@@ -27,7 +27,8 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { ChatGroupFrame, buildChatGroupActions, useChatGroups } from "./components/ChatGroupFrame.js";
+import { ChatGroupFrame, buildChatGroupActions, chatGroupApi, useChatGroups } from "./components/ChatGroupFrame.js";
+import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { McpPromptArgsDialog } from "./dialogs/McpPromptArgsDialog.js";
@@ -1111,7 +1112,7 @@ export function App() {
 
   // The tiled chat groups. See `useChatGroups` for why the list is flat and
   // why it stops at the number of ConversationLoops that actually exist.
-  const chatGroups = useChatGroups();
+  const chatGroups = useChatGroups(appMode);
   // The work panel is per-GROUP state now (each conversation carries its own),
   // but WIDENING THE WINDOW is a window-level effect: it has to fire when ANY
   // group wants the extra room, and stop the moment we leave the surface those
@@ -1625,9 +1626,16 @@ export function App() {
                                   panelOpen={group.panelOpen}
                                   onTogglePanel={() => chatGroups.setPanelOpen(group.id, !group.panelOpen)}
                                   actions={chatGroupActions}
+                                  {...(chatGroups.canSplit ? { onSplit: chatGroups.split } : {})}
+                                  {...(group.id === MAIN_CHAT_GROUP_ID
+                                    ? {}
+                                    : { onClose: () => chatGroups.close(group.id) })}
                                 >
                                 <ChatView
-                                  api={api}
+                                  // The tile's own view of the per-conversation
+                                  // channels: its calls name this group and its
+                                  // stream only carries this group's frames.
+                                  api={chatGroupApi(api, group.id)}
                                   onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
                                   /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
                                      인자로 전달 — queue-auto inject path 활성. */

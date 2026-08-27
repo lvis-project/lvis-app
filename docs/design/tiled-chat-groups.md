@@ -1,0 +1,111 @@
+# Tiled chat groups — up to four main conversations
+
+## What this is
+
+The main area holds up to **four** main-chat conversations side by side, each
+able to stream at the same time. Chat mode holds exactly one.
+
+The ceiling is not decorative. A conversation **is** a `ConversationLoop`: the
+loop owns the live history and runs exactly one turn at a time. Four tiles that
+can each be streaming therefore means four loops, not four views of one. Every
+control that today addresses "the conversation" has to say **which** one.
+
+## The name
+
+The group id travels as **`chatGroupId`**. The stream protocol already has a
+`groupId`, and it means *tool-call group* — an unrelated concept on the same
+frames. Reusing that name would produce a silent collision where a frame routes
+to the wrong tile only when a turn happens to contain grouped tool calls.
+
+`MAIN_CHAT_GROUP_ID = "main"` is the primary group, and it is the loop that
+already exists. `MAX_CHAT_GROUPS = 4` is the ceiling, counted **including** the
+primary.
+
+## What is per-group and what is not
+
+Per **group** — one per tile:
+
+- the `ConversationLoop` itself (live history, the single in-flight turn)
+- its post-turn hook chain (turns must be attributed to the session that tile
+  is holding, not to whichever session another tile happens to hold)
+- its rationale bindings
+- its conversation surface runtime, command port, and legacy stream adapter —
+  two tiles sharing one timeline would interleave their frames
+
+Per **window** — shared, and deliberately not multiplied:
+
+- `memoryManager` — every tile is an ordinary main-chat session and belongs in
+  the same session list
+- `idleScheduler` and `memoryCaptureService` — these fire once per window.
+  Giving each tile its own copy would multiply idle maintenance by the number
+  of open tiles. This is the same reasoning the side chat already follows.
+- the session list, search, starred, export/import — these describe the
+  window's conversations, not any one tile's
+
+## Channel split
+
+`lvis:chat:*` divides cleanly along that line.
+
+**Per-conversation — must carry `chatGroupId`:**
+`send`, `abort`, `guide`, `new`, `fork`, `retry-effort`,
+`continue-last-user`, `edit-resend`, `compact`, `session-resume`,
+`get-history`, `get-write-diff`, `get-verbatim-tool-result`,
+`get-sub-agent-transcript`, `enter-checkpoint-view`, `exit-checkpoint-view`,
+`branch-from-checkpoint`, `main-active-state`, `has-provider`
+
+**Window-scoped — unchanged:**
+`sessions`, `session-history`, `session-update`, `session-delete`,
+`export`, `import`
+
+`chatGroupId` is **required**, not defaulted. Both sides of this channel ship
+in the same binary, so a default would only ever paper over a caller that
+forgot to say which tile it meant — and the symptom of that bug (a turn
+appearing in the wrong tile) is worse than a rejected call.
+
+## Phases
+
+Each phase is independently shippable and independently verifiable.
+
+### Phase 1 — main process: group-addressable loops
+
+1. `resolveChatGroupLoop(chatGroupId)` in `boot/steps/conversation-wiring.ts`:
+   a lazy `Map<string, ConversationLoop>` over the shared memory manager,
+   enforcing `MAX_CHAT_GROUPS`. **Done.**
+2. `src/ipc/domains/chat.ts` currently closes over ONE `conversationLoop` at
+   registration (53 references) and builds one command port, one surface
+   runtime, and one legacy adapter from it. Replace that with a memoized
+   `chatGroupContext(chatGroupId)` returning the whole bundle, and have each
+   per-conversation handler resolve its group from the payload.
+
+### Phase 2 — frames say which tile they belong to
+
+`platform-conversation-legacy-adapter.ts` `deliver(envelope)` already has
+`envelope.conversationId`. Stamp `chatGroupId` onto every frame there — one
+insertion point, so no frame can escape unlabelled — and have the renderer drop
+frames addressed to another group.
+
+### Phase 3 — renderer: conversation state per group
+
+`<ChatView>` takes 43 props from App's conversation state. Extract
+`useChatState`, `useSendMessage`, `useWorkflowTools`, `useSearch`, the status
+bar, and attachments into a `<ChatGroupSession groupId>` component that owns
+them and renders `ChatView`.
+
+`useSessions` is the crux: it owns **both** the window-scoped list (which the
+sidebar reads) and the group-scoped current-session pointer (which one tile
+reads). Split it into `useSessionList()` and `useCurrentSession(groupId)`
+before anything else in this phase.
+
+### Phase 4 — the control
+
+`useChatGroups` gains `split()` and `close()`, bounded by `MAX_CHAT_GROUPS` in
+work mode and 1 in chat mode; chat mode collapses to the focused group. The
+frame already renders any number of groups side by side and already has the
+split control wired behind an `onSplit` prop — it is absent today precisely
+because a tile with no loop behind it would be a chat box that cannot answer.
+
+## Why the control comes last
+
+A split button that produced a tile with no loop behind it is worse than no
+split button: it looks live and cannot answer. The control is therefore the
+last thing to land, not the first.

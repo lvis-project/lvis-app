@@ -912,6 +912,15 @@ export type LvisApi = {
   >;
   chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
+  /**
+   * One tiled chat group's view of the per-conversation channels.
+   *
+   * A tile passes this where it would otherwise pass the api, so nothing below
+   * it has to know about groups — its calls already name the right
+   * conversation, and its stream subscription only sees that group's frames.
+   * See docs/design/tiled-chat-groups.md.
+   */
+  chatGroup?: (chatGroupId: string) => LvisApi;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
   chatGetHistory: () => Promise<{ restoredSubAgents?: RestoredSubAgentPayload[]; sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; projectRoot?: string; projectName?: string; projectIsDefault?: boolean; messages: SerializedHistoryMessage[] }>;
   chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;

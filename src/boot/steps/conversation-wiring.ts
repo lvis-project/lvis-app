@@ -15,6 +15,7 @@
 import { BrowserWindow as BrowserWindowValue } from "electron";
 import type { BrowserWindow } from "electron";
 import { createRoutineEngine } from "../routine.js";
+import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../contract/app-contract.js";
 import {
   createPostTurnHookChain,
   createConversationLoop,
@@ -373,6 +374,79 @@ export async function wireConversation(
     ...sideChatRationaleBindings,
   });
   ctx.sideChatConversationLoop = sideChatConversationLoop;
+
+  // Tiled chat groups — the main area can hold several conversations at once.
+  //
+  // A conversation IS a ConversationLoop: the loop holds the live history and
+  // runs exactly one turn at a time, so four tiles that can each be streaming
+  // means four loops, not four views of one. They share the MAIN memory manager
+  // — every tile is an ordinary main-chat session and belongs in the same
+  // session list — and differ only in which session each is holding.
+  //
+  // What they deliberately do NOT share is the window-wide singletons the
+  // primary loop drives: `idleScheduler` and `memoryCaptureService` fire once
+  // per window, and handing each group its own copy would multiply idle
+  // maintenance by the number of open tiles. Same reasoning as the side chat.
+  const groupLoops = new Map<string, ConversationLoop>();
+  const resolveChatGroupLoop = (chatGroupId: string): ConversationLoop => {
+    if (chatGroupId === MAIN_CHAT_GROUP_ID) return conversationLoop;
+    const existing = groupLoops.get(chatGroupId);
+    if (existing) return existing;
+    // The cap counts the primary loop, which is not in the map.
+    if (groupLoops.size + 1 >= MAX_CHAT_GROUPS) {
+      throw new Error(`chat-group-limit-reached:${MAX_CHAT_GROUPS}`);
+    }
+    let groupLoop!: ConversationLoop;
+    const groupRationaleBindings = createLoopRationaleBindings({
+      service: rationaleHostService,
+      permissionManager,
+      hookRunner,
+      scriptHookManager,
+      getLoop: () => groupLoop,
+    });
+    // Its own post-turn chain over the SAME store: each group persists its own
+    // turns, and a chain shared with another group would attribute them to
+    // whichever session that group happened to be holding.
+    const { postTurnHookChain: groupPostTurnHookChain } = createPostTurnHookChain({
+      memoryManager,
+      settingsService,
+      ...(bootAuditLogger ? { auditLogger: bootAuditLogger } : {}),
+    });
+    groupLoop = createConversationLoop({
+      settingsService,
+      systemPromptBuilder,
+      inputClassifier,
+      routeEngine,
+      toolRegistry,
+      supportsA2AParentDelivery: true,
+      memoryManager,
+      memoryReviewer,
+      permissionManager,
+      routineEngine,
+      postTurnHookChain: groupPostTurnHookChain,
+      bashAstValidator,
+      approvalGate,
+      hookRunner,
+      scriptHookManager,
+      getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+      broadcastPermissionConfigChanged: broadcastPermissionConfigChangedFromHost,
+      pluginRuntime,
+      pluginOperationGrants,
+      pluginOperationIdentityProvider,
+      skillOverlay,
+      sessionTodoStore,
+      notificationService,
+      auditLogger: bootAuditLogger,
+      rewireReviewerAgent,
+      llmFetch,
+      subscriptionProviderFactory,
+      ...groupRationaleBindings,
+    });
+    groupLoops.set(chatGroupId, groupLoop);
+    return groupLoop;
+  };
+  ctx.resolveChatGroupLoop = resolveChatGroupLoop;
+
 
 
   lateBinding.conversationLoopRef.fn = conversationLoop;

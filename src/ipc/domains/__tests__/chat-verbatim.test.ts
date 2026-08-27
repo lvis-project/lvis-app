@@ -1436,11 +1436,13 @@ B${i}
       await invoke("lvis:chat:edit-resend", 0, "contact alice@example.com");
 
       expect(editLoop.runTurn.mock.calls[0]?.[0]).toBe("contact [REDACTED:EMAIL]");
+      // Every frame carries the tiled chat group it belongs to, so a second
+      // tile's stream cannot be mistaken for this one's.
       expect(sent.filter(({ payload }) => (payload as { type?: string }).type === "redact_notice"))
         .toEqual([
           {
             channel: CHANNELS.chat.stream,
-            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 } },
+            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 }, chatGroupId: "main" },
           },
         ]);
 
@@ -1481,11 +1483,11 @@ B${i}
         .toEqual([
           {
             channel: CHANNELS.chat.stream,
-            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 } },
+            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 }, chatGroupId: "main" },
           },
           {
             channel: CHANNELS.chat.stream,
-            payload: { type: "redact_notice", count: 2, byKind: { EMAIL: 2 } },
+            payload: { type: "redact_notice", count: 2, byKind: { EMAIL: 2 }, chatGroupId: "main" },
           },
         ]);
 
@@ -1515,15 +1517,15 @@ B${i}
         .toEqual([
           {
             channel: CHANNELS.chat.stream,
-            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 } },
+            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 }, chatGroupId: "main" },
           },
           {
             channel: CHANNELS.chat.stream,
-            payload: { type: "redact_notice", count: 2, byKind: { EMAIL: 2 } },
+            payload: { type: "redact_notice", count: 2, byKind: { EMAIL: 2 }, chatGroupId: "main" },
           },
           {
             channel: CHANNELS.chat.stream,
-            payload: { type: "redact_notice", count: 1, byKind: { PHONE_KR: 1 } },
+            payload: { type: "redact_notice", count: 1, byKind: { PHONE_KR: 1 }, chatGroupId: "main" },
           },
         ]);
     } finally {

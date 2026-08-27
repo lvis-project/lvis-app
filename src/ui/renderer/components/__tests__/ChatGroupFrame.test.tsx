@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
-import { ChatGroupFrame, buildChatGroupActions, useChatGroups } from "../ChatGroupFrame.js";
+import { ChatGroupFrame, buildChatGroupActions, chatGroupApi, useChatGroups } from "../ChatGroupFrame.js";
+import type { LvisApi } from "../../types.js";
 
 const t = ((key: string) => key) as never;
 
@@ -130,5 +131,41 @@ describe("useChatGroups", () => {
     expect(result.current.groups[0]!.panelOpen).toBe(true);
     act(() => result.current.setPanelOpen("main", false));
     expect(result.current.groups[0]!.panelOpen).toBe(false);
+  });
+});
+
+describe("chatGroupApi", () => {
+  it("binds a tile to its own group when the surface supports it", () => {
+    const bound = { marker: "bound" } as unknown as LvisApi;
+    const chatGroup = vi.fn(() => bound);
+    const api = { chatGroup } as unknown as LvisApi;
+
+    expect(chatGroupApi(api, "group-2")).toBe(bound);
+    expect(chatGroup).toHaveBeenCalledWith("group-2");
+  });
+
+  it("refuses a non-primary group on a surface that cannot bind one", () => {
+    // Returning the unbound surface would put this tile's turns in the primary
+    // conversation — a wrong answer is worse than a rejected one.
+    const api = {} as unknown as LvisApi;
+
+    expect(chatGroupApi(api, "main")).toBe(api);
+    expect(() => chatGroupApi(api, "group-2")).toThrow(/chat-group-unavailable/);
+  });
+});
+
+describe("useChatGroups ceilings", () => {
+  it("collapses to the focused tile in chat mode and offers no split there", () => {
+    const { result } = renderHook(() => useChatGroups("chat"));
+
+    expect(result.current.groups).toHaveLength(1);
+    expect(result.current.canSplit).toBe(false);
+  });
+
+  it("never closes the primary group", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+
+    act(() => result.current.close("main"));
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main"]);
   });
 });

@@ -45,6 +45,25 @@ export {
  * marketplace announcements, overlay, suggested-replies, settings.updated)
  * are re-exported above rather than duplicated here.
  */
+/**
+ * Tiled chat groups — the main area can show more than one conversation.
+ *
+ * The id travels on every `lvis:chat:*` call, so it belongs to the contract
+ * rather than to either side of it. A conversation is one ConversationLoop in
+ * main, so a group id names a LOOP, not a view: two tiles showing the same
+ * group would be two views of one conversation, which is not what a split is.
+ */
+export const MAIN_CHAT_GROUP_ID = "main";
+
+/**
+ * How many conversations may be tiled at once.
+ *
+ * Capped because each one is a live agent loop: an uncapped split would let the
+ * window run more background work than the user can watch, and four is the
+ * point past which a tile is too narrow to read a transcript in.
+ */
+export const MAX_CHAT_GROUPS = 4;
+
 export const CHANNELS = {
   chat: {
     hasProvider: "lvis:chat:has-provider",

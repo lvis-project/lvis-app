@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Columns2, Download, PanelBottomClose, PanelBottomOpen,
   Pin, Upload, X,
@@ -12,6 +12,8 @@ import {
 } from "../../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../../contract/app-contract.js";
+import type { LvisApi } from "../types.js";
 
 /**
  * The chat group: an outlined work container with its own header.
@@ -298,6 +300,25 @@ export function ChatGroupFrame({
   );
 }
 
+/**
+ * One group's view of the per-conversation channels.
+ *
+ * The preload binds the group id into every call and filters the stream to
+ * that group, so a tile hands this down where it would otherwise hand down the
+ * api and nothing below it has to learn about groups.
+ *
+ * A surface WITHOUT that binding — a test double, an older preload — can only
+ * serve the primary group. Returning it for another tile would put that tile's
+ * turns in the primary conversation, so it refuses instead.
+ */
+export function chatGroupApi(api: LvisApi, chatGroupId: string): LvisApi {
+  if (api.chatGroup) return api.chatGroup(chatGroupId);
+  if (chatGroupId !== MAIN_CHAT_GROUP_ID) {
+    throw new Error(`chat-group-unavailable:${chatGroupId}`);
+  }
+  return api;
+}
+
 export interface ChatGroupState {
   id: string;
   /** The work panel, per group — see ChatGroupFrameProps.panelOpen. */
@@ -313,21 +334,19 @@ export interface ChatGroupState {
  * the rest of the app can actually name a group in.
  *
  * A group is bound to a conversation SOURCE, and every source is a distinct
- * ConversationLoop in main. There are two of those today (the main chat and the
- * side chat), so `canSplit` goes false at two. That is a real ceiling, not a
- * chosen one: a third tile with no loop behind it would be a chat box that
- * cannot answer, and an empty tile that looks live is worse than no tile.
+ * ConversationLoop in main — `MAX_CHAT_GROUPS` is that ceiling, counted
+ * including the primary. Chat mode holds exactly one: it is the focused-writing
+ * mode, and a second tile there would be the thing it exists to remove.
  */
-export function useChatGroups() {
-  // One entry today. The list is the shape a tiled workspace needs, and the
-  // group frame already renders any number of them side by side; what is still
-  // missing is the RUNTIME — a main conversation is one loop in the main
-  // process, so a second group means a second loop, not a second component.
-  // Until that lands there is deliberately no control that adds one: a split
-  // button that produced a group with no stream behind it would be worse than
-  // no split button.
-  const [groups, setGroups] = useState<ChatGroupState[]>([{ id: "main", panelOpen: false }]);
-  const [focusedId, setFocusedId] = useState("main");
+export function useChatGroups(appMode?: "chat" | "work") {
+  const [groups, setGroups] = useState<ChatGroupState[]>([
+    { id: MAIN_CHAT_GROUP_ID, panelOpen: false },
+  ]);
+  const [focusedId, setFocusedId] = useState(MAIN_CHAT_GROUP_ID);
+  // Monotonic, so a closed tile's id is never reused. Main-process loops are
+  // keyed by this id, and reusing one would hand a new tile the previous
+  // tile's live history.
+  const nextGroupIndex = useRef(2);
 
   const setPanelOpen = useCallback((id: string, open: boolean) => {
     setGroups((current) =>
@@ -335,7 +354,57 @@ export function useChatGroups() {
     );
   }, []);
 
-  return { groups, focusedId, focus: setFocusedId, setPanelOpen };
+  const split = useCallback(() => {
+    setGroups((current) => {
+      if (current.length >= MAX_CHAT_GROUPS) return current;
+      const id = `group-${nextGroupIndex.current}`;
+      nextGroupIndex.current += 1;
+      setFocusedId(id);
+      return [...current, { id, panelOpen: false }];
+    });
+  }, []);
+
+  const close = useCallback((id: string) => {
+    // The primary group is the window's conversation. Closing it would leave
+    // no tile that the session list, resume, and restore all address.
+    if (id === MAIN_CHAT_GROUP_ID) return;
+    setGroups((current) => {
+      const next = current.filter((group) => group.id !== id);
+      if (next.length === current.length) return current;
+      setFocusedId((focused) => (focused === id ? next[0]!.id : focused));
+      return next;
+    });
+  }, []);
+
+  // Chat mode collapses to the focused tile rather than closing the others:
+  // switching modes is a view change, and losing a conversation to it would
+  // make the toggle destructive.
+  const visibleGroups = appMode === "chat"
+    ? groups.filter((group) => group.id === focusedId)
+    : groups;
+  // The main process can serve MAX_CHAT_GROUPS conversations: every channel is
+  // group-addressed and every stream frame is labelled. The RENDERER cannot yet
+  // — App still owns one set of conversation state for the window
+  // (useChatState, useSendMessage, and the per-turn handlers), so a second tile
+  // would render the first tile's transcript over its own group's stream.
+  //
+  // Phase 3 in docs/design/tiled-chat-groups.md extracts that state per group.
+  // When it lands this constant goes away and the ceiling is MAX_CHAT_GROUPS.
+  // Until then the honest ceiling is one: a split button that produced a tile
+  // showing another conversation is worse than no split button.
+  const RENDERER_GROUP_CEILING = 1;
+  const canSplit = appMode !== "chat"
+    && groups.length < Math.min(MAX_CHAT_GROUPS, RENDERER_GROUP_CEILING);
+
+  return {
+    groups: visibleGroups,
+    focusedId,
+    focus: setFocusedId,
+    setPanelOpen,
+    canSplit,
+    split,
+    close,
+  };
 }
 
 /**

@@ -209,6 +209,8 @@ export class BootContext {
   declare conversationLoop: ConversationLoop;
   /** Side-chat (workspace rail) — 2nd loop with isolated `~/.lvis/side-chat/` store. */
   declare sideChatConversationLoop: ConversationLoop;
+  /** Resolves the loop behind one tiled chat group — see IpcDeps. */
+  declare resolveChatGroupLoop: (chatGroupId: string) => ConversationLoop;
   declare preferenceRefreshService: PreferenceRefreshService;
   declare memoryConsolidationService: MemoryConsolidationService;
   declare memoryMaintenanceCoordinator: MemoryMaintenanceCoordinator;
@@ -320,6 +322,7 @@ const BOOT_CONTEXT_FIELDS = [
   "postTurnHookChain",
   "conversationLoop",
   "sideChatConversationLoop",
+  "resolveChatGroupLoop",
   "preferenceRefreshService",
   "memoryConsolidationService",
   "memoryMaintenanceCoordinator",
