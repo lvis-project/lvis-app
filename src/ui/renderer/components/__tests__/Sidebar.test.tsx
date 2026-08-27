@@ -1002,7 +1002,7 @@ describe("Sidebar current-row scoping", () => {
     // they are on is the plugin. Both rows claiming `aria-current="page"` told
     // a screen reader the window was in two places at once, and drew the chat
     // row selected underneath the selected plugin row.
-    const onPlugin = renderSidebar({ activeView: "plugin:ep-api:lge-control" });
+    const onPlugin = renderSidebar({ activeView: "plugin:notes:panel" });
     expect(
       onPlugin.getByTestId("sidebar-session-sess-1").getAttribute("aria-current"),
     ).toBeNull();

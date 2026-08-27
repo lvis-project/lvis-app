@@ -116,11 +116,11 @@ The window remembers the pair and delivers it the moment that tile publishes its
 handle to the registry — which is also why the registry exposes `subscribe`
 rather than only a read.
 
-## Phases
+## The pieces
 
-Each phase is independently shippable and independently verifiable.
+Each piece is independently shippable and independently verifiable.
 
-### Phase 1 — main process: group-addressable loops
+### Main process: group-addressable loops
 
 1. `resolveChatGroupLoop(chatGroupId)` in `boot/steps/conversation-wiring.ts`:
    a lazy `Map<string, ConversationLoop>` over the shared memory manager,
@@ -131,14 +131,14 @@ Each phase is independently shippable and independently verifiable.
    `chatGroupContext(chatGroupId)` returning the whole bundle, and have each
    per-conversation handler resolve its group from the payload.
 
-### Phase 2 — frames say which tile they belong to
+### Channels: frames say which tile they belong to
 
 `platform-conversation-legacy-adapter.ts` `deliver(envelope)` already has
 `envelope.conversationId`. Stamp `chatGroupId` onto every frame there — one
 insertion point, so no frame can escape unlabelled — and have the renderer drop
 frames addressed to another group.
 
-### Phase 3 — renderer: conversation state per group. **Done.**
+### Renderer: conversation state per group
 
 `<ChatGroupSession>` owns one tile's conversation: `useChatState`,
 `useWorkflowTools`, `useCurrentSession`, `useSendMessage`, the context budget,
@@ -168,7 +168,7 @@ Two rules the tiles must keep:
   when React re-renders. Two frames landing in the same tick then read a stale
   (or already-cleared) accumulator, and a finished turn renders a blank body.
 
-### Phase 4 — the controls. **Done.**
+### The controls: split and drop
 
 `useChatGroups` owns `split()`, `close()` and `dropOnEdge()`, bounded by
 `MAX_CHAT_GROUPS` in work mode and 1 in chat mode; chat mode collapses to the

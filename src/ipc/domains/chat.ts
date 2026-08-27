@@ -586,8 +586,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
    * `continueLastUser`, `retryEffort`, and the checkpoint channels run through
    * stream-turn closures built once over the primary loop. Answering them for
    * another tile would run THAT tile's turn on the primary conversation, so
-   * they fail closed until those closures are group-scoped — see Phase 1.2 in
-   * docs/design/tiled-chat-groups.md. Failing is recoverable; silently running
+   * they fail closed until those closures are group-scoped — see "Main
+   * process: group-addressable loops" in docs/design/tiled-chat-groups.md. Failing is recoverable; silently running
    * a turn in the wrong conversation is not.
    */
   const requireMainGroup = (chatGroupId: unknown, channel: string): void => {
