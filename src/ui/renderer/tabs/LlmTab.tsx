@@ -249,6 +249,8 @@ export interface LlmTabProps {
   onOpenMarketplace?: () => void;
   model: string;
   setModel: (v: string) => void;
+  /** Moves vendor and model together when the pick belongs to another vendor. */
+  selectApiVendorModel: (vendorId: string, modelId: string) => void;
   enableThinking: boolean;
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
@@ -530,7 +532,11 @@ interface UnifiedModelOption {
 }
 
 /** Marks the API-key provider inside a unified option value. */
-const API_PROVIDER_KEY = "api";
+const API_PROVIDER_PREFIX = "api:";
+
+function apiProviderId(vendorId: string): string {
+  return `${API_PROVIDER_PREFIX}${vendorId}`;
+}
 
 function unifiedValue(providerId: string, modelId: string): string {
   return `${providerId}::${modelId}`;
@@ -737,6 +743,7 @@ export function LlmTab(props: LlmTabProps) {
     onOpenMarketplace,
     model,
     setModel,
+    selectApiVendorModel,
     enableThinking,
     setEnableThinking,
     thinkingBudget,
@@ -929,19 +936,44 @@ export function LlmTab(props: LlmTabProps) {
 
   const unifiedOptions = useMemo<UnifiedModelOption[]>(() => {
     const options: UnifiedModelOption[] = [];
-    // The API vendor contributes only once it can actually answer — a vendor
-    // that still needs a key has a catalogue of guesses, not of models.
-    if (hasKey || !activeProviderRequiresApiKey) {
-      for (const modelId of activeModelOptions) {
-        const entry = activeModelEntryById.get(modelId);
-        options.push({
-          value: unifiedValue(API_PROVIDER_KEY, modelId),
-          providerId: API_PROVIDER_KEY,
-          providerLabel: vendorInfo.label,
-          modelId,
-          vendorTag: entry?.provider ?? entry?.ownedBy ?? vendor,
-          ...(entry ? { entry } : {}),
-        });
+    // `modelOptionsFor` is the single authority on what an API vendor can
+    // offer: a curated line for a first-party vendor, and nothing at all for
+    // an endpoint-defined openai-compatible provider until its /models
+    // handshake lands. Do not add a second key-based gate on top — two
+    // policies answering the same question is how a vendor ends up with an
+    // empty chooser while its catalogue is right there.
+    const pushed = new Set<string>();
+    const pushApiOption = (
+      vendorId: string,
+      modelId: string,
+      entry: LlmModelListEntry | undefined,
+    ) => {
+      const value = unifiedValue(apiProviderId(vendorId), modelId);
+      if (pushed.has(value)) return;
+      pushed.add(value);
+      options.push({
+        value,
+        providerId: apiProviderId(vendorId),
+        providerLabel: getVendorInfo(vendorId).label,
+        modelId,
+        vendorTag: entry?.provider ?? entry?.ownedBy ?? vendorId,
+        ...(entry ? { entry } : {}),
+      });
+    };
+    // The vendor the configuration form points at goes first: it is the only
+    // one whose curated seed list and current selection are known here.
+    for (const modelId of activeModelOptions) {
+      pushApiOption(vendor, modelId, activeModelEntryById.get(modelId));
+    }
+    // Then every OTHER vendor whose /models handshake already landed. Without
+    // this, switching the form's vendor emptied the chooser of every vendor
+    // the user had configured — the catalogue was cached, just never offered.
+    for (const [cacheKey, state] of Object.entries(modelLists)) {
+      const cachedVendor = cacheKey.split("\n")[0];
+      if (!cachedVendor || cachedVendor === vendor) continue;
+      const entries = modelEntryMap(state.entries);
+      for (const modelId of state.options ?? []) {
+        pushApiOption(cachedVendor, modelId, entries.get(modelId));
       }
     }
     for (const view of subscription.providers) {
@@ -976,28 +1008,34 @@ export function LlmTab(props: LlmTabProps) {
     }
     return options;
   }, [
-    hasKey, activeProviderRequiresApiKey, vendorInfo, vendor,
-    activeModelOptions, activeModelEntryById,
+    vendor, activeModelOptions, activeModelEntryById, modelLists,
     subscription.providers, t,
   ]);
 
   const selectedUnifiedValue = subscription.activeRuntime.kind === "subscription"
     ? unifiedValue(subscription.activeRuntime.provider, subscription.activeRuntime.model ?? "")
-    : unifiedValue(API_PROVIDER_KEY, activeModelValue);
+    : unifiedValue(apiProviderId(vendor), activeModelValue);
 
   const handleUnifiedModelChange = useCallback((value: string) => {
     const parsed = parseUnifiedValue(value);
     if (!parsed) return;
-    if (parsed.providerId === API_PROVIDER_KEY) {
-      setModel(parsed.modelId);
-      void subscription.props.actions.useApiForChat?.();
+    if (parsed.providerId.startsWith(API_PROVIDER_PREFIX)) {
+      const pickedVendor = parsed.providerId.slice(API_PROVIDER_PREFIX.length);
+      if (pickedVendor === vendor) setModel(parsed.modelId);
+      else selectApiVendorModel(pickedVendor, parsed.modelId);
+      // Only switch the runtime when it is not already the API path. Calling
+      // it unconditionally rewrites settings on every pick, and that broadcast
+      // is what used to snap the chosen model back to the persisted one.
+      if (subscription.activeRuntime.kind !== "api") {
+        void subscription.props.actions.useApiForChat?.();
+      }
       return;
     }
     void subscription.props.actions.useForChat?.(
       parsed.providerId as SubscriptionRuntimeId,
       parsed.modelId === "" ? null : parsed.modelId,
     );
-  }, [setModel, subscription.props.actions]);
+  }, [selectApiVendorModel, setModel, vendor, subscription.activeRuntime.kind, subscription.props.actions]);
 
   const handleTogglePin = useCallback((modelId: string) => {
     const next = pinnedModels.includes(modelId)

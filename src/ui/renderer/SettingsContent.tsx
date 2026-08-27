@@ -566,6 +566,7 @@ export function SettingsContent({
               onOpenMarketplace={() => openMarketplaceTab("provider")}
               model={s.model}
               setModel={s.setModel}
+              selectApiVendorModel={s.selectApiVendorModel}
               enableThinking={s.enableThinking}
               setEnableThinking={s.setEnableThinking}
               thinkingBudget={s.thinkingBudget}
