@@ -36,6 +36,26 @@ type Sessions = ReturnType<typeof useCurrentSession>;
 type Settings = ReturnType<typeof useSettings>;
 type ComposeOutgoingFn = (raw: string) => ReturnType<typeof composeOutgoingUtil>;
 
+/**
+ * The host answers a refused send with a resolved value, not a rejection:
+ * `{ ok: false, error }` from the command port, or `{ error: "streaming-active" }`
+ * when the lease is taken. A resolved value the caller does not read leaves
+ * the user's bubble on screen and nothing behind it.
+ */
+function chatSendRefusal(result: unknown): string | undefined {
+  if (result === null || typeof result !== "object") return undefined;
+  const { ok, error } = result as { ok?: unknown; error?: unknown };
+  if (ok === true || typeof error !== "string") return undefined;
+  return error;
+}
+
+class ChatSendRefusedError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = "ChatSendRefusedError";
+  }
+}
+
 export interface UseSendMessageDeps {
   api: Api;
   t: TFn;
@@ -159,18 +179,13 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       // `trackStreamTurn` and surfaces a raw "stream already active" error. The
       // staged modes that are NOT user-initiated stay out — they are queued or
       // injected by the host, and must never abort the turn the user is watching.
-      if ((mode === "default" || mode === "mcp-prompt") && streaming) {
-        // Issue #622: interrupt the current turn and start a new one.
-        // chatAbort awaits until the active stream turn settles (interrupted),
-        // then returns. The in-flight turn's finally block calls
-        // finishStreamingRequest; the turnRequestRef increment below makes
-        // its requestId stale so the call is a safe no-op. Partial response
-        // is committed to history by post-turn-hook-chain with
-        // stopReason="interrupted".
-        if (debugStreamEnabled) debugLog("handleAsk", "interrupt:abort-and-proceed");
-        try { await api.chatAbort(); } catch { /* no-op */ }
-        // Same contract as the stop button: the initiator marks the settled
-        // turn interrupted; the engine no longer streams a literal marker.
+      // A send while a turn is running interrupts it. The host stops the
+      // running turn inside the same chatSend call (see the `interrupt`
+      // payload flag); awaiting a separate abort here first let the keyboard
+      // intent expire, and the send that followed was silently refused.
+      const interrupt = (mode === "default" || mode === "mcp-prompt") && streaming;
+      if (interrupt) {
+        if (debugStreamEnabled) debugLog("handleAsk", "interrupt:send");
         markLastAssistantInterrupted?.();
       }
       // Renderer only performs UX-level shortcuts for typed composer input.
@@ -292,9 +307,12 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       if (mode === "default") {
         appendUserEntry(trimmed, opts?.injectHint);
       }
-      resetStreamAccumulators();
+      // The interrupted turn's closing frames still arrive after this point
+      // and finalize their own entry with what they accumulated; only a
+      // fresh turn starts from empty accumulators.
+      if (!interrupt) resetStreamAccumulators();
       try {
-        await api.chatSend(
+        const result = await api.chatSend(
           outgoing,
           outgoingAttachments,
           opts?.inputOrigin === "queue-auto" ? "queue-auto" : SEND_MODE_ORIGIN[mode],
@@ -306,7 +324,10 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
           opts?.inputOrigin === "queue-auto"
             ? undefined
             : mode === "default" ? composed.personaPromptId : undefined,
+          interrupt ? { interrupt: true } : undefined,
         );
+        const refusal = chatSendRefusal(result);
+        if (refusal !== undefined) throw new ChatSendRefusedError(refusal);
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
         // already cleared by setQuestion(""). N counter persists across
@@ -329,8 +350,14 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         // previous localized framing — an unmapped failure must not lose it just
         // because this path learned to map the mapped ones.
         const rawMessage = (err as Error).message;
-        const code = rawMessage.match(/(?:^|Error:\s*)([a-z][a-z0-9-]*)\s*$/)?.[1];
-        const mappedKey = resolveIpcErrorKey(code);
+        const code = err instanceof ChatSendRefusedError
+          ? err.code
+          : rawMessage.match(/(?:^|Error:\s*)([a-z][a-z0-9-]*)\s*$/)?.[1];
+        // The generic sentence for this code speaks of permission changes;
+        // for a chat send the user needs to know their message did not go.
+        const mappedKey = code === "user-keyboard-required"
+          ? "app.sendNeedsKeyboard"
+          : resolveIpcErrorKey(code);
         setErrorWithThought(
           mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage }),
         );

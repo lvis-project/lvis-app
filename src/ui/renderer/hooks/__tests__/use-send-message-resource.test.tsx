@@ -74,9 +74,13 @@ function setup(options?: {
   llmModel?: UseSendMessageDeps["llmModel"];
   checkApiKey?: UseSendMessageDeps["checkApiKey"];
   settingsReady?: boolean;
+  streaming?: boolean;
 }) {
   const attachments = options?.attachments ?? [RESOURCE];
   const chatSend = options?.chatSend ?? vi.fn(async () => ({ ok: true }));
+  const chatAbort = vi.fn(async () => ({ ok: true }));
+  const resetStreamAccumulators = vi.fn();
+  const markLastAssistantInterrupted = vi.fn();
   const setQuestion = vi.fn();
   const activeSubscriptionRuntime = options?.activeSubscriptionRuntime ?? null;
   const subscriptionRuntimePolicy = options?.subscriptionRuntimePolicy
@@ -105,9 +109,10 @@ function setup(options?: {
   const setErrorWithThought = vi.fn();
 
   const deps = {
-    api: { chatSend },
+    api: { chatSend, chatAbort },
     t: (key: string) => key,
-    streaming: false,
+    streaming: options?.streaming ?? false,
+    markLastAssistantInterrupted,
     checkApiKey: options?.checkApiKey ?? (async () => true),
     // The real composer output for "summarize [Resource #1]" plus one resource: the
     // marker stays in the body, the fence rides as its own part.
@@ -132,7 +137,7 @@ function setup(options?: {
     }),
     appendUserEntry,
     dropUserEntry,
-    resetStreamAccumulators: vi.fn(),
+    resetStreamAccumulators,
     beginStreamingRequest: vi.fn(() => 1),
     finishStreamingRequest: vi.fn(),
     setErrorWithThought,
@@ -154,7 +159,10 @@ function setup(options?: {
   } as unknown as UseSendMessageDeps;
 
   const { result } = renderHook(() => useSendMessage(deps));
-  return { result, chatSend, setQuestion, setAttachments, dropUserEntry, setErrorWithThought };
+  return {
+    result, chatSend, chatAbort, setQuestion, setAttachments, dropUserEntry, setErrorWithThought,
+    resetStreamAccumulators, markLastAssistantInterrupted,
+  };
 }
 
 describe("handleAsk — a turn carrying an attached resource", () => {
@@ -366,5 +374,70 @@ describe("handleAsk — a turn carrying an attached resource", () => {
 
     expect(checkApiKey).not.toHaveBeenCalled();
     expect(chatSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleAsk — the host refuses the send with a resolved value", () => {
+  it.each([
+    ["the command port's { ok: false }", { ok: false, error: "session-mismatch" }, "formatIpcError.sessionMismatch"],
+    ["the taken-lease { error } frame", { error: "streaming-active" }, "formatIpcError.streamingActive"],
+    ["an expired keyboard intent", { ok: false, error: "user-keyboard-required" }, "app.sendNeedsKeyboard"],
+  ])("takes the bubble back and tells the user — %s", async (_label, frame, expectedKey) => {
+    const chatSend = vi.fn(async () => frame);
+    const { result, setQuestion, dropUserEntry, setErrorWithThought } = setup({ chatSend, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("a question");
+    });
+
+    expect(dropUserEntry).toHaveBeenCalledWith("a question");
+    expect(setErrorWithThought).toHaveBeenCalledWith(expectedKey);
+    const restore = setQuestion.mock.calls[setQuestion.mock.calls.length - 1]?.[0] as (current: string) => string;
+    expect(restore("")).toBe("a question");
+  });
+
+  it("treats a turn result as success — it has no error and no ok flag", async () => {
+    const chatSend = vi.fn(async () => ({ text: "answer", toolCalls: [], route: "llm" }));
+    const { result, dropUserEntry, setErrorWithThought } = setup({ chatSend, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("a question");
+    });
+
+    expect(dropUserEntry).not.toHaveBeenCalled();
+    expect(setErrorWithThought).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleAsk — a send while a turn is still running", () => {
+  it("asks the host to interrupt inside the same call instead of awaiting an abort first", async () => {
+    const { result, chatSend, chatAbort, resetStreamAccumulators, markLastAssistantInterrupted } = setup({
+      streaming: true,
+      attachments: [],
+    });
+
+    await act(async () => {
+      await result.current.handleAsk("new direction");
+    });
+
+    expect(chatAbort).not.toHaveBeenCalled();
+    expect(markLastAssistantInterrupted).toHaveBeenCalledTimes(1);
+    expect(chatSend).toHaveBeenCalledTimes(1);
+    expect(chatSend.mock.calls[0]?.[5]).toEqual({ interrupt: true });
+    // The interrupted turn's closing frame finalizes its own entry from the
+    // accumulators; clearing them here would leave that entry open.
+    expect(resetStreamAccumulators).not.toHaveBeenCalled();
+  });
+
+  it("starts a fresh turn from empty accumulators and no interrupt flag when nothing is running", async () => {
+    const { result, chatSend, resetStreamAccumulators, markLastAssistantInterrupted } = setup({ attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("first question");
+    });
+
+    expect(markLastAssistantInterrupted).not.toHaveBeenCalled();
+    expect(chatSend.mock.calls[0]?.[5]).toBeUndefined();
+    expect(resetStreamAccumulators).toHaveBeenCalledTimes(1);
   });
 });

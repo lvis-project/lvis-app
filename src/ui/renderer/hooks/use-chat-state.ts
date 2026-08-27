@@ -673,7 +673,10 @@ export function useChatState(api: LvisApi) {
         if (entry.kind !== "assistant") continue;
         if (entry.interrupted) return prev;
         const next = [...prev];
-        next[i] = { ...entry, interrupted: true, streaming: false };
+        // `streaming` is left to the turn's own closing frame: an interrupt
+        // send marks the entry before that frame lands, and the finalizer
+        // finds the entry to close by its streaming flag.
+        next[i] = { ...entry, interrupted: true };
         return next;
       }
       // Tool-abort with no streamed text yet: nothing to mark; the reload

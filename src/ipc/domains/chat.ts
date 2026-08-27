@@ -909,10 +909,33 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // PUBLIC lvis:chat:send — thin wrapper: trust boundary + sink construction,
   // logic in handlers/chat.ts. The common semantic timeline is canonical; the
   // renderer receives its existing frame shape only through the owner adapter.
+  // Stops the group's running turn and waits for it to settle, so the next
+  // command finds the lease free. Shared by `chat:abort` and an interrupt send.
+  const interruptActiveTurn = async (group: ChatGroupContext): Promise<void> => {
+    group.loop.abortCurrentTurn();
+    const activeStreamTurn = group.surfaceRuntime.activity.activeTurn();
+    if (activeStreamTurn) {
+      try {
+        await activeStreamTurn;
+      } catch {
+        // expected: interrupted turns may reject
+      }
+    }
+  };
+  const isInterruptSend = (payload: unknown): boolean =>
+    typeof payload === "object" && payload !== null
+    && (payload as { interrupt?: unknown }).interrupt === true;
+
   ipcMain.handle(CHANNELS.chat.send, async (e, payload: unknown, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.send, e); return UNAUTHORIZED_FRAME; }
+    const group = groupOf(chatGroupId);
+    // An interrupt send is the user's Enter while a turn is running. The abort
+    // happens inside this call rather than as a separate round trip the
+    // renderer awaits first: that wait outlived the five-second keyboard
+    // intent, and the send that followed was refused as not user-initiated.
+    if (isInterruptSend(payload)) await interruptActiveTurn(group);
     try {
-      return await groupOf(chatGroupId).commandPort.execute(DESKTOP_CONVERSATION_ACTOR, {
+      return await group.commandPort.execute(DESKTOP_CONVERSATION_ACTOR, {
         kind: "message.send",
         payload,
       });
@@ -975,16 +998,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.chat.abort, async (e, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.abort, e); return UNAUTHORIZED_FRAME; }
-    const group = groupOf(chatGroupId);
-    group.loop.abortCurrentTurn();
-    const activeStreamTurn = group.surfaceRuntime.activity.activeTurn();
-    if (activeStreamTurn) {
-      try {
-        await activeStreamTurn;
-      } catch {
-        // expected: interrupted turns may reject
-      }
-    }
+    await interruptActiveTurn(groupOf(chatGroupId));
     return { ok: true };
   });
 
