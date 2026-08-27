@@ -1096,6 +1096,7 @@ export function App() {
           .join("\n\n");
         await navigator.clipboard.writeText(text);
       },
+      onImport: handleImportAndLoad,
       onDelete: async (sessionId) => {
         const result = await api.chatSessionDelete(sessionId);
         if (!result?.ok) {
@@ -1111,7 +1112,7 @@ export function App() {
         await refreshSessions();
       },
     };
-  }, [api, sessions, refreshSessions, handleExport, handleNewChat]);
+  }, [api, sessions, refreshSessions, handleExport, handleImportAndLoad, handleNewChat]);
 
   // The tiled chat groups. See `useChatGroups` for why the list is flat and
   // why it stops at the number of ConversationLoops that actually exist.

@@ -616,6 +616,9 @@ export interface ConversationRowActions {
   onShare: (sessionId: string) => void | Promise<void>;
   onCopy: (sessionId: string) => void | Promise<void>;
   onDelete: (sessionId: string) => void | Promise<void>;
+  /** Import a conversation. Acts on the LIST, not on any row — see the Chats
+   *  tab's own context menu. */
+  onImport?: () => void | Promise<void>;
 }
 
 /** What a project row can do to itself — see ConversationRowActions. */
@@ -1137,7 +1140,20 @@ export function ProjectSessionList({
 
       {/* Chats tab — every conversation with no explicit project, a plain
           ungrouped list (the conventional "general chats" pattern). */}
-      <TabsContent value="chats" className="mt-2 space-y-1" data-testid="sidebar-unassigned-sessions">
+      {/* Right-click the LIST itself (not a row) → import. Importing always
+          creates a brand-new conversation, so it acts on the list; putting it
+          on a row would imply it acts on that row. Rows stop propagation once
+          they answer, so their own menu still wins. */}
+      <TabsContent
+        value="chats"
+        className="mt-2 min-h-24 space-y-1"
+        data-testid="sidebar-unassigned-sessions"
+        onContextMenu={(event) => openNativeContextMenu(event, "conversation", {
+          ...(conversationActions?.onImport
+            ? { "conversation.import": () => void conversationActions.onImport!() }
+            : {}),
+        } as NativeContextMenuHandlers)}
+      >
         {hasUngroupedSessions ? (
           <>
             {visibleSessions(ungroupedRecent).map(renderSessionRow)}

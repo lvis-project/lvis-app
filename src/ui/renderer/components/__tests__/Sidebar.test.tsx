@@ -935,6 +935,26 @@ describe("Sidebar conversation row actions", () => {
     restore();
   });
 
+  it("offers import on the LIST, and only row commands on a row", () => {
+    const state = rowState();
+    const onImport = vi.fn();
+    const { getByTestId, showNativeContextMenu, restore } = renderSidebar({
+      conversationActions: { ...asActions(state), onImport },
+    });
+    // The list's own blank area answers with import and nothing row-scoped:
+    // import creates a NEW conversation, so it cannot act on a row.
+    fireEvent.contextMenu(getByTestId("sidebar-unassigned-sessions"));
+    const listMenu = showNativeContextMenu.mock.calls.at(-1)?.[0];
+    expect(listMenu?.commands).toEqual(["conversation.import"]);
+
+    // A row answers first and does NOT offer import.
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    const rowMenu = showNativeContextMenu.mock.calls.at(-1)?.[0];
+    expect(rowMenu?.commands).not.toContain("conversation.import");
+    expect(rowMenu?.commands).toContain("conversation.delete");
+    restore();
+  });
+
   it("commits a rename on Enter and abandons it on Escape", () => {
     const state = rowState();
     const { getByTestId, emitNativeContextCommand, restore } = renderSidebar({

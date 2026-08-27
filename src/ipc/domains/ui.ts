@@ -66,6 +66,7 @@ const NATIVE_LAYOUT: Record<
     ["conversation.share", "conversation.copy"],
     ["conversation.archive", "conversation.unarchive"],
     ["conversation.delete"],
+    ["conversation.import"],
   ],
   message: [
     ["message.copy"],
@@ -115,6 +116,7 @@ const NATIVE_LABEL: Record<NativeContextMenuCommand, () => string> = {
   "conversation.share": () => t("sidebar.shareConversation"),
   "conversation.copy": () => t("sidebar.copyConversation"),
   "conversation.delete": () => t("sidebar.deleteConversation"),
+  "conversation.import": () => t("mainToolbar.import"),
   "message.copy": () => t("turnActionBar.copyButton"),
   "message.edit": () => t("chatView.editButtonTitle"),
   "message.fork": () => t("chatView.forkButtonTitle"),
