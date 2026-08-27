@@ -13,15 +13,15 @@
  * the main-process loop registry — ever has to name a position.
  */
 
-/** Which way a split divides its space. */
-export type SplitAxis = "row" | "column";
+/** Which way a split divides its space. Internal: the union is the api. */
+type SplitAxis = "row" | "column";
 
 export interface ChatGroupLeaf {
   kind: "leaf";
   chatGroupId: string;
 }
 
-export interface ChatGroupSplit {
+interface ChatGroupSplit {
   kind: "split";
   axis: SplitAxis;
   children: ChatGroupNode[];
