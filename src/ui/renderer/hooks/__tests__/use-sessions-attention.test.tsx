@@ -27,6 +27,19 @@ describe("turnsEndedUnseen", () => {
     expect(turnsEndedUnseen(before, after, { focusedChatGroupId: "main", conversationVisible: false })).toEqual(["s-1"]);
   });
 
+  it("does not mark a conversation the focused tile is showing, even when its turn ran in another tile", () => {
+    const before = [tile("main", "s-1", false), tile("group-2", "s-1", true)];
+    const after = [tile("main", "s-1", false), tile("group-2", "s-1", false)];
+    expect(turnsEndedUnseen(before, after, looking)).toEqual([]);
+  });
+
+  it("marks a conversation whose streaming tile left the canvas — the end will never be reported", () => {
+    const before = [tile("main", "s-1", false), tile("group-2", "s-2", true)];
+    expect(turnsEndedUnseen(before, [tile("main", "s-1", false)], looking)).toEqual(["s-2"]);
+    // …unless the focused tile is showing that very conversation.
+    expect(turnsEndedUnseen(before, [tile("main", "s-2", false)], looking)).toEqual([]);
+  });
+
   it("ignores a tile that moved to another conversation, a turn still running, and a tile with no session", () => {
     const before = [tile("group-2", "s-2", true), tile("group-3", "s-3", true), tile("group-4", "", true)];
     const after = [tile("group-2", "s-9", false), tile("group-3", "s-3", true), tile("group-4", "", false)];
@@ -72,6 +85,18 @@ describe("useTurnAttention", () => {
     expect(setUnread).toHaveBeenLastCalledWith("s-1", true);
     rerender({ tiles: [tile("main", "s-1", false)], focused: "main", visible: true });
     expect(setUnread).toHaveBeenLastCalledWith("s-1", false);
+  });
+
+  it("does not write a mark a conversation already carries", () => {
+    const { rerender, setUnread } = harness({ tiles: [tile("main", "s-1", false), tile("group-2", "s-2", true)], focused: "main", visible: true, unread: ["s-2"] });
+    rerender({ tiles: [tile("main", "s-1", false), tile("group-2", "s-2", false)], focused: "main", visible: true });
+    expect(setUnread).not.toHaveBeenCalled();
+  });
+
+  it("marks a conversation whose tile was closed mid-turn", () => {
+    const { rerender, setUnread } = harness({ tiles: [tile("main", "s-1", false), tile("group-2", "s-2", true)], focused: "main", visible: true });
+    rerender({ tiles: [tile("main", "s-1", false)], focused: "main", visible: true });
+    expect(setUnread).toHaveBeenLastCalledWith("s-2", true);
   });
 
   it("leaves a conversation marked by hand alone until the user looks away and back", () => {

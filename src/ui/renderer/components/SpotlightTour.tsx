@@ -194,7 +194,7 @@ function ringStyle(
  * when the OS toggle flips. Returns the current preference; defaults to
  * `false` in non-DOM test environments.
  */
-export function usePrefersReducedMotion(): boolean {
+function usePrefersReducedMotion(): boolean {
   const [reduce, setReduce] = useState<boolean>(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
       return false;

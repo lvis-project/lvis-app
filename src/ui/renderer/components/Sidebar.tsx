@@ -1,6 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
-import { usePrefersReducedMotion } from "./SpotlightTour.js";
 import { ViewHistoryNav, type ViewPathNavProps } from "./ViewPathNav.js";
 import {
   CalendarDays,
@@ -724,7 +723,6 @@ function SessionRow({
 }) {
   const time = formatRelativeSessionTime(session.modifiedAt, t);
   const rowDisabled = streaming && !active;
-  const reduceMotion = usePrefersReducedMotion();
   const pinLabel = isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation");
   return (
     <div
@@ -783,7 +781,7 @@ function SessionRow({
               isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
             ].join(" ")}
           >
-            <span className={`h-2 w-2 rounded-full bg-primary ${reduceMotion ? "ring-2 ring-primary/(--opacity-muted)" : "animate-pulse"}`} />
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
           </span>
         ) : (
           <MessageSquareText

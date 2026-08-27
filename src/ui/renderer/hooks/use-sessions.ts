@@ -295,13 +295,21 @@ export function turnsEndedUnseen(
   attention: Attention,
 ): string[] {
   const before = new Map(previous.map((tile) => [tile.chatGroupId, tile]));
+  const now = new Map(current.map((tile) => [tile.chatGroupId, tile]));
+  // "Looking" is a property of the conversation, not the tile: the same session
+  // can sit in two tiles at once (split clones the focused one), and the user
+  // sees its turn end through whichever tile is focused.
+  const watched = attention.conversationVisible
+    ? now.get(attention.focusedChatGroupId)?.sessionId
+    : undefined;
   const unseen: string[] = [];
-  for (const tile of current) {
-    const was = before.get(tile.chatGroupId);
-    if (!was?.streaming || tile.streaming) continue;
-    if (was.sessionId !== tile.sessionId || !tile.sessionId) continue;
-    const looking = attention.conversationVisible && tile.chatGroupId === attention.focusedChatGroupId;
-    if (!looking) unseen.push(tile.sessionId);
+  for (const [chatGroupId, was] of before) {
+    if (!was.streaming || !was.sessionId) continue;
+    const tile = now.get(chatGroupId);
+    // A tile that left the canvas mid-turn (closed, or collapsed by chat mode)
+    // took the user's view of that turn with it; nothing will report its end.
+    if (tile && (tile.streaming || tile.sessionId !== was.sessionId)) continue;
+    if (was.sessionId !== watched && !unseen.includes(was.sessionId)) unseen.push(was.sessionId);
   }
   return unseen;
 }
@@ -332,7 +340,7 @@ export function useTurnAttention(input: {
     const previous = previousTiles.current;
     previousTiles.current = tiles;
     for (const sessionId of turnsEndedUnseen(previous, tiles, latest.current.attention)) {
-      void latest.current.setUnread(sessionId, true);
+      if (!latest.current.isUnread(sessionId)) void latest.current.setUnread(sessionId, true);
     }
   }, [tiles]);
 

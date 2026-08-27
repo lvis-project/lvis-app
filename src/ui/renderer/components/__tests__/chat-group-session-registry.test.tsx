@@ -156,6 +156,15 @@ describe("tile sessions — every tile at once", () => {
     expect(woken).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the same array when another tile republishes with nothing tile-visible changed", () => {
+    const registry = new ChatGroupSessionRegistry();
+    registry.publish("main", holding("s-1", false));
+    registry.publish("group-2", holding("s-2", true));
+    const first = registry.readTiles();
+    registry.publish("main", { ...holding("s-1", false), entries: [{ role: "user", content: "…" } as unknown as ChatEntry] });
+    expect(registry.readTiles()).toBe(first);
+  });
+
   it("useTileSessions follows the store", () => {
     const registry = new ChatGroupSessionRegistry();
     const { result } = renderHook(() => useTileSessions(registry));
