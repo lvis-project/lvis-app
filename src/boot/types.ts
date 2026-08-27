@@ -104,6 +104,28 @@ export interface AppServices {
    * fixtures that boot only the main loop. Wired in `conversation-wiring.ts`.
    */
   sideChatConversationLoop?: ConversationLoop;
+  /**
+   * Resolves the loop that owns one tiled chat group.
+   *
+   * The main area can hold several conversations at once, and a conversation is
+   * one ConversationLoop — the loop holds the live history and can run exactly
+   * one turn — so N tiles means N loops, not N views of one. Group `"main"`
+   * always resolves to {@link conversationLoop}; the rest are created on first
+   * use and capped, because an uncapped one would let the window spawn
+   * background agents faster than the user can see them.
+   *
+   * Optional: absent in fixtures that boot only the main loop, where every
+   * request is the main group by definition.
+   */
+  resolveChatGroupLoop?: (chatGroupId: string) => ConversationLoop;
+  /** Forgets a group's loop once its tile is gone, so the ceiling counts live tiles only. */
+  releaseChatGroupLoop?: (chatGroupId: string) => void;
+  /**
+   * The tiled chat group this bundle is bound to. Set only on the per-group
+   * bundle `chat.ts` derives for a non-primary tile; the bundle assembled at
+   * boot has none and is the primary's.
+   */
+  chatGroupId?: string;
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
   /**

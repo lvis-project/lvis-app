@@ -52,7 +52,7 @@ test.describe("workspace rail redesign", () => {
 
   test("docked rail: no header count, drag splitter, launcher opens a tab", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-side-panel-toggle").click();
+    await page.getByTestId("chat-group-panel-toggle").click();
 
     const panel = page.getByTestId("chat-side-panel");
     await expect(panel).toBeVisible();
@@ -83,7 +83,7 @@ test.describe("workspace rail redesign", () => {
     // manifests in) and open the panel first; the mode/panel IPC resizes the OS
     // window, so pin the container width LAST so it is the final authority.
     await page.getByTestId("app-mode-chat").click();
-    await page.getByTestId("chat-side-panel-toggle").click();
+    await page.getByTestId("chat-group-panel-toggle").click();
     await page.setViewportSize({ width: 908, height: 840 });
 
     // Docked, not a modal drawer: no drawer sheet, no backdrop blur.
@@ -96,7 +96,7 @@ test.describe("workspace rail redesign", () => {
 
   test("narrow viewport falls back to the modal drawer", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-side-panel-toggle").click();
+    await page.getByTestId("chat-group-panel-toggle").click();
     await expect(page.getByTestId("chat-side-panel")).toBeVisible();
 
     // Shrink below the docked threshold → the rail moves into the drawer sheet.

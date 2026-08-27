@@ -7,6 +7,7 @@ import {
   Select,
   SelectContent,
   SelectGroup,
+  SelectLabel,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -14,7 +15,13 @@ import {
 import { Slider } from "../../../components/ui/slider.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import { ChevronDown, ChevronUp, Loader2, RefreshCw, Store } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, Loader2, Pin, Plus, RefreshCw, Store } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu.js";
 import {
   REASONING_EFFORT_STEPS,
   VENDORS,
@@ -48,7 +55,19 @@ import { isIpcErrorResult, type LvisApi } from "../types.js";
 import { SettingsHelpPopover, SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { PricingOverridesSection } from "./PricingOverridesSection.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { SubscriptionProvidersController } from "./SubscriptionProvidersController.js";
+import {
+  API_PATH_RUNTIME_CAPABILITIES,
+  DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
+  SUBSCRIPTION_RUNTIME_API_COUNTERPART,
+  type SubscriptionRuntimeId,
+} from "../../../shared/subscription-runtime.js";
+import { useSubscriptionProviders } from "./SubscriptionProvidersController.js";
+import {
+  ERROR_MESSAGE_KEYS,
+  ProviderCapabilityGrid,
+  SubscriptionProviderRow,
+  type SubscriptionProviderView,
+} from "./SubscriptionProvidersSection.js";
 
 export interface FallbackEntry {
   provider: string;
@@ -62,22 +81,16 @@ export interface FallbackEntry {
 const MODEL_LIST_SYNC_DEBOUNCE_MS = 350;
 
 /**
- * Layout for the provider/model dropdown popups.
+ * Catalog-specific bounds for the provider/model popups.
  *
- * `SelectContent` defaults to Radix `position="item-aligned"`, which sizes the
- * popup to its own widest row and anchors the selected row on top of the
- * trigger. With a real provider catalog — long ids plus a provider/context/price
- * detail line — that popup ends up a different width from its trigger and offset
- * out of the settings column, and the list is squeezed into whatever room is
- * left below the selected row instead of the space actually available.
- *
- * `position="popper"` anchors the popup under its trigger, so pinning the width
- * to `--radix-select-trigger-width` keeps it aligned (long ids ellipsize inside
- * the row), `min-w-64` keeps narrow triggers usable, and the height is bounded
- * by whichever is smaller: a readable list or the room Radix reports.
+ * Anchoring and width now come from `SelectContent` itself. What is still local
+ * is the SIZE OF THIS LIST: a provider catalog is long ids plus a
+ * provider/context/price detail line, so `min-w-64` keeps a narrow trigger's
+ * popup readable and the height is capped at whichever is smaller — a list a
+ * person can scan, or the room Radix reports.
  */
 const SELECT_POPUP_LAYOUT =
-  "w-(--radix-select-trigger-width) min-w-64 max-h-[min(386px,var(--radix-select-content-available-height))]";
+  "min-w-64 max-h-[min(386px,var(--radix-select-content-available-height))]";
 
 type ModelListState =
   | {
@@ -182,7 +195,6 @@ function ProviderSelect({
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent
-        position="popper"
         className={SELECT_POPUP_LAYOUT}
         data-testid="llm-tab:vendor-content"
       >
@@ -249,6 +261,8 @@ export interface LlmTabProps {
   onOpenMarketplace?: () => void;
   model: string;
   setModel: (v: string) => void;
+  /** Moves vendor and model together when the pick belongs to another vendor. */
+  selectApiVendorModel: (vendorId: string, modelId: string) => void;
   enableThinking: boolean;
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
@@ -259,17 +273,19 @@ export interface LlmTabProps {
   setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
   onSaved: () => void;
   /**
-   * Called after the user changes an immediate-apply control (vendor /
-   * thinking toggle / reasoning slider). The dialog debounces these and
-   * persists via `s.save("llm")` so the user gets immediate-feel
-   * application without spamming saves.
+   * Called after the user changes an immediate-apply control (the model
+   * chooser / vendor / thinking toggle / reasoning slider). The dialog
+   * debounces these and persists via `s.save("llm")` so the user gets
+   * immediate-feel application without spamming saves.
    */
   onImmediateChange?: () => void;
   /**
-   * Section-anchored explicit save handler. Both the 공급자 구성 and
-   * Fallback Chain sections render their own Save button that calls
-   * this — the orchestration save() persists the whole `llm` payload,
-   * so the two buttons are functionally identical and the visual
+   * Section-anchored explicit save handler, for the TYPED fields — an API
+   * key, a base URL — where a keystroke is not yet a decision. A pick from
+   * a chooser is, and goes through `onImmediateChange` instead. Both the
+   * 공급자 구성 and Fallback Chain sections render their own Save button
+   * that calls this — the orchestration save() persists the whole `llm`
+   * payload, so the two buttons are functionally identical and the visual
    * placement just anchors each Save to its inputs.
    */
   onSave?: () => void;
@@ -407,6 +423,25 @@ function modelOptionsFor(
   return options;
 }
 
+/**
+ * The saved model, when the endpoint's catalogue no longer lists it.
+ *
+ * `modelOptionsFor` keeps the saved id in the chooser so a configured provider
+ * never shows a blank selection — but that also lets a model the server has
+ * since dropped sit at the top of the list looking exactly like one it still
+ * serves, while every request to it is rejected. This names that case so the
+ * chooser and the status line can say it. Only a catalogue that actually
+ * landed counts: with nothing synced yet there is nothing to disagree with.
+ */
+export function unlistedSavedModel(
+  selectedModel: string,
+  catalogue: readonly string[] | undefined,
+): string | null {
+  const model = selectedModel.trim();
+  if (!model || !catalogue || catalogue.length === 0) return null;
+  return catalogue.includes(model) ? null : model;
+}
+
 function compactNumber(value: number): string {
   if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`;
   if (value >= 1_000) return `${Math.round(value / 100) / 10}k`;
@@ -429,55 +464,267 @@ function modelEntryPricingLabel(entry: LlmModelListEntry | undefined): string | 
   return `in ${pricing.prompt ?? "?"} / out ${pricing.completion ?? "?"}`;
 }
 
+/**
+ * One model row, on ONE line: who serves it, then what it is.
+ *
+ * It used to stack the id over a muted detail line, which made the trigger two
+ * rows tall for a control that shows a single choice, and made the popup's rows
+ * scan as pairs rather than as a list. The provider leads because that is how
+ * the choice is actually made — a person picks a provider's catalogue first and
+ * a model inside it second — and it is the short, repeating half, so it forms a
+ * readable left column while the ids ellipsize beside it.
+ *
+ * The free-route disclaimer is prose and cannot share the line. The FREE badge
+ * carries the signal; the sentence rides on the row's `title`, where it is one
+ * hover away instead of one line tall on every row.
+ */
 function ModelSelectItemContent({
   option,
   entry,
+  providerOverride,
+  factsOverride,
+  tone,
 }: {
   option: string;
   entry?: LlmModelListEntry;
+  /** Leading column when there is no catalogue entry to read a provider from —
+   *  a subscription model has a provider but no `LlmModelListEntry`. */
+  providerOverride?: string;
+  /** Trailing facts for the same case. */
+  factsOverride?: string;
+  /** The facts carry a problem, not a number — a saved model the endpoint dropped. */
+  tone?: "destructive";
 }) {
   const { t } = useTranslation();
   const isFree = entry?.tags?.free === true || isOpenRouterFreeModel(option);
   const isRouter = entry?.tags?.router === true;
   const isLocal = entry?.tags?.local === true;
-  const detailParts = [
-    entry?.provider ?? entry?.ownedBy,
+  const provider = entry?.provider ?? entry?.ownedBy ?? providerOverride;
+  // Provider is the leading column now, so it is NOT repeated in the trailing
+  // facts — those are the numbers that differ between models.
+  const facts = factsOverride ? [factsOverride] : [
     entry?.contextLength !== undefined
       ? t("llmTab.modelContextTokens", { count: compactNumber(entry.contextLength) })
       : undefined,
     modelEntryPricingLabel(entry) ?? undefined,
   ].filter((part): part is string => Boolean(part));
-  // Even the bare id needs its own truncating box: the popup is trigger-wide, so
-  // a long id must ellipsize inside the row rather than overflow it.
-  if (!isFree && !isRouter && !isLocal && detailParts.length === 0) {
-    return <span className="min-w-0 truncate">{option}</span>;
-  }
   return (
-    <span className="flex min-w-0 flex-col gap-0.5 py-0.5">
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 truncate">{option}</span>
-        {isFree && (
-          <Badge variant="secondary" className="h-4 px-1 text-[9px] uppercase">
-            {t("llmTab.openRouterFreeBadge")}
-          </Badge>
-        )}
-        {isRouter && (
-          <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase">
-            {t("llmTab.modelRouterBadge")}
-          </Badge>
-        )}
-        {isLocal && (
-          <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase">
-            {t("llmTab.modelLocalBadge")}
-          </Badge>
-        )}
-      </span>
-      {(isFree || detailParts.length > 0) && (
-        <span className="text-[10px] leading-tight text-muted-foreground">
-          {isFree ? t("llmTab.openRouterFreeDisclaimer") : detailParts.join(" · ")}
+    <span
+      className="flex w-full min-w-0 items-center gap-2"
+      data-model-id={option}
+      {...(isFree ? { title: t("llmTab.openRouterFreeDisclaimer") } : {})}
+    >
+      {provider && (
+        <span
+          className="max-w-[9rem] shrink-0 truncate text-muted-foreground"
+          data-testid={`llm-tab:model-provider:${option}`}
+        >
+          {provider}
+        </span>
+      )}
+      <span className="min-w-0 flex-1 truncate">{option}</span>
+      {isFree && (
+        <Badge variant="secondary" className="h-4 shrink-0 px-1 text-[9px] uppercase">
+          {t("llmTab.openRouterFreeBadge")}
+        </Badge>
+      )}
+      {isRouter && (
+        <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] uppercase">
+          {t("llmTab.modelRouterBadge")}
+        </Badge>
+      )}
+      {isLocal && (
+        <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] uppercase">
+          {t("llmTab.modelLocalBadge")}
+        </Badge>
+      )}
+      {facts.length > 0 && (
+        <span
+          className={`shrink-0 text-[10px] ${tone === "destructive" ? "text-destructive" : "text-muted-foreground"}`}
+          data-testid={`llm-tab:model-facts:${option}`}
+        >
+          {facts.join(" · ")}
         </span>
       )}
     </span>
+  );
+}
+
+/**
+ * One choosable model, wherever it comes from.
+ *
+ * The API vendor's catalogue and every connected subscription's models are the
+ * same kind of choice — "who answers, with what" — and the user makes exactly
+ * one of them. Keeping them in two lists made the screen say otherwise.
+ */
+interface UnifiedModelOption {
+  /** `providerId::modelId`. The Select's value, so a model id repeated by two
+   *  providers still resolves to the right one. */
+  value: string;
+  providerId: string;
+  providerLabel: string;
+  modelId: string;
+  /** Short vendor word shown as the row's leading column. */
+  vendorTag: string;
+  entry?: LlmModelListEntry;
+  /** Subscription-side facts, where there is no catalogue entry to read them from. */
+  facts?: string;
+  /** The provider exposes no model choice — this row IS the provider. */
+  fixed?: boolean;
+  /** Saved, but no longer in the endpoint's catalogue — see `unlistedSavedModel`. */
+  unlisted?: boolean;
+}
+
+/** Marks the API-key provider inside a unified option value. */
+/**
+ * One provider, however it is reached.
+ *
+ * A provider with both halves is ONE row: the same company, two ways in. The
+ * settings list must not make a user learn that "OpenAI" and "Codex" are the
+ * same account seen from two angles.
+ */
+interface ProviderConnection {
+  /** The subscription runtime id when paired, otherwise the API vendor id. */
+  id: string;
+  label: string;
+  /** Present when this provider can be reached with an API key. */
+  apiVendorId?: string;
+  apiConfigured: boolean;
+  subscription?: SubscriptionProviderView;
+  connected: boolean;
+}
+
+const API_PROVIDER_PREFIX = "api:";
+
+function apiProviderId(vendorId: string): string {
+  return `${API_PROVIDER_PREFIX}${vendorId}`;
+}
+
+function unifiedValue(providerId: string, modelId: string): string {
+  return `${providerId}::${modelId}`;
+}
+
+function parseUnifiedValue(value: string): { providerId: string; modelId: string } | null {
+  const at = value.indexOf("::");
+  if (at <= 0) return null;
+  return { providerId: value.slice(0, at), modelId: value.slice(at + 2) };
+}
+
+/**
+ * The model chooser.
+ *
+ * Two rules make this list readable when a catalogue runs to hundreds of
+ * entries. PINS come first, and they come first ACROSS providers — a pin exists
+ * so a model someone reaches for daily is one glance away, and a per-provider
+ * pin list would still make them find the provider first. Everything else is
+ * grouped BY provider, because that is the other thing a person navigates by.
+ *
+ * A stored pin is never trusted: it is matched against what is actually
+ * offered right now, so a model that left the catalogue, or one whose provider
+ * is disconnected, simply does not appear. The stored id survives that, and the
+ * pin comes back with the provider.
+ */
+function UnifiedModelSelect({
+  options,
+  value,
+  onValueChange,
+  pinned,
+  onTogglePin,
+  placeholder,
+  popupClassName,
+}: {
+  options: readonly UnifiedModelOption[];
+  value: string;
+  onValueChange: (value: string) => void;
+  pinned: readonly string[];
+  onTogglePin: (modelId: string) => void;
+  placeholder: string;
+  popupClassName: string;
+}) {
+  const { t } = useTranslation();
+  const pinnedSet = new Set(pinned);
+  const pinnedOptions = options.filter((option) => pinnedSet.has(option.modelId));
+  const restByProvider: Array<{ label: string; items: UnifiedModelOption[] }> = [];
+  for (const option of options) {
+    if (pinnedSet.has(option.modelId)) continue;
+    const last = restByProvider[restByProvider.length - 1];
+    if (last && last.label === option.providerLabel) last.items.push(option);
+    else restByProvider.push({ label: option.providerLabel, items: [option] });
+  }
+
+  const row = (option: UnifiedModelOption) => {
+    const isPinned = pinnedSet.has(option.modelId);
+    return (
+      <SelectItem
+        key={option.value}
+        value={option.value}
+        leading={
+          /* Outside ItemText so the pin stays in the row and never mirrors
+             into the collapsed trigger. Radix commits a row on POINTERUP, so
+             both pointer events stop here — pinning is not choosing. */
+          <span
+            role="button"
+            tabIndex={-1}
+            aria-label={isPinned ? t("llmTab.modelUnpin") : t("llmTab.modelPin")}
+            aria-pressed={isPinned}
+            data-testid={`llm-tab:model-pin:${option.value}`}
+            className={[
+              "inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded",
+              "hover:bg-accent",
+              isPinned ? "text-primary" : "text-muted-foreground/(--opacity-strong)",
+            ].join(" ")}
+            onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+            onPointerUp={(event) => { event.preventDefault(); event.stopPropagation(); }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onTogglePin(option.modelId);
+            }}
+          >
+            <Pin className={`h-3 w-3 ${isPinned ? "fill-current" : ""}`} aria-hidden={true} />
+          </span>
+        }
+      >
+        <ModelSelectItemContent
+          option={option.modelId}
+          {...(option.entry ? { entry: option.entry } : {})}
+          {...(option.entry ? {} : { providerOverride: option.vendorTag })}
+          {...(option.facts ? { factsOverride: option.facts } : {})}
+          {...(option.unlisted ? { tone: "destructive" as const } : {})}
+        />
+      </SelectItem>
+    );
+  };
+
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger id="model-select" className="w-full" data-testid="llm-model-select">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent className={popupClassName}>
+        {pinnedOptions.length > 0 && (
+          <SelectGroup>
+            <SelectLabel className="text-[10px] uppercase tracking-normal text-muted-foreground">
+              {t("llmTab.modelPinnedGroup")}
+            </SelectLabel>
+            {pinnedOptions.map(row)}
+          </SelectGroup>
+        )}
+        {restByProvider.map((group) => (
+          <SelectGroup key={group.label}>
+            <SelectLabel className="text-[10px] uppercase tracking-normal text-muted-foreground">
+              {group.label}
+            </SelectLabel>
+            {group.items.map(row)}
+          </SelectGroup>
+        ))}
+        {options.length === 0 && (
+          <div className="px-2 py-3 text-center text-xs text-muted-foreground" data-testid="llm-tab:model-none">
+            {t("llmTab.modelNoConnectedProvider")}
+          </div>
+        )}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -559,6 +806,7 @@ export function LlmTab(props: LlmTabProps) {
     onOpenMarketplace,
     model,
     setModel,
+    selectApiVendorModel,
     enableThinking,
     setEnableThinking,
     thinkingBudget,
@@ -742,22 +990,159 @@ export function LlmTab(props: LlmTabProps) {
     () => modelEntryMap(activeModelList?.entries),
     [activeModelList],
   );
+  // Only a synced catalogue can disqualify the saved model; a seeded vendor's
+  // curated line is not the server's word on what it serves.
+  const unlistedModel = unlistedSavedModel(
+    activeModelValue,
+    activeSyncedModelOptions,
+  );
+  // Subscription providers live beside the API vendor in ONE chooser, so this
+  // tab owns both halves of the state rather than handing one down.
+  const subscription = useSubscriptionProviders(api);
+  // Mirrored from settings rather than held locally: another window may pin a
+  // model too, and the chooser must show one truth.
+  const [pinnedModels, setPinnedModels] = useState<readonly string[]>([]);
+
+  const unifiedOptions = useMemo<UnifiedModelOption[]>(() => {
+    const options: UnifiedModelOption[] = [];
+    // `modelOptionsFor` is the single authority on what an API vendor can
+    // offer: a curated line for a first-party vendor, and nothing at all for
+    // an endpoint-defined openai-compatible provider until its /models
+    // handshake lands. Do not add a second key-based gate on top — two
+    // policies answering the same question is how a vendor ends up with an
+    // empty chooser while its catalogue is right there.
+    const pushed = new Set<string>();
+    const pushApiOption = (
+      vendorId: string,
+      modelId: string,
+      entry: LlmModelListEntry | undefined,
+    ) => {
+      const value = unifiedValue(apiProviderId(vendorId), modelId);
+      if (pushed.has(value)) return;
+      pushed.add(value);
+      options.push({
+        value,
+        providerId: apiProviderId(vendorId),
+        providerLabel: getVendorInfo(vendorId).label,
+        modelId,
+        vendorTag: entry?.provider ?? entry?.ownedBy ?? vendorId,
+        ...(entry ? { entry } : {}),
+      });
+    };
+    // The vendor the configuration form points at goes first: it is the only
+    // one whose curated seed list and current selection are known here.
+    for (const modelId of activeModelOptions) {
+      pushApiOption(vendor, modelId, activeModelEntryById.get(modelId));
+      if (modelId === unlistedModel) {
+        const last = options[options.length - 1]!;
+        options[options.length - 1] = { ...last, unlisted: true, facts: t("llmTab.modelUnlisted") };
+      }
+    }
+    // Then every OTHER vendor whose /models handshake already landed. Without
+    // this, switching the form's vendor emptied the chooser of every vendor
+    // the user had configured — the catalogue was cached, just never offered.
+    for (const [cacheKey, state] of Object.entries(modelLists)) {
+      const cachedVendor = cacheKey.split("\n")[0];
+      if (!cachedVendor || cachedVendor === vendor) continue;
+      const entries = modelEntryMap(state.entries);
+      for (const modelId of state.options ?? []) {
+        pushApiOption(cachedVendor, modelId, entries.get(modelId));
+      }
+    }
+    for (const view of subscription.providers) {
+      // Connected only. A signed-out provider has nothing to offer yet, and
+      // listing its models would invite a choice that cannot be honoured.
+      if (view.status?.connection !== "connected") continue;
+      const models = view.status.models ?? [];
+      if (models.length === 0) {
+        // No model choice at all — the row IS the provider. It still belongs in
+        // the list, because picking it is exactly as much of a choice as
+        // picking a model from a provider that has several.
+        options.push({
+          value: unifiedValue(view.descriptor.id, ""),
+          providerId: view.descriptor.id,
+          providerLabel: view.descriptor.label,
+          modelId: t("llmTab.providerDefaultModel"),
+          vendorTag: view.descriptor.id,
+          facts: t("llmTab.modelFixedByProvider"),
+          fixed: true,
+        });
+        continue;
+      }
+      for (const model of models) {
+        options.push({
+          value: unifiedValue(view.descriptor.id, model.id),
+          providerId: view.descriptor.id,
+          providerLabel: view.descriptor.label,
+          modelId: model.label || model.id,
+          vendorTag: view.descriptor.id,
+        });
+      }
+    }
+    return options;
+  }, [
+    vendor, activeModelOptions, activeModelEntryById, modelLists,
+    subscription.providers, t, unlistedModel,
+  ]);
+
+  const selectedUnifiedValue = subscription.activeRuntime.kind === "subscription"
+    ? unifiedValue(subscription.activeRuntime.provider, subscription.activeRuntime.model ?? "")
+    : unifiedValue(apiProviderId(vendor), activeModelValue);
+
+  const handleUnifiedModelChange = useCallback((value: string) => {
+    const parsed = parseUnifiedValue(value);
+    if (!parsed) return;
+    if (parsed.providerId.startsWith(API_PROVIDER_PREFIX)) {
+      const pickedVendor = parsed.providerId.slice(API_PROVIDER_PREFIX.length);
+      if (pickedVendor === vendor) setModel(parsed.modelId);
+      else selectApiVendorModel(pickedVendor, parsed.modelId);
+      // A pick is the decision. It persists the way the vendor row and the
+      // thinking controls do — through the debounced save — rather than
+      // waiting on the section's Save button, which exists for the typed
+      // fields (a key, a base URL) where a keystroke is not yet a decision.
+      onImmediateChange?.();
+      // Only switch the runtime when it is not already the API path. Calling
+      // it unconditionally rewrites settings on every pick, and that broadcast
+      // is what used to snap the chosen model back to the persisted one.
+      if (subscription.activeRuntime.kind !== "api") {
+        void subscription.props.actions.useApiForChat?.();
+      }
+      return;
+    }
+    void subscription.props.actions.useForChat?.(
+      parsed.providerId as SubscriptionRuntimeId,
+      parsed.modelId === "" ? null : parsed.modelId,
+    );
+  }, [
+    onImmediateChange, selectApiVendorModel, setModel, vendor,
+    subscription.activeRuntime.kind, subscription.props.actions,
+  ]);
+
+  const handleTogglePin = useCallback((modelId: string) => {
+    const next = pinnedModels.includes(modelId)
+      ? pinnedModels.filter((id: string) => id !== modelId)
+      : [...pinnedModels, modelId];
+    setPinnedModels(next);
+    void api.updateSettings({ llm: { pinnedModels: next } });
+  }, [api, pinnedModels]);
+
+  const [providerConfigOpen, setProviderConfigOpen] = useState(false);
+  const [addedRowIds, setAddedRowIds] = useState<readonly string[]>([]);
+  // A vendor with no usable credential has not answered the checklist yet.
+  const apiPathConfigured = hasKey || !activeProviderRequiresApiKey;
+
   const marketplaceProviderPresetOptions = useMemo(
     () => providerOptionsForPresets(marketplaceProviderPresets),
     [marketplaceProviderPresets],
   );
-  const marketplaceProviderPresetSelectIds = useMemo(
-    () => marketplaceProviderPresets.map((preset) =>
-      marketplaceProviderPresetSecretId(preset.providerId)
-    ),
-    [marketplaceProviderPresets],
-  );
+
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     const applySettings = (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
       const ids = settings.marketplace?.installedProviderIds;
       setMarketplaceProviderIds(Array.isArray(ids) ? ids : []);
+      setPinnedModels(settings.llm?.pinnedModels ?? []);
       const cache = settings.llm?.modelListCache ?? {};
       modelListCacheRef.current = cache;
       const cachedStates = modelListStatesFromCache(cache, marketplaceProviderPresets);
@@ -823,11 +1208,17 @@ export function LlmTab(props: LlmTabProps) {
     }
   }, [fallbackOpen, fallbackProviderKey, requestModelList, settingsLoaded]);
 
-  const displayVendor = selectedMarketplaceProviderPreset
-    ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
-    : vendor;
-  const isMarketplaceProviderSelected =
-    marketplaceProviderIds.includes(vendor) || Boolean(selectedMarketplaceProviderPreset);
+  // A provider that arrived from the marketplace says so on its row. The badge
+  // used to hang off the vendor dropdown; the dropdown is gone, but where a
+  // provider CAME FROM is still something the user needs to be able to see.
+  const marketplaceVendorIds = useMemo(
+    () => new Set<string>([
+      ...marketplaceProviderIds,
+      ...marketplaceProviderPresets.map((preset) =>
+        marketplaceProviderPresetSecretId(preset.providerId)),
+    ]),
+    [marketplaceProviderIds, marketplaceProviderPresets],
+  );
   const handleVendorChange = useCallback(
     (v: string) => {
       const preset = marketplaceProviderPresets.find(
@@ -850,36 +1241,414 @@ export function LlmTab(props: LlmTabProps) {
       setVendor,
     ],
   );
+  // ─── Connections ────────────────────────────────────────────────────────
+  // ONE list. A provider a user recognises as one company is one row, whether
+  // it is reached with an API key, by signing in to its subscription runtime,
+  // or both — `SUBSCRIPTION_RUNTIME_API_COUNTERPART` is the join that says
+  // which pairs are the same company.
+  const configuredApiVendorIds = useMemo(() => {
+    // A vendor that answered a /models handshake is configured by definition.
+    // The vendor the form points at counts too, so a key that was just entered
+    // shows up before its first fetch lands.
+    const ids = new Set<string>();
+    for (const cacheKey of Object.keys(modelLists)) {
+      const cachedVendor = cacheKey.split("\n")[0];
+      if (cachedVendor) ids.add(cachedVendor);
+    }
+    if (apiPathConfigured) ids.add(vendor);
+    return ids;
+  }, [modelLists, apiPathConfigured, vendor]);
+
+  // What a connected API vendor can SAY about itself on its row. The cache key
+  // is `vendor\nbaseUrl\ncredentialScope`, so the endpoint and the size of the
+  // catalogue it handed back are both already here — no extra call to show
+  // them, and no second source that could disagree with the chooser.
+  const apiFacts = useMemo(() => {
+    const facts = new Map<string, { baseUrl: string; modelCount: number }>();
+    for (const [cacheKey, state] of Object.entries(modelLists)) {
+      const [cachedVendor, baseUrl] = cacheKey.split("\n");
+      if (!cachedVendor) continue;
+      facts.set(cachedVendor, {
+        baseUrl: baseUrl ?? "",
+        modelCount: state.options?.length ?? 0,
+      });
+    }
+    return facts;
+  }, [modelLists]);
+
+  const connections = useMemo<ProviderConnection[]>(() => {
+    const claimed = new Set<string>();
+    const rows: ProviderConnection[] = [];
+    for (const view of subscription.providers) {
+      const counterpart = SUBSCRIPTION_RUNTIME_API_COUNTERPART[view.descriptor.id];
+      if (counterpart) claimed.add(counterpart);
+      const apiConfigured = counterpart ? configuredApiVendorIds.has(counterpart) : false;
+      rows.push({
+        id: view.descriptor.id,
+        // The company's name, not the runtime's: "OpenAI", not "Codex".
+        label: counterpart ? getVendorInfo(counterpart).label : view.descriptor.label,
+        ...(counterpart ? { apiVendorId: counterpart } : {}),
+        apiConfigured,
+        subscription: view,
+        connected: view.status?.connection === "connected" || apiConfigured,
+      });
+    }
+    for (const vendorId of configuredApiVendorIds) {
+      if (claimed.has(vendorId)) continue;
+      rows.push({
+        id: vendorId,
+        label: getVendorInfo(vendorId).label,
+        apiVendorId: vendorId,
+        apiConfigured: true,
+        connected: true,
+      });
+    }
+    return rows;
+  }, [subscription.providers, configuredApiVendorIds]);
+
+  // A provider picked from "add a provider" has to STAY on screen while it is
+  // being set up: signing in to a subscription runtime happens on its row, and
+  // a row that vanishes because it is not connected yet takes the login button
+  // with it.
+  const visibleRows = connections.filter(
+    (row) => row.connected || addedRowIds.includes(row.id),
+  );
+  // Everything else goes behind "add a provider". The catalogue keeps growing
+  // with marketplace presets, so the list's length has to track the number of
+  // providers the user actually USES, not the number that exist.
+  const addableRows = connections.filter(
+    (row) => !row.connected && !addedRowIds.includes(row.id),
+  );
+  const addableVendors = useMemo(
+    () => providerSelectOptions.filter((option) =>
+      !configuredApiVendorIds.has(option.id)
+      && !connections.some((row) => row.apiVendorId === option.id)),
+    [providerSelectOptions, configuredApiVendorIds, connections],
+  );
+
+  const revealRow = useCallback((rowId: string) => {
+    setAddedRowIds((current) => current.includes(rowId) ? current : [...current, rowId]);
+  }, []);
+
+  const openApiConfig = useCallback((vendorId: string) => {
+    if (vendorId !== vendor) handleVendorChange(vendorId);
+    setProviderConfigOpen(true);
+  }, [handleVendorChange, vendor]);
+
+  // The credential form for whichever provider row is open. One form, because
+  // one vendor is being edited at a time — the row that owns it just moved.
+  const credentialForm = (
+      <div
+        className="space-y-3"
+        data-testid="llm-tab:manual-section"
+      >
+        {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">
+              {t("llmTab.endpointBaseUrlLabel")}{vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
+            </Label>
+            <Input
+              data-testid="llm-base-url-input"
+              value={selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl}
+              onChange={(e) => {
+                if (endpointLockedToMarketplacePreset) return;
+                setBaseUrl(e.target.value);
+              }}
+              placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+              readOnly={endpointLockedToMarketplacePreset}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {t("llmTab.baseUrlDiscardWarning")}
+            </p>
+            {vendor === "azure-foundry" && (
+              <p className="text-[11px] text-muted-foreground">
+                {t("llmTab.azureEndpointFormat")}
+                {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
+                {" "}— {t("llmTab.azureDeploymentNote")}
+              </p>
+            )}
+            {(vendor === "openai" || vendor === "copilot") && (
+              <p className="text-[11px] text-muted-foreground">
+                {t("llmTab.proxyEndpointNote")}
+              </p>
+            )}
+          </div>
+        )}
+        {vendor === "vertex-ai" && (
+          <div className="space-y-2 rounded-md border p-3">
+            <p className="text-sm font-medium">{t("llmTab.vertexTitle")}</p>
+            <p className="text-[11px] text-muted-foreground">
+              {t("llmTab.vertexAuthDesc1")}<code>gcloud auth application-default login</code>{t("llmTab.vertexAuthDesc2")}
+              {t("llmTab.vertexAuthDesc3")}<code>GOOGLE_APPLICATION_CREDENTIALS</code>{t("llmTab.vertexAuthDesc4")}
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">{t("llmTab.gcpProjectIdLabel")}</Label>
+              <Input
+                value={vertexProject}
+                onChange={(e) => setVertexProject(e.target.value)}
+                placeholder="my-gcp-project"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">
+                {t("llmTab.vertexLocationLabel", { optional: t("llmTab.optional") })}
+              </Label>
+              <Input
+                value={vertexLocation}
+                onChange={(e) => setVertexLocation(e.target.value)}
+                placeholder={t("llmTab.vertexLocationPlaceholder")}
+              />
+            </div>
+          </div>
+        )}
+        {vendor !== "vertex-ai" && (
+          <div
+            className="min-w-0 space-y-2"
+            data-testid="llm-tab:api-key-section"
+            data-api-key-required={activeProviderRequiresApiKey ? "true" : "false"}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Label className="min-w-0 text-sm font-medium" data-testid="llm-tab:api-key-label">
+              {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
+              {!activeProviderRequiresApiKey ? ` (${t("llmTab.optional")})` : ""}
+            </Label>
+              {hasKey ? (
+                <Badge variant="default" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">{t("llmTab.apiKeySet")}</Badge>
+              ) : (
+                <Badge variant="secondary" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
+                  {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
+                </Badge>
+              )}
+              {hasKey && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-destructive"
+                  onClick={() => void api.deleteApiKey(activeCredentialProviderId).then(() => { setHasKey(false); onSaved(); })}
+                >
+                  {t("llmTab.delete")}
+                </Button>
+              )}
+            </div>
+            <Input
+              data-testid="llm-api-key-input"
+              type="password"
+              placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder}
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+            />
+          </div>
+        )}
+        </div>
+  );
+
+  // Which of this provider's two routes is serving chat right now. The user
+  // asked for exactly this: the row says the provider, the badge says the mode.
+  /** Which path this row is serving chat through right now, or null. */
+  const activeMode = (row: ProviderConnection): "subscription" | "api" | null =>
+    subscription.activeRuntime.kind === "subscription"
+      ? (subscription.activeRuntime.provider === row.id ? "subscription" : null)
+      : (row.apiVendorId && row.apiVendorId === vendor ? "api" : null);
+
+  const modeBadge = (row: ProviderConnection) => {
+    const active = activeMode(row);
+    if (!active) return null;
+    return (
+      <Badge variant="default" className="h-5 px-2 text-[10px]" data-testid={`llm-tab:connection-mode:${row.id}`}>
+        {active === "subscription" ? t("llmTab.modeSubscription") : t("llmTab.modeApiKey")}
+      </Badge>
+    );
+  };
+
+  /**
+   * The row's state, as one dot and one word.
+   *
+   * Every row carries it, including the ones that are merely connected — a row
+   * that only speaks up when it is the active one leaves the rest of the list
+   * saying nothing about itself, which is the state this list exists to show.
+   */
+  const statusChip = (row: ProviderConnection) => {
+    const live = activeMode(row) !== null;
+    const label = live
+      ? t("subscriptionProvidersSection.apiChatActive")
+      : row.connected
+        ? t("subscriptionProvidersSection.statusConnected")
+        : t("subscriptionProvidersSection.statusSignedOut");
+    const tone = live
+      ? "bg-primary"
+      : row.connected
+        ? "bg-success"
+        : "bg-muted-foreground/(--opacity-half)";
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
+        data-testid={`llm-tab:connection-status:${row.id}`}
+      >
+        <span className={`size-1.5 shrink-0 rounded-full ${tone}`} aria-hidden={true} />
+        {label}
+      </span>
+    );
+  };
+
+  /**
+   * What this connection is, in the row itself: the endpoint it reaches and how
+   * much of a catalogue came back. Without it the row is a bare name, and the
+   * user cannot tell two OpenAI-compatible endpoints apart.
+   */
+  const connectionSubline = (row: ProviderConnection) => {
+    if (!row.apiVendorId) return null;
+    const facts = apiFacts.get(row.apiVendorId);
+    if (!facts) return null;
+    const parts = [
+      facts.baseUrl,
+      facts.modelCount > 0 ? t("llmTab.modelSynced", { count: facts.modelCount }) : "",
+    ].filter(Boolean);
+    if (parts.length === 0) return null;
+    return (
+      <p
+        className="truncate text-[11px] text-muted-foreground"
+        title={parts.join(" · ")}
+        data-testid={`llm-tab:connection-subline:${row.id}`}
+      >
+        {parts.join(" · ")}
+      </p>
+    );
+  };
+
+  const apiKeyChip = (row: ProviderConnection) => {
+    if (!row.apiVendorId) return null;
+    const isOpen = providerConfigOpen && row.apiVendorId === vendor;
+    return (
+      <>
+        <Button
+          type="button"
+          size="sm"
+          variant={isOpen ? "secondary" : "outline"}
+          className="h-6 px-2 text-[11px]"
+          onClick={() => (isOpen ? setProviderConfigOpen(false) : openApiConfig(row.apiVendorId!))}
+          data-testid={`llm-tab:connection-api-key:${row.id}`}
+        >
+          {t("llmTab.authApiKey")}
+        </Button>
+      </>
+    );
+  };
+
+  const connectionsList = (
+    <div className="space-y-3" data-testid="llm-tab:connections">
+      <p className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 text-xs text-muted-foreground">
+        {t("subscriptionProvidersSection.securityNotice")}
+      </p>
+      {subscription.props.apiChatError ? (
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive"
+          data-testid="llm-tab:connections-error"
+        >
+          {t(ERROR_MESSAGE_KEYS[subscription.props.apiChatError])}
+        </p>
+      ) : null}
+      {visibleRows.length === 0 ? (
+        <p className="rounded-md border px-3 py-4 text-center text-xs text-muted-foreground" data-testid="llm-tab:connections-empty">
+          {t("llmTab.connectionsEmpty")}
+        </p>
+      ) : null}
+      {visibleRows.map((row) => row.subscription ? (
+        <SubscriptionProviderRow
+          key={row.id}
+          provider={row.subscription}
+          label={row.label}
+          activeSelection={subscription.props.activeSelection}
+          chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
+          actions={subscription.props.actions}
+          leading={<>{statusChip(row)}{modeBadge(row)}{apiKeyChip(row)}</>}
+          {...(providerConfigOpen && row.apiVendorId === vendor ? { trailing: credentialForm } : {})}
+        />
+      ) : (
+        <div
+          key={row.id}
+          className="space-y-3 rounded-md border bg-card p-3"
+          data-testid={`llm-tab:connection:${row.id}`}
+        >
+          {/* The whole head is the disclosure: the row IS the provider, so
+              managing it should not require finding a particular control on it. */}
+          <button
+            type="button"
+            className="flex w-full min-w-0 items-center gap-2 text-left"
+            aria-expanded={providerConfigOpen && row.apiVendorId === vendor}
+            onClick={() => (providerConfigOpen && row.apiVendorId === vendor
+              ? setProviderConfigOpen(false)
+              : openApiConfig(row.apiVendorId!))}
+            data-testid={`llm-tab:connection-toggle:${row.id}`}
+          >
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="truncate text-sm font-medium">{row.label}</span>
+                {modeBadge(row)}
+                {row.apiVendorId && marketplaceVendorIds.has(row.apiVendorId) ? (
+                  <span
+                    className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
+                    data-testid={`llm-tab:selected-provider-marketplace:${row.apiVendorId}`}
+                  >
+                    {t("llmTab.marketplaceInstalledBadge")}
+                  </span>
+                ) : null}
+              </span>
+              {connectionSubline(row)}
+            </span>
+            {statusChip(row)}
+            <ChevronRight
+              className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                providerConfigOpen && row.apiVendorId === vendor ? "rotate-90" : ""
+              }`}
+              aria-hidden={true}
+            />
+          </button>
+          {providerConfigOpen && row.apiVendorId === vendor ? credentialForm : null}
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 text-xs" data-testid="llm-tab:add-provider">
+              <Plus className="size-3.5" aria-hidden={true} />
+              {t("llmTab.addProvider")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
+            {addableRows.map((row) => (
+              <DropdownMenuItem
+                key={row.id}
+                data-testid={`llm-tab:add-provider-item:${row.id}`}
+                onClick={() => {
+                  revealRow(row.id);
+                  if (row.apiVendorId) openApiConfig(row.apiVendorId);
+                }}
+              >
+                {row.label}
+              </DropdownMenuItem>
+            ))}
+            {addableVendors.map((option) => (
+              <DropdownMenuItem
+                key={option.id}
+                data-testid={`llm-tab:add-provider-item:${option.id}`}
+                onClick={() => openApiConfig(option.id)}
+              >
+                {option.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-w-0 space-y-6">
       <SettingsPageHeader
         title={t("llmTab.pageTitle")}
         description={t("llmTab.pageDescription")}
       />
-
-      <SettingsSection
-        title={t("llmTab.currentConfiguration")}
-        id="llm-current-configuration"
-      >
-        <dl className="grid gap-3 sm:grid-cols-3" data-testid="llm-tab:configuration-summary">
-          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
-            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.vendor")}</dt>
-            <dd className="mt-1 truncate text-sm font-medium text-foreground">{vendorInfo.label}</dd>
-          </div>
-          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
-            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.model")}</dt>
-            <dd className="mt-1 truncate text-sm font-medium text-foreground">{model || "—"}</dd>
-          </div>
-          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
-            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.apiKey")}</dt>
-            <dd className="mt-1">
-              <Badge variant={hasKey ? "default" : "outline"} className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
-                {hasKey ? t("llmTab.apiKeySet") : t("llmTab.apiKeyNotSet")}
-              </Badge>
-            </dd>
-          </div>
-        </dl>
-      </SettingsSection>
 
       {/* Provider configuration — API keys and endpoint settings are edited
           directly here. */}
@@ -904,229 +1673,106 @@ export function LlmTab(props: LlmTabProps) {
           className="space-y-3"
           data-testid="llm-tab:section-providers"
         >
-          {/* Provider selector — the single provider switcher for the manual
-              API-key configuration. */}
           <div className="space-y-2">
-            <Label htmlFor="vendor-select" className="flex min-w-0 flex-wrap items-center gap-2">
-              {t("llmTab.vendor")}
-              <ImmediateBadge />
-              {isMarketplaceProviderSelected && (
-                <span
-                  className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
-                  data-testid={`llm-tab:selected-provider-marketplace:${displayVendor}`}
-                >
-                  {t("llmTab.marketplaceInstalledBadge")}
-                </span>
-              )}
-            </Label>
-            <ProviderSelect
-              value={displayVendor}
-              onValueChange={handleVendorChange}
-              triggerId="vendor-select"
-              triggerClassName="w-full"
-              placeholder={t("llmTab.vendorPlaceholder")}
-              vendorOptions={providerSelectOptions}
-              marketplaceProviderIds={[
-                ...marketplaceProviderIds,
-                ...marketplaceProviderPresetSelectIds,
-              ]}
-            />
-          </div>
-          {/* Provider detail form — the manual API-key configuration. */}
-          <div
-            className="space-y-3"
-            data-testid="llm-tab:manual-section"
-          >
-            {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">
-                  {t("llmTab.endpointBaseUrlLabel")}{vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
-                </Label>
-                <Input
-                  data-testid="llm-base-url-input"
-                  value={selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl}
-                  onChange={(e) => {
-                    if (endpointLockedToMarketplacePreset) return;
-                    setBaseUrl(e.target.value);
-                  }}
-                  placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
-                  readOnly={endpointLockedToMarketplacePreset}
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  {t("llmTab.baseUrlDiscardWarning")}
-                </p>
-                {vendor === "azure-foundry" && (
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("llmTab.azureEndpointFormat")}
-                    {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
-                    {" "}— {t("llmTab.azureDeploymentNote")}
-                  </p>
-                )}
-                {(vendor === "openai" || vendor === "copilot") && (
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("llmTab.proxyEndpointNote")}
-                  </p>
-                )}
-              </div>
-            )}
-            {vendor === "vertex-ai" && (
-              <div className="space-y-2 rounded-md border p-3">
-                <p className="text-sm font-medium">{t("llmTab.vertexTitle")}</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {t("llmTab.vertexAuthDesc1")}<code>gcloud auth application-default login</code>{t("llmTab.vertexAuthDesc2")}
-                  {t("llmTab.vertexAuthDesc3")}<code>GOOGLE_APPLICATION_CREDENTIALS</code>{t("llmTab.vertexAuthDesc4")}
-                </p>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">{t("llmTab.gcpProjectIdLabel")}</Label>
-                  <Input
-                    value={vertexProject}
-                    onChange={(e) => setVertexProject(e.target.value)}
-                    placeholder="my-gcp-project"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">
-                    {t("llmTab.vertexLocationLabel", { optional: t("llmTab.optional") })}
-                  </Label>
-                  <Input
-                    value={vertexLocation}
-                    onChange={(e) => setVertexLocation(e.target.value)}
-                    placeholder={t("llmTab.vertexLocationPlaceholder")}
-                  />
-                </div>
-              </div>
-            )}
-            {vendor !== "vertex-ai" && (
-              <div
-                className="min-w-0 space-y-2"
-                data-testid="llm-tab:api-key-section"
-                data-api-key-required={activeProviderRequiresApiKey ? "true" : "false"}
-              >
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <Label className="min-w-0 text-sm font-medium" data-testid="llm-tab:api-key-label">
-                  {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
-                  {!activeProviderRequiresApiKey ? ` (${t("llmTab.optional")})` : ""}
-                </Label>
-                  {hasKey ? (
-                    <Badge variant="default" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">{t("llmTab.apiKeySet")}</Badge>
-                  ) : (
-                    <Badge variant="secondary" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
-                      {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
-                    </Badge>
-                  )}
-                  {hasKey && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs text-destructive"
-                      onClick={() => void api.deleteApiKey(activeCredentialProviderId).then(() => { setHasKey(false); onSaved(); })}
-                    >
-                      {t("llmTab.delete")}
-                    </Button>
-                  )}
-                </div>
-                <Input
-                  data-testid="llm-api-key-input"
-                  type="password"
-                  placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder}
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                />
-              </div>
-            )}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="model-select" className="text-sm font-medium">{t("llmTab.model")}</Label>
-                <div className="flex items-center gap-1">
-                  {onOpenMarketplace && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 gap-1.5 px-2 text-xs"
-                          data-testid="llm-tab:marketplace-models"
-                          onClick={onOpenMarketplace}
-                        >
-                          <Store className="h-3.5 w-3.5" aria-hidden={true} />
-                          {t("llmTab.moreModelsInMarketplace")}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("llmTab.moreModelsInMarketplace")}</TooltipContent>
-                    </Tooltip>
-                  )}
-                  {activeShouldSyncModelList && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="model-select" className="text-sm font-medium">{t("llmTab.model")}</Label>
+              <div className="flex items-center gap-1">
+                {onOpenMarketplace && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button
                         type="button"
                         size="sm"
                         variant="ghost"
-                        className="h-7 w-7 p-0"
-                        aria-label={t("llmTab.modelSync")}
-                        data-testid="llm-tab:model-sync"
-                        disabled={activeModelList?.status === "loading"}
-                        onClick={() => void requestModelList(vendor, {
-                          baseUrl: activeModelListBaseUrl,
-                          credentialScope: activeModelListCredentialScope,
-                          ...(activeModelDiscoveryPolicy ? { modelDiscoveryPolicy: activeModelDiscoveryPolicy } : {}),
-                          force: true,
-                        })}
+                        className="h-7 gap-1.5 px-2 text-xs"
+                        data-testid="llm-tab:marketplace-models"
+                        onClick={onOpenMarketplace}
                       >
-                        {activeModelList?.status === "loading"
-                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
-                          : <RefreshCw className="h-3.5 w-3.5" aria-hidden={true} />}
+                        <Store className="h-3.5 w-3.5" aria-hidden={true} />
+                        {t("llmTab.moreModelsInMarketplace")}
                       </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("llmTab.modelSync")}</TooltipContent>
-                    </Tooltip>
-                  )}
-                </div>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("llmTab.moreModelsInMarketplace")}</TooltipContent>
+                  </Tooltip>
+                )}
+                {activeShouldSyncModelList && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0"
+                      aria-label={t("llmTab.modelSync")}
+                      data-testid="llm-tab:model-sync"
+                      disabled={activeModelList?.status === "loading"}
+                      onClick={() => void requestModelList(vendor, {
+                        baseUrl: activeModelListBaseUrl,
+                        credentialScope: activeModelListCredentialScope,
+                        ...(activeModelDiscoveryPolicy ? { modelDiscoveryPolicy: activeModelDiscoveryPolicy } : {}),
+                        force: true,
+                      })}
+                    >
+                      {activeModelList?.status === "loading"
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
+                        : <RefreshCw className="h-3.5 w-3.5" aria-hidden={true} />}
+                    </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("llmTab.modelSync")}</TooltipContent>
+                  </Tooltip>
+                )}
               </div>
-              <Select
-                value={activeModelValue}
-                onValueChange={setModel}
-              >
-                <SelectTrigger
-                  id="model-select"
-                  className="w-full"
-                  data-testid="llm-model-select"
-                >
-                  <SelectValue placeholder={vendorInfo.defaultModel} />
-                </SelectTrigger>
-                <SelectContent position="popper" className={SELECT_POPUP_LAYOUT}>
-                  {activeModelOptions.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      <ModelSelectItemContent
-                        option={option}
-                        {...(activeModelEntryById.has(option)
-                          ? { entry: activeModelEntryById.get(option)! }
-                          : {})}
-                      />
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {activeModelList?.status === "loading" && (
-                <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
-                  {t("llmTab.modelSyncing")}
-                </p>
-              )}
-              {activeModelList?.status === "ready" && (
-                <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
-                  {activeModelList.persistError
-                    ? t("llmTab.modelSyncCacheSaveFailed")
-                    : t("llmTab.modelSynced", { count: activeModelList.options.length })}
-                </p>
-              )}
-              {activeModelList?.status === "error" && (
-                <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
-                  {t("llmTab.modelSyncFailed")}
-                </p>
-              )}
             </div>
+            {/* ONE chooser across every connected provider. Picking a model
+                is what selects the provider — there is no second "switch"
+                control, because there was never a second choice to make. */}
+            <UnifiedModelSelect
+              options={unifiedOptions}
+              value={selectedUnifiedValue}
+              onValueChange={handleUnifiedModelChange}
+              pinned={pinnedModels}
+              onTogglePin={handleTogglePin}
+              placeholder={vendorInfo.defaultModel}
+              popupClassName={SELECT_POPUP_LAYOUT}
+            />
+            {unlistedModel && subscription.activeRuntime.kind === "api" && (
+              <p
+                role="alert"
+                className="text-[11px] text-destructive"
+                data-testid="llm-tab:model-unlisted"
+              >
+                {t("llmTab.modelUnlistedWarning", { model: unlistedModel })}
+              </p>
+            )}
+            {activeModelList?.status === "loading" && (
+              <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
+                {t("llmTab.modelSyncing")}
+              </p>
+            )}
+            {activeModelList?.status === "ready" && (
+              <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
+                {activeModelList.persistError
+                  ? t("llmTab.modelSyncCacheSaveFailed")
+                  : t("llmTab.modelSynced", { count: activeModelList.options.length })}
+              </p>
+            )}
+            {activeModelList?.status === "error" && (
+              <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
+                {t("llmTab.modelSyncFailed")}
+              </p>
+            )}
           </div>
+          {/* The same checklist the subscription runtimes answer. A vendor
+              that is not configured yet has answered nothing, so its row
+              reads unknown rather than claiming the host's features. */}
+          <ProviderCapabilityGrid
+            capabilities={apiPathConfigured
+              ? API_PATH_RUNTIME_CAPABILITIES
+              : DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES}
+            known={() => apiPathConfigured}
+            testIdPrefix="llm-tab:api-provider"
+          />
+          {connectionsList}
 
           {hasOnSave && (
             <SectionSaveBar
@@ -1138,8 +1784,6 @@ export function LlmTab(props: LlmTabProps) {
           )}
         </div>
       </SettingsSection>
-
-      <SubscriptionProvidersController api={api} />
 
       {/* Section B — Extended Thinking / Reasoning */}
       <SettingsSection
@@ -1270,7 +1914,7 @@ export function LlmTab(props: LlmTabProps) {
                       <SelectTrigger className="min-w-0 flex-1 text-xs">
                         <SelectValue placeholder={fallbackVendorInfo.defaultModel} />
                       </SelectTrigger>
-                      <SelectContent position="popper" className={SELECT_POPUP_LAYOUT}>
+                      <SelectContent className={SELECT_POPUP_LAYOUT}>
                         {fallbackModelOptions.map((option) => (
                           <SelectItem key={option} value={option}>
                             <ModelSelectItemContent option={option} />

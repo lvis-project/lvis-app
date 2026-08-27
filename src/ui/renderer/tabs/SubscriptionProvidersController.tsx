@@ -10,7 +10,7 @@ import {
 } from "../../../shared/subscription-runtime.js";
 import type { AppSettings, LvisApi } from "../types.js";
 import {
-  SubscriptionProvidersSection,
+  type SubscriptionProvidersSectionProps,
   type SubscriptionBusyAction,
   type SubscriptionChatSelection,
   type SubscriptionProviderModel,
@@ -113,7 +113,16 @@ function projectStatus(
  * credentials, executable paths, or URLs: those stay in the main process and
  * are represented only by the common safe status projection.
  */
-export function SubscriptionProvidersController({ api }: { api: LvisApi }) {
+/**
+ * Subscription-provider state, as a hook.
+ *
+ * It used to be a component that rendered `SubscriptionProvidersSection` and
+ * nothing else. The model chooser now spans BOTH halves of this tab — the API
+ * vendor's catalogue and every connected subscription's — so the tab needs this
+ * state beside the API state to build one list. A component could only have
+ * handed it downward.
+ */
+export function useSubscriptionProviders(api: LvisApi) {
   const [states, setStates] = useState<ProviderStateMap>(initialProviderStates);
   const [activeRuntime, setActiveRuntime] = useState<ActiveChatRuntime>({ kind: "api" });
   const [apiChatBusy, setApiChatBusy] = useState(false);
@@ -375,95 +384,95 @@ export function SubscriptionProvidersController({ api }: { api: LvisApi }) {
     ? { providerId: activeRuntime.provider, modelId: activeRuntime.model ?? null }
     : null;
 
-  return (
-    <SubscriptionProvidersSection
-      providers={providers}
-      activeSelection={activeSelection}
-      apiChatActive={activeRuntime.kind === "api"}
-      apiChatBusy={apiChatBusy}
-      chatSelectionBusy={chatSelectionBusy}
-      apiChatError={apiChatError}
-      actions={{
-        refreshStatus,
-        configureRuntime: async (provider) => {
-          await runAction(
-            provider,
-            "configure-runtime",
-            () => api.subscriptionChooseRuntime(provider),
-          );
-        },
-        forgetRuntime: async (provider) => {
-          await runAction(
-            provider,
-            "forget-runtime",
-            () => api.subscriptionForgetRuntime(provider),
-          );
-        },
-        verifyRuntime: async (provider) => {
-          await runAction(
-            provider,
-            "verify-runtime",
-            () => api.subscriptionVerifyRuntime(provider),
-          );
-        },
-        beginLogin: async (provider, method) => {
-          await runAction(
-            provider,
-            method === "browser" ? "login-browser" : "login-device-code",
-            () => api.subscriptionStartLogin(provider, method),
-          );
-        },
-        openLoginBrowser: async (provider) => {
-          await runAction(
-            provider,
-            "open-login-browser",
-            () => api.subscriptionOpenLoginBrowser(provider),
-          );
-        },
-        cancelLogin: async (provider) => {
-          await runAction(
-            provider,
-            "cancel-login",
-            () => api.subscriptionCancelLogin(provider),
-          );
-        },
-        logout: async (provider) => {
-          await runAction(
-            provider,
-            "logout",
-            () => api.subscriptionLogout(provider),
-          );
-        },
-        loadModels,
-        selectModel: (provider, modelId) => setStates((current) => ({
-          ...current,
-          [provider]: { ...current[provider], selectedModelId: modelId, errorCode: null },
-        })),
-        useForChat: async (provider, modelId) => {
-          await runChatSelection(async () => {
-            const result = await runAction(
-              provider,
-              "use-for-chat",
-              () => api.subscriptionUseForChat(provider, modelId ?? undefined),
-            );
-            if (result.ok) await refreshSettings();
-          });
-        },
-        useApiForChat: async () => {
-          await runChatSelection(async () => {
-            setApiChatBusy(true);
-            try {
-              const result = await api.subscriptionUseApiForChat();
-              if (!result.ok) setApiChatError(result.error);
-              else await refreshSettings();
-            } catch {
-              setApiChatError("subscription-operation-failed");
-            } finally {
-              setApiChatBusy(false);
-            }
-          });
-        },
-      }}
-    />
-  );
+  const props: SubscriptionProvidersSectionProps = {
+  providers,
+  activeSelection,
+  apiChatActive: activeRuntime.kind === "api",
+  apiChatBusy,
+  chatSelectionBusy,
+  apiChatError,
+  actions: {
+    refreshStatus,
+    configureRuntime: async (provider) => {
+      await runAction(
+        provider,
+        "configure-runtime",
+        () => api.subscriptionChooseRuntime(provider),
+      );
+    },
+    forgetRuntime: async (provider) => {
+      await runAction(
+        provider,
+        "forget-runtime",
+        () => api.subscriptionForgetRuntime(provider),
+      );
+    },
+    verifyRuntime: async (provider) => {
+      await runAction(
+        provider,
+        "verify-runtime",
+        () => api.subscriptionVerifyRuntime(provider),
+      );
+    },
+    beginLogin: async (provider, method) => {
+      await runAction(
+        provider,
+        method === "browser" ? "login-browser" : "login-device-code",
+        () => api.subscriptionStartLogin(provider, method),
+      );
+    },
+    openLoginBrowser: async (provider) => {
+      await runAction(
+        provider,
+        "open-login-browser",
+        () => api.subscriptionOpenLoginBrowser(provider),
+      );
+    },
+    cancelLogin: async (provider) => {
+      await runAction(
+        provider,
+        "cancel-login",
+        () => api.subscriptionCancelLogin(provider),
+      );
+    },
+    logout: async (provider) => {
+      await runAction(
+        provider,
+        "logout",
+        () => api.subscriptionLogout(provider),
+      );
+    },
+    loadModels,
+    selectModel: (provider, modelId) => setStates((current) => ({
+      ...current,
+      [provider]: { ...current[provider], selectedModelId: modelId, errorCode: null },
+    })),
+    useForChat: async (provider, modelId) => {
+      await runChatSelection(async () => {
+        const result = await runAction(
+          provider,
+          "use-for-chat",
+          () => api.subscriptionUseForChat(provider, modelId ?? undefined),
+        );
+        if (result.ok) await refreshSettings();
+      });
+    },
+    useApiForChat: async () => {
+      await runChatSelection(async () => {
+        setApiChatBusy(true);
+        try {
+          const result = await api.subscriptionUseApiForChat();
+          if (!result.ok) setApiChatError(result.error);
+          else await refreshSettings();
+        } catch {
+          setApiChatError("subscription-operation-failed");
+        } finally {
+          setApiChatBusy(false);
+        }
+      });
+    },
+  },
+  };
+
+  return { providers, activeRuntime, props };
 }

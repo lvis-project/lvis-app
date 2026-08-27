@@ -27,6 +27,7 @@ import {
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { parseStagedEnvelope, isMissingStagedEnvelopeErrorMessage } from "../../shared/staged-origins.js";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { isValidSessionId } from "../../memory/memory-manager.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
@@ -67,6 +68,10 @@ import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 import { createConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
+import type { ConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
+import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
+import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
+import type { ConversationLoop } from "../../engine/conversation-loop.js";
 const log = createLogger("chat");
 const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
 const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
@@ -491,26 +496,335 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // This single host-owned runtime outlives individual transports. Direct
   // registrar tests deliberately receive a private instance, while production
   // main-process composition injects the same one into Local API and IPC.
-  const conversationSurfaceRuntime = deps.conversationSurfaceRuntime
-    ?? createConversationSurfaceRuntime();
-  const conversationCommandPort = deps.conversationCommandPort
-    ?? createConversationCommandPort(deps, conversationSurfaceRuntime);
-  const legacyStreamAdapter = createPlatformConversationLegacyStreamAdapter(
-    conversationSurfaceRuntime.timeline,
-  );
-  // Electron is the first owner-surface adapter. It receives a compatibility
-  // projection only; the semantic timeline remains the producer source.
-  legacyStreamAdapter.subscribe((channel, payload) => {
-    sendToWebContents(getMainWindow()?.webContents, channel, payload, log);
-  });
-  const buildSink = (streamId?: number): ConversationStreamEventSink =>
-    createPlatformConversationEventSink(conversationSurfaceRuntime.timeline, {
-      conversationId: conversationLoop.getSessionId(),
-      ...(streamId === undefined ? {} : { turnId: createPlatformTurnId(streamId) }),
+  // ─── Tiled chat groups ────────────────────────────────────────────────
+  //
+  // A conversation IS a ConversationLoop: it holds the live history and runs
+  // exactly one turn at a time. Several tiles that can each be streaming
+  // therefore means several loops, and everything built ON one loop — its
+  // surface runtime, its command port, its legacy stream adapter — has to be
+  // per-group too. Two tiles sharing one timeline would interleave frames.
+  //
+  // See docs/design/tiled-chat-groups.md.
+  const STREAMING_ACTIVE = "streaming-active" as const;
+  type StreamTurnTransport = {
+    readonly sink: ConversationStreamEventSink;
+  };
+  /**
+   * The turn machinery of ONE group: its leases, its stream ids and sinks,
+   * and the replay paths (edit/resend, continue, retry) built over them.
+   *
+   * These were one closure family over the primary loop. A handler that read
+   * a group's history and then replayed it through closures bound to the
+   * primary ran that tile's turn in the primary conversation — so each group
+   * builds its own, and a handler reaches them only through the group it
+   * resolved.
+   */
+  const createGroupTurns = (
+    loop: ConversationLoop,
+    surfaceRuntime: ConversationSurfaceRuntime,
+    buildSink: (streamId?: number) => ConversationStreamEventSink,
+    groupDeps: IpcDeps,
+  ) => {
+    const trackStreamTurn = <T>(factory: () => Promise<T>): Promise<T> =>
+      surfaceRuntime.activity.trackTurn(factory);
+    const tryTrackStreamTurn = <T>(factory: () => Promise<T>): Promise<T> | null =>
+      surfaceRuntime.activity.tryTrackTurn(factory);
+    const trackSessionMutation = <T>(factory: () => Promise<T>): Promise<T> | null =>
+      surfaceRuntime.activity.trackMutation(factory);
+    const allocateStreamId = () => surfaceRuntime.activity.allocateStreamId();
+    const createStreamTurnTransport = (): StreamTurnTransport => {
+      const streamId = allocateStreamId();
+      return { sink: buildSink(streamId) };
+    };
+    const runStreamTurn = async (
+      { sink }: StreamTurnTransport,
+      input: string,
+      attachments?: import("../../engine/llm/types.js").UserContentPart[],
+      rolePrompt?: ActiveRolePrompt,
+      displayText?: string,
+    ) => {
+      // Edit/resend and history replay reach the provider through this separate
+      // main-chat path. Keep their input (including folded text attachments)
+      // under the same DLP boundary as a normal `chat:send` turn while
+      // preserving non-text attachments.
+      //
+      // Keep only the fixed staged-origin enum before DLP can rewrite a source
+      // header into a non-parseable placeholder. Passing that enum as the
+      // claim below lets runStreamedTurn fail closed rather than downgrade a
+      // replayed staged turn to user-keyboard; the raw source never crosses
+      // this boundary.
+      const replayStagedInputOrigin = parseStagedEnvelope(input)?.kind.inputOrigin;
+      const sanitized = sanitizeOutgoingTurnContent(settingsService, sink, input, attachments);
+      const result = await runStreamedTurn(
+        loop,
+        sanitized.input,
+        sink,
+        {
+          ...STREAM_TURN_OPTIONS,
+          ...(replayStagedInputOrigin ? { inputOrigin: replayStagedInputOrigin } : {}),
+          ...(sanitized.attachments && sanitized.attachments.length > 0
+            ? { attachments: sanitized.attachments }
+            : {}),
+          ...(rolePrompt ? { rolePrompt } : {}),
+          ...(displayText !== undefined ? { displayText } : {}),
+        },
+      );
+      await markMainActiveAfterTurn(groupDeps, sanitized.input);
+      return result;
+    };
+    const tryStreamTurn = <T>(
+      factory: (transport: StreamTurnTransport) => Promise<T>,
+    ): Promise<T> | null => {
+      const transport = createStreamTurnTransport();
+      return tryTrackStreamTurn(() => factory(transport));
+    };
+
+    const continueFromLastUserTurnWithinLease = async (
+      opts: { requireTerminalUser: boolean; restoreOnFailure: boolean },
+      transport: StreamTurnTransport,
+    ) => {
+      const messages = [...(loop.getHistory().getMessages() as GenericMessage[])];
+      if (messages.length === 0) return { ok: false, error: "no-user-message" };
+      let lastUserIdx = messages.length - 1;
+      if (opts.requireTerminalUser) {
+        if (messages[lastUserIdx]?.role !== "user") {
+          return { ok: false, error: "last-message-not-user" };
+        }
+      } else {
+        lastUserIdx = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "user") { lastUserIdx = i; break; }
+        }
+      }
+      if (lastUserIdx < 0) return { ok: false, error: "no-user-message" };
+      const lastUser = messages[lastUserIdx] as Extract<GenericMessage, { role: "user" }>;
+      // Disjoint split: text parts → prompt body, non-text parts → attachments.
+      // `userContentText()` is wrong here — its `[image:...]` placeholder would
+      // re-send each attachment twice once paired with `lastUserAttachments`.
+      const lastUserText = Array.isArray(lastUser.content)
+        ? lastUser.content
+            .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+            .map((p) => p.text)
+            .join("\n")
+        : lastUser.content;
+      const lastUserAttachments = Array.isArray(lastUser.content)
+        ? lastUser.content.filter((p) => p.type !== "text")
+        : undefined;
+      const personaPromptId = personaPromptIdFromUserMessage(lastUser);
+      if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
+      const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
+      if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
+      // Carried forward for the same reason `personaPromptId` is: the replayed row has to
+      // look like the row it replaces. Without it a resource turn's fenced body — folded
+      // into `lastUserText` by the split above — renders inside the user's own bubble on
+      // reload, which is exactly what the seam in `run-turn.ts` exists to prevent, undone
+      // one click after it worked.
+      //
+      // DISPLAY only. The fold still puts the fence in the replayed turn's text, so the
+      // per-turn bound (which counts content PARTS) does not see it — unchanged by this
+      // and accepted by the resources policy §6. What the fold must NOT also lose is the
+      // turn's TAINT, and that is fixed where taint is derived: `initialToolTrustOrigin`
+      // recognizes the fence in body text, the same way it already recognizes an inlined
+      // paste.
+      const priorDisplayText = (lastUser.meta as { displayText?: unknown } | undefined)?.displayText;
+      loop.getHistory().truncate(lastUserIdx);
+      try {
+        const result = await runStreamTurn(
+          transport,
+          lastUserText,
+          lastUserAttachments,
+          personaPrompt.rolePrompt,
+          typeof priorDisplayText === "string" ? priorDisplayText : undefined,
+        );
+        return { ok: true, result };
+      } catch (err) {
+        // Retry intentionally keeps its legacy behavior for ordinary stream
+        // failures, but a DLP-induced staged-header rejection happens before
+        // provider work and must never turn the pre-send truncate into data loss.
+        if (opts.restoreOnFailure || isMissingStagedEnvelopeError(err)) {
+          loop.getHistory().restore(messages);
+        }
+        throw err;
+      }
+    };
+    const continueFromLastUserTurn = async (
+      opts: { requireTerminalUser: boolean; restoreOnFailure: boolean },
+      expectedSessionId?: string,
+    ) => {
+      const turn = tryStreamTurn(async (transport) => {
+        if (expectedSessionId !== undefined && expectedSessionId !== loop.getSessionId()) {
+          return { ok: false, error: "session-mismatch" };
+        }
+        return continueFromLastUserTurnWithinLease(opts, transport);
+      });
+      return turn ?? { ok: false, error: STREAMING_ACTIVE };
+    };
+    return {
+      trackStreamTurn,
+      trackSessionMutation,
+      allocateStreamId,
+      runStreamTurn,
+      tryStreamTurn,
+      continueFromLastUserTurnWithinLease,
+      continueFromLastUserTurn,
+    };
+  };
+  type GroupTurns = ReturnType<typeof createGroupTurns>;
+
+  interface ChatGroupContext {
+    loop: ConversationLoop;
+    deps: IpcDeps;
+    surfaceRuntime: ConversationSurfaceRuntime;
+    commandPort: ConversationCommandPort;
+    buildSink: (streamId?: number) => ConversationStreamEventSink;
+    turns: GroupTurns;
+    /** Detaches this group's frames from the window — part of releasing it. */
+    unsubscribeStream: () => void;
+  }
+  const groupContexts = new Map<string, ChatGroupContext>();
+  const chatGroupContext = (chatGroupId: string): ChatGroupContext => {
+    const cached = groupContexts.get(chatGroupId);
+    if (cached) return cached;
+    const isMain = chatGroupId === MAIN_CHAT_GROUP_ID;
+    // No silent fall back to the primary loop: a request naming a group this
+    // process cannot build must fail, because the alternative is another
+    // tile's turn landing in this one.
+    if (!isMain && (!deps.resolveChatGroupLoop || !deps.releaseChatGroupLoop)) {
+      throw new Error("chat-groups-unavailable");
+    }
+    const loop = isMain ? conversationLoop : deps.resolveChatGroupLoop!(chatGroupId);
+    const groupDeps: IpcDeps = isMain ? deps : { ...deps, conversationLoop: loop, chatGroupId };
+    if (!isMain) watchRendererLifetime();
+    // Injected runtimes belong to the PRIMARY group. Production composition
+    // shares one with the Local API, and registrar tests inject a private one;
+    // a second tile must not be handed either.
+    const surfaceRuntime = isMain
+      ? deps.conversationSurfaceRuntime ?? createConversationSurfaceRuntime()
+      : createConversationSurfaceRuntime();
+    const commandPort = isMain
+      ? deps.conversationCommandPort ?? createConversationCommandPort(groupDeps, surfaceRuntime)
+      : createConversationCommandPort(groupDeps, surfaceRuntime);
+    const legacyStreamAdapter = createPlatformConversationLegacyStreamAdapter(
+      surfaceRuntime.timeline,
+    );
+    // Electron is the first owner-surface adapter. It receives a compatibility
+    // projection only; the semantic timeline remains the producer source.
+    //
+    // The group is stamped HERE rather than inside the adapter: the adapter is
+    // group-agnostic by design, and labelling at the one subscriber that owns
+    // these frames means no frame can leave unlabelled. `chatGroupId`, not
+    // `groupId` — the stream protocol already uses that name for a tool-call
+    // group, and reusing it would misroute a frame only when a turn happened
+    // to contain grouped tool calls.
+    const unsubscribeStream = legacyStreamAdapter.subscribe((channel, payload) => {
+      const labelled = payload && typeof payload === "object"
+        ? { ...(payload as Record<string, unknown>), chatGroupId }
+        : payload;
+      sendToWebContents(getMainWindow()?.webContents, channel, labelled, log);
     });
+    const buildGroupSink = (streamId?: number): ConversationStreamEventSink =>
+      createPlatformConversationEventSink(surfaceRuntime.timeline, {
+        conversationId: loop.getSessionId(),
+        ...(streamId === undefined ? {} : { turnId: createPlatformTurnId(streamId) }),
+      });
+    const context: ChatGroupContext = {
+      loop,
+      deps: groupDeps,
+      surfaceRuntime,
+      commandPort,
+      buildSink: buildGroupSink,
+      turns: createGroupTurns(loop, surfaceRuntime, buildGroupSink, groupDeps),
+      unsubscribeStream,
+    };
+    groupContexts.set(chatGroupId, context);
+    return context;
+  };
+
+  // The primary group is built eagerly so its injected runtimes are wired
+  // before any channel is called, exactly as they were before groups existed.
+  const mainGroup = chatGroupContext(MAIN_CHAT_GROUP_ID);
+  const conversationSurfaceRuntime = mainGroup.surfaceRuntime;
+  const buildSink = mainGroup.buildSink;
+
+  /**
+   * The group a per-conversation channel names, from its trailing argument.
+   *
+   * Required, not defaulted. Both ends of these channels ship in one binary
+   * and the preload stamps the id on every call, so an absent id is a caller
+   * that forgot which tile it meant — and the symptom of defaulting that (a
+   * turn landing in the wrong tile) is worse than a rejected call.
+   */
+  const groupOf = (chatGroupId: unknown): ChatGroupContext => {
+    if (typeof chatGroupId !== "string" || !chatGroupId.trim()) {
+      throw new Error("chat-group-required");
+    }
+    return chatGroupContext(chatGroupId.trim());
+  };
+
+  const releaseGroup = async (id: string): Promise<boolean> => {
+    const context = groupContexts.get(id);
+    if (!context) return false;
+    context.loop.abortCurrentTurn();
+    const active = context.surfaceRuntime.activity.activeTurn()
+      ?? context.surfaceRuntime.activity.activeMutation();
+    if (active) {
+      try {
+        await active;
+      } catch {
+        // expected: interrupted turns may reject
+      }
+    }
+    context.unsubscribeStream();
+    groupContexts.delete(id);
+    deps.releaseChatGroupLoop?.(id);
+    return true;
+  };
+
+  /**
+   * A renderer that navigates or dies takes its tiles with it, and the one
+   * that comes back numbers its tiles from the start again. Every group but
+   * the primary is let go of at that moment, so a reloaded window's second
+   * tile can never be handed a conversation the previous window left behind.
+   * Installed once, on the window whose tiles these are, the first time it
+   * asks for a second tile — that is the first moment there is anything to
+   * lose.
+   */
+  const watchedRenderers = new WeakSet<object>();
+  const watchRendererLifetime = (): void => {
+    const contents = getMainWindow()?.webContents;
+    if (!contents || watchedRenderers.has(contents)) return;
+    watchedRenderers.add(contents);
+    const releaseAll = () => {
+      for (const id of [...groupContexts.keys()]) {
+        if (id !== MAIN_CHAT_GROUP_ID) void releaseGroup(id);
+      }
+    };
+    contents.on("did-start-navigation", (event) => {
+      if (event.isMainFrame && !event.isSameDocument) releaseAll();
+    });
+    contents.on("render-process-gone", releaseAll);
+  };
+
+  /**
+   * Let go of a tile's conversation when the tile closes.
+   *
+   * The loop is what makes a group cost something — live history and the
+   * ability to run a turn — and ids are never reused, so a closed tile that
+   * kept its loop would count against the ceiling for the rest of the
+   * session. Any turn still running is stopped first: a tile that is gone
+   * has nowhere to show it.
+   */
+  ipcMain.handle(CHANNELS.chat.groupRelease, async (e, chatGroupId?: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.groupRelease, e); return UNAUTHORIZED_FRAME; }
+    if (typeof chatGroupId !== "string" || !chatGroupId.trim()) return { ok: false, error: "chat-group-required" };
+    const id = chatGroupId.trim();
+    if (id === MAIN_CHAT_GROUP_ID) return { ok: false, error: "invalid-args" };
+    return { ok: true, released: await releaseGroup(id) };
+  });
 
   // read-only, sender guard optional
-  ipcMain.handle(CHANNELS.chat.hasProvider, () => conversationLoop.hasProvider());
+  ipcMain.handle(CHANNELS.chat.hasProvider, (_e, chatGroupId?: unknown) =>
+    groupOf(chatGroupId).loop.hasProvider());
   ipcMain.handle(CHANNELS.llm.ping, async (e) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.llm.ping, e);
@@ -519,63 +833,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return conversationLoop.pingProvider();
   });
 
-  const STREAMING_ACTIVE = "streaming-active" as const;
-  const trackStreamTurn = <T>(factory: () => Promise<T>): Promise<T> =>
-    conversationSurfaceRuntime.activity.trackTurn(factory);
-  const tryTrackStreamTurn = <T>(factory: () => Promise<T>): Promise<T> | null =>
-    conversationSurfaceRuntime.activity.tryTrackTurn(factory);
-  const trackSessionMutation = <T>(factory: () => Promise<T>): Promise<T> | null =>
-    conversationSurfaceRuntime.activity.trackMutation(factory);
-  const allocateStreamId = () => conversationSurfaceRuntime.activity.allocateStreamId();
-  type StreamTurnTransport = {
-    readonly sink: ConversationStreamEventSink;
-  };
-  const createStreamTurnTransport = (): StreamTurnTransport => {
-    const streamId = allocateStreamId();
-    return { sink: buildSink(streamId) };
-  };
-  const runStreamTurn = async (
-    { sink }: StreamTurnTransport,
-    input: string,
-    attachments?: import("../../engine/llm/types.js").UserContentPart[],
-    rolePrompt?: ActiveRolePrompt,
-    displayText?: string,
-  ) => {
-    // Edit/resend and history replay reach the provider through this separate
-    // main-chat path. Keep their input (including folded text attachments)
-    // under the same DLP boundary as a normal `chat:send` turn while
-    // preserving non-text attachments.
-    //
-    // Keep only the fixed staged-origin enum before DLP can rewrite a source
-    // header into a non-parseable placeholder. Passing that enum as the
-    // claim below lets runStreamedTurn fail closed rather than downgrade a
-    // replayed staged turn to user-keyboard; the raw source never crosses
-    // this boundary.
-    const replayStagedInputOrigin = parseStagedEnvelope(input)?.kind.inputOrigin;
-    const sanitized = sanitizeOutgoingTurnContent(settingsService, sink, input, attachments);
-    const result = await runStreamedTurn(
-      conversationLoop,
-      sanitized.input,
-      sink,
-      {
-        ...STREAM_TURN_OPTIONS,
-        ...(replayStagedInputOrigin ? { inputOrigin: replayStagedInputOrigin } : {}),
-        ...(sanitized.attachments && sanitized.attachments.length > 0
-          ? { attachments: sanitized.attachments }
-          : {}),
-        ...(rolePrompt ? { rolePrompt } : {}),
-        ...(displayText !== undefined ? { displayText } : {}),
-      },
-    );
-    await markMainActiveAfterTurn(deps, sanitized.input);
-    return result;
-  };
-  const tryStreamTurn = <T>(
-    factory: (transport: StreamTurnTransport) => Promise<T>,
-  ): Promise<T> | null => {
-    const transport = createStreamTurnTransport();
-    return tryTrackStreamTurn(() => factory(transport));
-  };
+  const mainTurns = mainGroup.turns;
 
   // D3 opt-in wake is registered once the parent stream coordinator exists.
   // It never changes the active session: a race with user navigation or a
@@ -611,9 +869,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
         return;
       }
 
-      const streamId = allocateStreamId();
+      const streamId = mainTurns.allocateStreamId();
       const sink = buildSink(streamId);
-      await trackStreamTurn(async () => {
+      await mainTurns.trackStreamTurn(async () => {
         // Snapshot only after the turn lease is visible. A concurrent manual
         // send or session mutation then fails closed before it can switch the
         // loop or consume the same durable mailbox entries.
@@ -651,10 +909,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // PUBLIC lvis:chat:send — thin wrapper: trust boundary + sink construction,
   // logic in handlers/chat.ts. The common semantic timeline is canonical; the
   // renderer receives its existing frame shape only through the owner adapter.
-  ipcMain.handle(CHANNELS.chat.send, async (e, payload: unknown) => {
+  ipcMain.handle(CHANNELS.chat.send, async (e, payload: unknown, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.send, e); return UNAUTHORIZED_FRAME; }
     try {
-      return await conversationCommandPort.execute(DESKTOP_CONVERSATION_ACTOR, {
+      return await groupOf(chatGroupId).commandPort.execute(DESKTOP_CONVERSATION_ACTOR, {
         kind: "message.send",
         payload,
       });
@@ -679,7 +937,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // `queueGuidance` so the renderer can never lose a guide to a turn that
   // ended between the active-turn check and the enqueue. The IPC return value
   // drives the renderer's "keep typed text vs. clear" decision.
-  ipcMain.handle(CHANNELS.chat.guide, async (e, input: string) => {
+  ipcMain.handle(CHANNELS.chat.guide, async (e, input: string, chatGroupId?: unknown) => {
+    const group = groupOf(chatGroupId);
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.chat.guide, e);
       return UNAUTHORIZED_FRAME;
@@ -692,8 +951,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     // The `redact_notice` stream event uses the active turn's streamId
     // implicitly and travels through the shared surface adapter so every
     // attached display sees the same current streaming context.
-    const effective = sanitizeOutgoingInput(settingsService, buildSink(), input);
-    const queueResult = conversationLoop.queueGuidance(effective);
+    const effective = sanitizeOutgoingInput(settingsService, group.buildSink(), input);
+    const queueResult = group.loop.queueGuidance(effective);
     if (queueResult === "queued") {
       // Audit successful guide as a mutating state transition (parity with
       // `lvis:feedback:submit` and other mutating IPC calls — security
@@ -705,7 +964,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const mode: ChatUtteranceMode = "guide";
       auditLogger.log({
         timestamp: new Date().toISOString(),
-        sessionId: conversationLoop.getSessionId(),
+        sessionId: group.loop.getSessionId(),
         type: "info",
         input: `chat:utterance:${mode}:queued:len=${effective.length}`,
       });
@@ -714,10 +973,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: false, error: queueResult };
   });
 
-  ipcMain.handle(CHANNELS.chat.abort, async (e) => {
+  ipcMain.handle(CHANNELS.chat.abort, async (e, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.abort, e); return UNAUTHORIZED_FRAME; }
-    conversationLoop.abortCurrentTurn();
-    const activeStreamTurn = conversationSurfaceRuntime.activity.activeTurn();
+    const group = groupOf(chatGroupId);
+    group.loop.abortCurrentTurn();
+    const activeStreamTurn = group.surfaceRuntime.activity.activeTurn();
     if (activeStreamTurn) {
       try {
         await activeStreamTurn;
@@ -728,9 +988,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle(CHANNELS.chat.new, async (e, rawProject?: unknown) => {
+  ipcMain.handle(CHANNELS.chat.new, async (e, rawProject?: unknown, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.new, e); return UNAUTHORIZED_FRAME; }
-    const mutation = trackSessionMutation(async () => {
+    const group = groupOf(chatGroupId);
+    const conversationLoop = group.loop;
+    const mutation = group.turns.trackSessionMutation(async () => {
       const parsed = resolveChatNewProjectPayload(rawProject, getDefaultWorkspaceRoot());
       const resolved = resolveAuthorizedWorkspaceProject(parsed.projectRoot, parsed.projectName);
       if (!resolved.authorized || !resolved.project) return PROJECT_NOT_ALLOWED;
@@ -770,15 +1032,16 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return handleChatSessions(deps, opts);
   });
 
-  ipcMain.handle(CHANNELS.chat.compact, (e) => {
+  ipcMain.handle(CHANNELS.chat.compact, (e, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.compact, e); return UNAUTHORIZED_FRAME; }
+    const group = groupOf(chatGroupId);
     // Wire onCompactStarted/onCompactOccurred so slash-/compact also shows
     // the "자동 압축 중..." StatusBar indicator (parity with token preflight
     // path which gets it via runStreamedTurn callbacks). streamId is omitted
     // because manualCompact runs outside the per-turn stream.
-    const mutation = trackSessionMutation(async () => {
-      const sink = buildSink();
-      return conversationLoop.manualCompact({
+    const mutation = group.turns.trackSessionMutation(async () => {
+      const sink = group.buildSink();
+      return group.loop.manualCompact({
         onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
           sink({
             kind: "compaction.started",
@@ -805,12 +1068,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return mutation ?? { error: STREAMING_ACTIVE };
   });
 
-  ipcMain.handle(CHANNELS.chat.sessionResume, async (e, sessionId: string) => {
+  ipcMain.handle(CHANNELS.chat.sessionResume, async (e, sessionId: string, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.sessionResume, e); return UNAUTHORIZED_FRAME; }
     if (!isSafeSessionId(sessionId)) {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
-    const mutation = trackSessionMutation(async () => {
+    const group = groupOf(chatGroupId);
+    const conversationLoop = group.loop;
+    const mutation = group.turns.trackSessionMutation(async () => {
       const result = conversationLoop.resetAndResume(sessionId);
       if (result.ok && conversationLoop.getSessionKind() === "main") {
         await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
@@ -829,7 +1094,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
   // PUBLIC lvis:chat:get-history — read-only, sender guard optional. Returns the
   // active session's serialized history; logic delegated.
-  ipcMain.handle(CHANNELS.chat.getHistory, () => handleChatGetHistory(deps));
+  ipcMain.handle(CHANNELS.chat.getHistory, (_e, chatGroupId?: unknown) =>
+    handleChatGetHistory(groupOf(chatGroupId).deps));
 
   ipcMain.handle(CHANNELS.chat.mainActiveState, (e) => {
     if (!validateHostRendererSender(e)) {
@@ -854,11 +1120,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return handleChatSessionHistory(deps, sessionId);
   });
 
-  ipcMain.handle(CHANNELS.chat.editResend, async (e, messageIndex: number, newText: string) => {
+  ipcMain.handle(CHANNELS.chat.editResend, async (e, messageIndex: number, newText: string, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.editResend, e); return UNAUTHORIZED_FRAME; }
+    const group = groupOf(chatGroupId);
+    const conversationLoop = group.loop;
     if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
     if (typeof newText !== "string" || newText.trim().length === 0) return { ok: false, error: "empty-text" };
-    const turn = tryStreamTurn(async (transport) => {
+    const turn = group.turns.tryStreamTurn(async (transport) => {
       // Read, persona-resolve, and truncate only after the exclusive lease is
       // visible. A Local API/CLI turn cannot leave this replay with a partial
       // history when it wins the race.
@@ -872,7 +1140,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const messages = [...history];
       conversationLoop.getHistory().truncate(historyIndex);
       try {
-        const result = await runStreamTurn(transport, newText, undefined, personaPrompt.rolePrompt);
+        const result = await group.turns.runStreamTurn(transport, newText, undefined, personaPrompt.rolePrompt);
         return { ok: true, result };
       } catch (err) {
         // A provider-bound replay can fail closed before runTurn (for example
@@ -887,9 +1155,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return turn ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
-  ipcMain.handle(CHANNELS.chat.fork, async (e, messageIndex: number) => {
+  ipcMain.handle(CHANNELS.chat.fork, async (e, messageIndex: number, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.fork, e); return UNAUTHORIZED_FRAME; }
-    const mutation = trackSessionMutation(async () => {
+    const group = groupOf(chatGroupId);
+    const conversationLoop = group.loop;
+    const mutation = group.turns.trackSessionMutation(async () => {
       const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
       let upto = current.length;
       if (typeof messageIndex === "number" && messageIndex >= 0) {
@@ -933,101 +1203,23 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
     return mutation ?? { ok: false, sessionId: null, error: STREAMING_ACTIVE };
   });
-  const continueFromLastUserTurnWithinLease = async (
-    opts: { requireTerminalUser: boolean; restoreOnFailure: boolean },
-    transport: StreamTurnTransport,
-  ) => {
-    const messages = [...(conversationLoop.getHistory().getMessages() as GenericMessage[])];
-    if (messages.length === 0) return { ok: false, error: "no-user-message" };
-    let lastUserIdx = messages.length - 1;
-    if (opts.requireTerminalUser) {
-      if (messages[lastUserIdx]?.role !== "user") {
-        return { ok: false, error: "last-message-not-user" };
-      }
-    } else {
-      lastUserIdx = -1;
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "user") { lastUserIdx = i; break; }
-      }
-    }
-    if (lastUserIdx < 0) return { ok: false, error: "no-user-message" };
-    const lastUser = messages[lastUserIdx] as Extract<GenericMessage, { role: "user" }>;
-    // Disjoint split: text parts → prompt body, non-text parts → attachments.
-    // `userContentText()` is wrong here — its `[image:...]` placeholder would
-    // re-send each attachment twice once paired with `lastUserAttachments`.
-    const lastUserText = Array.isArray(lastUser.content)
-      ? lastUser.content
-          .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
-          .map((p) => p.text)
-          .join("\n")
-      : lastUser.content;
-    const lastUserAttachments = Array.isArray(lastUser.content)
-      ? lastUser.content.filter((p) => p.type !== "text")
-      : undefined;
-    const personaPromptId = personaPromptIdFromUserMessage(lastUser);
-    if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
-    const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
-    if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
-    // Carried forward for the same reason `personaPromptId` is: the replayed row has to
-    // look like the row it replaces. Without it a resource turn's fenced body — folded
-    // into `lastUserText` by the split above — renders inside the user's own bubble on
-    // reload, which is exactly what the seam in `run-turn.ts` exists to prevent, undone
-    // one click after it worked.
-    //
-    // DISPLAY only. The fold still puts the fence in the replayed turn's text, so the
-    // per-turn bound (which counts content PARTS) does not see it — unchanged by this
-    // and accepted by the resources policy §6. What the fold must NOT also lose is the
-    // turn's TAINT, and that is fixed where taint is derived: `initialToolTrustOrigin`
-    // recognizes the fence in body text, the same way it already recognizes an inlined
-    // paste.
-    const priorDisplayText = (lastUser.meta as { displayText?: unknown } | undefined)?.displayText;
-    conversationLoop.getHistory().truncate(lastUserIdx);
-    try {
-      const result = await runStreamTurn(
-        transport,
-        lastUserText,
-        lastUserAttachments,
-        personaPrompt.rolePrompt,
-        typeof priorDisplayText === "string" ? priorDisplayText : undefined,
-      );
-      return { ok: true, result };
-    } catch (err) {
-      // Retry intentionally keeps its legacy behavior for ordinary stream
-      // failures, but a DLP-induced staged-header rejection happens before
-      // provider work and must never turn the pre-send truncate into data loss.
-      if (opts.restoreOnFailure || isMissingStagedEnvelopeError(err)) {
-        conversationLoop.getHistory().restore(messages);
-      }
-      throw err;
-    }
-  };
-  const continueFromLastUserTurn = async (
-    opts: { requireTerminalUser: boolean; restoreOnFailure: boolean },
-    expectedSessionId?: string,
-  ) => {
-    const turn = tryStreamTurn(async (transport) => {
-      if (expectedSessionId !== undefined && expectedSessionId !== conversationLoop.getSessionId()) {
-        return { ok: false, error: "session-mismatch" };
-      }
-      return continueFromLastUserTurnWithinLease(opts, transport);
-    });
-    return turn ?? { ok: false, error: STREAMING_ACTIVE };
-  };
-
-  ipcMain.handle(CHANNELS.chat.continueLastUser, async (e, payload: unknown) => {
+  ipcMain.handle(CHANNELS.chat.continueLastUser, async (e, payload: unknown, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.continueLastUser, e); return UNAUTHORIZED_FRAME; }
+    const group = groupOf(chatGroupId);
     const p = payload as { sessionId?: unknown };
     if (typeof p?.sessionId !== "string") return { ok: false, error: "invalid-args" };
-    if (p.sessionId !== conversationLoop.getSessionId()) return { ok: false, error: "session-mismatch" };
-    return continueFromLastUserTurn({ requireTerminalUser: true, restoreOnFailure: true }, p.sessionId);
+    if (p.sessionId !== group.loop.getSessionId()) return { ok: false, error: "session-mismatch" };
+    return group.turns.continueFromLastUserTurn({ requireTerminalUser: true, restoreOnFailure: true }, p.sessionId);
   });
 
   ipcMain.handle(CHANNELS.chat.retryEffort, async (
     e,
     opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean },
+    chatGroupId?: unknown,
   ) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.retryEffort, e); return UNAUTHORIZED_FRAME; }
-    const turn = tryStreamTurn(async (transport) => {
+    const group = groupOf(chatGroupId);
+    const turn = group.turns.tryStreamTurn(async (transport) => {
       const prevLlm = settingsService.get("llm");
       const provider = prevLlm.provider;
       const prevBlock = getLlmVendorSettings(prevLlm.vendors, provider);
@@ -1049,9 +1241,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
       if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
         void deps.refreshSandboxNetworkConfig?.();
       }
-      conversationLoop.refreshProvider();
+      group.loop.refreshProvider();
       try {
-        return await continueFromLastUserTurnWithinLease(
+        return await group.turns.continueFromLastUserTurnWithinLease(
           { requireTerminalUser: false, restoreOnFailure: false },
           transport,
         );
@@ -1065,22 +1257,41 @@ export function registerChatHandlers(deps: IpcDeps): void {
         if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
           void deps.refreshSandboxNetworkConfig?.();
         }
-        conversationLoop.refreshProvider();
+        group.loop.refreshProvider();
       }
     });
     return turn ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
-  ipcMain.handle(CHANNELS.chat.export, async (e, format: "markdown" | "json") => {
+  // `targetSessionId` lets a sidebar row export ITSELF. Without it "share this
+  // conversation" on a row silently exported whichever conversation happened to
+  // be loaded — the same click meaning two different things.
+  ipcMain.handle(CHANNELS.chat.export, async (
+    e,
+    format: "markdown" | "json",
+    targetSessionId?: unknown,
+  ) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.export, e); return UNAUTHORIZED_FRAME; }
     const { dialog } = await import("electron");
     const { writeFile } = await import("node:fs/promises");
     const win = getMainWindow();
     if (format !== "markdown" && format !== "json") return { ok: false, error: "invalid-format" };
-    const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    const loadedSessionId = conversationLoop.getSessionId();
+    let sessionId = loadedSessionId;
+    let messages: GenericMessage[];
+    if (typeof targetSessionId === "string" && targetSessionId !== loadedSessionId) {
+      if (!isValidSessionId(targetSessionId)) return { ok: false, error: "invalid-session" };
+      const stored = memoryManager.loadSession(targetSessionId);
+      // Not "fall back to the loaded conversation" — that would export the
+      // wrong thing under the right name. A missing session is an error.
+      if (!Array.isArray(stored)) return { ok: false, error: "not-found" };
+      sessionId = targetSessionId;
+      messages = stored as GenericMessage[];
+    } else {
+      messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    }
     if (messages.length === 0) return { ok: false, error: "empty" };
 
-    const sessionId = conversationLoop.getSessionId();
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const defaultName = `lvis-chat-${sessionId.slice(0, 8)}-${stamp}.${format === "markdown" ? "md" : "json"}`;
     const dialogOptions = {
@@ -1121,6 +1332,86 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     await writeFile(res.filePath, body, "utf-8");
     return { ok: true, filePath: res.filePath };
+  });
+
+  // ── Row-level conversation edits ───────────────────────────────────────
+  // One channel for the three fields a conversation row can change, because
+  // they are one action from the user's side: editing this conversation's own
+  // card. Each field is read off the payload by name — the payload is NEVER
+  // spread into the metadata, so a renderer cannot reach the project binding
+  // or the A2A wire identity through here.
+  ipcMain.handle(CHANNELS.chat.sessionUpdate, async (e, payload: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.sessionUpdate, e); return UNAUTHORIZED_FRAME; }
+    const raw = (payload ?? {}) as {
+      sessionId?: unknown;
+      title?: unknown;
+      archived?: unknown;
+      unread?: unknown;
+    };
+    if (!isValidSessionId(raw.sessionId)) return { ok: false, error: "invalid-session" };
+    if (!memoryManager.hasSessionMetadataFile(raw.sessionId)
+      && !Array.isArray(memoryManager.loadSession(raw.sessionId))) {
+      return { ok: false, error: "not-found" };
+    }
+    const fields: { title?: string; archivedAt?: string | null; unreadSince?: string | null } = {};
+    if (raw.title !== undefined) {
+      if (typeof raw.title !== "string") return { ok: false, error: "invalid-title" };
+      const title = raw.title.replace(/[\u0000-\u001F\u007F\u2028\u2029]/g, " ").trim();
+      // An empty rename is not "clear the title" — the row would then fall back
+      // to the derived title and the user would see their edit vanish with no
+      // explanation. Refuse it and let the caller keep the dialog open.
+      if (!title) return { ok: false, error: "empty-title" };
+      fields.title = title;
+    }
+    const now = new Date().toISOString();
+    if (raw.archived !== undefined) {
+      if (typeof raw.archived !== "boolean") return { ok: false, error: "invalid-archived" };
+      fields.archivedAt = raw.archived ? now : null;
+    }
+    if (raw.unread !== undefined) {
+      if (typeof raw.unread !== "boolean") return { ok: false, error: "invalid-unread" };
+      fields.unreadSince = raw.unread ? now : null;
+    }
+    if (Object.keys(fields).length === 0) return { ok: false, error: "no-fields" };
+    await memoryManager.updateSessionRowFields(raw.sessionId, fields);
+    return { ok: true };
+  });
+
+  ipcMain.handle(CHANNELS.chat.sessionDelete, async (e, payload: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.sessionDelete, e); return UNAUTHORIZED_FRAME; }
+    const sessionId = (payload as { sessionId?: unknown } | null)?.sessionId;
+    if (!isValidSessionId(sessionId)) return { ok: false, error: "invalid-session" };
+    // The confirmation lives HERE, not in the renderer. A renderer-side confirm
+    // is a promise the caller can skip; this one cannot be reached around.
+    const { dialog } = await import("electron");
+    const win = getMainWindow();
+    const confirmOptions = {
+      type: "warning" as const,
+      buttons: [t("mainDialog.cancelButton"), t("mainDialog.deleteConversationConfirm")],
+      defaultId: 0,
+      cancelId: 0,
+      message: t("mainDialog.deleteConversationMessage"),
+      detail: t("mainDialog.deleteConversationDetail"),
+    };
+    const confirmation = win
+      ? await dialog.showMessageBox(win, confirmOptions)
+      : await dialog.showMessageBox(confirmOptions);
+    if (confirmation.response !== 1) return { ok: false, canceled: true };
+
+    // Only a LOADED conversation can be mid-turn, so only it needs the
+    // mutation guard — and any tile may be the one holding it. Holding a
+    // delete of some other conversation behind a loop would refuse a safe
+    // action for a reason that does not apply to it.
+    const holder = [...groupContexts.values()].find((group) => group.loop.getSessionId() === sessionId);
+    if (!holder) {
+      await memoryManager.deleteSession(sessionId);
+      return { ok: true, wasLoaded: false };
+    }
+    const mutation = holder.turns.trackSessionMutation(async () => {
+      await memoryManager.deleteSession(sessionId);
+      return { ok: true as const, wasLoaded: true };
+    });
+    return (await mutation) ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
   // Reverse of chat.export. INTERNAL (mutating; not in
@@ -1191,37 +1482,40 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   // ─── Checkpoint View + Branch ─────────────────────────
 
-  ipcMain.handle(CHANNELS.chat.enterCheckpointView, (e, payload: unknown) => {
+  ipcMain.handle(CHANNELS.chat.enterCheckpointView, (e, payload: unknown, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.enterCheckpointView, e); return UNAUTHORIZED_FRAME; }
+    const group = groupOf(chatGroupId);
     const p = payload as { sessionId?: unknown; compactNum?: unknown };
     if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
       return { error: "invalid-args" };
     }
-    if (p.sessionId !== conversationLoop.getSessionId()) {
+    if (p.sessionId !== group.loop.getSessionId()) {
       return { error: "session-mismatch" };
     }
-    const result = conversationLoop.enterViewMode(p.compactNum as number);
+    const result = group.loop.enterViewMode(p.compactNum as number);
     if (!result) return { error: "checkpoint-not-found" };
     return result;
   });
 
-  ipcMain.handle(CHANNELS.chat.exitCheckpointView, (e) => {
+  ipcMain.handle(CHANNELS.chat.exitCheckpointView, (e, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.exitCheckpointView, e); return UNAUTHORIZED_FRAME; }
-    conversationLoop.exitViewMode();
+    const group = groupOf(chatGroupId);
+    group.loop.exitViewMode();
     return { ok: true };
   });
 
-  ipcMain.handle(CHANNELS.chat.branchFromCheckpoint, async (e, payload: unknown) => {
+  ipcMain.handle(CHANNELS.chat.branchFromCheckpoint, async (e, payload: unknown, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.branchFromCheckpoint, e); return UNAUTHORIZED_FRAME; }
+    const group = groupOf(chatGroupId);
     const p = payload as { sessionId?: unknown; compactNum?: unknown };
     if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
       return { error: "invalid-args" };
     }
-    if (p.sessionId !== conversationLoop.getSessionId()) {
+    if (p.sessionId !== group.loop.getSessionId()) {
       return { error: "session-mismatch" };
     }
-    const mutation = trackSessionMutation(async () =>
-      conversationLoop.branchFromCheckpoint(p.compactNum as number));
+    const mutation = group.turns.trackSessionMutation(async () =>
+      group.loop.branchFromCheckpoint(p.compactNum as number));
     if (!mutation) return { error: STREAMING_ACTIVE };
     try {
       return await mutation;
@@ -1488,13 +1782,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // lineCount is computed here so the renderer never has to split on "\n".
   ipcMain.handle(
     CHANNELS.chat.getVerbatimToolResult,
-    (e, { sessionId, toolUseId }: { sessionId: string; toolUseId: string }) => {
+    (e, { sessionId, toolUseId }: { sessionId: string; toolUseId: string }, chatGroupId?: unknown) => {
       if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.chat.getVerbatimToolResult, e);
         return null;
       }
-      if (sessionId !== conversationLoop.getSessionId()) return null;
-      const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+      const group = groupOf(chatGroupId);
+      if (sessionId !== group.loop.getSessionId()) return null;
+      const messages = group.loop.getHistory().getMessages() as GenericMessage[];
       const msg = messages.find(
         (m): m is Extract<GenericMessage, { role: "tool_result" }> =>
           m.role === "tool_result" && m.toolUseId === toolUseId,
@@ -1526,17 +1821,18 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // list.
   ipcMain.handle(
     CHANNELS.chat.getSubAgentTranscript,
-    (e, payload: unknown) => {
+    (e, payload: unknown, chatGroupId?: unknown) => {
       if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.chat.getSubAgentTranscript, e);
         return { ok: false, error: "unauthorized-frame" };
       }
+      const group = groupOf(chatGroupId);
       const p = (payload ?? {}) as Record<string, unknown>;
       const originSessionId = typeof p.originSessionId === "string" && isSafeSessionId(p.originSessionId)
         ? p.originSessionId
         : "";
       if (!originSessionId) return { ok: false, error: "invalid-origin-session-id" };
-      if (originSessionId !== conversationLoop.getSessionId()) {
+      if (originSessionId !== group.loop.getSessionId()) {
         return { ok: false, error: "origin-session-not-active" };
       }
       const runner = deps.getSubAgentRunner?.();
@@ -1547,7 +1843,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       if (!childSessionId) return { ok: false, error: "invalid-child-session-id" };
       const messages = memoryManager.rehydrateToolResultArtifacts(
         originSessionId,
-        conversationLoop.getHistory().getMessages(),
+        group.loop.getHistory().getMessages(),
       ) as GenericMessage[];
       // Ownership is established either by the parent's transcript still
       // referencing the child, or by the child's own persisted

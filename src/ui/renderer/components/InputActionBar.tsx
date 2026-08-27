@@ -23,8 +23,8 @@
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
-import { useCallback, useEffect, useRef, type MouseEvent, type ReactNode } from "react";
-import { ArrowUp, Brain, HelpCircle, Paperclip, Square, User } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { ArrowUp, Brain, Check, ChevronRight, HelpCircle, Lightbulb, Paperclip, Square, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -32,7 +32,11 @@ import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import { SlashPicker, type QuickAction } from "./SlashPicker.js";
-import { ReasoningSlider } from "./ReasoningSlider.js";
+import { ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
+import { getApi } from "../api-client.js";
+import { isIpcErrorResult } from "../types.js";
+import { modelCardChoices, type ModelCardChoice } from "../hooks/use-settings.js";
+import type { AppSettings } from "../types.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../shared/assistant-context-menu.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
@@ -96,8 +100,8 @@ export interface InputActionBarProps {
   statusRow: InputStatusRow;
   /** Workspace mode controls compact status-row model labeling. */
   appMode?: "chat" | "work";
-  /** Opens Settings → LLM when the model cell is clicked. */
-  onOpenModelSettings?: () => void;
+  /** Opens Settings → LLM — the model card's way to the full catalogue. */
+  onOpenModelSettings: () => void;
   /** Opens Settings → Permissions when the permission cell is clicked. */
   onOpenPermissions?: () => void;
   /** Opens the deferred approval queue dialog. Separate from permission settings. */
@@ -368,7 +372,7 @@ function StatusSubRow({
   statusRow: InputStatusRow;
   appMode: "chat" | "work";
   ringSlot: ReactNode;
-  onOpenModelSettings?: () => void;
+  onOpenModelSettings: () => void;
   onOpenPermissions?: () => void;
   onOpenApprovalQueue?: () => void;
   enableThinkingChat: boolean;
@@ -453,36 +457,19 @@ function StatusSubRow({
 
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
-        {/* Model — brain icon + compact label; chat mode hides vendor prefix. */}
-        {onOpenModelSettings ? (
-          <button
-            type="button"
-            onClick={onOpenModelSettings}
-            data-testid="iab-status-model"
-            className="inline-flex min-w-0 shrink items-center gap-1 text-left transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
-            title={vendorModel}
-          >
-            <Brain className="h-3 w-3 shrink-0 text-input-bar-placeholder" aria-hidden="true" />
-            <span className="min-w-0 truncate">{displayModel}</span>
-          </button>
-        ) : (
-          <span
-            data-testid="iab-status-model"
-            className="inline-flex min-w-0 shrink items-center gap-1"
-            title={vendorModel}
-          >
-            <Brain className="h-3 w-3 shrink-0 text-input-bar-placeholder" aria-hidden="true" />
-            <span className="min-w-0 truncate">{displayModel}</span>
-          </span>
-        )}
-
-        {reasoningAvailable && (
-          <>
-            <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-            {/* 추론 (reasoning) slider — BETWEEN the model cell and the dot. */}
-            <ReasoningSlider enabled={enableThinkingChat} onToggle={onToggleThinking} />
-          </>
-        )}
+        {/* Model — brain icon + compact label; chat mode hides vendor prefix.
+            Clicking it, or the reasoning chip after it, opens the model card:
+            the pinned models, the reasoning level, and the way to the full
+            catalogue. Settings is one more click away, not the first thing a
+            model click does. */}
+        <ModelQuickPicker
+          vendorModel={vendorModel}
+          displayModel={displayModel}
+          enableThinking={enableThinkingChat}
+          reasoningAvailable={reasoningAvailable}
+          onToggleThinking={onToggleThinking}
+          onOpenModelSettings={onOpenModelSettings}
+        />
 
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
@@ -494,6 +481,187 @@ function StatusSubRow({
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * The model card: what the status row's model cell opens.
+ *
+ * It holds the three things a person changes mid-conversation — which
+ * model to use (the current one, and the pinned ones), how deep to reason,
+ * and, when neither is enough, the way to the full catalogue in Settings.
+ * Pins come from the same list the settings chooser pins with, so the card
+ * and the chooser cannot disagree about what is pinned; a pick persists at
+ * once, the same way the chooser's does.
+ *
+ * The reasoning chip beside the model cell is a second way in, not a
+ * second control: it shows the current level and opens this same card.
+ */
+function ModelQuickPicker({
+  vendorModel,
+  displayModel,
+  enableThinking,
+  reasoningAvailable,
+  onToggleThinking,
+  onOpenModelSettings,
+}: {
+  vendorModel: string;
+  displayModel: string;
+  enableThinking: boolean;
+  reasoningAvailable: boolean;
+  onToggleThinking: (next: boolean) => void | Promise<void>;
+  onOpenModelSettings: () => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  // The chip sits outside the card, so Radix would treat a click on it as
+  // "outside" — dismiss, then the click reopens: a flicker. The card is told
+  // the chip is not outside, and the chip toggles like the trigger does.
+  // Whichever of the two opened the card gets focus back when it closes.
+  const chipRef = useRef<HTMLButtonElement>(null);
+  const openedByChipRef = useRef(false);
+  const [choices, setChoices] = useState<ModelCardChoice[]>([]);
+  const [anyPinned, setAnyPinned] = useState(true);
+  const runtimeRef = useRef<string>("api");
+  const { level, levelLabels, apply } = useReasoningLevel({ enabled: enableThinking, onToggle: onToggleThinking });
+
+  // Read on open and follow the broadcast while open: a pin added in
+  // Settings, or a pick made in another tile, shows up without reopening.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const take = (settings: AppSettings) => {
+      if (cancelled) return;
+      setChoices(modelCardChoices(settings.llm));
+      setAnyPinned((settings.llm.pinnedModels ?? []).length > 0);
+      runtimeRef.current = settings.llm.activeChatRuntime?.kind ?? "api";
+    };
+    const api = getApi();
+    void api.getSettings().then(take).catch(() => { /* card stays as it was */ });
+    const unsubscribe = api.onSettingsUpdated(take);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [open]);
+
+  const pick = async (choice: ModelCardChoice) => {
+    if (choice.current) {
+      setOpen(false);
+      return;
+    }
+    const api = getApi();
+    // The card closes only once the pick took. A refused or failed save
+    // leaves it open with the current mark unmoved — the honest state.
+    const saved = await api.updateSettings({
+      llm: {
+        provider: choice.vendor,
+        vendors: { [choice.vendor]: { model: choice.modelId } },
+      },
+    });
+    if (isIpcErrorResult(saved)) {
+      console.warn("[lvis] model pick was refused: %s", saved.error);
+      return;
+    }
+    // A pinned model is an API model, so picking one is also choosing the
+    // API path when a subscription runtime was in use. That switch has its
+    // own request — the settings patch refuses a runtime change on its own —
+    // and it is the same one the settings chooser sends.
+    if (runtimeRef.current !== "api") await api.subscriptionUseApiForChat();
+    setOpen(false);
+  };
+
+  const reasoningLabel = t("bottomActionRow.reasoning");
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-testid="iab-status-model"
+          onClick={() => { openedByChipRef.current = false; }}
+          className="inline-flex min-w-0 shrink items-center gap-1 text-left transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
+          title={vendorModel}
+        >
+          <Brain className="h-3 w-3 shrink-0 text-input-bar-placeholder" aria-hidden="true" />
+          <span className="min-w-0 truncate">{displayModel}</span>
+        </button>
+      </PopoverTrigger>
+      {reasoningAvailable ? (
+        <>
+          <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
+          <button
+            type="button"
+            ref={chipRef}
+            data-testid="iab-status-reasoning"
+            data-level={level}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
+            title={`${reasoningLabel}: ${levelLabels[level]}`}
+            onClick={() => {
+              openedByChipRef.current = !open;
+              setOpen(!open);
+            }}
+            className={`flex shrink-0 cursor-pointer items-center gap-0.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
+          >
+            <Lightbulb className="h-3 w-3 shrink-0" aria-hidden="true" />
+            <span className="shrink-0 tabular-nums">{levelLabels[level]}</span>
+          </button>
+        </>
+      ) : null}
+      <PopoverContent
+        align="end"
+        side="top"
+        sideOffset={6}
+        className="w-72 p-0"
+        data-testid="model-quick-picker"
+        onInteractOutside={(event) => {
+          if (chipRef.current?.contains(event.target as Node)) event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (!openedByChipRef.current) return;
+          event.preventDefault();
+          chipRef.current?.focus();
+        }}
+      >
+        <div className="px-3 pt-3 text-caption font-medium text-muted-foreground">
+          {t("bottomActionRow.modelPickerModels")}
+        </div>
+        <ul className="max-h-56 overflow-y-auto px-1 py-1" role="listbox" aria-label={t("bottomActionRow.modelPickerModels")}>
+          {choices.map((choice) => (
+            <li key={`${choice.vendor}::${choice.modelId}`} role="option" aria-selected={choice.current}>
+              <button
+                type="button"
+                onClick={() => void pick(choice)}
+                data-testid={`model-quick-picker-option:${choice.vendor}:${choice.modelId}`}
+                className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent"
+              >
+                <span className="max-w-[7rem] shrink-0 truncate text-caption text-muted-foreground">{choice.vendorLabel}</span>
+                <span className="min-w-0 flex-1 truncate">{choice.modelId}</span>
+                {choice.current ? <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /> : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+        {anyPinned ? null : (
+          <p className="px-3 pb-2 text-caption text-muted-foreground" data-testid="model-quick-picker-no-pins">
+            {t("bottomActionRow.modelPickerNoPins")}
+          </p>
+        )}
+        {reasoningAvailable ? (
+          <div className="border-t border-border/(--opacity-medium) px-3 py-3" data-testid="model-quick-picker-reasoning">
+            <div className="mb-2 text-caption font-medium text-muted-foreground">{reasoningLabel}</div>
+            <ReasoningLevelControl level={level} levelLabels={levelLabels} apply={apply} label={reasoningLabel} />
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => { setOpen(false); onOpenModelSettings(); }}
+          data-testid="model-quick-picker-more"
+          className="flex w-full items-center justify-between border-t border-border/(--opacity-medium) px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent"
+        >
+          <span>{t("bottomActionRow.modelPickerMore")}</span>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+        </button>
+      </PopoverContent>
+    </Popover>
   );
 }
 

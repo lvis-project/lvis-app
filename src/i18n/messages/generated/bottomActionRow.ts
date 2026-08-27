@@ -17,6 +17,9 @@ export const en = {
   "bottomActionRow.shortcutImmediate": "Inject immediately",
   "bottomActionRow.shortcutCancel": "Cancel LLM",
   "bottomActionRow.shortcutPalette": "Commands / resources",
+  "bottomActionRow.modelPickerModels": "Models",
+  "bottomActionRow.modelPickerNoPins": "No pinned models yet. Pin one in Settings.",
+  "bottomActionRow.modelPickerMore": "More models…",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "bottomActionRow.newline": "줄바꿈",
@@ -36,4 +39,7 @@ export const ko: Record<keyof typeof en, string> = {
   "bottomActionRow.shortcutImmediate": "즉시 주입",
   "bottomActionRow.shortcutCancel": "LLM 취소",
   "bottomActionRow.shortcutPalette": "커맨드 / 리소스",
+  "bottomActionRow.modelPickerModels": "모델",
+  "bottomActionRow.modelPickerNoPins": "핀된 모델이 없습니다. 설정에서 핀을 지정하세요.",
+  "bottomActionRow.modelPickerMore": "모델 더보기",
 };

@@ -101,6 +101,14 @@ function preserveSettingsScrollPosition(): () => void {
   };
 }
 
+/**
+ * This tab's fields are 11px, and a popup that opens from an 11px control must
+ * be 11px too — `SelectContent` carries the size so its items inherit it,
+ * rather than each item pinning `text-sm` and the menu reading a size larger
+ * than the field it belongs to.
+ */
+const DENSE_SELECT_POPUP = "text-[11px]";
+
 export function PermissionsTab({
   exactDenyDraft = null,
   onExactDenySaved,
@@ -198,9 +206,19 @@ export function PermissionsTab({
   // as if it had been stored.
   const [adjudicationRevision, setAdjudicationRevision] = useState(0);
 
+  // True once the panel has content on screen. After that, a refresh must not
+  // reach for the blank/error surface: `loading` replaces the WHOLE panel with
+  // one line, the scroll container collapses from ~4000px to one viewport, and
+  // the browser clamps scrollTop to the new maximum. When the content comes
+  // back the scroll position is gone — which is why removing a rule at the
+  // bottom of the page threw the user back to the top.
+  const hasLoadedRef = useRef(false);
+
   const fetchAll = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes, sandboxRes, settingsRes] =
         await Promise.all([
@@ -241,11 +259,17 @@ export function PermissionsTab({
         setWindowsStatus(null);
       }
     } catch (e) {
-      setError((e as Error).message ?? t("permissionsTab.errorLoadFailed"));
+      const message = (e as Error).message ?? t("permissionsTab.errorLoadFailed");
+      // Same rule for the failure surface. A refresh that fails still has the
+      // last-known state on screen, so it reports through the banner instead of
+      // replacing what the user is reading with an error page.
+      if (hasLoadedRef.current) showBanner("error", message);
+      else setError(message);
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
     }
-  }, []);
+  }, [showBanner]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
@@ -964,7 +988,7 @@ export function PermissionsTab({
                           >
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent>
+                          <SelectContent className={DENSE_SELECT_POPUP}>
                             <SelectItem value="off">{t("permissionsTab.interactiveOffLabel")}</SelectItem>
                             <SelectItem value="low">{t("permissionsTab.interactiveLowLabel")}</SelectItem>
                             <SelectItem value="medium">
@@ -1214,7 +1238,7 @@ export function PermissionsTab({
                 >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={DENSE_SELECT_POPUP}>
                   <SelectItem value="low">{t("permissionsTab.adjudicationMaxVerdictLow")}</SelectItem>
                   <SelectItem value="medium">
                     {t("permissionsTab.adjudicationMaxVerdictMedium")}
@@ -1244,7 +1268,7 @@ export function PermissionsTab({
                 >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={DENSE_SELECT_POPUP}>
                   <SelectItem value="reviewer">
                     {t("permissionsTab.adjudicationModelReviewer")}
                   </SelectItem>
@@ -1279,7 +1303,7 @@ export function PermissionsTab({
                 >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={DENSE_SELECT_POPUP}>
                   <SelectItem value="deferred">
                     {t("permissionsTab.adjudicationBackgroundEscalationDeferred")}
                   </SelectItem>
@@ -1464,7 +1488,7 @@ export function PermissionsTab({
               <SelectTrigger className="h-8 w-24 text-xs">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={DENSE_SELECT_POPUP}>
                 <SelectItem value="allow">{t("permissionsTab.actionAllow")}</SelectItem>
                 <SelectItem value="deny">{t("permissionsTab.actionDeny")}</SelectItem>
               </SelectContent>

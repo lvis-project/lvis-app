@@ -86,6 +86,8 @@ export interface SettingsOrchestrationState {
   marketplaceProviderPresetId: string;
   marketplaceProviderPresets: readonly MarketplaceInstalledProviderPreset[];
   selectMarketplaceProviderPreset: (preset: MarketplaceInstalledProviderPreset) => void;
+  /** Move vendor and model together when the chosen model belongs elsewhere. */
+  selectApiVendorModel: (vendorId: string, modelId: string) => void;
   clearMarketplaceProviderPreset: () => void;
   // Lifecycle
   settingsLoaded: boolean;
@@ -244,10 +246,12 @@ export function useSettingsOrchestration(
   useEffect(() => {
     if (!settingsLoaded) return;
     if (!ALL_VENDORS.some((x) => x.id === vendor)) return;
-    if (hydratedVendorRef.current === vendor) {
-      hydratedVendorRef.current = null;
-      return;
-    }
+    // Only a vendor CHANGE re-hydrates. This effect also re-runs whenever a
+    // cross-window settings broadcast refreshes the snapshot, and hydrating
+    // then would overwrite the fields the user is editing right now — the
+    // chosen model, a half-typed base URL — with the persisted values.
+    if (hydratedVendorRef.current === vendor) return;
+    hydratedVendorRef.current = vendor;
     let cancelled = false;
     void api.hasApiKey(activeCredentialProviderId).then((k) => { if (!cancelled) setHasKey(k); });
     const block = isLLMVendor(vendor)
@@ -295,6 +299,29 @@ export function useSettingsOrchestration(
     void api.hasWebApiKey(webProvider).then((k) => { if (!cancelled) setHasWebKey(k); });
     return () => { cancelled = true; };
   }, [webProvider, api, settingsLoaded]);
+
+  /**
+   * Choose a model that may belong to a different API vendor than the one the
+   * configuration form is pointed at. The chooser spans every configured
+   * vendor, so vendor and model have to move together — and the hydration
+   * marker is stamped here so the vendor-change effect does not immediately
+   * replace the chosen model with that vendor's persisted one.
+   */
+  const selectApiVendorModel = useCallback((vendorId: string, modelId: string) => {
+    if (!isLLMVendor(vendorId)) return;
+    const block = getLlmVendorSettings(settingsSnapshot?.llm.vendors, vendorId);
+    hydratedVendorRef.current = vendorId;
+    setVendor(vendorId);
+    if (vendorId !== "openai-compatible") setMarketplaceProviderPresetId("");
+    setBaseUrl(block.baseUrl ?? "");
+    setVertexProject(block.vertexProject ?? "");
+    setVertexLocation(block.vertexLocation ?? "");
+    setEnableThinking(block.enableThinking);
+    setThinkingBudget(block.thinkingBudgetTokens);
+    setKeyInput("");
+    setModel(modelId);
+    void api.hasApiKey(vendorId).then((k) => setHasKey(k)).catch(() => setHasKey(false));
+  }, [api, settingsSnapshot]);
 
   const selectMarketplaceProviderPreset = useCallback((preset: MarketplaceInstalledProviderPreset) => {
     const openaiCompatibleDefaults = getLlmVendorSettings(
@@ -539,6 +566,7 @@ export function useSettingsOrchestration(
     clearLastSaveError,
     hydrateLlmFromSettings,
     vendor, setVendor,
+    selectApiVendorModel,
     keyInput, setKeyInput,
     model, setModel,
     hasKey, setHasKey,

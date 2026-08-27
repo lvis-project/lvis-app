@@ -273,6 +273,12 @@ export type AppSettings = {
      * here because a settings file written before this shipped has no list.
      */
     pricingOverrides?: PricingOverride[];
+    /**
+     * Models pinned to the top of the model chooser. ONE list across every
+     * provider — see `LLMSettings.pinnedModels` for why, and for why a stored
+     * id is never trusted without intersecting it against what is connected.
+     */
+    pinnedModels?: string[];
   };
   chat: { systemPrompt: string; autoCompact: boolean; subAgentMaxRounds?: number };
   webSearch: { provider: string };
@@ -366,6 +372,8 @@ export type AppSettings = {
     settingsTab?: SettingsTab;
     /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
     pinnedProjectRoots?: string[];
+    archivedProjectRoots?: string[];
+    projectLabels?: Record<string, string>;
     /** Auto-launch LVIS at OS login. SOT: `SystemSettings`. Default false. */
     launchAtStartup?: boolean;
     /** When launching at startup, start hidden in the tray. SOT: `SystemSettings`. Default false. */
@@ -904,6 +912,20 @@ export type LvisApi = {
   >;
   chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
+  /**
+   * One tiled chat group's view of the per-conversation channels.
+   *
+   * A tile passes this where it would otherwise pass the api, so nothing below
+   * it has to know about groups — its calls already name the right
+   * conversation, and its stream subscription only sees that group's frames.
+   * See docs/design/tiled-chat-groups.md.
+   */
+  chatGroup?: (chatGroupId: string) => LvisApi;
+  /**
+   * Let go of this group's conversation in main. Sent when its tile closes;
+   * the primary group refuses it.
+   */
+  chatGroupRelease: () => Promise<{ ok: boolean; released?: boolean; error?: string }>;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
   chatGetHistory: () => Promise<{ restoredSubAgents?: RestoredSubAgentPayload[]; sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; projectRoot?: string; projectName?: string; projectIsDefault?: boolean; messages: SerializedHistoryMessage[] }>;
   chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;
@@ -925,7 +947,18 @@ export type LvisApi = {
   chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
   chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
-  chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  /** `sessionId` targets a conversation other than the loaded one. */
+  chatExport: (format: "markdown" | "json", sessionId?: string) => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  /** Row-level conversation edits. Each field is optional; omitted means unchanged. */
+  chatSessionUpdate: (payload: {
+    sessionId: string;
+    title?: string;
+    archived?: boolean;
+    unread?: boolean;
+  }) => Promise<{ ok: true } | { ok: false; error?: string }>;
+  chatSessionDelete: (
+    sessionId: string,
+  ) => Promise<{ ok: true; wasLoaded: boolean } | { ok: false; error?: string; canceled?: boolean }>;
   /** Reverse of chatExport. Always creates a brand-new session (never overwrites). */
   chatImport: () => Promise<
     { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }

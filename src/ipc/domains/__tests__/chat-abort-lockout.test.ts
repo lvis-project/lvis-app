@@ -131,7 +131,7 @@ describe("lvis:chat:abort with a turn parked on an approval", () => {
     const stop = Promise.resolve(
       invokeRegisteredHandler<Promise<{ ok: boolean }>>(
         handlers,
-        CHANNELS.chat.abort,
+        CHANNELS.chat.abort, "main",
       ),
     );
     // A bound the Stop must beat. The gate's own wait is five minutes, so a

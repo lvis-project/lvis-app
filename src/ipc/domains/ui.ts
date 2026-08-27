@@ -48,15 +48,25 @@ const NATIVE_LAYOUT: Record<
     ["workspace.open", "workspace.reveal"],
     ["workspace.copy-path", "workspace.copy-relative-path"],
   ],
+  // Grouped by what the action COSTS to undo, cheapest first: open, then
+  // labelling, then things that leave the window, then archive, and removal
+  // last and alone. VS Code's context-menu guidance is to group similar
+  // actions and keep the destructive one out of the group above it.
   project: [
     ["project.new-chat"],
-    ["project.pin", "project.unpin", "project.reveal"],
+    ["project.pin", "project.unpin", "project.edit", "project.reveal"],
+    ["project.archive", "project.unarchive"],
     ["project.add"],
     ["project.remove"],
   ],
   conversation: [
     ["conversation.open"],
-    ["conversation.pin", "conversation.unpin"],
+    ["conversation.mark-unread", "conversation.mark-read"],
+    ["conversation.rename", "conversation.pin", "conversation.unpin"],
+    ["conversation.share", "conversation.copy"],
+    ["conversation.archive", "conversation.unarchive"],
+    ["conversation.delete"],
+    ["conversation.import"],
   ],
   message: [
     ["message.copy"],
@@ -83,12 +93,30 @@ const NATIVE_LABEL: Record<NativeContextMenuCommand, () => string> = {
   "project.new-chat": () => t("sidebar.projectMenuNewChat"),
   "project.pin": () => t("sidebar.pinProject"),
   "project.unpin": () => t("sidebar.unpinProject"),
-  "project.reveal": () => t("sidebar.projectMenuReveal"),
+  "project.edit": () => t("sidebar.projectMenuEdit"),
+  // Names the actual file manager, the way workspace.reveal already does. A
+  // generic "reveal folder" made the same action read differently depending on
+  // which menu you opened it from.
+  "project.reveal": () =>
+    t(process.platform === "darwin"
+      ? "chatPreviewRail.revealInFinder"
+      : "chatPreviewRail.revealInExplorer"),
+  "project.archive": () => t("sidebar.projectMenuArchive"),
+  "project.unarchive": () => t("sidebar.projectMenuUnarchive"),
   "project.add": () => t("sidebar.projectMenuAdd"),
   "project.remove": () => t("sidebar.projectMenuRemove"),
   "conversation.open": () => t("chatPreviewRail.ctxOpen"),
   "conversation.pin": () => t("sidebar.pinConversation"),
   "conversation.unpin": () => t("sidebar.unpinConversation"),
+  "conversation.rename": () => t("sidebar.renameConversation"),
+  "conversation.mark-unread": () => t("sidebar.markConversationUnread"),
+  "conversation.mark-read": () => t("sidebar.markConversationRead"),
+  "conversation.archive": () => t("sidebar.archiveConversation"),
+  "conversation.unarchive": () => t("sidebar.unarchiveConversation"),
+  "conversation.share": () => t("sidebar.shareConversation"),
+  "conversation.copy": () => t("sidebar.copyConversation"),
+  "conversation.delete": () => t("sidebar.deleteConversation"),
+  "conversation.import": () => t("mainToolbar.import"),
   "message.copy": () => t("turnActionBar.copyButton"),
   "message.edit": () => t("chatView.editButtonTitle"),
   "message.fork": () => t("chatView.forkButtonTitle"),

@@ -44,6 +44,10 @@ export const en = {
   "mainDialog.pluginDisableNotPermitted": "This plugin is managed by your organization and cannot be disabled.",
   "mainDialog.noPersonasAvailable": "No personas available",
   "mainDialog.exportConversationTitle": "Export conversation",
+  "mainDialog.deleteConversationMessage": "Delete this conversation?",
+  "mainDialog.deleteConversationDetail": "The transcript and its checkpoints are removed from disk. This cannot be undone.",
+  "mainDialog.deleteConversationConfirm": "Delete",
+  "mainDialog.cancelButton": "Cancel",
   "mainDialog.importConversationTitle": "Import conversation",
 
   // ── E4 — Startup / global shortcuts settings tab ──────────────────

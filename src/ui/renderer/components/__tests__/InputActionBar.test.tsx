@@ -15,8 +15,10 @@ const codingPreset: RolePreset = { id: "coding", name: "코딩", systemPromptAdd
 // renderer api on mount.
 const getSettings = vi.fn();
 const updateSettings = vi.fn();
+const onSettingsUpdated = vi.fn(() => () => {});
+const subscriptionUseApiForChat = vi.fn(async () => ({ ok: true }));
 vi.mock("../../api-client.js", () => ({
-  getApi: () => ({ getSettings, updateSettings }),
+  getApi: () => ({ getSettings, updateSettings, onSettingsUpdated, subscriptionUseApiForChat }),
 }));
 
 const defaultStatusRow: InputStatusRow = {
@@ -75,6 +77,7 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     enableThinkingChat: false,
     onToggleThinking: vi.fn(),
     statusRow: defaultStatusRow,
+    onOpenModelSettings: vi.fn(),
     ...overrides,
   };
   return render(
@@ -127,12 +130,12 @@ describe("InputActionBar (unified bar)", () => {
     const send = trailing.querySelector("[data-testid='composer-send-button']");
     expect(help && send).toBeTruthy();
     expect(help!.compareDocumentPosition(send!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // Reasoning/thinking is no longer in the trailing cluster — it now lives in
-    // the status sub-row (between vendor·model and the active dot).
+    // Reasoning/thinking is no longer in the trailing cluster — it is the
+    // status sub-row chip after the model cell (and opens the model card).
     expect(trailing.querySelector("[data-testid='thinking-button']")).toBeNull();
     const statusRow = getByTestId("iab-status-row");
-    expect(statusRow.querySelector("[data-testid='reasoning-slider']")).toBeTruthy();
-    expect(statusRow.querySelector("[data-testid='reasoning-slider'] svg")).toBeTruthy();
+    expect(statusRow.querySelector("[data-testid='iab-status-reasoning']")).toBeTruthy();
+    expect(statusRow.querySelector("[data-testid='iab-status-reasoning'] svg")).toBeTruthy();
   });
 
   it("does NOT render the legacy PluginGridButton (plugins live in the sidebar + slash picker)", () => {
@@ -383,5 +386,145 @@ describe("InputActionBar (unified bar)", () => {
     fireEvent.click(getByTestId("iab-status-pending"));
     expect(onOpenApprovalQueue).toHaveBeenCalledTimes(1);
     expect(onOpenPermissions).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("model card (status-row model cell)", () => {
+  /** Settings where two models are pinned and offered, and one pinned id is offered by nothing. */
+  const settingsWithPins = () => ({
+    llm: {
+      provider: "openai-compatible",
+      activeChatRuntime: { kind: "api" },
+      vendors: {
+        "openai-compatible": { model: "qwen3.8-27b-gguf", enableThinking: true, thinkingBudgetTokens: 10_000, baseUrl: "http://llm.example.test/v1" },
+        claude: { model: "claude-sonnet-4-6", enableThinking: true, thinkingBudgetTokens: 10_000 },
+      },
+      streamSmoothing: "none",
+      fallbackChain: [],
+      modelListCache: {
+        "openai-compatible\nhttp://llm.example.test/v1\n": {
+          vendor: "openai-compatible",
+          baseUrl: "http://llm.example.test/v1",
+          endpoint: "http://llm.example.test/v1/models",
+          models: ["qwen3.8-27b-gguf", "qwen3.8-27b-nvfp4"],
+          fetchedAt: "2026-08-27T00:00:00.000Z",
+        },
+      },
+      pinnedModels: ["qwen3.8-27b-nvfp4", "qwen3.8-27b-gguf", "gone-from-every-catalogue"],
+    },
+  });
+
+  beforeEach(() => {
+    getSettings.mockReset();
+    updateSettings.mockReset();
+    subscriptionUseApiForChat.mockClear();
+    getSettings.mockResolvedValue(settingsWithPins());
+    updateSettings.mockResolvedValue({});
+  });
+
+  it("opens the card instead of leaving for Settings", async () => {
+    const onOpenModelSettings = vi.fn();
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings });
+    fireEvent.click(getByTestId("iab-status-model"));
+    expect(await findByTestId("model-quick-picker")).toBeTruthy();
+    expect(onOpenModelSettings).not.toHaveBeenCalled();
+  });
+
+  it("the reasoning chip is a second way into the same card, and goes with reasoning", async () => {
+    const onOpenModelSettings = vi.fn();
+    const { getByTestId, findByTestId, queryByTestId, unmount } = renderBar({ onOpenModelSettings, enableThinkingChat: true });
+    const chip = getByTestId("iab-status-reasoning");
+    expect(chip.getAttribute("data-level")).not.toBe("0");
+    fireEvent.click(chip);
+    expect(await findByTestId("model-quick-picker")).toBeTruthy();
+    expect(queryByTestId("reasoning-popover")).toBeNull();
+    expect(onOpenModelSettings).not.toHaveBeenCalled();
+    unmount();
+    const without = renderBar({ onOpenModelSettings, reasoningAvailable: false });
+    expect(without.queryByTestId("iab-status-reasoning")).toBeNull();
+    expect(without.getByTestId("iab-status-model")).toBeTruthy();
+  });
+
+  it("lists the pinned models only — in pinned order, and none that nothing offers", async () => {
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    await waitFor(() => expect(card.querySelectorAll("[role='option']").length).toBe(2));
+    const ids = [...card.querySelectorAll("[role='option'] button")].map((b) => b.getAttribute("data-testid"));
+    expect(ids).toEqual([
+      "model-quick-picker-option:openai-compatible:qwen3.8-27b-nvfp4",
+      "model-quick-picker-option:openai-compatible:qwen3.8-27b-gguf",
+    ]);
+    // The one the chat is on is marked as such.
+    expect(card.querySelector("[role='option'][aria-selected='true'] button")?.getAttribute("data-testid"))
+      .toBe("model-quick-picker-option:openai-compatible:qwen3.8-27b-gguf");
+  });
+
+  it("persists a pick at once and closes", async () => {
+    const { getByTestId, findByTestId, queryByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    const option = await waitFor(() => {
+      const el = card.querySelector<HTMLButtonElement>("[data-testid='model-quick-picker-option:openai-compatible:qwen3.8-27b-nvfp4']");
+      if (!el) throw new Error("not yet");
+      return el;
+    });
+    fireEvent.click(option);
+    expect(updateSettings).toHaveBeenCalledWith({
+      llm: {
+        provider: "openai-compatible",
+        vendors: { "openai-compatible": { model: "qwen3.8-27b-nvfp4" } },
+      },
+    });
+    // Already on the API path: no runtime switch is sent.
+    await waitFor(() => expect(queryByTestId("model-quick-picker")).toBeNull());
+    expect(subscriptionUseApiForChat).not.toHaveBeenCalled();
+  });
+
+  it("also leaves a subscription runtime for the API path when a pin is chosen", async () => {
+    getSettings.mockResolvedValue({
+      ...settingsWithPins(),
+      llm: { ...settingsWithPins().llm, activeChatRuntime: { kind: "subscription", provider: "codex" } },
+    });
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    const option = await waitFor(() => {
+      const el = card.querySelector<HTMLButtonElement>("[data-testid='model-quick-picker-option:openai-compatible:qwen3.8-27b-nvfp4']");
+      if (!el) throw new Error("not yet");
+      return el;
+    });
+    fireEvent.click(option);
+    await waitFor(() => expect(subscriptionUseApiForChat).toHaveBeenCalledTimes(1));
+  });
+
+  it("carries the reasoning control and the way to the full catalogue", async () => {
+    const onOpenModelSettings = vi.fn();
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    expect(card.querySelector("[data-testid='model-quick-picker-reasoning'] [data-testid='reasoning-range']")).toBeTruthy();
+    fireEvent.click(card.querySelector("[data-testid='model-quick-picker-more']")!);
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("still lists the current model when nothing is pinned, and says where to pin", async () => {
+    getSettings.mockResolvedValue({ ...settingsWithPins(), llm: { ...settingsWithPins().llm, pinnedModels: [] } });
+    const { getByTestId, findByTestId, queryByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    await waitFor(() => expect(card.querySelectorAll("[role='option']").length).toBe(1));
+    expect(card.querySelector("[role='option'][aria-selected='true'] button")?.getAttribute("data-testid"))
+      .toBe("model-quick-picker-option:openai-compatible:qwen3.8-27b-gguf");
+    expect(await findByTestId("model-quick-picker-no-pins")).toBeTruthy();
+    // With pins, the hint is not there.
+    getSettings.mockResolvedValue(settingsWithPins());
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(queryByTestId("model-quick-picker")).toBeNull());
+    fireEvent.click(getByTestId("iab-status-model"));
+    const reopened = await findByTestId("model-quick-picker");
+    await waitFor(() => expect(reopened.querySelectorAll("[role='option']").length).toBe(2));
+    expect(queryByTestId("model-quick-picker-no-pins")).toBeNull();
   });
 });

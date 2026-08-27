@@ -82,6 +82,37 @@ describe("VerticalSplitLayout", () => {
     expect(onDragChange).toHaveBeenCalledWith(78);
   });
 
+  it("drags in percent of the measured layout, and commits once on release", () => {
+    const onDragChange = vi.fn();
+    const onCommit = vi.fn();
+    // jsdom lays nothing out; the layout has to be told it is 1000px tall so
+    // there is a px→percent conversion for the pointer to go through.
+    const clientHeight = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(1000);
+    try {
+      render(
+        <VerticalSplitLayout
+          topPercent={45}
+          onDragChange={onDragChange}
+          onCommit={onCommit}
+          ariaLabel="Resize"
+          separatorTestId="splitter"
+          top={<div>top</div>}
+          bottom={<div>bottom</div>}
+        />,
+      );
+      const splitter = screen.getByTestId("splitter");
+      fireEvent.pointerDown(splitter, { clientY: 450, pointerId: 1 });
+      window.dispatchEvent(new MouseEvent("pointermove", { clientY: 550 } as MouseEventInit));
+      expect(onDragChange).toHaveBeenLastCalledWith(55);
+      expect(onCommit).not.toHaveBeenCalled();
+      window.dispatchEvent(new MouseEvent("pointerup"));
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(onCommit).toHaveBeenCalledWith(55);
+    } finally {
+      clientHeight.mockRestore();
+    }
+  });
+
   it("a zero-height layout guards the drag against NaN (no callback)", () => {
     const { onDragChange } = renderLayout(45);
     const splitter = screen.getByTestId("splitter");

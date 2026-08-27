@@ -37,6 +37,10 @@ export const ja: Record<SeedMessageKey, string> = {
   "mainDialog.pluginDisableNotPermitted": "このプラグインは組織によって管理されているため、無効にできません。",
   "mainDialog.noPersonasAvailable": "利用可能な persona はありません",
   "mainDialog.exportConversationTitle": "会話をエクスポート",
+  "mainDialog.deleteConversationMessage": "この会話を削除しますか？",
+  "mainDialog.deleteConversationDetail": "トランスクリプトとチェックポイントがディスクから削除されます。元に戻せません。",
+  "mainDialog.deleteConversationConfirm": "削除",
+  "mainDialog.cancelButton": "キャンセル",
   "mainDialog.importConversationTitle": "会話をインポート",
 
   // ── E4 — 起動 / グローバルショートカット ─────────────────────────

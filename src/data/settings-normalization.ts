@@ -118,6 +118,35 @@ function normalizeSubscriptionChatRuntimeModel(value: unknown): string | undefin
  * settings. Invalid or removed subscription providers fail closed to the API
  * boundary; the retained API vendor blocks and their secrets are untouched.
  */
+/**
+ * Upper bound on `llm.pinnedModels`.
+ *
+ * A pin list is a shortcut, and a shortcut longer than a screen is just the
+ * catalogue again. The cap also bounds what a corrupted or hand-edited settings
+ * file can push into the chooser.
+ */
+const MAX_PINNED_MODELS = 24;
+
+/**
+ * A stored pin list, made safe to render: strings only, trimmed, de-duplicated,
+ * order preserved, capped. Anything else on disk is dropped rather than
+ * repaired — a pin is a model id or it is nothing.
+ */
+function normalizePinnedModels(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of input) {
+    if (typeof entry !== "string") continue;
+    const id = entry.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= MAX_PINNED_MODELS) break;
+  }
+  return out;
+}
+
 export function normalizeActiveChatRuntime(input: unknown): ActiveChatRuntime {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { kind: "api" };
@@ -489,6 +518,9 @@ export function mergeLlmPatch(
     pricingOverrides: normalizePricingOverrides(
       "pricingOverrides" in partial ? partial.pricingOverrides : base.pricingOverrides,
     ),
+    pinnedModels: normalizePinnedModels(
+      "pinnedModels" in partial ? partial.pinnedModels : base.pinnedModels,
+    ),
     // `llm.hostResolverMap` is deliberately NOT carried forward. The manual
     // Chromium host-resolver map was removed with the private-endpoint access
     // path, so a value still on disk from an older build is inert. Dropping it
@@ -620,6 +652,7 @@ export function pruneLazyLlmVendorBlocks(
       installedProviderPresets,
     ),
     pricingOverrides: normalizePricingOverrides(llm.pricingOverrides),
+    pinnedModels: normalizePinnedModels(llm.pinnedModels),
   };
   if (marketplaceProviderPresetId) {
     prunedLlm.marketplaceProviderPresetId = marketplaceProviderPresetId;
@@ -931,17 +964,23 @@ export function isCloseBehavior(value: unknown): value is SystemCloseBehavior {
   return typeof value === "string" && (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(value);
 }
 
-const MAX_PINNED_PROJECT_ROOTS = 200;
+const MAX_PROJECT_ROOT_LIST = 200;
+/** Labels are display text for a sidebar row, not prose. */
+const MAX_PROJECT_LABEL_CHARS = 60;
 
 /**
- * De-duplicates, trims, and caps a pinned-project-roots list on both the
- * patch and normalize paths. De-dup keys on `projectRootKey` (the same
- * case/slash-insensitive root-identity SoT the sidebar's pin lookup uses via
+ * De-duplicates, trims, and caps a list of project roots on both the patch and
+ * normalize paths. De-dup keys on `projectRootKey` (the same case/slash-
+ * insensitive root-identity SoT the sidebar's pin lookup uses via
  * `projectRootEquals`) rather than raw string equality, so e.g.
- * "C:\\ws\\alpha" and "c:/ws/alpha/" are recognized as the same pinned root
- * instead of accumulating as separate list entries.
+ * "C:\\ws\\alpha" and "c:/ws/alpha/" are recognized as the same root instead
+ * of accumulating as separate entries.
+ *
+ * Serves BOTH the pinned and the archived list. Two copies of this would be
+ * two chances for pin and archive to disagree about what counts as the same
+ * folder — and they must agree, since a row can be both.
  */
-export function normalizePinnedProjectRoots(raw: unknown[]): string[] {
+export function normalizeProjectRootList(raw: unknown[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const entry of raw) {
@@ -952,7 +991,34 @@ export function normalizePinnedProjectRoots(raw: unknown[]): string[] {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(trimmed);
-    if (out.length >= MAX_PINNED_PROJECT_ROOTS) break;
+    if (out.length >= MAX_PROJECT_ROOT_LIST) break;
+  }
+  return out;
+}
+
+/**
+ * Trims, caps, and drops empty entries from the project label map.
+ *
+ * A label is what the user typed to rename a folder ROW; it never renames the
+ * folder on disk. Keyed by `projectRootKey` so the lookup matches the same
+ * root identity the pin and archive lists use.
+ */
+export function normalizeProjectLabels(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  let count = 0;
+  for (const [root, label] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof label !== "string") continue;
+    const key = projectRootKey(root);
+    if (!key) continue;
+    const trimmed = label.replace(/[\u0000-\u001F\u007F\u2028\u2029]/g, " ").trim();
+    // An empty label is the ABSENCE of a custom name, so it is dropped rather
+    // than stored — otherwise "clear my rename" and "rename to nothing" would
+    // be two states that look identical to the row.
+    if (!trimmed) continue;
+    out[key] = trimmed.slice(0, MAX_PROJECT_LABEL_CHARS);
+    count += 1;
+    if (count >= MAX_PROJECT_ROOT_LIST) break;
   }
   return out;
 }
@@ -990,6 +1056,8 @@ export function normalizeSystem(input: unknown): SystemSettings {
     activeView?: unknown;
     settingsTab?: unknown;
     pinnedProjectRoots?: unknown;
+    archivedProjectRoots?: unknown;
+    projectLabels?: unknown;
   } & Record<(typeof SIDE_PANEL_SPLIT_KEYS)[number], unknown>;
   // Each field is normalized independently: a missing/invalid field falls
   // back to its default while a valid sibling is preserved (mirrors the
@@ -1059,9 +1127,21 @@ export function normalizeSystem(input: unknown): SystemSettings {
     // unrecognized onto the default, so an invalid value is not a separate arm.
     result.settingsTab = normalizeSettingsTab(rawSettingsTab);
   }
+  const rawArchivedProjectRoots = obj.archivedProjectRoots;
+  if (Array.isArray(rawArchivedProjectRoots)) {
+    result.archivedProjectRoots = normalizeProjectRootList(rawArchivedProjectRoots);
+  } else if (rawArchivedProjectRoots !== undefined) {
+    log.warn(
+      `system.archivedProjectRoots invalid (received ${JSON.stringify(rawArchivedProjectRoots)}), using default %s`,
+      DEFAULT_SETTINGS.system.archivedProjectRoots,
+    );
+  }
+  if (obj.projectLabels !== undefined) {
+    result.projectLabels = normalizeProjectLabels(obj.projectLabels);
+  }
   const rawPinnedProjectRoots = obj.pinnedProjectRoots;
   if (Array.isArray(rawPinnedProjectRoots)) {
-    result.pinnedProjectRoots = normalizePinnedProjectRoots(rawPinnedProjectRoots);
+    result.pinnedProjectRoots = normalizeProjectRootList(rawPinnedProjectRoots);
   } else if (rawPinnedProjectRoots !== undefined) {
     log.warn(
       `system.pinnedProjectRoots invalid (received ${JSON.stringify(rawPinnedProjectRoots)}), using default %s`,

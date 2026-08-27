@@ -1,9 +1,9 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import {
   SIDE_PANEL_SPLIT_MAX_PERCENT,
   SIDE_PANEL_SPLIT_MIN_PERCENT,
-  clampSidePanelSplitPercent,
 } from "../../../shared/side-panel.js";
+import { useEdgeResize, useMeasuredSize } from "../hooks/use-edge-resize.js";
 
 /** Keyboard nudge step (percent) for the split separator. */
 const SPLIT_KEY_STEP = 5;
@@ -19,11 +19,13 @@ const SPLIT_KEY_STEP = 5;
  * `onCommit` (drag-end / keyboard step, persist). The PERCENT itself is owned by
  * the caller (a `useVerticalSplit` store) so it survives the panel unmount.
  *
- * Its pointer-capture cleanup lives in a LOCAL ref (`resizeCleanupRef`), never
- * shared with the panel's horizontal-width drag — the two can be in flight
- * against different DOM handles, so a shared ref would tear one down mid-drag.
- * The `rect.height <= 0` early-return guards the drawer-collapsed case (a folded
- * sheet reports zero height, which would otherwise divide to NaN).
+ * The drag is `useEdgeResize`, the same primitive the sidebar, the side panel
+ * and the chat-group gutters resize with: the top pane is the "panel", its
+ * percent is the "width", and `unitsPerPixel` turns the pointer's px into
+ * percent of this layout. Until the layout has a measured height there is no
+ * conversion, so the pointer is not wired — a drawer folded to zero height
+ * would otherwise divide to NaN — while the keyboard, which steps in percent
+ * and needs no height, always is.
  */
 export function VerticalSplitLayout({
   topPercent,
@@ -47,33 +49,25 @@ export function VerticalSplitLayout({
   separatorTestId?: string;
 }) {
   const layoutRef = useRef<HTMLDivElement | null>(null);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
-  // Latest drag value, read by the drag-end closure (non-reactive) so the
-  // committed value is exact even if React state lags a frame.
-  const liveRef = useRef(topPercent);
-  useEffect(() => {
-    liveRef.current = topPercent;
-  }, [topPercent]);
+  const { height } = useMeasuredSize(layoutRef);
+  const measured = height > 0;
 
-  // Release any in-flight pointer capture on unmount so a drag crossing an
-  // unmount boundary (tab switch / panel close mid-drag) leaks no listeners.
-  useEffect(() => () => resizeCleanupRef.current?.(), []);
-
-  const percentFromClientY = (clientY: number): number | null => {
-    const layout = layoutRef.current;
-    if (!layout) return null;
-    const rect = layout.getBoundingClientRect();
-    // Drawer-collapsed / zero-height guard: dividing by 0 → NaN → broken grid.
-    if (rect.height <= 0) return null;
-    return clampSidePanelSplitPercent(((clientY - rect.top) / rect.height) * 100);
-  };
-
-  const applyFromClientY = (clientY: number) => {
-    const next = percentFromClientY(clientY);
-    if (next == null) return;
-    liveRef.current = next;
-    onDragChange(next);
-  };
+  const { onPointerDown, onKeyDown } = useEdgeResize({
+    width: topPercent,
+    edge: "end",
+    axis: "y",
+    ...(measured ? { unitsPerPixel: 100 / height } : {}),
+    min: SIDE_PANEL_SPLIT_MIN_PERCENT,
+    max: SIDE_PANEL_SPLIT_MAX_PERCENT,
+    keyStep: SPLIT_KEY_STEP,
+    onWidthChange: onDragChange,
+    // A keyboard step is both the move and the commit; the hook reports it
+    // once, as a commit, so the move is replayed here for the caller.
+    onWidthCommit: (percent) => {
+      onDragChange(percent);
+      onCommit(percent);
+    },
+  });
 
   return (
     // The separator ROW is 1.25rem (20px) tall so the whole row is the pointer
@@ -97,45 +91,8 @@ export function VerticalSplitLayout({
         tabIndex={0}
         data-testid={separatorTestId}
         className="group flex cursor-row-resize touch-none select-none items-center px-2 outline-none"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          resizeCleanupRef.current?.();
-          applyFromClientY(event.clientY);
-          const onMove = (moveEvent: PointerEvent) => applyFromClientY(moveEvent.clientY);
-          const cleanup = () => {
-            window.removeEventListener("pointermove", onMove);
-            window.removeEventListener("pointerup", cleanup);
-            window.removeEventListener("pointercancel", cleanup);
-            resizeCleanupRef.current = null;
-            onCommit(liveRef.current);
-          };
-          resizeCleanupRef.current = cleanup;
-          window.addEventListener("pointermove", onMove);
-          window.addEventListener("pointerup", cleanup);
-          window.addEventListener("pointercancel", cleanup);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowUp") {
-            event.preventDefault();
-            const next = clampSidePanelSplitPercent(topPercent - SPLIT_KEY_STEP);
-            onDragChange(next);
-            onCommit(next);
-          } else if (event.key === "ArrowDown") {
-            event.preventDefault();
-            const next = clampSidePanelSplitPercent(topPercent + SPLIT_KEY_STEP);
-            onDragChange(next);
-            onCommit(next);
-          } else if (event.key === "Home") {
-            event.preventDefault();
-            onDragChange(SIDE_PANEL_SPLIT_MIN_PERCENT);
-            onCommit(SIDE_PANEL_SPLIT_MIN_PERCENT);
-          } else if (event.key === "End") {
-            event.preventDefault();
-            onDragChange(SIDE_PANEL_SPLIT_MAX_PERCENT);
-            onCommit(SIDE_PANEL_SPLIT_MAX_PERCENT);
-          }
-        }}
+        onPointerDown={measured ? onPointerDown : undefined}
+        onKeyDown={onKeyDown}
       >
         <span className="h-0.5 w-full rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
       </div>

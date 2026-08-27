@@ -6,7 +6,10 @@ import { MainToolbar } from "../MainToolbar.js";
 
 function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}) {
   return {
-    leadClearance: 64,
+    streaming: false,
+    hasApiKey: true as boolean | null,
+    appMode: "work" as const,
+    onToggleAppMode: vi.fn(),
     viewNav: {
       segments: [{ key: "home", label: "홈" }],
       canGoBack: false,
@@ -15,12 +18,6 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
       onForward: vi.fn(),
       onSelectSegment: vi.fn(),
     },
-    streaming: false,
-    hasApiKey: true as boolean | null,
-    appMode: "work" as const,
-    onToggleAppMode: vi.fn(),
-    sidePanelOpen: false,
-    onToggleSidePanel: vi.fn(),
     ...overrides,
   };
 }
@@ -46,20 +43,16 @@ describe("MainToolbar", () => {
     expect(document.querySelector("[data-testid='token-progress-ring']")).toBeNull();
   });
 
-  it("does not render a Home button (Home nav is owned by the Sidebar)", () => {
-    // The band names the current location in the path, but it never offers a
-    // Home control of its own.
-    renderWithProvider(defaultProps({
-      viewNav: {
-        segments: [{ key: "memory", label: "메모리" }],
-        canGoBack: true,
-        canGoForward: false,
-        onBack: vi.fn(),
-        onForward: vi.fn(),
-        onSelectSegment: vi.fn(),
-      },
-    }));
-    expect(screen.queryByTitle("홈")).toBeNull();
+  it("names the location on its leading edge, where the sidebar card ends", () => {
+    // History (back/forward) moved to the sidebar, which owns routes. The PATH
+    // stays on the band: it says WHERE THE WINDOW IS, and giving it a row of
+    // its own below the band cost 28px of every screen to repeat that.
+    renderWithProvider(defaultProps());
+    const crumb = document.querySelector("[data-testid='view-path-breadcrumb']");
+    expect(crumb).toBeTruthy();
+    expect(crumb!.textContent).toContain("홈");
+    // It is a path, not a Home button — no history controls come with it.
+    expect(screen.queryByTestId("view-path-back")).toBeNull();
   });
 
   // The search / star / export controls + the collapse toggle moved to the
@@ -87,18 +80,11 @@ describe("MainToolbar", () => {
     expect(onToggleAppMode).toHaveBeenCalledWith("chat");
   });
 
-  it("renders an icon-only side-panel toggle to the right of the mode toggle", () => {
-    const onToggleSidePanel = vi.fn();
-    const { container } = renderWithProvider(defaultProps({ onToggleSidePanel }));
-
-    const modeToggle = screen.getByTestId("app-mode-toggle");
-    const sidePanelToggle = screen.getByTestId("chat-side-panel-toggle");
-    expect(sidePanelToggle.textContent?.trim()).toBe("");
-    expect(sidePanelToggle.compareDocumentPosition(modeToggle) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-
-    fireEvent.click(sidePanelToggle);
-    expect(onToggleSidePanel).toHaveBeenCalledOnce();
-    expect(container.querySelector("[data-testid='chat-side-panel-toggle'] svg")).toBeTruthy();
+  it("no longer renders the work-panel toggle (each chat group owns its panel)", () => {
+    // One window-level button cannot mean the right thing once more than one
+    // conversation is on screen, so the control moved into the group header.
+    renderWithProvider(defaultProps());
+    expect(screen.queryByTestId("chat-side-panel-toggle")).toBeNull();
   });
 });
 

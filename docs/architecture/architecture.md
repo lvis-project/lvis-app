@@ -144,6 +144,11 @@ Important rules:
   silent truncation.
 - Foreground turn-end notices stay out of the composer notification area; system
   notifications are reserved for background or non-focused app state.
+- The main window may show up to four conversations side by side (chat mode
+  shows one). Each tile is its own conversation loop in the main process,
+  addressed by `chatGroupId` on every per-conversation `lvis:chat:*` channel;
+  the loops share the memory manager and the window-wide idle services. A
+  closed tile releases its loop. See `docs/design/tiled-chat-groups.md`.
 
 ## Memory
 

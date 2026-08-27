@@ -1,13 +1,13 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
+import { ViewHistoryNav, type ViewPathNavProps } from "./ViewPathNav.js";
 import {
   CalendarDays,
-  Download,
   Folder,
-  Home,
   KanbanSquare,
   KeyRound,
   MessageSquareText,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Pin,
@@ -16,10 +16,8 @@ import {
   Repeat2,
   Search,
   ShoppingBag,
-  Upload,
   Wrench,
 } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu.js";
 import { Button } from "../../../components/ui/button.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs.js";
@@ -46,6 +44,7 @@ import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
+import { CHAT_SESSION_DRAG_TYPE } from "./chat-group-drop.js";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -110,15 +109,9 @@ export interface SidebarProps {
   onWidthCommit?: (px: number) => void;
   /** Open the unified search overlay — second button in the cluster strip. */
   onOpenUnifiedSearch: () => void;
-  /** Whether the current session is starred — drives the cluster star fill. */
-  isCurrentSessionStarred: boolean;
-  /** Toggle the current session star — third button in the cluster strip. */
-  onToggleCurrentSessionStar: () => void | Promise<void>;
-  /** Export the current session — fourth button in the cluster strip. */
-  onExport: (format: "markdown" | "json") => void | Promise<void>;
-  /** #1500 (E3) — import a previously-exported JSON as a brand-new session.
-   *  Fifth button in the cluster strip, adjacent to export. */
-  onImport: () => void | Promise<void>;
+  /** Route path + history. The sidebar renders only the HISTORY half in its
+   *  cluster strip; App renders the path half on the canvas. */
+  viewNav: ViewPathNavProps;
   /** Recent main-chat sessions shown under the current project group. */
   sessions?: SessionSummary[];
   /** Workspace projects from the App-level active project source of truth. */
@@ -145,6 +138,10 @@ export interface SidebarProps {
   isProjectPinned?: (projectRoot: string | undefined) => boolean;
   /** Pin/unpin a project — persists immediately (SystemSettings). */
   onToggleProjectPin?: (projectRoot: string) => void;
+  /** What a conversation row can do to itself — see ConversationRowActions. */
+  conversationActions?: ConversationRowActions;
+  /** What a project row can do to itself — see ProjectRowActions. */
+  projectActions?: ProjectRowActions;
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
@@ -603,6 +600,87 @@ function useWorkspaceProjects(enabled: boolean): ProjectIdentity[] {
  * The `data-testid`/`aria-current`/click semantics stay on the inner "load"
  * button, unchanged from the prior single-button structure.
  */
+/**
+ * What a conversation row can do to ITSELF.
+ *
+ * One object rather than eight loose props: these arrive together, they are
+ * offered together in one menu, and a row that has some of them but not others
+ * would show a menu with holes in it.
+ */
+export interface ConversationRowActions {
+  isArchived: (sessionId: string) => boolean;
+  isUnread: (sessionId: string) => boolean;
+  onRename: (sessionId: string, title: string) => void | Promise<void>;
+  onSetArchived: (sessionId: string, archived: boolean) => void | Promise<void>;
+  onSetUnread: (sessionId: string, unread: boolean) => void | Promise<void>;
+  onShare: (sessionId: string) => void | Promise<void>;
+  onCopy: (sessionId: string) => void | Promise<void>;
+  onDelete: (sessionId: string) => void | Promise<void>;
+  /** Import a conversation. Acts on the LIST, not on any row — see the Chats
+   *  tab's own context menu. */
+  onImport?: () => void | Promise<void>;
+}
+
+/** What a project row can do to itself — see ConversationRowActions. */
+export interface ProjectRowActions {
+  isArchived: (projectRoot: string | undefined) => boolean;
+  onSetArchived: (projectRoot: string) => void;
+  label: (projectRoot: string | undefined) => string | undefined;
+  onSetLabel: (projectRoot: string, label: string) => void;
+}
+
+/**
+ * Rename in place, for whichever row is being renamed.
+ *
+ * One component because a conversation row and a project row rename
+ * identically: the label becomes a field, Enter commits, Escape and blur
+ * abandon. Two copies would be two chances for the two rows to disagree about
+ * what Escape does.
+ */
+function InlineRename({
+  initial,
+  onCommit,
+  onCancel,
+  testId,
+  t,
+}: {
+  initial: string;
+  onCommit: (value: string) => void;
+  onCancel: () => void;
+  testId: string;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <input
+      type="text"
+      autoFocus
+      value={value}
+      placeholder={t("sidebar.renamePlaceholder")}
+      aria-label={t("sidebar.renamePlaceholder")}
+      data-testid={testId}
+      className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 py-0.5 text-[12px] text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      onChange={(event) => setValue(event.target.value)}
+      onClick={(event) => event.stopPropagation()}
+      // Blur abandons rather than commits. A rename that lands because focus
+      // moved is a rename the user never confirmed.
+      onBlur={onCancel}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const next = value.trim();
+          // An empty field is not a rename. Leave the row as it was.
+          if (next) onCommit(next);
+          else onCancel();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    />
+  );
+}
+
 function SessionRow({
   session,
   active,
@@ -610,7 +688,12 @@ function SessionRow({
   onLoadSession,
   isPinned,
   onTogglePin,
-  onContextMenu,
+  onOpenMenu,
+  unread,
+  archived,
+  renaming,
+  onCommitRename,
+  onCancelRename,
   t,
 }: {
   session: SessionSummary;
@@ -621,66 +704,152 @@ function SessionRow({
   isPinned?: boolean;
   /** Toggle this conversation's pin — omitted entirely hides the pin affordance. */
   onTogglePin?: () => void | Promise<void>;
-  /** Open the native conversation actions menu for this row. */
-  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
+  /** Open this row's actions menu. Wired to BOTH the right-click and the
+   *  trailing entry button, so the two cannot offer different things. */
+  onOpenMenu?: (event: MouseEvent<HTMLElement>) => void;
+  /** Manually marked unread — drawn as a dot plus a heavier title. */
+  unread?: boolean;
+  /** Archived — kept legible but visibly set aside. */
+  archived?: boolean;
+  renaming?: boolean;
+  onCommitRename?: (title: string) => void;
+  onCancelRename?: () => void;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const time = formatRelativeSessionTime(session.modifiedAt, t);
   const rowDisabled = streaming && !active;
+  const pinLabel = isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation");
   return (
     <div
-      onContextMenu={onContextMenu}
+      onContextMenu={onOpenMenu}
       className={[
         "group relative flex w-full min-w-0 items-center rounded-md transition-colors",
         active
           ? "bg-primary/(--opacity-subtle) text-primary"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
         rowDisabled ? "cursor-not-allowed opacity-50" : "",
+        // Archived rows stay READABLE. Dimming them to the point of illegibility
+        // would make the archive a place things go to be lost, which is what
+        // delete is for.
+        archived && !rowDisabled ? "opacity-70" : "",
       ].filter(Boolean).join(" ")}
+      data-archived={archived ? "true" : undefined}
+      data-unread={unread ? "true" : undefined}
     >
-      <button
-        type="button"
-        disabled={rowDisabled}
-        aria-current={active ? "page" : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        data-testid={`sidebar-session-${session.id}`}
-        onClick={() => void onLoadSession?.(session.id)}
-      >
-        <MessageSquareText className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{session.title}</span>
-      </button>
-      {time && !isPinned ? (
-        <span className="shrink-0 pr-2 text-[10px] text-muted-foreground/(--opacity-intense) group-hover:hidden">
+      {/* ── Leading slot. One 14px square that holds the row's KIND at rest and
+          its pin on hover. The two never coexist, so the row's text never
+          shifts — the reason the swap happens here rather than by revealing a
+          fourth control. A pinned row keeps the pin showing: the state has to
+          be readable without hovering every row to find it. */}
+      <span className="relative ml-2 flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        {onTogglePin ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void onTogglePin();
+            }}
+            className={[
+              "absolute inset-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              isPinned ? "flex text-primary" : "hidden group-hover:flex group-focus-within:flex",
+            ].join(" ")}
+            aria-label={pinLabel}
+            title={pinLabel}
+            aria-pressed={isPinned}
+            data-testid={`sidebar-session-pin-${session.id}`}
+          >
+            <Pin className={`h-3 w-3 ${isPinned ? "fill-current" : ""}`} />
+          </button>
+        ) : null}
+        <MessageSquareText
+          className={[
+            "h-3.5 w-3.5",
+            // Hidden — not removed. The glyph keeps reserving the square so the
+            // swap costs no layout.
+            isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
+          ].join(" ")}
+          aria-hidden="true"
+        />
+      </span>
+      {renaming && onCommitRename && onCancelRename ? (
+        <div className="flex min-w-0 flex-1 items-center px-2 py-1">
+          <InlineRename
+            initial={session.title}
+            onCommit={onCommitRename}
+            onCancel={onCancelRename}
+            testId={`sidebar-session-rename-${session.id}`}
+            t={t}
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={rowDisabled}
+          aria-current={active ? "page" : undefined}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid={`sidebar-session-${session.id}`}
+          onClick={() => void onLoadSession?.(session.id)}
+          // Dragging a conversation onto a tile is how the main area is
+          // arranged: the edge it lands on says whether to split that tile or
+          // replace what it holds. A click still just opens it in place.
+          draggable={!rowDisabled}
+          onDragStart={(event) => {
+            event.dataTransfer.setData(CHAT_SESSION_DRAG_TYPE, session.id);
+            event.dataTransfer.effectAllowed = "copy";
+          }}
+        >
+          {/* Unread is a dot AND weight. The dot alone would be the only
+              carrier of the state, and colour alone is not a signal everyone
+              receives. */}
+          {unread ? (
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
+              aria-hidden="true"
+              data-testid={`sidebar-session-unread-${session.id}`}
+            />
+          ) : null}
+          <span className={`min-w-0 flex-1 truncate ${unread ? "font-semibold text-foreground" : ""}`}>
+            {session.title}
+          </span>
+        </button>
+      )}
+      {time ? (
+        <span className="shrink-0 pr-1 text-[10px] text-muted-foreground/(--opacity-intense) group-hover:hidden group-focus-within:hidden">
           {time}
         </span>
       ) : null}
-      {onTogglePin ? (
+      {/* ── Trailing slot: the way IN to this row's actions. Right-click already
+          opens the same menu, but a right-click is undiscoverable — the button
+          is what tells the user the menu exists. Both call one handler. */}
+      {onOpenMenu ? (
         <button
           type="button"
           onClick={(event) => {
             event.stopPropagation();
-            void onTogglePin();
+            onOpenMenu(event);
           }}
-          className={[
-            "mr-1 shrink-0 rounded p-1 hover:bg-muted-foreground/(--opacity-subtle) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            isPinned ? "flex text-primary" : "hidden group-hover:flex group-focus-within:flex",
-          ].join(" ")}
-          aria-label={isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation")}
-          title={isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation")}
-          aria-pressed={isPinned}
-          data-testid={`sidebar-session-pin-${session.id}`}
+          className="mr-1 hidden shrink-0 rounded p-1 hover:bg-muted-foreground/(--opacity-subtle) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:flex group-focus-within:flex"
+          aria-label={t("sidebar.conversationMenu")}
+          title={t("sidebar.conversationMenu")}
+          data-testid={`sidebar-session-menu-${session.id}`}
         >
-          <Pin className={`h-3 w-3 ${isPinned ? "fill-current" : ""}`} />
+          <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
       ) : null}
     </div>
   );
 }
 
+/**
+ * The conversation list, exported because a chat GROUP renders the same list in
+ * its own sidebar. One list component, so the window's sidebar and a group's
+ * sidebar cannot show two different pictures of the same conversations.
+ */
 function ProjectSessionList({
   collapsed,
   sessions,
   currentSessionId,
+  conversationSurfaceVisible,
   streaming,
   onLoadSession,
   onNewChatForProject,
@@ -693,10 +862,22 @@ function ProjectSessionList({
   onToggleSessionStar,
   isProjectPinned,
   onToggleProjectPin,
+  conversationActions,
+  projectActions,
 }: {
   collapsed: boolean;
   sessions: SessionSummary[];
   currentSessionId?: string;
+  /**
+   * Whether a CONVERSATION is what the window is showing.
+   *
+   * A session stays loaded while the user reads a plugin view or Settings, so
+   * "which session is loaded" and "which row is the current page" are two
+   * different questions. Answering them with one value put `aria-current`
+   * on a chat row and on the plugin row at the same time — two rows claiming
+   * to be the page the user is on.
+   */
+  conversationSurfaceVisible: boolean;
   streaming: boolean;
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
@@ -709,6 +890,8 @@ function ProjectSessionList({
   onToggleSessionStar?: (sessionId: string, title?: string) => void | Promise<void>;
   isProjectPinned?: (projectRoot: string | undefined) => boolean;
   onToggleProjectPin?: (projectRoot: string) => void;
+  conversationActions?: ConversationRowActions;
+  projectActions?: ProjectRowActions;
 }) {
   const { t } = useTranslation();
   const openNativeContextMenu = useNativeContextMenu();
@@ -766,6 +949,12 @@ function ProjectSessionList({
   const isSessionPinned = (sessionId: string) => Boolean(isSessionStarred?.(sessionId));
   const fallbackProjects = useWorkspaceProjects(projectsProp === undefined);
   const workspaceProjects = projectsProp ?? fallbackProjects;
+  // Which row is mid-rename. One id for BOTH kinds of row: renaming two things
+  // at once is not a state the user can be in, so it is not a state to model.
+  const [renamingKey, setRenamingKey] = useState<string | null>(null);
+  // Archived rows are out of the way by default and one click from being back.
+  const [showArchived, setShowArchived] = useState(false);
+
   const mainSessions = useMemo(
     () => sessions.filter((session) => session.sessionKind === "main"),
     [sessions],
@@ -842,29 +1031,113 @@ function ProjectSessionList({
   const hasNamedProjects = sessionsByProject.length > 0;
   const hasUngroupedSessions = ungroupedSessions.length > 0;
 
+
+  const conversationMenuHandlers = (session: SessionSummary): NativeContextMenuHandlers => {
+    const actions = conversationActions;
+    const archived = actions?.isArchived(session.id) ?? false;
+    const unread = actions?.isUnread(session.id) ?? false;
+    return {
+      ...(!streaming || session.id === currentSessionId
+        ? { "conversation.open": () => void onLoadSession?.(session.id) }
+        : {}),
+      ...(actions
+        ? {
+            [unread ? "conversation.mark-read" : "conversation.mark-unread"]: () =>
+              void actions.onSetUnread(session.id, !unread),
+            "conversation.rename": () => setRenamingKey(`session:${session.id}`),
+            "conversation.share": () => void actions.onShare(session.id),
+            "conversation.copy": () => void actions.onCopy(session.id),
+            [archived ? "conversation.unarchive" : "conversation.archive"]: () =>
+              void actions.onSetArchived(session.id, !archived),
+            "conversation.delete": () => void actions.onDelete(session.id),
+          }
+        : {}),
+      ...(onToggleSessionStar
+        ? {
+            [isSessionPinned(session.id) ? "conversation.unpin" : "conversation.pin"]: () =>
+              void onToggleSessionStar(session.id, session.title),
+          }
+        : {}),
+    } as NativeContextMenuHandlers;
+  };
+
   const renderSessionRow = (session: SessionSummary) => (
     <SessionRow
       key={session.id}
       session={session}
-      active={session.id === currentSessionId}
+      active={conversationSurfaceVisible && session.id === currentSessionId}
       streaming={streaming}
       onLoadSession={onLoadSession}
       isPinned={isSessionPinned(session.id)}
       onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}
-      onContextMenu={(event) => openNativeContextMenu(event, "conversation", {
-        ...(!streaming || session.id === currentSessionId
-          ? { "conversation.open": () => void onLoadSession?.(session.id) }
-          : {}),
-        ...(onToggleSessionStar
-          ? {
-              [isSessionPinned(session.id) ? "conversation.unpin" : "conversation.pin"]: () =>
-                void onToggleSessionStar(session.id, session.title),
-            }
-          : {}),
-      } as NativeContextMenuHandlers)}
+      onOpenMenu={(event) => openNativeContextMenu(event, "conversation", conversationMenuHandlers(session))}
+      unread={conversationActions?.isUnread(session.id)}
+      archived={conversationActions?.isArchived(session.id)}
+      renaming={renamingKey === `session:${session.id}`}
+      onCommitRename={conversationActions
+        ? (title) => {
+            setRenamingKey(null);
+            void conversationActions.onRename(session.id, title);
+          }
+        : undefined}
+      onCancelRename={() => setRenamingKey(null)}
       t={t}
     />
   );
+
+  // Archived conversations leave the default listing. They are not deleted, so
+  // the toggle below brings them straight back — the reason archive is worth
+  // having as something distinct from delete.
+  const visibleSessions = (list: SessionSummary[]) =>
+    showArchived || !conversationActions
+      ? list
+      : list.filter((session) => !conversationActions.isArchived(session.id));
+
+  const hasArchivedSessions = Boolean(
+    conversationActions && sessions.some((session) => conversationActions.isArchived(session.id)),
+  );
+
+  // The folder's own actions, built once. The row's right-click and its
+  // trailing button both call this, so the two can never offer different sets.
+  const projectMenuHandlers = (project: ProjectIdentity): NativeContextMenuHandlers => {
+    const root = project.projectRoot;
+    const archived = Boolean(projectActions?.isArchived(root));
+    return {
+      ...(!streaming
+        ? {
+            "project.new-chat": () => void onNewChatForProject?.({
+              ...(root ? { projectRoot: root } : {}),
+              projectName: project.projectName,
+            }),
+          }
+        : {}),
+      ...(onToggleProjectPin && root
+        ? { [pinnedLabelFor(root)]: () => onToggleProjectPin(root) }
+        : {}),
+      ...(projectActions && root
+        ? {
+            "project.edit": () => setRenamingKey(`project:${root}`),
+            [archived ? "project.unarchive" : "project.archive"]: () =>
+              projectActions.onSetArchived(root),
+          }
+        : {}),
+      ...(root ? { "project.reveal": () => revealProject(root) } : {}),
+      // Also offered ON a row: someone hunting for "add a project"
+      // right-clicks the nearest project-looking thing.
+      ...addProjectMenuHandlers(),
+      ...(root && !project.isDefault
+        ? { "project.remove": () => void removeProject(project) }
+        : {}),
+    } as NativeContextMenuHandlers;
+  };
+  const pinnedLabelFor = (root: string) =>
+    isProjectPinned?.(root) ? "project.unpin" : "project.pin";
+
+  // Archived FOLDERS leave the listing on the same terms archived
+  // conversations do, and answer to the same toggle — one archive, one switch.
+  const visibleProjects = showArchived || !projectActions
+    ? sessionsByProject
+    : sessionsByProject.filter(({ project }) => !projectActions.isArchived(project.projectRoot));
 
   return (
     <Tabs value={activeTab} onValueChange={(value) => onActiveSidebarTabChangeGuard(value, onActiveTabChange)} data-testid="sidebar-tabs">
@@ -886,14 +1159,40 @@ function ProjectSessionList({
 
       {/* Chats tab — every conversation with no explicit project, a plain
           ungrouped list (the conventional "general chats" pattern). */}
-      <TabsContent value="chats" className="mt-2 space-y-1" data-testid="sidebar-unassigned-sessions">
+      {/* Right-click the LIST itself (not a row) → import. Importing always
+          creates a brand-new conversation, so it acts on the list; putting it
+          on a row would imply it acts on that row. Rows stop propagation once
+          they answer, so their own menu still wins. */}
+      <TabsContent
+        value="chats"
+        className="mt-2 min-h-24 space-y-1"
+        data-testid="sidebar-unassigned-sessions"
+        onContextMenu={(event) => openNativeContextMenu(event, "conversation", {
+          ...(conversationActions?.onImport
+            ? { "conversation.import": () => void conversationActions.onImport!() }
+            : {}),
+        } as NativeContextMenuHandlers)}
+      >
         {hasUngroupedSessions ? (
           <>
-            {ungroupedRecent.map(renderSessionRow)}
+            {visibleSessions(ungroupedRecent).map(renderSessionRow)}
             {ungroupedOverflow > 0 ? (
               <div className="px-2 pt-1 text-[10px] text-muted-foreground">
                 {t("sidebar.moreSessions", { count: ungroupedOverflow })}
               </div>
+            ) : null}
+            {/* Offered only once something IS archived. A permanent toggle for
+                an empty archive is a control that never does anything. */}
+            {hasArchivedSessions ? (
+              <button
+                type="button"
+                onClick={() => setShowArchived((value) => !value)}
+                className="w-full rounded-md px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-pressed={showArchived}
+                data-testid="sidebar-toggle-archived"
+              >
+                {showArchived ? t("sidebar.hideArchived") : t("sidebar.showArchived")}
+              </button>
             ) : null}
           </>
         ) : (
@@ -949,59 +1248,86 @@ function ProjectSessionList({
             </div>
           </div>
         ) : null}
-        {hasNamedProjects ? sessionsByProject.map(({ project, recent, overflow }) => {
+        {hasNamedProjects ? visibleProjects.map(({ project, recent, overflow }) => {
           const pinned = Boolean(isProjectPinned?.(project.projectRoot));
+          const archived = Boolean(projectActions?.isArchived(project.projectRoot));
+          const displayName = projectActions?.label(project.projectRoot) ?? project.projectName;
+          const openProject = () => void onNewChatForProject?.({
+            ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
+            projectName: project.projectName,
+          });
           return (
           <div key={project.projectRoot} className="space-y-1">
-            {/* Right-click a project row → context menu of REAL project actions
-                (new chat here, reveal folder, pin/unpin, remove project). */}
-            <button
-              type="button"
-              disabled={streaming}
+            {/* The folder row. Clicking it starts a chat here; the trailing
+                button and the right-click open the SAME set of folder actions,
+                built once below so the two entry points cannot diverge. */}
+            <div
               className={[
-                "flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium text-foreground transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "group flex w-full min-w-0 items-center rounded-md transition-colors",
                 streaming ? "cursor-not-allowed opacity-50" : "hover:bg-muted",
-              ].join(" ")}
-              title={project.projectRoot ?? t("sidebar.newProjectChat", { project: project.projectName })}
-              data-testid={`sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
-              onClick={() => void onNewChatForProject?.({
-                ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
-                projectName: project.projectName,
-              })}
-              onContextMenu={(event) => openNativeContextMenu(event, "project", {
-                ...(!streaming
-                  ? {
-                      "project.new-chat": () => void onNewChatForProject?.({
-                        ...(project.projectRoot ? { projectRoot: project.projectRoot } : {}),
-                        projectName: project.projectName,
-                      }),
-                    }
-                  : {}),
-                ...(onToggleProjectPin && project.projectRoot
-                  ? {
-                      [pinned ? "project.unpin" : "project.pin"]: () =>
-                        onToggleProjectPin(project.projectRoot!),
-                    }
-                  : {}),
-                ...(project.projectRoot
-                  ? { "project.reveal": () => revealProject(project.projectRoot!) }
-                  : {}),
-                // Also offered ON a row: someone hunting for "add a project"
-                // right-clicks the nearest project-looking thing.
-                ...addProjectMenuHandlers(),
-                ...(project.projectRoot && !project.isDefault
-                  ? { "project.remove": () => void removeProject(project) }
-                  : {}),
-              } as NativeContextMenuHandlers)}
+                archived && !streaming ? "opacity-70" : "",
+              ].filter(Boolean).join(" ")}
+              data-archived={archived ? "true" : undefined}
+              onContextMenu={(event) => openNativeContextMenu(event, "project", projectMenuHandlers(project))}
             >
-              <Folder className="h-4 w-4 shrink-0 text-primary" />
-              {pinned ? <Pin className="h-3 w-3 shrink-0 fill-current text-primary" /> : null}
-              <span className="min-w-0 flex-1 truncate">{project.projectName}</span>
-              <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </button>
+              {renamingKey === `project:${project.projectRoot}` && projectActions && project.projectRoot ? (
+                <div className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1">
+                  <Folder className="h-4 w-4 shrink-0 text-primary" />
+                  <InlineRename
+                    initial={displayName}
+                    onCommit={(value) => {
+                      setRenamingKey(null);
+                      projectActions.onSetLabel(project.projectRoot!, value);
+                    }}
+                    onCancel={() => setRenamingKey(null)}
+                    testId={`sidebar-project-rename-${projectTestId(project.projectRoot, project.projectName)}`}
+                    t={t}
+                  />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={streaming}
+                  className={[
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium text-foreground",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    streaming ? "cursor-not-allowed" : "",
+                  ].filter(Boolean).join(" ")}
+                  title={project.projectRoot ?? t("sidebar.newProjectChat", { project: displayName })}
+                  data-testid={`sidebar-project-${projectTestId(project.projectRoot, project.projectName)}`}
+                  onClick={openProject}
+                >
+                  <Folder className="h-4 w-4 shrink-0 text-primary" />
+                  {pinned ? <Pin className="h-3 w-3 shrink-0 fill-current text-primary" /> : null}
+                  <span className="min-w-0 flex-1 truncate">{displayName}</span>
+                  {/* Hidden at rest, not removed — it keeps reserving its width
+                      so the folder name does not re-truncate when the pointer
+                      arrives. A row that reflows under the cursor is harder to
+                      aim at than one that simply reveals a control. */}
+                  <Plus
+                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground invisible group-hover:visible group-focus-within:visible"
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
+              {/* After the new-chat affordance, exactly as the folder's own
+                  actions sit after the conversation's. */}
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openNativeContextMenu(event, "project", projectMenuHandlers(project));
+                }}
+                className="mr-1 hidden shrink-0 rounded p-1 hover:bg-muted-foreground/(--opacity-subtle) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:flex group-focus-within:flex"
+                aria-label={t("sidebar.projectMenu")}
+                title={t("sidebar.projectMenu")}
+                data-testid={`sidebar-project-menu-${projectTestId(project.projectRoot, project.projectName)}`}
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
-              {recent.length > 0 ? recent.map(renderSessionRow) : (
+              {visibleSessions(recent).length > 0 ? visibleSessions(recent).map(renderSessionRow) : (
                 <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
                   {t("sidebar.noProjectSessions")}
                 </div>
@@ -1033,7 +1359,13 @@ function onActiveSidebarTabChangeGuard(value: string, onActiveTabChange: (tab: S
 //
 // The horizontal button cluster that sits ON the OS traffic-light LINE, RIGHT
 // AFTER the lights:
-//   [펼침/닫힘 collapse toggle] → [검색 search] → [즐겨찾기 star] → [내보내기 export]
+//   [펼침/닫힘 collapse toggle] → [검색 search] → [뒤로 back] → [앞으로 forward]
+//
+// Pin / export / import USED to sit here. They act on a CONVERSATION, and the
+// part that owns the conversation is the chat group, so they moved into its
+// header (ChatGroupFrame) and into each row's context menu. What took their
+// place navigates ROUTES, which is what this sidebar owns. See DESIGN.md
+// "Workbench model".
 // Always rendered (both expanded + collapsed). When the surrounding card is
 // expanded it forms the card's top strip; when collapsed it stands bare in the
 // band. Each control is an h-6 w-6 icon button (24px, ~4px pad around the 16px
@@ -1053,20 +1385,16 @@ function ClusterStrip({
   leadClearance,
   onToggleCollapse,
   onOpenUnifiedSearch,
-  isCurrentSessionStarred,
-  onToggleCurrentSessionStar,
-  onExport,
-  onImport,
+  viewNav,
 }: {
   collapsed: boolean;
   /** True on darwin — left-pad the first button past the OS traffic lights. */
   leadClearance: boolean;
   onToggleCollapse: () => void;
   onOpenUnifiedSearch: () => void;
-  isCurrentSessionStarred: boolean;
-  onToggleCurrentSessionStar: () => void | Promise<void>;
-  onExport: (format: "markdown" | "json") => void | Promise<void>;
-  onImport: () => void | Promise<void>;
+  /** Route history. Only the history half renders here — the path half names
+   *  the content, so it belongs on the canvas, not in the chrome. */
+  viewNav: ViewPathNavProps;
 }) {
   const { t } = useTranslation();
   return (
@@ -1116,73 +1444,17 @@ function ClusterStrip({
         <TooltipContent side="bottom">{t("mainToolbar.unifiedSearch")}</TooltipContent>
       </Tooltip>
 
-      {/* 핀 — current-session pin (reuses the existing starred-session
-          mechanism internally; user-facing icon/label are "pin", see the
-          2026-07 "즐겨찾기 → 핀" naming refinement). */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 aspect-square p-0 shrink-0"
-            onClick={() => void onToggleCurrentSessionStar()}
-            title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
-            aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
-            aria-pressed={isCurrentSessionStarred}
-          >
-            <Pin key={isCurrentSessionStarred ? "on" : "off"} className={`h-4 w-4 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
-      </Tooltip>
-
-      {/* 내보내기 — export menu (Markdown / JSON). Tour anchor "settings-entry". */}
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 aspect-square p-0 shrink-0"
-                title={t("mainToolbar.export")}
-                aria-label={t("mainToolbar.export")}
-                data-testid="toolbar-export"
-                data-tour-anchor="settings-entry"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("mainToolbar.export")}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="start" className="w-[180px]">
-          <DropdownMenuItem data-testid="toolbar-export-markdown" onClick={() => void onExport("markdown")}>
-            {t("sidebar.exportMarkdown")}
-          </DropdownMenuItem>
-          <DropdownMenuItem data-testid="toolbar-export-json" onClick={() => void onExport("json")}>
-            {t("sidebar.exportJson")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* 가져오기 — import a previously-exported JSON as a brand-new session (#1500 / E3). */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 aspect-square p-0 shrink-0"
-            onClick={() => void onImport()}
-            title={t("mainToolbar.import")}
-            aria-label={t("mainToolbar.import")}
-            data-testid="toolbar-import"
-          >
-            <Upload className="h-4 w-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{t("mainToolbar.import")}</TooltipContent>
-      </Tooltip>
+      {/* 뒤로 / 앞으로 — route history. This strip is the sidebar's, and the
+          sidebar is what decides which route is showing, so the control that
+          moves BETWEEN routes belongs to it. */}
+      <ViewHistoryNav
+        canGoBack={viewNav.canGoBack}
+        canGoForward={viewNav.canGoForward}
+        backLabel={viewNav.backLabel}
+        forwardLabel={viewNav.forwardLabel}
+        onBack={viewNav.onBack}
+        onForward={viewNav.onForward}
+      />
     </div>
   );
 }
@@ -1212,10 +1484,7 @@ export function Sidebar({
   onWidthChange,
   onWidthCommit,
   onOpenUnifiedSearch,
-  isCurrentSessionStarred,
-  onToggleCurrentSessionStar,
-  onExport,
-  onImport,
+  viewNav,
   sessions = [],
   projects,
   currentSessionId,
@@ -1226,6 +1495,8 @@ export function Sidebar({
   onActiveSidebarTabChange,
   isSessionStarred,
   onToggleSessionStar,
+  conversationActions,
+  projectActions,
   isProjectPinned,
   onToggleProjectPin,
 }: SidebarProps) {
@@ -1285,17 +1556,19 @@ export function Sidebar({
     //      retracts (body removed) and the cluster pops OUT into the bare band
     //      with NO surface behind it. The strip's screen position is identical in
     //      both states; the only visual delta is the card surface behind it.
-    // top-2 (8px) lands the h-7 (28px) cluster strip's center at ≈22px — the OS
-    // traffic lights' visual center (trafficLightPosition.y:16 + ≈6px half of
-    // their ≈12px diameter). So the cluster sits ON the lights' line on darwin.
-    // win/linux + non-Electron align a touch higher (top-1.5) with no OS lights.
+    // The cluster strip must share the traffic lights' CENTRE LINE, and that
+    // line moved when the band went 44px -> 36px: the lights are now at
+    // trafficLightPosition.y:12 with a ≈12px diameter, so their centre is 18.
+    // An h-7 (28px) strip centres at inset + 14, so the inset has to be 4
+    // (top-1), not 8 — at top-2 the icons sat 4px BELOW the lights.
+    // win/linux + non-Electron have no OS lights to align against.
     <aside
       data-testid="primary-sidebar"
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
         "absolute left-2 bottom-3 z-30 flex min-h-0 flex-col",
-        darwinTopClearance ? "top-2" : "top-1.5",
+        darwinTopClearance ? "top-1" : "top-1.5",
         collapsed && "pointer-events-none",
       ].join(" ")}
       // The aside overlays the Electron drag band. Mark it no-drag so its controls
@@ -1374,10 +1647,7 @@ export function Sidebar({
           leadClearance={darwinTopClearance}
           onToggleCollapse={onToggleCollapse}
           onOpenUnifiedSearch={onOpenUnifiedSearch}
-          isCurrentSessionStarred={isCurrentSessionStarred}
-          onToggleCurrentSessionStar={onToggleCurrentSessionStar}
-          onExport={onExport}
-          onImport={onImport}
+          viewNav={viewNav}
         />
 
       {/* ── Card body — new chat + nav + footer. EXPANDED: inline within the card
@@ -1526,6 +1796,7 @@ export function Sidebar({
                     sessions={sessions}
                     projects={projects}
                     currentSessionId={currentSessionId}
+                    conversationSurfaceVisible={activeView === "home"}
                     streaming={streaming}
                     onLoadSession={onLoadSession}
                     onNewChatForProject={onNewChatForProject}
@@ -1537,6 +1808,8 @@ export function Sidebar({
                     onToggleSessionStar={onToggleSessionStar}
                     isProjectPinned={isProjectPinned}
                     onToggleProjectPin={onToggleProjectPin}
+                    conversationActions={conversationActions}
+                    projectActions={projectActions}
                   />
                 </div>
               </div>
@@ -1553,20 +1826,9 @@ export function Sidebar({
           composer-seam-alignment padding was removed so the footer reads as one
           uniform nav rhythm at every window height. */}
       <div className={`border-t border-border px-2 py-2 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
-        {/* Home — placed above the marketplace, capped by this footer's border-t
-            divider (which matches the composer's border-t seam). */}
-        <NavItem
-          viewKey="home"
-          label={t("mainToolbar.home")}
-          icon={<Home className="h-4 w-4" />}
-          isActive={activeView === "home"}
-          onClick={() => onSelect("home")}
-          collapsed={compact}
-          tone="home"
-          data-testid="sidebar-home"
-        />
-        {/* Divider between Home and Marketplace */}
-        <div className="my-1 border-t border-border self-stretch" />
+        {/* Home used to sit here. The conversation list IS the home surface —
+            a row that navigates to "the chat" while the chats are listed a few
+            pixels above it was naming the same destination twice. */}
         {/* Marketplace jump — styled as a NavItem, disabled until URL ready */}
         <NavItem
           viewKey="marketplace"

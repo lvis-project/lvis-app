@@ -5,7 +5,7 @@
 // gesture-gated mutating permission/policy family (that lives in the internal
 // surface). Channel names come from the contract SOT (no inline literals).
 import { ipcRenderer } from "electron";
-import { CHANNELS } from "../contract/app-contract.js";
+import { CHANNELS, MAIN_CHAT_GROUP_ID } from "../contract/app-contract.js";
 import {
   captureUserKeyboardIntent,
   consumeUserKeyboardIntent,
@@ -17,10 +17,21 @@ import type {
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { StreamEvent } from "../lib/chat-stream-state.js";
 
-export function buildPublicSurface() {
+/**
+ * The chat channels that address ONE conversation.
+ *
+ * Every one of them names its group on the wire. A tile gets its own surface
+ * through `chatGroup(id)`; the default surface is the primary group, which is
+ * what a window with a single conversation has always been.
+ *
+ * See docs/design/tiled-chat-groups.md.
+ */
+function buildSurfaceForChatGroup(chatGroupId: string) {
   return {
   // ─── Chat (ConversationLoop) ─────────────────────
-  chatHasProvider: async () => ipcRenderer.invoke(CHANNELS.chat.hasProvider) as Promise<boolean>,
+  chatHasProvider: async () => ipcRenderer.invoke(CHANNELS.chat.hasProvider, chatGroupId) as Promise<boolean>,
+  chatGroupRelease: async () =>
+    ipcRenderer.invoke(CHANNELS.chat.groupRelease, chatGroupId) as Promise<{ ok: boolean; released?: boolean; error?: string }>,
   captureUserKeyboardIntent,
   chatSend: async (
     input: string,
@@ -37,9 +48,9 @@ export function buildPublicSurface() {
       ...(inputOrigin === "user-keyboard"
         ? { userActivation: consumeUserKeyboardIntent(userIntent) }
         : {}),
-    }),
-  chatGuide: async (input: string) => ipcRenderer.invoke(CHANNELS.chat.guide, input),
-  chatNew: async (opts?: { projectRoot?: string; projectName?: string }) => ipcRenderer.invoke(CHANNELS.chat.new, opts),
+    }, chatGroupId),
+  chatGuide: async (input: string) => ipcRenderer.invoke(CHANNELS.chat.guide, input, chatGroupId),
+  chatNew: async (opts?: { projectRoot?: string; projectName?: string }) => ipcRenderer.invoke(CHANNELS.chat.new, opts, chatGroupId),
   chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
     ipcRenderer.invoke(CHANNELS.chat.sessions, opts) as Promise<{
       current: string;
@@ -59,7 +70,7 @@ export function buildPublicSurface() {
     }>,
   // Conversation UX
   chatGetHistory: async () =>
-    ipcRenderer.invoke(CHANNELS.chat.getHistory) as Promise<{
+    ipcRenderer.invoke(CHANNELS.chat.getHistory, chatGroupId) as Promise<{
       sessionId: string;
       sessionTitle?: string;
       sessionKind: "main" | "routine";
@@ -113,47 +124,64 @@ export function buildPublicSurface() {
       preambleChars?: number;
     }>,
   chatEditResend: async (messageIndex: number, newText: string) =>
-    ipcRenderer.invoke(CHANNELS.chat.editResend, messageIndex, newText),
-  chatFork: async (messageIndex: number) => ipcRenderer.invoke(CHANNELS.chat.fork, messageIndex),
+    ipcRenderer.invoke(CHANNELS.chat.editResend, messageIndex, newText, chatGroupId),
+  chatFork: async (messageIndex: number) => ipcRenderer.invoke(CHANNELS.chat.fork, messageIndex, chatGroupId),
   chatContinueLastUser: async (sessionId: string) =>
-    ipcRenderer.invoke(CHANNELS.chat.continueLastUser, { sessionId }) as Promise<{ ok: boolean; error?: string }>,
+    ipcRenderer.invoke(CHANNELS.chat.continueLastUser, { sessionId }, chatGroupId) as Promise<{ ok: boolean; error?: string }>,
   chatRetryEffort: async (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) =>
-    ipcRenderer.invoke(CHANNELS.chat.retryEffort, opts),
-  chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke(CHANNELS.chat.export, format),
+    ipcRenderer.invoke(CHANNELS.chat.retryEffort, opts, chatGroupId),
+  // `sessionId` targets a conversation other than the loaded one — that is
+  // what lets a sidebar row share itself. Omit it for the loaded conversation.
+  chatExport: async (format: "markdown" | "json", sessionId?: string) =>
+    ipcRenderer.invoke(CHANNELS.chat.export, format, sessionId),
+  // Row-level conversation edits. Internal channels (mutating).
+  chatSessionUpdate: async (payload: {
+    sessionId: string;
+    title?: string;
+    archived?: boolean;
+    unread?: boolean;
+  }) =>
+    ipcRenderer.invoke(CHANNELS.chat.sessionUpdate, payload) as Promise<
+      { ok: true } | { ok: false; error?: string }
+    >,
+  chatSessionDelete: async (sessionId: string) =>
+    ipcRenderer.invoke(CHANNELS.chat.sessionDelete, { sessionId }) as Promise<
+      { ok: true; wasLoaded: boolean } | { ok: false; error?: string }
+    >,
   // #1500 (E3) — reverse of chatExport. Channel is internal (not in
   // PUBLIC_CHANNELS) even though the bridge lives alongside chatExport here.
   chatImport: async () =>
     ipcRenderer.invoke(CHANNELS.chat.import) as Promise<
       { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }
     >,
-  chatCompact: async () => ipcRenderer.invoke(CHANNELS.chat.compact),
-  chatSessionResume: async (sessionId: string) => ipcRenderer.invoke(CHANNELS.chat.sessionResume, sessionId),
+  chatCompact: async () => ipcRenderer.invoke(CHANNELS.chat.compact, chatGroupId),
+  chatSessionResume: async (sessionId: string) => ipcRenderer.invoke(CHANNELS.chat.sessionResume, sessionId, chatGroupId),
   // Checkpoint view and explicit branch actions.
   chatEnterCheckpointView: async (sessionId: string, compactNum: number) =>
-    ipcRenderer.invoke(CHANNELS.chat.enterCheckpointView, { sessionId, compactNum }) as Promise<
+    ipcRenderer.invoke(CHANNELS.chat.enterCheckpointView, { sessionId, compactNum }, chatGroupId) as Promise<
       { messageIndexAtCreation: number } | { error: string }
     >,
   chatExitCheckpointView: async () =>
-    ipcRenderer.invoke(CHANNELS.chat.exitCheckpointView) as Promise<{ ok: boolean }>,
+    ipcRenderer.invoke(CHANNELS.chat.exitCheckpointView, chatGroupId) as Promise<{ ok: boolean }>,
   chatBranchFromCheckpoint: async (sessionId: string, compactNum: number) =>
-    ipcRenderer.invoke(CHANNELS.chat.branchFromCheckpoint, { sessionId, compactNum }) as Promise<
+    ipcRenderer.invoke(CHANNELS.chat.branchFromCheckpoint, { sessionId, compactNum }, chatGroupId) as Promise<
       {
         newSessionId: string;
         lastMessageRole: "user" | "assistant" | "tool_result" | null;
         shouldAutoContinue: boolean;
       } | { error: string }
     >,
-  chatAbort: async () => ipcRenderer.invoke(CHANNELS.chat.abort) as Promise<{ ok: boolean }>,
+  chatAbort: async () => ipcRenderer.invoke(CHANNELS.chat.abort, chatGroupId) as Promise<{ ok: boolean }>,
   // Lazy-load verbatim tool_result content (in-session only).
   chatGetVerbatimToolResult: async (sessionId: string, toolUseId: string) =>
-    ipcRenderer.invoke(CHANNELS.chat.getVerbatimToolResult, { sessionId, toolUseId }) as Promise<
+    ipcRenderer.invoke(CHANNELS.chat.getVerbatimToolResult, { sessionId, toolUseId }, chatGroupId) as Promise<
       { content: string; lineCount: number } | null
     >,
   chatGetSubAgentTranscript: async (opts: {
     originSessionId: string;
     childSessionId: string;
   }) =>
-    ipcRenderer.invoke(CHANNELS.chat.getSubAgentTranscript, opts) as Promise<
+    ipcRenderer.invoke(CHANNELS.chat.getSubAgentTranscript, opts, chatGroupId) as Promise<
       | {
           ok: true;
           childSessionId: string;
@@ -175,7 +203,14 @@ export function buildPublicSurface() {
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke(CHANNELS.starred.remove, opts),
   onChatStream: (handler: (event: StreamEvent) => void) => {
-    const listener = (_event: unknown, payload: StreamEvent) => handler(payload);
+    // Every group's frames arrive on the same channel, so a surface only
+    // forwards the ones addressed to ITS group. Dropping the check would put
+    // another tile's tokens in this tile's transcript.
+    const listener = (_event: unknown, payload: StreamEvent) => {
+      const frameGroup = (payload as { chatGroupId?: unknown }).chatGroupId;
+      if (typeof frameGroup === "string" && frameGroup !== chatGroupId) return;
+      handler(payload);
+    };
     ipcRenderer.on(CHANNELS.chat.stream, listener);
     return () => ipcRenderer.removeListener(CHANNELS.chat.stream, listener);
   },
@@ -195,5 +230,20 @@ export function buildPublicSurface() {
   getUsageSummary: async (days?: number) => ipcRenderer.invoke(CHANNELS.usage.summary, days),
   getUsageRange: async (opts: { dateFrom: string; dateTo: string }) => ipcRenderer.invoke(CHANNELS.usage.range, opts),
   exportUsageCsv: async (rows: Array<Record<string, string | number>>) => ipcRenderer.invoke(CHANNELS.usage.exportCsv, rows),
+  };
+}
+
+export function buildPublicSurface() {
+  const surface = buildSurfaceForChatGroup(MAIN_CHAT_GROUP_ID);
+  return {
+    ...surface,
+    /**
+     * One tile's view of the per-conversation channels.
+     *
+     * A tile passes this where it would otherwise pass `lvisApi`, so nothing
+     * downstream has to learn about groups — every call it makes already names
+     * the right conversation.
+     */
+    chatGroup: (chatGroupId: string) => buildSurfaceForChatGroup(chatGroupId),
   };
 }

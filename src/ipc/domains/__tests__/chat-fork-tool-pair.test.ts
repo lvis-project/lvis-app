@@ -87,7 +87,7 @@ describe("lvis:chat:fork — tool-pair invariant", () => {
 
   it("writes the forked session without the unpaired assistant toolCalls entry", async () => {
     const deps = await setup(historyWithOrphanToolCall());
-    const result = await invokeRegisteredHandler<Promise<{ ok: boolean }>>(handlers, CHANNEL, -1);
+    const result = await invokeRegisteredHandler<Promise<{ ok: boolean }>>(handlers, CHANNEL, -1, "main");
     expect(result.ok).toBe(true);
 
     const written = forkedMessages(deps);
@@ -97,7 +97,7 @@ describe("lvis:chat:fork — tool-pair invariant", () => {
 
   it("keeps the assistant text of the repaired message and the paired tool_result", async () => {
     const deps = await setup(historyWithOrphanToolCall());
-    await invokeRegisteredHandler<Promise<unknown>>(handlers, CHANNEL, -1);
+    await invokeRegisteredHandler<Promise<unknown>>(handlers, CHANNEL, -1, "main");
 
     const written = forkedMessages(deps);
     expect(written.map((m) => m.role)).toEqual(["user", "assistant", "tool_result", "assistant"]);
@@ -112,7 +112,7 @@ describe("lvis:chat:fork — tool-pair invariant", () => {
       // Assistant message carrying the call was lost; only the result survives.
       { role: "tool_result", toolUseId: "tu-dangling", content: "orphan result" },
     ]);
-    await invokeRegisteredHandler<Promise<unknown>>(handlers, CHANNEL, -1);
+    await invokeRegisteredHandler<Promise<unknown>>(handlers, CHANNEL, -1, "main");
 
     const written = forkedMessages(deps);
     expect(written.map((m) => m.role)).toEqual(["user"]);
@@ -120,7 +120,7 @@ describe("lvis:chat:fork — tool-pair invariant", () => {
 
   it("leaves the ACTIVE session save unrepaired — only the fork target is normalized", async () => {
     const deps = await setup(historyWithOrphanToolCall());
-    await invokeRegisteredHandler<Promise<unknown>>(handlers, CHANNEL, -1);
+    await invokeRegisteredHandler<Promise<unknown>>(handlers, CHANNEL, -1, "main");
 
     const activeCall = deps.memoryManager.saveSession.mock.calls.find(
       ([sessionId]: [string]) => sessionId === ACTIVE_SESSION,

@@ -1,8 +1,8 @@
-import { ArrowDownToLine, Download, PanelRightClose, PanelRightOpen, RefreshCw, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Download, RefreshCw, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
+import { ViewPathBreadcrumb, type ViewPathNavProps } from "./components/ViewPathNav.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
-import { ViewPathNav, type ViewPathNavProps } from "./components/ViewPathNav.js";
 import { RemoteA2AActionButton } from "./components/RemoteA2AActionButton.js";
 
 /**
@@ -53,22 +53,15 @@ function isDevMode(): boolean {
 }
 
 export interface MainToolbarProps {
-  /** Path + history controls for the current location. `activeView` used to be
-   *  passed here and thrown away; the path is what it was always for. */
+  /** Current location path. Rendered on the band's leading edge, immediately
+   *  after the sidebar-clearance reserve. */
   viewNav: ViewPathNavProps;
-  /** Left reserve (px) for the floating sidebar card that overlaps this band. */
-  leadClearance: number;
   streaming: boolean;
   hasApiKey: boolean | null;
   /** Current workspace mode (Chat / Work). Drives the segmented toggle. */
   appMode: AppMode;
   /** Fired when the user picks a segment in the Chat/Work toggle. */
   onToggleAppMode: (mode: AppMode) => void;
-  /** Whether the right-side work panel is open. */
-  sidePanelOpen: boolean;
-  /** Toggle the right-side work panel. */
-  onToggleSidePanel: () => void;
-
   onOpenDevTools?: () => void;
   /** Latest app-update state from the main process. */
   appUpdateState?: AppUpdateBadgeState;
@@ -86,13 +79,10 @@ export interface MainToolbarProps {
 
 export function MainToolbar({
   viewNav,
-  leadClearance,
   streaming: _streaming,
   hasApiKey: _hasApiKey,
   appMode,
   onToggleAppMode,
-  sidePanelOpen,
-  onToggleSidePanel,
   onOpenDevTools,
   appUpdateState = { kind: "idle" },
   appUpdateInFlight = false,
@@ -111,25 +101,18 @@ export function MainToolbar({
     <div
       data-testid="main-toolbar"
       className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2"
-      style={{ paddingLeft: `${leadClearance}px` }}
     >
+      {/* ── Location path, on the band's LEADING edge. The band itself reserves
+          the sidebar card's width (CustomTitleBar's `leadClearance`), so this
+          starts exactly where that card ends. Width-capped so a long path
+          truncates rather than eating the drag region the user grabs to move
+          the window. */}
+      <NoDrag className="flex min-w-0 max-w-[45%] shrink-0 items-center">
+        <ViewPathBreadcrumb segments={viewNav.segments} onSelectSegment={viewNav.onSelectSegment} />
+      </NoDrag>
+
       {/* ── Spacer pushes the trailing controls to the far-right edge (stays drag) */}
       <div className="min-w-0 flex-1 sm:min-w-[64px]" aria-hidden="true" data-testid="main-toolbar-drag-band" />
-
-      {/* ── Location: back / forward + the path.
-          It sits with the trailing group, NOT at the band's leading edge: the
-          floating sidebar card extends up into this band and covers the left
-          side, which is why this toolbar hosts only right-aligned controls in
-          the first place. Rendering the path there put it behind the card.
-          Width-capped so a long path truncates instead of eating the spacer
-          the user grabs to move the window. */}
-      {/* The BUTTONS stay at every width; only the path text collapses below
-          `md`. At the 460px chat width the band cannot fit a readable path,
-          but losing the way to go back with it would leave chat mode without
-          navigation at all (owner decision). */}
-      <NoDrag className="flex min-w-0 max-w-[45%] shrink-0 items-center">
-        <ViewPathNav {...viewNav} />
-      </NoDrag>
 
       <NoDrag>
         <RemoteA2AActionButton />
@@ -181,30 +164,10 @@ export function MainToolbar({
         <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
       </NoDrag>
 
-      <NoDrag>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="h-7 w-7 rounded-lg text-muted-foreground transition-[color,background-color,transform] duration-[var(--motion-fast)] ease-[var(--motion-ease-standard)] hover:bg-accent hover:text-foreground active:scale-[0.96] motion-reduce:transition-none motion-reduce:transform-none"
-              title={sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}
-              aria-label={sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}
-              aria-pressed={sidePanelOpen}
-              aria-expanded={sidePanelOpen}
-              aria-controls="chat-side-panel"
-              onClick={onToggleSidePanel}
-              data-testid="chat-side-panel-toggle"
-            >
-              <span key={sidePanelOpen ? "close" : "open"} className="lvis-anim-fade-in motion-reduce:animate-none">
-                {sidePanelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-              </span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}</TooltipContent>
-        </Tooltip>
-      </NoDrag>
+      {/* The work-panel toggle used to sit here. It moved into the chat
+          group's own header: the panel shows what THAT conversation is doing,
+          and one window-level button cannot mean the right thing once more
+          than one conversation is on screen. */}
     </div>
   );
 }

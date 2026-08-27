@@ -321,6 +321,10 @@ export interface SessionListEntry {
   parentSessionId?: string;
   /** Compact sequence number this session was forked from. Only set on true checkpoint forks. */
   branchedFromCompactNum?: number;
+  /** ISO time the user archived this conversation. Absent = not archived. */
+  archivedAt?: string;
+  /** ISO time the user marked it unread. Absent = read. */
+  unreadSince?: string;
   /** ISO timestamp when this session was branched. Only set on true checkpoint forks. */
   branchedAt?: string;
 }
@@ -385,9 +389,22 @@ export interface SessionMetadata {
   checkpoints?: Checkpoint[];
   /**
    * LLM-generated session title. When set, takes precedence over the
-   * auto-derived title from session content. Max 20 chars enforced on write.
+   * auto-derived title from session content. Capped on write at
+   * MAX_SESSION_TITLE_CHARS, the same length the auto-derived title uses.
    */
   title?: string;
+  /**
+   * ISO timestamp of when the user archived this conversation. Absent means
+   * not archived — the flag is the timestamp, so there is no second field to
+   * fall out of step with it.
+   */
+  archivedAt?: string;
+  /**
+   * ISO timestamp of when the user marked this conversation unread. Absent
+   * means read. This is a MANUAL mark, not a computed one: nothing sets it on
+   * the user's behalf, so nothing has to clear it on their behalf either.
+   */
+  unreadSince?: string;
   /**
    * Compact number of the checkpoint this session was branched from.
    * Set when a session is created via branchFromCheckpoint().
@@ -536,6 +553,15 @@ const MAX_PROMPT_MEMORY_INDEX_TOKENS = 400;
 const MAX_PROMPT_USER_PREFERENCES_TOKENS = 600;
 const MAX_MEMORY_SELECTION_ENTRY_TOKENS = 320;
 const MAX_MANAGED_MEMORY_TITLE_CHARS = 120;
+/**
+ * Cap for a stored session title.
+ *
+ * 80, not 20. The auto-derived title (readSessionSummary) already slices at 80,
+ * so a 20-char cap meant a title the user TYPED was held to a quarter of what
+ * the same row displayed when nobody typed anything — and 20 characters is a
+ * few words of Korean. One number now governs both.
+ */
+const MAX_SESSION_TITLE_CHARS = 80;
 const MAX_MANAGED_MEMORY_CONTENT_CHARS = 8_000;
 const MAX_CONSOLIDATION_SOURCE_NOTES = 16;
 const MAX_PROMPT_LONG_TERM_MEMORY_OVERVIEW_TOKENS = 400;
@@ -997,8 +1023,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
       ? rawPreamble.slice(0, MAX_SUMMARY_PREAMBLE_CHARS)
       : undefined,
     checkpoints: checkpoints && checkpoints.length > 0 ? checkpoints : undefined,
-    // Stored title (max 20 chars enforced on write; cap defensively on read too)
-    title: rawTitle && rawTitle.length > 0 ? rawTitle.slice(0, 20) : undefined,
+    // Stored title (capped on write; cap defensively on read too)
+    title: rawTitle && rawTitle.length > 0 ? rawTitle.slice(0, MAX_SESSION_TITLE_CHARS) : undefined,
     // Checkpoint branch provenance fields.
     branchedFromCompactNum: rawBranchedFromCompactNum,
     branchedAt: rawBranchedAt,
@@ -1023,6 +1049,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     subAgentTaskState,
     subAgentSuspensionReason,
     subAgentSuspensionPrompt,
+    archivedAt: typeof raw.archivedAt === "string" ? raw.archivedAt : undefined,
+    unreadSince: typeof raw.unreadSince === "string" ? raw.unreadSince : undefined,
   };
 }
 
@@ -2097,6 +2125,39 @@ export class MemoryManager {
     return changed ? hydrated : messages;
   }
 
+  /**
+   * Apply the row-level conversation fields to a session's metadata.
+   *
+   * `saveSessionMetadata` writes the whole file, so a field-level update has
+   * to read first or it erases everything it did not mention. The parameter is
+   * an explicit triple rather than a `Partial<SessionMetadata>`: this is the
+   * path a RENDERER reaches, and a general patch would let it set the A2A wire
+   * identity and the project binding, which it must never do.
+   *
+   * `null` clears; `undefined` leaves alone. That distinction is the whole
+   * reason the caller can unarchive and mark-read through the same call.
+   */
+  async updateSessionRowFields(
+    sessionId: string,
+    fields: { title?: string; archivedAt?: string | null; unreadSince?: string | null },
+  ): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`updateSessionRowFields: invalid sessionId "${sessionId}"`);
+    }
+    const current = this.loadSessionMetadata(sessionId) ?? {};
+    const next: SessionMetadata = { ...current };
+    if (fields.title !== undefined) next.title = fields.title;
+    if (fields.archivedAt !== undefined) {
+      if (fields.archivedAt === null) delete next.archivedAt;
+      else next.archivedAt = fields.archivedAt;
+    }
+    if (fields.unreadSince !== undefined) {
+      if (fields.unreadSince === null) delete next.unreadSince;
+      else next.unreadSince = fields.unreadSince;
+    }
+    await this.saveSessionMetadata(sessionId, next);
+  }
+
   async saveSessionMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
     if (!isValidSessionId(sessionId)) {
       throw new Error(`saveSessionMetadata: invalid sessionId "${sessionId}"`);
@@ -2139,9 +2200,8 @@ export class MemoryManager {
         );
       }
     }
-    // Cap stored title to 20 chars.
-    if (safe.title !== undefined && safe.title.length > 20) {
-      safe = { ...safe, title: safe.title.slice(0, 20) };
+    if (safe.title !== undefined && safe.title.length > MAX_SESSION_TITLE_CHARS) {
+      safe = { ...safe, title: safe.title.slice(0, MAX_SESSION_TITLE_CHARS) };
     }
     // Capture before the first asynchronous lock boundary. A detach and re-add
     // can otherwise clear the Set guard before this writer enters the lock.
@@ -2467,6 +2527,8 @@ export class MemoryManager {
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
           ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
+          ...(metadata?.archivedAt ? { archivedAt: metadata.archivedAt } : {}),
+          ...(metadata?.unreadSince ? { unreadSince: metadata.unreadSince } : {}),
         };
       });
   }
@@ -2570,6 +2632,8 @@ export class MemoryManager {
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
           ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
+          ...(metadata?.archivedAt ? { archivedAt: metadata.archivedAt } : {}),
+          ...(metadata?.unreadSince ? { unreadSince: metadata.unreadSince } : {}),
         };
       });
   }

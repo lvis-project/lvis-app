@@ -87,6 +87,12 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-native-context-menu": "formatIpcError.invalidInput",
   "invalid-value": "formatIpcError.invalidValue",
   "invalid-format": "formatIpcError.invalidFormat",
+  "invalid-session": "formatIpcError.invalidSession",
+  "invalid-title": "formatIpcError.invalidTitle",
+  "empty-title": "formatIpcError.emptyTitle",
+  "invalid-archived": "formatIpcError.invalidArchived",
+  "invalid-unread": "formatIpcError.invalidUnread",
+  "no-fields": "formatIpcError.noFields",
   "invalid-method": "formatIpcError.invalidMethod",
   "invalid-event-type": "formatIpcError.invalidEventType",
   "invalid-index": "formatIpcError.invalidIndex",
@@ -311,6 +317,10 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "open-failed": "formatIpcError.openFailed",
   "checkpoint-not-found": "formatIpcError.checkpointNotFound",
   "session-mismatch": "formatIpcError.sessionMismatch",
+  // ── Tiled chat groups ──
+  "chat-group-limit-reached": "formatIpcError.chatGroupLimitReached",
+  "chat-groups-unavailable": "formatIpcError.chatGroupsUnavailable",
+  "chat-group-required": "formatIpcError.chatGroupRequired",
   "preference-refresh-service-unavailable": "formatIpcError.preferenceRefreshServiceUnavailable",
   "production-disabled": "formatIpcError.productionDisabled",
   // ── Diagnostics bundle + log tail + crash list ──

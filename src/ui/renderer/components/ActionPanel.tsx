@@ -1,8 +1,6 @@
 import {
   Boxes,
   Cable,
-  ChevronLeft,
-  ChevronRight,
   FilePenLine,
   FileText,
   Globe2,
@@ -10,10 +8,9 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { type ReactNode } from "react";
 import { useTranslation } from "../../../i18n/react.js";
-import { FLOATING_LANE_ITEM_WIDTH } from "./FloatingRightLane.js";
 import { Button } from "../../../components/ui/button.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import {
   useNativeContextMenu,
@@ -223,41 +220,6 @@ function StatsDashboard({ stats }: { stats: ActivityStat[] }) {
   );
 }
 
-function CompactDashboardStat({
-  icon: Icon,
-  label,
-}: ActivityStat) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div
-          className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/(--opacity-faint) text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label={label}
-        >
-          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="left">{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function FloatingPanel({ children }: { children: ReactNode }) {
-  const { t } = useTranslation();
-
-  return (
-    <aside
-      aria-label={t("actionPanel.title")}
-      // Position comes from `FloatingRightLane`; this only describes the surface.
-      className={`lvis-surface-floating pointer-events-auto flex ${FLOATING_LANE_ITEM_WIDTH} flex-col overflow-hidden rounded-xl bg-card/(--opacity-solid) text-card-foreground backdrop-blur`}
-      data-testid="action-panel"
-      style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
-    >
-      {children}
-    </aside>
-  );
-}
-
 export function ActionPanel({
   open,
   onOpenChange,
@@ -277,71 +239,57 @@ export function ActionPanel({
   ];
   const populatedStats = allStats.filter((stat) => stat.count > 0);
 
-  if (!open) {
-    return (
-      <aside
-        aria-label={t("actionPanel.title")}
-        className="pointer-events-none"
-        data-testid="action-panel-rail"
-      >
-        <div
-          className="lvis-surface-raised flex w-11 max-w-[calc(100vw-2rem)] flex-col items-center gap-1.5 rounded-xl bg-card/(--opacity-solid) p-1.5 text-card-foreground backdrop-blur"
-          data-testid="action-panel-summary"
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="pointer-events-auto h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                aria-label={t("actionPanel.openAriaLabel")}
-                aria-expanded={false}
-                data-testid="action-panel-open"
-                onClick={() => onOpenChange(true)}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left">{t("actionPanel.openTooltip")}</TooltipContent>
-          </Tooltip>
-          <div className="flex min-w-0 flex-col items-center gap-1" data-testid="action-panel-summary-list">
-            {populatedStats.map((stat) => (
-              <CompactDashboardStat key={stat.label} icon={stat.icon} label={stat.label} count={stat.count} />
-            ))}
-          </div>
-        </div>
-      </aside>
-    );
-  }
+  const populatedCount = populatedStats.reduce((sum, stat) => sum + stat.count, 0);
 
+  // Anchored to the group header, opening DOWNWARD over the transcript.
+  // It used to float over the top-right of the chat column, which put it at
+  // the same point for every group on screen; a header-anchored disclosure
+  // says which conversation it is reporting on by where it hangs from.
   return (
-    <FloatingPanel>
-      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold leading-5">{t("actionPanel.title")}</h2>
-            <p className="truncate text-[11px] leading-4 text-muted-foreground">{t("actionPanel.subtitle")}</p>
-          </div>
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="h-8 w-8 shrink-0"
-              aria-label={t("actionPanel.closeAriaLabel")}
-              aria-expanded={true}
-              data-testid="action-panel-close"
-              onClick={() => onOpenChange(false)}
+              className="relative h-6 w-6 aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground"
+              aria-label={open ? t("actionPanel.closeAriaLabel") : t("actionPanel.openAriaLabel")}
+              aria-expanded={open}
+              data-testid="action-panel-open"
             >
-              <ChevronRight className="h-4 w-4" />
+              <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+              {populatedCount > 0 && (
+                // A count, not a dot: the panel's whole purpose is "how much
+                // did it just do", and that is answerable without opening it.
+                <span
+                  className="absolute -right-0.5 -top-0.5 min-w-3 rounded-full bg-primary px-0.5 text-[8px] font-medium leading-3 tabular-nums text-primary-foreground"
+                  data-testid="action-panel-badge"
+                >
+                  {populatedCount > 99 ? "99+" : populatedCount}
+                </span>
+              )}
             </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">{t("actionPanel.closeTooltip")}</TooltipContent>
-        </Tooltip>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t("actionPanel.title")}</TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        side="bottom"
+        align="end"
+        sideOffset={6}
+        aria-label={t("actionPanel.title")}
+        className="flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
+        style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
+        data-testid="action-panel"
+      >
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold leading-5">{t("actionPanel.title")}</h2>
+          <p className="truncate text-[11px] leading-4 text-muted-foreground">{t("actionPanel.subtitle")}</p>
+        </div>
       </div>
 
       <StatsDashboard stats={allStats} />
@@ -383,6 +331,7 @@ export function ActionPanel({
           web
         />
       </div>
-    </FloatingPanel>
+      </PopoverContent>
+    </Popover>
   );
 }

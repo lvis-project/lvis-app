@@ -143,6 +143,14 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     // from MainToolbar into the floating sidebar's cluster strip (#1319), so the
     // Sidebar is the host component that must carry them now.
     const sidebarProps: Parameters<typeof Sidebar>[0] = {
+    viewNav: {
+      segments: [],
+      canGoBack: false,
+      canGoForward: false,
+      onBack: () => {},
+      onForward: () => {},
+      onSelectSegment: () => {},
+    },
       activeView: "home",
       onSelect: vi.fn(),
       pluginViews: [],

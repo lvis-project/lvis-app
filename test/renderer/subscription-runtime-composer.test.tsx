@@ -83,14 +83,14 @@ describe("subscription runtime composer readiness", () => {
     // The persisted runtime might be a subscription, whose effort setting is
     // provider-owned. Do not briefly expose the API-only control before the
     // authoritative selection has loaded.
-    expect(container.querySelector('[data-testid="reasoning-slider"]')).toBeNull();
+    expect(container.querySelector('[data-testid="iab-status-reasoning"]')).toBeNull();
 
     resolveSettings(settings);
     await waitFor(() => expect(api.subscriptionRuntimeStatus).toHaveBeenCalledWith("codex"));
     await waitFor(() => {
       expect(container.querySelector('[data-testid="token-progress-ring"]')).toBeNull();
       expect(container.querySelector('[data-testid="token-cost-badge"]')).toBeNull();
-      expect(container.querySelector('[data-testid="reasoning-slider"]')).toBeNull();
+      expect(container.querySelector('[data-testid="iab-status-reasoning"]')).toBeNull();
     });
   });
 
@@ -116,7 +116,7 @@ describe("subscription runtime composer readiness", () => {
       expect(textarea).toBeTruthy();
       expect(textarea?.disabled).toBe(false);
       expect(container.querySelector('[data-testid="composer-api-key-chip"]')).toBeNull();
-      expect(container.querySelector('[data-testid="reasoning-slider"]')).toBeNull();
+      expect(container.querySelector('[data-testid="iab-status-reasoning"]')).toBeNull();
       expect(container.querySelector('[data-testid="token-progress-ring"]')).toBeNull();
       const attach = container.querySelector('[data-testid="iab-attach-button"]') as HTMLButtonElement | null;
       expect(attach?.disabled).toBe(false);

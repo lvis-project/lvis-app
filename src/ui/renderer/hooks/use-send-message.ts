@@ -20,7 +20,7 @@ import type {
 } from "../../../shared/chat-origin.js";
 import type { Attachment } from "../types/attachments.js";
 import type { useChatState } from "./use-chat-state.js";
-import type { useSessions } from "./use-sessions.js";
+import type { useCurrentSession } from "./use-sessions.js";
 import type { useSettings } from "./use-settings.js";
 import { subscriptionImageAttachmentLimitViolation } from "../utils/subscription-runtime-ui-policy.js";
 import {
@@ -32,7 +32,7 @@ import type { HandleAskRefFn } from "./use-routine-overlay.js";
 type Api = ReturnType<typeof getApi>;
 type TFn = ReturnType<typeof useTranslation>["t"];
 type ChatState = ReturnType<typeof useChatState>;
-type Sessions = ReturnType<typeof useSessions>;
+type Sessions = ReturnType<typeof useCurrentSession>;
 type Settings = ReturnType<typeof useSettings>;
 type ComposeOutgoingFn = (raw: string) => ReturnType<typeof composeOutgoingUtil>;
 
@@ -53,7 +53,7 @@ export interface UseSendMessageDeps {
   sessionLoad: Sessions["handleLoadSession"];
   applyLoadedSession: ChatState["applyLoadedSession"];
   refreshSessionId: Sessions["refreshSessionId"];
-  refreshSessions: Sessions["refreshSessions"];
+  refreshSessions: () => void | Promise<void>;
   attachments: Attachment[];
   setAttachments: Dispatch<SetStateAction<Attachment[]>>;
   llmVendor: Settings["llmVendor"];

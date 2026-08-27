@@ -37,6 +37,10 @@ export const zh: Record<SeedMessageKey, string> = {
   "mainDialog.pluginDisableNotPermitted": "此插件由您的组织管理，无法停用。",
   "mainDialog.noPersonasAvailable": "没有可用的 persona",
   "mainDialog.exportConversationTitle": "导出会话",
+  "mainDialog.deleteConversationMessage": "删除此对话？",
+  "mainDialog.deleteConversationDetail": "记录及其检查点将从磁盘中删除。此操作无法撤销。",
+  "mainDialog.deleteConversationConfirm": "删除",
+  "mainDialog.cancelButton": "取消",
   "mainDialog.importConversationTitle": "导入会话",
 
   // ── E4 — 启动 / 全局快捷键 ────────────────────────────────────────

@@ -31,6 +31,10 @@ export const fr: Record<SeedMessageKey, string> = {
   "mainDialog.pluginDisableNotPermitted": "Ce plugin est géré par votre organisation et ne peut pas être désactivé.",
   "mainDialog.noPersonasAvailable": "Aucune persona disponible",
   "mainDialog.exportConversationTitle": "Exporter la conversation",
+  "mainDialog.deleteConversationMessage": "Supprimer cette conversation ?",
+  "mainDialog.deleteConversationDetail": "La transcription et ses points de contrôle sont supprimés du disque. Cette action est irréversible.",
+  "mainDialog.deleteConversationConfirm": "Supprimer",
+  "mainDialog.cancelButton": "Annuler",
   "mainDialog.importConversationTitle": "Importer la conversation",
 
   // ── E4 — Démarrage / raccourcis globaux ───────────────────────────

@@ -242,6 +242,26 @@ export interface SubscriptionRuntimeCapabilities {
   readonly subagent: boolean;
 }
 
+/**
+ * The API-key vendor that reaches the same provider as a subscription runtime.
+ *
+ * A user recognises OpenAI, xAI, and Moonshot as one company each — the two
+ * ways in are an API key or signing in to that company's runtime, not two
+ * providers with similar names. Settings lists the provider once and offers
+ * the authentication methods, and this is the join that makes that possible.
+ *
+ * Values are the ids the LLM vendor settings already use: a built-in vendor id
+ * for OpenAI, an OpenAI-compatible preset id for the other two. A runtime with
+ * no key-based route simply has no entry.
+ */
+export const SUBSCRIPTION_RUNTIME_API_COUNTERPART: Readonly<
+  Partial<Record<SubscriptionRuntimeId, string>>
+> = Object.freeze({
+  codex: "openai",
+  "grok-build": "xai",
+  "kimi-code": "moonshot",
+});
+
 /** Safe capability projection when a runtime has not verified a feature. */
 export const DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES: SubscriptionRuntimeCapabilities = Object.freeze({
   chat: false,
@@ -256,6 +276,33 @@ export const DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES: SubscriptionRuntimeCapab
   compaction: false,
   routine: false,
   subagent: false,
+});
+
+/**
+ * The API-key path's capability projection, in the same shape the subscription
+ * runtimes report so one checklist can describe every connection.
+ *
+ * These are not vendor claims. On the API path LVIS runs its own engine, so
+ * tools, MCP, routines, subagents, compaction, plugins, and project access are
+ * host features that hold for any vendor; attachment ingress is likewise
+ * unconditional there (see `SubscriptionRuntimeUiPolicy`: "API-key providers
+ * keep their established policy"). `imageAttachmentLimits` stays null because
+ * the native-image budget is a subscription-transport concept — the API path
+ * sends attachments through the normal composer pipeline instead.
+ */
+export const API_PATH_RUNTIME_CAPABILITIES: SubscriptionRuntimeCapabilities = Object.freeze({
+  chat: true,
+  images: true,
+  imageAttachmentLimits: null,
+  files: true,
+  tools: true,
+  projectAccess: true,
+  plugins: true,
+  mcp: true,
+  generateText: true,
+  compaction: true,
+  routine: true,
+  subagent: true,
 });
 
 export const SUBSCRIPTION_RUNTIME_DESCRIPTORS: readonly SubscriptionRuntimeDescriptor[] = [

@@ -275,11 +275,6 @@
     {
       "type": "exports",
       "file": "src/components/ui/select.tsx",
-      "name": "SelectLabel"
-    },
-    {
-      "type": "exports",
-      "file": "src/components/ui/select.tsx",
       "name": "SelectScrollDownButton"
     },
     {
@@ -2881,11 +2876,6 @@
       "type": "types",
       "file": "src/ui/renderer/preview/workspace-tabs.ts",
       "name": "WorkspaceTabMode"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/tabs/SubscriptionProvidersSection.tsx",
-      "name": "SubscriptionProviderCapabilities"
     },
     {
       "type": "types",

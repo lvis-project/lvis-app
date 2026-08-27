@@ -2,10 +2,12 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-06-30 (Asia/Seoul)
+- Last refreshed: 2026-08-27 (Asia/Seoul)
 - Primary product surfaces: LVIS desktop renderer, chat workspace, work mode, plugin pages, settings, marketplace, right-side action/activity surfaces.
 - Evidence reviewed:
   - External index: `https://github.com/voltagent/awesome-design-md`
+  - VS Code workbench benchmark (2026-08-27): `code.visualstudio.com/api/references/theme-color`,
+    `/docs/getstarted/userinterface`, `/api/ux-guidelines/{overview,sidebars,editor-actions,context-menus}`
   - Downloaded reference docs via `getdesign`: Linear, Raycast, Vercel, VoltAgent
   - Local token system: `src/styles.css`, `src/shared/theme-bundles.ts`, `src/ui/renderer/theme/`
   - Local component surfaces: `src/ui/renderer/components/ActionPanel.tsx`, `Sidebar.tsx`, `InputActionBar.tsx`, plugin host pages
@@ -92,17 +94,125 @@
   - Truncation is intentional: single-line cells use `truncate`; multi-line summaries clamp at 1–2 lines (`line-clamp-1/2`). Paths and identifiers truncate with a tooltip carrying the full value; prefer keeping the tail (filename) visible.
   - Timestamps are compact and locale-aware; relative time may be used in activity feeds but absolute time must be recoverable (tooltip or detail).
 
+## Workbench model
+
+Benchmarked against the VS Code workbench (`code.visualstudio.com/api/references/theme-color`,
+`/docs/getstarted/userinterface`, `/api/ux-guidelines/*`). VS Code is the closest shipping
+product to what LVIS is: a dense, long-running operator surface where several pieces of work
+are open at once and the chrome has to stay out of the way. What follows is what we take from
+it and — just as important — what we do not.
+
+### Parts own their tokens, and the part boundary is the design boundary
+
+VS Code splits the window into named parts — Title Bar, Activity Bar, Side Bar, Editor Group,
+Panel, Status Bar — and gives each its own token family (`titleBar.*`, `sideBar.*`,
+`editorGroup.*`, `editorGroupHeader.*`, `breadcrumb.*`). A control's appearance is decided by
+which part it is in, not by what it does. Ours are: **window band**, **sidebar**, **chat
+group**, **work panel**, **status strip**.
+
+The rule that follows is the one worth internalising: *an action belongs to the part that owns
+the thing it acts on.* Pin, export, and import act on a conversation, so they belong to the
+chat group, not to the window band. A control placed in the wrong part is a token violation
+before it is a layout one.
+
+### The work container is a framed group
+
+VS Code's editor group is a **bordered container**, not an open canvas: `editorGroup.border`
+separates groups, `editorGroupHeader.tabsBorder` is the hairline under the header, and
+`editorGroup.focusedEmptyBorder` puts *focus on the frame itself*. That last token is the
+tell — in a multi-group workbench, "which one am I typing into" has to be answerable at a
+glance, and the frame is what answers it.
+
+For LVIS this means the chat area is an outlined group with its own header, and the focused
+group is distinguishable by its border. This is a deliberate, narrow exception to
+"Avoid box-in-box layouts": the chat group qualifies as *a distinct repeated item* under
+principle 2, and it earns the frame precisely because it repeats.
+
+### Group header carries title on the leading edge, actions on the trailing edge
+
+The header is the group's own strip: what this group holds, then what you can do to it. Actions
+scoped to the whole container live here, and the same actions appear in the container's context
+menu. The trailing edge ends with the group's own controls — its sidebar toggle, its split, its
+close — so the frame is self-sufficient: everything you can do to a group is reachable from the
+group. VS Code's sidebar guidance is explicit that a toolbar should stay small — *"be careful to
+not add too many actions to reduce clutter and confusion"* — so the header takes the few actions
+that act on the conversation and nothing else.
+
+### Path depth belongs to the content, not to the window
+
+Breadcrumbs in VS Code sit at the **top of the editor content, on the leading edge** — under the
+chrome, above the text — because the path describes what is open, not where the window is. Their
+tokens (`breadcrumb.foreground`, `breadcrumb.activeSelectionForeground`) are content tokens, not
+title-bar tokens. A path floated to the trailing edge of the window band reads as window
+furniture and loses that association.
+
+History navigation is the opposite case: back/forward act on the *window's* location, so they
+stay in the chrome.
+
+### Splitting is a first-class layout, not a window trick
+
+Editor groups split vertically and horizontally, hold independent content, are rearranged by
+drag, and are closed as a unit. Crucially each group is *complete on its own* — its own header,
+its own actions, its own focus. A split that shares one header across panes is a split view, not
+a group.
+
+LVIS chat groups follow this: multiple chat groups tile in the main area, and each carries its
+own header and its own sidebar. A group is the unit of both layout and state.
+
+Two constraints we impose on ourselves that VS Code does not:
+
+- **Flat list along one axis, not a split tree.** A tree buys arbitrary nesting, and nothing
+  else in the app can address a nested position — not a keyboard command, not a restore, not a
+  test. A flat list is the model the rest of the app can actually name a group in.
+- **A group may only exist if a conversation source backs it.** Every source is a distinct
+  conversation loop in the main process. When none is free, the split control is *absent*, not
+  disabled. An empty tile that looks live is worse than no tile, and a chat box that cannot
+  answer is not a layout feature.
+
+### Rows carry inline actions on hover and the same actions in a context menu
+
+VS Code's list rows reveal inline actions on hover, and the row's context menu offers the same
+set plus the rest. Two rules from the UX guidelines carry over verbatim: *group similar actions
+together*, and *place large groups of actions into a submenu*. The inline affordance is the
+frequent one; the menu is the complete one. They must not disagree about what is possible.
+
+Hover treatment for an inline action is its own token family in VS Code
+(`toolbar.hoverBackground` / `toolbar.activeBackground`), separate from the row's own
+`list.hoverBackground` — a row highlight and a button highlight are different signals and must
+not be drawn with the same value.
+
+### What we do NOT take
+
+- **The Activity Bar.** It exists because VS Code hosts many unrelated view containers. Our
+  sidebar has one job; a second vertical rail would be chrome without content.
+- **Tabs on the group.** VS Code tabs solve "many files, one group". Our chat groups are the
+  tabs; adding a tab strip inside a group would nest the same idea twice.
+- **The Status Bar as a dense readout.** VS Code packs it with per-language state we do not
+  have. Our bottom strip stays minimal.
+- **`workbench.*` naming.** Token names stay semantic (`bg-card`, `border-border`); VS Code's
+  part-prefixed names are for a theming API we do not expose.
+
 ## Components
 - Existing components to reuse: shadcn primitives in `src/components/ui/*`, theme provider, semantic token utilities, lucide icons, existing tooltip/popover/dialog primitives.
 - Canonical app surfaces:
-  - Sidebar: route ownership and plugin entry points.
+  - Sidebar: route ownership, conversation/project lists, and plugin entry points. Owns
+    history navigation (back/forward) in its leading cluster strip; owns per-row inline
+    actions and per-row context menus.
+  - Chat group: the framed work container (see Workbench model). Owns its header — title on
+    the leading edge, conversation-scoped actions and its work-panel toggle on the trailing
+    edge — and owns its own work panel. Groups tile; each is complete on its own.
   - Main canvas: route-owned work surface with minimal host framing through `PageShell`.
+    Carries the location path on its LEADING edge, under the window band.
   - ActionPanel: floating operational activity surface.
   - Command picker: search and 1st/2nd-depth command navigation.
   - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
   - SettingsSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.
 - Variants and states:
-  - Hover: subtle semantic surface tint, never layout shift.
+  - Hover: subtle semantic surface tint, never layout shift. A ROW highlight and an inline
+    BUTTON highlight inside that row are different signals and must not share one value.
+  - Group focus: a framed container expresses focus on its own border, not only on the
+    control inside it — with several groups open, the frame is what answers "which one
+    am I typing into".
   - Active/selected: primary or route-specific accent with accessible foreground.
   - Focus: shared ring token, always visible for keyboard users.
   - Empty/loading/error/success: literal operational state, not decorative copy.

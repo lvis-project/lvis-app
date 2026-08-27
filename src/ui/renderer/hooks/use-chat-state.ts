@@ -212,11 +212,15 @@ export function useChatState(api: LvisApi) {
           }
           return;
         }
-        setEntries((p) => {
-          streamRef.current += ev.text!;
-          const base = p;
-          return upsertStreamingAssistant(base, streamRef.current);
-        });
+        // The accumulator advances HERE, not inside the updater. React runs an
+        // updater at flush time, so a ref mutated in one only catches up when
+        // React decides to re-render — and any frame that arrives in the same
+        // tick reads it empty. `assistant_round` reading an empty accumulator
+        // is exactly how a finished turn ends up with a blank body.
+        // `reasoning_delta` below has always done it this way.
+        streamRef.current += ev.text;
+        const streamedBody = streamRef.current;
+        setEntries((p) => upsertStreamingAssistant(p, streamedBody));
       } else if (ev.type === "reasoning_delta" && ev.text) {
         if (finalAssistantRoundClosedRef.current) {
           if (debugStreamEnabled) {
@@ -287,10 +291,17 @@ export function useChatState(api: LvisApi) {
           }
           return;
         }
+        // Both accumulators are read HERE, not inside the updater. The handler
+        // clears them a few lines below, and an updater runs at flush time —
+        // so when React defers (two frames landing in one tick), the updater
+        // reads the ALREADY-CLEARED ref and finalizes the turn with an empty
+        // body. Capturing first makes the outcome independent of scheduling.
+        const roundThought = ev.thought ?? thoughtRef.current;
+        const roundRawText = ev.text || streamRef.current;
         setEntries((p) => {
           const base = p;
           const beforeCount = base.length;
-          let next = finalizeStreamingReasoning(base, ev.thought ?? thoughtRef.current);
+          let next = finalizeStreamingReasoning(base, roundThought);
           const afterReasoningCount = next.length;
           // Bugfix #561 follow-up: empty-string `ev.text` from the engine
           // would be picked by the previous `ev.text ?? streamRef.current`
@@ -298,7 +309,7 @@ export function useChatState(api: LvisApi) {
           // accumulated body and leaving the assistant entry blank. Use
           // `||` so an empty string falls through to the delta-accumulated
           // `streamRef.current` instead of overwriting body content.
-          const rawText = ev.text || streamRef.current;
+          const rawText = roundRawText;
           const detected = detectFromStream(rawText);
           const finalText = visibleAssistantText(detected.cleanedText);
           next = finalizeStreamingAssistant(next, finalText, { phase, overrideText: finalText });
@@ -308,7 +319,7 @@ export function useChatState(api: LvisApi) {
               beforeCount,
               afterReasoningCount,
               afterAssistantCount,
-              usedThought: (ev.thought ?? thoughtRef.current).length,
+              usedThought: roundThought.length,
               rawTextLen: rawText.length,
               cleanedTextLen: finalText.length,
               phase,

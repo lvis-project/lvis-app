@@ -29,7 +29,10 @@ describe("App — view key guard on the activate-view IPC", () => {
 
     await waitFor(() => expect(screen.getByTestId("view-path-current-memory")).toBeTruthy());
     expect(screen.queryByTestId("main-content-back")).toBeNull();
-    expect(screen.queryByTestId("chat-view-root")).toBeNull();
+    // The conversations stay MOUNTED across view navigation — a tile's stream
+    // subscription starts when it mounts, so unmounting them to show another
+    // view would drop the frames of a turn still running. Hidden, not gone.
+    expect(screen.getByTestId("chat-surface").dataset.visible).toBe("false");
   });
 
   it("ignores a misspelled built-in key instead of rendering it as a plugin view", async () => {

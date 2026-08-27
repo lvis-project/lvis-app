@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../../../lib/utils.js";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
@@ -9,7 +10,6 @@ import {
   Bot,
   LayoutGrid,
   Loader2,
-  PanelRightClose,
   Pin,
   Plus,
   X,
@@ -25,6 +25,7 @@ import {
 import { useTranslation } from "../../../i18n/react.js";
 import { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
+import { useChatGroupPanelBand } from "./ChatGroupFrame.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
@@ -646,6 +647,14 @@ export function ChatSidePanel({
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
+  // The group frame owns the header band; the panel reports its column width
+  // so the band's divider lands on that column's own edge.
+  const panelBand = useChatGroupPanelBand();
+  useEffect(() => {
+    if (!resizable) return;
+    panelBand?.setWidth(width);
+    return () => panelBand?.setWidth(null);
+  }, [panelBand, resizable, width]);
 
   // ─── Tab-bar horizontal scroll / drag-pan (diagnosis ②) ──────────────────
   const tabScrollElRef = useRef<HTMLDivElement | null>(null);
@@ -797,63 +806,16 @@ export function ChatSidePanel({
     else if (r.right > c.right) el.scrollLeft += (r.right - c.right) + 8;
   }, [activeTab, tabs.length]);
 
-  return (
-    <aside
-      data-testid="chat-side-panel"
-      // `width` is the complete docked flex reservation. The floating card's
-      // `mr-2` consumes 0.5rem of that reservation instead of overflowing it.
-      style={resizable ? { width: `calc(${width}px - 0.5rem)` } : undefined}
-      className={[
-        "min-h-0 min-w-0 backdrop-blur",
-        resizable
-          ? // Docked (resizable) variant — a FLOATING card, matching the left
-            // Sidebar's visual language: margin/gap off the canvas edges,
-            // rounded-2xl, shadow-e2, surface-raised bg, hairline border-subtle.
-            // Previously flush-docked (border-l, no radius, bg-background) —
-            // this reads as a distinct depth-tier surface instead of a seam.
-            // Rounding/clipping lives on the INNER chat-preview-rail wrapper
-            // (below), not this <aside> — the aside stays overflow-visible so
-            // the resize bar's straddled hit-strip and any content that
-            // intentionally overflows (tooltips, drag cursor) are unaffected.
-            "my-2 mr-2 rounded-2xl border border-border-subtle bg-card shadow-e2"
-          : // Narrow-screen drawer variant fills its WorkspaceRailDrawer sheet —
-            // no floating chrome (the sheet itself is already the surface).
-            "bg-background/(--opacity-solid)",
-        className,
-      ].join(" ")}
+  // The panel's tabs ARE its header. When the group frame offers its band,
+  // they render there so the header line runs unbroken across both columns;
+  // the narrow-screen drawer has no such band, so they render in place.
+  const tabStripContent = (
+    <div
+      className={panelBand?.slot
+        ? "flex h-full min-w-0 flex-1 items-center gap-1"
+        : "flex min-w-0 shrink-0 items-center gap-2 border-b px-2 py-1"}
+      data-testid="chat-side-panel-tab-strip"
     >
-      {resizable ? (
-        <EdgeResizeBar
-          width={width}
-          edge="start"
-          onWidthChange={onWidthChange}
-          onWidthCommit={onWidthCommit}
-          min={SIDE_PANEL_MIN_WIDTH}
-          max={resolveSidePanelMaxWidth}
-          resetWidth={SIDE_PANEL_DEFAULT_WIDTH}
-          applyElementRef={resizeElementRef}
-          ariaLabel={t("chatPreviewRail.resizePanel")}
-          data-testid="chat-side-panel-width-splitter"
-        />
-      ) : null}
-      <div
-        data-testid="chat-preview-rail"
-        className={`flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden ${resizable ? "rounded-2xl" : ""}`}
-      >
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-          <PanelRightClose className="h-4 w-4 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{t("chatPreviewRail.title")}</div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button type="button" size="icon-xs" variant="ghost" title={t("chatPreviewRail.close")} aria-label={t("chatPreviewRail.close")} onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-
-        {tabs.length > 0 ? (
-        <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-2 py-1">
           <div
             ref={attachTabScroll}
             role="tablist"
@@ -930,9 +892,69 @@ export function ChatSidePanel({
           </div>
           <div className="flex shrink-0 items-center gap-1 border-l pl-2" data-testid="chat-side-panel-tab-actions">
             <WorkspaceLauncherMenu onOpen={addTab} />
+            {/* Docked, the group header band already carries the control that
+                closes this column. The drawer has no such band, so it keeps
+                its own. */}
+            {panelBand?.slot ? null : (
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                title={t("chatPreviewRail.close")}
+                aria-label={t("chatPreviewRail.close")}
+                onClick={onClose}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
           </div>
-        </div>
-        ) : null}
+    </div>
+  );
+  const tabStrip = panelBand?.slot
+    ? createPortal(tabStripContent, panelBand.slot)
+    : tabStripContent;
+
+  return (
+    <aside
+      data-testid="chat-side-panel"
+      // `width` is the complete docked flex reservation. The floating card's
+      // `mr-2` consumes 0.5rem of that reservation instead of overflowing it.
+      style={resizable ? { width: `${width}px` } : undefined}
+      className={[
+        "min-h-0 min-w-0 backdrop-blur",
+        resizable
+          ? // Docked variant — a COLUMN of the chat group, not a card floating
+            // inside it. Its header segment lives in the group's header band,
+            // so the seam between the two columns has to be one unbroken line
+            // from that band to the bottom of the group; a floating card with
+            // its own margins and rounding would break the line and start the
+            // panel BELOW the header instead of level with it.
+            "border-l border-border/(--opacity-half) bg-card"
+          : // Narrow-screen drawer variant fills its WorkspaceRailDrawer sheet —
+            // no floating chrome (the sheet itself is already the surface).
+            "bg-background/(--opacity-solid)",
+        className,
+      ].join(" ")}
+    >
+      {resizable ? (
+        <EdgeResizeBar
+          width={width}
+          edge="start"
+          onWidthChange={onWidthChange}
+          onWidthCommit={onWidthCommit}
+          min={SIDE_PANEL_MIN_WIDTH}
+          max={resolveSidePanelMaxWidth}
+          resetWidth={SIDE_PANEL_DEFAULT_WIDTH}
+          applyElementRef={resizeElementRef}
+          ariaLabel={t("chatPreviewRail.resizePanel")}
+          data-testid="chat-side-panel-width-splitter"
+        />
+      ) : null}
+      <div
+        data-testid="chat-preview-rail"
+        className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden"
+      >
+        {tabStrip}
 
         <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab?.kind} data-active-tab-mode={activeTab?.mode}>
           {activeTab == null ? (

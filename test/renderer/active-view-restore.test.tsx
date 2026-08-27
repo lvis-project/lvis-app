@@ -49,7 +49,13 @@ function isActive(container: HTMLElement, testId: string): boolean {
 }
 
 function atHome(container: HTMLElement): boolean {
-  return container.querySelector('[data-testid="composer-textarea"]') !== null;
+  // The conversations stay MOUNTED across view navigation — a tile subscribes
+  // to its group's stream when it mounts, so unmounting them to show another
+  // view would drop the frames of a turn still running. "At home" is therefore
+  // whether the surface is SHOWING, not whether it exists.
+  return container
+    .querySelector('[data-testid="chat-surface"]')
+    ?.getAttribute("data-visible") === "true";
 }
 
 /**
@@ -295,15 +301,15 @@ describe("a launch whose stored location has not arrived yet", () => {
 
   it("records a pick that changes nothing on screen, since it still supersedes the stored one", async () => {
     // The shape where the discard and the write disagree about what happened.
-    // Selecting Home while the window is on the seed `home` moves nothing, so
-    // it reads as a navigation with nothing to record — but it supersedes the
-    // stored location just as any other does, and the app is left holding a
-    // location the user has already overridden.
+    // Starting a new chat while the window is already on the chat surface moves
+    // nothing, so it reads as a navigation with nothing to record — but it
+    // supersedes the stored location just as any other does, and the app is
+    // left holding a location the user has already overridden.
     const { release, opts } = heldLaunch(settingsWithActiveView("work-board"));
     const { container, api } = await renderApp(opts);
     await waitFor(() => expect(atHome(container)).toBe(true));
 
-    await clickNav(container, "sidebar-home");
+    await clickNav(container, "sidebar-new-chat");
     await act(async () => {
       release();
     });

@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Sidebar } from "../Sidebar.js";
 import type { SessionSummary } from "../../hooks/use-sessions.js";
@@ -112,9 +112,14 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     collapsed: false,
     onToggleCollapse: vi.fn(),
     onOpenUnifiedSearch: vi.fn(),
-    isCurrentSessionStarred: false,
-    onToggleCurrentSessionStar: vi.fn(),
-    onExport: vi.fn(),
+    viewNav: {
+      segments: [],
+      canGoBack: false,
+      canGoForward: false,
+      onBack: vi.fn(),
+      onForward: vi.fn(),
+      onSelectSegment: vi.fn(),
+    },
     sessions,
     projects: overrides.projects ?? [
       {
@@ -387,7 +392,12 @@ describe("Sidebar conversation pinning", () => {
     try {
       const unassigned = getByTestId("sidebar-unassigned-sessions");
       const rows = Array.from(unassigned.querySelectorAll('[data-testid^="sidebar-session-"]'))
-        .filter((el) => !el.getAttribute("data-testid")?.includes("-pin-"));
+        .filter((el) => {
+          // Keep only the row's own load button. Each row also carries a pin
+          // and a menu button under the same `sidebar-session` prefix.
+          const id = el.getAttribute("data-testid") ?? "";
+          return !id.includes("-pin-") && !id.includes("-menu-");
+        });
       expect(rows.map((el) => el.getAttribute("data-testid"))).toEqual([
         "sidebar-session-sess-2",
         "sidebar-session-sess-1",
@@ -407,7 +417,12 @@ describe("Sidebar conversation pinning", () => {
     try {
       let unassigned = getByTestId("sidebar-unassigned-sessions");
       let rows = Array.from(unassigned.querySelectorAll('[data-testid^="sidebar-session-"]'))
-        .filter((el) => !el.getAttribute("data-testid")?.includes("-pin-"));
+        .filter((el) => {
+          // Keep only the row's own load button. Each row also carries a pin
+          // and a menu button under the same `sidebar-session` prefix.
+          const id = el.getAttribute("data-testid") ?? "";
+          return !id.includes("-pin-") && !id.includes("-menu-");
+        });
       expect(rows[0].getAttribute("data-testid")).toBe("sidebar-session-sess-2");
 
       pinned = new Set();
@@ -425,9 +440,14 @@ describe("Sidebar conversation pinning", () => {
             collapsed={false}
             onToggleCollapse={vi.fn()}
             onOpenUnifiedSearch={vi.fn()}
-            isCurrentSessionStarred={false}
-            onToggleCurrentSessionStar={vi.fn()}
-            onExport={vi.fn()}
+            viewNav={{
+              segments: [],
+              canGoBack: false,
+              canGoForward: false,
+              onBack: vi.fn(),
+              onForward: vi.fn(),
+              onSelectSegment: vi.fn(),
+            }}
             sessions={[
               {
                 id: "sess-1",
@@ -452,7 +472,12 @@ describe("Sidebar conversation pinning", () => {
       );
       unassigned = getByTestId("sidebar-unassigned-sessions");
       rows = Array.from(unassigned.querySelectorAll('[data-testid^="sidebar-session-"]'))
-        .filter((el) => !el.getAttribute("data-testid")?.includes("-pin-"));
+        .filter((el) => {
+          // Keep only the row's own load button. Each row also carries a pin
+          // and a menu button under the same `sidebar-session` prefix.
+          const id = el.getAttribute("data-testid") ?? "";
+          return !id.includes("-pin-") && !id.includes("-menu-");
+        });
       expect(rows.map((el) => el.getAttribute("data-testid"))).toEqual([
         "sidebar-session-sess-1",
         "sidebar-session-sess-2",
@@ -833,5 +858,154 @@ describe("Sidebar conversation context menu", () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe("Sidebar conversation row actions", () => {
+  const rowState = () => ({
+    archived: new Set<string>(),
+    unread: new Set<string>(),
+    onRename: vi.fn(),
+    onSetArchived: vi.fn(),
+    onSetUnread: vi.fn(),
+    onShare: vi.fn(),
+    onCopy: vi.fn(),
+    onDelete: vi.fn(),
+  });
+
+  const asActions = (state: ReturnType<typeof rowState>) => ({
+    isArchived: (id: string) => state.archived.has(id),
+    isUnread: (id: string) => state.unread.has(id),
+    onRename: state.onRename,
+    onSetArchived: state.onSetArchived,
+    onSetUnread: state.onSetUnread,
+    onShare: state.onShare,
+    onCopy: state.onCopy,
+    onDelete: state.onDelete,
+  });
+
+  it("opens the same menu from the trailing button as from a right-click", () => {
+    const state = rowState();
+    const { getByTestId, showNativeContextMenu, restore } = renderSidebar({
+      conversationActions: asActions(state),
+    });
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    const call = showNativeContextMenu.mock.calls.at(-1)?.[0];
+    expect(call?.kind).toBe("conversation");
+    // Every command the row offers must be one the main-side allow-list knows.
+    expect(call?.commands).toEqual(
+      expect.arrayContaining([
+        "conversation.rename",
+        "conversation.mark-unread",
+        "conversation.share",
+        "conversation.copy",
+        "conversation.archive",
+        "conversation.delete",
+      ]),
+    );
+    restore();
+  });
+
+  it("offers unarchive and mark-read once the row is in those states", () => {
+    const state = rowState();
+    state.archived.add("sess-1");
+    state.unread.add("sess-1");
+    const { getByTestId, showNativeContextMenu, restore } = renderSidebar({
+      conversationActions: asActions(state),
+    });
+    fireEvent.click(getByTestId("sidebar-toggle-archived"));
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    const call = showNativeContextMenu.mock.calls.at(-1)?.[0];
+    expect(call?.commands).toContain("conversation.unarchive");
+    expect(call?.commands).toContain("conversation.mark-read");
+    expect(call?.commands).not.toContain("conversation.archive");
+    expect(call?.commands).not.toContain("conversation.mark-unread");
+    restore();
+  });
+
+  it("hides archived conversations until the archive toggle is used", () => {
+    const state = rowState();
+    state.archived.add("sess-1");
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      conversationActions: asActions(state),
+    });
+    expect(queryByTestId("sidebar-session-sess-1")).toBeNull();
+    fireEvent.click(getByTestId("sidebar-toggle-archived"));
+    expect(queryByTestId("sidebar-session-sess-1")).not.toBeNull();
+    restore();
+  });
+
+  it("offers import on the LIST, and only row commands on a row", () => {
+    const state = rowState();
+    const onImport = vi.fn();
+    const { getByTestId, showNativeContextMenu, restore } = renderSidebar({
+      conversationActions: { ...asActions(state), onImport },
+    });
+    // The list's own blank area answers with import and nothing row-scoped:
+    // import creates a NEW conversation, so it cannot act on a row.
+    fireEvent.contextMenu(getByTestId("sidebar-unassigned-sessions"));
+    const listMenu = showNativeContextMenu.mock.calls.at(-1)?.[0];
+    expect(listMenu?.commands).toEqual(["conversation.import"]);
+
+    // A row answers first and does NOT offer import.
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    const rowMenu = showNativeContextMenu.mock.calls.at(-1)?.[0];
+    expect(rowMenu?.commands).not.toContain("conversation.import");
+    expect(rowMenu?.commands).toContain("conversation.delete");
+    restore();
+  });
+
+  it("commits a rename on Enter and abandons it on Escape", () => {
+    const state = rowState();
+    const { getByTestId, emitNativeContextCommand, restore } = renderSidebar({
+      conversationActions: asActions(state),
+    });
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    act(() => emitNativeContextCommand("conversation.rename"));
+    const field = getByTestId("sidebar-session-rename-sess-1");
+    fireEvent.change(field, { target: { value: "새 이름" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(state.onRename).not.toHaveBeenCalled();
+
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    act(() => emitNativeContextCommand("conversation.rename"));
+    const again = getByTestId("sidebar-session-rename-sess-1");
+    fireEvent.change(again, { target: { value: "새 이름" } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    expect(state.onRename).toHaveBeenCalledWith("sess-1", "새 이름");
+    restore();
+  });
+});
+
+describe("Sidebar collapsed rail", () => {
+  it("renders collapsed as well as expanded", () => {
+    // The collapsed rail returns EARLY from the conversation list, so any hook
+    // added below that branch renders in one state and not the other. React
+    // reports that as "rendered fewer hooks than expected" and the whole app
+    // falls into the error boundary — which is what this asserts against.
+    const { getByTestId, restore } = renderSidebar({ collapsed: true });
+    expect(getByTestId("sidebar-cluster")).toBeTruthy();
+    restore();
+  });
+});
+
+describe("Sidebar current-row scoping", () => {
+  it("marks the loaded conversation as the current page only while a conversation is showing", () => {
+    const onChat = renderSidebar({ activeView: "home" });
+    expect(
+      onChat.getByTestId("sidebar-session-sess-1").getAttribute("aria-current"),
+    ).toBe("page");
+    onChat.restore();
+    cleanup();
+
+    // A session stays LOADED while the user reads a plugin view, but the page
+    // they are on is the plugin. Both rows claiming `aria-current="page"` told
+    // a screen reader the window was in two places at once, and drew the chat
+    // row selected underneath the selected plugin row.
+    const onPlugin = renderSidebar({ activeView: "plugin:notes:panel" });
+    expect(
+      onPlugin.getByTestId("sidebar-session-sess-1").getAttribute("aria-current"),
+    ).toBeNull();
+    onPlugin.restore();
   });
 });
