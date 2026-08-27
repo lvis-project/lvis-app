@@ -1646,7 +1646,7 @@ export function App() {
                                     group.source === "side"
                                       ? t("chatGroup.sideChatTitle")
                                       : sessions.find((s) => s.id === currentSessionId)?.title
-                                        ?? t("sidebar.newChat")
+                                        ?? t("mainToolbar.newChat")
                                   }
                                   focused={chatGroups.focusedId === group.id}
                                   onFocus={() => chatGroups.focus(group.id)}
