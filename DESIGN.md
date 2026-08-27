@@ -132,7 +132,9 @@ principle 2, and it earns the frame precisely because it repeats.
 
 The header is the group's own strip: what this group holds, then what you can do to it. Actions
 scoped to the whole container live here, and the same actions appear in the container's context
-menu. VS Code's sidebar guidance is explicit that a toolbar should stay small — *"be careful to
+menu. The trailing edge ends with the group's own controls — its sidebar toggle, its split, its
+close — so the frame is self-sufficient: everything you can do to a group is reachable from the
+group. VS Code's sidebar guidance is explicit that a toolbar should stay small — *"be careful to
 not add too many actions to reduce clutter and confusion"* — so the header takes the few actions
 that act on the conversation and nothing else.
 
@@ -155,7 +157,17 @@ its own actions, its own focus. A split that shares one header across panes is a
 a group.
 
 LVIS chat groups follow this: multiple chat groups tile in the main area, and each carries its
-own header and its own work panel. A group is the unit of both layout and state.
+own header and its own sidebar. A group is the unit of both layout and state.
+
+Two constraints we impose on ourselves that VS Code does not:
+
+- **Flat list along one axis, not a split tree.** A tree buys arbitrary nesting, and nothing
+  else in the app can address a nested position — not a keyboard command, not a restore, not a
+  test. A flat list is the model the rest of the app can actually name a group in.
+- **A group may only exist if a conversation source backs it.** Every source is a distinct
+  conversation loop in the main process. When none is free, the split control is *absent*, not
+  disabled. An empty tile that looks live is worse than no tile, and a chat box that cannot
+  answer is not a layout feature.
 
 ### Rows carry inline actions on hover and the same actions in a context menu
 
