@@ -233,7 +233,7 @@ export function ChatGroupFrame({
 }
 
 /** A group's conversation source. Each maps to ONE ConversationLoop in main. */
-export type ChatGroupSource = "main" | "side";
+type ChatGroupSource = "main" | "side";
 
 export interface ChatGroupState {
   id: string;
