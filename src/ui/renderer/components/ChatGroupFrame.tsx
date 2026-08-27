@@ -14,6 +14,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import { useTranslation } from "../../../i18n/react.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../../contract/app-contract.js";
 import type { LvisApi } from "../types.js";
+import {
+  closeLeaf,
+  countLeaves,
+  layoutBoxes,
+  leaf,
+  leafIds,
+  splitLeaf,
+  type ChatGroupBox,
+  type ChatGroupNode,
+  type DropEdge,
+} from "./chat-group-tree.js";
 
 /**
  * The chat group: an outlined work container with its own header.
@@ -341,25 +352,27 @@ export interface ChatGroupState {
   id: string;
   /** The work panel, per group — see ChatGroupFrameProps.panelOpen. */
   panelOpen: boolean;
+  /** Where this tile sits, in percentages of the main area. */
+  box: ChatGroupBox;
 }
 
 /**
  * The open chat groups, tiled.
  *
- * The list is flat and laid out along one axis rather than a split TREE. A tree
- * buys arbitrary nesting, and nothing else here can address a nested position —
- * not a keyboard command, not a restore, not a test. A flat list is the model
- * the rest of the app can actually name a group in.
+ * The geometry is a split tree — see `chat-group-tree.ts` and
+ * docs/design/tiled-chat-groups.md. Tiles are arranged freely, tmux style: a
+ * session dropped on a tile's edge splits that tile on that axis, so 1, 2, 3,
+ * and 4 tiles are each reachable in more than one shape.
  *
  * A group is bound to a conversation SOURCE, and every source is a distinct
- * ConversationLoop in main — `MAX_CHAT_GROUPS` is that ceiling, counted
- * including the primary. Chat mode holds exactly one: it is the focused-writing
- * mode, and a second tile there would be the thing it exists to remove.
+ * ConversationLoop in main — `MAX_CHAT_GROUPS` is that ceiling, counted in
+ * LEAVES and including the primary. Chat mode holds exactly one: it is the
+ * focused-writing mode, and a second tile there would be the thing it exists
+ * to remove.
  */
 export function useChatGroups(appMode?: "chat" | "work") {
-  const [groups, setGroups] = useState<ChatGroupState[]>([
-    { id: MAIN_CHAT_GROUP_ID, panelOpen: false },
-  ]);
+  const [tree, setTree] = useState<ChatGroupNode>(() => leaf(MAIN_CHAT_GROUP_ID));
+  const [panelOpenIds, setPanelOpenIds] = useState<readonly string[]>([]);
   const [focusedId, setFocusedId] = useState(MAIN_CHAT_GROUP_ID);
   // Monotonic, so a closed tile's id is never reused. Main-process loops are
   // keyed by this id, and reusing one would hand a new tile the previous
@@ -367,39 +380,64 @@ export function useChatGroups(appMode?: "chat" | "work") {
   const nextGroupIndex = useRef(2);
 
   const setPanelOpen = useCallback((id: string, open: boolean) => {
-    setGroups((current) =>
-      current.map((group) => (group.id === id ? { ...group, panelOpen: open } : group)),
-    );
-  }, []);
-
-  const split = useCallback(() => {
-    setGroups((current) => {
-      if (current.length >= MAX_CHAT_GROUPS) return current;
-      const id = `group-${nextGroupIndex.current}`;
-      nextGroupIndex.current += 1;
-      setFocusedId(id);
-      return [...current, { id, panelOpen: false }];
+    setPanelOpenIds((current) => {
+      const has = current.includes(id);
+      if (has === open) return current;
+      return open ? [...current, id] : current.filter((each) => each !== id);
     });
   }, []);
+
+  /**
+   * Drop a new conversation on `targetGroupId`'s `edge`.
+   *
+   * Returns the new group's id, or null when the ceiling is already reached —
+   * the caller shows no edge affordance in that case, so the limit is visible
+   * in the gesture rather than as a rejection after the fact.
+   */
+  const dropOnEdge = useCallback((targetGroupId: string, edge: DropEdge): string | null => {
+    if (countLeaves(tree) >= MAX_CHAT_GROUPS) return null;
+    const id = `group-${nextGroupIndex.current}`;
+    nextGroupIndex.current += 1;
+    setTree((current) => splitLeaf(current, targetGroupId, edge, id));
+    setFocusedId(id);
+    return id;
+  }, [tree]);
+
+  /** The split control: same thing as a drop on the focused tile's right edge. */
+  const split = useCallback(() => {
+    dropOnEdge(focusedId, "right");
+  }, [dropOnEdge, focusedId]);
 
   const close = useCallback((id: string) => {
     // The primary group is the window's conversation. Closing it would leave
     // no tile that the session list, resume, and restore all address.
     if (id === MAIN_CHAT_GROUP_ID) return;
-    setGroups((current) => {
-      const next = current.filter((group) => group.id !== id);
-      if (next.length === current.length) return current;
-      setFocusedId((focused) => (focused === id ? next[0]!.id : focused));
+    setTree((current) => {
+      const next = closeLeaf(current, id);
+      if (next === current) return current;
+      const survivors = leafIds(next);
+      setFocusedId((focused) => (survivors.includes(focused) ? focused : survivors[0]!));
       return next;
     });
+    setPanelOpenIds((current) => current.filter((each) => each !== id));
   }, []);
 
   // Chat mode collapses to the focused tile rather than closing the others:
   // switching modes is a view change, and losing a conversation to it would
   // make the toggle destructive.
-  const visibleGroups = appMode === "chat"
-    ? groups.filter((group) => group.id === focusedId)
-    : groups;
+  const visibleTree = appMode === "chat" ? leaf(focusedId) : tree;
+  const groups = useMemo<ChatGroupState[]>(
+    () => layoutBoxes(visibleTree).map((box) => ({
+      id: box.chatGroupId,
+      panelOpen: panelOpenIds.includes(box.chatGroupId),
+      box,
+    })),
+    // `visibleTree` is rebuilt each render in chat mode, so the tree and the
+    // mode are the honest dependencies here, not the derived node.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tree, appMode, focusedId, panelOpenIds],
+  );
+
   // The main process can serve MAX_CHAT_GROUPS conversations: every channel is
   // group-addressed and every stream frame is labelled. The RENDERER cannot yet
   // — App still owns one set of conversation state for the window
@@ -411,16 +449,20 @@ export function useChatGroups(appMode?: "chat" | "work") {
   // Until then the honest ceiling is one: a split button that produced a tile
   // showing another conversation is worse than no split button.
   const RENDERER_GROUP_CEILING = 1;
-  const canSplit = appMode !== "chat"
-    && groups.length < Math.min(MAX_CHAT_GROUPS, RENDERER_GROUP_CEILING);
+  const ceiling = Math.min(MAX_CHAT_GROUPS, RENDERER_GROUP_CEILING);
+  const canSplit = appMode !== "chat" && countLeaves(tree) < ceiling;
 
   return {
-    groups: visibleGroups,
+    groups,
+    tree,
     focusedId,
     focus: setFocusedId,
     setPanelOpen,
     canSplit,
+    /** True while a drop would actually be honoured — gates the edge affordance. */
+    canDrop: canSplit,
     split,
+    dropOnEdge,
     close,
   };
 }

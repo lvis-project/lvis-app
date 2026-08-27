@@ -177,6 +177,69 @@ describe("chatGroupApi", () => {
   });
 });
 
+describe("useChatGroups placement", () => {
+  it("starts as a single tile filling the area", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+
+    expect(result.current.groups.map((g) => g.id)).toEqual(["main"]);
+    expect(result.current.groups[0]!.box).toMatchObject({
+      left: 0, top: 0, width: 100, height: 100,
+    });
+  });
+
+  it("splits the dropped-on tile and focuses what was added", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+
+    let added: string | null = null;
+    act(() => { added = result.current.dropOnEdge("main", "right"); });
+
+    expect(added).toBe("group-2");
+    expect(result.current.focusedId).toBe("group-2");
+    expect(result.current.groups.map((g) => g.id)).toEqual(["main", "group-2"]);
+    expect(result.current.groups[1]!.box).toMatchObject({ left: 50, width: 50, height: 100 });
+  });
+
+  it("refuses a drop past the ceiling instead of silently ignoring it", () => {
+    // The caller shows no edge affordance when this returns null, so the limit
+    // is visible in the gesture rather than as a rejection after the fact.
+    const { result } = renderHook(() => useChatGroups("work"));
+
+    act(() => { result.current.dropOnEdge("main", "right"); });
+    act(() => { result.current.dropOnEdge("group-2", "bottom"); });
+    act(() => { result.current.dropOnEdge("group-3", "bottom"); });
+
+    let overflow: string | null = "not-run";
+    act(() => { overflow = result.current.dropOnEdge("group-4", "right"); });
+
+    expect(result.current.groups).toHaveLength(4);
+    expect(overflow).toBeNull();
+  });
+
+  it("never reuses a closed tile's id", () => {
+    // Main-process loops are keyed by this id: reusing one would hand a new
+    // tile the previous tile's live history.
+    const { result } = renderHook(() => useChatGroups("work"));
+
+    act(() => { result.current.dropOnEdge("main", "right"); });
+    act(() => { result.current.close("group-2"); });
+    let reborn: string | null = null;
+    act(() => { reborn = result.current.dropOnEdge("main", "right"); });
+
+    expect(reborn).toBe("group-3");
+  });
+
+  it("gives a closed tile's space back and keeps focus on a tile that exists", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+
+    act(() => { result.current.dropOnEdge("main", "right"); });
+    act(() => { result.current.close("group-2"); });
+
+    expect(result.current.groups.map((g) => g.id)).toEqual(["main"]);
+    expect(result.current.groups[0]!.box).toMatchObject({ width: 100, height: 100 });
+    expect(result.current.focusedId).toBe("main");
+  });
+});
+
 describe("useChatGroups ceilings", () => {
   it("collapses to the focused tile in chat mode and offers no split there", () => {
     const { result } = renderHook(() => useChatGroups("chat"));

@@ -1613,10 +1613,35 @@ export function App() {
                                     is the sidebar's own `bottom-3`: the two
                                     cards then end on ONE line, which is the
                                     thing the eye actually checks. */}
-                                <div className="flex min-h-0 min-w-0 flex-1 gap-2 pb-3 pl-2 pr-3 pt-1" data-testid="chat-group-row">
+                                {/* Tiles are positioned from the split tree's boxes rather
+                                    than nested flex containers, so a tile's rectangle is
+                                    one number that the layout, a drag hit-test, and a
+                                    measurement in a test all read the same way. */}
+                                <div className="min-h-0 min-w-0 flex-1 pb-2 pl-1 pr-2 pt-0" data-testid="chat-group-row">
+                                {/* The positioning context is INSIDE the padding: an
+                                    absolutely-positioned child resolves against the padding
+                                    box, so anchoring the tiles to the row itself would eat
+                                    the air that lines the chat group's bottom edge up with
+                                    the sidebar's. */}
+                                <div className="relative h-full w-full" data-testid="chat-group-canvas">
                                 {chatGroups.groups.map((group) => (
-                                <ChatGroupFrame
+                                <div
                                   key={group.id}
+                                  /* p-1 is the half-gutter: two adjacent tiles make the
+                                     8px gap the row used to get from `gap-2`, and the row's
+                                     own padding is reduced by the same 4px so the outer
+                                     edges land exactly where they did — the chat group's
+                                     bottom line has to stay on the sidebar's. */
+                                  className="absolute flex p-1"
+                                  style={{
+                                    left: `${group.box.left}%`,
+                                    top: `${group.box.top}%`,
+                                    width: `${group.box.width}%`,
+                                    height: `${group.box.height}%`,
+                                  }}
+                                  data-testid={`chat-group-cell:${group.id}`}
+                                >
+                                <ChatGroupFrame
                                   title={
                                     sessions.find((s) => s.id === currentSessionId)?.title
                                     ?? t("mainToolbar.newChat")
@@ -1688,7 +1713,9 @@ export function App() {
                                   onProjectError={handleProjectError}
                                 />
                                 </ChatGroupFrame>
+                                </div>
                                 ))}
+                                </div>
                                 </div>
                               </ChatContextProvider>
                             </PageShell>

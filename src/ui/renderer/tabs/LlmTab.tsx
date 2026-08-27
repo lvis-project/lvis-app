@@ -1426,7 +1426,7 @@ export function LlmTab(props: LlmTabProps) {
     const tone = live
       ? "bg-primary"
       : row.connected
-        ? "bg-emerald-500"
+        ? "bg-success"
         : "bg-muted-foreground/(--opacity-half)";
     return (
       <span

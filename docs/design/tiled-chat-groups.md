@@ -62,6 +62,48 @@ in the same binary, so a default would only ever paper over a caller that
 forgot to say which tile it meant — and the symptom of that bug (a turn
 appearing in the wrong tile) is worse than a rejected call.
 
+## Geometry: a split tree, not a list
+
+Tiles are arranged **freely, tmux style**: any leaf can be split horizontally or
+vertically, so 1, 2, 3, and 4 are all reachable in more than one shape and the
+user picks which. The layout is therefore a **tree** of splits whose leaves are
+chat groups, not a flat list.
+
+Two facts settle this.
+
+`DESIGN.md` puts the floor for a chat column at **448px**. The main area is
+roughly 1000px wide with the sidebar open, so four columns give each tile 250px
+— under the floor the plugin-panel work already established. Four tiles have to
+nest. Once the layout nests at all, a flat list cannot describe it.
+
+The addressability objection that argued for a flat list does not survive
+contact with the actual split: a leaf keeps its stable `chatGroupId` no matter
+where it sits, and the tree describes **geometry only**. Nothing that names a
+conversation — a keyboard command, a restore, a test — has to name a position.
+
+```
+tree := { kind: "leaf", chatGroupId }
+      | { kind: "split", axis: "row" | "column", children: tree[], sizes: number[] }
+```
+
+`MAX_CHAT_GROUPS` is a count of LEAVES, unchanged at 4. The tree's depth is
+bounded by that count, so no separate depth limit is needed.
+
+## Placement: drop on a tile's edge
+
+A session is dragged from the session list onto a tile. The **edge** it lands on
+is the instruction:
+
+- an outer band (~8px) on any of the tile's four sides → split that leaf on that
+  axis and put the session on that side
+- the tile's centre → replace what that tile is holding
+
+This is the same gesture VS Code uses for editor groups, so it needs no
+teaching, and it is the only drop model where the *shape* the user wants is
+expressed by where they let go rather than by a separate control. A drop that
+would exceed `MAX_CHAT_GROUPS` shows no edge affordance — the ceiling is visible
+in the gesture instead of appearing as a rejection after the fact.
+
 ## Phases
 
 Each phase is independently shippable and independently verifiable.
