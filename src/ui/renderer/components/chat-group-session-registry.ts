@@ -87,7 +87,7 @@ type Listener = () => void;
  * does not exist yet, and the one that leaves the window's controls usable
  * rather than stuck disabled.
  */
-export const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
+const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
   entries: [] as readonly ChatEntry[],
   streaming: false,
   applyLoadedSession: () => {},
