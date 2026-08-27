@@ -21,6 +21,15 @@ const handleFor = (streaming: boolean, entries: readonly ChatEntry[] = NO_ENTRIE
   clearForNewChat: () => {},
   resetForNewSession: () => {},
   restoreSubAgentSpawns: () => {},
+  ask: async () => {},
+  insertImportedTriggerEntry: () => {},
+  currentSessionId: "",
+  currentSessionProject: {},
+  loadSession: async () => false,
+  fallbackToast: null,
+  prefillComposer: () => {},
+  appendSystemEntry: () => {},
+  startNewChat: async () => {},
 });
 
 describe("ChatGroupSessionRegistry", () => {

@@ -17,7 +17,7 @@ import { deferred } from "../helpers.js";
 import { useChatState } from "../../../src/ui/renderer/hooks/use-chat-state.js";
 import { useContextBudget } from "../../../src/ui/renderer/hooks/use-context-budget.js";
 import { useCostEstimate } from "../../../src/ui/renderer/hooks/use-cost-estimate.js";
-import { useSessions } from "../../../src/ui/renderer/hooks/use-sessions.js";
+import { useCurrentSession, useSessionList } from "../../../src/ui/renderer/hooks/use-sessions.js";
 import { useStarred } from "../../../src/ui/renderer/hooks/use-starred.js";
 import type { LvisApi } from "../../../src/ui/renderer/types.js";
 import type { ChatEntry } from "../../../src/lib/chat-stream-state.js";
@@ -601,10 +601,10 @@ describe("useCostEstimate (memo invariants)", () => {
   });
 });
 
-describe("useSessions (streaming guard)", () => {
+describe("useCurrentSession (streaming guard)", () => {
   it("handleLoadSession is a no-op while streaming=true", async () => {
     const { api } = makeMockLvisApi();
-    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
     const setEntries = vi.fn();
     let loaded = true;
     await act(async () => {
@@ -617,7 +617,7 @@ describe("useSessions (streaming guard)", () => {
 
   it("handleLoadSession loads when not streaming", async () => {
     const { api } = makeMockLvisApi();
-    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
     const setEntries = vi.fn();
     let loaded = false;
     await act(async () => {
@@ -636,7 +636,7 @@ describe("useSessions (streaming guard)", () => {
       compactedAt: null,
       removedMessageCount: 0,
     });
-    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
     const setEntries = vi.fn();
     let loaded = true;
 
@@ -651,7 +651,7 @@ describe("useSessions (streaming guard)", () => {
 
   it("handleLoadSession replays structural history into chat entries", async () => {
     const { api } = makeMockLvisApi();
-    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
     const setEntries = vi.fn();
     api.chatSessionHistory.mockClear();
     api.chatSessionHistory.mockResolvedValueOnce({
@@ -699,7 +699,7 @@ describe("useSessions (streaming guard)", () => {
 
   it("handleLoadSession does not synthesize a session-level context estimate", async () => {
     const { api } = makeMockLvisApi();
-    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
     const setEntries = vi.fn();
     api.chatSessionHistory.mockClear();
     api.chatSessionHistory.mockResolvedValueOnce({
@@ -735,7 +735,7 @@ describe("useSessions (streaming guard)", () => {
     const applyInitial = vi.fn();
     const applyLoaded = vi.fn();
     const { result } = renderHook(() =>
-      useSessions(api as unknown as LvisApi, applyInitial),
+      useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
     );
 
     await waitFor(() => expect(api.chatGetHistory).toHaveBeenCalledTimes(1));
@@ -759,7 +759,7 @@ describe("useSessions (streaming guard)", () => {
     expect(result.current.currentSessionId).toBe("manual-sess");
   });
 
-  it("refreshSessions only refreshes the list and does not overwrite the loaded session metadata", async () => {
+  it("refreshing the list cannot touch the session a tile is holding", async () => {
     const { api } = makeMockLvisApi({
       historyBySession: {
         "manual-sess": {
@@ -770,7 +770,7 @@ describe("useSessions (streaming guard)", () => {
       },
     });
     const applyLoaded = vi.fn();
-    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
 
     await act(async () => {
       await result.current.handleLoadSession("manual-sess", false, applyLoaded);
@@ -780,10 +780,15 @@ describe("useSessions (streaming guard)", () => {
     expect(result.current.currentSessionTitle).toBe("Manual");
     api.chatGetHistory.mockClear();
 
+    // The list is a SEPARATE hook now, so this is structural rather than a
+    // promise: useSessionList holds no session metadata and never reads the
+    // current session, which is why four tiles can share one list.
+    const list = renderHook(() => useSessionList(api as unknown as LvisApi));
     await act(async () => {
-      await result.current.refreshSessions();
+      await list.result.current.refreshSessions();
     });
 
+    expect(api.chatSessions).toHaveBeenCalled();
     expect(api.chatGetHistory).not.toHaveBeenCalled();
     expect(result.current.currentSessionId).toBe("manual-sess");
     expect(result.current.currentSessionTitle).toBe("Manual");
@@ -810,7 +815,7 @@ describe("useSessions (streaming guard)", () => {
     const applyInitial = vi.fn();
 
     const { result } = renderHook(() =>
-      useSessions(api as unknown as LvisApi, applyInitial),
+      useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
     );
 
     await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("persisted-sess"));
@@ -841,7 +846,9 @@ describe("useSessions (streaming guard)", () => {
     });
     const applyInitial = vi.fn();
 
-    renderHook(() => useSessions(api as unknown as LvisApi, applyInitial));
+    renderHook(() =>
+      useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
+    );
 
     await waitFor(() => {
       expect(applyInitial).toHaveBeenCalledWith([
@@ -883,7 +890,7 @@ describe("useSessions (streaming guard)", () => {
     const applyInitial = vi.fn();
 
     const { result } = renderHook(() =>
-      useSessions(api as unknown as LvisApi, applyInitial),
+      useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
     );
 
     await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("main-sess"));
@@ -927,7 +934,7 @@ describe("useSessions (streaming guard)", () => {
     const applyInitial = vi.fn();
 
     const { result } = renderHook(() =>
-      useSessions(api as unknown as LvisApi, applyInitial),
+      useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
     );
 
     await waitFor(() => expect(api.chatNew).toHaveBeenCalledTimes(1));
@@ -954,7 +961,7 @@ describe("useSessions (streaming guard)", () => {
     const applyInitial = vi.fn();
 
     const { result } = renderHook(() =>
-      useSessions(api as unknown as LvisApi, applyInitial),
+      useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
     );
 
     await waitFor(() => expect(api.chatMainActiveState).toHaveBeenCalled());
@@ -987,7 +994,7 @@ describe("useSessions (streaming guard)", () => {
     const applyInitial = vi.fn();
 
     const { result } = renderHook(() =>
-      useSessions(api as unknown as LvisApi, applyInitial),
+      useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
     );
 
     await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("yesterday-late"));
