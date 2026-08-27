@@ -247,6 +247,7 @@ describe("preload contextBridge world shape lock", () => {
           "chatGetSubAgentTranscript": "function",
           "chatGetVerbatimToolResult": "function",
           "chatGetWriteDiff": "function",
+          "chatGroup": "function",
           "chatGuide": "function",
           "chatHasProvider": "function",
           "chatImport": "function",

@@ -663,6 +663,7 @@ describe("bootstrap() integration lock", () => {
         "registerPluginEventBridge",
         "remoteA2AActionController",
         "requestPluginOperationGrant",
+        "resolveChatGroupLoop",
         "revokePluginOperationSession",
         "rewireReviewerAgent",
         "routeEngine",

@@ -135,13 +135,36 @@ describe("useChatGroups", () => {
 });
 
 describe("chatGroupApi", () => {
-  it("binds a tile to its own group when the surface supports it", () => {
-    const bound = { marker: "bound" } as unknown as LvisApi;
-    const chatGroup = vi.fn(() => bound);
+  it("layers the group binding over the rest of the api", () => {
+    // chatGroup() rebinds the chat channels only. A tile also calls
+    // getSettings, which lives on another preload surface — returning the bare
+    // binding hands the tile an api that is missing most of itself.
+    const getSettings = vi.fn();
+    const boundSend = vi.fn();
+    const chatGroup = vi.fn(() => ({ send: boundSend }) as unknown as LvisApi);
+    const api = { chatGroup, getSettings, send: vi.fn() } as unknown as LvisApi;
+
+    const tile = chatGroupApi(api, "group-2") as unknown as Record<string, unknown>;
+
+    expect(chatGroup).toHaveBeenCalledWith("group-2");
+    expect(tile.send).toBe(boundSend);
+    expect(tile.getSettings).toBe(getSettings);
+  });
+
+  it("hands the same view back for the same group so memos below it hold", () => {
+    const chatGroup = vi.fn(() => ({}) as unknown as LvisApi);
     const api = { chatGroup } as unknown as LvisApi;
 
-    expect(chatGroupApi(api, "group-2")).toBe(bound);
-    expect(chatGroup).toHaveBeenCalledWith("group-2");
+    expect(chatGroupApi(api, "group-2")).toBe(chatGroupApi(api, "group-2"));
+    expect(chatGroup).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the primary group on the top-level surface, which already binds it", () => {
+    const chatGroup = vi.fn();
+    const api = { chatGroup } as unknown as LvisApi;
+
+    expect(chatGroupApi(api, "main")).toBe(api);
+    expect(chatGroup).not.toHaveBeenCalled();
   });
 
   it("refuses a non-primary group on a surface that cannot bind one", () => {

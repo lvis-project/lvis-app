@@ -300,23 +300,41 @@ export function ChatGroupFrame({
   );
 }
 
+const groupApiCache = new WeakMap<LvisApi, Map<string, LvisApi>>();
+
 /**
- * One group's view of the per-conversation channels.
+ * One group's view of the api.
  *
- * The preload binds the group id into every call and filters the stream to
- * that group, so a tile hands this down where it would otherwise hand down the
- * api and nothing below it has to learn about groups.
+ * `chatGroup()` rebinds the per-CONVERSATION channels only. Settings, plugins,
+ * the session list, and everything else a tile reaches for come from other
+ * preload surfaces and are window-scoped, so the group binding is LAYERED over
+ * the full api rather than replacing it — handing a tile the bare binding gives
+ * it an api that is missing most of itself.
  *
- * A surface WITHOUT that binding — a test double, an older preload — can only
- * serve the primary group. Returning it for another tile would put that tile's
- * turns in the primary conversation, so it refuses instead.
+ * The primary group needs no layer: the top-level surface is already bound to
+ * it. A surface WITHOUT the binding — a test double, an older preload — can
+ * therefore still serve the primary, and only the primary; returning it for
+ * another tile would put that tile's turns in the primary conversation, so it
+ * refuses instead.
+ *
+ * Layered views are memoized per api and group because a tile passes this as a
+ * prop, and a fresh object every render would defeat every memo below it.
  */
 export function chatGroupApi(api: LvisApi, chatGroupId: string): LvisApi {
-  if (api.chatGroup) return api.chatGroup(chatGroupId);
-  if (chatGroupId !== MAIN_CHAT_GROUP_ID) {
-    throw new Error(`chat-group-unavailable:${chatGroupId}`);
+  if (chatGroupId === MAIN_CHAT_GROUP_ID) return api;
+  if (!api.chatGroup) throw new Error(`chat-group-unavailable:${chatGroupId}`);
+
+  let perGroup = groupApiCache.get(api);
+  if (!perGroup) {
+    perGroup = new Map();
+    groupApiCache.set(api, perGroup);
   }
-  return api;
+  const cached = perGroup.get(chatGroupId);
+  if (cached) return cached;
+
+  const layered = { ...api, ...api.chatGroup(chatGroupId) } as LvisApi;
+  perGroup.set(chatGroupId, layered);
+  return layered;
 }
 
 export interface ChatGroupState {

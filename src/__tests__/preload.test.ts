@@ -282,7 +282,7 @@ describe("preload — plugin webview asset URLs", () => {
       input: "hello",
       inputOrigin: "user-keyboard",
       userActivation: false,
-    }));
+    }), "main");
   });
 
   it("does not trust renderer-minted plugin userAction flags", async () => {
@@ -393,14 +393,16 @@ describe("preload — plugin webview asset URLs", () => {
     mockUserActivation.isActive = false;
     await chatSend("second", undefined, "user-keyboard", token);
 
+    // The group id rides on every send: a turn that forgets which tile it came
+    // from is exactly the defect the required (never defaulted) id prevents.
     expect(mockInvoke).toHaveBeenNthCalledWith(1, "lvis:chat:send", expect.objectContaining({
       input: "first",
       userActivation: true,
-    }));
+    }), "main");
     expect(mockInvoke).toHaveBeenNthCalledWith(2, "lvis:chat:send", expect.objectContaining({
       input: "second",
       userActivation: false,
-    }));
+    }), "main");
   });
 
   it("exposes renderer env flags including debugStream", async () => {

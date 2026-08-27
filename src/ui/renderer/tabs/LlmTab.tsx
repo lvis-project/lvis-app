@@ -15,7 +15,7 @@ import {
 import { Slider } from "../../../components/ui/slider.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import { ChevronDown, ChevronUp, Loader2, Pin, Plus, RefreshCw, Store } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, Loader2, Pin, Plus, RefreshCw, Store } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1208,6 +1208,23 @@ export function LlmTab(props: LlmTabProps) {
     return ids;
   }, [modelLists, apiPathConfigured, vendor]);
 
+  // What a connected API vendor can SAY about itself on its row. The cache key
+  // is `vendor\nbaseUrl\ncredentialScope`, so the endpoint and the size of the
+  // catalogue it handed back are both already here — no extra call to show
+  // them, and no second source that could disagree with the chooser.
+  const apiFacts = useMemo(() => {
+    const facts = new Map<string, { baseUrl: string; modelCount: number }>();
+    for (const [cacheKey, state] of Object.entries(modelLists)) {
+      const [cachedVendor, baseUrl] = cacheKey.split("\n");
+      if (!cachedVendor) continue;
+      facts.set(cachedVendor, {
+        baseUrl: baseUrl ?? "",
+        modelCount: state.options?.length ?? 0,
+      });
+    }
+    return facts;
+  }, [modelLists]);
+
   const connections = useMemo<ProviderConnection[]>(() => {
     const claimed = new Set<string>();
     const rows: ProviderConnection[] = [];
@@ -1376,15 +1393,74 @@ export function LlmTab(props: LlmTabProps) {
 
   // Which of this provider's two routes is serving chat right now. The user
   // asked for exactly this: the row says the provider, the badge says the mode.
-  const modeBadge = (row: ProviderConnection) => {
-    const active = subscription.activeRuntime.kind === "subscription"
+  /** Which path this row is serving chat through right now, or null. */
+  const activeMode = (row: ProviderConnection): "subscription" | "api" | null =>
+    subscription.activeRuntime.kind === "subscription"
       ? (subscription.activeRuntime.provider === row.id ? "subscription" : null)
       : (row.apiVendorId && row.apiVendorId === vendor ? "api" : null);
+
+  const modeBadge = (row: ProviderConnection) => {
+    const active = activeMode(row);
     if (!active) return null;
     return (
       <Badge variant="default" className="h-5 px-2 text-[10px]" data-testid={`llm-tab:connection-mode:${row.id}`}>
         {active === "subscription" ? t("llmTab.modeSubscription") : t("llmTab.modeApiKey")}
       </Badge>
+    );
+  };
+
+  /**
+   * The row's state, as one dot and one word.
+   *
+   * Every row carries it, including the ones that are merely connected — a row
+   * that only speaks up when it is the active one leaves the rest of the list
+   * saying nothing about itself, which is the state this list exists to show.
+   */
+  const statusChip = (row: ProviderConnection) => {
+    const live = activeMode(row) !== null;
+    const label = live
+      ? t("subscriptionProvidersSection.apiChatActive")
+      : row.connected
+        ? t("subscriptionProvidersSection.statusConnected")
+        : t("subscriptionProvidersSection.statusSignedOut");
+    const tone = live
+      ? "bg-primary"
+      : row.connected
+        ? "bg-emerald-500"
+        : "bg-muted-foreground/(--opacity-half)";
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
+        data-testid={`llm-tab:connection-status:${row.id}`}
+      >
+        <span className={`size-1.5 shrink-0 rounded-full ${tone}`} aria-hidden={true} />
+        {label}
+      </span>
+    );
+  };
+
+  /**
+   * What this connection is, in the row itself: the endpoint it reaches and how
+   * much of a catalogue came back. Without it the row is a bare name, and the
+   * user cannot tell two OpenAI-compatible endpoints apart.
+   */
+  const connectionSubline = (row: ProviderConnection) => {
+    if (!row.apiVendorId) return null;
+    const facts = apiFacts.get(row.apiVendorId);
+    if (!facts) return null;
+    const parts = [
+      facts.baseUrl,
+      facts.modelCount > 0 ? t("llmTab.modelSynced", { count: facts.modelCount }) : "",
+    ].filter(Boolean);
+    if (parts.length === 0) return null;
+    return (
+      <p
+        className="truncate text-[11px] text-muted-foreground"
+        title={parts.join(" · ")}
+        data-testid={`llm-tab:connection-subline:${row.id}`}
+      >
+        {parts.join(" · ")}
+      </p>
     );
   };
 
@@ -1434,7 +1510,7 @@ export function LlmTab(props: LlmTabProps) {
           activeSelection={subscription.props.activeSelection}
           chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
           actions={subscription.props.actions}
-          leading={<>{modeBadge(row)}{apiKeyChip(row)}</>}
+          leading={<>{statusChip(row)}{modeBadge(row)}{apiKeyChip(row)}</>}
           {...(providerConfigOpen && row.apiVendorId === vendor ? { trailing: credentialForm } : {})}
         />
       ) : (
@@ -1443,19 +1519,40 @@ export function LlmTab(props: LlmTabProps) {
           className="space-y-3 rounded-md border bg-card p-3"
           data-testid={`llm-tab:connection:${row.id}`}
         >
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{row.label}</span>
-            {modeBadge(row)}
-            {row.apiVendorId && marketplaceVendorIds.has(row.apiVendorId) ? (
-              <span
-                className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
-                data-testid={`llm-tab:selected-provider-marketplace:${row.apiVendorId}`}
-              >
-                {t("llmTab.marketplaceInstalledBadge")}
+          {/* The whole head is the disclosure: the row IS the provider, so
+              managing it should not require finding a particular control on it. */}
+          <button
+            type="button"
+            className="flex w-full min-w-0 items-center gap-2 text-left"
+            aria-expanded={providerConfigOpen && row.apiVendorId === vendor}
+            onClick={() => (providerConfigOpen && row.apiVendorId === vendor
+              ? setProviderConfigOpen(false)
+              : openApiConfig(row.apiVendorId!))}
+            data-testid={`llm-tab:connection-toggle:${row.id}`}
+          >
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="truncate text-sm font-medium">{row.label}</span>
+                {modeBadge(row)}
+                {row.apiVendorId && marketplaceVendorIds.has(row.apiVendorId) ? (
+                  <span
+                    className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
+                    data-testid={`llm-tab:selected-provider-marketplace:${row.apiVendorId}`}
+                  >
+                    {t("llmTab.marketplaceInstalledBadge")}
+                  </span>
+                ) : null}
               </span>
-            ) : null}
-            {apiKeyChip(row)}
-          </div>
+              {connectionSubline(row)}
+            </span>
+            {statusChip(row)}
+            <ChevronRight
+              className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                providerConfigOpen && row.apiVendorId === vendor ? "rotate-90" : ""
+              }`}
+              aria-hidden={true}
+            />
+          </button>
           {providerConfigOpen && row.apiVendorId === vendor ? credentialForm : null}
         </div>
       ))}
