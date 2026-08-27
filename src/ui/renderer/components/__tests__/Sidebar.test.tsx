@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Sidebar } from "../Sidebar.js";
 import type { SessionSummary } from "../../hooks/use-sessions.js";
@@ -986,5 +986,26 @@ describe("Sidebar collapsed rail", () => {
     const { getByTestId, restore } = renderSidebar({ collapsed: true });
     expect(getByTestId("sidebar-cluster")).toBeTruthy();
     restore();
+  });
+});
+
+describe("Sidebar current-row scoping", () => {
+  it("marks the loaded conversation as the current page only while a conversation is showing", () => {
+    const onChat = renderSidebar({ activeView: "home" });
+    expect(
+      onChat.getByTestId("sidebar-session-sess-1").getAttribute("aria-current"),
+    ).toBe("page");
+    onChat.restore();
+    cleanup();
+
+    // A session stays LOADED while the user reads a plugin view, but the page
+    // they are on is the plugin. Both rows claiming `aria-current="page"` told
+    // a screen reader the window was in two places at once, and drew the chat
+    // row selected underneath the selected plugin row.
+    const onPlugin = renderSidebar({ activeView: "plugin:ep-api:lge-control" });
+    expect(
+      onPlugin.getByTestId("sidebar-session-sess-1").getAttribute("aria-current"),
+    ).toBeNull();
+    onPlugin.restore();
   });
 });

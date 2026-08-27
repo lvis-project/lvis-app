@@ -840,6 +840,7 @@ function ProjectSessionList({
   collapsed,
   sessions,
   currentSessionId,
+  conversationSurfaceVisible,
   streaming,
   onLoadSession,
   onNewChatForProject,
@@ -858,6 +859,16 @@ function ProjectSessionList({
   collapsed: boolean;
   sessions: SessionSummary[];
   currentSessionId?: string;
+  /**
+   * Whether a CONVERSATION is what the window is showing.
+   *
+   * A session stays loaded while the user reads a plugin view or Settings, so
+   * "which session is loaded" and "which row is the current page" are two
+   * different questions. Answering them with one value put `aria-current`
+   * on a chat row and on the plugin row at the same time — two rows claiming
+   * to be the page the user is on.
+   */
+  conversationSurfaceVisible: boolean;
   streaming: boolean;
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
@@ -1045,7 +1056,7 @@ function ProjectSessionList({
     <SessionRow
       key={session.id}
       session={session}
-      active={session.id === currentSessionId}
+      active={conversationSurfaceVisible && session.id === currentSessionId}
       streaming={streaming}
       onLoadSession={onLoadSession}
       isPinned={isSessionPinned(session.id)}
@@ -1776,6 +1787,7 @@ export function Sidebar({
                     sessions={sessions}
                     projects={projects}
                     currentSessionId={currentSessionId}
+                    conversationSurfaceVisible={activeView === "home"}
                     streaming={streaming}
                     onLoadSession={onLoadSession}
                     onNewChatForProject={onNewChatForProject}

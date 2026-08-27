@@ -30,22 +30,16 @@ type SubscriptionProviderId = SubscriptionRuntimeId;
 type SubscriptionProviderRuntimeState = SubscriptionRuntimeState | "checking";
 
 /**
- * Layout for the subscription model dropdown popup.
+ * Width bound for the subscription model popup, above `sm`.
  *
- * `SelectContent` defaults to Radix `position="item-aligned"`, which sizes the
- * popup to its own widest row and anchors the selected row over the trigger. A
- * provider catalog is wider than this card, so on a narrow window the popup grew
- * past the settings pane and covered the app's left navigation column.
- *
- * `popper` + `align="start"` anchors it at the trigger's leading edge. The width
- * bound follows the trigger's own `w-full sm:w-80` rule: below `sm` the trigger
- * fills the pane, so matching it is the only placement that fits and long ids
- * ellipsize; from `sm` up the trigger is a fixed-width control with room beside
- * it, so the popup keeps its natural width and ids stay readable, bounded by the
- * space Radix reports.
+ * Anchoring and the trigger-matched width are `SelectContent`'s own defaults
+ * now. This overrides only the upper half of the trigger's `w-full sm:w-80`
+ * rule: from `sm` up the trigger is a fixed 20rem control with room beside it,
+ * so the popup keeps its natural width for long model ids rather than being
+ * squeezed to 20rem, bounded by the space Radix reports.
  */
 const MODEL_POPUP_LAYOUT =
-  "w-(--radix-select-trigger-width) sm:w-auto sm:max-w-(--radix-select-content-available-width)";
+  "sm:w-auto sm:max-w-(--radix-select-content-available-width)";
 
 export type SubscriptionBusyAction =
   | "refresh"
@@ -443,11 +437,7 @@ export function SubscriptionProvidersSection({
                       >
                         <SelectValue placeholder={t("subscriptionProvidersSection.modelPlaceholder")} />
                       </SelectTrigger>
-                      <SelectContent
-                        position="popper"
-                        align="start"
-                        className={MODEL_POPUP_LAYOUT}
-                      >
+                      <SelectContent className={MODEL_POPUP_LAYOUT}>
                         {models.map((model) => (
                           <SelectItem key={model.id} value={model.id}>
                             <span className="flex min-w-0 items-center gap-2">

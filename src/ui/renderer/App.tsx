@@ -104,6 +104,17 @@ import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
 
 // ─── App ────────────────────────────────────────────
 
+/**
+ * Card edge -> where a content title starts.
+ *
+ * The main surface sits one 8px gutter past the sidebar card and carries 8px of
+ * its own leading padding, so every view's title — a plugin's name, the chat
+ * group's conversation title — begins 16px in. The band's path is the same
+ * label one row up, and a path that stopped at the card edge read as belonging
+ * to the sidebar rather than to the thing it names.
+ */
+const CONTENT_TITLE_INSET = 16;
+
 export function App() {
   const { t } = useTranslation();
   const api = useMemo(() => getApi(), []);
@@ -1277,7 +1288,14 @@ export function App() {
               {/* Single top band — window controls + the app toolbar cluster live
                   together here. The toolbar content is passed as children so it
                   renders IN the band (no separate toolbar row below it). */}
-              <CustomTitleBar leadClearance={sidebarCollapsed ? 64 : sidebarWidth + 8}>
+              {/* The band's path names what is open, so it lines up with that
+                  thing's own title one row below — NOT with the sidebar card's
+                  edge. `CONTENT_TITLE_INSET` is the distance from the card to
+                  where a title starts: the gutter between the card and the
+                  content, plus the content surface's own leading padding. */}
+              <CustomTitleBar
+                leadClearance={(sidebarCollapsed ? 64 : sidebarWidth + 8) + CONTENT_TITLE_INSET}
+              >
                 <MainToolbar
                   viewNav={viewNav}
                   streaming={streaming}

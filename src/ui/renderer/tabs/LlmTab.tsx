@@ -62,22 +62,16 @@ export interface FallbackEntry {
 const MODEL_LIST_SYNC_DEBOUNCE_MS = 350;
 
 /**
- * Layout for the provider/model dropdown popups.
+ * Catalog-specific bounds for the provider/model popups.
  *
- * `SelectContent` defaults to Radix `position="item-aligned"`, which sizes the
- * popup to its own widest row and anchors the selected row on top of the
- * trigger. With a real provider catalog — long ids plus a provider/context/price
- * detail line — that popup ends up a different width from its trigger and offset
- * out of the settings column, and the list is squeezed into whatever room is
- * left below the selected row instead of the space actually available.
- *
- * `position="popper"` anchors the popup under its trigger, so pinning the width
- * to `--radix-select-trigger-width` keeps it aligned (long ids ellipsize inside
- * the row), `min-w-64` keeps narrow triggers usable, and the height is bounded
- * by whichever is smaller: a readable list or the room Radix reports.
+ * Anchoring and width now come from `SelectContent` itself. What is still local
+ * is the SIZE OF THIS LIST: a provider catalog is long ids plus a
+ * provider/context/price detail line, so `min-w-64` keeps a narrow trigger's
+ * popup readable and the height is capped at whichever is smaller — a list a
+ * person can scan, or the room Radix reports.
  */
 const SELECT_POPUP_LAYOUT =
-  "w-(--radix-select-trigger-width) min-w-64 max-h-[min(386px,var(--radix-select-content-available-height))]";
+  "min-w-64 max-h-[min(386px,var(--radix-select-content-available-height))]";
 
 type ModelListState =
   | {
@@ -182,7 +176,6 @@ function ProviderSelect({
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent
-        position="popper"
         className={SELECT_POPUP_LAYOUT}
         data-testid="llm-tab:vendor-content"
       >
@@ -1095,7 +1088,7 @@ export function LlmTab(props: LlmTabProps) {
                 >
                   <SelectValue placeholder={vendorInfo.defaultModel} />
                 </SelectTrigger>
-                <SelectContent position="popper" className={SELECT_POPUP_LAYOUT}>
+                <SelectContent className={SELECT_POPUP_LAYOUT}>
                   {activeModelOptions.map((option) => (
                     <SelectItem key={option} value={option}>
                       <ModelSelectItemContent
@@ -1270,7 +1263,7 @@ export function LlmTab(props: LlmTabProps) {
                       <SelectTrigger className="min-w-0 flex-1 text-xs">
                         <SelectValue placeholder={fallbackVendorInfo.defaultModel} />
                       </SelectTrigger>
-                      <SelectContent position="popper" className={SELECT_POPUP_LAYOUT}>
+                      <SelectContent className={SELECT_POPUP_LAYOUT}>
                         {fallbackModelOptions.map((option) => (
                           <SelectItem key={option} value={option}>
                             <ModelSelectItemContent option={option} />

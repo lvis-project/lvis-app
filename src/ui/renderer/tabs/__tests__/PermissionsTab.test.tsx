@@ -46,6 +46,7 @@ function installApi(
       getMode: vi.fn(async () => ({ mode: "default" })),
       setMode: vi.fn(async (mode: string) => ({ ok: true, mode })),
       onModeChanged: vi.fn(() => () => undefined),
+      onConfigChanged: vi.fn(() => () => undefined),
       listRules: vi.fn(async () => []),
       addRule: vi.fn(async () => ({ ok: true, rule: { pattern: "x", action: "allow" } })),
       removeRule: vi.fn(async () => ({ ok: true })),
@@ -1195,5 +1196,68 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
     expect(updateSettings).not.toHaveBeenCalledWith({ features: { osToolSandbox: false } });
     expect(screen.getByTestId("os-sandbox-windows-install-cancelled")).toBeTruthy();
     expect(screen.getByTestId("os-sandbox-windows-consent")).toBeTruthy();
+  });
+});
+
+/**
+ * A refresh must not blank the panel.
+ *
+ * Every rule/directory mutation broadcasts a permission-config-changed hint,
+ * and this tab answers it by re-running `fetchAll`. While `loading` was true
+ * for THAT fetch too, the whole panel collapsed to a single "loading" line —
+ * the scroll container went from thousands of pixels to one viewport, the
+ * browser clamped scrollTop to the new maximum, and the position was gone by
+ * the time the content came back. Measured on the real app: removing a rule
+ * near the bottom took the scroll container from 1562 to 8.
+ */
+describe("PermissionsTab background refresh", () => {
+  it("keeps the loaded panel on screen while a config-change refresh runs", async () => {
+    const api = installApi([[], []]);
+    const onConfigChanged = api.permission.onConfigChanged as unknown as ReturnType<typeof vi.fn>;
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    await waitFor(() => expect(screen.queryByTestId("permissions-loading")).toBeNull());
+
+    // The hint the host broadcasts after addRule/removeRule.
+    const notify = onConfigChanged.mock.calls[0]?.[0] as (() => void) | undefined;
+    expect(notify).toBeTypeOf("function");
+
+    let resolveRules: ((rows: never[]) => void) | undefined;
+    (api.permission.listRules as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRules = resolve as (rows: never[]) => void; }),
+    );
+
+    await act(async () => {
+      notify!();
+    });
+
+    // Mid-refresh: the panel the user was reading is still there.
+    expect(screen.queryByTestId("permissions-loading")).toBeNull();
+    expect(screen.getByTestId("permissions-rule-pattern-input")).toBeTruthy();
+
+    await act(async () => {
+      resolveRules?.([]);
+    });
+    expect(screen.queryByTestId("permissions-loading")).toBeNull();
+  });
+
+  it("still shows the loading surface on the FIRST load, where there is nothing to keep", async () => {
+    const api = installApi([[]]);
+    let resolveRules: ((rows: never[]) => void) | undefined;
+    (api.permission.listRules as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRules = resolve as (rows: never[]) => void; }),
+    );
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.getByTestId("permissions-loading")).toBeTruthy();
+
+    await act(async () => {
+      resolveRules?.([]);
+    });
+    await waitFor(() => expect(screen.queryByTestId("permissions-loading")).toBeNull());
   });
 });
