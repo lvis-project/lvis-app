@@ -27,7 +27,9 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { ChatGroupFrame, buildChatGroupActions } from "./components/ChatGroupFrame.js";
+import { ChatGroupFrame, buildChatGroupActions, useChatGroups } from "./components/ChatGroupFrame.js";
+import { ProjectSessionList } from "./components/Sidebar.js";
+import { SideChatView } from "./components/SideChatView.js";
 import { ViewPathBreadcrumb } from "./components/ViewPathNav.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
@@ -1111,12 +1113,18 @@ export function App() {
     };
   }, [api, sessions, refreshSessions, handleExport, handleNewChat]);
 
+  // The tiled chat groups. See `useChatGroups` for why the list is flat and
+  // why it stops at the number of ConversationLoops that actually exist.
+  const chatGroups = useChatGroups();
+
   const projectActions = useMemo<ProjectRowActions>(() => ({
     isArchived: isProjectArchived,
     onSetArchived: toggleProjectArchived,
     label: projectLabel,
     onSetLabel: setProjectLabel,
   }), [isProjectArchived, toggleProjectArchived, projectLabel, setProjectLabel]);
+
+
 
   // ─── Effects ──────────────────────────────────
   const toggleCommandPopover = useCallback(() => {
@@ -1170,6 +1178,31 @@ export function App() {
       });
     },
     [dismissMarketplaceAnnouncement],
+  );
+
+  // Each group's sidebar renders the SAME conversation list the window's
+  // sidebar renders — one component, so a group and the window can never show
+  // two different pictures of the same conversations.
+  const groupSidebar = (
+    <ProjectSessionList
+      collapsed={false}
+      sessions={sessions}
+      projects={workspaceProjects}
+      currentSessionId={currentSessionId}
+      streaming={streaming}
+      onLoadSession={handleLoadSession}
+      onNewChatForProject={onNewChatForProject}
+      onRefreshProjects={refreshWorkspaceProjects}
+      onProjectError={handleProjectError}
+      activeTab={sidebarActiveTab}
+      onActiveTabChange={setSidebarActiveTab}
+      isSessionStarred={isSessionStarred}
+      onToggleSessionStar={handleToggleSessionStar}
+      isProjectPinned={isProjectPinned}
+      onToggleProjectPin={toggleProjectPin}
+      conversationActions={conversationActions}
+      projectActions={projectActions}
+    />
   );
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
@@ -1356,16 +1389,17 @@ export function App() {
                   {/* ── Location path. A breadcrumb names the CONTENT, so it sits
                       at the content's leading edge rather than in the window
                       band — same placement rule VS Code applies to its editor
-                      breadcrumbs. It renders only when there is depth to show:
-                      a single crumb repeats the title and earns no row. */}
-                  {viewNav.segments.length > 1 ? (
-                    <div className="shrink-0 px-3 pt-1.5" data-testid="canvas-path">
-                      <ViewPathBreadcrumb
-                        segments={viewNav.segments}
-                        onSelectSegment={viewNav.onSelectSegment}
-                      />
-                    </div>
-                  ) : null}
+                      breadcrumbs. It renders at every depth, including one:
+                      since the chat group's header now carries the CONVERSATION
+                      title, this row is the only thing naming the ROUTE, and
+                      hiding it at depth 1 would leave the shallowest views —
+                      the ones a new user is most likely on — unlabelled. */}
+                  <div className="shrink-0 px-3 pt-1.5" data-testid="canvas-path">
+                    <ViewPathBreadcrumb
+                      segments={viewNav.segments}
+                      onSelectSegment={viewNav.onSelectSegment}
+                    />
+                  </div>
                   {/* Floating notification stack — update/announcement banners are an
                       OVERLAY, not in-flow content. They float over the canvas anchored
                       top-RIGHT so they never push the routed content or the composer
@@ -1604,16 +1638,32 @@ export function App() {
                                     It is wrapped in the chat GROUP: an outlined
                                     container carrying its own title + the actions
                                     that operate on this conversation. */}
+                                <div className="flex min-h-0 min-w-0 flex-1 gap-2" data-testid="chat-group-row">
+                                {chatGroups.groups.map((group) => (
                                 <ChatGroupFrame
+                                  key={group.id}
                                   title={
-                                    sessions.find((s) => s.id === currentSessionId)?.title
-                                    ?? t("sidebar.newChat")
+                                    group.source === "side"
+                                      ? t("chatGroup.sideChatTitle")
+                                      : sessions.find((s) => s.id === currentSessionId)?.title
+                                        ?? t("sidebar.newChat")
                                   }
-                                  focused
-                                  panelOpen={sidePanelOpen}
-                                  onTogglePanel={handleToggleSidePanel}
-                                  actions={chatGroupActions}
+                                  focused={chatGroups.focusedId === group.id}
+                                  onFocus={() => chatGroups.focus(group.id)}
+                                  sidebar={groupSidebar}
+                                  sidebarOpen={group.sidebarOpen}
+                                  onToggleSidebar={() => chatGroups.toggleSidebar(group.id)}
+                                  onSplit={chatGroups.canSplit ? chatGroups.split : undefined}
+                                  onClose={chatGroups.groups.length > 1 ? () => chatGroups.close(group.id) : undefined}
+                                  // Only the main group's actions act on the main
+                                  // conversation. The side chat is a different loop
+                                  // with a different session, so offering the same
+                                  // pin/export here would act on the wrong one.
+                                  actions={group.source === "main" ? chatGroupActions : []}
                                 >
+                                {group.source === "side" ? (
+                                  <SideChatView api={api} />
+                                ) : (
                                 <ChatView
                                   api={api}
                                   onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
@@ -1667,7 +1717,10 @@ export function App() {
                                   onRefreshProjects={refreshWorkspaceProjects}
                                   onProjectError={handleProjectError}
                                 />
+                                )}
                                 </ChatGroupFrame>
+                                ))}
+                                </div>
                               </ChatContextProvider>
                             </PageShell>
                           );

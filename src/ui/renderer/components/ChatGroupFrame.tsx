@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Download, PanelRightClose, PanelRightOpen, Pin, Upload } from "lucide-react";
+import { useCallback, useState, type ReactNode } from "react";
+import { Columns2, Download, PanelRightClose, PanelRightOpen, Pin, Upload, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
   DropdownMenu,
@@ -48,8 +48,20 @@ export interface ChatGroupFrameProps {
   actions: ChatGroupAction[];
   /** Whether this group currently has focus — drives the border, see above. */
   focused?: boolean;
-  panelOpen: boolean;
-  onTogglePanel: () => void;
+  /** This group's OWN sidebar — its conversation list. Rendered inside the
+   *  frame, so it scrolls and closes with the group rather than with the
+   *  window. */
+  sidebar?: ReactNode;
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
+  /** Split off another group. Absent when no free conversation source remains. */
+  onSplit?: () => void;
+  /** Close this group. Absent on the last one — a workspace with no group is
+   *  not a state the user can get back out of. */
+  onClose?: () => void;
+  /** Raised when anything inside the group is interacted with, so the frame
+   *  can take focus. */
+  onFocus?: () => void;
   children: ReactNode;
 }
 
@@ -60,18 +72,27 @@ export function ChatGroupFrame({
   title,
   actions,
   focused,
-  panelOpen,
-  onTogglePanel,
+  sidebar,
+  sidebarOpen,
+  onToggleSidebar,
+  onSplit,
+  onClose,
+  onFocus,
   children,
 }: ChatGroupFrameProps) {
   const { t } = useTranslation();
-  const panelLabel = panelOpen
-    ? t("mainToolbar.hideActionPanel")
-    : t("mainToolbar.showActionPanel");
+  const sidebarLabel = sidebarOpen
+    ? t("chatGroup.hideSidebar")
+    : t("chatGroup.showSidebar");
   return (
     <section
       data-testid="chat-group"
       data-focused={focused ? "true" : undefined}
+      // Focus follows interaction rather than a click on the frame itself:
+      // clicking into the composer IS choosing the group, and requiring a
+      // second click on the chrome to say so would be a step with no purpose.
+      onFocusCapture={onFocus}
+      onMouseDownCapture={onFocus}
       className={[
         "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card",
         // Focus lives on the frame. `border-border` is the resting hairline;
@@ -139,27 +160,150 @@ export function ChatGroupFrame({
             </Tooltip>
           ),
         )}
+        {onSplit ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={HEADER_BUTTON_CLASS}
+                onClick={onSplit}
+                title={t("chatGroup.split")}
+                aria-label={t("chatGroup.split")}
+                data-testid="chat-group-split"
+              >
+                <Columns2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("chatGroup.split")}</TooltipContent>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
               className={HEADER_BUTTON_CLASS}
-              onClick={onTogglePanel}
-              title={panelLabel}
-              aria-label={panelLabel}
-              aria-pressed={panelOpen}
-              data-testid="chat-group-panel-toggle"
+              onClick={onToggleSidebar}
+              title={sidebarLabel}
+              aria-label={sidebarLabel}
+              aria-pressed={sidebarOpen}
+              data-testid="chat-group-sidebar-toggle"
             >
-              {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+              {sidebarOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{panelLabel}</TooltipContent>
+          <TooltipContent side="bottom">{sidebarLabel}</TooltipContent>
         </Tooltip>
+        {onClose ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={HEADER_BUTTON_CLASS}
+                onClick={onClose}
+                title={t("chatGroup.close")}
+                aria-label={t("chatGroup.close")}
+                data-testid="chat-group-close"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("chatGroup.close")}</TooltipContent>
+          </Tooltip>
+        ) : null}
       </header>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+      {/* The group's own sidebar sits INSIDE the frame, on the trailing edge —
+          the side its toggle is on. Putting it outside would make it the
+          window's sidebar again, which is the thing this is not. */}
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        {sidebarOpen && sidebar ? (
+          <aside
+            className="flex min-h-0 w-56 shrink-0 flex-col overflow-hidden border-l border-border/(--opacity-half)"
+            data-testid="chat-group-sidebar"
+          >
+            {sidebar}
+          </aside>
+        ) : null}
+      </div>
     </section>
   );
+}
+
+/** A group's conversation source. Each maps to ONE ConversationLoop in main. */
+export type ChatGroupSource = "main" | "side";
+
+export interface ChatGroupState {
+  id: string;
+  source: ChatGroupSource;
+  sidebarOpen: boolean;
+}
+
+/**
+ * The open chat groups, tiled.
+ *
+ * The list is flat and laid out along one axis rather than a split TREE. A tree
+ * buys arbitrary nesting, and nothing else here can address a nested position —
+ * not a keyboard command, not a restore, not a test. A flat list is the model
+ * the rest of the app can actually name a group in.
+ *
+ * A group is bound to a conversation SOURCE, and every source is a distinct
+ * ConversationLoop in main. There are two of those today (the main chat and the
+ * side chat), so `canSplit` goes false at two. That is a real ceiling, not a
+ * chosen one: a third tile with no loop behind it would be a chat box that
+ * cannot answer, and an empty tile that looks live is worse than no tile.
+ */
+export function useChatGroups() {
+  const [groups, setGroups] = useState<ChatGroupState[]>([
+    { id: "main", source: "main", sidebarOpen: false },
+  ]);
+  const [focusedId, setFocusedId] = useState("main");
+
+  const takenSources = new Set(groups.map((group) => group.source));
+  const freeSource = (["main", "side"] as ChatGroupSource[]).find(
+    (source) => !takenSources.has(source),
+  );
+
+  const split = useCallback(() => {
+    setGroups((current) => {
+      const taken = new Set(current.map((group) => group.source));
+      const next = (["main", "side"] as ChatGroupSource[]).find((source) => !taken.has(source));
+      if (!next) return current;
+      setFocusedId(next);
+      return [...current, { id: next, source: next, sidebarOpen: false }];
+    });
+  }, []);
+
+  const close = useCallback((id: string) => {
+    setGroups((current) => {
+      // Never close the last one: a workspace with no group has no control left
+      // to open one from.
+      if (current.length <= 1) return current;
+      const next = current.filter((group) => group.id !== id);
+      setFocusedId((focused) => (focused === id ? next[0]!.id : focused));
+      return next;
+    });
+  }, []);
+
+  const toggleSidebar = useCallback((id: string) => {
+    setGroups((current) =>
+      current.map((group) =>
+        group.id === id ? { ...group, sidebarOpen: !group.sidebarOpen } : group,
+      ),
+    );
+  }, []);
+
+  return {
+    groups,
+    focusedId,
+    focus: setFocusedId,
+    canSplit: freeSource !== undefined,
+    split,
+    close,
+    toggleSidebar,
+  };
 }
 
 /**

@@ -49,6 +49,11 @@ export const en = {
   "sidebar.hideArchived": "Hide archived",
   "sidebar.renamePlaceholder": "Name",
   "sidebar.conversationMenu": "Conversation actions",
+  "chatGroup.showSidebar": "Show conversations",
+  "chatGroup.hideSidebar": "Hide conversations",
+  "chatGroup.split": "Split chat area",
+  "chatGroup.close": "Close chat area",
+  "chatGroup.sideChatTitle": "Side chat",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "sidebar.ariaLabel": "기본 탐색",
@@ -100,4 +105,9 @@ export const ko: Record<keyof typeof en, string> = {
   "sidebar.hideArchived": "보관함 숨기기",
   "sidebar.renamePlaceholder": "이름",
   "sidebar.conversationMenu": "대화 작업",
+  "chatGroup.showSidebar": "대화 목록 열기",
+  "chatGroup.hideSidebar": "대화 목록 닫기",
+  "chatGroup.split": "채팅 영역 분할",
+  "chatGroup.close": "채팅 영역 닫기",
+  "chatGroup.sideChatTitle": "사이드 채팅",
 };

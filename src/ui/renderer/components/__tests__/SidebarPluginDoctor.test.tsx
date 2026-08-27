@@ -7,6 +7,14 @@ import { Sidebar } from "../Sidebar.js";
 
 function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const props: Parameters<typeof Sidebar>[0] = {
+    viewNav: {
+      segments: [],
+      canGoBack: false,
+      canGoForward: false,
+      onBack: () => {},
+      onForward: () => {},
+      onSelectSegment: () => {},
+    },
     activeView: "home",
     onSelect: vi.fn(),
     pluginViews: [],

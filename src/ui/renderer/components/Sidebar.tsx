@@ -829,7 +829,12 @@ function SessionRow({
   );
 }
 
-function ProjectSessionList({
+/**
+ * The conversation list, exported because a chat GROUP renders the same list in
+ * its own sidebar. One list component, so the window's sidebar and a group's
+ * sidebar cannot show two different pictures of the same conversations.
+ */
+export function ProjectSessionList({
   collapsed,
   sessions,
   currentSessionId,
@@ -922,6 +927,12 @@ function ProjectSessionList({
   const isSessionPinned = (sessionId: string) => Boolean(isSessionStarred?.(sessionId));
   const fallbackProjects = useWorkspaceProjects(projectsProp === undefined);
   const workspaceProjects = projectsProp ?? fallbackProjects;
+  // Which row is mid-rename. One id for BOTH kinds of row: renaming two things
+  // at once is not a state the user can be in, so it is not a state to model.
+  const [renamingKey, setRenamingKey] = useState<string | null>(null);
+  // Archived rows are out of the way by default and one click from being back.
+  const [showArchived, setShowArchived] = useState(false);
+
   const mainSessions = useMemo(
     () => sessions.filter((session) => session.sessionKind === "main"),
     [sessions],
@@ -998,11 +1009,6 @@ function ProjectSessionList({
   const hasNamedProjects = sessionsByProject.length > 0;
   const hasUngroupedSessions = ungroupedSessions.length > 0;
 
-  // Which row is mid-rename. One id for BOTH kinds of row: renaming two things
-  // at once is not a state the user can be in, so it is not a state to model.
-  const [renamingKey, setRenamingKey] = useState<string | null>(null);
-  // Archived rows are out of the way by default and one click from being back.
-  const [showArchived, setShowArchived] = useState(false);
 
   const conversationMenuHandlers = (session: SessionSummary): NativeContextMenuHandlers => {
     const actions = conversationActions;

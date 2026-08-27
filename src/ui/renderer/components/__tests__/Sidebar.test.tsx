@@ -956,3 +956,15 @@ describe("Sidebar conversation row actions", () => {
     restore();
   });
 });
+
+describe("Sidebar collapsed rail", () => {
+  it("renders collapsed as well as expanded", () => {
+    // The collapsed rail returns EARLY from the conversation list, so any hook
+    // added below that branch renders in one state and not the other. React
+    // reports that as "rendered fewer hooks than expected" and the whole app
+    // falls into the error boundary — which is what this asserts against.
+    const { getByTestId, restore } = renderSidebar({ collapsed: true });
+    expect(getByTestId("sidebar-cluster")).toBeTruthy();
+    restore();
+  });
+});
