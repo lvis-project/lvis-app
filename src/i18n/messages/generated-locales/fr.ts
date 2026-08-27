@@ -2555,6 +2555,7 @@ export const frMessages: Record<string, string> = {
   "chatGroup.hideSidebar": "Masquer les conversations",
   "chatGroup.split": "Diviser la zone de discussion",
   "chatGroup.close": "Fermer la zone de discussion",
+  "chatGroup.resize": "Redimensionner les zones de discussion",
   "chatGroup.sideChatTitle": "Discussion latérale",
   "skillBadge.loadedFallback": "Compétence {name} chargée.",
   "skillBadge.loadedLabel": "Compétence chargée: {name}",

@@ -20,21 +20,24 @@ export interface EdgeResizeBarProps extends UseEdgeResizeOptions {
 
 /**
  * Shared drag-to-resize edge bar — ONE visual + interaction + a11y code path
- * for every panel that resizes along a vertical edge (the left Sidebar's
- * right edge, the right-docked ChatSidePanel's left edge). Renders a
- * full-height 8px hit strip with a thin 2px visible rule that tints on
- * hover/focus, positioned at the panel's resize edge (`edge="end"` → bar sits
- * at the panel's right; `edge="start"` → bar sits at the panel's left). All
- * drag/keyboard/reset logic is delegated to `useEdgeResize`; this component
- * only draws the bar and wires its DOM events to that hook.
+ * for every edge that resizes something: the left Sidebar's right edge, the
+ * right-docked ChatSidePanel's left edge, and the gutters between tiled chat
+ * groups. Renders a full-length 8px hit strip with a thin 2px visible rule
+ * that tints on hover/focus, positioned at the resize edge (`edge="end"` →
+ * bar sits at the panel's right, or bottom on the y axis; `edge="start"` →
+ * left, or top). All drag/keyboard/reset logic is delegated to
+ * `useEdgeResize`; this component only draws the bar and wires its DOM
+ * events to that hook.
  *
- * a11y: `role="separator"` + `aria-orientation="vertical"` + arrow-key steps
- * (direction always matches the visual edge) + Home/End to the bounds +
- * double-click or Enter to reset to `resetWidth`.
+ * a11y: `role="separator"` + `aria-orientation` (the orientation of the bar
+ * itself: a width-resizing bar stands vertical) + arrow-key steps (direction
+ * always matches the visual edge) + Home/End to the bounds + double-click or
+ * Enter to reset to `resetWidth`.
  */
 export function EdgeResizeBar({
   width,
   edge,
+  axis = "x",
   onWidthChange,
   onWidthCommit,
   min,
@@ -50,6 +53,7 @@ export function EdgeResizeBar({
   const { onPointerDown, onKeyDown, makeResetHandler, resolveMax } = useEdgeResize({
     width,
     edge,
+    axis,
     onWidthChange,
     onWidthCommit,
     min,
@@ -59,10 +63,23 @@ export function EdgeResizeBar({
   });
 
   const straddle = variant === "straddle";
+  const placement = axis === "x"
+    ? [
+      "inset-y-0 w-2 cursor-col-resize items-center",
+      edge === "end"
+        ? `right-0 justify-end ${straddle ? "translate-x-1/2" : ""}`
+        : `left-0 justify-start ${straddle ? "-translate-x-1/2" : ""}`,
+    ]
+    : [
+      "inset-x-0 h-2 cursor-row-resize justify-center",
+      edge === "end"
+        ? `bottom-0 items-end ${straddle ? "translate-y-1/2" : ""}`
+        : `top-0 items-start ${straddle ? "-translate-y-1/2" : ""}`,
+    ];
   return (
     <div
       role="separator"
-      aria-orientation="vertical"
+      aria-orientation={axis === "x" ? "vertical" : "horizontal"}
       aria-label={ariaLabel}
       aria-valuenow={Math.round(width)}
       aria-valuemin={min}
@@ -70,17 +87,20 @@ export function EdgeResizeBar({
       tabIndex={0}
       data-testid={testId}
       className={[
-        "group absolute inset-y-0 z-40 flex w-2 cursor-col-resize touch-none select-none items-center outline-none",
-        edge === "end"
-          ? `right-0 justify-end ${straddle ? "translate-x-1/2" : ""}`
-          : `left-0 justify-start ${straddle ? "-translate-x-1/2" : ""}`,
+        "group absolute z-40 flex touch-none select-none outline-none",
+        ...placement,
       ].join(" ")}
       style={style}
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
       onDoubleClick={makeResetHandler(resetWidth)}
     >
-      <span className="h-full w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+      <span
+        className={[
+          "rounded-full bg-transparent transition-colors group-hover:bg-primary group-focus-visible:bg-primary",
+          axis === "x" ? "h-full w-0.5" : "h-0.5 w-full",
+        ].join(" ")}
+      />
     </div>
   );
 }

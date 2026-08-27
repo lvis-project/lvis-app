@@ -116,6 +116,34 @@ The window remembers the pair and delivers it the moment that tile publishes its
 handle to the registry — which is also why the registry exposes `subscribe`
 rather than only a read.
 
+## Resizing: the gutter between two tiles
+
+A boundary between siblings is a gutter, and a gutter is the same
+`EdgeResizeBar` the sidebar and the side panel resize with — standing on the
+boundary instead of on a panel's edge. The leading tile is the "panel", its
+extent along the split's axis is the "width", and the trailing tile takes what
+is left of the pair. The hook gained one option for it, `axis`, because a
+boundary between a top and a bottom tile follows the pointer's Y; everything
+else — sign, clamp, keyboard steps, Home/End, double-click reset — is the
+same code, which is the point of it being an option rather than a second hook.
+
+A gutter is identified by where it is in the tree (the split's path and the
+pair's index), not by an id: a split has none, and the nodes either side of it
+may be splits themselves. Moving a gutter changes the two shares it separates
+and nothing else — siblings and everything nested inside either side keep
+their own proportions, so a drag on one boundary never moves a boundary the
+user was not holding.
+
+The floors are in pixels — 448px across, the column floor DESIGN.md gives
+every chat surface, and 240px down — while the tree only knows shares, so the
+bar converts through the measured canvas. A pair that cannot hold two floors
+offers no bar at all, rather than a bar that snaps back on every drag.
+
+During a drag the new layout is written straight to the cells' style, the
+same DOM-direct path the sidebar uses, and the tree is committed once on
+release. Committing per move would re-render every conversation on screen
+for every pointer event.
+
 ## The pieces
 
 Each piece is independently shippable and independently verifiable.

@@ -2572,6 +2572,7 @@ export const esMessages: Record<string, string> = {
   "chatGroup.hideSidebar": "Ocultar conversaciones",
   "chatGroup.split": "Dividir el área de chat",
   "chatGroup.close": "Cerrar el área de chat",
+  "chatGroup.resize": "Cambiar el tamaño de las áreas de chat",
   "chatGroup.sideChatTitle": "Chat lateral",
   "skillBadge.loadedFallback": "Habilidad {name} cargada.",
   "skillBadge.loadedLabel": "Habilidad cargada: {name}",

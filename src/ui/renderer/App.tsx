@@ -30,7 +30,7 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { ChatGroupFrame, useChatGroups } from "./components/ChatGroupFrame.js";
+import { ChatGroupFrame, ChatGroupGutter, areaStyle, useChatGroups } from "./components/ChatGroupFrame.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, type SessionSummary } from "./hooks/use-sessions.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
@@ -1350,12 +1350,7 @@ export function App() {
                                      edges land exactly where they did — the chat group's
                                      bottom line has to stay on the sidebar's. */
                                   className="absolute flex p-1"
-                                  style={{
-                                    left: `${group.box.left}%`,
-                                    top: `${group.box.top}%`,
-                                    width: `${group.box.width}%`,
-                                    height: `${group.box.height}%`,
-                                  }}
+                                  style={areaStyle(group.box)}
                                   data-testid={`chat-group-cell:${group.id}`}
                                 >
                                   {/* The tile owns its conversation: every hook inside is
@@ -1400,6 +1395,18 @@ export function App() {
                                     )}
                                   </ChatGroupSession>
                                 </div>
+                                ))}
+                                {/* The boundaries sit in the 8px the cells' half-gutters
+                                    leave between tiles, so the bar's strip is exactly
+                                    the gap and steals nothing from either transcript. */}
+                                {chatGroups.gutters.map((gutter) => (
+                                  <ChatGroupGutter
+                                    key={gutter.key}
+                                    gutter={gutter}
+                                    canvasRef={chatGroupCanvasRef}
+                                    previewResize={chatGroups.previewResize}
+                                    onResize={chatGroups.resize}
+                                  />
                                 ))}
                                 </div>
                                 </div>

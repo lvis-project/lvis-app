@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, createEvent, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
-import { ChatGroupFrame, buildChatGroupActions, chatGroupApi, useChatGroups } from "../ChatGroupFrame.js";
+import { ChatGroupFrame, ChatGroupGutter, buildChatGroupActions, chatGroupApi, useChatGroups } from "../ChatGroupFrame.js";
+import { layoutBoxes, layoutGutters, leaf, resizeGutter, splitLeaf, type ChatGroupGutter as ChatGroupGutterShape } from "../chat-group-tree.js";
 import { CHAT_SESSION_DRAG_TYPE } from "../chat-group-drop.js";
 import type { LvisApi } from "../../types.js";
 
@@ -330,5 +331,83 @@ describe("ChatGroupFrame drop gesture", () => {
 
     drag("drop", tile, file, { x: 795, y: 300 });
     expect(onSessionDrop).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatGroupGutter", () => {
+  afterEach(cleanup);
+
+  /** A canvas holding two tiles side by side, split down the middle. */
+  function canvasWithTwoTiles(width = 1000) {
+    const canvas = document.createElement("div");
+    Object.defineProperty(canvas, "clientWidth", { value: width });
+    Object.defineProperty(canvas, "clientHeight", { value: 700 });
+    for (const id of ["main", "group-2"]) {
+      const cell = document.createElement("div");
+      cell.setAttribute("data-testid", `chat-group-cell:${id}`);
+      canvas.appendChild(cell);
+    }
+    document.body.appendChild(canvas);
+    return canvas;
+  }
+
+  function renderGutter(canvas: HTMLElement, onResize = vi.fn()) {
+    const tree = splitLeaf(leaf("main"), "main", "right", "group-2");
+    const [gutter] = layoutGutters(tree);
+    const previewResize = (g: ChatGroupGutterShape, share: number) => {
+      const next = resizeGutter(tree, g, share);
+      return { boxes: layoutBoxes(next), gutters: layoutGutters(next) };
+    };
+    const view = render(
+      <TooltipProvider>
+        <ChatGroupGutter
+          gutter={gutter!}
+          canvasRef={{ current: canvas }}
+          previewResize={previewResize}
+          onResize={onResize}
+        />
+      </TooltipProvider>,
+      // A root of its own: createRoot empties its container, and the cells
+      // have to survive as the gutter's siblings for the paint to find them.
+      { container: canvas.appendChild(document.createElement("div")) },
+    );
+    return { view, gutter: gutter!, onResize };
+  }
+
+  it("stands on the boundary as the same separator the side panel resizes with", () => {
+    const canvas = canvasWithTwoTiles();
+    const { gutter } = renderGutter(canvas);
+    const bar = screen.getByTestId(`chat-group-gutter-bar:${gutter.key}`);
+    expect(bar.getAttribute("role")).toBe("separator");
+    // A width-resizing bar stands vertical; its value is the leading tile's px.
+    expect(bar.getAttribute("aria-orientation")).toBe("vertical");
+    expect(bar.getAttribute("aria-valuenow")).toBe("500");
+    // Both sides keep the 448px column floor.
+    expect(bar.getAttribute("aria-valuemin")).toBe("448");
+    expect(bar.getAttribute("aria-valuemax")).toBe("552");
+  });
+
+  it("paints the drag onto the cells directly and commits the share once, on release", () => {
+    const canvas = canvasWithTwoTiles();
+    const { gutter, onResize } = renderGutter(canvas);
+    const bar = screen.getByTestId(`chat-group-gutter-bar:${gutter.key}`);
+
+    fireEvent.pointerDown(bar, { clientX: 500, pointerId: 1 });
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 540 } as MouseEventInit));
+    });
+    // 540 of 1000 → the leading cell is 54% wide, the trailing one starts there.
+    expect(canvas.querySelector<HTMLElement>('[data-testid="chat-group-cell:main"]')!.style.width).toBe("54%");
+    expect(canvas.querySelector<HTMLElement>('[data-testid="chat-group-cell:group-2"]')!.style.left).toBe("54%");
+    expect(onResize).not.toHaveBeenCalled();
+
+    act(() => { window.dispatchEvent(new MouseEvent("pointerup")); });
+    expect(onResize).toHaveBeenCalledTimes(1);
+    expect(onResize.mock.calls[0]![1]).toBeCloseTo(0.54);
+  });
+
+  it("offers no bar when the pair cannot hold two tiles at the floor", () => {
+    const { gutter } = renderGutter(canvasWithTwoTiles(800));
+    expect(screen.queryByTestId(`chat-group-gutter-bar:${gutter.key}`)).toBeNull();
   });
 });

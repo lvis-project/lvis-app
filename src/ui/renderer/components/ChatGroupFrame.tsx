@@ -1,4 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
+  type ReactNode, type RefObject,
+} from "react";
 import {
   Columns2, Download, PanelBottomClose, PanelBottomOpen,
   Pin, Upload, X,
@@ -13,7 +16,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../../contract/app-contract.js";
+import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
+import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import {
   CHAT_SESSION_DRAG_TYPE,
   dropIndicatorStyle,
@@ -24,13 +29,27 @@ import {
   closeLeaf,
   countLeaves,
   layoutBoxes,
+  layoutGutters,
   leaf,
   leafIds,
+  resizeGutter,
   splitLeaf,
   type ChatGroupBox,
+  type ChatGroupGutter,
   type ChatGroupNode,
   type DropEdge,
 } from "./chat-group-tree.js";
+
+/**
+ * The least a tile may be dragged down to, in px.
+ *
+ * Width is the 448px floor DESIGN.md gives every chat column — the same one
+ * the side panel clamps to. Height has no documented floor; 240px is a header,
+ * a composer, and one visible turn, below which a tile is a composer with no
+ * transcript above it.
+ */
+const CHAT_GROUP_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
+const CHAT_GROUP_MIN_HEIGHT = 240;
 
 /**
  * The chat group: an outlined work container with its own header.
@@ -541,19 +560,155 @@ export function useChatGroups(appMode?: "chat" | "work") {
   // number of loops, nothing weaker.
   const canSplit = appMode !== "chat" && countLeaves(tree) < MAX_CHAT_GROUPS;
 
+  // Boundaries between tiles. Chat mode shows one leaf, so there are none.
+  const gutters = useMemo(
+    () => layoutGutters(visibleTree),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tree, appMode, focusedId],
+  );
+
+  const resize = useCallback((gutter: Pick<ChatGroupGutter, "path" | "index">, leadingShare: number) => {
+    setTree((current) => resizeGutter(current, gutter, leadingShare));
+  }, []);
+
+  /**
+   * Where everything WOULD be with the gutter at `leadingShare`, without
+   * committing it — what a drag paints frame by frame. The tree is committed
+   * once, at the end, so a drag does not re-render four conversations per
+   * pointer move.
+   */
+  const previewResize = useCallback(
+    (gutter: Pick<ChatGroupGutter, "path" | "index">, leadingShare: number) => {
+      const next = resizeGutter(tree, gutter, leadingShare);
+      return { boxes: layoutBoxes(next), gutters: layoutGutters(next) };
+    },
+    [tree],
+  );
+
   return {
     groups,
+    gutters,
     tree,
     focusedId,
     focus: setFocusedId,
     setPanelOpen,
     canSplit,
-    /** True while a drop would actually be honoured — gates the edge affordance. */
-    canDrop: canSplit,
     split,
     dropOnEdge,
+    resize,
+    previewResize,
     close,
   };
+}
+
+/**
+ * The tile area's size in px, kept current as the window changes.
+ *
+ * Read in an effect rather than during render: a ref's `.current` during
+ * render is whatever the last commit left there, and a window resize commits
+ * nothing on its own — the floors would then be computed against a canvas
+ * that no longer exists.
+ */
+function useCanvasSize(canvasRef: RefObject<HTMLElement | null>): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const measure = () => setSize((prev) => {
+      const next = { width: el.clientWidth, height: el.clientHeight };
+      return prev.width === next.width && prev.height === next.height ? prev : next;
+    });
+    measure();
+    const Observer = typeof window !== "undefined" ? window.ResizeObserver : undefined;
+    if (typeof Observer !== "function") return;
+    const observer = new Observer(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [canvasRef]);
+  return size;
+}
+
+/** Percent geometry → the inline style a cell or gutter is positioned with. */
+export function areaStyle(box: { left: number; top: number; width: number; height: number }) {
+  return {
+    left: `${box.left}%`,
+    top: `${box.top}%`,
+    width: `${box.width}%`,
+    height: `${box.height}%`,
+  };
+}
+
+export interface ChatGroupGutterProps {
+  gutter: ChatGroupGutter;
+  /** The tile area, for turning percentages into the pixels the floors are in. */
+  canvasRef: RefObject<HTMLElement | null>;
+  previewResize: (gutter: ChatGroupGutter, leadingShare: number) => {
+    boxes: ChatGroupBox[];
+    gutters: ChatGroupGutter[];
+  };
+  onResize: (gutter: ChatGroupGutter, leadingShare: number) => void;
+}
+
+/**
+ * The draggable boundary between two tiles.
+ *
+ * It is the same `EdgeResizeBar` the sidebar and the side panel resize with,
+ * standing on the boundary instead of on a panel's edge: the leading tile is
+ * the "panel", its extent along the split's axis is the "width", and the
+ * trailing tile takes whatever is left of the pair. The floors are in pixels,
+ * so the bar converts through the canvas size — the tree only knows shares.
+ *
+ * While dragging, the new layout is written straight to the cells' and
+ * gutters' style — the same DOM-direct path the sidebar uses — and the tree
+ * is committed once on release. Committing per move would re-render every
+ * conversation on screen for every pointer event.
+ */
+export function ChatGroupGutter({ gutter, canvasRef, previewResize, onResize }: ChatGroupGutterProps) {
+  const { t } = useTranslation();
+  const canvas = useCanvasSize(canvasRef);
+  const along = gutter.axis === "row" ? canvas.width : canvas.height;
+  const pairPx = (along * (gutter.leading + gutter.trailing)) / 100;
+  const floor = gutter.axis === "row" ? CHAT_GROUP_MIN_WIDTH : CHAT_GROUP_MIN_HEIGHT;
+  const leadingPx = (along * gutter.leading) / 100;
+
+  const paint = useCallback((leadingShare: number) => {
+    const root = canvasRef.current;
+    if (!root) return;
+    const next = previewResize(gutter, leadingShare);
+    for (const box of next.boxes) {
+      const cell = root.querySelector<HTMLElement>(`[data-testid="chat-group-cell:${box.chatGroupId}"]`);
+      if (cell) Object.assign(cell.style, areaStyle(box));
+    }
+    for (const each of next.gutters) {
+      const bar = root.querySelector<HTMLElement>(`[data-testid="chat-group-gutter:${each.key}"]`);
+      if (bar) Object.assign(bar.style, areaStyle(each));
+    }
+  }, [canvasRef, gutter, previewResize]);
+
+  // A pair that cannot fit two floors has nothing to give. No bar, rather
+  // than a bar that snaps back on every drag.
+  if (pairPx < floor * 2) return null;
+
+  return (
+    <div
+      className="absolute"
+      style={areaStyle(gutter)}
+      data-testid={`chat-group-gutter:${gutter.key}`}
+    >
+      <EdgeResizeBar
+        width={leadingPx}
+        edge="end"
+        axis={gutter.axis === "row" ? "x" : "y"}
+        min={floor}
+        max={pairPx - floor}
+        resetWidth={pairPx / 2}
+        onWidthChange={(px) => paint(px / pairPx)}
+        onWidthCommit={(px) => onResize(gutter, px / pairPx)}
+        ariaLabel={t("chatGroup.resize")}
+        data-testid={`chat-group-gutter-bar:${gutter.key}`}
+      />
+    </div>
+  );
 }
 
 /**

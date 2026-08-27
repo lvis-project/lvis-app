@@ -2567,6 +2567,7 @@ export const zhMessages: Record<string, string> = {
   "chatGroup.hideSidebar": "隐藏对话列表",
   "chatGroup.split": "拆分聊天区域",
   "chatGroup.close": "关闭聊天区域",
+  "chatGroup.resize": "调整聊天区域大小",
   "chatGroup.sideChatTitle": "侧边对话",
   "sidebar.unpinProject": "取消固定项目",
   "skillBadge.loadedFallback": "技能 {name} 已加载。",

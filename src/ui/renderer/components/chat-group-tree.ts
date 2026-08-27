@@ -13,7 +13,8 @@
  * the main-process loop registry — ever has to name a position.
  */
 
-/** Which way a split divides its space. Internal: the union is the api. */
+/** Which way a split divides its space. Internal: it reaches callers through
+ *  `ChatGroupGutter.axis`, never by name. */
 type SplitAxis = "row" | "column";
 
 export interface ChatGroupLeaf {
@@ -202,4 +203,114 @@ export function layoutBoxes(node: ChatGroupNode): ChatGroupBox[] {
     return boxes;
   };
   return walk(node, 0, 0, 100, 100);
+}
+
+/**
+ * A gutter: the boundary between two adjacent children of one split.
+ *
+ * Identified by where it is in the tree — the split's path from the root and
+ * the index of the pair — because a split has no id of its own and the two
+ * leaves either side of it may themselves be splits. The geometry is the
+ * boundary line as percentages of the main area: zero-thickness along the
+ * split's axis, spanning the pair's shared extent across it.
+ */
+export interface ChatGroupGutter {
+  /** Stable while the tree's SHAPE is unchanged; a resize keeps it. */
+  key: string;
+  axis: SplitAxis;
+  /** Child indices from the root down to the split that owns this gutter. */
+  path: number[];
+  /** The gutter sits between children `index` and `index + 1`. */
+  index: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  /** Extent of the two sides along the axis, as percentages of the main area. */
+  leading: number;
+  trailing: number;
+}
+
+export function layoutGutters(node: ChatGroupNode): ChatGroupGutter[] {
+  const walk = (
+    current: ChatGroupNode,
+    path: number[],
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+  ): ChatGroupGutter[] => {
+    if (current.kind === "leaf") return [];
+    const gutters: ChatGroupGutter[] = [];
+    const extent = current.axis === "row" ? width : height;
+    let offset = 0;
+    current.children.forEach((child, at) => {
+      const share = current.sizes[at] ?? 1 / current.children.length;
+      const childLeft = current.axis === "row" ? left + width * offset : left;
+      const childTop = current.axis === "row" ? top : top + height * offset;
+      const childWidth = current.axis === "row" ? width * share : width;
+      const childHeight = current.axis === "row" ? height : height * share;
+      gutters.push(...walk(child, [...path, at], childLeft, childTop, childWidth, childHeight));
+
+      const next = current.children[at + 1];
+      if (next) {
+        const nextShare = current.sizes[at + 1] ?? 1 / current.children.length;
+        const boundary = offset + share;
+        gutters.push({
+          key: `${path.join(".")}:${at}`,
+          axis: current.axis,
+          path,
+          index: at,
+          left: current.axis === "row" ? left + width * boundary : left,
+          top: current.axis === "row" ? top : top + height * boundary,
+          width: current.axis === "row" ? 0 : width,
+          height: current.axis === "row" ? height : 0,
+          leading: extent * share,
+          trailing: extent * nextShare,
+        });
+      }
+      offset += share;
+    });
+    return gutters;
+  };
+  return walk(node, [], 0, 0, 100, 100);
+}
+
+/**
+ * Move a gutter: give the leading side `leadingShare` of what the pair holds
+ * together, and the trailing side the rest.
+ *
+ * Only the two children either side of the gutter change. Their siblings and
+ * everything nested inside either of them keep their own proportions, so a
+ * drag on one boundary never moves a boundary the user was not holding.
+ * Returns the tree unchanged when the gutter does not exist in it.
+ */
+export function resizeGutter(
+  root: ChatGroupNode,
+  gutter: Pick<ChatGroupGutter, "path" | "index">,
+  leadingShare: number,
+): ChatGroupNode {
+  const share = Math.min(1, Math.max(0, leadingShare));
+  const rewrite = (node: ChatGroupNode, depth: number): ChatGroupNode | null => {
+    if (node.kind === "leaf") return null;
+    if (depth === gutter.path.length) {
+      const a = node.sizes[gutter.index];
+      const b = node.sizes[gutter.index + 1];
+      if (a === undefined || b === undefined) return null;
+      const pair = a + b;
+      const sizes = [...node.sizes];
+      sizes[gutter.index] = pair * share;
+      sizes[gutter.index + 1] = pair * (1 - share);
+      return { ...node, sizes };
+    }
+    const at = gutter.path[depth]!;
+    const child = node.children[at];
+    if (!child) return null;
+    const replaced = rewrite(child, depth + 1);
+    if (!replaced) return null;
+    const children = [...node.children];
+    children[at] = replaced;
+    return { ...node, children };
+  };
+  return rewrite(root, 0) ?? root;
 }

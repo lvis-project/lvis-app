@@ -162,3 +162,65 @@ describe("useEdgeResize", () => {
     }
   });
 });
+
+describe("useEdgeResize on the y axis", () => {
+  function pointerDownAt(clientY: number) {
+    return {
+      preventDefault: vi.fn(),
+      clientX: 0,
+      clientY,
+      pointerId: 1,
+      currentTarget: { setPointerCapture: vi.fn() },
+    } as unknown as React.PointerEvent;
+  }
+
+  it("follows the pointer's Y and ignores its X", () => {
+    const onWidthChange = vi.fn();
+    const onWidthCommit = vi.fn();
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 300, edge: "end", axis: "y", onWidthChange, onWidthCommit, min: 100, max: 600 }),
+    );
+
+    act(() => { result.current.onPointerDown(pointerDownAt(200)); });
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 999, clientY: 260 } as MouseEventInit) as unknown as PointerEvent);
+    });
+    expect(onWidthChange).toHaveBeenLastCalledWith(360);
+
+    act(() => { dispatchWindowPointerUp(); });
+    expect(onWidthCommit).toHaveBeenCalledWith(360);
+  });
+
+  it("steps with ArrowDown/ArrowUp, matching the bar's own orientation", () => {
+    const onWidthCommit = vi.fn();
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 300, edge: "end", axis: "y", onWidthChange: vi.fn(), onWidthCommit, min: 100, max: 600, keyStep: 10 }),
+    );
+    act(() => { result.current.onKeyDown(makeKeyEvent("ArrowDown")); });
+    expect(onWidthCommit).toHaveBeenLastCalledWith(310);
+    act(() => { result.current.onKeyDown(makeKeyEvent("ArrowUp")); });
+    expect(onWidthCommit).toHaveBeenLastCalledWith(290);
+    // The x-axis keys mean nothing here.
+    act(() => { result.current.onKeyDown(makeKeyEvent("ArrowRight")); });
+    expect(onWidthCommit).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes the live extent to the element's height, not its width", () => {
+    const el = document.createElement("div");
+    const { result } = renderHook(() =>
+      useEdgeResize({
+        width: 300, edge: "end", axis: "y", onWidthChange: vi.fn(), onWidthCommit: vi.fn(),
+        min: 100, max: 600, applyElementRef: { current: el },
+      }),
+    );
+    act(() => { result.current.onPointerDown(pointerDownAt(0)); });
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientY: 50 } as MouseEventInit) as unknown as PointerEvent);
+    });
+    return new Promise<void>((resolve) => requestAnimationFrame(() => {
+      expect(el.style.height).toBe("350px");
+      expect(el.style.width).toBe("");
+      resolve();
+    }));
+  });
+});

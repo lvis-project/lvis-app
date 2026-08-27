@@ -3,8 +3,10 @@ import {
   closeLeaf,
   countLeaves,
   layoutBoxes,
+  layoutGutters,
   leaf,
   leafIds,
+  resizeGutter,
   splitLeaf,
   type ChatGroupNode,
 } from "../chat-group-tree.js";
@@ -104,5 +106,59 @@ describe("layoutBoxes", () => {
 
     const area = layoutBoxes(tree).reduce((sum, b) => sum + b.width * b.height, 0);
     expect(area).toBeCloseTo(100 * 100, 6);
+  });
+});
+
+describe("layoutGutters", () => {
+  it("puts one gutter on every boundary between siblings, on the split's own axis", () => {
+    let tree: ChatGroupNode = splitLeaf(main, "main", "right", "group-2");
+    tree = splitLeaf(tree, "main", "bottom", "group-3");
+
+    const gutters = layoutGutters(tree);
+    expect(gutters.map((g) => [g.axis, g.left, g.top, g.width, g.height])).toEqual([
+      ["column", 0, 50, 50, 0],   // main | group-3, inside the left column
+      ["row", 50, 0, 0, 100],     // left column | group-2
+    ]);
+  });
+
+  it("reports both sides' extents so a caller can turn a pixel floor into a share", () => {
+    const tree = splitLeaf(main, "main", "right", "group-2");
+    const [gutter] = layoutGutters(tree);
+    expect(gutter).toMatchObject({ leading: 50, trailing: 50, path: [], index: 0 });
+  });
+
+  it("keeps a gutter's key across a resize, since the shape did not change", () => {
+    const tree = splitLeaf(main, "main", "right", "group-2");
+    const [before] = layoutGutters(tree);
+    const [after] = layoutGutters(resizeGutter(tree, before!, 0.7));
+    expect(after!.key).toBe(before!.key);
+  });
+});
+
+describe("resizeGutter", () => {
+  it("moves only the boundary that was held", () => {
+    let tree: ChatGroupNode = splitLeaf(main, "main", "right", "group-2");
+    tree = splitLeaf(tree, "main", "bottom", "group-3");
+    const inner = layoutGutters(tree).find((g) => g.axis === "column")!;
+
+    const resized = resizeGutter(tree, inner, 0.25);
+
+    const box = (id: string) => layoutBoxes(resized).find((b) => b.chatGroupId === id)!;
+    expect(box("main").height).toBeCloseTo(25);
+    expect(box("group-3").height).toBeCloseTo(75);
+    expect(box("group-2")).toMatchObject({ left: 50, width: 50, height: 100 });
+  });
+
+  it("leaves the tree alone when the gutter is not in it", () => {
+    const tree = splitLeaf(main, "main", "right", "group-2");
+    expect(resizeGutter(tree, { path: [3], index: 0 }, 0.3)).toBe(tree);
+    expect(resizeGutter(tree, { path: [], index: 5 }, 0.3)).toBe(tree);
+  });
+
+  it("clamps the share so neither side goes negative", () => {
+    const tree = splitLeaf(main, "main", "right", "group-2");
+    const boxes = layoutBoxes(resizeGutter(tree, { path: [], index: 0 }, 1.4));
+    expect(boxes.find((b) => b.chatGroupId === "main")!.width).toBeCloseTo(100);
+    expect(boxes.find((b) => b.chatGroupId === "group-2")!.width).toBeCloseTo(0);
   });
 });
