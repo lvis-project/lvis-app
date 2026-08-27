@@ -49,7 +49,13 @@ function isActive(container: HTMLElement, testId: string): boolean {
 }
 
 function atHome(container: HTMLElement): boolean {
-  return container.querySelector('[data-testid="composer-textarea"]') !== null;
+  // The conversations stay MOUNTED across view navigation — a tile subscribes
+  // to its group's stream when it mounts, so unmounting them to show another
+  // view would drop the frames of a turn still running. "At home" is therefore
+  // whether the surface is SHOWING, not whether it exists.
+  return container
+    .querySelector('[data-testid="chat-surface"]')
+    ?.getAttribute("data-visible") === "true";
 }
 
 /**

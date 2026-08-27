@@ -131,6 +131,9 @@ export interface ChatGroupSessionProps {
   children: (frame: {
     actions: ReturnType<typeof buildChatGroupActions>;
     content: ReactNode;
+    /** This tile's session — the frame titles itself by its OWN conversation,
+     *  not the focused one, or four tiles would all wear the same name. */
+    currentSessionId: string;
   }) => ReactNode;
   panelOpen: boolean;
   onSidePanelOpenChange: (open: boolean) => void;
@@ -565,5 +568,5 @@ export function ChatGroupSession({
     </ChatContextProvider>
   );
 
-  return <>{children({ actions, content })}</>;
+  return <>{children({ actions, content, currentSessionId })}</>;
 }

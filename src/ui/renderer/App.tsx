@@ -31,6 +31,7 @@ import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
 import { ChatGroupFrame, useChatGroups } from "./components/ChatGroupFrame.js";
+import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, type SessionSummary } from "./hooks/use-sessions.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
@@ -285,6 +286,47 @@ export function App() {
     if (!sessionId) return;
     await handleLoadSessionAndRefresh(sessionId);
   }, [handleImport, handleLoadSessionAndRefresh]);
+
+  /**
+   * A conversation dragged out of the sidebar and dropped on a tile.
+   *
+   * The middle of a tile means "show it here"; an edge means "put it beside
+   * this one". The second case creates a tile that is not mounted yet, so the
+   * load cannot happen in this handler — it is remembered and run the moment
+   * that tile publishes its handle.
+   */
+  const [pendingSessionDrop, setPendingSessionDrop] =
+    useState<{ chatGroupId: string; sessionId: string } | null>(null);
+
+  const handleSessionDrop = useCallback((
+    targetGroupId: string,
+    sessionId: string,
+    target: DropTarget,
+  ) => {
+    if (target === "center") {
+      chatGroups.focus(targetGroupId);
+      void chatGroupSessions.read(targetGroupId)?.loadSession(sessionId);
+      return;
+    }
+    const created = chatGroups.dropOnEdge(targetGroupId, target);
+    // null is the ceiling: four tiles already. Nothing to say — the frame
+    // stops offering edges once `canSplit` is false.
+    if (created) setPendingSessionDrop({ chatGroupId: created, sessionId });
+  }, [chatGroups, chatGroupSessions]);
+
+  useEffect(() => {
+    if (!pendingSessionDrop) return;
+    const { chatGroupId, sessionId } = pendingSessionDrop;
+    const deliver = () => {
+      const tile = chatGroupSessions.read(chatGroupId);
+      if (!tile) return false;
+      void tile.loadSession(sessionId);
+      setPendingSessionDrop(null);
+      return true;
+    };
+    if (deliver()) return;
+    return chatGroupSessions.subscribe(chatGroupId, () => { deliver(); });
+  }, [pendingSessionDrop, chatGroupSessions]);
 
   // Pinned-project preference — pinned projects sort to the top of the
   // sidebar's Projects tab.
@@ -1327,14 +1369,17 @@ export function App() {
                                     panelOpen={group.panelOpen}
                                     onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
                                   >
-                                    {({ actions, content }) => (
+                                    {({ actions, content, currentSessionId: tileSessionId }) => (
                                       <ChatGroupFrame
                                         title={
-                                          sessions.find((session: SessionSummary) => session.id === currentSessionId)?.title
+                                          sessions.find((session: SessionSummary) => session.id === tileSessionId)?.title
                                           ?? t("mainToolbar.newChat")
                                         }
                                         focused={chatGroups.focusedId === group.id}
                                         onFocus={() => chatGroups.focus(group.id)}
+                                        onSessionDrop={(sessionId, target) =>
+                                          handleSessionDrop(group.id, sessionId, target)}
+                                        canSplit={chatGroups.canSplit}
                                         panelOpen={group.panelOpen}
                                         onTogglePanel={() => chatGroups.setPanelOpen(group.id, !group.panelOpen)}
                                         actions={actions}

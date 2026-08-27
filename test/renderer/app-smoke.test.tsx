@@ -217,8 +217,16 @@ describe("App smoke (Phase 1 infra)", () => {
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );
-    expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeFalsy();
-    expect(container.querySelector('[data-testid="chat-group-panel-toggle"]')).toBeFalsy();
+    // Hidden with its conversation, not unmounted: a tile subscribes to its
+    // group's stream when it mounts, so tearing the surface down for Settings
+    // would drop the frames of a turn still running. The panel and its toggle
+    // go away with the surface that owns them.
+    expect(
+      container.querySelector('[data-testid="chat-surface"]')?.getAttribute("data-visible"),
+    ).toBe("false");
+    expect(
+      container.querySelector('[data-testid="chat-side-panel"]')?.closest('[data-testid="chat-surface"]'),
+    ).toBeTruthy();
 
     // Coming back restores it — the state rode with the group, not with the
     // window, so it did not have to be re-opened.
@@ -227,6 +235,9 @@ describe("App smoke (Phase 1 infra)", () => {
     });
     await waitFor(() => {
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy();
+      expect(
+        container.querySelector('[data-testid="chat-surface"]')?.getAttribute("data-visible"),
+      ).toBe("true");
       expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
     });
     expect(container.querySelector('[data-testid="chat-group-panel-toggle"]')?.getAttribute("aria-pressed")).toBe("true");

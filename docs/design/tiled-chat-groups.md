@@ -94,15 +94,27 @@ bounded by that count, so no separate depth limit is needed.
 A session is dragged from the session list onto a tile. The **edge** it lands on
 is the instruction:
 
-- an outer band (~8px) on any of the tile's four sides → split that leaf on that
-  axis and put the session on that side
+- an outer band on any of the tile's four sides → split that leaf on that axis
+  and put the session on that side
 - the tile's centre → replace what that tile is holding
 
-This is the same gesture VS Code uses for editor groups, so it needs no
-teaching, and it is the only drop model where the *shape* the user wants is
-expressed by where they let go rather than by a separate control. A drop that
-would exceed `MAX_CHAT_GROUPS` shows no edge affordance — the ceiling is visible
-in the gesture instead of appearing as a rejection after the fact.
+The band is 40px, but never more than 30% of the tile: a fixed band on a narrow
+tile would leave no middle at all, turning "replace" into a target the user
+cannot hit. On a corner the *nearest* edge wins, so a pointer moving one pixel
+does not flicker between two answers.
+
+This is the same gesture editor groups use elsewhere, so it needs no teaching,
+and it is the only drop model where the *shape* the user wants is expressed by
+where they let go rather than by a separate control. At `MAX_CHAT_GROUPS` every
+edge resolves to the centre — the tile highlights whole rather than by halves,
+so the ceiling is felt while still dragging instead of arriving as a rejection
+after the fact.
+
+The session cannot be loaded in the drop handler, because the tile it belongs in
+does not exist yet: the drop creates a leaf, and that leaf mounts a render later.
+The window remembers the pair and delivers it the moment that tile publishes its
+handle to the registry — which is also why the registry exposes `subscribe`
+rather than only a read.
 
 ## Phases
 
@@ -156,13 +168,17 @@ Two rules the tiles must keep:
   when React re-renders. Two frames landing in the same tick then read a stale
   (or already-cleared) accumulator, and a finished turn renders a blank body.
 
-### Phase 4 — the control
+### Phase 4 — the controls. **Done.**
 
-`useChatGroups` gains `split()` and `close()`, bounded by `MAX_CHAT_GROUPS` in
-work mode and 1 in chat mode; chat mode collapses to the focused group. The
-frame already renders any number of groups side by side and already has the
-split control wired behind an `onSplit` prop — it is absent today precisely
-because a tile with no loop behind it would be a chat box that cannot answer.
+`useChatGroups` owns `split()`, `close()` and `dropOnEdge()`, bounded by
+`MAX_CHAT_GROUPS` in work mode and 1 in chat mode; chat mode collapses to the
+focused group. `split()` halves the **largest** tile along its longer side, not
+the focused one — focus moves to whatever was just added, so a focus-based split
+walks four clicks down to 124px columns, a quarter of the 448px a chat column
+needs. Halving the largest turns the same four clicks into a 2x2.
+
+Placement itself is the drop gesture above; the split control is the same thing
+without a pointer to say which way.
 
 ## Why the control comes last
 

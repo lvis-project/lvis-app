@@ -130,7 +130,7 @@ export class ChatGroupSessionRegistry {
     // A tile republishes on every render and its reader is an ancestor that
     // renders it, so waking unconditionally is a loop — each side asking the
     // other to go again. Only the DATA decides: the callbacks are dispatched
-    // through `latest`, so their identity is not something a reader can观 see,
+    // through `latest`, so their identity is not something a reader can see,
     // and comparing it would put the loop back for any caller that forgot to
     // memoize one of them.
     const unchanged = previous !== undefined

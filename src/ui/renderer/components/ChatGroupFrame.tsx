@@ -15,6 +15,12 @@ import { useTranslation } from "../../../i18n/react.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../../contract/app-contract.js";
 import type { LvisApi } from "../types.js";
 import {
+  CHAT_SESSION_DRAG_TYPE,
+  dropIndicatorStyle,
+  dropTargetAt,
+  type DropTarget,
+} from "./chat-group-drop.js";
+import {
   closeLeaf,
   countLeaves,
   layoutBoxes,
@@ -70,6 +76,21 @@ export interface ChatGroupFrameProps {
   onTogglePanel: () => void;
   /** Split off another group. Absent when no free conversation source remains. */
   onSplit?: () => void;
+  /**
+   * Take a conversation dropped on this tile.
+   *
+   * `target` is where it landed: an edge splits this tile on that axis, the
+   * centre replaces what it is holding.
+   */
+  onSessionDrop?: (sessionId: string, target: DropTarget) => void;
+  /**
+   * Whether another tile still fits.
+   *
+   * At the ceiling every drop resolves to the centre, so the tile highlights
+   * whole rather than by halves: the limit shows up in the gesture itself
+   * instead of arriving as a rejection once the user has let go.
+   */
+  canSplit?: boolean;
   /** Close this group. Absent on the last one — a workspace with no group is
    *  not a state the user can get back out of. */
   onClose?: () => void;
@@ -127,6 +148,8 @@ export function ChatGroupFrame({
   panelOpen,
   onTogglePanel,
   onSplit,
+  onSessionDrop,
+  canSplit,
   onClose,
   onFocus,
   children,
@@ -140,17 +163,54 @@ export function ChatGroupFrame({
     [panelSlot],
   );
   const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
+
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const carriesSession = (event: React.DragEvent) =>
+    event.dataTransfer.types.includes(CHAT_SESSION_DRAG_TYPE);
+
+  const readTarget = (event: React.DragEvent<HTMLElement>): DropTarget => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const landed = dropTargetAt(rect, { x: event.clientX, y: event.clientY });
+    return canSplit ? landed : "center";
+  };
+
   return (
     <section
       data-testid="chat-group"
       data-focused={focused ? "true" : undefined}
+      data-drop-target={dropTarget ?? undefined}
+      onDragOver={onSessionDrop ? (event) => {
+        if (!carriesSession(event)) return;
+        // Without this the browser refuses the drop and the whole gesture ends
+        // in the default "no" cursor.
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDropTarget(readTarget(event));
+      } : undefined}
+      onDragLeave={onSessionDrop ? (event) => {
+        // A drag crossing a child fires leave on the section too. Only a
+        // pointer that actually left the tile's box should clear the hint.
+        const rect = event.currentTarget.getBoundingClientRect();
+        const inside = event.clientX >= rect.left && event.clientX <= rect.right
+          && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        if (!inside) setDropTarget(null);
+      } : undefined}
+      onDrop={onSessionDrop ? (event) => {
+        if (!carriesSession(event)) return;
+        event.preventDefault();
+        const sessionId = event.dataTransfer.getData(CHAT_SESSION_DRAG_TYPE);
+        setDropTarget(null);
+        if (sessionId) onSessionDrop(sessionId, readTarget(event));
+      } : undefined}
       // Focus follows interaction rather than a click on the frame itself:
       // clicking into the composer IS choosing the group, and requiring a
       // second click on the chrome to say so would be a step with no purpose.
       onFocusCapture={onFocus}
       onMouseDownCapture={onFocus}
       className={[
-        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card",
+        // `relative` so the drop indicator can cover the half the new tile
+        // would take, in the tile's own coordinates.
+        "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card",
         // Focus lives on the frame. `border-border` is the resting hairline;
         // the focused group swaps the whole border rather than adding a ring,
         // so a group never changes size when focus moves to it.
@@ -307,6 +367,14 @@ export function ChatGroupFrame({
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
         </ChatGroupPanelBandContext.Provider>
       </ChatGroupHeaderSlotContext.Provider>
+      {dropTarget ? (
+        <div
+          aria-hidden={true}
+          className="pointer-events-none absolute rounded-md border-2 border-primary bg-primary/(--opacity-subtle)"
+          style={dropIndicatorStyle(dropTarget)}
+          data-testid="chat-group-drop-indicator"
+        />
+      ) : null}
     </section>
   );
 }

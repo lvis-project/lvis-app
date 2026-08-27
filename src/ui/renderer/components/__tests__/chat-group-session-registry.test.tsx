@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatEntry } from "../../../../lib/chat-stream-state.js";
+import type { SessionProjectSummary } from "../../hooks/use-sessions.js";
 import {
   ChatGroupSessionRegistry,
   useChatGroupSession,
@@ -12,6 +13,9 @@ import {
 // state and replaces it only when the transcript actually changes. A fresh
 // array literal per render would be a caller breaking that contract.
 const NO_ENTRIES: readonly ChatEntry[] = [];
+// Same contract for the project summary: it is `useState` in the tile, so its
+// identity changes only when the session's project does.
+const NO_PROJECT: SessionProjectSummary = {};
 
 const handleFor = (streaming: boolean, entries: readonly ChatEntry[] = NO_ENTRIES): ChatGroupSessionHandle => ({
   entries,
@@ -24,7 +28,7 @@ const handleFor = (streaming: boolean, entries: readonly ChatEntry[] = NO_ENTRIE
   ask: async () => {},
   insertImportedTriggerEntry: () => {},
   currentSessionId: "",
-  currentSessionProject: {},
+  currentSessionProject: NO_PROJECT,
   loadSession: async () => false,
   fallbackToast: null,
   prefillComposer: () => {},

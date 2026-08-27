@@ -44,6 +44,7 @@ import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
+import { CHAT_SESSION_DRAG_TYPE } from "./chat-group-drop.js";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -788,6 +789,14 @@ function SessionRow({
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid={`sidebar-session-${session.id}`}
           onClick={() => void onLoadSession?.(session.id)}
+          // Dragging a conversation onto a tile is how the main area is
+          // arranged: the edge it lands on says whether to split that tile or
+          // replace what it holds. A click still just opens it in place.
+          draggable={!rowDisabled}
+          onDragStart={(event) => {
+            event.dataTransfer.setData(CHAT_SESSION_DRAG_TYPE, session.id);
+            event.dataTransfer.effectAllowed = "copy";
+          }}
         >
           {/* Unread is a dot AND weight. The dot alone would be the only
               carrier of the state, and colour alone is not a signal everyone

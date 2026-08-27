@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { ChatGroupFrame, buildChatGroupActions, chatGroupApi, useChatGroups } from "../ChatGroupFrame.js";
+import { CHAT_SESSION_DRAG_TYPE } from "../chat-group-drop.js";
 import type { LvisApi } from "../../types.js";
 
 const t = ((key: string) => key) as never;
@@ -253,5 +254,81 @@ describe("useChatGroups ceilings", () => {
 
     act(() => result.current.close("main"));
     expect(result.current.groups.map((group) => group.id)).toEqual(["main"]);
+  });
+});
+
+describe("ChatGroupFrame drop gesture", () => {
+  afterEach(cleanup);
+
+  const TILE = { left: 0, top: 0, width: 800, height: 600 };
+
+  function tileWithRect(props: Partial<React.ComponentProps<typeof ChatGroupFrame>>) {
+    const view = render(frame(props));
+    const tile = view.container.querySelector('[data-testid="chat-group"]')!;
+    // jsdom lays nothing out, so the tile has to be told how big it is — the
+    // whole gesture is read off that rectangle.
+    tile.getBoundingClientRect = () => ({
+      ...TILE,
+      right: TILE.width,
+      bottom: TILE.height,
+      x: TILE.left,
+      y: TILE.top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+    return tile;
+  }
+
+  const carriedSession = {
+    types: [CHAT_SESSION_DRAG_TYPE],
+    getData: () => "session-7",
+    dropEffect: "none",
+  };
+
+  /**
+   * jsdom's drag events drop the pointer coordinates on the floor, and the
+   * whole gesture is those coordinates — so they are set on the event itself.
+   */
+  function drag(
+    kind: "dragOver" | "drop",
+    tile: Element,
+    dataTransfer: unknown,
+    point: { x: number; y: number },
+  ) {
+    const event = createEvent[kind](tile, { dataTransfer });
+    Object.defineProperty(event, "clientX", { value: point.x });
+    Object.defineProperty(event, "clientY", { value: point.y });
+    fireEvent(tile, event);
+  }
+
+  it("reports the edge a conversation landed on", () => {
+    const onSessionDrop = vi.fn();
+    const tile = tileWithRect({ onSessionDrop, canSplit: true });
+
+    drag("drop", tile, carriedSession, { x: 795, y: 300 });
+
+    expect(onSessionDrop).toHaveBeenCalledWith("session-7", "right");
+  });
+
+  it("collapses every edge to the centre once no tile fits, so the ceiling is felt before the drop", () => {
+    const onSessionDrop = vi.fn();
+    const tile = tileWithRect({ onSessionDrop, canSplit: false });
+
+    drag("dragOver", tile, carriedSession, { x: 795, y: 300 });
+    expect(tile.getAttribute("data-drop-target")).toBe("center");
+
+    drag("drop", tile, carriedSession, { x: 795, y: 300 });
+    expect(onSessionDrop).toHaveBeenCalledWith("session-7", "center");
+  });
+
+  it("ignores a drag that is not carrying a conversation", () => {
+    const onSessionDrop = vi.fn();
+    const tile = tileWithRect({ onSessionDrop, canSplit: true });
+
+    const file = { types: ["Files"], getData: () => "", dropEffect: "none" };
+    drag("dragOver", tile, file, { x: 795, y: 300 });
+    expect(tile.getAttribute("data-drop-target")).toBeNull();
+
+    drag("drop", tile, file, { x: 795, y: 300 });
+    expect(onSessionDrop).not.toHaveBeenCalled();
   });
 });
