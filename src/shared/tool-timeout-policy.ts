@@ -112,6 +112,14 @@ export const TOOL_TIMEOUT_POLICY = {
   mcpRequestDefaultMs: 60_000,
   mcpRequestMaxMs: 120_000,
   networkFetchDefaultMs: 15_000,
+  // A model provider's streamed response: how long the host waits for the
+  // next byte — the response headers first, then each delta — before the
+  // stream counts as stalled. One number for both the transport deadline of
+  // the provider fetch and the adapter's idle re-arm, because they bound the
+  // same wait. Model responses are not web fetches: a self-hosted gateway
+  // that answers only when generation is complete legitimately stays silent
+  // for well over `networkFetchDefaultMs` while it prefills and reasons.
+  modelStreamIdleCeilingMs: 300_000,
   // Host-owned LLM boundaries for the permission-rationale path. These are
   // separate from ordinary tool execution and the interactive user wait.
   rationaleGenerationMs: 15_000,

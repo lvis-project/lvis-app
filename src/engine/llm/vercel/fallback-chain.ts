@@ -163,6 +163,9 @@ async function* attemptStreamWithRetries(
       lastErr = err;
       await waitForAttemptWindow(attemptStartedAt, err, params.abortSignal);
       if (attempt >= MAX_ATTEMPTS_PER_PROVIDER) break;
+      // Logged like a fallback is: a run of retries is what a slow or flapping
+      // gateway looks like from the chat, and nothing else records why.
+      log.warn(`retry: ${label} attempt=${attempt + 1}/${MAX_ATTEMPTS_PER_PROVIDER} reason=${err instanceof Error ? err.message : String(err)}`);
       callbacks?.onStatus?.({
         phase: "retry",
         label,
