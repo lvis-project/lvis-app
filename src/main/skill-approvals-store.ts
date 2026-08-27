@@ -4,7 +4,10 @@
  * call would reopen the approval dock even after the user said "yes" 30
  * seconds ago, which is a clear UX regression.
  *
- * File: `~/.lvis/skill-approvals.json`
+ * File: `~/.lvis/skills/approvals.json` — the skills namespace, alongside the
+ * user-authored skills these approvals are about (`SkillStore.USER_SKILLS_DIR`).
+ * It lived at `~/.lvis/skill-approvals.json` until the per-feature storage rule
+ * reached it; {@link adoptLegacyRootFileSync} moves an existing one on first load.
  *
  * v2 schema (hash-binding):
  * {
@@ -45,7 +48,7 @@ import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
-import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
+import { adoptLegacyRootFileSync, writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 
 export interface SkillApprovalRecord {
   /** Record key from the caller — a skill name, or `<name>#bundled`. */
@@ -60,7 +63,11 @@ export interface SkillApprovalsFile {
   approvedSkills: SkillApprovalRecord[];
 }
 
-const DEFAULT_PATH = resolve(lvisHome(), "skill-approvals.json");
+const FEATURE_ID = "skills";
+const FILE_NAME = "approvals.json";
+const LEGACY_ROOT_FILE = "skill-approvals.json";
+
+const DEFAULT_PATH = resolve(lvisHome(), FEATURE_ID, FILE_NAME);
 
 /**
  * Hash the approval material so a record binds to exactly what the user said yes
@@ -131,6 +138,13 @@ export class SkillApprovalsStore {
   }
 
   async load(): Promise<void> {
+    // Only when this store is on its default path: a caller that passed an
+    // explicit path (tests, fixtures) is not talking about `~/.lvis` at all,
+    // and migrating the real user's file underneath such a call would be a
+    // side effect nobody asked for.
+    if (this.filePath === DEFAULT_PATH) {
+      adoptLegacyRootFileSync(FEATURE_ID, FILE_NAME, LEGACY_ROOT_FILE);
+    }
     const file = await readFileOrEmpty(this.filePath);
     this.cache = new Map(file.approvedSkills.map((r) => [r.name, r.sha256]));
   }

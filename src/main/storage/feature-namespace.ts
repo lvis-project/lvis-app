@@ -22,10 +22,11 @@
  * assertions on `win32`).
  */
 import { randomBytes } from "node:crypto";
-import { constants, promises as fs } from "node:fs";
+import { chmodSync, constants, promises as fs, linkSync, mkdirSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { platform } from "node:process";
 import { lvisHome } from "../../shared/lvis-home.js";
+import { createLogger } from "../../lib/logger.js";
 import {
   RENAME_FILE_LOCK_CODES,
   BACKGROUND_ATTEMPTS,
@@ -236,4 +237,90 @@ export function openFeatureNamespace(featureId: string): FeatureNamespaceHandle 
       return child;
     },
   };
+}
+
+const log = createLogger("feature-namespace");
+
+/**
+ * Adopt a file that predates the per-feature rule, moving it from the
+ * `~/.lvis/` root into its owning feature's namespace.
+ *
+ * The rule (CLAUDE.md, "Storage Namespace per Feature") reserves the root for
+ * CROSS-CUTTING resources — `settings.json`, `audit.log`, `secrets/` — and puts
+ * everything a single domain owns under `~/.lvis/<feature>/`. Files written
+ * before the rule existed sit in the root regardless, which is not merely
+ * untidy: it defeats the operational property the rule buys, namely that
+ * backing up or clearing one domain is `~/.lvis/<feature>/` and nothing else.
+ * A domain-owned file stranded in the root is missed by both.
+ *
+ * Policy, matching {@link ../../boot/steps/work-board-migration}:
+ *
+ *   - The DESTINATION's existence is the idempotency marker. Once it exists —
+ *     whether linked here, by the store's first write, or by a prior run —
+ *     `linkSync` answers EEXIST and this is a no-op forever, so a store may
+ *     call it on every load.
+ *   - Link, then unlink. `linkSync` publishes the legacy inode under the new
+ *     name in one atomic step: it cannot half-succeed, and it refuses (EEXIST)
+ *     rather than clobber a destination. Because both names then refer to the
+ *     SAME inode, there is no copy that could differ from the original and no
+ *     window in which neither path holds the data. An earlier draft did
+ *     stat-then-read-then-write-then-compare, and needed that final compare
+ *     precisely BECAUSE it made a copy — every one of those steps asked the
+ *     filesystem a question and then acted on an answer that could already be
+ *     stale. Removal of the old name is still the point: leaving it behind
+ *     would keep the root cluttered and leave two names free to diverge once
+ *     the link is broken by a write.
+ *   - Every failure is non-fatal. A store that cannot migrate still opens on
+ *     its destination path and behaves exactly as it would for a new install.
+ *
+ * Synchronous on purpose. This runs once, at store construction or first load,
+ * on a small JSON file, and both callers differ in async-ness — a sync helper
+ * is what lets there be ONE implementation instead of an async copy and a sync
+ * copy drifting apart.
+ *
+ * REMOVAL: this is a migration, not a compatibility layer. Delete it, and its
+ * call sites, once installs predating the move are no longer supported —
+ * tracked for the release after 2026-11-01.
+ */
+export function adoptLegacyRootFileSync(
+  featureId: string,
+  destinationName: string,
+  legacyRootFileName: string,
+): void {
+  if (!featureId || featureId.includes("/") || featureId.includes("\\") || featureId.includes("..")) {
+    throw new Error(`adoptLegacyRootFileSync: invalid featureId "${featureId}"`);
+  }
+  const home = lvisHome();
+  const legacyPath = join(home, legacyRootFileName);
+  const destinationPath = join(home, featureId, destinationName);
+  try {
+    mkdirSync(join(home, featureId), { recursive: true, mode: DIR_MODE });
+    linkSync(legacyPath, destinationPath);
+  } catch (err) {
+    // ENOENT — no legacy file, which is the steady state from the second run
+    // onward. EEXIST — the destination already owns the name. Both are the
+    // ordinary outcome, and neither needed a stat to discover: asking is what
+    // creates the window between the answer and the act.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "EEXIST") return;
+    log.warn(
+      `storage migration: ${legacyRootFileName} -> ${featureId}/${destinationName} could not be linked: %s`,
+      (err as Error).message,
+    );
+    return;
+  }
+  try {
+    // The link published the legacy INODE under the new name, so it published
+    // the legacy mode with it. Restore the namespace's own file mode while the
+    // two names still share the inode.
+    chmodSync(destinationPath, FILE_MODE);
+    rmSync(legacyPath, { force: true });
+    log.info(`storage migration: adopted ${legacyRootFileName} as ${featureId}/${destinationName}`);
+  } catch (err) {
+    // The data is already safe under the new name; only the tidying failed.
+    log.warn(
+      `storage migration: ${legacyRootFileName} -> ${featureId}/${destinationName} linked, but could not be tidied: %s`,
+      (err as Error).message,
+    );
+  }
 }

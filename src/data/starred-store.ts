@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { adoptLegacyRootFileSync } from "../main/storage/feature-namespace.js";
 const log = createLogger("starred-store");
 
 export interface StarredMessage {
@@ -28,12 +29,34 @@ export interface StarredStoreOptions {
   filePath?: string;
 }
 
+const FEATURE_ID = "sessions";
+const FILE_NAME = "starred.json";
+const LEGACY_ROOT_FILE = "starred.json";
+
+/**
+ * Starred messages live in the SESSIONS namespace, not at the `~/.lvis` root.
+ * Every record is an index INTO a session file — `sessionId` plus the message
+ * index within `~/.lvis/sessions/<sessionId>.jsonl` — so the two are one
+ * domain: clearing `~/.lvis/sessions/` and leaving the stars behind would
+ * leave every record pointing at a session that no longer exists.
+ *
+ * Enumeration is unaffected: the session lister filters on `.jsonl` AND on
+ * `isValidSessionId`, so a `starred.json` sitting beside the session files is
+ * invisible to it.
+ */
 export class StarredStore {
   private readonly filePath: string;
   private cache: StarredMessage[] = [];
 
   constructor(options?: StarredStoreOptions) {
-    this.filePath = resolve(options?.filePath ?? join(lvisHome(), "starred.json"));
+    const defaultPath = resolve(join(lvisHome(), FEATURE_ID, FILE_NAME));
+    this.filePath = resolve(options?.filePath ?? defaultPath);
+    // Only on the default path — a caller that supplied one (tests, fixtures)
+    // is not talking about `~/.lvis`, and migrating the real user's file
+    // underneath such a call would be a side effect nobody asked for.
+    if (this.filePath === defaultPath) {
+      adoptLegacyRootFileSync(FEATURE_ID, FILE_NAME, LEGACY_ROOT_FILE);
+    }
     this.load();
   }
 
