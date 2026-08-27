@@ -12,6 +12,7 @@
  * and any future in-process api/cli/sdk consume a single definition rather than
  * re-deriving them.
  */
+import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { ChatInputOrigin, ChatSendPayload, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import {
   isChatSendInputOrigin,
@@ -430,6 +431,10 @@ export async function markMainActiveAfterTurn(
 ): Promise<void> {
   const { conversationLoop, memoryManager } = deps;
   if (conversationLoop.getSessionKind() !== "main") return;
+  // "Main active" is the conversation the next launch resumes, and the
+  // primary tile is the one restore addresses. A turn in another tile would
+  // otherwise make it last-turn-wins across tiles.
+  if (deps.chatGroupId !== undefined && deps.chatGroupId !== MAIN_CHAT_GROUP_ID) return;
   if (conversationLoop.getHistory().length > 0) {
     // "No explicit project" sessions (the default/base-directory binding)
     // must NOT persist projectRoot/projectName into metadata — null project

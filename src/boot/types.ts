@@ -120,6 +120,12 @@ export interface AppServices {
   resolveChatGroupLoop?: (chatGroupId: string) => ConversationLoop;
   /** Forgets a group's loop once its tile is gone, so the ceiling counts live tiles only. */
   releaseChatGroupLoop?: (chatGroupId: string) => void;
+  /**
+   * The tiled chat group this bundle is bound to. Set only on the per-group
+   * bundle `chat.ts` derives for a non-primary tile; the bundle assembled at
+   * boot has none and is the primary's.
+   */
+  chatGroupId?: string;
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
   /**

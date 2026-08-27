@@ -462,9 +462,11 @@ export function useChatGroups(appMode?: "chat" | "work") {
   const [tree, setTree] = useState<ChatGroupNode>(() => leaf(MAIN_CHAT_GROUP_ID));
   const [panelOpenIds, setPanelOpenIds] = useState<readonly string[]>([]);
   const [focusedId, setFocusedId] = useState(MAIN_CHAT_GROUP_ID);
-  // Monotonic, so a closed tile's id is never reused. Main-process loops are
-  // keyed by this id, and reusing one would hand a new tile the previous
-  // tile's live history.
+  // Monotonic, so a closed tile's id is never reused within this renderer.
+  // Main-process loops are keyed by this id, and reusing one would hand a
+  // new tile the previous tile's live history. (A reload starts the count
+  // over — main lets every group go when the renderer navigates, so the
+  // fresh count meets no stale loop.)
   const nextGroupIndex = useRef(2);
 
   const setPanelOpen = useCallback((id: string, open: boolean) => {

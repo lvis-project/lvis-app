@@ -53,6 +53,32 @@ describe("chat project payloads", () => {
   });
 });
 
+describe("markMainActiveAfterTurn across chat tiles", () => {
+  it("moves the resume target for the primary tile only", async () => {
+    const markMainActiveResume = vi.fn(async () => {});
+    const base = {
+      conversationLoop: {
+        getSessionKind: () => "main",
+        getHistory: () => [{ role: "user", content: "hello" }],
+        getSessionId: () => "session-tile",
+        getSessionProjectIsDefault: () => true,
+        getSessionProjectContext: () => null,
+      },
+      memoryManager: {
+        loadSessionMetadata: vi.fn(() => ({})),
+        saveSessionMetadata: vi.fn(async () => {}),
+        markMainActiveResume,
+        markMainActiveFresh: vi.fn(async () => {}),
+      },
+    };
+    await markMainActiveAfterTurn({ ...base, chatGroupId: "group-2" } as unknown as IpcDeps, "hello");
+    expect(markMainActiveResume).not.toHaveBeenCalled();
+    await markMainActiveAfterTurn({ ...base, chatGroupId: "main" } as unknown as IpcDeps, "hello");
+    await markMainActiveAfterTurn(base as unknown as IpcDeps, "hello");
+    expect(markMainActiveResume).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("markMainActiveAfterTurn project metadata", () => {
   it("persists the current main session project identity without a no-project scope", async () => {
     const saveSessionMetadata = vi.fn(async () => {});

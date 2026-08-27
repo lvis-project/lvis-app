@@ -28,6 +28,44 @@ vi.mock("../../gated.js", async (importOriginal) => ({
   validateHostRendererSender: () => true,
 }));
 
+// Every group's frames leave through one adapter subscription; releasing the
+// group must let go of it. The adapter is real except that the unsubscribe
+// it hands back is observable.
+const unsubscribes: ReturnType<typeof vi.fn>[] = [];
+vi.mock("../../../api/platform-conversation-legacy-adapter.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../api/platform-conversation-legacy-adapter.js")>();
+  return {
+    ...actual,
+    createPlatformConversationLegacyStreamAdapter: (...args: Parameters<typeof actual.createPlatformConversationLegacyStreamAdapter>) => {
+      const adapter = actual.createPlatformConversationLegacyStreamAdapter(...args);
+      return {
+        ...adapter,
+        subscribe: (fn: Parameters<typeof adapter.subscribe>[0]) => {
+          const real = adapter.subscribe(fn);
+          const spy = vi.fn(real);
+          unsubscribes.push(spy);
+          return spy;
+        },
+      };
+    },
+  };
+});
+
+// Every surface runtime the registrar builds, in order — the primary's first,
+// then one per group. A group's leases live on its own.
+const runtimes: import("../../../engine/conversation-surface-runtime.js").ConversationSurfaceRuntime[] = [];
+vi.mock("../../../engine/conversation-surface-runtime.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../engine/conversation-surface-runtime.js")>();
+  return {
+    ...actual,
+    createConversationSurfaceRuntime: (...args: Parameters<typeof actual.createConversationSurfaceRuntime>) => {
+      const runtime = actual.createConversationSurfaceRuntime(...args);
+      runtimes.push(runtime);
+      return runtime;
+    },
+  };
+});
+
 type FakeLoop = {
   id: string;
   sessionId: string;
@@ -54,7 +92,9 @@ function fakeLoop(id: string, messages: unknown[] = []): FakeLoop {
   };
 }
 
-async function registerWithGroups() {
+type RendererEvents = Record<string, ((...args: unknown[]) => void)[]>;
+
+async function registerWithGroups(window?: { webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void } }) {
   const { createConversationSurfaceRuntime } = await import("../../../engine/conversation-surface-runtime.js");
   const main = fakeLoop(MAIN_CHAT_GROUP_ID, [{ role: "user", content: "from main" }]);
   const groups = new Map<string, FakeLoop>();
@@ -80,15 +120,23 @@ async function registerWithGroups() {
       saveSessionMetadata: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
-    getMainWindow: vi.fn(() => null),
+    getMainWindow: vi.fn(() => window ?? null),
   } as unknown as Parameters<typeof registerChatHandlers>[0]);
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!(RENDERER_EVENT, ...args);
   return { main, groups, resolveChatGroupLoop, releaseChatGroupLoop, invoke };
 }
 
+function fakeRenderer(): { window: { webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void } }; events: RendererEvents } {
+  const events: RendererEvents = {};
+  const on = (name: string, fn: (...args: unknown[]) => void) => { (events[name] ??= []).push(fn); };
+  return { window: { webContents: { on } }, events };
+}
+
 describe("lvis:chat:* with chat groups", () => {
   beforeEach(() => {
     handlers.clear();
+    unsubscribes.length = 0;
+    runtimes.length = 0;
     vi.clearAllMocks();
   });
 
@@ -142,6 +190,49 @@ describe("lvis:chat:* with chat groups", () => {
     invoke(CHANNELS.chat.hasProvider, "group-2");
     expect(resolveChatGroupLoop).toHaveBeenCalledTimes(2);
     expect(groups.get("group-2")).not.toBe(first);
+  });
+
+  it("release lets go of the group's frames, and waits for a turn that is still running", async () => {
+    const { invoke, groups } = await registerWithGroups();
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    expect(unsubscribes).toHaveLength(2); // the primary's, then group-2's
+    const groupRuntime = runtimes[1]!;
+    let finishTurn!: () => void;
+    const lease = groupRuntime.activity.tryTrackTurn(() => new Promise<void>((resolve) => { finishTurn = resolve; }));
+    expect(lease).not.toBeNull();
+    let settled = false;
+    const release = (invoke(CHANNELS.chat.groupRelease, "group-2") as Promise<unknown>).then((r) => { settled = true; return r; });
+    await Promise.resolve();
+    expect(groups.get("group-2")!.abortCurrentTurn).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false); // still waiting on the turn's lease
+    finishTurn();
+    expect(await release).toEqual({ ok: true, released: true });
+    expect(unsubscribes[1]).toHaveBeenCalledTimes(1);
+    expect(unsubscribes[0]).not.toHaveBeenCalled(); // the primary keeps its frames
+  });
+
+  it("lets every group go when the renderer navigates — a reload numbers its tiles from the start", async () => {
+    const { window, events } = fakeRenderer();
+    const { invoke, groups, resolveChatGroupLoop, releaseChatGroupLoop } = await registerWithGroups(window);
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    invoke(CHANNELS.chat.hasProvider, "group-3");
+    const before = groups.get("group-2")!;
+    expect(events["did-start-navigation"]).toHaveLength(1); // installed once, not per group
+    // An in-page navigation is not a reload.
+    events["did-start-navigation"]![0]!({ isMainFrame: true, isSameDocument: true });
+    expect(releaseChatGroupLoop).not.toHaveBeenCalled();
+    events["did-start-navigation"]![0]!({ isMainFrame: true, isSameDocument: false });
+    await Promise.resolve();
+    expect(releaseChatGroupLoop.mock.calls.map((call) => call[0]).sort()).toEqual(["group-2", "group-3"]);
+    // The reloaded renderer's first extra tile is "group-2" again — and gets a new loop.
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    expect(resolveChatGroupLoop).toHaveBeenCalledTimes(3);
+    expect(groups.get("group-2")).not.toBe(before);
+    // A dead render process is the same story.
+    invoke(CHANNELS.chat.hasProvider, "group-4");
+    events["render-process-gone"]![0]!();
+    await Promise.resolve();
+    expect(releaseChatGroupLoop).toHaveBeenLastCalledWith("group-4");
   });
 
   it("refuses a non-primary group when the process cannot release one", async () => {

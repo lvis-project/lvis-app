@@ -447,9 +447,10 @@ export async function wireConversation(
   };
   ctx.resolveChatGroupLoop = resolveChatGroupLoop;
   // The other half of the ceiling: a closed tile's loop leaves the map, so
-  // the count is of tiles that exist, not of tiles that ever existed. Ids
-  // are never reused (see the renderer), so nothing can reach a released
-  // loop by name afterwards.
+  // the count is of tiles that exist, not of tiles that ever existed. A
+  // renderer never reuses an id within its lifetime, and `chat.ts` releases
+  // every group when the renderer navigates or dies, so a name that comes
+  // back after a reload builds a fresh loop rather than finding this one.
   ctx.releaseChatGroupLoop = (chatGroupId: string): void => {
     const loop = groupLoops.get(chatGroupId);
     if (!loop) return;

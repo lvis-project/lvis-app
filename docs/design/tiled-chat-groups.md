@@ -49,13 +49,15 @@ Per **window** — shared, and deliberately not multiplied:
 **Per-conversation — must carry `chatGroupId`:**
 `send`, `abort`, `guide`, `new`, `fork`, `retry-effort`,
 `continue-last-user`, `edit-resend`, `compact`, `session-resume`,
-`get-history`, `get-write-diff`, `get-verbatim-tool-result`,
-`get-sub-agent-transcript`, `enter-checkpoint-view`, `exit-checkpoint-view`,
-`branch-from-checkpoint`, `main-active-state`, `has-provider`, `group-release`
+`get-history`, `get-verbatim-tool-result`, `get-sub-agent-transcript`,
+`enter-checkpoint-view`, `exit-checkpoint-view`, `branch-from-checkpoint`,
+`has-provider`, `group-release`
 
 **Window-scoped — unchanged:**
 `sessions`, `session-history`, `session-update`, `session-delete`,
-`export`, `import`
+`export`, `import`, `get-write-diff` (reads a sidecar by session id),
+`main-active-state` (the conversation the next launch resumes — the primary
+tile's; a turn in another tile does not move it)
 
 `chatGroupId` is **required**, not defaulted. Both sides of this channel ship
 in the same binary, so a default would only ever paper over a caller that
@@ -175,7 +177,10 @@ Each piece is independently shippable and independently verifiable.
    detaches the group's frames, and forgets the loop. Ids are never reused, so
    without this a closed tile would count against `MAX_CHAT_GROUPS` for the
    rest of the session. Release is tied to **close**, not unmount — the
-   chat-mode toggle unmounts tiles too, and must not destroy anything. **Done.**
+   chat-mode toggle unmounts tiles too, and must not destroy anything. A
+   renderer that navigates (reload) or dies releases every group at once:
+   the one that comes back numbers its tiles from the start, and must never
+   meet a context the previous renderer left behind. **Done.**
 
 ### Channels: frames say which tile they belong to
 

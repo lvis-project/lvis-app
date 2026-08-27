@@ -693,7 +693,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
       throw new Error("chat-groups-unavailable");
     }
     const loop = isMain ? conversationLoop : deps.resolveChatGroupLoop!(chatGroupId);
-    const groupDeps: IpcDeps = isMain ? deps : { ...deps, conversationLoop: loop };
+    const groupDeps: IpcDeps = isMain ? deps : { ...deps, conversationLoop: loop, chatGroupId };
+    if (!isMain) watchRendererLifetime();
     // Injected runtimes belong to the PRIMARY group. Production composition
     // shares one with the Local API, and registrar tests inject a private one;
     // a second tile must not be handed either.
@@ -760,6 +761,50 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return chatGroupContext(chatGroupId.trim());
   };
 
+  const releaseGroup = async (id: string): Promise<boolean> => {
+    const context = groupContexts.get(id);
+    if (!context) return false;
+    context.loop.abortCurrentTurn();
+    const active = context.surfaceRuntime.activity.activeTurn()
+      ?? context.surfaceRuntime.activity.activeMutation();
+    if (active) {
+      try {
+        await active;
+      } catch {
+        // expected: interrupted turns may reject
+      }
+    }
+    context.unsubscribeStream();
+    groupContexts.delete(id);
+    deps.releaseChatGroupLoop?.(id);
+    return true;
+  };
+
+  /**
+   * A renderer that navigates or dies takes its tiles with it, and the one
+   * that comes back numbers its tiles from the start again. Every group but
+   * the primary is let go of at that moment, so a reloaded window's second
+   * tile can never be handed a conversation the previous window left behind.
+   * Installed once, on the window whose tiles these are, the first time it
+   * asks for a second tile — that is the first moment there is anything to
+   * lose.
+   */
+  const watchedRenderers = new WeakSet<object>();
+  const watchRendererLifetime = (): void => {
+    const contents = getMainWindow()?.webContents;
+    if (!contents || watchedRenderers.has(contents)) return;
+    watchedRenderers.add(contents);
+    const releaseAll = () => {
+      for (const id of [...groupContexts.keys()]) {
+        if (id !== MAIN_CHAT_GROUP_ID) void releaseGroup(id);
+      }
+    };
+    contents.on("did-start-navigation", (event) => {
+      if (event.isMainFrame && !event.isSameDocument) releaseAll();
+    });
+    contents.on("render-process-gone", releaseAll);
+  };
+
   /**
    * Let go of a tile's conversation when the tile closes.
    *
@@ -774,22 +819,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (typeof chatGroupId !== "string" || !chatGroupId.trim()) return { ok: false, error: "chat-group-required" };
     const id = chatGroupId.trim();
     if (id === MAIN_CHAT_GROUP_ID) return { ok: false, error: "invalid-args" };
-    const context = groupContexts.get(id);
-    if (!context) return { ok: true, released: false };
-    context.loop.abortCurrentTurn();
-    const active = context.surfaceRuntime.activity.activeTurn()
-      ?? context.surfaceRuntime.activity.activeMutation();
-    if (active) {
-      try {
-        await active;
-      } catch {
-        // expected: interrupted turns may reject
-      }
-    }
-    context.unsubscribeStream();
-    groupContexts.delete(id);
-    deps.releaseChatGroupLoop?.(id);
-    return { ok: true, released: true };
+    return { ok: true, released: await releaseGroup(id) };
   });
 
   // read-only, sender guard optional
