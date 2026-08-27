@@ -118,6 +118,35 @@ function normalizeSubscriptionChatRuntimeModel(value: unknown): string | undefin
  * settings. Invalid or removed subscription providers fail closed to the API
  * boundary; the retained API vendor blocks and their secrets are untouched.
  */
+/**
+ * Upper bound on `llm.pinnedModels`.
+ *
+ * A pin list is a shortcut, and a shortcut longer than a screen is just the
+ * catalogue again. The cap also bounds what a corrupted or hand-edited settings
+ * file can push into the chooser.
+ */
+const MAX_PINNED_MODELS = 24;
+
+/**
+ * A stored pin list, made safe to render: strings only, trimmed, de-duplicated,
+ * order preserved, capped. Anything else on disk is dropped rather than
+ * repaired — a pin is a model id or it is nothing.
+ */
+function normalizePinnedModels(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of input) {
+    if (typeof entry !== "string") continue;
+    const id = entry.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= MAX_PINNED_MODELS) break;
+  }
+  return out;
+}
+
 export function normalizeActiveChatRuntime(input: unknown): ActiveChatRuntime {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { kind: "api" };
@@ -489,6 +518,9 @@ export function mergeLlmPatch(
     pricingOverrides: normalizePricingOverrides(
       "pricingOverrides" in partial ? partial.pricingOverrides : base.pricingOverrides,
     ),
+    pinnedModels: normalizePinnedModels(
+      "pinnedModels" in partial ? partial.pinnedModels : base.pinnedModels,
+    ),
     // `llm.hostResolverMap` is deliberately NOT carried forward. The manual
     // Chromium host-resolver map was removed with the private-endpoint access
     // path, so a value still on disk from an older build is inert. Dropping it
@@ -620,6 +652,7 @@ export function pruneLazyLlmVendorBlocks(
       installedProviderPresets,
     ),
     pricingOverrides: normalizePricingOverrides(llm.pricingOverrides),
+    pinnedModels: normalizePinnedModels(llm.pinnedModels),
   };
   if (marketplaceProviderPresetId) {
     prunedLlm.marketplaceProviderPresetId = marketplaceProviderPresetId;

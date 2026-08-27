@@ -273,6 +273,12 @@ export type AppSettings = {
      * here because a settings file written before this shipped has no list.
      */
     pricingOverrides?: PricingOverride[];
+    /**
+     * Models pinned to the top of the model chooser. ONE list across every
+     * provider — see `LLMSettings.pinnedModels` for why, and for why a stored
+     * id is never trusted without intersecting it against what is connected.
+     */
+    pinnedModels?: string[];
   };
   chat: { systemPrompt: string; autoCompact: boolean; subAgentMaxRounds?: number };
   webSearch: { provider: string };

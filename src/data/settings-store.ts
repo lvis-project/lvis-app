@@ -176,6 +176,21 @@ export interface LLMSettings {
    * variable this surfaces has always had.
    */
   pricingOverrides: PricingOverride[];
+  /**
+   * Models the user pinned to the top of the model chooser, newest last.
+   *
+   * ONE list across every provider, not one per provider: pinning exists so a
+   * model a person reaches for daily is not buried in a several-hundred-entry
+   * catalogue, and a per-provider list would still make them find the provider
+   * first. Entries are model ids as the provider reports them.
+   *
+   * Never trusted on read. A pinned id may name a model that has since left the
+   * catalogue, or one whose provider is no longer connected; the chooser
+   * intersects this list with what is actually available and shows the rest of
+   * it not at all. The id STAYS stored through that, so reconnecting a provider
+   * brings its pins back rather than silently dropping them.
+   */
+  pinnedModels: string[];
 }
 
 /**
@@ -192,6 +207,7 @@ export interface LLMSettingsPatch {
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
   modelListCache?: LlmModelListCache;
   pricingOverrides?: PricingOverride[];
+  pinnedModels?: string[];
 }
 
 export interface ChatSettings {

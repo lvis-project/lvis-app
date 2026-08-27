@@ -167,6 +167,46 @@ const CAPABILITY_ROWS: readonly {
   { key: "subagent", labelKey: "subscriptionProvidersSection.capabilitySubagent" },
 ];
 
+/**
+ * One checklist for every connection. Subscription runtimes report verified
+ * capabilities per provider; the API path reports the host-engine projection
+ * (`API_PATH_RUNTIME_CAPABILITIES`). Both render through this so the two never
+ * describe the same feature with different words.
+ *
+ * `known` carries the distinction the labels depend on: a capability the
+ * runtime has not answered for is "unknown", not "unavailable".
+ */
+export function ProviderCapabilityGrid({
+  capabilities,
+  known,
+  testIdPrefix,
+}: {
+  capabilities: SubscriptionProviderCapabilities;
+  known: (key: BooleanCapabilityKey) => boolean;
+  testIdPrefix: string;
+}) {
+  const { t } = useTranslation();
+  const label = (available: boolean, isKnown: boolean): string => {
+    if (!isKnown) return t("subscriptionProvidersSection.capabilityUnknown");
+    return t(available
+      ? "subscriptionProvidersSection.capabilityAvailable"
+      : "subscriptionProvidersSection.capabilityUnavailable");
+  };
+  return (
+    <dl
+      className="grid gap-2 rounded-md border bg-muted/(--opacity-muted) px-3 py-2 text-xs sm:grid-cols-2 lg:grid-cols-3"
+      data-testid={`${testIdPrefix}:capabilities`}
+    >
+      {CAPABILITY_ROWS.map(({ key, labelKey }) => (
+        <div className="space-y-0.5" key={key} data-testid={`${testIdPrefix}:capability:${key}`}>
+          <dt className="font-medium text-foreground">{t(labelKey)}</dt>
+          <dd className="text-muted-foreground">{label(capabilities[key], known(key))}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 const ERROR_MESSAGE_KEYS: Record<SubscriptionProviderErrorCode, string> = {
   "subscription-provider-not-supported": "subscriptionProvidersSection.errorProviderNotSupported",
   "subscription-runtime-not-configured": "subscriptionProvidersSection.errorRuntimeNotConfigured",
@@ -233,13 +273,6 @@ export function SubscriptionProvidersSection({
     if (status.connection === "connected") return t("subscriptionProvidersSection.statusConnected");
     if (status.connection === "signed-out") return t("subscriptionProvidersSection.statusSignedOut");
     return t("subscriptionProvidersSection.statusReady");
-  };
-
-  const capabilityLabel = (available: boolean, known: boolean): string => {
-    if (!known) return t("subscriptionProvidersSection.capabilityUnknown");
-    return t(available
-      ? "subscriptionProvidersSection.capabilityAvailable"
-      : "subscriptionProvidersSection.capabilityUnavailable");
   };
 
   return (
@@ -388,23 +421,11 @@ export function SubscriptionProvidersSection({
                 </div>
               ) : null}
 
-              <dl
-                className="grid gap-2 rounded-md border bg-muted/(--opacity-muted) px-3 py-2 text-xs sm:grid-cols-2 lg:grid-cols-3"
-                data-testid={`subscription-provider:${descriptor.id}:capabilities`}
-              >
-                {CAPABILITY_ROWS.map(({ key, labelKey }) => (
-                  <div
-                    className="space-y-0.5"
-                    key={key}
-                    data-testid={`subscription-provider:${descriptor.id}:capability:${key}`}
-                  >
-                    <dt className="font-medium text-foreground">{t(labelKey)}</dt>
-                    <dd className="text-muted-foreground">
-                      {capabilityLabel(capabilities[key], status?.capabilities?.[key] !== undefined)}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              <ProviderCapabilityGrid
+                capabilities={capabilities}
+                known={(key) => status?.capabilities?.[key] !== undefined}
+                testIdPrefix={`subscription-provider:${descriptor.id}`}
+              />
 
               {connected && descriptor.modelSelection !== "none" ? (
                 <div className="space-y-1">

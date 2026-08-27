@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     fallbackChain: [],
     modelListCache: {},
     pricingOverrides: [],
+    pinnedModels: [],
   },
   chat: {
     systemPrompt:

@@ -7,6 +7,7 @@ import {
   Select,
   SelectContent,
   SelectGroup,
+  SelectLabel,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -14,7 +15,7 @@ import {
 import { Slider } from "../../../components/ui/slider.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import { ChevronDown, ChevronUp, Loader2, RefreshCw, Store } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Pin, RefreshCw, Store } from "lucide-react";
 import {
   REASONING_EFFORT_STEPS,
   VENDORS,
@@ -48,7 +49,13 @@ import { isIpcErrorResult, type LvisApi } from "../types.js";
 import { SettingsHelpPopover, SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { PricingOverridesSection } from "./PricingOverridesSection.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { SubscriptionProvidersController } from "./SubscriptionProvidersController.js";
+import {
+  API_PATH_RUNTIME_CAPABILITIES,
+  DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
+  type SubscriptionRuntimeId,
+} from "../../../shared/subscription-runtime.js";
+import { useSubscriptionProviders } from "./SubscriptionProvidersController.js";
+import { ProviderCapabilityGrid, SubscriptionProvidersSection } from "./SubscriptionProvidersSection.js";
 
 export interface FallbackEntry {
   provider: string;
@@ -439,18 +446,25 @@ function modelEntryPricingLabel(entry: LlmModelListEntry | undefined): string | 
 function ModelSelectItemContent({
   option,
   entry,
+  providerOverride,
+  factsOverride,
 }: {
   option: string;
   entry?: LlmModelListEntry;
+  /** Leading column when there is no catalogue entry to read a provider from —
+   *  a subscription model has a provider but no `LlmModelListEntry`. */
+  providerOverride?: string;
+  /** Trailing facts for the same case. */
+  factsOverride?: string;
 }) {
   const { t } = useTranslation();
   const isFree = entry?.tags?.free === true || isOpenRouterFreeModel(option);
   const isRouter = entry?.tags?.router === true;
   const isLocal = entry?.tags?.local === true;
-  const provider = entry?.provider ?? entry?.ownedBy;
+  const provider = entry?.provider ?? entry?.ownedBy ?? providerOverride;
   // Provider is the leading column now, so it is NOT repeated in the trailing
   // facts — those are the numbers that differ between models.
-  const facts = [
+  const facts = factsOverride ? [factsOverride] : [
     entry?.contextLength !== undefined
       ? t("llmTab.modelContextTokens", { count: compactNumber(entry.contextLength) })
       : undefined,
@@ -489,6 +503,159 @@ function ModelSelectItemContent({
         <span className="shrink-0 text-[10px] text-muted-foreground">{facts.join(" · ")}</span>
       )}
     </span>
+  );
+}
+
+/**
+ * One choosable model, wherever it comes from.
+ *
+ * The API vendor's catalogue and every connected subscription's models are the
+ * same kind of choice — "who answers, with what" — and the user makes exactly
+ * one of them. Keeping them in two lists made the screen say otherwise.
+ */
+interface UnifiedModelOption {
+  /** `providerId::modelId`. The Select's value, so a model id repeated by two
+   *  providers still resolves to the right one. */
+  value: string;
+  providerId: string;
+  providerLabel: string;
+  modelId: string;
+  /** Short vendor word shown as the row's leading column. */
+  vendorTag: string;
+  entry?: LlmModelListEntry;
+  /** Subscription-side facts, where there is no catalogue entry to read them from. */
+  facts?: string;
+  /** The provider exposes no model choice — this row IS the provider. */
+  fixed?: boolean;
+}
+
+/** Marks the API-key provider inside a unified option value. */
+const API_PROVIDER_KEY = "api";
+
+function unifiedValue(providerId: string, modelId: string): string {
+  return `${providerId}::${modelId}`;
+}
+
+function parseUnifiedValue(value: string): { providerId: string; modelId: string } | null {
+  const at = value.indexOf("::");
+  if (at <= 0) return null;
+  return { providerId: value.slice(0, at), modelId: value.slice(at + 2) };
+}
+
+/**
+ * The model chooser.
+ *
+ * Two rules make this list readable when a catalogue runs to hundreds of
+ * entries. PINS come first, and they come first ACROSS providers — a pin exists
+ * so a model someone reaches for daily is one glance away, and a per-provider
+ * pin list would still make them find the provider first. Everything else is
+ * grouped BY provider, because that is the other thing a person navigates by.
+ *
+ * A stored pin is never trusted: it is matched against what is actually
+ * offered right now, so a model that left the catalogue, or one whose provider
+ * is disconnected, simply does not appear. The stored id survives that, and the
+ * pin comes back with the provider.
+ */
+function UnifiedModelSelect({
+  options,
+  value,
+  onValueChange,
+  pinned,
+  onTogglePin,
+  placeholder,
+  popupClassName,
+}: {
+  options: readonly UnifiedModelOption[];
+  value: string;
+  onValueChange: (value: string) => void;
+  pinned: readonly string[];
+  onTogglePin: (modelId: string) => void;
+  placeholder: string;
+  popupClassName: string;
+}) {
+  const { t } = useTranslation();
+  const pinnedSet = new Set(pinned);
+  const pinnedOptions = options.filter((option) => pinnedSet.has(option.modelId));
+  const restByProvider: Array<{ label: string; items: UnifiedModelOption[] }> = [];
+  for (const option of options) {
+    if (pinnedSet.has(option.modelId)) continue;
+    const last = restByProvider[restByProvider.length - 1];
+    if (last && last.label === option.providerLabel) last.items.push(option);
+    else restByProvider.push({ label: option.providerLabel, items: [option] });
+  }
+
+  const row = (option: UnifiedModelOption) => {
+    const isPinned = pinnedSet.has(option.modelId);
+    return (
+      <SelectItem
+        key={option.value}
+        value={option.value}
+        leading={
+          /* Outside ItemText so the pin stays in the row and never mirrors
+             into the collapsed trigger. Radix commits a row on POINTERUP, so
+             both pointer events stop here — pinning is not choosing. */
+          <span
+            role="button"
+            tabIndex={-1}
+            aria-label={isPinned ? t("llmTab.modelUnpin") : t("llmTab.modelPin")}
+            aria-pressed={isPinned}
+            data-testid={`llm-tab:model-pin:${option.value}`}
+            className={[
+              "inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded",
+              "hover:bg-accent",
+              isPinned ? "text-primary" : "text-muted-foreground/(--opacity-strong)",
+            ].join(" ")}
+            onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+            onPointerUp={(event) => { event.preventDefault(); event.stopPropagation(); }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onTogglePin(option.modelId);
+            }}
+          >
+            <Pin className={`h-3 w-3 ${isPinned ? "fill-current" : ""}`} aria-hidden={true} />
+          </span>
+        }
+      >
+        <ModelSelectItemContent
+          option={option.modelId}
+          {...(option.entry ? { entry: option.entry } : {})}
+          {...(option.entry ? {} : { providerOverride: option.vendorTag })}
+          {...(option.facts ? { factsOverride: option.facts } : {})}
+        />
+      </SelectItem>
+    );
+  };
+
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger id="model-select" className="w-full" data-testid="llm-model-select">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent className={popupClassName}>
+        {pinnedOptions.length > 0 && (
+          <SelectGroup>
+            <SelectLabel className="text-[10px] uppercase tracking-normal text-muted-foreground">
+              {t("llmTab.modelPinnedGroup")}
+            </SelectLabel>
+            {pinnedOptions.map(row)}
+          </SelectGroup>
+        )}
+        {restByProvider.map((group) => (
+          <SelectGroup key={group.label}>
+            <SelectLabel className="text-[10px] uppercase tracking-normal text-muted-foreground">
+              {group.label}
+            </SelectLabel>
+            {group.items.map(row)}
+          </SelectGroup>
+        ))}
+        {options.length === 0 && (
+          <div className="px-2 py-3 text-center text-xs text-muted-foreground" data-testid="llm-tab:model-none">
+            {t("llmTab.modelNoConnectedProvider")}
+          </div>
+        )}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -753,6 +920,96 @@ export function LlmTab(props: LlmTabProps) {
     () => modelEntryMap(activeModelList?.entries),
     [activeModelList],
   );
+  // Subscription providers live beside the API vendor in ONE chooser, so this
+  // tab owns both halves of the state rather than handing one down.
+  const subscription = useSubscriptionProviders(api);
+  // Mirrored from settings rather than held locally: another window may pin a
+  // model too, and the chooser must show one truth.
+  const [pinnedModels, setPinnedModels] = useState<readonly string[]>([]);
+
+  const unifiedOptions = useMemo<UnifiedModelOption[]>(() => {
+    const options: UnifiedModelOption[] = [];
+    // The API vendor contributes only once it can actually answer — a vendor
+    // that still needs a key has a catalogue of guesses, not of models.
+    if (hasKey || !activeProviderRequiresApiKey) {
+      for (const modelId of activeModelOptions) {
+        const entry = activeModelEntryById.get(modelId);
+        options.push({
+          value: unifiedValue(API_PROVIDER_KEY, modelId),
+          providerId: API_PROVIDER_KEY,
+          providerLabel: vendorInfo.label,
+          modelId,
+          vendorTag: entry?.provider ?? entry?.ownedBy ?? vendor,
+          ...(entry ? { entry } : {}),
+        });
+      }
+    }
+    for (const view of subscription.providers) {
+      // Connected only. A signed-out provider has nothing to offer yet, and
+      // listing its models would invite a choice that cannot be honoured.
+      if (view.status?.connection !== "connected") continue;
+      const models = view.status.models ?? [];
+      if (models.length === 0) {
+        // No model choice at all — the row IS the provider. It still belongs in
+        // the list, because picking it is exactly as much of a choice as
+        // picking a model from a provider that has several.
+        options.push({
+          value: unifiedValue(view.descriptor.id, ""),
+          providerId: view.descriptor.id,
+          providerLabel: view.descriptor.label,
+          modelId: t("llmTab.providerDefaultModel"),
+          vendorTag: view.descriptor.id,
+          facts: t("llmTab.modelFixedByProvider"),
+          fixed: true,
+        });
+        continue;
+      }
+      for (const model of models) {
+        options.push({
+          value: unifiedValue(view.descriptor.id, model.id),
+          providerId: view.descriptor.id,
+          providerLabel: view.descriptor.label,
+          modelId: model.label || model.id,
+          vendorTag: view.descriptor.id,
+        });
+      }
+    }
+    return options;
+  }, [
+    hasKey, activeProviderRequiresApiKey, vendorInfo, vendor,
+    activeModelOptions, activeModelEntryById,
+    subscription.providers, t,
+  ]);
+
+  const selectedUnifiedValue = subscription.activeRuntime.kind === "subscription"
+    ? unifiedValue(subscription.activeRuntime.provider, subscription.activeRuntime.model ?? "")
+    : unifiedValue(API_PROVIDER_KEY, activeModelValue);
+
+  const handleUnifiedModelChange = useCallback((value: string) => {
+    const parsed = parseUnifiedValue(value);
+    if (!parsed) return;
+    if (parsed.providerId === API_PROVIDER_KEY) {
+      setModel(parsed.modelId);
+      void subscription.props.actions.useApiForChat?.();
+      return;
+    }
+    void subscription.props.actions.useForChat?.(
+      parsed.providerId as SubscriptionRuntimeId,
+      parsed.modelId === "" ? null : parsed.modelId,
+    );
+  }, [setModel, subscription.props.actions]);
+
+  const handleTogglePin = useCallback((modelId: string) => {
+    const next = pinnedModels.includes(modelId)
+      ? pinnedModels.filter((id: string) => id !== modelId)
+      : [...pinnedModels, modelId];
+    setPinnedModels(next);
+    void api.updateSettings({ llm: { pinnedModels: next } });
+  }, [api, pinnedModels]);
+
+  // A vendor with no usable credential has not answered the checklist yet.
+  const apiPathConfigured = hasKey || !activeProviderRequiresApiKey;
+
   const marketplaceProviderPresetOptions = useMemo(
     () => providerOptionsForPresets(marketplaceProviderPresets),
     [marketplaceProviderPresets],
@@ -769,6 +1026,7 @@ export function LlmTab(props: LlmTabProps) {
     const applySettings = (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
       const ids = settings.marketplace?.installedProviderIds;
       setMarketplaceProviderIds(Array.isArray(ids) ? ids : []);
+      setPinnedModels(settings.llm?.pinnedModels ?? []);
       const cache = settings.llm?.modelListCache ?? {};
       modelListCacheRef.current = cache;
       const cachedStates = modelListStatesFromCache(cache, marketplaceProviderPresets);
@@ -1095,30 +1353,18 @@ export function LlmTab(props: LlmTabProps) {
                   )}
                 </div>
               </div>
-              <Select
-                value={activeModelValue}
-                onValueChange={setModel}
-              >
-                <SelectTrigger
-                  id="model-select"
-                  className="w-full"
-                  data-testid="llm-model-select"
-                >
-                  <SelectValue placeholder={vendorInfo.defaultModel} />
-                </SelectTrigger>
-                <SelectContent className={SELECT_POPUP_LAYOUT}>
-                  {activeModelOptions.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      <ModelSelectItemContent
-                        option={option}
-                        {...(activeModelEntryById.has(option)
-                          ? { entry: activeModelEntryById.get(option)! }
-                          : {})}
-                      />
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* ONE chooser across every connected provider. Picking a model
+                  is what selects the provider — there is no second "switch"
+                  control, because there was never a second choice to make. */}
+              <UnifiedModelSelect
+                options={unifiedOptions}
+                value={selectedUnifiedValue}
+                onValueChange={handleUnifiedModelChange}
+                pinned={pinnedModels}
+                onTogglePin={handleTogglePin}
+                placeholder={vendorInfo.defaultModel}
+                popupClassName={SELECT_POPUP_LAYOUT}
+              />
               {activeModelList?.status === "loading" && (
                 <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
                   {t("llmTab.modelSyncing")}
@@ -1137,6 +1383,16 @@ export function LlmTab(props: LlmTabProps) {
                 </p>
               )}
             </div>
+            {/* The same checklist the subscription runtimes answer. A vendor
+                that is not configured yet has answered nothing, so its row
+                reads unknown rather than claiming the host's features. */}
+            <ProviderCapabilityGrid
+              capabilities={apiPathConfigured
+                ? API_PATH_RUNTIME_CAPABILITIES
+                : DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES}
+              known={() => apiPathConfigured}
+              testIdPrefix="llm-tab:api-provider"
+            />
           </div>
 
           {hasOnSave && (
@@ -1150,7 +1406,7 @@ export function LlmTab(props: LlmTabProps) {
         </div>
       </SettingsSection>
 
-      <SubscriptionProvidersController api={api} />
+      <SubscriptionProvidersSection {...subscription.props} />
 
       {/* Section B — Extended Thinking / Reasoning */}
       <SettingsSection

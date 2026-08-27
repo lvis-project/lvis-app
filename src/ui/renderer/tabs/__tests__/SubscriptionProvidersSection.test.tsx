@@ -4,9 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getLocale, setLocale } from "../../../../i18n/runtime.js";
 import type { SubscriptionRuntimeCapabilities } from "../../../../shared/subscription-runtime.js";
 import {
+  ProviderCapabilityGrid,
   SubscriptionProvidersSection,
   type SubscriptionProviderView,
 } from "../SubscriptionProvidersSection.js";
+import {
+  API_PATH_RUNTIME_CAPABILITIES,
+  DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
+} from "../../../../shared/subscription-runtime.js";
 
 function runtimeCapabilities(
   overrides: Partial<SubscriptionRuntimeCapabilities> = {},
@@ -259,5 +264,40 @@ describe("SubscriptionProvidersSection", () => {
 
     expect(screen.queryByTestId("subscription-provider:codex:device-code")).toBeNull();
     expect(document.body).not.toHaveTextContent("https://auth.example.test/secret-token");
+  });
+});
+
+describe("ProviderCapabilityGrid", () => {
+  it("answers every checklist row for the API path", () => {
+    render(
+      <ProviderCapabilityGrid
+        capabilities={API_PATH_RUNTIME_CAPABILITIES}
+        known={() => true}
+        testIdPrefix="api-path"
+      />,
+    );
+
+    const grid = screen.getByTestId("api-path:capabilities");
+    const rows = grid.querySelectorAll("[data-testid^='api-path:capability:']");
+    // The API path claims the host engine's features, so no row may read
+    // "unavailable" — a new capability key added to the checklist without a
+    // matching entry in the projection fails right here.
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.querySelector("dd")?.textContent).toBe("Available");
+    }
+  });
+
+  it("reads unknown, not unavailable, for a vendor that has answered nothing", () => {
+    render(
+      <ProviderCapabilityGrid
+        capabilities={DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES}
+        known={() => false}
+        testIdPrefix="api-path"
+      />,
+    );
+
+    const chat = screen.getByTestId("api-path:capability:chat");
+    expect(chat.querySelector("dd")?.textContent).toBe("Not verified yet");
   });
 });

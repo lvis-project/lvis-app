@@ -8,7 +8,22 @@ import type {
   SubscriptionRuntimeStatusUpdatedEvent,
 } from "../../../../shared/subscription-runtime.js";
 import type { AppSettings, LvisApi } from "../../types.js";
-import { SubscriptionProvidersController } from "../SubscriptionProvidersController.js";
+import { useSubscriptionProviders } from "../SubscriptionProvidersController.js";
+import { SubscriptionProvidersSection } from "../SubscriptionProvidersSection.js";
+
+/**
+ * What the settings tab does with the hook, in one place.
+ *
+ * The hook used to BE this component. It became a hook because the model
+ * chooser needs subscription state beside the API-vendor state, and a component
+ * could only hand its state downward. These tests still exercise the same pair
+ * — the state and the section it feeds — so the pairing lives here rather than
+ * as a production component with no production caller.
+ */
+function SubscriptionProvidersController({ api }: { api: LvisApi }) {
+  const { props } = useSubscriptionProviders(api);
+  return <SubscriptionProvidersSection {...props} />;
+}
 
 function connectedStatus(provider: SubscriptionRuntimeId): SubscriptionRuntimeStatus {
   return {
