@@ -21,6 +21,7 @@ import {
   readJsonFile,
   writeJsonAtomic,
   writeFileAtomicAtPath,
+  adoptLegacyRootFileSync,
 } from "../feature-namespace.js";
 import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
@@ -196,5 +197,66 @@ describe("feature-namespace", () => {
     await writeJsonAtomic(dir, "config.json", { v: 2 });
     const value = await readJsonFile(join(dir, "config.json"), { v: 0 });
     expect(value).toEqual({ v: 2 });
+  });
+
+  describe("adoptLegacyRootFileSync", () => {
+    const FEATURE = "skills";
+    const DEST = "approvals.json";
+    const LEGACY = "skill-approvals.json";
+    const payload = JSON.stringify({ version: 2, approvedSkills: [{ name: "a" }] });
+
+    it("moves a legacy root file into the feature namespace and removes the original", () => {
+      writeFileSync(join(tempDir, LEGACY), payload);
+
+      adoptLegacyRootFileSync(FEATURE, DEST, LEGACY);
+
+      const dest = join(tempDir, FEATURE, DEST);
+      expect(readFileSync(dest, "utf-8")).toBe(payload);
+      // Removing the original is the point: a domain-owned file left in the
+      // root is exactly what defeats per-domain backup and clear.
+      expect(existsSync(join(tempDir, LEGACY))).toBe(false);
+      if (POSIX) {
+        expect(statSync(join(tempDir, FEATURE)).mode & 0o777).toBe(0o700);
+        expect(statSync(dest).mode & 0o777).toBe(0o600);
+      }
+    });
+
+    it("does nothing when there is no legacy file", () => {
+      adoptLegacyRootFileSync(FEATURE, DEST, LEGACY);
+      expect(existsSync(join(tempDir, FEATURE, DEST))).toBe(false);
+    });
+
+    it("never overwrites an existing destination, and leaves the legacy alone", () => {
+      // The destination's existence is the idempotency marker, so a store may
+      // call this on every load. If it could overwrite, a second call after a
+      // downgrade-and-rerun would clobber current data with a stale copy.
+      mkdirSync(join(tempDir, FEATURE), { recursive: true });
+      writeFileSync(join(tempDir, FEATURE, DEST), '{"current":true}');
+      writeFileSync(join(tempDir, LEGACY), payload);
+
+      adoptLegacyRootFileSync(FEATURE, DEST, LEGACY);
+
+      expect(readFileSync(join(tempDir, FEATURE, DEST), "utf-8")).toBe('{"current":true}');
+      expect(existsSync(join(tempDir, LEGACY))).toBe(true);
+    });
+
+    it("is idempotent across repeated calls", () => {
+      writeFileSync(join(tempDir, LEGACY), payload);
+      adoptLegacyRootFileSync(FEATURE, DEST, LEGACY);
+      adoptLegacyRootFileSync(FEATURE, DEST, LEGACY);
+      adoptLegacyRootFileSync(FEATURE, DEST, LEGACY);
+      expect(readFileSync(join(tempDir, FEATURE, DEST), "utf-8")).toBe(payload);
+    });
+
+    it("ignores a legacy path that is a directory rather than a file", () => {
+      mkdirSync(join(tempDir, LEGACY), { recursive: true });
+      adoptLegacyRootFileSync(FEATURE, DEST, LEGACY);
+      expect(existsSync(join(tempDir, FEATURE, DEST))).toBe(false);
+      expect(statSync(join(tempDir, LEGACY)).isDirectory()).toBe(true);
+    });
+
+    it("rejects a traversing feature id", () => {
+      expect(() => adoptLegacyRootFileSync("../escape", DEST, LEGACY)).toThrow(/invalid featureId/);
+    });
   });
 });

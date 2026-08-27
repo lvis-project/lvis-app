@@ -22,10 +22,12 @@
  * assertions on `win32`).
  */
 import { randomBytes } from "node:crypto";
-import { constants, promises as fs } from "node:fs";
+import { constants, promises as fs, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { platform } from "node:process";
 import { lvisHome } from "../../shared/lvis-home.js";
+import { writeUtf8FileAtomicSync } from "../../lib/atomic-file.js";
+import { createLogger } from "../../lib/logger.js";
 import {
   RENAME_FILE_LOCK_CODES,
   BACKGROUND_ATTEMPTS,
@@ -236,4 +238,79 @@ export function openFeatureNamespace(featureId: string): FeatureNamespaceHandle 
       return child;
     },
   };
+}
+
+const log = createLogger("feature-namespace");
+
+/**
+ * Adopt a file that predates the per-feature rule, moving it from the
+ * `~/.lvis/` root into its owning feature's namespace.
+ *
+ * The rule (CLAUDE.md, "Storage Namespace per Feature") reserves the root for
+ * CROSS-CUTTING resources — `settings.json`, `audit.log`, `secrets/` — and puts
+ * everything a single domain owns under `~/.lvis/<feature>/`. Files written
+ * before the rule existed sit in the root regardless, which is not merely
+ * untidy: it defeats the operational property the rule buys, namely that
+ * backing up or clearing one domain is `~/.lvis/<feature>/` and nothing else.
+ * A domain-owned file stranded in the root is missed by both.
+ *
+ * Policy, matching {@link ../../boot/steps/work-board-migration}:
+ *
+ *   - The DESTINATION's existence is the idempotency marker. Once it exists —
+ *     whether written here, by the store's first write, or by a prior run —
+ *     this is a no-op forever, so a store may call it on every load.
+ *   - Copy first, verify, then remove. The legacy file is only unlinked after
+ *     the destination has been read back and compared byte for byte, so there
+ *     is no window in which neither path holds the data. Removal is the point:
+ *     leaving the legacy behind would keep the root cluttered and leave two
+ *     copies free to diverge if an older build is ever run again.
+ *   - Every failure is non-fatal. A store that cannot migrate still opens on
+ *     its destination path and behaves exactly as it would for a new install.
+ *
+ * Synchronous on purpose. This runs once, at store construction or first load,
+ * on a small JSON file, and both callers differ in async-ness — a sync helper
+ * is what lets there be ONE implementation instead of an async copy and a sync
+ * copy drifting apart.
+ *
+ * REMOVAL: this is a migration, not a compatibility layer. Delete it, and its
+ * call sites, once installs predating the move are no longer supported —
+ * tracked for the release after 2026-11-01.
+ */
+export function adoptLegacyRootFileSync(
+  featureId: string,
+  destinationName: string,
+  legacyRootFileName: string,
+): void {
+  if (!featureId || featureId.includes("/") || featureId.includes("\\") || featureId.includes("..")) {
+    throw new Error(`adoptLegacyRootFileSync: invalid featureId "${featureId}"`);
+  }
+  const home = lvisHome();
+  const legacyPath = join(home, legacyRootFileName);
+  const destinationPath = join(home, featureId, destinationName);
+  try {
+    // Destination first: the cheap check that makes the common case a stat.
+    if (statSync(destinationPath, { throwIfNoEntry: false })) return;
+    const legacy = statSync(legacyPath, { throwIfNoEntry: false });
+    if (!legacy || !legacy.isFile()) return;
+
+    const body = readFileSync(legacyPath, "utf-8");
+    mkdirSync(join(home, featureId), { recursive: true, mode: DIR_MODE });
+    writeUtf8FileAtomicSync(destinationPath, body, FILE_MODE);
+
+    // Read back rather than trust the write. Unlinking the only other copy on
+    // the strength of a call that returned is how a migration loses data.
+    if (readFileSync(destinationPath, "utf-8") !== body) {
+      log.warn(
+        `storage migration: ${legacyRootFileName} -> ${featureId}/${destinationName} read back differently; leaving the legacy file in place`,
+      );
+      return;
+    }
+    rmSync(legacyPath, { force: true });
+    log.info(`storage migration: adopted ${legacyRootFileName} as ${featureId}/${destinationName}`);
+  } catch (err) {
+    log.warn(
+      `storage migration: ${legacyRootFileName} -> ${featureId}/${destinationName} failed: %s`,
+      (err as Error).message,
+    );
+  }
 }
