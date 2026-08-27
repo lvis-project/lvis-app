@@ -26,6 +26,7 @@ import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
+import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
 import { ChatGroupFrame, buildChatGroupActions } from "./components/ChatGroupFrame.js";
 import { ViewPathBreadcrumb } from "./components/ViewPathNav.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
@@ -55,7 +56,7 @@ import { SIDEBAR_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js";
 import { useSidebarTab } from "./hooks/use-sidebar-tab.js";
 import { useActiveView } from "./hooks/use-active-view.js";
 import { useSettingsTab } from "./hooks/use-settings-tab.js";
-import { usePinnedProjects } from "./hooks/use-pinned-projects.js";
+import { useProjectPreferences } from "./hooks/use-project-preferences.js";
 import { useRoutineOverlay } from "./hooks/use-routine-overlay.js";
 import { useSendMessage } from "./hooks/use-send-message.js";
 import { usePluginViewRouting } from "./hooks/use-plugin-view-routing.js";
@@ -223,7 +224,14 @@ export function App() {
   const { activeTab: sidebarActiveTab, setActiveTab: setSidebarActiveTab } = useSidebarTab(api);
   // Pinned-project preference — pinned projects sort to the top of the
   // sidebar's Projects tab.
-  const { isProjectPinned, toggleProjectPin } = usePinnedProjects(api);
+  const {
+    isProjectPinned,
+    toggleProjectPin,
+    isProjectArchived,
+    toggleProjectArchived,
+    projectLabel,
+    setProjectLabel,
+  } = useProjectPreferences(api);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [workspaceProjects, setWorkspaceProjects] = useState<ProjectIdentity[]>([]);
@@ -570,9 +578,10 @@ export function App() {
     try { await api.submitFeedback({ sessionId: currentSessionId, messageIndex: messageIdx, rating, reason }); } catch { /* no-op */ }
   }, [api, currentSessionId]);
 
-  const handleExport = useCallback(async (format: "markdown" | "json") => {
-    try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
+  const handleExport = useCallback(async (format: "markdown" | "json", sessionId?: string) => {
+    try { await api.chatExport(format, sessionId); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
   }, [api]);
+
 
   // #1500 (E3) — reverse of handleExport. Returns the new sessionId on
   // success so the caller can load it and refresh the sidebar, matching the
@@ -715,6 +724,7 @@ export function App() {
       onSelectSegment: navigateToLocation,
     };
   }, [location, t, pluginViews, viewHistory, navigateToLocation]);
+
 
   // The conversation action set. Built once so the chat-group header and the
   // sidebar row's context menu cannot drift apart about what is offered.
@@ -1045,6 +1055,69 @@ export function App() {
     await refreshSessions();
   }, [activeProject, api, clearForNewChat, defaultWorkspaceProject, refreshSessionId, refreshSessions, resetForNewSession, resolveKnownProject, streaming]);
 
+  // ── What a conversation ROW can do to itself ───────────────────────────────
+  // Assembled here because these are the only place that has both the IPC
+  // bridge and the list refresh: every mutation below has to be followed by
+  // `refreshSessions()` or the row keeps rendering the state it just left.
+  const conversationActions = useMemo<ConversationRowActions>(() => {
+    const findSession = (sessionId: string) => sessions.find((session) => session.id === sessionId);
+    const applyUpdate = async (
+      payload: { sessionId: string; title?: string; archived?: boolean; unread?: boolean },
+    ) => {
+      const result = await api.chatSessionUpdate(payload);
+      if (!result?.ok) {
+        console.warn("[lvis] conversation update failed:", result?.error);
+        return;
+      }
+      await refreshSessions();
+    };
+    return {
+      isArchived: (sessionId) => Boolean(findSession(sessionId)?.archivedAt),
+      isUnread: (sessionId) => Boolean(findSession(sessionId)?.unreadSince),
+      onRename: (sessionId, title) => applyUpdate({ sessionId, title }),
+      onSetArchived: (sessionId, archived) => applyUpdate({ sessionId, archived }),
+      onSetUnread: (sessionId, unread) => applyUpdate({ sessionId, unread }),
+      // Share hands the conversation to the OS save dialog as Markdown — the
+      // one format that is readable by whoever receives it without LVIS.
+      onShare: (sessionId) => handleExport("markdown", sessionId),
+      onCopy: async (sessionId) => {
+        const history = await api.chatSessionHistory(sessionId);
+        const messages = history?.messages ?? [];
+        if (messages.length === 0) return;
+        const text = messages
+          .map((message) => {
+            const body = typeof message.content === "string"
+              ? message.content
+              : JSON.stringify(message.content);
+            return `## ${message.role}\n\n${body}`;
+          })
+          .join("\n\n");
+        await navigator.clipboard.writeText(text);
+      },
+      onDelete: async (sessionId) => {
+        const result = await api.chatSessionDelete(sessionId);
+        if (!result?.ok) {
+          // A cancelled confirm is the user's own decision, not a failure.
+          if (!("canceled" in result && result.canceled)) {
+            console.warn("[lvis] conversation delete failed:", result?.error);
+          }
+          return;
+        }
+        // Deleting the LOADED conversation leaves the loop pointed at a file
+        // that is gone, so start a fresh one rather than leaving it dangling.
+        if (result.wasLoaded) await handleNewChat();
+        await refreshSessions();
+      },
+    };
+  }, [api, sessions, refreshSessions, handleExport, handleNewChat]);
+
+  const projectActions = useMemo<ProjectRowActions>(() => ({
+    isArchived: isProjectArchived,
+    onSetArchived: toggleProjectArchived,
+    label: projectLabel,
+    onSetLabel: setProjectLabel,
+  }), [isProjectArchived, toggleProjectArchived, projectLabel, setProjectLabel]);
+
   // ─── Effects ──────────────────────────────────
   const toggleCommandPopover = useCallback(() => {
     if (activeView !== "home") {
@@ -1259,6 +1332,8 @@ export function App() {
                 onWidthCommit={commitSidebarWidth}
                 onOpenUnifiedSearch={() => { searchOpenOverlay(); }}
                 viewNav={viewNav}
+                conversationActions={conversationActions}
+                projectActions={projectActions}
                 activeSidebarTab={sidebarActiveTab}
                 onActiveSidebarTabChange={setSidebarActiveTab}
                 isSessionStarred={isSessionStarred}

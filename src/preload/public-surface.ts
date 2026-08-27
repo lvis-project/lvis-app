@@ -119,7 +119,24 @@ export function buildPublicSurface() {
     ipcRenderer.invoke(CHANNELS.chat.continueLastUser, { sessionId }) as Promise<{ ok: boolean; error?: string }>,
   chatRetryEffort: async (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) =>
     ipcRenderer.invoke(CHANNELS.chat.retryEffort, opts),
-  chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke(CHANNELS.chat.export, format),
+  // `sessionId` targets a conversation other than the loaded one — that is
+  // what lets a sidebar row share itself. Omit it for the loaded conversation.
+  chatExport: async (format: "markdown" | "json", sessionId?: string) =>
+    ipcRenderer.invoke(CHANNELS.chat.export, format, sessionId),
+  // Row-level conversation edits. Internal channels (mutating).
+  chatSessionUpdate: async (payload: {
+    sessionId: string;
+    title?: string;
+    archived?: boolean;
+    unread?: boolean;
+  }) =>
+    ipcRenderer.invoke(CHANNELS.chat.sessionUpdate, payload) as Promise<
+      { ok: true } | { ok: false; error?: string }
+    >,
+  chatSessionDelete: async (sessionId: string) =>
+    ipcRenderer.invoke(CHANNELS.chat.sessionDelete, { sessionId }) as Promise<
+      { ok: true; wasLoaded: boolean } | { ok: false; error?: string }
+    >,
   // #1500 (E3) — reverse of chatExport. Channel is internal (not in
   // PUBLIC_CHANNELS) even though the bridge lives alongside chatExport here.
   chatImport: async () =>

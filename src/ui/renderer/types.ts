@@ -366,6 +366,8 @@ export type AppSettings = {
     settingsTab?: SettingsTab;
     /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
     pinnedProjectRoots?: string[];
+    archivedProjectRoots?: string[];
+    projectLabels?: Record<string, string>;
     /** Auto-launch LVIS at OS login. SOT: `SystemSettings`. Default false. */
     launchAtStartup?: boolean;
     /** When launching at startup, start hidden in the tray. SOT: `SystemSettings`. Default false. */
@@ -925,7 +927,18 @@ export type LvisApi = {
   chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
   chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
-  chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  /** `sessionId` targets a conversation other than the loaded one. */
+  chatExport: (format: "markdown" | "json", sessionId?: string) => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  /** Row-level conversation edits. Each field is optional; omitted means unchanged. */
+  chatSessionUpdate: (payload: {
+    sessionId: string;
+    title?: string;
+    archived?: boolean;
+    unread?: boolean;
+  }) => Promise<{ ok: true } | { ok: false; error?: string }>;
+  chatSessionDelete: (
+    sessionId: string,
+  ) => Promise<{ ok: true; wasLoaded: boolean } | { ok: false; error?: string; canceled?: boolean }>;
   /** Reverse of chatExport. Always creates a brand-new session (never overwrites). */
   chatImport: () => Promise<
     { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }

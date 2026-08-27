@@ -66,6 +66,10 @@ export const CHANNELS = {
     // Reverse of `export` — always creates a brand-new session,
     // never overwrites. INTERNAL (mutating; not in PUBLIC_CHANNELS below).
     import: "lvis:chat:import",
+    // Row-level conversation edits. INTERNAL (mutating) — the renderer may set
+    // ONLY the three fields these name, never arbitrary session metadata.
+    sessionUpdate: "lvis:chat:session-update",
+    sessionDelete: "lvis:chat:session-delete",
     enterCheckpointView: "lvis:chat:enter-checkpoint-view",
     exitCheckpointView: "lvis:chat:exit-checkpoint-view",
     branchFromCheckpoint: "lvis:chat:branch-from-checkpoint",

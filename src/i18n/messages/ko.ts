@@ -39,6 +39,10 @@ export const ko: Record<SeedMessageKey, string> = {
   "mainDialog.pluginDisableNotPermitted": "이 플러그인은 조직에서 관리하므로 비활성화할 수 없습니다.",
   "mainDialog.noPersonasAvailable": "사용 가능한 persona 없음",
   "mainDialog.exportConversationTitle": "대화 내보내기",
+  "mainDialog.deleteConversationMessage": "이 대화를 삭제할까요?",
+  "mainDialog.deleteConversationDetail": "대화 기록과 체크포인트가 디스크에서 제거됩니다. 되돌릴 수 없습니다.",
+  "mainDialog.deleteConversationConfirm": "삭제",
+  "mainDialog.cancelButton": "취소",
   "mainDialog.importConversationTitle": "대화 가져오기",
 
   // ── E4 — 시작 / 전역 단축키 설정 탭 ────────────────────────────────

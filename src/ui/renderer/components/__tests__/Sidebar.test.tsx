@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Sidebar } from "../Sidebar.js";
 import type { SessionSummary } from "../../hooks/use-sessions.js";
@@ -858,5 +858,101 @@ describe("Sidebar conversation context menu", () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe("Sidebar conversation row actions", () => {
+  const rowState = () => ({
+    archived: new Set<string>(),
+    unread: new Set<string>(),
+    onRename: vi.fn(),
+    onSetArchived: vi.fn(),
+    onSetUnread: vi.fn(),
+    onShare: vi.fn(),
+    onCopy: vi.fn(),
+    onDelete: vi.fn(),
+  });
+
+  const asActions = (state: ReturnType<typeof rowState>) => ({
+    isArchived: (id: string) => state.archived.has(id),
+    isUnread: (id: string) => state.unread.has(id),
+    onRename: state.onRename,
+    onSetArchived: state.onSetArchived,
+    onSetUnread: state.onSetUnread,
+    onShare: state.onShare,
+    onCopy: state.onCopy,
+    onDelete: state.onDelete,
+  });
+
+  it("opens the same menu from the trailing button as from a right-click", () => {
+    const state = rowState();
+    const { getByTestId, showNativeContextMenu, restore } = renderSidebar({
+      conversationActions: asActions(state),
+    });
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    const call = showNativeContextMenu.mock.calls.at(-1)?.[0];
+    expect(call?.kind).toBe("conversation");
+    // Every command the row offers must be one the main-side allow-list knows.
+    expect(call?.commands).toEqual(
+      expect.arrayContaining([
+        "conversation.rename",
+        "conversation.mark-unread",
+        "conversation.share",
+        "conversation.copy",
+        "conversation.archive",
+        "conversation.delete",
+      ]),
+    );
+    restore();
+  });
+
+  it("offers unarchive and mark-read once the row is in those states", () => {
+    const state = rowState();
+    state.archived.add("sess-1");
+    state.unread.add("sess-1");
+    const { getByTestId, showNativeContextMenu, restore } = renderSidebar({
+      conversationActions: asActions(state),
+    });
+    fireEvent.click(getByTestId("sidebar-toggle-archived"));
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    const call = showNativeContextMenu.mock.calls.at(-1)?.[0];
+    expect(call?.commands).toContain("conversation.unarchive");
+    expect(call?.commands).toContain("conversation.mark-read");
+    expect(call?.commands).not.toContain("conversation.archive");
+    expect(call?.commands).not.toContain("conversation.mark-unread");
+    restore();
+  });
+
+  it("hides archived conversations until the archive toggle is used", () => {
+    const state = rowState();
+    state.archived.add("sess-1");
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      conversationActions: asActions(state),
+    });
+    expect(queryByTestId("sidebar-session-sess-1")).toBeNull();
+    fireEvent.click(getByTestId("sidebar-toggle-archived"));
+    expect(queryByTestId("sidebar-session-sess-1")).not.toBeNull();
+    restore();
+  });
+
+  it("commits a rename on Enter and abandons it on Escape", () => {
+    const state = rowState();
+    const { getByTestId, emitNativeContextCommand, restore } = renderSidebar({
+      conversationActions: asActions(state),
+    });
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    act(() => emitNativeContextCommand("conversation.rename"));
+    const field = getByTestId("sidebar-session-rename-sess-1");
+    fireEvent.change(field, { target: { value: "새 이름" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(state.onRename).not.toHaveBeenCalled();
+
+    fireEvent.click(getByTestId("sidebar-session-menu-sess-1"));
+    act(() => emitNativeContextCommand("conversation.rename"));
+    const again = getByTestId("sidebar-session-rename-sess-1");
+    fireEvent.change(again, { target: { value: "새 이름" } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    expect(state.onRename).toHaveBeenCalledWith("sess-1", "새 이름");
+    restore();
   });
 });

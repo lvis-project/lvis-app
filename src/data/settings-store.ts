@@ -72,7 +72,8 @@ import {
   normalizeDiagnostics,
   normalizeFeatureFlags,
   normalizeMarketplace,
-  normalizePinnedProjectRoots,
+  normalizeProjectRootList,
+  normalizeProjectLabels,
   pruneLazyLlmVendorBlocks,
   SIDE_PANEL_SPLIT_KEYS,
   normalizeSystem,
@@ -649,6 +650,18 @@ export interface SystemSettings {
    * empty. Normalized to a de-duplicated string array on read/write.
    */
   pinnedProjectRoots?: string[];
+  /**
+   * Archived project roots — hidden from the Projects tab's default listing
+   * without being removed. Removal drops the workspace root and its durable
+   * permission scope; archiving touches neither, which is exactly why the two
+   * are separate actions on the row.
+   */
+  archivedProjectRoots?: string[];
+  /**
+   * User-chosen display names for project rows, keyed by `projectRootKey`.
+   * A label renames the ROW, never the folder on disk.
+   */
+  projectLabels?: Record<string, string>;
 }
 
 /**
@@ -1104,9 +1117,21 @@ export class SettingsService {
         // anything unrecognized onto the default, so there is no "ignored" arm.
         next.settingsTab = normalizeSettingsTab(rawSettingsTab);
       }
+      const rawArchivedProjectRoots = partial.system.archivedProjectRoots;
+      if (Array.isArray(rawArchivedProjectRoots)) {
+        next.archivedProjectRoots = normalizeProjectRootList(rawArchivedProjectRoots);
+      } else if (rawArchivedProjectRoots !== undefined) {
+        log.warn(
+          `system.archivedProjectRoots patch ignored (received ${JSON.stringify(rawArchivedProjectRoots)}), keeping %s`,
+          this.settings.system.archivedProjectRoots,
+        );
+      }
+      if (partial.system.projectLabels !== undefined) {
+        next.projectLabels = normalizeProjectLabels(partial.system.projectLabels);
+      }
       const rawPinnedProjectRoots = partial.system.pinnedProjectRoots;
       if (Array.isArray(rawPinnedProjectRoots)) {
-        next.pinnedProjectRoots = normalizePinnedProjectRoots(rawPinnedProjectRoots);
+        next.pinnedProjectRoots = normalizeProjectRootList(rawPinnedProjectRoots);
       } else if (rawPinnedProjectRoots !== undefined) {
         log.warn(
           `system.pinnedProjectRoots patch ignored (received ${JSON.stringify(rawPinnedProjectRoots)}), keeping %s`,

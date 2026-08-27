@@ -138,6 +138,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // Ask the normalizer what an absent tab means rather than restating it.
     settingsTab: normalizeSettingsTab(undefined),
     pinnedProjectRoots: [],
+    archivedProjectRoots: [],
+    projectLabels: {},
     // E4 — auto-launch defaults OFF (opt-in). Only applied on packaged builds.
     launchAtStartup: false,
     launchMinimized: false,

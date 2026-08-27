@@ -16,6 +16,10 @@ export interface SessionSummary {
   projectName?: string;
   /** Compact number of the checkpoint this session was forked from. Only set on true checkpoint forks. */
   branchedFromCompactNum?: number;
+  /** ISO time the user archived this conversation. Absent = not archived. */
+  archivedAt?: string;
+  /** ISO time the user marked it unread. Absent = read. */
+  unreadSince?: string;
 }
 
 export interface SessionProjectSummary {

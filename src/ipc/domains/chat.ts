@@ -27,6 +27,7 @@ import {
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { parseStagedEnvelope, isMissingStagedEnvelopeErrorMessage } from "../../shared/staged-origins.js";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { isValidSessionId } from "../../memory/memory-manager.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
@@ -1071,16 +1072,35 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return turn ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
-  ipcMain.handle(CHANNELS.chat.export, async (e, format: "markdown" | "json") => {
+  // `targetSessionId` lets a sidebar row export ITSELF. Without it "share this
+  // conversation" on a row silently exported whichever conversation happened to
+  // be loaded — the same click meaning two different things.
+  ipcMain.handle(CHANNELS.chat.export, async (
+    e,
+    format: "markdown" | "json",
+    targetSessionId?: unknown,
+  ) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.export, e); return UNAUTHORIZED_FRAME; }
     const { dialog } = await import("electron");
     const { writeFile } = await import("node:fs/promises");
     const win = getMainWindow();
     if (format !== "markdown" && format !== "json") return { ok: false, error: "invalid-format" };
-    const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    const loadedSessionId = conversationLoop.getSessionId();
+    let sessionId = loadedSessionId;
+    let messages: GenericMessage[];
+    if (typeof targetSessionId === "string" && targetSessionId !== loadedSessionId) {
+      if (!isValidSessionId(targetSessionId)) return { ok: false, error: "invalid-session" };
+      const stored = memoryManager.loadSession(targetSessionId);
+      // Not "fall back to the loaded conversation" — that would export the
+      // wrong thing under the right name. A missing session is an error.
+      if (!Array.isArray(stored)) return { ok: false, error: "not-found" };
+      sessionId = targetSessionId;
+      messages = stored as GenericMessage[];
+    } else {
+      messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    }
     if (messages.length === 0) return { ok: false, error: "empty" };
 
-    const sessionId = conversationLoop.getSessionId();
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const defaultName = `lvis-chat-${sessionId.slice(0, 8)}-${stamp}.${format === "markdown" ? "md" : "json"}`;
     const dialogOptions = {
@@ -1121,6 +1141,85 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     await writeFile(res.filePath, body, "utf-8");
     return { ok: true, filePath: res.filePath };
+  });
+
+  // ── Row-level conversation edits ───────────────────────────────────────
+  // One channel for the three fields a conversation row can change, because
+  // they are one action from the user's side: editing this conversation's own
+  // card. Each field is read off the payload by name — the payload is NEVER
+  // spread into the metadata, so a renderer cannot reach the project binding
+  // or the A2A wire identity through here.
+  ipcMain.handle(CHANNELS.chat.sessionUpdate, async (e, payload: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.sessionUpdate, e); return UNAUTHORIZED_FRAME; }
+    const raw = (payload ?? {}) as {
+      sessionId?: unknown;
+      title?: unknown;
+      archived?: unknown;
+      unread?: unknown;
+    };
+    if (!isValidSessionId(raw.sessionId)) return { ok: false, error: "invalid-session" };
+    if (!memoryManager.hasSessionMetadataFile(raw.sessionId)
+      && !Array.isArray(memoryManager.loadSession(raw.sessionId))) {
+      return { ok: false, error: "not-found" };
+    }
+    const fields: { title?: string; archivedAt?: string | null; unreadSince?: string | null } = {};
+    if (raw.title !== undefined) {
+      if (typeof raw.title !== "string") return { ok: false, error: "invalid-title" };
+      const title = raw.title.replace(/[\u0000-\u001F\u007F\u2028\u2029]/g, " ").trim();
+      // An empty rename is not "clear the title" — the row would then fall back
+      // to the derived title and the user would see their edit vanish with no
+      // explanation. Refuse it and let the caller keep the dialog open.
+      if (!title) return { ok: false, error: "empty-title" };
+      fields.title = title;
+    }
+    const now = new Date().toISOString();
+    if (raw.archived !== undefined) {
+      if (typeof raw.archived !== "boolean") return { ok: false, error: "invalid-archived" };
+      fields.archivedAt = raw.archived ? now : null;
+    }
+    if (raw.unread !== undefined) {
+      if (typeof raw.unread !== "boolean") return { ok: false, error: "invalid-unread" };
+      fields.unreadSince = raw.unread ? now : null;
+    }
+    if (Object.keys(fields).length === 0) return { ok: false, error: "no-fields" };
+    await memoryManager.updateSessionRowFields(raw.sessionId, fields);
+    return { ok: true };
+  });
+
+  ipcMain.handle(CHANNELS.chat.sessionDelete, async (e, payload: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.sessionDelete, e); return UNAUTHORIZED_FRAME; }
+    const sessionId = (payload as { sessionId?: unknown } | null)?.sessionId;
+    if (!isValidSessionId(sessionId)) return { ok: false, error: "invalid-session" };
+    // The confirmation lives HERE, not in the renderer. A renderer-side confirm
+    // is a promise the caller can skip; this one cannot be reached around.
+    const { dialog } = await import("electron");
+    const win = getMainWindow();
+    const confirmOptions = {
+      type: "warning" as const,
+      buttons: [t("mainDialog.cancelButton"), t("mainDialog.deleteConversationConfirm")],
+      defaultId: 0,
+      cancelId: 0,
+      message: t("mainDialog.deleteConversationMessage"),
+      detail: t("mainDialog.deleteConversationDetail"),
+    };
+    const confirmation = win
+      ? await dialog.showMessageBox(win, confirmOptions)
+      : await dialog.showMessageBox(confirmOptions);
+    if (confirmation.response !== 1) return { ok: false, canceled: true };
+
+    const wasLoaded = sessionId === conversationLoop.getSessionId();
+    // Only the LOADED conversation can be mid-turn, so only it needs the
+    // mutation guard. Holding a delete of some other conversation behind the
+    // loop would refuse a safe action for a reason that does not apply to it.
+    if (!wasLoaded) {
+      await memoryManager.deleteSession(sessionId);
+      return { ok: true, wasLoaded: false };
+    }
+    const mutation = trackSessionMutation(async () => {
+      await memoryManager.deleteSession(sessionId);
+      return { ok: true as const, wasLoaded: true };
+    });
+    return (await mutation) ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
   // Reverse of chat.export. INTERNAL (mutating; not in

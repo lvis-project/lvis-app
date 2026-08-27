@@ -31,6 +31,10 @@ export const es: Record<SeedMessageKey, string> = {
   "mainDialog.pluginDisableNotPermitted": "Este complemento está gestionado por tu organización y no se puede desactivar.",
   "mainDialog.noPersonasAvailable": "No hay personas disponibles",
   "mainDialog.exportConversationTitle": "Exportar conversación",
+  "mainDialog.deleteConversationMessage": "¿Eliminar esta conversación?",
+  "mainDialog.deleteConversationDetail": "La transcripción y sus puntos de control se eliminan del disco. Esto no se puede deshacer.",
+  "mainDialog.deleteConversationConfirm": "Eliminar",
+  "mainDialog.cancelButton": "Cancelar",
   "mainDialog.importConversationTitle": "Importar conversación",
 
   // ── E4 — Inicio / atajos globales ─────────────────────────────────
