@@ -2526,6 +2526,7 @@ export const zhMessages: Record<string, string> = {
   "sidebar.projectsTab": "项目",
   "sidebar.resizeHandleAriaLabel": "调整侧边栏大小",
   "sidebar.unpinConversation": "取消固定对话",
+  "sidebar.conversationMenu": "对话操作",
   "sidebar.unpinProject": "取消固定项目",
   "skillBadge.loadedFallback": "技能 {name} 已加载。",
   "skillBadge.loadedLabel": "技能加载：{name}",

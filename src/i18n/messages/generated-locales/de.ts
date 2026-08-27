@@ -2510,6 +2510,7 @@ export const deMessages: Record<string, string> = {
   "sidebar.unpinProject": "Projekt-Anheftung aufheben",
   "sidebar.pinConversation": "Unterhaltung anheften",
   "sidebar.unpinConversation": "Anheftung der Unterhaltung aufheben",
+  "sidebar.conversationMenu": "Unterhaltungsaktionen",
   "skillBadge.loadedFallback": "Fertigkeit {name} geladen.",
   "skillBadge.loadedLabel": "Fertigkeit geladen: {name}",
   "slashPicker.catCommand": "Befehle",

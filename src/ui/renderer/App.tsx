@@ -26,6 +26,8 @@ import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
+import { ChatGroupFrame, buildChatGroupActions } from "./components/ChatGroupFrame.js";
+import { ViewPathBreadcrumb } from "./components/ViewPathNav.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { McpPromptArgsDialog } from "./dialogs/McpPromptArgsDialog.js";
@@ -714,6 +716,26 @@ export function App() {
     };
   }, [location, t, pluginViews, viewHistory, navigateToLocation]);
 
+  // The conversation action set. Built once so the chat-group header and the
+  // sidebar row's context menu cannot drift apart about what is offered.
+  const chatGroupActions = useMemo(
+    () =>
+      buildChatGroupActions({
+        t,
+        pinned: Boolean(currentSessionId && isSessionStarred(currentSessionId)),
+        onTogglePin: () =>
+          currentSessionId
+            ? handleToggleSessionStar(
+                currentSessionId,
+                sessions.find((s) => s.id === currentSessionId)?.title,
+              )
+            : Promise.resolve(),
+        onExport: handleExport,
+        onImport: handleImportAndLoad,
+      }),
+    [t, currentSessionId, isSessionStarred, sessions, handleToggleSessionStar, handleExport, handleImportAndLoad],
+  );
+
   // Build flat PluginEntry list for InputActionBar plugin grid.
   // `unauthed` is set when the owning plugin declares `manifest.auth` AND its
   // current statusTool result is `kind: "unauthed"`. The grid renders a
@@ -1180,11 +1202,10 @@ export function App() {
                   renders IN the band (no separate toolbar row below it). */}
               <CustomTitleBar>
                 <MainToolbar
-                  viewNav={viewNav}
                   // The floating sidebar card extends UP into this band, so the
                   // toolbar's own leading edge is behind it. Reserve exactly what
-                  // <main> reserves below, from the same two values, so the path
-                  // starts where the card ends instead of rendering underneath it.
+                  // <main> reserves below, from the same two values, so the
+                  // trailing controls clear the card instead of hiding under it.
                   leadClearance={sidebarCollapsed ? 64 : sidebarWidth + 8}
                   streaming={streaming}
                   hasApiKey={effectiveLlmReady}
@@ -1237,18 +1258,13 @@ export function App() {
                 onWidthChange={setSidebarWidth}
                 onWidthCommit={commitSidebarWidth}
                 onOpenUnifiedSearch={() => { searchOpenOverlay(); }}
-                isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
-                onToggleCurrentSessionStar={() => currentSessionId
-                  ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
-                  : Promise.resolve()}
+                viewNav={viewNav}
                 activeSidebarTab={sidebarActiveTab}
                 onActiveSidebarTabChange={setSidebarActiveTab}
                 isSessionStarred={isSessionStarred}
                 onToggleSessionStar={handleToggleSessionStar}
                 isProjectPinned={isProjectPinned}
                 onToggleProjectPin={toggleProjectPin}
-                onExport={handleExport}
-                onImport={handleImportAndLoad}
               />
               <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
                 <main
@@ -1262,6 +1278,19 @@ export function App() {
                   // during a drag this tracks the live width for a seamless resize.
                   style={sidebarCollapsed ? undefined : { paddingLeft: `${sidebarWidth + 8}px` }}
                 >
+                  {/* ── Location path. A breadcrumb names the CONTENT, so it sits
+                      at the content's leading edge rather than in the window
+                      band — same placement rule VS Code applies to its editor
+                      breadcrumbs. It renders only when there is depth to show:
+                      a single crumb repeats the title and earns no row. */}
+                  {viewNav.segments.length > 1 ? (
+                    <div className="shrink-0 px-3 pt-1.5" data-testid="canvas-path">
+                      <ViewPathBreadcrumb
+                        segments={viewNav.segments}
+                        onSelectSegment={viewNav.onSelectSegment}
+                      />
+                    </div>
+                  ) : null}
                   {/* Floating notification stack — update/announcement banners are an
                       OVERLAY, not in-flow content. They float over the canvas anchored
                       top-RIGHT so they never push the routed content or the composer
@@ -1496,7 +1525,20 @@ export function App() {
                                     single-occupant design. */}
                                 <McpAppPipPanel />
                                 <McpAppFullscreenPanel />
-                                {/* ChatView is the single chat renderer (issue #547). */}
+                                {/* ChatView is the single chat renderer (issue #547).
+                                    It is wrapped in the chat GROUP: an outlined
+                                    container carrying its own title + the actions
+                                    that operate on this conversation. */}
+                                <ChatGroupFrame
+                                  title={
+                                    sessions.find((s) => s.id === currentSessionId)?.title
+                                    ?? t("sidebar.newChat")
+                                  }
+                                  focused
+                                  panelOpen={sidePanelOpen}
+                                  onTogglePanel={handleToggleSidePanel}
+                                  actions={chatGroupActions}
+                                >
                                 <ChatView
                                   api={api}
                                   onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
@@ -1550,6 +1592,7 @@ export function App() {
                                   onRefreshProjects={refreshWorkspaceProjects}
                                   onProjectError={handleProjectError}
                                 />
+                                </ChatGroupFrame>
                               </ChatContextProvider>
                             </PageShell>
                           );

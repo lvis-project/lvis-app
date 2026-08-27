@@ -112,9 +112,14 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     collapsed: false,
     onToggleCollapse: vi.fn(),
     onOpenUnifiedSearch: vi.fn(),
-    isCurrentSessionStarred: false,
-    onToggleCurrentSessionStar: vi.fn(),
-    onExport: vi.fn(),
+    viewNav: {
+      segments: [],
+      canGoBack: false,
+      canGoForward: false,
+      onBack: vi.fn(),
+      onForward: vi.fn(),
+      onSelectSegment: vi.fn(),
+    },
     sessions,
     projects: overrides.projects ?? [
       {
@@ -387,7 +392,12 @@ describe("Sidebar conversation pinning", () => {
     try {
       const unassigned = getByTestId("sidebar-unassigned-sessions");
       const rows = Array.from(unassigned.querySelectorAll('[data-testid^="sidebar-session-"]'))
-        .filter((el) => !el.getAttribute("data-testid")?.includes("-pin-"));
+        .filter((el) => {
+          // Keep only the row's own load button. Each row also carries a pin
+          // and a menu button under the same `sidebar-session` prefix.
+          const id = el.getAttribute("data-testid") ?? "";
+          return !id.includes("-pin-") && !id.includes("-menu-");
+        });
       expect(rows.map((el) => el.getAttribute("data-testid"))).toEqual([
         "sidebar-session-sess-2",
         "sidebar-session-sess-1",
@@ -407,7 +417,12 @@ describe("Sidebar conversation pinning", () => {
     try {
       let unassigned = getByTestId("sidebar-unassigned-sessions");
       let rows = Array.from(unassigned.querySelectorAll('[data-testid^="sidebar-session-"]'))
-        .filter((el) => !el.getAttribute("data-testid")?.includes("-pin-"));
+        .filter((el) => {
+          // Keep only the row's own load button. Each row also carries a pin
+          // and a menu button under the same `sidebar-session` prefix.
+          const id = el.getAttribute("data-testid") ?? "";
+          return !id.includes("-pin-") && !id.includes("-menu-");
+        });
       expect(rows[0].getAttribute("data-testid")).toBe("sidebar-session-sess-2");
 
       pinned = new Set();
@@ -425,9 +440,14 @@ describe("Sidebar conversation pinning", () => {
             collapsed={false}
             onToggleCollapse={vi.fn()}
             onOpenUnifiedSearch={vi.fn()}
-            isCurrentSessionStarred={false}
-            onToggleCurrentSessionStar={vi.fn()}
-            onExport={vi.fn()}
+            viewNav={{
+              segments: [],
+              canGoBack: false,
+              canGoForward: false,
+              onBack: vi.fn(),
+              onForward: vi.fn(),
+              onSelectSegment: vi.fn(),
+            }}
             sessions={[
               {
                 id: "sess-1",
@@ -452,7 +472,12 @@ describe("Sidebar conversation pinning", () => {
       );
       unassigned = getByTestId("sidebar-unassigned-sessions");
       rows = Array.from(unassigned.querySelectorAll('[data-testid^="sidebar-session-"]'))
-        .filter((el) => !el.getAttribute("data-testid")?.includes("-pin-"));
+        .filter((el) => {
+          // Keep only the row's own load button. Each row also carries a pin
+          // and a menu button under the same `sidebar-session` prefix.
+          const id = el.getAttribute("data-testid") ?? "";
+          return !id.includes("-pin-") && !id.includes("-menu-");
+        });
       expect(rows.map((el) => el.getAttribute("data-testid"))).toEqual([
         "sidebar-session-sess-1",
         "sidebar-session-sess-2",

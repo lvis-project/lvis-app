@@ -2531,6 +2531,7 @@ export const esMessages: Record<string, string> = {
   "sidebar.unpinProject": "Dejar de fijar proyecto",
   "sidebar.pinConversation": "Fijar conversación",
   "sidebar.unpinConversation": "Dejar de fijar conversación",
+  "sidebar.conversationMenu": "Acciones de conversación",
   "skillBadge.loadedFallback": "Habilidad {name} cargada.",
   "skillBadge.loadedLabel": "Habilidad cargada: {name}",
   "slashPicker.catCommand": "Comandos",

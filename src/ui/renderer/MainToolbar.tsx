@@ -2,7 +2,6 @@ import { ArrowDownToLine, Download, PanelRightClose, PanelRightOpen, RefreshCw, 
 import { Button } from "../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
-import { ViewPathNav, type ViewPathNavProps } from "./components/ViewPathNav.js";
 import { RemoteA2AActionButton } from "./components/RemoteA2AActionButton.js";
 
 /**
@@ -53,9 +52,6 @@ function isDevMode(): boolean {
 }
 
 export interface MainToolbarProps {
-  /** Path + history controls for the current location. `activeView` used to be
-   *  passed here and thrown away; the path is what it was always for. */
-  viewNav: ViewPathNavProps;
   /** Left reserve (px) for the floating sidebar card that overlaps this band. */
   leadClearance: number;
   streaming: boolean;
@@ -85,7 +81,6 @@ export interface MainToolbarProps {
 }
 
 export function MainToolbar({
-  viewNav,
   leadClearance,
   streaming: _streaming,
   hasApiKey: _hasApiKey,
@@ -115,21 +110,6 @@ export function MainToolbar({
     >
       {/* ── Spacer pushes the trailing controls to the far-right edge (stays drag) */}
       <div className="min-w-0 flex-1 sm:min-w-[64px]" aria-hidden="true" data-testid="main-toolbar-drag-band" />
-
-      {/* ── Location: back / forward + the path.
-          It sits with the trailing group, NOT at the band's leading edge: the
-          floating sidebar card extends up into this band and covers the left
-          side, which is why this toolbar hosts only right-aligned controls in
-          the first place. Rendering the path there put it behind the card.
-          Width-capped so a long path truncates instead of eating the spacer
-          the user grabs to move the window. */}
-      {/* The BUTTONS stay at every width; only the path text collapses below
-          `md`. At the 460px chat width the band cannot fit a readable path,
-          but losing the way to go back with it would leave chat mode without
-          navigation at all (owner decision). */}
-      <NoDrag className="flex min-w-0 max-w-[45%] shrink-0 items-center">
-        <ViewPathNav {...viewNav} />
-      </NoDrag>
 
       <NoDrag>
         <RemoteA2AActionButton />

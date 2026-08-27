@@ -2514,6 +2514,7 @@ export const frMessages: Record<string, string> = {
   "sidebar.unpinProject": "Désépingler le projet",
   "sidebar.pinConversation": "Épingler la conversation",
   "sidebar.unpinConversation": "Désépingler la conversation",
+  "sidebar.conversationMenu": "Actions de conversation",
   "skillBadge.loadedFallback": "Compétence {name} chargée.",
   "skillBadge.loadedLabel": "Compétence chargée: {name}",
   "slashPicker.catCommand": "Commandes",

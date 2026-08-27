@@ -33,6 +33,7 @@ export const en = {
   "sidebar.unpinProject": "Unpin project",
   "sidebar.pinConversation": "Pin conversation",
   "sidebar.unpinConversation": "Unpin conversation",
+  "sidebar.conversationMenu": "Conversation actions",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "sidebar.ariaLabel": "기본 탐색",
@@ -68,4 +69,5 @@ export const ko: Record<keyof typeof en, string> = {
   "sidebar.unpinProject": "프로젝트 고정 해제",
   "sidebar.pinConversation": "대화 고정",
   "sidebar.unpinConversation": "대화 고정 해제",
+  "sidebar.conversationMenu": "대화 작업",
 };

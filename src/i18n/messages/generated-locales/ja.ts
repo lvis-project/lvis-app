@@ -2526,6 +2526,7 @@ export const jaMessages: Record<string, string> = {
   "sidebar.projectsTab": "プロジェクト",
   "sidebar.resizeHandleAriaLabel": "サイドバーのサイズを変更する",
   "sidebar.unpinConversation": "会話の固定を解除する",
+  "sidebar.conversationMenu": "会話の操作",
   "sidebar.unpinProject": "プロジェクトの固定を解除する",
   "skillBadge.loadedFallback": "スキル {name} がロードされました。",
   "skillBadge.loadedLabel": "ロードされたスキル: {name}",

@@ -1,13 +1,14 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
+import { ViewHistoryNav, type ViewPathNavProps } from "./ViewPathNav.js";
 import {
   CalendarDays,
-  Download,
   Folder,
   Home,
   KanbanSquare,
   KeyRound,
   MessageSquareText,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Pin,
@@ -16,10 +17,8 @@ import {
   Repeat2,
   Search,
   ShoppingBag,
-  Upload,
   Wrench,
 } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu.js";
 import { Button } from "../../../components/ui/button.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs.js";
@@ -110,15 +109,9 @@ export interface SidebarProps {
   onWidthCommit?: (px: number) => void;
   /** Open the unified search overlay — second button in the cluster strip. */
   onOpenUnifiedSearch: () => void;
-  /** Whether the current session is starred — drives the cluster star fill. */
-  isCurrentSessionStarred: boolean;
-  /** Toggle the current session star — third button in the cluster strip. */
-  onToggleCurrentSessionStar: () => void | Promise<void>;
-  /** Export the current session — fourth button in the cluster strip. */
-  onExport: (format: "markdown" | "json") => void | Promise<void>;
-  /** #1500 (E3) — import a previously-exported JSON as a brand-new session.
-   *  Fifth button in the cluster strip, adjacent to export. */
-  onImport: () => void | Promise<void>;
+  /** Route path + history. The sidebar renders only the HISTORY half in its
+   *  cluster strip; App renders the path half on the canvas. */
+  viewNav: ViewPathNavProps;
   /** Recent main-chat sessions shown under the current project group. */
   sessions?: SessionSummary[];
   /** Workspace projects from the App-level active project source of truth. */
@@ -610,7 +603,7 @@ function SessionRow({
   onLoadSession,
   isPinned,
   onTogglePin,
-  onContextMenu,
+  onOpenMenu,
   t,
 }: {
   session: SessionSummary;
@@ -621,15 +614,17 @@ function SessionRow({
   isPinned?: boolean;
   /** Toggle this conversation's pin — omitted entirely hides the pin affordance. */
   onTogglePin?: () => void | Promise<void>;
-  /** Open the native conversation actions menu for this row. */
-  onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
+  /** Open this row's actions menu. Wired to BOTH the right-click and the
+   *  trailing entry button, so the two cannot offer different things. */
+  onOpenMenu?: (event: MouseEvent<HTMLElement>) => void;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const time = formatRelativeSessionTime(session.modifiedAt, t);
   const rowDisabled = streaming && !active;
+  const pinLabel = isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation");
   return (
     <div
-      onContextMenu={onContextMenu}
+      onContextMenu={onOpenMenu}
       className={[
         "group relative flex w-full min-w-0 items-center rounded-md transition-colors",
         active
@@ -638,39 +633,72 @@ function SessionRow({
         rowDisabled ? "cursor-not-allowed opacity-50" : "",
       ].filter(Boolean).join(" ")}
     >
+      {/* ── Leading slot. One 14px square that holds the row's KIND at rest and
+          its pin on hover. The two never coexist, so the row's text never
+          shifts — the reason the swap happens here rather than by revealing a
+          fourth control. A pinned row keeps the pin showing: the state has to
+          be readable without hovering every row to find it. */}
+      <span className="relative ml-2 flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        {onTogglePin ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void onTogglePin();
+            }}
+            className={[
+              "absolute inset-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              isPinned ? "flex text-primary" : "hidden group-hover:flex group-focus-within:flex",
+            ].join(" ")}
+            aria-label={pinLabel}
+            title={pinLabel}
+            aria-pressed={isPinned}
+            data-testid={`sidebar-session-pin-${session.id}`}
+          >
+            <Pin className={`h-3 w-3 ${isPinned ? "fill-current" : ""}`} />
+          </button>
+        ) : null}
+        <MessageSquareText
+          className={[
+            "h-3.5 w-3.5",
+            // Hidden — not removed. The glyph keeps reserving the square so the
+            // swap costs no layout.
+            isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
+          ].join(" ")}
+          aria-hidden="true"
+        />
+      </span>
       <button
         type="button"
         disabled={rowDisabled}
         aria-current={active ? "page" : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex min-w-0 flex-1 items-center rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         data-testid={`sidebar-session-${session.id}`}
         onClick={() => void onLoadSession?.(session.id)}
       >
-        <MessageSquareText className="h-3.5 w-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{session.title}</span>
       </button>
-      {time && !isPinned ? (
-        <span className="shrink-0 pr-2 text-[10px] text-muted-foreground/(--opacity-intense) group-hover:hidden">
+      {time ? (
+        <span className="shrink-0 pr-1 text-[10px] text-muted-foreground/(--opacity-intense) group-hover:hidden group-focus-within:hidden">
           {time}
         </span>
       ) : null}
-      {onTogglePin ? (
+      {/* ── Trailing slot: the way IN to this row's actions. Right-click already
+          opens the same menu, but a right-click is undiscoverable — the button
+          is what tells the user the menu exists. Both call one handler. */}
+      {onOpenMenu ? (
         <button
           type="button"
           onClick={(event) => {
             event.stopPropagation();
-            void onTogglePin();
+            onOpenMenu(event);
           }}
-          className={[
-            "mr-1 shrink-0 rounded p-1 hover:bg-muted-foreground/(--opacity-subtle) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            isPinned ? "flex text-primary" : "hidden group-hover:flex group-focus-within:flex",
-          ].join(" ")}
-          aria-label={isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation")}
-          title={isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation")}
-          aria-pressed={isPinned}
-          data-testid={`sidebar-session-pin-${session.id}`}
+          className="mr-1 hidden shrink-0 rounded p-1 hover:bg-muted-foreground/(--opacity-subtle) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:flex group-focus-within:flex"
+          aria-label={t("sidebar.conversationMenu")}
+          title={t("sidebar.conversationMenu")}
+          data-testid={`sidebar-session-menu-${session.id}`}
         >
-          <Pin className={`h-3 w-3 ${isPinned ? "fill-current" : ""}`} />
+          <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
       ) : null}
     </div>
@@ -851,7 +879,7 @@ function ProjectSessionList({
       onLoadSession={onLoadSession}
       isPinned={isSessionPinned(session.id)}
       onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}
-      onContextMenu={(event) => openNativeContextMenu(event, "conversation", {
+      onOpenMenu={(event) => openNativeContextMenu(event, "conversation", {
         ...(!streaming || session.id === currentSessionId
           ? { "conversation.open": () => void onLoadSession?.(session.id) }
           : {}),
@@ -1033,7 +1061,13 @@ function onActiveSidebarTabChangeGuard(value: string, onActiveTabChange: (tab: S
 //
 // The horizontal button cluster that sits ON the OS traffic-light LINE, RIGHT
 // AFTER the lights:
-//   [펼침/닫힘 collapse toggle] → [검색 search] → [즐겨찾기 star] → [내보내기 export]
+//   [펼침/닫힘 collapse toggle] → [검색 search] → [뒤로 back] → [앞으로 forward]
+//
+// Pin / export / import USED to sit here. They act on a CONVERSATION, and the
+// part that owns the conversation is the chat group, so they moved into its
+// header (ChatGroupFrame) and into each row's context menu. What took their
+// place navigates ROUTES, which is what this sidebar owns. See DESIGN.md
+// "Workbench model".
 // Always rendered (both expanded + collapsed). When the surrounding card is
 // expanded it forms the card's top strip; when collapsed it stands bare in the
 // band. Each control is an h-6 w-6 icon button (24px, ~4px pad around the 16px
@@ -1053,20 +1087,16 @@ function ClusterStrip({
   leadClearance,
   onToggleCollapse,
   onOpenUnifiedSearch,
-  isCurrentSessionStarred,
-  onToggleCurrentSessionStar,
-  onExport,
-  onImport,
+  viewNav,
 }: {
   collapsed: boolean;
   /** True on darwin — left-pad the first button past the OS traffic lights. */
   leadClearance: boolean;
   onToggleCollapse: () => void;
   onOpenUnifiedSearch: () => void;
-  isCurrentSessionStarred: boolean;
-  onToggleCurrentSessionStar: () => void | Promise<void>;
-  onExport: (format: "markdown" | "json") => void | Promise<void>;
-  onImport: () => void | Promise<void>;
+  /** Route history. Only the history half renders here — the path half names
+   *  the content, so it belongs on the canvas, not in the chrome. */
+  viewNav: ViewPathNavProps;
 }) {
   const { t } = useTranslation();
   return (
@@ -1116,73 +1146,17 @@ function ClusterStrip({
         <TooltipContent side="bottom">{t("mainToolbar.unifiedSearch")}</TooltipContent>
       </Tooltip>
 
-      {/* 핀 — current-session pin (reuses the existing starred-session
-          mechanism internally; user-facing icon/label are "pin", see the
-          2026-07 "즐겨찾기 → 핀" naming refinement). */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 aspect-square p-0 shrink-0"
-            onClick={() => void onToggleCurrentSessionStar()}
-            title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
-            aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
-            aria-pressed={isCurrentSessionStarred}
-          >
-            <Pin key={isCurrentSessionStarred ? "on" : "off"} className={`h-4 w-4 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
-      </Tooltip>
-
-      {/* 내보내기 — export menu (Markdown / JSON). Tour anchor "settings-entry". */}
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 aspect-square p-0 shrink-0"
-                title={t("mainToolbar.export")}
-                aria-label={t("mainToolbar.export")}
-                data-testid="toolbar-export"
-                data-tour-anchor="settings-entry"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("mainToolbar.export")}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="start" className="w-[180px]">
-          <DropdownMenuItem data-testid="toolbar-export-markdown" onClick={() => void onExport("markdown")}>
-            {t("sidebar.exportMarkdown")}
-          </DropdownMenuItem>
-          <DropdownMenuItem data-testid="toolbar-export-json" onClick={() => void onExport("json")}>
-            {t("sidebar.exportJson")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* 가져오기 — import a previously-exported JSON as a brand-new session (#1500 / E3). */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 aspect-square p-0 shrink-0"
-            onClick={() => void onImport()}
-            title={t("mainToolbar.import")}
-            aria-label={t("mainToolbar.import")}
-            data-testid="toolbar-import"
-          >
-            <Upload className="h-4 w-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{t("mainToolbar.import")}</TooltipContent>
-      </Tooltip>
+      {/* 뒤로 / 앞으로 — route history. This strip is the sidebar's, and the
+          sidebar is what decides which route is showing, so the control that
+          moves BETWEEN routes belongs to it. */}
+      <ViewHistoryNav
+        canGoBack={viewNav.canGoBack}
+        canGoForward={viewNav.canGoForward}
+        backLabel={viewNav.backLabel}
+        forwardLabel={viewNav.forwardLabel}
+        onBack={viewNav.onBack}
+        onForward={viewNav.onForward}
+      />
     </div>
   );
 }
@@ -1212,10 +1186,7 @@ export function Sidebar({
   onWidthChange,
   onWidthCommit,
   onOpenUnifiedSearch,
-  isCurrentSessionStarred,
-  onToggleCurrentSessionStar,
-  onExport,
-  onImport,
+  viewNav,
   sessions = [],
   projects,
   currentSessionId,
@@ -1374,10 +1345,7 @@ export function Sidebar({
           leadClearance={darwinTopClearance}
           onToggleCollapse={onToggleCollapse}
           onOpenUnifiedSearch={onOpenUnifiedSearch}
-          isCurrentSessionStarred={isCurrentSessionStarred}
-          onToggleCurrentSessionStar={onToggleCurrentSessionStar}
-          onExport={onExport}
-          onImport={onImport}
+          viewNav={viewNav}
         />
 
       {/* ── Card body — new chat + nav + footer. EXPANDED: inline within the card
