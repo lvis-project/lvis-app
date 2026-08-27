@@ -422,6 +422,20 @@ function modelEntryPricingLabel(entry: LlmModelListEntry | undefined): string | 
   return `in ${pricing.prompt ?? "?"} / out ${pricing.completion ?? "?"}`;
 }
 
+/**
+ * One model row, on ONE line: who serves it, then what it is.
+ *
+ * It used to stack the id over a muted detail line, which made the trigger two
+ * rows tall for a control that shows a single choice, and made the popup's rows
+ * scan as pairs rather than as a list. The provider leads because that is how
+ * the choice is actually made — a person picks a provider's catalogue first and
+ * a model inside it second — and it is the short, repeating half, so it forms a
+ * readable left column while the ids ellipsize beside it.
+ *
+ * The free-route disclaimer is prose and cannot share the line. The FREE badge
+ * carries the signal; the sentence rides on the row's `title`, where it is one
+ * hover away instead of one line tall on every row.
+ */
 function ModelSelectItemContent({
   option,
   entry,
@@ -433,42 +447,46 @@ function ModelSelectItemContent({
   const isFree = entry?.tags?.free === true || isOpenRouterFreeModel(option);
   const isRouter = entry?.tags?.router === true;
   const isLocal = entry?.tags?.local === true;
-  const detailParts = [
-    entry?.provider ?? entry?.ownedBy,
+  const provider = entry?.provider ?? entry?.ownedBy;
+  // Provider is the leading column now, so it is NOT repeated in the trailing
+  // facts — those are the numbers that differ between models.
+  const facts = [
     entry?.contextLength !== undefined
       ? t("llmTab.modelContextTokens", { count: compactNumber(entry.contextLength) })
       : undefined,
     modelEntryPricingLabel(entry) ?? undefined,
   ].filter((part): part is string => Boolean(part));
-  // Even the bare id needs its own truncating box: the popup is trigger-wide, so
-  // a long id must ellipsize inside the row rather than overflow it.
-  if (!isFree && !isRouter && !isLocal && detailParts.length === 0) {
-    return <span className="min-w-0 truncate">{option}</span>;
-  }
   return (
-    <span className="flex min-w-0 flex-col gap-0.5 py-0.5">
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 truncate">{option}</span>
-        {isFree && (
-          <Badge variant="secondary" className="h-4 px-1 text-[9px] uppercase">
-            {t("llmTab.openRouterFreeBadge")}
-          </Badge>
-        )}
-        {isRouter && (
-          <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase">
-            {t("llmTab.modelRouterBadge")}
-          </Badge>
-        )}
-        {isLocal && (
-          <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase">
-            {t("llmTab.modelLocalBadge")}
-          </Badge>
-        )}
-      </span>
-      {(isFree || detailParts.length > 0) && (
-        <span className="text-[10px] leading-tight text-muted-foreground">
-          {isFree ? t("llmTab.openRouterFreeDisclaimer") : detailParts.join(" · ")}
+    <span
+      className="flex w-full min-w-0 items-center gap-2"
+      {...(isFree ? { title: t("llmTab.openRouterFreeDisclaimer") } : {})}
+    >
+      {provider && (
+        <span
+          className="max-w-[9rem] shrink-0 truncate text-muted-foreground"
+          data-testid={`llm-tab:model-provider:${option}`}
+        >
+          {provider}
         </span>
+      )}
+      <span className="min-w-0 flex-1 truncate">{option}</span>
+      {isFree && (
+        <Badge variant="secondary" className="h-4 shrink-0 px-1 text-[9px] uppercase">
+          {t("llmTab.openRouterFreeBadge")}
+        </Badge>
+      )}
+      {isRouter && (
+        <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] uppercase">
+          {t("llmTab.modelRouterBadge")}
+        </Badge>
+      )}
+      {isLocal && (
+        <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] uppercase">
+          {t("llmTab.modelLocalBadge")}
+        </Badge>
+      )}
+      {facts.length > 0 && (
+        <span className="shrink-0 text-[10px] text-muted-foreground">{facts.join(" · ")}</span>
       )}
     </span>
   );
