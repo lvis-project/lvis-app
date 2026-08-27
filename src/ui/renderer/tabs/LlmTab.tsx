@@ -421,6 +421,25 @@ function modelOptionsFor(
   return options;
 }
 
+/**
+ * The saved model, when the endpoint's catalogue no longer lists it.
+ *
+ * `modelOptionsFor` keeps the saved id in the chooser so a configured provider
+ * never shows a blank selection — but that also lets a model the server has
+ * since dropped sit at the top of the list looking exactly like one it still
+ * serves, while every request to it is rejected. This names that case so the
+ * chooser and the status line can say it. Only a catalogue that actually
+ * landed counts: with nothing synced yet there is nothing to disagree with.
+ */
+export function unlistedSavedModel(
+  selectedModel: string,
+  catalogue: readonly string[] | undefined,
+): string | null {
+  const model = selectedModel.trim();
+  if (!model || !catalogue || catalogue.length === 0) return null;
+  return catalogue.includes(model) ? null : model;
+}
+
 function compactNumber(value: number): string {
   if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`;
   if (value >= 1_000) return `${Math.round(value / 100) / 10}k`;
@@ -462,6 +481,7 @@ function ModelSelectItemContent({
   entry,
   providerOverride,
   factsOverride,
+  tone,
 }: {
   option: string;
   entry?: LlmModelListEntry;
@@ -470,6 +490,8 @@ function ModelSelectItemContent({
   providerOverride?: string;
   /** Trailing facts for the same case. */
   factsOverride?: string;
+  /** The facts carry a problem, not a number — a saved model the endpoint dropped. */
+  tone?: "destructive";
 }) {
   const { t } = useTranslation();
   const isFree = entry?.tags?.free === true || isOpenRouterFreeModel(option);
@@ -514,7 +536,12 @@ function ModelSelectItemContent({
         </Badge>
       )}
       {facts.length > 0 && (
-        <span className="shrink-0 text-[10px] text-muted-foreground">{facts.join(" · ")}</span>
+        <span
+          className={`shrink-0 text-[10px] ${tone === "destructive" ? "text-destructive" : "text-muted-foreground"}`}
+          data-testid={`llm-tab:model-facts:${option}`}
+        >
+          {facts.join(" · ")}
+        </span>
       )}
     </span>
   );
@@ -541,6 +568,8 @@ interface UnifiedModelOption {
   facts?: string;
   /** The provider exposes no model choice — this row IS the provider. */
   fixed?: boolean;
+  /** Saved, but no longer in the endpoint's catalogue — see `unlistedSavedModel`. */
+  unlisted?: boolean;
 }
 
 /** Marks the API-key provider inside a unified option value. */
@@ -658,6 +687,7 @@ function UnifiedModelSelect({
           {...(option.entry ? { entry: option.entry } : {})}
           {...(option.entry ? {} : { providerOverride: option.vendorTag })}
           {...(option.facts ? { factsOverride: option.facts } : {})}
+          {...(option.unlisted ? { tone: "destructive" as const } : {})}
         />
       </SelectItem>
     );
@@ -957,6 +987,12 @@ export function LlmTab(props: LlmTabProps) {
     () => modelEntryMap(activeModelList?.entries),
     [activeModelList],
   );
+  // Only a synced catalogue can disqualify the saved model; a seeded vendor's
+  // curated line is not the server's word on what it serves.
+  const unlistedModel = unlistedSavedModel(
+    activeModelValue,
+    activeSyncedModelOptions,
+  );
   // Subscription providers live beside the API vendor in ONE chooser, so this
   // tab owns both halves of the state rather than handing one down.
   const subscription = useSubscriptionProviders(api);
@@ -994,6 +1030,10 @@ export function LlmTab(props: LlmTabProps) {
     // one whose curated seed list and current selection are known here.
     for (const modelId of activeModelOptions) {
       pushApiOption(vendor, modelId, activeModelEntryById.get(modelId));
+      if (modelId === unlistedModel) {
+        const last = options[options.length - 1]!;
+        options[options.length - 1] = { ...last, unlisted: true, facts: t("llmTab.modelUnlisted") };
+      }
     }
     // Then every OTHER vendor whose /models handshake already landed. Without
     // this, switching the form's vendor emptied the chooser of every vendor
@@ -1039,7 +1079,7 @@ export function LlmTab(props: LlmTabProps) {
     return options;
   }, [
     vendor, activeModelOptions, activeModelEntryById, modelLists,
-    subscription.providers, t,
+    subscription.providers, t, unlistedModel,
   ]);
 
   const selectedUnifiedValue = subscription.activeRuntime.kind === "subscription"
@@ -1708,6 +1748,15 @@ export function LlmTab(props: LlmTabProps) {
               placeholder={vendorInfo.defaultModel}
               popupClassName={SELECT_POPUP_LAYOUT}
             />
+            {unlistedModel && subscription.activeRuntime.kind === "api" && (
+              <p
+                role="alert"
+                className="text-[11px] text-destructive"
+                data-testid="llm-tab:model-unlisted"
+              >
+                {t("llmTab.modelUnlistedWarning", { model: unlistedModel })}
+              </p>
+            )}
             {activeModelList?.status === "loading" && (
               <p className="text-[11px] text-muted-foreground" data-testid="llm-tab:model-sync-status">
                 {t("llmTab.modelSyncing")}

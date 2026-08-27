@@ -1569,6 +1569,8 @@ export const esMessages: Record<string, string> = {
   "llmTab.modelNoConnectedProvider": "No hay ningún proveedor conectado. Conecta uno abajo.",
   "llmTab.providerDefaultModel": "Modelo predeterminado del proveedor",
   "llmTab.modelFixedByProvider": "Sin elección de modelo",
+  "llmTab.modelUnlisted": "No está en la lista de modelos del endpoint",
+  "llmTab.modelUnlistedWarning": "'{model}' ya no figura en el endpoint. Las solicitudes se rechazan hasta que elija y guarde otro modelo.",
   "llmTab.modelContextTokens": "{count} ctx",
   "llmTab.moreModelsInMarketplace": "Mas modelos",
   "llmTab.optional": "opcional",

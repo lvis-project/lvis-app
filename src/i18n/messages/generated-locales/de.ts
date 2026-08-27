@@ -1555,6 +1555,8 @@ export const deMessages: Record<string, string> = {
   "llmTab.modelNoConnectedProvider": "Kein verbundener Anbieter. Verbinden Sie unten einen.",
   "llmTab.providerDefaultModel": "Standardmodell des Anbieters",
   "llmTab.modelFixedByProvider": "Keine Modellauswahl",
+  "llmTab.modelUnlisted": "Nicht in der Modellliste des Endpunkts",
+  "llmTab.modelUnlistedWarning": "'{model}' wird vom Endpunkt nicht mehr angeboten. Anfragen werden abgelehnt, bis ein anderes Modell gewählt und gespeichert ist.",
   "llmTab.modelContextTokens": "{count} Kontext",
   "llmTab.moreModelsInMarketplace": "Mehr Modelle",
   "llmTab.optional": "optional",

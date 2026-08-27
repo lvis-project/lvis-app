@@ -1558,6 +1558,8 @@ export const frMessages: Record<string, string> = {
   "llmTab.modelNoConnectedProvider": "Aucun fournisseur connecté. Connectez-en un ci-dessous.",
   "llmTab.providerDefaultModel": "Modèle par défaut du fournisseur",
   "llmTab.modelFixedByProvider": "Pas de choix de modèle",
+  "llmTab.modelUnlisted": "Absent de la liste de modèles du point de terminaison",
+  "llmTab.modelUnlistedWarning": "'{model}' n'est plus proposé par le point de terminaison. Les requêtes sont refusées tant qu'un autre modèle n'est pas choisi et enregistré.",
   "llmTab.modelContextTokens": "{count} ctx",
   "llmTab.moreModelsInMarketplace": "Plus de modèles",
   "llmTab.optional": "facultatif",

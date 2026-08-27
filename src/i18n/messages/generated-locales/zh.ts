@@ -1567,6 +1567,8 @@ export const zhMessages: Record<string, string> = {
   "llmTab.modelNoConnectedProvider": "没有已连接的提供方。请在下方连接。",
   "llmTab.providerDefaultModel": "提供方默认模型",
   "llmTab.modelFixedByProvider": "不可选择",
+  "llmTab.modelUnlisted": "不在端点的模型列表中",
+  "llmTab.modelUnlistedWarning": "'{model}' 已不在端点的模型列表中。在选择并保存其他模型之前，请求将被拒绝。",
   "llmTab.modelRouterBadge": "路由器",
   "llmTab.modelSync": "同步型号列表",
   "llmTab.modelSyncCacheSaveFailed": "模型已同步，但无法更新保存的缓存。",

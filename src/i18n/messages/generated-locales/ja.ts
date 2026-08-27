@@ -1567,6 +1567,8 @@ export const jaMessages: Record<string, string> = {
   "llmTab.modelNoConnectedProvider": "接続済みのプロバイダーがありません。下で接続してください。",
   "llmTab.providerDefaultModel": "プロバイダーの既定モデル",
   "llmTab.modelFixedByProvider": "選択不可",
+  "llmTab.modelUnlisted": "エンドポイントのモデル一覧にありません",
+  "llmTab.modelUnlistedWarning": "'{model}' はエンドポイントのモデル一覧から外れています。別のモデルを選んで保存するまでリクエストは拒否されます。",
   "llmTab.modelRouterBadge": "ルーター",
   "llmTab.modelSync": "同期モデルリスト",
   "llmTab.modelSyncCacheSaveFailed": "モデルは同期されましたが、保存されたキャッシュを更新できませんでした。",
