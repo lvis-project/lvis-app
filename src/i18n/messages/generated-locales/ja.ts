@@ -854,6 +854,8 @@ export const jaMessages: Record<string, string> = {
   "chatPreviewRail.fileOperation.read": "読取",
   "chatPreviewRail.fileOperation.tool": "ツール",
   "chatPreviewRail.fileOperation.write": "書込",
+  "chatPreviewRail.urlOrigin.argument": "要求",
+  "chatPreviewRail.urlOrigin.result": "結果から",
   "chatPreviewRail.fileSourceDirectory": "ディレクトリ",
   "chatPreviewRail.fileSourceLabel": "ファイルソース",
   "chatPreviewRail.fileSourceSession": "セッションファイル",

@@ -12,7 +12,14 @@ import {
   isGlobPattern,
 } from "./tool-input-paths.js";
 
-const ACTION_PANEL_ACTIVITY_LIMIT = 5;
+/**
+ * How many rows one activity list shows. Exported because the chat preview
+ * model bounds its web-artifact list by the same number: the Browser tab and
+ * this panel are two views of one set of fetched pages, and a bound that lived
+ * on only one side would let a single link-heavy result grow the other without
+ * limit.
+ */
+export const ACTION_PANEL_ACTIVITY_LIMIT = 5;
 const ACTION_PANEL_ICON_LIMIT = 10;
 const TERMINAL_TOOL_PATTERN = /(^|[._:-])(shell|bash|cmd|powershell|terminal|exec|run)([._:-]|$)/i;
 const BROWSER_TOOL_PATTERN = /(browser|playwright|screenshot|chrome|viewport|open_url|web_page|web_fetch|web_search|web_patch|fetch)/i;
@@ -72,6 +79,11 @@ export function looksLikeFilePath(value: string): boolean {
  * prose punctuation trimmed (`(https://x/y)` in a summary is the page, not the
  * bracket). Shared with `preview/preview-targets.ts`: two collectors would give
  * the Browser tab and this panel different page lists for the same turn.
+ *
+ * Bounded at four levels of nesting, which is the shape a tool's arguments and
+ * a decoded JSON result actually take. A URL buried deeper than that is inside
+ * a payload the tool is carrying rather than a page it fetched, and the bound
+ * is also what stops a pathological result from walking without end.
  */
 export function collectUrls(value: unknown, depth = 0): string[] {
   if (depth > 4 || value == null) return [];

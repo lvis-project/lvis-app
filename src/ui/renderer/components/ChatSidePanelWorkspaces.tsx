@@ -1098,6 +1098,7 @@ export function BrowserWorkspace({
       sourceLabel: t("chatPreviewRail.manualUrlSource"),
       createdOrder: Number.MAX_SAFE_INTEGER,
       url: manualUrl,
+      origin: "address",
     };
   }, [manualUrl, t, tabId]);
   const displayedTarget = manualTarget ?? selectedTarget;

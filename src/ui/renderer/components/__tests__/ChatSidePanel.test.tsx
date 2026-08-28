@@ -379,6 +379,9 @@ describe("ChatSidePanel", () => {
         sourceLabel: "builtin",
         createdOrder: 2,
         url: "https://example.com/docs",
+        // Named by a page rather than asked for by the turn — the row has to
+        // say so before the viewer opens it in the webview.
+        origin: "result",
       },
       {
         id: "json-1",
@@ -451,6 +454,9 @@ describe("ChatSidePanel", () => {
     fireEvent.click(screen.getByTestId("chat-side-panel-browser-search-trigger"));
     const rows = screen.getAllByTestId("chat-side-panel-browser-row");
     expect(rows.length).toBeGreaterThanOrEqual(2);
+    // The web row discloses where its address came from: this one was named by
+    // a page, not asked for by the turn.
+    expect(rows[1]!.textContent).toContain("결과에서");
     fireEvent.click(rows[1]!);
     const webview = container.querySelector('[data-testid="chat-side-panel-browser-webview"]');
     expect(webview?.getAttribute("src")).toBe("https://example.com/docs");

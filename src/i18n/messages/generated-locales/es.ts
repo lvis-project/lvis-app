@@ -941,6 +941,8 @@ export const esMessages: Record<string, string> = {
   "chatPreviewRail.fileOperation.read": "Leído",
   "chatPreviewRail.fileOperation.tool": "Herramienta",
   "chatPreviewRail.fileOperation.write": "Escrito",
+  "chatPreviewRail.urlOrigin.argument": "Solicitado",
+  "chatPreviewRail.urlOrigin.result": "Del resultado",
   "chatPreviewRail.fileSourceLabel": "Origen de archivos",
   "chatPreviewRail.fileSourceDirectory": "Directorio",
   "chatPreviewRail.fileSourceSession": "Archivos de sesión",

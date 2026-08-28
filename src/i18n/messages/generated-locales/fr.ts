@@ -935,6 +935,8 @@ export const frMessages: Record<string, string> = {
   "chatPreviewRail.fileOperation.read": "Lu",
   "chatPreviewRail.fileOperation.tool": "Outil",
   "chatPreviewRail.fileOperation.write": "Écrit",
+  "chatPreviewRail.urlOrigin.argument": "Demandé",
+  "chatPreviewRail.urlOrigin.result": "Du résultat",
   "chatPreviewRail.fileSourceLabel": "Source des fichiers",
   "chatPreviewRail.fileSourceDirectory": "Répertoire",
   "chatPreviewRail.fileSourceSession": "Fichiers de session",

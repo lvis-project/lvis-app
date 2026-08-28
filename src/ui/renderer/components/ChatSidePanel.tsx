@@ -434,6 +434,7 @@ function ContentTabView({
       sourceLabel: t("chatPreviewRail.manualUrlSource"),
       createdOrder: Number.MAX_SAFE_INTEGER,
       url: content.url,
+      origin: "address",
     };
   }, [content, tab.id, t]);
   if (!content) return null;

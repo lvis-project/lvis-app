@@ -20,7 +20,10 @@
 import { describe, expect, it } from "vitest";
 import type { ChatEntry } from "../../../../lib/chat-stream-state.js";
 import { collectChatPreviewModel } from "../preview-targets.js";
-import { computeActionPanelActivity } from "../../utils/action-panel-activity.js";
+import {
+  ACTION_PANEL_ACTIVITY_LIMIT,
+  computeActionPanelActivity,
+} from "../../utils/action-panel-activity.js";
 
 /** The exact lookup ChatView.routeActivity performs for a non-web row. */
 function resolvesInPreview(model: ReturnType<typeof collectChatPreviewModel>, target: string): boolean {
@@ -158,9 +161,23 @@ function actionPanelWebTargets(entries: ChatEntry[]): string[] {
 
 /** Every page the side panel's Browser tab would list (`BROWSER_TARGET_KINDS`). */
 function browserTabUrls(entries: ChatEntry[]): string[] {
+  return urlTargets(entries).map((target) => target.url);
+}
+
+function urlTargets(entries: ChatEntry[]) {
   return collectChatPreviewModel({ entries, attachments: [] })
-    .targets.filter((target) => target.kind === "url")
-    .map((target) => target.url);
+    .targets.filter((target) => target.kind === "url");
+}
+
+/** One web call, shaped like the tools that make them. */
+function browserTool(fields: {
+  toolUseId: string;
+  name: string;
+  displayOrder: number;
+  input: Record<string, unknown>;
+  result: string;
+}) {
+  return { ...fields, status: "done", category: "network" };
 }
 
 /**
@@ -204,6 +221,53 @@ describe("action panel <-> preview web-target join", () => {
     const expected = ["https://a.example/one", "https://b.example/two"];
     expect([...new Set(actionPanelWebTargets(entries))].sort()).toEqual(expected);
     expect(browserTabUrls(entries).sort()).toEqual(expected);
+
+    // The page is credited to the call that FETCHED it, not to the search that
+    // merely listed it, and each row says which of the two it was.
+    const targets = urlTargets(entries);
+    expect(targets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: "https://a.example/one",
+          toolUseId: "fetch-1",
+          origin: "argument",
+        }),
+        expect.objectContaining({
+          url: "https://b.example/two",
+          toolUseId: "search-1",
+          origin: "result",
+        }),
+      ]),
+    );
+  });
+
+  it("bounds the tab by the same row cap the activity list uses, keeping the newest pages", () => {
+    // One link-heavy result: without a bound this is one Browser row per link.
+    const listed = Array.from({ length: 12 }, (_, index) => `https://listed.example/${index}`);
+    const entries = [toolGroup([
+      browserTool({
+        toolUseId: "search-many",
+        name: "web_search",
+        displayOrder: 0,
+        input: { query: "many" },
+        result: JSON.stringify({ results: listed.map((url) => ({ url })) }),
+      }),
+      browserTool({
+        toolUseId: "fetch-newest",
+        name: "web_fetch",
+        displayOrder: 1,
+        input: { url: "https://newest.example/page" },
+        result: "<html></html>",
+      }),
+    ])];
+
+    const tabUrls = browserTabUrls(entries);
+    expect(tabUrls).toHaveLength(ACTION_PANEL_ACTIVITY_LIMIT);
+    // Both sides keep the same end of the list: the most recent call's page is
+    // in, and both stop at the shared limit.
+    expect(tabUrls).toContain("https://newest.example/page");
+    expect([...new Set(actionPanelWebTargets(entries))]).toHaveLength(ACTION_PANEL_ACTIVITY_LIMIT);
+    expect(actionPanelWebTargets(entries)).toContain("https://newest.example/page");
   });
 
   it("neither side promotes a URL quoted inside a file a read tool returned", () => {

@@ -4,6 +4,7 @@ import { ChatContextProvider, type ChatContextValue } from "../context/ChatConte
 import { ChatView } from "../ChatView.js";
 import { chatGroupApi } from "./ChatGroupFrame.js";
 import {
+  tileDrawsSession,
   useRegisterChatGroupSession,
   type ChatGroupSessionRegistry,
 } from "./chat-group-session-registry.js";
@@ -139,6 +140,8 @@ export interface ChatGroupSessionProps {
     currentSessionId: string;
   }) => ReactNode;
   panelOpen: boolean;
+  /** Is this the tile the window is focused on? It adopts cards no tile holds. */
+  focused: boolean;
   onSidePanelOpenChange: (open: boolean) => void;
 }
 
@@ -152,7 +155,7 @@ export interface ChatGroupSessionProps {
  * one set of variables.
  */
 export function ChatGroupSession({
-  chatGroupId, api: windowApi, registry, env, children, panelOpen, onSidePanelOpenChange,
+  chatGroupId, api: windowApi, registry, env, children, panelOpen, focused, onSidePanelOpenChange,
 }: ChatGroupSessionProps) {
   const { t } = useTranslation();
 
@@ -179,10 +182,29 @@ export function ChatGroupSession({
       sessionId === currentSessionIdRef.current || ownedChildSessionIdsRef.current.has(sessionId),
     [],
   );
+  const focusedRef = useRef(focused);
+  // A window-wide card whose session no tile is showing — a routine's, a side
+  // chat's, a background agent's after its parent tile moved on — is adopted
+  // here rather than dropped by every tile at once. `readTiles` is read at
+  // delivery time, not subscribed to: the answer must reflect the window as it
+  // is when the card arrives, and this predicate must stay referentially
+  // stable or the channel resubscribes and loses in-flight events.
+  const drawsSession = useCallback(
+    (sessionId: string) => tileDrawsSession({
+      tiles: registry.readTiles(),
+      sessionId,
+      owned: ownsSession(sessionId),
+      focused: focusedRef.current,
+    }),
+    [registry, ownsSession],
+  );
   const {
     askQuestions, subAgentSpawns, loadedSkills,
     dismissAskQuestion, resetForNewSession, restoreSubAgentSpawns,
-  } = useWorkflowTools(api, { ownsSession });
+  } = useWorkflowTools(api, { ownsSession, drawsSession });
+  useLayoutEffect(() => {
+    focusedRef.current = focused;
+  }, [focused]);
   // Same commit-time discipline as the session id below: the listener reads the
   // ref from an IPC callback, so it must never see a render that was discarded.
   useLayoutEffect(() => {

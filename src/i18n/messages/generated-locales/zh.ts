@@ -854,6 +854,8 @@ export const zhMessages: Record<string, string> = {
   "chatPreviewRail.fileOperation.read": "已读",
   "chatPreviewRail.fileOperation.tool": "工具",
   "chatPreviewRail.fileOperation.write": "已写",
+  "chatPreviewRail.urlOrigin.argument": "已请求",
+  "chatPreviewRail.urlOrigin.result": "来自结果",
   "chatPreviewRail.fileSourceDirectory": "目录",
   "chatPreviewRail.fileSourceLabel": "文件来源",
   "chatPreviewRail.fileSourceSession": "会话文件",

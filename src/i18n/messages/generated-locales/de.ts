@@ -932,6 +932,8 @@ export const deMessages: Record<string, string> = {
   "chatPreviewRail.fileOperation.read": "Gelesen",
   "chatPreviewRail.fileOperation.tool": "Werkzeug",
   "chatPreviewRail.fileOperation.write": "Geschrieben",
+  "chatPreviewRail.urlOrigin.argument": "Angefordert",
+  "chatPreviewRail.urlOrigin.result": "Aus Ergebnis",
   "chatPreviewRail.fileSourceLabel": "Dateiquelle",
   "chatPreviewRail.fileSourceDirectory": "Verzeichnis",
   "chatPreviewRail.fileSourceSession": "Sitzungsdateien",

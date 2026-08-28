@@ -86,10 +86,22 @@ export interface WorkflowToolsOptions {
    * channel subscription, and a frame arriving during a resubscribe is lost.
    */
   ownsSession?: (sessionId: string) => boolean;
+  /**
+   * Whether this surface DRAWS a window-wide card addressed to `sessionId`.
+   * Wider than `ownsSession`: a turn can run in a session no tile is showing
+   * (a routine, a side chat, a background sub-agent whose parent tile moved
+   * on), and such a card must still reach a screen — see `tileDrawsSession`.
+   * Defaults to `ownsSession` when omitted, and to "keep everything" when
+   * neither is given. Same stability requirement as `ownsSession`.
+   */
+  drawsSession?: (sessionId: string) => boolean;
 }
 
 export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {}) {
-  const { ownsSession } = options;
+  const { ownsSession, drawsSession } = options;
+  // One predicate for the card channels, resolved once so the subscription
+  // below depends on a single identity.
+  const drawsOrOwns = drawsSession ?? ownsSession;
   const [askQuestions, setAskQuestions] = useState<AskUserQuestionRequest[]>([]);
   const [subAgentSpawns, setSubAgentSpawns] = useState<SubAgentSpawn[]>([]);
   const [loadedSkills, setLoadedSkills] = useState<SkillBadgeProps[]>([]);
@@ -104,7 +116,7 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
       // A question belongs to ONE conversation. Drawn in every tile, it can be
       // answered from a tile that never asked — that answer resolves the gate,
       // and the asking tile is left holding a card the gate now refuses.
-      if (ownsSession && !ownsSession(req.sessionId)) return;
+      if (drawsOrOwns && !drawsOrOwns(req.sessionId)) return;
       setAskQuestions((prev) =>
         prev.some((p) => p.id === req.id) ? prev : [...prev, req],
       );
@@ -199,9 +211,10 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
       });
     });
     const unsubSkill = api.onSkillLoaded?.((event) => {
-      // Same conversation scoping as the cards above: a skill loaded in one
-      // tile's turn is not a badge on the tile beside it.
-      if (ownsSession && !ownsSession(event.sessionId)) return;
+      // Same conversation scoping as the card above, adoption included: a skill
+      // loaded in one tile's turn is not a badge on the tile beside it, and one
+      // loaded by a routine or a background agent still belongs on screen.
+      if (drawsOrOwns && !drawsOrOwns(event.sessionId)) return;
       // M4: dedupe by name (newest wins) and cap to last SKILL_BADGE_CAP.
       // Without this, a chatty assistant could grow the badge list
       // unbounded over a long session.
@@ -232,7 +245,7 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
       unsubSkill?.();
       unsubAskTimeout?.();
     };
-  }, [api, ownsSession]);
+  }, [api, ownsSession, drawsOrOwns]);
 
   const dismissAskQuestion = useCallback((id: string) => {
     setAskQuestions((prev) => prev.filter((q) => q.id !== id));

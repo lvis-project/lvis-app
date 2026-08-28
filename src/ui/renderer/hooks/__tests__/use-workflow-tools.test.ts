@@ -124,4 +124,48 @@ describe("useWorkflowTools", () => {
 
     expect(result.current.loadedSkills.map((s) => s.name)).toEqual(["mine"]);
   });
+
+  it("draws an adopted card while sub-agent frames stay bound to the owned session", () => {
+    let onAsk: Parameters<LvisApi["onAskUserQuestion"]>[0] | undefined;
+    let onSkill: Parameters<LvisApi["onSkillLoaded"]>[0] | undefined;
+    let onSpawn: Parameters<LvisApi["onAgentSpawnEvent"]>[0] | undefined;
+    const api = {
+      onAskUserQuestion: vi.fn((handler: Parameters<LvisApi["onAskUserQuestion"]>[0]) => {
+        onAsk = handler;
+        return () => undefined;
+      }),
+      onAgentSpawnEvent: vi.fn((handler: Parameters<LvisApi["onAgentSpawnEvent"]>[0]) => {
+        onSpawn = handler;
+        return () => undefined;
+      }),
+      onSkillLoaded: vi.fn((handler: Parameters<LvisApi["onSkillLoaded"]>[0]) => {
+        onSkill = handler;
+        return () => undefined;
+      }),
+      onAskUserQuestionTimeout: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+    // What a focused tile passes: it owns one conversation, and adopts cards
+    // from any session no tile is showing (a routine here).
+    const ownsSession = (sessionId: string) => sessionId === "session-mine";
+    const drawsSession = (sessionId: string) =>
+      ownsSession(sessionId) || sessionId === "session-routine";
+    const { result } = renderHook(() => useWorkflowTools(api, { ownsSession, drawsSession }));
+
+    act(() => {
+      onAsk?.({
+        id: "routine-card",
+        sessionId: "session-routine",
+        questions: [{ question: "?", choices: ["yes", "no"] }],
+        createdAt: 0,
+      });
+      onSkill?.({ name: "routine-skill", description: "loaded headless", sessionId: "session-routine" });
+      // Frames keep the narrower rule: an adopted card is a prompt this tile
+      // must answer, but another session's agent list is not this tile's panel.
+      onSpawn?.({ spawnId: "routine-spawn", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Routine", parentSessionId: "session-routine" });
+    });
+
+    expect(result.current.askQuestions.map((q) => q.id)).toEqual(["routine-card"]);
+    expect(result.current.loadedSkills.map((s) => s.name)).toEqual(["routine-skill"]);
+    expect(result.current.subAgentSpawns).toEqual([]);
+  });
 });

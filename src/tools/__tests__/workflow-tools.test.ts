@@ -187,6 +187,28 @@ describe("ask_user_question tool", () => {
     });
   });
 
+  it("refuses when the invocation names no session, without opening a gate", async () => {
+    // The executor omits `sessionId` rather than substituting a placeholder, so
+    // this refusal is reachable: a card addressed to nothing would render
+    // nowhere and hold the gate open until it timed out.
+    const ask = vi.fn();
+    const tool = createAskUserQuestionTool({ getGate: () => ({ ask }) as never });
+    const unattributed: ToolExecutionContext = {
+      cwd: process.cwd(),
+      extraAllowedDirectories: [],
+      metadata: { supportsA2AParentDelivery: true },
+    };
+
+    const r = await tool.execute(
+      { questions: [{ question: "Continue?", choices: ["yes", "no"] }] },
+      unattributed,
+    );
+
+    expect(r.isError).toBe(true);
+    expect(JSON.parse(r.output).error).toContain("executing session");
+    expect(ask).not.toHaveBeenCalled();
+  });
+
   it("threads ctx.abortSignal into gate.ask", async () => {
     const ask = vi.fn().mockResolvedValue({ requestId: "r1", answers: [] });
     const tool = createAskUserQuestionTool({
