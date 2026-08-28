@@ -394,12 +394,26 @@ function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
  * end, the first assistant entry wins; crossing a turn start first means the
  * current turn has produced no assistant entry yet (a tool round), and the
  * previous turn's answer is not touched.
+ *
+ * An injected user line (queued guidance, a sub-agent report) lands inside a
+ * running turn as well as at the start of a drained one. Crossing one, the
+ * answer before it is still this turn's only while it is streaming; a
+ * finished answer behind an injected line belongs to the turn before.
  */
 function currentTurnAssistantIdx(entries: readonly ChatEntry[]): number {
+  let crossedInjectedLine = false;
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
-    if (entry?.kind === "assistant") return i;
-    if (isTurnStartEntry(entry)) return -1;
+    if (entry?.kind === "assistant") {
+      return crossedInjectedLine && !entry.streaming ? -1 : i;
+    }
+    if (isTurnStartEntry(entry)) {
+      if (entry?.kind === "user" && entry.injectHint) {
+        crossedInjectedLine = true;
+        continue;
+      }
+      return -1;
+    }
   }
   return -1;
 }

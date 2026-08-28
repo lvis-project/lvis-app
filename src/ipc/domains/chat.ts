@@ -923,6 +923,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
       }
     }
   };
+  // A refusal that came back after the running turn was already stopped: the
+  // renderer must not read it as "nothing happened" and take the interrupted
+  // badge off an answer that really was cut short.
+  const flagInterruptedRefusal = (result: unknown): unknown => {
+    if (result === null || typeof result !== "object") return result;
+    const { ok, error } = result as { ok?: unknown; error?: unknown };
+    if (ok === true || typeof error !== "string") return result;
+    return { ...result, interrupted: true };
+  };
   const isInterruptSend = (payload: unknown): boolean =>
     typeof payload === "object" && payload !== null
     && (payload as { interrupt?: unknown }).interrupt === true;
@@ -934,6 +943,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     // happens inside this call rather than as a separate round trip the
     // renderer awaits first: that wait outlived the five-second keyboard
     // intent, and the send that followed was refused as not user-initiated.
+    let interrupted = false;
     if (isInterruptSend(payload)) {
       // Only a send the host would accept from the keyboard may stop the
       // running turn: a refused payload must leave the answer the user was
@@ -941,16 +951,18 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const admitted = parseChatSendPayload(payload);
       if (admitted.ok && admitted.payload.inputOrigin === "user-keyboard") {
         await interruptActiveTurn(group);
+        interrupted = true;
       }
     }
     try {
-      return await group.commandPort.execute(DESKTOP_CONVERSATION_ACTOR, {
+      const result = await group.commandPort.execute(DESKTOP_CONVERSATION_ACTOR, {
         kind: "message.send",
         payload,
       });
+      return interrupted ? flagInterruptedRefusal(result) : result;
     } catch (error) {
       if (error instanceof Error && error.message === STREAMING_ACTIVE) {
-        return { error: STREAMING_ACTIVE };
+        return { error: STREAMING_ACTIVE, ...(interrupted ? { interrupted: true } : {}) };
       }
       throw error;
     }

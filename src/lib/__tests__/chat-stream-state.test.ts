@@ -648,6 +648,21 @@ describe("markTurnAssistantInterrupted — the turn the abort cut short", () => 
     expect(markTurnAssistantInterrupted(entries)).toBe(entries);
   });
 
+  it("crosses an injected user line to a still-streaming answer, but not to a finished one", () => {
+    const streaming: ChatEntry[] = [
+      { kind: "user", text: "q" },
+      { kind: "assistant", text: "partial", streaming: true },
+      { kind: "user", text: "steer", injectHint: "queue" },
+    ];
+    expect(markTurnAssistantInterrupted(streaming)[1]).toMatchObject({ interrupted: true });
+    const finished: ChatEntry[] = [
+      { kind: "user", text: "q" },
+      { kind: "assistant", text: "earlier", streaming: false },
+      { kind: "user", text: "queued", injectHint: "queue" },
+    ];
+    expect(markTurnAssistantInterrupted(finished)).toBe(finished);
+  });
+
   it("is a no-op on an already marked entry, and clear restores the unmarked shape", () => {
     const marked = markTurnAssistantInterrupted(answered("done"));
     expect(markTurnAssistantInterrupted(marked)).toBe(marked);

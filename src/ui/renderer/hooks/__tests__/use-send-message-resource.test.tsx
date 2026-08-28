@@ -16,6 +16,9 @@ import "../../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useSendMessage, type UseSendMessageDeps } from "../use-send-message.js";
+import { useChatState } from "../use-chat-state.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import type { LvisApi } from "../../types.js";
 import { MCP_RESOURCE_FENCE_OPEN } from "../../../../shared/mcp-resource-bounds.js";
 import type { Attachment } from "../../types/attachments.js";
 import type { UserContentPart } from "../../../../engine/llm/types.js";
@@ -76,6 +79,8 @@ function setup(options?: {
   settingsReady?: boolean;
   streaming?: boolean;
   handleCompactCommand?: UseSendMessageDeps["handleCompactCommand"];
+  /** Drive the real transcript hook instead of mocks for its entry functions. */
+  realChatState?: boolean;
 }) {
   const attachments = options?.attachments ?? [RESOURCE];
   const chatSend = options?.chatSend ?? vi.fn(async () => ({ ok: true }));
@@ -111,8 +116,10 @@ function setup(options?: {
   const appendUserEntry = vi.fn();
   const setErrorWithThought = vi.fn();
 
+  const { api: mockApi, emitChatStream } = makeMockLvisApi();
+  const api = { ...mockApi, chatSend, chatAbort } as unknown as LvisApi;
   const deps = {
-    api: { chatSend, chatAbort },
+    api,
     t: (key: string) => key,
     streaming: options?.streaming ?? false,
     markLastAssistantInterrupted,
@@ -163,10 +170,28 @@ function setup(options?: {
     handleAskRef: { current: null },
   } as unknown as UseSendMessageDeps;
 
-  const { result } = renderHook(() => useSendMessage(deps));
+  let chat: ReturnType<typeof useChatState> | null = null;
+  const { result } = renderHook(() => {
+    const chatState = useChatState(api);
+    chat = chatState;
+    return useSendMessage(options?.realChatState
+      ? {
+        ...deps,
+        appendUserEntry: chatState.appendUserEntry,
+        dropUserEntry: chatState.dropUserEntry,
+        resetStreamAccumulators: chatState.resetStreamAccumulators,
+        markLastAssistantInterrupted: chatState.markLastAssistantInterrupted,
+        unmarkLastAssistantInterrupted: chatState.unmarkLastAssistantInterrupted,
+        appendSystemEntry: chatState.appendSystemEntry,
+        setErrorWithThought: chatState.setErrorWithThought,
+      }
+      : deps);
+  });
   return {
     result, chatSend, chatAbort, setQuestion, setAttachments, dropUserEntry, setErrorWithThought,
     resetStreamAccumulators, markLastAssistantInterrupted, unmarkLastAssistantInterrupted, appendSystemEntry,
+    chat: () => chat as unknown as ReturnType<typeof useChatState>,
+    emitChatStream,
   };
 }
 
@@ -469,6 +494,67 @@ describe("handleAsk — a send while a turn is still running", () => {
     expect(dropUserEntry).toHaveBeenCalledTimes(1);
     const restore = setQuestion.mock.calls.at(-1)?.[0] as ((q: string) => string) | string;
     expect(typeof restore === "function" ? restore("") : restore).toBe("new direction");
+  });
+
+  it("keeps the badge when the host refused only after it had already stopped the turn", async () => {
+    const chatSend = vi.fn(async () => ({ ok: false, error: "session-mismatch", interrupted: true }));
+    const {
+      result, markLastAssistantInterrupted, unmarkLastAssistantInterrupted, appendSystemEntry, setErrorWithThought,
+    } = setup({ chatSend, streaming: true, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("new direction");
+    });
+
+    expect(markLastAssistantInterrupted).toHaveBeenCalledTimes(1);
+    expect(unmarkLastAssistantInterrupted).not.toHaveBeenCalled();
+    expect(appendSystemEntry).toHaveBeenCalledTimes(1);
+    expect(setErrorWithThought).not.toHaveBeenCalled();
+  });
+
+  it("in the real transcript: the streaming answer wears the badge and the new question lands after it", async () => {
+    const { result, chat, emitChatStream } = setup({ streaming: true, attachments: [], realChatState: true });
+    act(() => chat().appendUserEntry("first"));
+    act(() => emitChatStream({ type: "text_delta", streamId: 1, text: "partial answer" }));
+
+    await act(async () => {
+      await result.current.handleAsk("second");
+    });
+
+    expect(chat().entries.map((e) => e.kind)).toEqual(["user", "assistant", "user"]);
+    expect(chat().entries[1]).toMatchObject({ text: "partial answer", interrupted: true, streaming: true });
+    expect(chat().entries[2]).toMatchObject({ kind: "user", text: "second" });
+  });
+
+  it("in the real transcript: a refusal at admission takes the badge back and leaves a note, not a bubble", async () => {
+    const chatSend = vi.fn(async () => ({ ok: false, error: "user-keyboard-required" }));
+    const { result, chat, emitChatStream } = setup({ chatSend, streaming: true, attachments: [], realChatState: true });
+    act(() => chat().appendUserEntry("first"));
+    act(() => emitChatStream({ type: "text_delta", streamId: 1, text: "partial answer" }));
+
+    await act(async () => {
+      await result.current.handleAsk("second");
+    });
+
+    expect(chat().entries.map((e) => e.kind)).toEqual(["user", "assistant", "system"]);
+    expect(chat().entries[1]).toMatchObject({ text: "partial answer", streaming: true });
+    expect(chat().entries[1]).not.toHaveProperty("interrupted");
+    expect(chat().entries[2]).toMatchObject({ text: "app.sendNeedsKeyboard" });
+  });
+
+  it("in the real transcript: a refusal after the abort keeps the badge on the cut-short answer", async () => {
+    const chatSend = vi.fn(async () => ({ ok: false, error: "session-mismatch", interrupted: true }));
+    const { result, chat, emitChatStream } = setup({ chatSend, streaming: true, attachments: [], realChatState: true });
+    act(() => chat().appendUserEntry("first"));
+    act(() => emitChatStream({ type: "text_delta", streamId: 1, text: "partial answer" }));
+
+    await act(async () => {
+      await result.current.handleAsk("second");
+    });
+    act(() => emitChatStream({ type: "done", streamId: 1 }));
+
+    expect(chat().entries.map((e) => e.kind)).toEqual(["user", "assistant", "system"]);
+    expect(chat().entries[1]).toMatchObject({ text: "partial answer", interrupted: true, streaming: false });
   });
 
   it("never interrupts on behalf of a queue drain, even while the renderer still counts the turn as streaming", async () => {

@@ -208,10 +208,15 @@ export function useChatState(api: LvisApi) {
             if (debugStreamEnabled) debugLog("stream", "activeStreamId:adopt", { streamId });
           }
         } else if (activeStreamIdRef.current !== streamId) {
-          if (activeStreamIdRef.current === supersededStreamIdRef.current) {
+          if (
+            activeStreamIdRef.current === supersededStreamIdRef.current
+            && streamId > activeStreamIdRef.current
+          ) {
             // A newer stream is speaking: the interrupted one is over whether
             // or not its own closing frame ever arrives. Close it the way its
-            // own `done` would have.
+            // own `done` would have. Ids climb, so only a higher one is the
+            // successor — a straggler from an older stream must not take the
+            // active slot while the interrupted turn is still armed.
             if (finalAssistantRoundClosedRef.current || (!streamRef.current && !thoughtRef.current)) {
               setEntries((p) => dropPendingLlmStatusAssistant(p));
             } else {

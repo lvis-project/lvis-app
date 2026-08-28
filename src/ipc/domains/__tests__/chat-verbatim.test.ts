@@ -2281,6 +2281,27 @@ describe("an interrupt send while a turn is running", () => {
     await first;
   });
 
+  it("reports that the turn was already stopped when the refusal comes after the abort", async () => {
+    const { loop, turnEntered } = runningTurn();
+    await setupHandlers(loop);
+
+    const first = invoke(CHANNELS.chat.send, {
+      input: "first", inputOrigin: "user-keyboard", userActivation: true,
+    }, "main") as Promise<unknown>;
+    await turnEntered.promise;
+
+    // Admitted at the door, refused later while resolving its persona prompt.
+    const second = await invoke(CHANNELS.chat.send, {
+      input: "second", inputOrigin: "user-keyboard", userActivation: true, interrupt: true,
+      personaPromptId: "persona-that-does-not-exist",
+    }, "main");
+    await first;
+
+    expect(loop.abortCurrentTurn).toHaveBeenCalledTimes(1);
+    expect(second).toMatchObject({ ok: false, interrupted: true });
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+  });
+
   it("without the flag a send during a running turn is refused, and nothing is aborted", async () => {
     const { loop, turnEntered } = runningTurn();
     await setupHandlers(loop);

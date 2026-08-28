@@ -1170,6 +1170,47 @@ describe("useChatState — a turn interrupted by the next send", () => {
     expect(result.current.entries[3]).toMatchObject({ text: "fresh", streaming: false });
   });
 
+  it("marks the streaming answer even after guidance was injected behind it", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "partial" });
+    dispatch({ type: "guidance_injected", streamId: 1, text: "steer this way" });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant", "user"]);
+    act(() => result.current.markLastAssistantInterrupted());
+    expect(result.current.entries[1]).toMatchObject({ text: "partial", interrupted: true });
+  });
+
+  it("does not reach back past a drained queue line to a finished answer", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "earlier answer" });
+    dispatch({ type: "done", streamId: 1 });
+    act(() => result.current.appendUserEntry("queued", "queue"));
+    dispatch({ type: "tool_start", streamId: 2, name: "slow_tool", groupId: "g2", toolUseId: "t2" });
+    act(() => result.current.markLastAssistantInterrupted());
+    expect(result.current.entries[1]).not.toHaveProperty("interrupted");
+  });
+
+  it("does not let an older stream's straggler take the active slot while an interrupt is armed", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "old answer" });
+    dispatch({ type: "done", streamId: 1 });
+    act(() => result.current.appendUserEntry("second"));
+    dispatch({ type: "text_delta", streamId: 2, text: "current" });
+    act(() => result.current.markLastAssistantInterrupted());
+    // A late frame of stream 1 is not the successor of stream 2.
+    dispatch({ type: "text_delta", streamId: 1, text: " late" });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(result.current.entries[3]).toMatchObject({ text: "current", interrupted: true, streaming: true });
+    dispatch({ type: "done", streamId: 2 });
+    expect(result.current.entries[3]).toMatchObject({ text: "current", interrupted: true, streaming: false });
+    // The next real turn still renders.
+    act(() => result.current.appendUserEntry("third"));
+    dispatch({ type: "text_delta", streamId: 3, text: "next" });
+    expect(result.current.entries[5]).toMatchObject({ text: "next", streaming: true });
+  });
+
   it("forgets the retired stream on a new chat, so the id can be reused", () => {
     const { result, dispatch } = mount();
     act(() => result.current.appendUserEntry("first"));

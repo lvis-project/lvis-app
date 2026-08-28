@@ -42,15 +42,16 @@ type ComposeOutgoingFn = (raw: string) => ReturnType<typeof composeOutgoingUtil>
  * when the lease is taken. A resolved value the caller does not read leaves
  * the user's bubble on screen and nothing behind it.
  */
-function chatSendRefusal(result: unknown): string | undefined {
+function chatSendRefusal(result: unknown): { code: string; interrupted: boolean } | undefined {
   if (result === null || typeof result !== "object") return undefined;
-  const { ok, error } = result as { ok?: unknown; error?: unknown };
+  const { ok, error, interrupted } = result as { ok?: unknown; error?: unknown; interrupted?: unknown };
   if (ok === true || typeof error !== "string") return undefined;
-  return error;
+  return { code: error, interrupted: interrupted === true };
 }
 
 class ChatSendRefusedError extends Error {
-  constructor(readonly code: string) {
+  /** `interrupted`: the host had already stopped the running turn when it refused. */
+  constructor(readonly code: string, readonly interrupted: boolean) {
     super(code);
     this.name = "ChatSendRefusedError";
   }
@@ -306,19 +307,21 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       // Staged modes skip only the user-bubble append. The imported_trigger marker
       // already represents the plugin-authored / app-authored prompt visibly, and
       // rendering the wrapped envelope as a user bubble would misattribute authorship.
-      if (mode === "default") {
-        appendUserEntry(trimmed, opts?.injectHint);
-      }
       // The interrupted turn's closing frames still arrive after this point
       // and finalize their own entry with what they accumulated; only a
       // fresh turn starts from empty accumulators.
       if (interrupt) {
         // Marked here, not at entry: every gate above returns without a send,
-        // and a turn nothing interrupted must not wear the badge.
+        // and a turn nothing interrupted must not wear the badge. And before
+        // the new bubble: the mark walks back to the running turn's answer
+        // and stops at a user line.
         if (debugStreamEnabled) debugLog("handleAsk", "interrupt:send");
         markLastAssistantInterrupted?.();
       } else {
         resetStreamAccumulators();
+      }
+      if (mode === "default") {
+        appendUserEntry(trimmed, opts?.injectHint);
       }
       try {
         const result = await api.chatSend(
@@ -336,7 +339,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
           ...(interrupt ? [{ interrupt: true }] : []),
         );
         const refusal = chatSendRefusal(result);
-        if (refusal !== undefined) throw new ChatSendRefusedError(refusal);
+        if (refusal !== undefined) throw new ChatSendRefusedError(refusal.code, refusal.interrupted);
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
         // already cleared by setQuestion(""). N counter persists across
@@ -368,15 +371,6 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
           ? "app.sendNeedsKeyboard"
           : resolveIpcErrorKey(code);
         const message = mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage });
-        if (interrupt && err instanceof ChatSendRefusedError) {
-          // Refused at admission: the host never stopped the running turn, so
-          // it goes on untouched — take the badge back and say so beside it
-          // rather than closing its entry with an error.
-          unmarkLastAssistantInterrupted?.();
-          appendSystemEntry(message);
-        } else {
-          setErrorWithThought(message);
-        }
         // Put the turn back the way it was. The bubble was appended optimistically and
         // the composer was cleared before the IPC resolved; a REFUSED send means main
         // recorded nothing, so leaving either would show the user a message that was
@@ -384,8 +378,21 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         // already restores the draft for its own refusal — this is the same repair for
         // every other one, which until now only the guard had.
         //
+        // The bubble goes first: the error or note below must land after the
+        // turn it belongs to, and the walk back to that turn's answer stops
+        // at a user line.
+        if (mode === "default") dropUserEntry(trimmed);
+        if (interrupt && err instanceof ChatSendRefusedError) {
+          // The running turn is not closed here with an error: refused at
+          // admission it goes on untouched, and refused after the abort its
+          // own closing frame finalizes it. Only the first case takes the
+          // badge back.
+          if (!err.interrupted) unmarkLastAssistantInterrupted?.();
+          appendSystemEntry(message);
+        } else {
+          setErrorWithThought(message);
+        }
         if (mode === "default") {
-          dropUserEntry(trimmed);
           // Text AND attachments, together. They are one thing: the composer derives its
           // chips from the markers in the body, so a body restored without its
           // attachments is a draft with dangling references. Restored only when the

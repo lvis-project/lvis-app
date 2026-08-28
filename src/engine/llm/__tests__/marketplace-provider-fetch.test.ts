@@ -12,7 +12,7 @@ describe("guarded model-provider fetch", () => {
   it("rejects a public cross-origin request before it can forward credentials", async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const providerFetch = createGuardedModelProviderFetch(
-      "http://10.232.178.100:30000/v1",
+      "http://10.0.0.8:30000/v1",
       fetchImpl,
     );
 
@@ -25,7 +25,7 @@ describe("guarded model-provider fetch", () => {
   });
 
   it("permits credentialed HTTP only for the self-hosted guarded fetch", () => {
-    const baseUrl = "http://10.232.178.100:30000/v1";
+    const baseUrl = "http://10.0.0.8:30000/v1";
     const selfHostedFetch = createGuardedModelProviderFetch(baseUrl);
     const marketplaceFetch = createGuardedMarketplaceProviderFetch(baseUrl, {
       providerId: "private-marketplace",
@@ -73,9 +73,9 @@ describe("how long a model provider may stay silent", () => {
           resolve(new Response(null, { status: 499 }));
         }, { once: true });
       })) as unknown as typeof fetch;
-      const providerFetch = createGuardedModelProviderFetch("http://10.232.178.100:30000/v1", fetchImpl);
+      const providerFetch = createGuardedModelProviderFetch("http://10.0.0.8:30000/v1", fetchImpl);
 
-      const pending = providerFetch("http://10.232.178.100:30000/v1/chat/completions", {
+      const pending = providerFetch("http://10.0.0.8:30000/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: "Bearer internal-key" },
         body: "{}",
