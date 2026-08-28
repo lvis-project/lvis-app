@@ -56,8 +56,8 @@ export const SIDEBAR_WIDTH_PREF: PanelWidthPref = {
 
 /**
  * Right-docked ChatSidePanel. Bounds live in the `EdgeResizeBar` wiring
- * (`min={SIDE_PANEL_MIN_WIDTH}`, `max` = live `100vw - 12rem`) rather than
- * here, so this pref clamps nothing and its commit is persist-only.
+ * (`sidePanelLayout`'s range for the tile) rather than here, so this pref
+ * clamps nothing and its commit is persist-only.
  */
 export const SIDE_PANEL_WIDTH_PREF: PanelWidthPref = {
   settingsKey: "sidePanelWidth",

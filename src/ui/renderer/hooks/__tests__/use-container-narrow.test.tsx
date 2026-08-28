@@ -6,17 +6,18 @@ import "../../../../../test/renderer/setup.js";
  * floors when the container can hold both, an overlay over the transcript's
  * right edge (the panel keeping its own floor) when it cannot.
  *
- * The docking threshold is derived from the shared side-panel min width plus a
- * transcript floor — NOT a magic constant that exceeds chat mode's reserved
- * window. Chat mode's OS window reserves `SIDE_PANEL_MIN_WIDTH` on top of its
- * base width for the docked panel, so its container clears the threshold and
- * docks (regression guard for the chat-mode modal-blur bug).
+ * The docking threshold is derived from the shared side-panel reserve (card
+ * plus insets) plus a transcript floor — NOT a magic constant that exceeds
+ * chat mode's reserved window. Chat mode's OS window reserves
+ * `SIDE_PANEL_MIN_RESERVE` on top of its base width for the docked panel, so
+ * its container clears the threshold and docks (regression guard for the
+ * chat-mode modal-blur bug).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { DOCK_ENTER_WIDTH, DOCK_EXIT_WIDTH, useContainerNarrow, sidePanelLayout } from "../use-container-narrow.js";
-import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
+import { SIDE_PANEL_MIN_RESERVE, SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 
 /**
  * A controllable ResizeObserver stub: capture the callback so a test can push
@@ -81,10 +82,10 @@ describe("useContainerNarrow", () => {
     // column, and must sit BELOW chat mode's reserved container so chat docks.
     expect(DOCK_ENTER_WIDTH).toBeGreaterThan(SIDE_PANEL_MIN_WIDTH);
     expect(DOCK_EXIT_WIDTH).toBeGreaterThan(DOCK_ENTER_WIDTH);
-    // The chat-mode side-panel window reserves SIDE_PANEL_MIN_WIDTH on top of
-    // the ~460px base window; after the collapsed sidebar padding the observed
-    // chat-view-root is ≈ 800px. Docking must be allowed there.
-    expect(DOCK_EXIT_WIDTH).toBeLessThan(460 + SIDE_PANEL_MIN_WIDTH);
+    // The chat-mode side-panel window reserves SIDE_PANEL_MIN_RESERVE on top
+    // of the ~460px base window; after the collapsed sidebar padding the
+    // observed chat-view-root is ≈ 800px. Docking must be allowed there.
+    expect(DOCK_EXIT_WIDTH).toBeLessThan(460 + SIDE_PANEL_MIN_RESERVE);
   });
 
   it("docks (isNarrow=false) at chat-mode side-panel container width", () => {
@@ -134,23 +135,23 @@ describe("useContainerNarrow", () => {
 
 describe("sidePanelLayout", () => {
   it("docks with the pixel floors when the container can hold both columns", () => {
-    expect(sidePanelLayout(Number.POSITIVE_INFINITY, false)).toEqual({ mode: "docked", min: 448, max: Number.POSITIVE_INFINITY });
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: 448, max: DOCK_ENTER_WIDTH - 320 });
-    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: 448, max: 880 });
+    // The reserve is the 448px card plus 16px of insets.
+    expect(sidePanelLayout(Number.POSITIVE_INFINITY, false)).toEqual({ mode: "docked", min: 464, max: Number.POSITIVE_INFINITY });
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: 464, max: DOCK_ENTER_WIDTH - 320 });
+    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: 464, max: 880 });
   });
 
   it("floats over the transcript, keeping its own floor, when the container cannot", () => {
-    // A 2×2 tile: the card keeps 448 inside the tile's 16px of insets and the
-    // transcript stays laid out beneath.
-    expect(sidePanelLayout(496, true)).toEqual({ mode: "overlay", min: 448, max: 480 });
-    // Narrower than the panel's own floor: the card fills the room the insets leave.
-    expect(sidePanelLayout(400, true)).toEqual({ mode: "overlay", min: 384, max: 384 });
+    // A 2×2 tile: the card keeps its floor and the transcript stays laid out beneath.
+    expect(sidePanelLayout(496, true)).toEqual({ mode: "overlay", min: 464, max: 496 });
+    // Narrower than the reserve: the card fills the tile.
+    expect(sidePanelLayout(400, true)).toEqual({ mode: "overlay", min: 400, max: 400 });
   });
 
   it("takes the mode from the hysteresis verdict, so a gutter dragged across the threshold does not flip it", () => {
     // Inside the dead-band: still narrow → still floating, its range still the container's.
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH + 30, true)).toEqual({ mode: "overlay", min: 448, max: DOCK_ENTER_WIDTH + 14 });
-    // Not yet narrow at the enter width: docked, the range never below the panel floor.
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH - 1, false)).toEqual({ mode: "docked", min: 448, max: 448 });
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH + 30, true)).toEqual({ mode: "overlay", min: 464, max: DOCK_ENTER_WIDTH + 30 });
+    // Not yet narrow at the enter width: docked, the range never below the reserve floor.
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH - 1, false)).toEqual({ mode: "docked", min: 464, max: 464 });
   });
 });

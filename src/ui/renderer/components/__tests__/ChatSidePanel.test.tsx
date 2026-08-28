@@ -84,7 +84,6 @@ function HarnessPanel({
   initialSelectedId,
   panelMounted = true,
   subAgentSpawns = [],
-  floating,
 }: {
   api: LvisApi;
   sessionId?: string;
@@ -93,7 +92,6 @@ function HarnessPanel({
   initialSelectedId: string | null;
   panelMounted?: boolean;
   subAgentSpawns?: SubAgentSpawn[];
-  floating?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId);
   const workspaceTabs = useWorkspaceTabs();
@@ -111,8 +109,6 @@ function HarnessPanel({
       width={448}
       onWidthChange={vi.fn()}
       onWidthCommit={vi.fn()}
-      floating={floating}
-      onClose={vi.fn()}
     />
   );
 }
@@ -1626,44 +1622,19 @@ describe("ChatSidePanel", () => {
 });
 
 describe("ChatSidePanel inside a chat group", () => {
-  function renderInGroup(floating: boolean) {
-    return renderPanel(
+  it("is a self-contained card: its tabs stay on it and the header keeps the only close", () => {
+    renderPanel(
       <ChatGroupFrame title="a" actions={[]} panelOpen={true} onTogglePanel={vi.fn()}>
-        <HarnessPanel
-          api={api()}
-          sessionId="session-1"
-          targets={[]}
-          files={[]}
-          initialSelectedId={null}
-          floating={floating}
-        />
+        <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />
       </ChatGroupFrame>,
     );
-  }
-
-  it("docked: the tabs sit in the group header band, sized to the panel column", () => {
-    renderInGroup(false);
-    const band = screen.getByTestId("chat-group-panel-band");
-    expect(band.style.width).toBe("448px");
-    expect(within(band).getByTestId("chat-side-panel-tab-strip")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel").className).toContain("border-l");
-    expect(
-      within(screen.getByTestId("chat-side-panel")).queryByTestId("chat-side-panel-tab-strip"),
-    ).toBeNull();
-  });
-
-  it("floating: the tabs and close control stay inside the panel and the band keeps its own width", () => {
-    renderInGroup(true);
-    const band = screen.getByTestId("chat-group-panel-band");
-    expect(band.style.width).toBe("");
-    expect(within(band).queryByTestId("chat-side-panel-tab-strip")).toBeNull();
     const panel = screen.getByTestId("chat-side-panel");
-    // A raised card like the floating sidebar, not a bordered column.
     expect(panel.className).toContain("rounded-2xl");
-    expect(panel.className).not.toContain("border-l");
-    const actions = within(within(panel).getByTestId("chat-side-panel-tab-strip")).getByTestId(
-      "chat-side-panel-tab-actions",
-    );
-    expect(within(actions).getByLabelText(/닫기|close/i)).toBeTruthy();
+    expect(within(panel).getByTestId("chat-side-panel-tab-strip")).toBeTruthy();
+    expect(
+      within(screen.getByTestId("chat-group-header")).queryByTestId("chat-side-panel-tab-strip"),
+    ).toBeNull();
+    const actions = within(panel).getByTestId("chat-side-panel-tab-actions");
+    expect(within(actions).queryByLabelText(/닫기|close/i)).toBeNull();
   });
 });

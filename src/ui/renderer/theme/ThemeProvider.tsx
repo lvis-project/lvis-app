@@ -119,9 +119,9 @@ export function ThemeProvider({
       setFollowSystemState(next.followSystem);
       // User-configurable font family + size — written as CSS variables on
       // `documentElement` so the body's `font-family: var(--lvis-font-family, …)`
-      // / `font-size: calc(1rem * var(--lvis-font-size-scale, 1))` rules pick
+      // / `font-size: calc(1rem * var(--lvis-font-size-scale, …))` rules pick
       // up the override. `family: "system"` (or unset) removes the override so
-      // the default HOST_FONT_STACK / 1rem base apply. See styles.css body.
+      // the default HOST_FONT_STACK / default step apply. See styles.css body.
       if (typeof document === "undefined") return;
       const root = document.documentElement;
       const font = settings.appearance?.font;

@@ -71,6 +71,7 @@ type FakeLoop = {
   sessionId: string;
   hasProvider: ReturnType<typeof vi.fn>;
   abortCurrentTurn: ReturnType<typeof vi.fn>;
+  newConversation: ReturnType<typeof vi.fn>;
   getSessionId: () => string;
   getSessionKind: () => "main";
   hasActiveTurn: () => boolean;
@@ -85,6 +86,7 @@ function fakeLoop(id: string, messages: unknown[] = []): FakeLoop {
     sessionId: `session-of-${id}`,
     hasProvider: vi.fn(() => id !== MAIN_CHAT_GROUP_ID),
     abortCurrentTurn: vi.fn(),
+    newConversation: vi.fn(),
     getSessionId: () => loop.sessionId,
     getSessionKind: () => "main",
     hasActiveTurn: () => false,
@@ -233,6 +235,16 @@ describe("lvis:chat:* with chat groups", () => {
     expect(memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-older");
   });
 
+  it("releasing the primary keeps its loop and hands it a blank conversation", async () => {
+    const { invoke, main, releaseChatGroupLoop, memoryManager } = await registerWithGroups();
+    expect(await invoke(CHANNELS.chat.groupRelease, MAIN_CHAT_GROUP_ID)).toEqual({ ok: true, released: true });
+    expect(main.abortCurrentTurn).toHaveBeenCalledTimes(1);
+    expect(main.newConversation).toHaveBeenCalledTimes(1);
+    // The next launch must not bring the closed conversation back.
+    expect(memoryManager.markMainActiveFresh).toHaveBeenCalledTimes(1);
+    expect(releaseChatGroupLoop).not.toHaveBeenCalledWith(MAIN_CHAT_GROUP_ID);
+  });
+
   it("releases a closed tile's group: turn stopped, loop forgotten, a later use builds afresh", async () => {
     const { invoke, groups, resolveChatGroupLoop, releaseChatGroupLoop } = await registerWithGroups();
     invoke(CHANNELS.chat.hasProvider, "group-2");
@@ -242,7 +254,6 @@ describe("lvis:chat:* with chat groups", () => {
     expect(releaseChatGroupLoop).toHaveBeenCalledWith("group-2");
     expect(await invoke(CHANNELS.chat.groupRelease, "group-2")).toEqual({ ok: true, released: false });
     // The primary is never released.
-    expect(await invoke(CHANNELS.chat.groupRelease, MAIN_CHAT_GROUP_ID)).toEqual({ ok: false, error: "invalid-args" });
     // A name reaching main again after release builds a new group, not the old one.
     invoke(CHANNELS.chat.hasProvider, "group-2");
     expect(resolveChatGroupLoop).toHaveBeenCalledTimes(2);

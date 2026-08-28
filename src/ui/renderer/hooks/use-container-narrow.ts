@@ -1,5 +1,5 @@
 import { useEffect, useState, type RefObject } from "react";
-import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
+import { SIDE_PANEL_MIN_RESERVE } from "../../../shared/side-panel.js";
 
 export interface UseContainerNarrowResult {
   /** True when the observed container is too narrow to dock the side panel. */
@@ -9,8 +9,8 @@ export interface UseContainerNarrowResult {
 }
 
 /**
- * Minimum transcript column width that must survive alongside the docked side
- * panel for docking to be usable. Below this the panel would crush the chat
+ * Minimum transcript column width that must survive beside the docked side
+ * panel (card plus its insets) for docking to be usable. Below this the panel would crush the chat
  * transcript, so the panel floats over it instead; at or above it both panes
  * stay interactive side by side.
  */
@@ -18,35 +18,28 @@ const MIN_DOCKED_TRANSCRIPT_WIDTH = 320;
 
 /**
  * Container width at/below which docking both the transcript and the side panel
- * is physically too tight — derived from the shared side-panel min width plus a
+ * is physically too tight — derived from the shared side-panel reserve plus a
  * transcript floor rather than a magic constant, so it tracks the panel SoT.
- * Chat mode's OS window reserves exactly `SIDE_PANEL_MIN_WIDTH` on top of its
+ * Chat mode's OS window reserves exactly `SIDE_PANEL_MIN_RESERVE` on top of its
  * base width to host the docked panel, so its container clears this threshold
  * and docks. Floating only happens in genuinely too-narrow containers (a
  * split tile, a hand-shrunk work-mode window).
  */
-export const DOCK_ENTER_WIDTH = SIDE_PANEL_MIN_WIDTH + MIN_DOCKED_TRANSCRIPT_WIDTH;
+export const DOCK_ENTER_WIDTH = SIDE_PANEL_MIN_RESERVE + MIN_DOCKED_TRANSCRIPT_WIDTH;
 /** Exit width — 60px dead-band above enter to avoid flip-flop near the boundary. */
 export const DOCK_EXIT_WIDTH = DOCK_ENTER_WIDTH + 60;
 
 type SidePanelLayoutMode = "docked" | "overlay";
 
-/**
- * Horizontal room a floating panel leaves to the tile's edges — the same
- * card-in-a-band inset the floating sidebar uses (`right-2` + a `left` gap of
- * the same size). The range hands this back so the card never pokes past the
- * tile it floats in.
- */
-const FLOATING_PANEL_INSET = 16;
 
 export interface SidePanelLayout {
   /**
-   * `docked`: the panel is a column beside the transcript and pushes it.
-   * `overlay`: the container cannot hold both pixel floors, so the panel keeps
+   * The panel is the same raised card in both — the floating sidebar's shape.
+   * `docked`: the card is a column beside the transcript and pushes it.
+   * `overlay`: the container cannot hold both pixel floors, so the card keeps
    * its own floor and floats over the transcript's right edge inside the
-   * container as a raised card — the same shape as the floating sidebar — and
-   * the transcript keeps its layout underneath instead of being crushed into
-   * a strip nobody could use. Never a window-level sheet.
+   * container — the transcript keeps its layout underneath instead of being
+   * crushed into a strip nobody could use. Never a window-level sheet.
    */
   mode: SidePanelLayoutMode;
   /** The range the split bar moves in. */
@@ -56,19 +49,19 @@ export interface SidePanelLayout {
 
 /**
  * How the side panel lays out inside a container `width` px across, and the
- * width range it may take there. `narrow` is {@link useContainerNarrow}'s
- * hysteresis verdict, not a fresh comparison: the two modes give the panel
- * different ranges, so a mode that flipped on a single threshold would jump
- * the panel's width back and forth while a tile gutter is dragged across it.
- * An unmeasured container (Infinity) docks with the pixel floors.
+ * range its reserve (card plus insets) may take there. `narrow` is
+ * {@link useContainerNarrow}'s hysteresis verdict, not a fresh comparison: the
+ * two modes give the panel different ranges, so a mode that flipped on a
+ * single threshold would jump the panel's width back and forth while a tile
+ * gutter is dragged across it. An unmeasured container (Infinity) docks with
+ * the pixel floors.
  */
 export function sidePanelLayout(width: number, narrow: boolean): SidePanelLayout {
-  if (!Number.isFinite(width)) return { mode: "docked", min: SIDE_PANEL_MIN_WIDTH, max: Number.POSITIVE_INFINITY };
+  if (!Number.isFinite(width)) return { mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: Number.POSITIVE_INFINITY };
   if (!narrow) {
-    return { mode: "docked", min: SIDE_PANEL_MIN_WIDTH, max: Math.max(SIDE_PANEL_MIN_WIDTH, width - MIN_DOCKED_TRANSCRIPT_WIDTH) };
+    return { mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: Math.max(SIDE_PANEL_MIN_RESERVE, width - MIN_DOCKED_TRANSCRIPT_WIDTH) };
   }
-  const room = Math.max(0, width - FLOATING_PANEL_INSET);
-  return { mode: "overlay", min: Math.min(SIDE_PANEL_MIN_WIDTH, room), max: room };
+  return { mode: "overlay", min: Math.min(SIDE_PANEL_MIN_RESERVE, width), max: width };
 }
 
 /**

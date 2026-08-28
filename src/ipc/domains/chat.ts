@@ -772,19 +772,23 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return chatGroupContext(chatGroupId.trim());
   };
 
-  const releaseGroup = async (id: string): Promise<boolean> => {
-    const context = groupContexts.get(id);
-    if (!context) return false;
+  /** Stop whatever a group's loop is doing and wait until it has stopped. */
+  const quiesce = async (context: ChatGroupContext): Promise<void> => {
     context.loop.abortCurrentTurn();
     const active = context.surfaceRuntime.activity.activeTurn()
       ?? context.surfaceRuntime.activity.activeMutation();
-    if (active) {
-      try {
-        await active;
-      } catch {
-        // expected: interrupted turns may reject
-      }
+    if (!active) return;
+    try {
+      await active;
+    } catch {
+      // expected: interrupted turns may reject
     }
+  };
+
+  const releaseGroup = async (id: string): Promise<boolean> => {
+    const context = groupContexts.get(id);
+    if (!context) return false;
+    await quiesce(context);
     context.unsubscribeStream();
     groupContexts.delete(id);
     deps.releaseChatGroupLoop?.(id);
@@ -829,7 +833,19 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.groupRelease, e); return UNAUTHORIZED_FRAME; }
     if (typeof chatGroupId !== "string" || !chatGroupId.trim()) return { ok: false, error: "chat-group-required" };
     const id = chatGroupId.trim();
-    if (id === MAIN_CHAT_GROUP_ID) return { ok: false, error: "invalid-args" };
+    if (id === MAIN_CHAT_GROUP_ID) {
+      // The primary loop is the window's: resume, restore, and the session
+      // list all address it, so it is never torn down and its stream stays
+      // subscribed (the next primary tile reads it). Closing its tile lets go
+      // of the conversation it holds — a blank one in its place, and the
+      // window-active pointer cleared so the next launch does not bring the
+      // closed conversation back — so no other tile is refused that session
+      // by a tile that no longer exists.
+      await quiesce(mainGroup);
+      mainGroup.loop.newConversation();
+      await memoryManager.markMainActiveFresh();
+      return { ok: true, released: true };
+    }
     return { ok: true, released: await releaseGroup(id) };
   });
 

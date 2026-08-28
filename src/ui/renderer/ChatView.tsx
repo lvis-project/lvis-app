@@ -39,7 +39,7 @@ import { FloatingRightLane } from "./components/FloatingRightLane.js";
 import { useChatGroupHeaderSlot } from "./components/ChatGroupFrame.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { sidePanelLayout, useContainerNarrow } from "./hooks/use-container-narrow.js";
-import { SIDE_PANEL_MIN_WIDTH } from "../../shared/side-panel.js";
+import { SIDE_PANEL_MIN_RESERVE } from "../../shared/side-panel.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -317,7 +317,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
       setSidePanelWidth(px);
       // The setting is the panel's docked width everywhere; a floating panel
       // in a tile narrower than the floor may not write a sub-floor value.
-      commitSidePanelWidth(Math.max(SIDE_PANEL_MIN_WIDTH, px));
+      commitSidePanelWidth(Math.max(SIDE_PANEL_MIN_RESERVE, px));
     },
     [commitSidePanelWidth, setSidePanelWidth],
   );
@@ -894,12 +894,14 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           inert={!dockedPanelExpanded}
           style={{ width: dockedPanelExpanded ? `${dockedPanelWidth}px` : "0px" }}
           className={[
-            "z-40 flex min-w-0 shrink-0 origin-right justify-end will-change-[width,opacity,transform]",
-            // Floating: the same card-in-a-band placement as the floating
-            // sidebar (inset from the tile's edges, the card carries its own
-            // elevation), so the two overlays read as one kind of surface.
+            // The card's air — the floating sidebar's own insets — lives on this
+            // wrapper in both modes, so the reserve the transcript is pushed by
+            // and the box the card floats in are the same width. In px, not
+            // rem: the reserve (`SIDE_PANEL_CARD_INSET`) is a pixel count the
+            // main process also uses, and the user's font scale must not move it.
+            "z-40 flex min-w-0 shrink-0 origin-right justify-end pt-[8px] pr-[8px] pb-[12px] pl-[8px] will-change-[width,opacity,transform]",
             panelLayout.mode === "overlay"
-              ? "absolute top-2 right-2 bottom-3"
+              ? "absolute inset-y-0 right-0"
               : "relative self-stretch",
             sidePanelResizing
               ? "transition-none"
@@ -933,14 +935,10 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
             width={dockedPanelWidth}
             minWidth={panelLayout.min}
             maxWidth={panelLayout.max}
-            floating={panelLayout.mode === "overlay"}
             onWidthChange={handleSidePanelWidthChange}
             onWidthCommit={handleSidePanelWidthCommit}
             resizeElementRef={dockedPanelMotionRef}
-            onClose={() => {
-              onSidePanelOpenChange?.(false);
-            }}
-            className="relative flex shrink-0 self-stretch"
+            className="relative flex shrink-0"
           />
         </div>
       ) : null}

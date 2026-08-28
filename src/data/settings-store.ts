@@ -612,8 +612,9 @@ export interface SystemSettings {
   shutdownCleanupTimeoutMs?: number;
   /**
    * Persisted width (px) of the docked ChatSidePanel workspace rail, set by the
-   * left-edge drag handle. Durable shell-layout preference; clamped to
-   * [SIDE_PANEL_MIN_WIDTH, viewport) at drag time in the renderer. Default 448.
+   * left-edge drag handle — the card plus its insets (`SIDE_PANEL_MIN_RESERVE`
+   * is the floor). Durable shell-layout preference; bounded by the tile's
+   * range at drag time in the renderer. Default 464.
    */
   sidePanelWidth?: number;
   /**

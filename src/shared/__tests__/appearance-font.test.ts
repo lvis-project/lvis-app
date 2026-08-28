@@ -12,7 +12,7 @@ import {
 // a CSS-injection font-family.
 describe("appearance-font — shared frame-0 / write-time guards", () => {
   it("exposes exactly the four discrete size-scale presets", () => {
-    expect([...FONT_SIZE_SCALE_VALUES]).toEqual([0.875, 1, 1.125, 1.25]);
+    expect([...FONT_SIZE_SCALE_VALUES]).toEqual([0.75, 0.875, 1, 1.125]);
   });
 
   it("accepts each preset size scale via membership check (preload parse contract)", () => {

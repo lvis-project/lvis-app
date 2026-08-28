@@ -40,6 +40,7 @@ vi.mock("electron", () => ({
 // ── Module imports (after mock) ────────────────────────────────────────────
 
 import { UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
+import { CHAT_SIDE_PANEL_WIDTH } from "../main/main-window-bounds.js";
 import { hostFrameEvent } from "./test-helpers.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -203,7 +204,9 @@ describe("WindowManager IPC — validateSender guard", () => {
       expect(openResult).toEqual({ ok: true });
       flushTween();
       const expanded = lastBounds(main);
-      expect(expanded.width).toBe(908);
+      // The window grows by exactly the side panel's reserve, anchored on its
+      // right edge inside the work area.
+      expect(expanded.width).toBe(460 + CHAT_SIDE_PANEL_WIDTH);
       expect(expanded.height).toBe(840);
       expect(expanded.x + expanded.width).toBe(1910);
 

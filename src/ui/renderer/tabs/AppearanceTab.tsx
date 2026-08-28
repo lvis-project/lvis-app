@@ -32,6 +32,7 @@ import {
   visibleLocalesFor,
 } from "../../../i18n/index.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { FONT_SIZE_SCALE_DEFAULT, type FontSizeScale } from "../../../shared/appearance-font.js";
 
 type AppearanceMarketplaceFilter = "theme" | "language-pack";
 
@@ -145,12 +146,12 @@ function BundleCard({
 
 /* ─── Font family + size presets ─────────────────────────────────────────── */
 
-type FontSizeOption = { value: 0.875 | 1 | 1.125 | 1.25; label: string };
+type FontSizeOption = { value: FontSizeScale; label: string };
 const FONT_SIZE_OPTIONS: ReadonlyArray<FontSizeOption> = [
-  { value: 0.875, label: "appearanceTab.fontSizeSmall" },
-  { value: 1, label: "appearanceTab.fontSizeNormal" },
-  { value: 1.125, label: "appearanceTab.fontSizeLarge" },
-  { value: 1.25, label: "appearanceTab.fontSizeXLarge" },
+  { value: 0.75, label: "appearanceTab.fontSizeSmall" },
+  { value: 0.875, label: "appearanceTab.fontSizeNormal" },
+  { value: 1, label: "appearanceTab.fontSizeLarge" },
+  { value: 1.125, label: "appearanceTab.fontSizeXLarge" },
 ];
 
 type FontFamilyPreset = { value: string; label: string; stack: string };
@@ -199,11 +200,11 @@ function presetForStack(stack: string | undefined): string {
   return hit ? hit.value : "custom";
 }
 
-const FONT_SIZE_VALUES: ReadonlyArray<0.875 | 1 | 1.125 | 1.25> = FONT_SIZE_OPTIONS.map((o) => o.value);
+const FONT_SIZE_VALUES: ReadonlyArray<FontSizeScale> = FONT_SIZE_OPTIONS.map((o) => o.value);
 
 function useFontPreferences() {
   const [family, setFamilyState] = useState<string>("system");
-  const [sizeScale, setSizeScaleState] = useState<0.875 | 1 | 1.125 | 1.25>(1);
+  const [sizeScale, setSizeScaleState] = useState<FontSizeScale>(FONT_SIZE_SCALE_DEFAULT);
 
   // Initial load + cross-window broadcast subscription. Without the subscription
   // the radio buttons drift from the canonical state when the user changes the
@@ -230,9 +231,9 @@ function useFontPreferences() {
       if (font?.family && font.family !== "system") setFamilyState(font.family);
       else setFamilyState("system");
       if (font?.sizeScale && (FONT_SIZE_VALUES as readonly number[]).includes(font.sizeScale)) {
-        setSizeScaleState(font.sizeScale as 0.875 | 1 | 1.125 | 1.25);
+        setSizeScaleState(font.sizeScale as FontSizeScale);
       } else {
-        setSizeScaleState(1);
+        setSizeScaleState(FONT_SIZE_SCALE_DEFAULT);
       }
     }
     return () => { cancelled = true; unsub?.(); };
@@ -251,7 +252,7 @@ function useFontPreferences() {
       /* ignore */
     }
   };
-  const setSizeScale = (next: 0.875 | 1 | 1.125 | 1.25) => {
+  const setSizeScale = (next: FontSizeScale) => {
     setSizeScaleState(next);
     try {
       const api = getApi();

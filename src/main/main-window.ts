@@ -119,9 +119,10 @@ export function initialThemeArgs(): string[] {
   // settings service (already normalized at write time by settings-store's
   // `isValidFontFamilyOverride` + `FONT_SIZE_SCALE_VALUES` guards). Carrying
   // them in the frame-0 prime makes the main renderer paint at the
-  // configured size + family instead of flashing the 1.0 / HOST_FONT_STACK
-  // default until React hydrates. `"system"` family + a missing/1.0 scale are
-  // the defaults, so they're left off the wire (no override → omit the field).
+  // configured size + family instead of flashing the default step /
+  // HOST_FONT_STACK until React hydrates. `"system"` family + a missing scale
+  // are the defaults, so they're left off the wire (no override → omit the
+  // field); the CSS fallback is the default step.
   const font = getServices()?.settingsService.getAll().appearance?.font;
   const fontSizeScale = typeof font?.sizeScale === "number" ? font.sizeScale : undefined;
   const fontFamily = font?.family && font.family !== "system" ? font.family : undefined;

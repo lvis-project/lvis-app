@@ -41,8 +41,8 @@ export interface InitialThemePrime {
    * User font-size multiplier on the `1rem` base (`settings.appearance.font.sizeScale`).
    * Applied at frame 0 as `--lvis-font-size-scale` on documentElement so the
    * main renderer paints at the configured size instead of flashing the
-   * 1.0 default until React hydrates. Omitted when the user is on the default
-   * (no override persisted).
+   * default step until React hydrates. Omitted when the user is on the
+   * default (no override persisted).
    */
   fontSizeScale?: number;
   /**

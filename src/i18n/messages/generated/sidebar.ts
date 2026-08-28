@@ -54,6 +54,8 @@ export const en = {
   "chatGroup.hideSidebar": "Hide conversations",
   "chatGroup.split": "Split chat area",
   "chatGroup.close": "Close chat area",
+  "chatGroup.maximize": "Show only this chat",
+  "chatGroup.restore": "Show all chat areas",
   "chatGroup.resize": "Resize chat areas",
   "chatGroup.sideChatTitle": "Side chat",
 } as const;
@@ -112,6 +114,8 @@ export const ko: Record<keyof typeof en, string> = {
   "chatGroup.hideSidebar": "대화 목록 닫기",
   "chatGroup.split": "채팅 영역 분할",
   "chatGroup.close": "채팅 영역 닫기",
+  "chatGroup.maximize": "이 채팅만 보기",
+  "chatGroup.restore": "모든 채팅 영역 보기",
   "chatGroup.resize": "채팅 영역 크기 조절",
   "chatGroup.sideChatTitle": "사이드 채팅",
 };

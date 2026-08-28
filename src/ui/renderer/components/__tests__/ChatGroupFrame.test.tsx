@@ -109,6 +109,19 @@ describe("ChatGroupFrame", () => {
     expect(slot.compareDocumentPosition(pin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("offers show-alone only when told there is something to hide, and names the way back", () => {
+    const onToggleMaximize = vi.fn();
+    const view = render(frame());
+    expect(screen.queryByTestId("chat-group-maximize")).toBeNull();
+    view.rerender(frame({ onToggleMaximize }));
+    const control = screen.getByTestId("chat-group-maximize");
+    expect(control.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(control);
+    expect(onToggleMaximize).toHaveBeenCalledTimes(1);
+    view.rerender(frame({ onToggleMaximize, maximized: true }));
+    expect(screen.getByTestId("chat-group-maximize").getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("offers no close on the last group", () => {
     render(frame());
     // Absent rather than disabled: a control that can never do anything in this
@@ -250,11 +263,63 @@ describe("useChatGroups ceilings", () => {
     expect(result.current.canSplit).toBe(false);
   });
 
-  it("never closes the primary group", () => {
+  it("never closes the last group, but once split the primary closes like any other", () => {
     const { result } = renderHook(() => useChatGroups("work"));
-
+    expect(result.current.closable).toBe(false);
     act(() => result.current.close("main"));
     expect(result.current.groups.map((group) => group.id)).toEqual(["main"]);
+
+    act(() => result.current.dropOnEdge("main", "right"));
+    expect(result.current.closable).toBe(true);
+    act(() => result.current.close("main"));
+    expect(result.current.groups.map((group) => group.id)).toEqual(["group-2"]);
+    expect(result.current.focusedId).toBe("group-2");
+    expect(result.current.closable).toBe(false);
+  });
+
+  it("offers neither close nor show-alone in chat mode, which already shows one tile and hides the rest", () => {
+    const { result, rerender } = renderHook(({ mode }: { mode: "chat" | "work" }) => useChatGroups(mode), {
+      initialProps: { mode: "work" as "chat" | "work" },
+    });
+    act(() => result.current.dropOnEdge("main", "right"));
+    expect(result.current.closable).toBe(true);
+    rerender({ mode: "chat" });
+    expect(result.current.groups).toHaveLength(1);
+    expect(result.current.closable).toBe(false);
+    expect(result.current.canMaximize).toBe(false);
+  });
+
+  it("shows one tile alone on maximize and gives the others back on restore, closing nothing", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    expect(result.current.canMaximize).toBe(false);
+    act(() => result.current.dropOnEdge("main", "right"));
+    expect(result.current.canMaximize).toBe(true);
+
+    act(() => result.current.toggleMaximize("group-2"));
+    expect(result.current.maximizedId).toBe("group-2");
+    expect(result.current.groups.map((group) => group.id)).toEqual(["group-2"]);
+    expect(result.current.gutters).toEqual([]);
+    // Still two tiles: the view changed, not the workspace.
+    expect(result.current.closable).toBe(true);
+
+    act(() => result.current.toggleMaximize("group-2"));
+    expect(result.current.maximizedId).toBeNull();
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2"]);
+  });
+
+  it("drops a maximize when its tile closes or another tile is added", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.dropOnEdge("main", "right"));
+    act(() => result.current.toggleMaximize("group-2"));
+    act(() => result.current.close("group-2"));
+    expect(result.current.maximizedId).toBeNull();
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main"]);
+
+    act(() => result.current.dropOnEdge("main", "right"));
+    act(() => result.current.toggleMaximize("main"));
+    act(() => result.current.dropOnEdge("main", "bottom"));
+    expect(result.current.maximizedId).toBeNull();
+    expect(result.current.groups).toHaveLength(3);
   });
 });
 

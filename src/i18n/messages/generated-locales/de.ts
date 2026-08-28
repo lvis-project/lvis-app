@@ -2561,6 +2561,8 @@ export const deMessages: Record<string, string> = {
   "chatGroup.hideSidebar": "Unterhaltungen ausblenden",
   "chatGroup.split": "Chatbereich teilen",
   "chatGroup.close": "Chatbereich schließen",
+  "chatGroup.maximize": "Nur diesen Chat anzeigen",
+  "chatGroup.restore": "Alle Chatbereiche anzeigen",
   "chatGroup.resize": "Chatbereiche in der Größe ändern",
   "chatGroup.sideChatTitle": "Seiten-Chat",
   "skillBadge.loadedFallback": "Fertigkeit {name} geladen.",
