@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installMockLvisApi, type MockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import type { LlmModelListResult } from "../../../../shared/llm-model-list.js";
+import type { MarketplaceInstalledProviderPreset } from "../../../../shared/marketplace-package-assets.js";
 import type { SubscriptionProviderView } from "../SubscriptionProvidersSection.js";
 
 const useSubscriptionProvidersMock = vi.hoisted(() => vi.fn());
@@ -17,7 +18,23 @@ const { LlmTab } = await import("../LlmTab.js");
 type MockApi = MockLvisApi;
 
 /** Stable identity: LlmTab's settings effect keys off this array. */
-const NO_PRESETS: never[] = [];
+const NO_PRESETS: readonly MarketplaceInstalledProviderPreset[] = [];
+
+function preset(
+  providerId: string,
+  label: string,
+  baseUrl: string,
+): MarketplaceInstalledProviderPreset {
+  return {
+    providerId,
+    label,
+    baseUrl,
+    defaultModel: `${providerId}-default`,
+    modelOptions: [`${providerId}-default`],
+    apiKeyPlaceholder: "sk-...",
+    requiresApiKey: true,
+  } as MarketplaceInstalledProviderPreset;
+}
 
 function codexView(
   overrides: Partial<SubscriptionProviderView> = {},
@@ -58,53 +75,82 @@ function installSubscription(providers: readonly SubscriptionProviderView[]) {
   });
 }
 
+const FETCH_FAILED: LlmModelListResult = {
+  ok: false,
+  error: "model-list-fetch-failed",
+  message: "no",
+};
+
 function makeApi(overrides: MockApi = {}): MockApi {
   const api = installMockLvisApi();
-  api.listLlmModels = vi.fn().mockResolvedValue({
-    ok: false,
-    error: "model-list-fetch-failed",
-    message: "no",
-  } satisfies LlmModelListResult);
+  api.listLlmModels = vi.fn().mockResolvedValue(FETCH_FAILED);
+  api.hasApiKey = vi.fn().mockResolvedValue(true);
   for (const [name, impl] of Object.entries(overrides)) api[name] = impl;
   return api;
 }
 
-async function renderTab(
-  api: MockApi,
-  props: Partial<Record<string, unknown>> = {},
-) {
+/** `getSettings` carrying a model-list cache, so a handshake can be pre-landed. */
+function settingsWithCache(cache: Record<string, unknown>) {
+  return vi.fn().mockResolvedValue({
+    llm: { pinnedModels: [], modelListCache: cache },
+    marketplace: { installedProviderIds: [] },
+  });
+}
+
+/** `getSettings` with a stored block for one vendor, for the dirty signal. */
+function settingsWithVendorBlock(vendor: string, block: Record<string, string>) {
+  return vi.fn().mockResolvedValue({
+    llm: { pinnedModels: [], modelListCache: {}, vendors: { [vendor]: block } },
+    marketplace: { installedProviderIds: [] },
+  });
+}
+
+interface TabProps {
+  vendor?: string;
+  baseUrl?: string;
+  keyInput?: string;
+  hasKey?: boolean;
+  model?: string;
+  marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
+  marketplaceProviderPresetId?: string;
+  fallbackChain?: { provider: string; model: string }[];
+  fallbackOpen?: boolean;
+}
+
+async function renderTab(api: MockApi, props: TabProps = {}) {
   const result = render(
     <TooltipProvider>
-    <LlmTab
-      api={api as never}
-      marketplaceProviderPresets={NO_PRESETS}
-      vendor={(props.vendor as string) ?? "openai"}
-      setVendor={(props.setVendor as never) ?? vi.fn()}
-      baseUrl={(props.baseUrl as string) ?? ""}
-      setBaseUrl={(props.setBaseUrl as never) ?? vi.fn()}
-      vertexProject=""
-      setVertexProject={vi.fn()}
-      vertexLocation=""
-      setVertexLocation={vi.fn()}
-      hasKey={(props.hasKey as boolean) ?? true}
-      setHasKey={vi.fn()}
-      keyInput=""
-      setKeyInput={vi.fn()}
-      model={(props.model as string) ?? "gpt-5.4"}
-      setModel={vi.fn()}
-      selectApiVendorModel={vi.fn()}
-      enableThinking={false}
-      setEnableThinking={vi.fn()}
-      thinkingBudget={10_000}
-      setThinkingBudget={vi.fn()}
-      fallbackChain={[]}
-      setFallbackChain={vi.fn()}
-      fallbackOpen={false}
-      setFallbackOpen={vi.fn()}
-      onSaved={vi.fn()}
-      onSave={(props.onSave as never) ?? vi.fn()}
-      settingsLoaded={true}
-    />
+      <LlmTab
+        api={api as never}
+        marketplaceProviderPresets={props.marketplaceProviderPresets ?? NO_PRESETS}
+        marketplaceProviderPresetId={props.marketplaceProviderPresetId ?? ""}
+        vendor={props.vendor ?? "openai"}
+        setVendor={vi.fn()}
+        baseUrl={props.baseUrl ?? ""}
+        setBaseUrl={vi.fn()}
+        vertexProject=""
+        setVertexProject={vi.fn()}
+        vertexLocation=""
+        setVertexLocation={vi.fn()}
+        hasKey={props.hasKey ?? true}
+        setHasKey={vi.fn()}
+        keyInput={props.keyInput ?? ""}
+        setKeyInput={vi.fn()}
+        model={props.model ?? "gpt-5.4"}
+        setModel={vi.fn()}
+        selectApiVendorModel={vi.fn()}
+        enableThinking={false}
+        setEnableThinking={vi.fn()}
+        thinkingBudget={10_000}
+        setThinkingBudget={vi.fn()}
+        fallbackChain={props.fallbackChain ?? []}
+        setFallbackChain={vi.fn()}
+        fallbackOpen={props.fallbackOpen ?? false}
+        setFallbackOpen={vi.fn()}
+        onSaved={vi.fn()}
+        onSave={vi.fn()}
+        settingsLoaded={true}
+      />
     </TooltipProvider>,
   );
   // The tab syncs the active vendor's catalogue on a debounce after mount.
@@ -112,6 +158,17 @@ async function renderTab(
     await Promise.resolve();
   });
   return result;
+}
+
+/** Radix menus open on pointerdown, not click. */
+function openMenu(trigger: HTMLElement) {
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+}
+
+function rowOrder(): (string | null)[] {
+  return Array.from(
+    screen.getByTestId("llm-tab:connections").querySelectorAll("[data-provider-row]"),
+  ).map((node) => node.getAttribute("data-provider-row"));
 }
 
 beforeEach(() => {
@@ -122,22 +179,19 @@ beforeEach(() => {
 
 describe("LlmTab provider cards", () => {
   it("puts Save inside the card being edited, not on the page", async () => {
-    const api = makeApi();
-    await renderTab(api);
+    await renderTab(makeApi(), { keyInput: "sk-typed" });
 
     expect(screen.queryByTestId("llm-tab:save-providers")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai"));
 
     const card = screen.getByTestId("llm-tab:connection:openai");
-    const save = screen.getByTestId("llm-tab:save-providers");
-    expect(card).toContainElement(save);
+    expect(card).toContainElement(screen.getByTestId("llm-tab:save-providers"));
   });
 
   it("hides the API key field until the API-key route is chosen", async () => {
     installSubscription([codexView()]);
-    const api = makeApi();
-    await renderTab(api);
+    await renderTab(makeApi());
 
     expect(screen.queryByTestId("llm-api-key-input")).not.toBeInTheDocument();
 
@@ -147,13 +201,15 @@ describe("LlmTab provider cards", () => {
     expect(useApiKey.parentElement).toBe(loginBrowser.parentElement);
 
     fireEvent.click(useApiKey);
+    const form = screen.getByTestId("llm-tab:manual-section");
     expect(screen.getByTestId("llm-api-key-input")).toBeInTheDocument();
+    expect(useApiKey).toHaveAttribute("aria-controls", form.id);
+    expect(useApiKey).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("llm-tab:api-key-status")).toHaveTextContent(/설정됨|Configured|Set/);
   });
 
-  it("asks for an endpoint only where the endpoint is the user's to supply", async () => {
-    const api = makeApi();
-    const { unmount } = await renderTab(api);
+  it("asks for no endpoint where the endpoint is fixed", async () => {
+    const { unmount } = await renderTab(makeApi());
     fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai"));
     expect(screen.queryByTestId("llm-base-url-input")).not.toBeInTheDocument();
     unmount();
@@ -173,24 +229,137 @@ describe("LlmTab provider cards", () => {
     expect(screen.getByTestId("llm-base-url-input")).toBeInTheDocument();
   });
 
+  it("asks for an endpoint on a self-hosted vendor whose address is per install", async () => {
+    await renderTab(makeApi(), {
+      vendor: "ollama",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      model: "llama3",
+    });
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:ollama"));
+    expect(screen.getByTestId("llm-base-url-input")).toHaveValue("http://127.0.0.1:11434/v1");
+  });
+
   it("appends an added provider below every existing card", async () => {
     installSubscription([codexView({
       status: { runtime: "ready", connection: "connected", models: [] },
     } as Partial<SubscriptionProviderView>)]);
-    await renderTab(makeApi(), { vendor: "openai" });
+    await renderTab(makeApi());
 
-    fireEvent.pointerDown(
-      screen.getByTestId("llm-tab:add-provider"),
-      { button: 0, ctrlKey: false, pointerType: "mouse" },
-    );
-    const item = await screen.findByTestId("llm-tab:add-provider-item:claude");
-    fireEvent.click(item);
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
 
-    const rows = Array.from(
-      screen.getByTestId("llm-tab:connections").querySelectorAll("[data-provider-row]"),
-    ).map((node) => node.getAttribute("data-provider-row"));
+    const rows = rowOrder();
     expect(rows[rows.length - 1]).toBe("claude");
     expect(rows.length).toBeGreaterThan(1);
+  });
+});
+
+describe("LlmTab marketplace preset rows", () => {
+  const presets = [
+    preset("acme-gw", "Acme Gateway", "https://acme.example/v1"),
+    preset("bolt-gw", "Bolt Gateway", "https://bolt.example/v1"),
+  ] as const;
+
+  async function addBothPresets(api: MockApi) {
+    await renderTab(api, {
+      vendor: "openai-compatible",
+      marketplaceProviderPresets: presets,
+      model: "",
+      hasKey: false,
+    });
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:marketplace-provider:acme-gw"));
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:marketplace-provider:bolt-gw"));
+  }
+
+  it("gives each installed preset its own named card", async () => {
+    await addBothPresets(makeApi());
+
+    expect(screen.getByTestId("llm-tab:connection:marketplace-provider:acme-gw"))
+      .toHaveTextContent("Acme Gateway");
+    expect(screen.getByTestId("llm-tab:connection:marketplace-provider:bolt-gw"))
+      .toHaveTextContent("Bolt Gateway");
+    expect(rowOrder()).toEqual(["marketplace-provider:acme-gw", "marketplace-provider:bolt-gw"]);
+  });
+
+  it("drops an added preset out of the add menu", async () => {
+    await addBothPresets(makeApi());
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    await screen.findByTestId("llm-tab:add-provider-item:claude");
+    expect(screen.queryByTestId("llm-tab:add-provider-item:marketplace-provider:acme-gw")).toBeNull();
+    expect(screen.queryByTestId("llm-tab:add-provider-item:marketplace-provider:bolt-gw")).toBeNull();
+  });
+
+  it("reports each preset's handshake on its own card", async () => {
+    const api = makeApi({
+      getSettings: settingsWithCache({
+        [["openai-compatible", "https://acme.example/v1", "acme-gw"].join("\n")]: {
+          vendor: "openai-compatible",
+          baseUrl: "https://acme.example/v1",
+          credentialScope: "acme-gw",
+          endpoint: "https://acme.example/v1/models",
+          models: ["acme-1", "acme-2"],
+          fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }),
+    });
+    await renderTab(api, {
+      vendor: "openai-compatible",
+      marketplaceProviderPresets: presets,
+      model: "",
+      hasKey: false,
+    });
+    // Acme's catalogue landed, so its row is already there; only Bolt is left
+    // to add — and the two must not share one set of facts.
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:marketplace-provider:bolt-gw"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("llm-tab:connection-subline:marketplace-provider:acme-gw"))
+        .toHaveAttribute("data-provider-sync-status", "ready");
+    });
+    expect(screen.queryByTestId("llm-tab:connection-subline:marketplace-provider:bolt-gw")).toBeNull();
+  });
+});
+
+describe("LlmTab unsaved provider input", () => {
+  it("keeps Save unavailable until a field actually changes", async () => {
+    const saved = { baseUrl: "http://localhost:8001/v1" };
+    const { unmount } = await renderTab(
+      makeApi({ getSettings: settingsWithVendorBlock("openai-compatible", saved) }),
+      { vendor: "openai-compatible", baseUrl: saved.baseUrl, model: "local-model" },
+    );
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeDisabled());
+    unmount();
+
+    await renderTab(
+      makeApi({ getSettings: settingsWithVendorBlock("openai-compatible", saved) }),
+      { vendor: "openai-compatible", baseUrl: "http://localhost:9999/v1", model: "local-model" },
+    );
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled());
+  });
+
+  it("keeps a card with uncommitted input on screen and marks it when collapsed", async () => {
+    // Nothing was added and nothing is configured: this row exists only
+    // because the draft does — which is the part that survives a remount.
+    await renderTab(makeApi({ hasApiKey: vi.fn().mockResolvedValue(false) }), {
+      vendor: "claude",
+      hasKey: false,
+      keyInput: "sk-ant-typed",
+      model: "",
+    });
+
+    expect(screen.getByTestId("llm-tab:connection:claude")).toBeInTheDocument();
+    // Collapsed, but not silent about what it is holding.
+    expect(screen.getByTestId("llm-tab:connection-unsaved:claude")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
+    expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled();
+    expect(screen.queryByTestId("llm-tab:connection-unsaved:claude")).toBeNull();
   });
 });
 
@@ -214,14 +383,11 @@ describe("LlmTab OpenAI model catalogue", () => {
       expect(screen.getByTestId("llm-tab:connection-subline:openai"))
         .toHaveAttribute("data-provider-sync-status", "ready");
     });
-    const subline = screen.getByTestId("llm-tab:connection-subline:openai");
-    expect(subline).toHaveTextContent("https://api.openai.com/v1/models");
+    expect(screen.getByTestId("llm-tab:connection-subline:openai"))
+      .toHaveTextContent("https://api.openai.com/v1/models");
     expect(screen.getByTestId("llm-tab:model-sync-status")).toHaveTextContent("1");
 
-    fireEvent.pointerDown(
-      screen.getByTestId("llm-model-select"),
-      { button: 0, ctrlKey: false, pointerType: "mouse" },
-    );
+    openMenu(screen.getByTestId("llm-model-select"));
     await screen.findByText("gpt-from-endpoint");
     // The bundled catalogue is metadata, never the list: none of its ids may
     // appear once the endpoint has answered.
@@ -230,13 +396,87 @@ describe("LlmTab OpenAI model catalogue", () => {
   });
 
   it("says the handshake failed instead of standing in a bundled list", async () => {
-    const api = makeApi();
-    await renderTab(api, { model: "" });
+    await renderTab(makeApi(), { model: "" });
 
     await waitFor(() => {
       expect(screen.getByTestId("llm-tab:connection-subline:openai"))
         .toHaveAttribute("data-provider-sync-status", "error");
     });
     expect(screen.getByTestId("llm-tab:model-sync-status")).not.toHaveTextContent(/\d+/);
+  });
+
+  it("distinguishes a failure that left a catalogue standing from one that did not", async () => {
+    const api = makeApi({
+      getSettings: settingsWithCache({
+        [["openai", "", ""].join("\n")]: {
+          vendor: "openai",
+          endpoint: "https://api.openai.com/v1/models",
+          models: ["gpt-cached"],
+          fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }),
+    });
+    await renderTab(api, { model: "" });
+
+    const status = await screen.findByTestId("llm-tab:model-sync-status");
+    await waitFor(() => {
+      expect(status).toHaveAttribute("data-provider-sync-status", "error");
+    });
+    // A cached catalogue is still on offer, so the message must not read as
+    // "nothing to show" — the two failures are different states.
+    expect(status.textContent).toMatch(/마지막으로 받은|last catalogue/);
+  });
+
+  it("does not spend a credentialed handshake when no key is stored", async () => {
+    const api = makeApi({ hasApiKey: vi.fn().mockResolvedValue(false) });
+    installSubscription([codexView({
+      status: { runtime: "ready", connection: "connected", models: [] },
+    } as Partial<SubscriptionProviderView>)]);
+    await renderTab(api, { model: "", hasKey: false });
+
+    await waitFor(() => expect(api.hasApiKey).toHaveBeenCalledWith("openai"));
+    expect(api.listLlmModels).not.toHaveBeenCalled();
+
+    const subline = await screen.findByTestId("llm-tab:connection-subline:codex");
+    expect(subline).toHaveAttribute("data-provider-sync-status", "needs-credential");
+    expect(subline).not.toHaveClass("text-destructive");
+    // And no second, API-side OpenAI row conjured out of the attempt.
+    expect(rowOrder()).toEqual(["codex"]);
+  });
+
+  it("draws no configured row from a handshake that only started", async () => {
+    let release: ((result: LlmModelListResult) => void) | undefined;
+    const api = makeApi({
+      listLlmModels: vi.fn().mockImplementation(() => new Promise((resolve) => {
+        release = resolve as (result: LlmModelListResult) => void;
+      })),
+    });
+    await renderTab(api, {
+      model: "",
+      vendor: "claude",
+      hasKey: false,
+      fallbackOpen: true,
+      fallbackChain: [{ provider: "openrouter", model: "x" }],
+    });
+
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalled());
+    // In flight and nothing stored: a started handshake is not a configured
+    // provider, so it must not draw a "connected" row of its own.
+    expect(rowOrder()).toEqual([]);
+
+    await act(async () => {
+      release?.({
+        ok: true,
+        vendor: "openrouter",
+        endpoint: "https://openrouter.ai/api/v1/models",
+        models: ["a", "b"],
+        fetchedAt: "2026-01-01T00:00:00.000Z",
+      });
+      await Promise.resolve();
+    });
+    // Once the catalogue lands, the same provider IS configured and gets one.
+    await waitFor(() => expect(rowOrder()).toEqual(["openrouter"]));
+    expect(screen.getByTestId("llm-tab:connection-subline:openrouter"))
+      .toHaveAttribute("data-provider-sync-status", "ready");
   });
 });
