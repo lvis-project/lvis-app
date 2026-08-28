@@ -37,7 +37,7 @@ import { WebTab } from "./tabs/WebTab.js";
 import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
-import { AboutTab } from "./tabs/AboutTab.js";
+import { AboutTab, useAppInfo } from "./tabs/AboutTab.js";
 import { StartupTab } from "./tabs/StartupTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
@@ -178,6 +178,7 @@ export function SettingsContent({
   onDiscardExactDeny?: () => void;
 }) {
   const { t } = useTranslation();
+  const appInfo = useAppInfo(api);
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
   const [marketplaceFilter, setMarketplaceFilter] = useState<MarketplacePackageFilter>("all");
   const [pendingPermissions, setPendingPermissions] = useState(0);
@@ -479,11 +480,15 @@ export function SettingsContent({
           </Fragment>
         ))}
       </VerticalTabsList>
-      {/* Version footer — fills dead space at the bottom of the sidebar
-          tastefully. Static text only; no IPC needed. */}
+      {/* Version footer — the running app's version as main reports it,
+          the same reader the About tab uses; a literal here went stale for
+          every release after the one it was typed in. */}
       <div className="shrink-0 border-t px-3 py-2.5">
-        <span className="text-[11px] tabular-nums text-muted-foreground/(--opacity-strong) select-none">
-          v0.1.8
+        <span
+          className="text-[11px] tabular-nums text-muted-foreground/(--opacity-strong) select-none"
+          data-testid="settings-nav-app-version"
+        >
+          {appInfo ? `v${appInfo.version}` : null}
         </span>
       </div>
       </div>

@@ -73,6 +73,16 @@ function consumerTab(container: HTMLElement): string {
   return container.querySelector('[data-testid="consumer-tab"]')?.textContent ?? "";
 }
 
+describe("settings navigation footer", () => {
+  it("names the version main reports, not a literal typed at some release", async () => {
+    const { container, api } = await renderWithConsumer("content");
+    const footer = container.querySelector('[data-testid="settings-nav-app-version"]');
+    expect(footer).toBeTruthy();
+    await waitFor(() => expect(footer?.textContent).toBe("v0.0.0-test"));
+    expect(api.getAppInfo).toHaveBeenCalled();
+  });
+});
+
 describe.each<Embedder>(["content", "inline"])("settings tab read-back (%s)", (embedder) => {
   it("hands the new tab to the consumer when the user moves inside the panel", async () => {
     const { container } = await renderWithConsumer(embedder);

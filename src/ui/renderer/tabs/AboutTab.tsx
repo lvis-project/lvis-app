@@ -9,7 +9,7 @@ export interface AboutTabProps {
   api: LvisApi;
 }
 
-interface AppInfo {
+export interface AppInfo {
   version: string;
   electronVersion: string;
   nodeVersion: string;
@@ -40,8 +40,12 @@ function platformLabel(platform: NodeJS.Platform): string {
  * auth management were relocated to the Model + Usage surfaces. System-Info
  * testids are kept stable (general-tab-*) for continuity with existing specs.
  */
-export function AboutTab({ api }: AboutTabProps) {
-  const { t } = useTranslation();
+/**
+ * The app's own identity (version, paths) as main reports it. One reader for
+ * every settings surface that names the version, so a label can never drift
+ * from what is actually running.
+ */
+export function useAppInfo(api: Pick<LvisApi, "getAppInfo">): AppInfo | null {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
 
   useEffect(() => {
@@ -58,6 +62,13 @@ export function AboutTab({ api }: AboutTabProps) {
       alive = false;
     };
   }, [api]);
+
+  return appInfo;
+}
+
+export function AboutTab({ api }: AboutTabProps) {
+  const { t } = useTranslation();
+  const appInfo = useAppInfo(api);
 
   const copyDataPath = useCallback(() => {
     if (!appInfo) return;
