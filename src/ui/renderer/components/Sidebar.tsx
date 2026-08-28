@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import { ViewHistoryNav, type ViewPathNavProps } from "./ViewPathNav.js";
 import {
@@ -544,9 +544,13 @@ function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: stri
 // ─── Project sessions ───────────────────────────────────────────────────────
 
 // One page of conversation rows. The lists have no upper bound, so the sidebar
-// renders a page and reveals the next one as the reader scrolls; it never caps
-// the list, which would leave the remainder unreachable.
+// shows a page and offers the next one — revealed by scrolling in the flat
+// Chats list, opened by a button in each Projects group. Neither CAPS the list,
+// which is what left the remainder unreachable.
 const SESSION_PAGE_SIZE = 6;
+
+/** How far ahead of the scroller's edge the next page is prepared. */
+const SESSION_REVEAL_MARGIN = "200px 0px";
 
 /**
  * A conversation list that grows as it is scrolled.
@@ -555,31 +559,39 @@ const SESSION_PAGE_SIZE = 6;
  * the last rendered row: once it enters the scroller the reader has consumed
  * everything rendered, so the next page is revealed — repeating until the whole
  * list is on screen.
+ *
+ * This is the FLAT list's behaviour. A grouped list cannot use it: one group
+ * cascading to fill the viewport would push its sibling groups below the fold,
+ * so the Projects tab pages each group behind its own control instead.
  */
 function RevealingSessionList({
   sessions,
   renderRow,
   sentinelTestId,
+  viewportRef,
 }: {
   sessions: SessionSummary[];
   renderRow: (session: SessionSummary) => ReactNode;
   sentinelTestId: string;
+  /** The scroller the sentinel is measured against — see the effect below. */
+  viewportRef: RefObject<HTMLDivElement | null>;
 }) {
   const [visibleCount, setVisibleCount] = useState(SESSION_PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const total = sessions.length;
-  const hasMore = visibleCount < total;
+  // The list SHRINKS under the window whenever the archive toggle hides rows
+  // again, so what is rendered is the revealed count reconciled with the list
+  // that exists now — never a count carried over from a longer one.
+  const shown = Math.max(SESSION_PAGE_SIZE, Math.min(visibleCount, total));
+  const hasMore = shown < total;
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
-    // These lists scroll inside the sidebar card's Radix viewport, not the
+    // The list scrolls inside the sidebar card's Radix viewport, not the
     // document, so THAT element is the observer root — measured against the
     // document viewport the sentinel counts as visible from the start and the
-    // whole list would unroll at once. `null` is IntersectionObserver's own
-    // "document viewport" root, the right answer when no scroller encloses the
-    // list.
-    const root = sentinel.closest("[data-radix-scroll-area-viewport]");
+    // whole list would unroll at once.
     // Rebuilt on every reveal: IntersectionObserver reports CHANGES, so an
     // observer carried across a reveal stays silent while the sentinel is still
     // in view, and the list would stop growing one page short of filling the
@@ -587,17 +599,17 @@ function RevealingSessionList({
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
-        setVisibleCount((count) => Math.min(count + SESSION_PAGE_SIZE, total));
+        setVisibleCount(Math.min(shown + SESSION_PAGE_SIZE, total));
       },
-      { root },
+      { root: viewportRef.current, rootMargin: SESSION_REVEAL_MARGIN },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [total, visibleCount]);
+  }, [total, shown, viewportRef]);
 
   return (
     <>
-      {sessions.slice(0, visibleCount).map(renderRow)}
+      {sessions.slice(0, shown).map(renderRow)}
       {hasMore ? <div ref={sentinelRef} aria-hidden="true" data-testid={sentinelTestId} /> : null}
     </>
   );
@@ -946,6 +958,7 @@ function ProjectSessionList({
   onToggleProjectPin,
   conversationActions,
   projectActions,
+  scrollViewportRef,
 }: {
   collapsed: boolean;
   sessions: SessionSummary[];
@@ -974,6 +987,12 @@ function ProjectSessionList({
   onToggleProjectPin?: (projectRoot: string) => void;
   conversationActions?: ConversationRowActions;
   projectActions?: ProjectRowActions;
+  /**
+   * The card's scroll viewport. The Chats list reveals itself against THIS
+   * scroller, so the list has to be handed the element rather than hunt for an
+   * ancestor by selector.
+   */
+  scrollViewportRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
   const openNativeContextMenu = useNativeContextMenu();
@@ -1036,6 +1055,17 @@ function ProjectSessionList({
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
   // Archived rows are out of the way by default and one click from being back.
   const [showArchived, setShowArchived] = useState(false);
+  // Which project groups are showing all of their conversations. The Projects
+  // tab is an OVERVIEW of projects, so a group shows one page and the reader
+  // opens the one they came for; letting every group run to its full length
+  // would push the sibling projects below the fold.
+  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(new Set());
+  const toggleProjectSessions = (key: string) =>
+    setExpandedProjects((current) => {
+      const next = new Set(current);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   const mainSessions = useMemo(
     () => sessions.filter((session) => session.sessionKind === "main"),
@@ -1256,6 +1286,7 @@ function ProjectSessionList({
               sessions={visibleSessions(ungroupedSessions)}
               renderRow={renderSessionRow}
               sentinelTestId="sidebar-unassigned-sessions-sentinel"
+              viewportRef={scrollViewportRef}
             />
             {/* Offered only once something IS archived. A permanent toggle for
                 an empty archive is a control that never does anything. */}
@@ -1325,7 +1356,13 @@ function ProjectSessionList({
           </div>
         ) : null}
         {hasNamedProjects ? visibleProjects.map(({ project, projectSessions }) => {
+          // Archived rows leave the list BEFORE it is paged, so a page is a
+          // page of rows the reader can actually see.
           const groupSessions = visibleSessions(projectSessions);
+          const groupKey = project.projectRoot ?? project.projectName;
+          const groupExpanded = expandedProjects.has(groupKey);
+          const shownGroupSessions = groupExpanded ? groupSessions : groupSessions.slice(0, SESSION_PAGE_SIZE);
+          const hiddenGroupSessions = groupSessions.length - shownGroupSessions.length;
           const pinned = Boolean(isProjectPinned?.(project.projectRoot));
           const archived = Boolean(projectActions?.isArchived(project.projectRoot));
           const displayName = projectActions?.label(project.projectRoot) ?? project.projectName;
@@ -1405,11 +1442,24 @@ function ProjectSessionList({
             </div>
             <div className="ml-4 border-l border-border/(--opacity-half) pl-2">
               {groupSessions.length > 0 ? (
-                <RevealingSessionList
-                  sessions={groupSessions}
-                  renderRow={renderSessionRow}
-                  sentinelTestId={`sidebar-project-sessions-sentinel-${projectTestId(project.projectRoot, project.projectName)}`}
-                />
+                <>
+                  {shownGroupSessions.map(renderSessionRow)}
+                  {/* A CONTROL, not a label: the conversations past the first
+                      page are only reachable because this button opens them. */}
+                  {hiddenGroupSessions > 0 || groupExpanded ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleProjectSessions(groupKey)}
+                      className="w-full rounded-md px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-expanded={groupExpanded}
+                      data-testid={`sidebar-project-sessions-more-${projectTestId(project.projectRoot, project.projectName)}`}
+                    >
+                      {groupExpanded
+                        ? t("sidebar.fewerSessions")
+                        : t("sidebar.moreSessions", { count: hiddenGroupSessions })}
+                    </button>
+                  ) : null}
+                </>
               ) : (
                 <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
                   {t("sidebar.noProjectSessions")}
@@ -1623,6 +1673,9 @@ export function Sidebar({
   const darwinTopClearance = isDarwinPlatform();
 
   const navListId = "sidebar-nav-list";
+  // The scroller the conversation list reveals itself against, handed down
+  // rather than looked up: the list is inside this viewport by construction.
+  const navScrollViewportRef = useRef<HTMLDivElement | null>(null);
 
   return (
     // The sidebar is a FLOATING-CARD shell. The <aside> is a TRANSPARENT
@@ -1831,7 +1884,10 @@ export function Sidebar({
                 content wider than the card and get HARD-clipped by the viewport,
                 so row-level `truncate` never produces its ellipsis. Force that
                 wrapper back to block so width is bounded and `…` can kick in. */}
-            <ScrollArea className="flex-1 min-h-0 [&_[data-radix-scroll-area-viewport]>div]:!block [&_[data-radix-scroll-area-viewport]>div]:!min-w-0">
+            <ScrollArea
+              viewportRef={navScrollViewportRef}
+              className="flex-1 min-h-0 [&_[data-radix-scroll-area-viewport]>div]:!block [&_[data-radix-scroll-area-viewport]>div]:!min-w-0"
+            >
               <div className={`px-2 py-1 space-y-0.5 ${compact ? "flex flex-col items-center" : ""}`}>
                 {pluginViews.map((view) => {
                   const viewKey = toViewKey(view);
@@ -1889,6 +1945,7 @@ export function Sidebar({
                     onToggleProjectPin={onToggleProjectPin}
                     conversationActions={conversationActions}
                     projectActions={projectActions}
+                    scrollViewportRef={navScrollViewportRef}
                   />
                 </div>
               </div>

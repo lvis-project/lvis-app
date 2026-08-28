@@ -1038,17 +1038,23 @@ describe("Sidebar conversation reveal on scroll", () => {
     return conversations.filter((session) => queryByTestId(`sidebar-session-${session.id}`)).length;
   }
 
-  function manyConversations(count: number, prefix: string, projectRoot?: string): SessionSummary[] {
+  function manyConversations(
+    count: number,
+    prefix: string,
+    project?: { projectRoot: string; projectName: string },
+  ): SessionSummary[] {
     return Array.from({ length: count }, (_unused, index) => ({
       id: `${prefix}-${index}`,
       title: `${prefix} 대화 ${index}`,
       modifiedAt: new Date(Date.now() - index * 60_000).toISOString(),
       sessionKind: "main" as const,
-      ...(projectRoot ? { projectRoot, projectName: "other-app" } : {}),
+      ...(project ?? {}),
     }));
   }
 
-  it("reveals the ungrouped list a page at a time as the sentinel reaches the scroller", async () => {
+  const SENTINEL = "sidebar-unassigned-sessions-sentinel";
+
+  it("reveals one page per intersection, rebuilding its observer each time", async () => {
     const conversations = manyConversations(15, "일반");
     const { getByTestId, queryByTestId, restore } = renderSidebar({
       sessions: conversations,
@@ -1063,41 +1069,49 @@ describe("Sidebar conversation reveal on scroll", () => {
 
       // The sentinel is what asks for the next page, and it must actually be
       // observed — an unobserved sentinel would silently reveal nothing.
-      act(() => {
-        expect(triggerIntersection(getByTestId("sidebar-unassigned-sessions-sentinel"))).toBe(1);
+      // It is then parked back out of view, because this test is about ONE page
+      // per intersection; a sentinel left in view keeps asking, which is the
+      // next test's subject.
+      await act(async () => {
+        expect(triggerIntersection(getByTestId(SENTINEL))).toBe(1);
+        triggerIntersection(getByTestId(SENTINEL), false);
       });
-      await waitFor(() => expect(renderedRows()).toBe(12));
+      expect(renderedRows()).toBe(12);
 
-      act(() => {
-        triggerIntersection(getByTestId("sidebar-unassigned-sessions-sentinel"));
+      // Still exactly ONE observer: the reveal built a new one and disconnected
+      // the old, rather than leaving both watching the same sentinel.
+      await act(async () => {
+        expect(triggerIntersection(getByTestId(SENTINEL))).toBe(1);
+        triggerIntersection(getByTestId(SENTINEL), false);
       });
-      await waitFor(() => expect(renderedRows()).toBe(15));
+      expect(renderedRows()).toBe(15);
 
       // Everything is on screen, so there is nothing left to ask for.
-      expect(queryByTestId("sidebar-unassigned-sessions-sentinel")).toBeNull();
+      expect(queryByTestId(SENTINEL)).toBeNull();
     } finally {
       restore();
     }
   });
 
-  it("gives each project group its own reveal window on the Projects tab", async () => {
-    const conversations = manyConversations(9, "프로젝트", OTHER_ROOT);
+  it("keeps revealing from one intersection while the sentinel stays in view", async () => {
+    const conversations = manyConversations(15, "이어서");
     const { getByTestId, queryByTestId, restore } = renderSidebar({
       sessions: conversations,
-      currentSessionId: "프로젝트-0",
+      currentSessionId: "이어서-0",
     });
-    const sentinelId = "sidebar-project-sessions-sentinel-C-Users-example-workspace-lvis-project-other-app";
     try {
       const renderedRows = () => countRenderedRows(conversations, queryByTestId);
+      expect(renderedRows()).toBe(6);
 
-      activateTab(getByTestId("sidebar-tab-projects"));
-      await waitFor(() => expect(renderedRows()).toBe(6));
-
-      act(() => {
-        expect(triggerIntersection(getByTestId(sentinelId))).toBe(1);
+      // A sentinel that is still on screen after a reveal has to produce the
+      // NEXT reveal without being poked again — a page shorter than the
+      // scroller would otherwise leave the list stalled with the sentinel
+      // sitting in plain view and nothing to scroll toward.
+      await act(async () => {
+        expect(triggerIntersection(getByTestId(SENTINEL))).toBe(1);
       });
-      await waitFor(() => expect(renderedRows()).toBe(9));
-      expect(queryByTestId(sentinelId)).toBeNull();
+      await waitFor(() => expect(renderedRows()).toBe(15));
+      expect(queryByTestId(SENTINEL)).toBeNull();
     } finally {
       restore();
     }
@@ -1113,7 +1127,104 @@ describe("Sidebar conversation reveal on scroll", () => {
       for (const session of conversations) {
         expect(queryByTestId(`sidebar-session-${session.id}`)).toBeTruthy();
       }
-      expect(queryByTestId("sidebar-unassigned-sessions-sentinel")).toBeNull();
+      expect(queryByTestId(SENTINEL)).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("pages the list that survives the archive filter, and follows it back down when it shrinks", async () => {
+    const conversations = manyConversations(15, "보관");
+    const archived = new Set(["보관-1", "보관-3", "보관-5"]);
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      sessions: conversations,
+      currentSessionId: "보관-0",
+      conversationActions: {
+        isArchived: (id: string) => archived.has(id),
+        isUnread: () => false,
+        isResponding: () => false,
+        onRename: vi.fn(),
+        onSetArchived: vi.fn(),
+        onSetUnread: vi.fn(),
+        onShare: vi.fn(),
+        onCopy: vi.fn(),
+        onDelete: vi.fn(),
+      },
+    });
+    try {
+      const renderedRows = () => countRenderedRows(conversations, queryByTestId);
+
+      // A page is a page of rows the reader can SEE: the archived rows leave
+      // the list before it is paged, so the first page is six visible rows and
+      // not six minus whatever was archived among them.
+      expect(renderedRows()).toBe(6);
+      expect(queryByTestId("sidebar-session-보관-1")).toBeNull();
+      expect(queryByTestId("sidebar-session-보관-6")).not.toBeNull();
+
+      fireEvent.click(getByTestId("sidebar-toggle-archived"));
+      await act(async () => {
+        triggerIntersection(getByTestId(SENTINEL));
+      });
+      await waitFor(() => expect(renderedRows()).toBe(15));
+
+      // Hiding them again shortens the list under the window. What is rendered
+      // follows the list that exists now — the count from the longer one is not
+      // carried over, and nothing is left asking for rows that are gone.
+      fireEvent.click(getByTestId("sidebar-toggle-archived"));
+      await waitFor(() => expect(renderedRows()).toBe(12));
+      expect(queryByTestId(SENTINEL)).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("gives each project group its own page and a control that opens the rest", async () => {
+    const THIRD_ROOT = "C:\\Users\\example\\workspace\\lvis-project\\third-app";
+    const conversations = [
+      ...manyConversations(9, "프로젝트", { projectRoot: OTHER_ROOT, projectName: "other-app" }),
+      ...manyConversations(9, "이웃", { projectRoot: THIRD_ROOT, projectName: "third-app" }),
+    ];
+    const otherRows = conversations.filter((session) => session.projectRoot === OTHER_ROOT);
+    const thirdRows = conversations.filter((session) => session.projectRoot === THIRD_ROOT);
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      sessions: conversations,
+      currentSessionId: "프로젝트-0",
+      projects: [
+        {
+          projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\lvis-app",
+          projectName: "lvis-app",
+          isDefault: true,
+        },
+        { projectRoot: OTHER_ROOT, projectName: "other-app" },
+        { projectRoot: THIRD_ROOT, projectName: "third-app" },
+      ],
+    });
+    const moreId = "sidebar-project-sessions-more-C-Users-example-workspace-lvis-project-other-app";
+    try {
+      activateTab(getByTestId("sidebar-tab-projects"));
+
+      // Every group shows its first page, so the tab stays an OVERVIEW of the
+      // projects instead of one group running long enough to push its siblings
+      // below the fold.
+      await waitFor(() => expect(countRenderedRows(otherRows, queryByTestId)).toBe(6));
+      expect(countRenderedRows(thirdRows, queryByTestId)).toBe(6);
+
+      // The rest is behind a real control this time, not the inert label the
+      // capped list used to end with.
+      const more = getByTestId(moreId);
+      expect(more.tagName).toBe("BUTTON");
+      expect(more).toHaveAttribute("aria-expanded", "false");
+      expect(more.textContent).toContain("3");
+
+      fireEvent.click(more);
+      expect(countRenderedRows(otherRows, queryByTestId)).toBe(9);
+      expect(getByTestId(moreId)).toHaveAttribute("aria-expanded", "true");
+      // One group opening says nothing about its neighbours.
+      expect(countRenderedRows(thirdRows, queryByTestId)).toBe(6);
+
+      fireEvent.click(getByTestId(moreId));
+      expect(countRenderedRows(otherRows, queryByTestId)).toBe(6);
+      expect(getByTestId(moreId)).toHaveAttribute("aria-expanded", "false");
     } finally {
       restore();
     }

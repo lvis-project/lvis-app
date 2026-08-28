@@ -40,11 +40,20 @@ if (typeof (vi as { unstubAllGlobals?: unknown }).unstubAllGlobals !== "function
   };
 }
 
+const liveIntersectionObservers = new Set<TestIntersectionObserver>();
+/**
+ * Each target's last reported intersection, which is what makes this stub model
+ * the real contract rather than a message bus: a browser hands a NEW observer
+ * the target's CURRENT state, so an observer built over a still-visible element
+ * fires again on its own. Without that, code whose observer must be rebuilt to
+ * keep going looks correct under test and stalls in the app.
+ */
+const intersectionStates = new Map<Element, boolean>();
+
 afterEach(() => {
   cleanup();
+  intersectionStates.clear();
 });
-
-const liveIntersectionObservers = new Set<TestIntersectionObserver>();
 
 /**
  * jsdom lays nothing out, so a real IntersectionObserver would never report an
@@ -73,6 +82,12 @@ class TestIntersectionObserver implements IntersectionObserver {
 
   observe(target: Element): void {
     this.targets.add(target);
+    // The browser reports the target's current state to a newly observing
+    // observer, asynchronously — so this delivery is queued, not immediate,
+    // exactly as the real one arrives after the caller's own frame.
+    queueMicrotask(() => {
+      this.deliver(target, intersectionStates.get(target) ?? false);
+    });
   }
 
   unobserve(target: Element): void {
@@ -111,8 +126,13 @@ class TestIntersectionObserver implements IntersectionObserver {
  * Report `target` as having scrolled into (or out of) its observer's root.
  * Returns the number of observers that were watching it, so a test can assert
  * that the element it picked is actually observed.
+ *
+ * The state STICKS: an element left intersecting stays intersecting for every
+ * observer that starts watching it later, which is how the browser behaves and
+ * what lets a test drive a scroll ONCE and watch the consequences play out.
  */
 export function triggerIntersection(target: Element, isIntersecting = true): number {
+  intersectionStates.set(target, isIntersecting);
   let delivered = 0;
   for (const observer of [...liveIntersectionObservers]) {
     if (observer.deliver(target, isIntersecting)) delivered += 1;
