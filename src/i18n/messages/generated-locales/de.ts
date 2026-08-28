@@ -2526,7 +2526,6 @@ export const deMessages: Record<string, string> = {
   "sidebar.justNow": "jetzt",
   "sidebar.marketplace": "Marktplatz",
   "sidebar.minutesAgo": "{count} Min.",
-  "sidebar.moreSessions": "{count} weitere",
   "sidebar.newProjectChat": "Neuer Chat in {project}",
   "sidebar.noProjectSessions": "Keine aktuellen Unterhaltungen",
   "sidebar.projectsLabel": "Projekte",

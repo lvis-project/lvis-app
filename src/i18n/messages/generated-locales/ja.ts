@@ -2539,7 +2539,6 @@ export const jaMessages: Record<string, string> = {
   "sidebar.justNow": "今",
   "sidebar.marketplace": "市場",
   "sidebar.minutesAgo": "{count}m",
-  "sidebar.moreSessions": "{count} 詳細",
   "sidebar.newProjectChat": "{project} の新しいチャット",
   "sidebar.noProjectSessions": "最近の会話はありません",
   "sidebar.pinConversation": "会話をピン留めする",

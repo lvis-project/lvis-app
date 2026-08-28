@@ -2539,7 +2539,6 @@ export const zhMessages: Record<string, string> = {
   "sidebar.justNow": "现在",
   "sidebar.marketplace": "市场",
   "sidebar.minutesAgo": "{count}m",
-  "sidebar.moreSessions": "{count} 更多",
   "sidebar.newProjectChat": "{project} 中的新聊天",
   "sidebar.noProjectSessions": "没有最近的对话",
   "sidebar.pinConversation": "固定对话",

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import "../../../../../test/renderer/setup.js";
+import { triggerIntersection } from "../../../../../test/renderer/setup.js";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
@@ -1024,5 +1024,98 @@ describe("Sidebar current-row scoping", () => {
       onPlugin.getByTestId("sidebar-session-sess-1").getAttribute("aria-current"),
     ).toBeNull();
     onPlugin.restore();
+  });
+});
+
+describe("Sidebar conversation reveal on scroll", () => {
+  const OTHER_ROOT = "C:\\Users\\example\\workspace\\lvis-project\\other-app";
+
+  /** How many of `conversations` currently have a row in the sidebar. */
+  function countRenderedRows(
+    conversations: SessionSummary[],
+    queryByTestId: (id: string) => HTMLElement | null,
+  ): number {
+    return conversations.filter((session) => queryByTestId(`sidebar-session-${session.id}`)).length;
+  }
+
+  function manyConversations(count: number, prefix: string, projectRoot?: string): SessionSummary[] {
+    return Array.from({ length: count }, (_unused, index) => ({
+      id: `${prefix}-${index}`,
+      title: `${prefix} 대화 ${index}`,
+      modifiedAt: new Date(Date.now() - index * 60_000).toISOString(),
+      sessionKind: "main" as const,
+      ...(projectRoot ? { projectRoot, projectName: "other-app" } : {}),
+    }));
+  }
+
+  it("reveals the ungrouped list a page at a time as the sentinel reaches the scroller", async () => {
+    const conversations = manyConversations(15, "일반");
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      sessions: conversations,
+      currentSessionId: "일반-0",
+    });
+    try {
+      const renderedRows = () => countRenderedRows(conversations, queryByTestId);
+
+      // One page up front — the rest is not rendered yet, and nothing claims
+      // otherwise: the old capped list ended in an inert "N more" label.
+      expect(renderedRows()).toBe(6);
+
+      // The sentinel is what asks for the next page, and it must actually be
+      // observed — an unobserved sentinel would silently reveal nothing.
+      act(() => {
+        expect(triggerIntersection(getByTestId("sidebar-unassigned-sessions-sentinel"))).toBe(1);
+      });
+      await waitFor(() => expect(renderedRows()).toBe(12));
+
+      act(() => {
+        triggerIntersection(getByTestId("sidebar-unassigned-sessions-sentinel"));
+      });
+      await waitFor(() => expect(renderedRows()).toBe(15));
+
+      // Everything is on screen, so there is nothing left to ask for.
+      expect(queryByTestId("sidebar-unassigned-sessions-sentinel")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("gives each project group its own reveal window on the Projects tab", async () => {
+    const conversations = manyConversations(9, "프로젝트", OTHER_ROOT);
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      sessions: conversations,
+      currentSessionId: "프로젝트-0",
+    });
+    const sentinelId = "sidebar-project-sessions-sentinel-C-Users-example-workspace-lvis-project-other-app";
+    try {
+      const renderedRows = () => countRenderedRows(conversations, queryByTestId);
+
+      activateTab(getByTestId("sidebar-tab-projects"));
+      await waitFor(() => expect(renderedRows()).toBe(6));
+
+      act(() => {
+        expect(triggerIntersection(getByTestId(sentinelId))).toBe(1);
+      });
+      await waitFor(() => expect(renderedRows()).toBe(9));
+      expect(queryByTestId(sentinelId)).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders a short list whole, with no sentinel to scroll toward", () => {
+    const conversations = manyConversations(4, "짧은");
+    const { queryByTestId, restore } = renderSidebar({
+      sessions: conversations,
+      currentSessionId: "짧은-0",
+    });
+    try {
+      for (const session of conversations) {
+        expect(queryByTestId(`sidebar-session-${session.id}`)).toBeTruthy();
+      }
+      expect(queryByTestId("sidebar-unassigned-sessions-sentinel")).toBeNull();
+    } finally {
+      restore();
+    }
   });
 });

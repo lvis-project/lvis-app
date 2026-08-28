@@ -2547,7 +2547,6 @@ export const esMessages: Record<string, string> = {
   "sidebar.justNow": "ahora",
   "sidebar.marketplace": "Mercado",
   "sidebar.minutesAgo": "{count} min",
-  "sidebar.moreSessions": "{count} más",
   "sidebar.newProjectChat": "Nuevo chat en {project}",
   "sidebar.noProjectSessions": "No hay conversaciones recientes",
   "sidebar.projectsLabel": "Proyectos",
