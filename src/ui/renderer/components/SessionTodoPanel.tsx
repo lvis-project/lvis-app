@@ -107,6 +107,10 @@ export function SessionTodoPanel({
 
   const refresh = useCallback(async () => {
     const requestedSessionId = sessionId;
+    // Before a tile holds a conversation there is nothing to list, and the
+    // channel names its session or nothing at all — main has no "current
+    // session" to resolve an unnamed read against.
+    if (!requestedSessionId) return;
     const list = await api.listSessionTodos(requestedSessionId);
     if (requestedSessionId !== latestSessionIdRef.current) {
       return;
@@ -176,6 +180,7 @@ export function SessionTodoPanel({
   const activePulse = reduceMotion ? "" : "animate-pulse";
 
   const handleDismiss = async () => {
+    if (!sessionId) return;
     try {
       await api.clearSessionTodos(sessionId);
     } catch (err) {
