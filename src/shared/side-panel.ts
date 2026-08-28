@@ -10,7 +10,17 @@
  * floor. 448px == 28rem.
  */
 export const SIDE_PANEL_MIN_WIDTH = 448;
-export const SIDE_PANEL_DEFAULT_WIDTH = 448;
+/**
+ * The panel is a raised card inside its tile — the floating sidebar's own
+ * shape — with 8px of air on each side. What a tile reserves for it, and what
+ * `sidePanelWidth` persists, is the card plus that air; while a tile can hold
+ * the reserve the card itself never drops under `SIDE_PANEL_MIN_WIDTH`, and a
+ * tile narrower than that gives the card all of itself but the air.
+ */
+const SIDE_PANEL_CARD_INSET = 16;
+export const SIDE_PANEL_MIN_RESERVE = SIDE_PANEL_MIN_WIDTH + SIDE_PANEL_CARD_INSET;
+/** The reserve with no width persisted: the card at its floor. */
+export const SIDE_PANEL_DEFAULT_WIDTH = SIDE_PANEL_MIN_WIDTH + SIDE_PANEL_CARD_INSET;
 
 /**
  * Primary (left) navigation sidebar width geometry. The sidebar is a floating
@@ -77,7 +87,7 @@ export function clampSidePanelSplitPercent(value: number): number {
  */
 export function normalizeSidePanelWidth(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(value));
+  return Math.max(SIDE_PANEL_MIN_RESERVE, Math.round(value));
 }
 
 export function normalizeSidebarWidth(value: unknown): number | undefined {

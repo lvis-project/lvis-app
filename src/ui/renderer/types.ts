@@ -336,8 +336,8 @@ export type AppSettings = {
     font?: {
       /** `"system"` = HOST_FONT_STACK default; otherwise a validated raw stack. */
       family?: "system" | string;
-      /** Multiplier on `1rem` base. Allowed: 0.875 / 1 / 1.125 / 1.25. */
-      sizeScale?: 0.875 | 1 | 1.125 | 1.25;
+      /** Multiplier on `1rem` base. Allowed: 0.75 / 0.875 / 1 / 1.125. */
+      sizeScale?: 0.75 | 0.875 | 1 | 1.125;
     };
   };
   /** §B1 — external URL viewer policy (in-app vs system browser). */

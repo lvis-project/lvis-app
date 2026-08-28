@@ -902,6 +902,11 @@ function normalizeAppearanceFont(input: unknown): AppearanceFontSettings | undef
   if (typeof o.sizeScale === "number"
     && (FONT_SIZE_SCALE_VALUES as readonly number[]).includes(o.sizeScale)) {
     out.sizeScale = o.sizeScale as FontSizeScale;
+  } else if (o.sizeScale === 1.25) {
+    // The top step of the ladder before it moved down one (0.875–1.25). A
+    // profile that chose the largest size keeps the largest size rather than
+    // landing on the default because its number fell off the ladder.
+    out.sizeScale = FONT_SIZE_SCALE_VALUES[FONT_SIZE_SCALE_VALUES.length - 1]!;
   }
   // Empty object → treat as undefined so defaults serialize cleanly.
   return Object.keys(out).length > 0 ? out : undefined;

@@ -1753,10 +1753,11 @@
    * use `rem` units relative to the root element — scale proportionally with
    * the user's preference. A `body { font-size: calc(1rem * …) }` rule has no
    * effect on `rem`-based utilities because `rem` always resolves against the
-   * `html` root, not `body`. The default `var(…, 1)` keeps the base 16px
-   * unchanged when no scale override is set. */
+   * `html` root, not `body`. The fallback is `FONT_SIZE_SCALE_DEFAULT`
+   * (`src/shared/appearance-font.ts`): the standard step of the size ladder,
+   * one under the browser's 16px, applied when no override is persisted. */
   html {
-    font-size: calc(1rem * var(--lvis-font-size-scale, 1));
+    font-size: calc(1rem * var(--lvis-font-size-scale, 0.875));
   }
   body {
     @apply bg-background text-foreground;

@@ -3,7 +3,7 @@ import {
   type ReactNode, type RefObject,
 } from "react";
 import {
-  Columns2, Download, PanelBottomClose, PanelBottomOpen,
+  Columns2, Download, Maximize2, Minimize2, PanelBottomClose, PanelBottomOpen,
   Pin, Upload, X,
 } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
@@ -114,6 +114,12 @@ export interface ChatGroupFrameProps {
   /** Close this group. Absent on the last one — a workspace with no group is
    *  not a state the user can get back out of. */
   onClose?: () => void;
+  /**
+   * Show only this group, or give the others their space back. Absent while
+   * the group is alone: with nothing to hide, the control would do nothing.
+   */
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
   /** Raised when anything inside the group is interacted with, so the frame
    *  can take focus. */
   onFocus?: () => void;
@@ -138,29 +144,6 @@ export function useChatGroupHeaderSlot(): HTMLElement | null {
   return useContext(ChatGroupHeaderSlotContext);
 }
 
-/**
- * The work panel's share of the header.
- *
- * The panel is a COLUMN of the group, so the header line above it belongs to
- * the panel the same way the rest of the line belongs to the conversation —
- * one band across the group, split where the columns split. That is why the
- * panel has no title row of its own: its tabs ARE its header.
- *
- * The panel reports its own width up so the band can match it; the frame owns
- * the width because the toggle that closes the panel has to sit inside the
- * band even when there is no panel to portal anything into it.
- */
-export interface ChatGroupPanelBand {
-  slot: HTMLElement | null;
-  setWidth: (px: number | null) => void;
-}
-
-const ChatGroupPanelBandContext = createContext<ChatGroupPanelBand | null>(null);
-
-export function useChatGroupPanelBand(): ChatGroupPanelBand | null {
-  return useContext(ChatGroupPanelBandContext);
-}
-
 export function ChatGroupFrame({
   title,
   actions,
@@ -171,17 +154,13 @@ export function ChatGroupFrame({
   onSessionDrop,
   canSplit,
   onClose,
+  maximized = false,
+  onToggleMaximize,
   onFocus,
   children,
 }: ChatGroupFrameProps) {
   const { t } = useTranslation();
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
-  const [panelSlot, setPanelSlot] = useState<HTMLDivElement | null>(null);
-  const [panelBandWidth, setPanelBandWidth] = useState<number | null>(null);
-  const panelBand = useMemo<ChatGroupPanelBand>(
-    () => ({ slot: panelSlot, setWidth: setPanelBandWidth }),
-    [panelSlot],
-  );
   const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
 
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -318,27 +297,10 @@ export function ChatGroupFrame({
             <TooltipContent side="bottom">{t("chatGroup.split")}</TooltipContent>
           </Tooltip>
         ) : null}
-        {/* The panel's share of the header line: its tabs on the left, the
-            control that closes it on the right, sized to the panel column so
-            the divider between them is ONE line from the header to the bottom
-            of the group. */}
-        <div
-          data-testid="chat-group-panel-band"
-          className={[
-            "flex h-full shrink-0 items-center gap-1",
-            // `-mr-2` cancels the header's own right padding so the band's
-            // right edge is the GROUP's inner edge — the same edge the panel
-            // column ends on. Without it the band sits 8px inboard and its
-            // divider misses the column's by exactly that much.
-            panelBandWidth === null ? "" : "-mr-2 border-l border-border/(--opacity-half) pl-2 pr-2",
-          ].join(" ")}
-          style={panelBandWidth === null ? undefined : { width: `${panelBandWidth}px` }}
-        >
-          <div
-            ref={setPanelSlot}
-            className="flex h-full min-w-0 flex-1 items-center overflow-hidden"
-            data-testid="chat-group-panel-slot"
-          />
+        {/* Trailing cluster: the controls that act on this GROUP as a tile —
+            its work panel, its share of the area, its presence. The panel's
+            own tabs live on the panel card, not here. */}
+        <div className="flex h-full shrink-0 items-center gap-1">
         {/* The work panel is per-GROUP. It shows what THIS conversation is
             doing, so a single window-level toggle could only ever be right for
             one of the groups on screen. */}
@@ -359,6 +321,25 @@ export function ChatGroupFrame({
           </TooltipTrigger>
           <TooltipContent side="bottom">{panelLabel}</TooltipContent>
         </Tooltip>
+        {onToggleMaximize ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={HEADER_BUTTON_CLASS}
+                onClick={onToggleMaximize}
+                title={maximized ? t("chatGroup.restore") : t("chatGroup.maximize")}
+                aria-label={maximized ? t("chatGroup.restore") : t("chatGroup.maximize")}
+                aria-pressed={maximized}
+                data-testid="chat-group-maximize"
+              >
+                {maximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{maximized ? t("chatGroup.restore") : t("chatGroup.maximize")}</TooltipContent>
+          </Tooltip>
+        ) : null}
         {onClose ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -383,9 +364,7 @@ export function ChatGroupFrame({
           copy of it inside the frame said the same thing twice and cost the
           transcript the width to say it. */}
       <ChatGroupHeaderSlotContext.Provider value={headerSlot}>
-        <ChatGroupPanelBandContext.Provider value={panelBand}>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-        </ChatGroupPanelBandContext.Provider>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
       </ChatGroupHeaderSlotContext.Provider>
       {dropTarget ? (
         <div
@@ -462,6 +441,9 @@ export function useChatGroups(appMode?: "chat" | "work") {
   const [tree, setTree] = useState<ChatGroupNode>(() => leaf(MAIN_CHAT_GROUP_ID));
   const [panelOpenIds, setPanelOpenIds] = useState<readonly string[]>([]);
   const [focusedId, setFocusedId] = useState(MAIN_CHAT_GROUP_ID);
+  // The one tile shown alone, if any. A view choice, like chat mode's: the
+  // others keep their conversations and their places until restored.
+  const [maximizedId, setMaximizedId] = useState<string | null>(null);
   // Monotonic, so a closed tile's id is never reused within this renderer.
   // Main-process loops are keyed by this id, and reusing one would hand a
   // new tile the previous tile's live history. (A reload starts the count
@@ -490,6 +472,8 @@ export function useChatGroups(appMode?: "chat" | "work") {
     nextGroupIndex.current += 1;
     setTree((current) => splitLeaf(current, targetGroupId, edge, id));
     setFocusedId(id);
+    // A tile added behind a maximized one would be a tile nobody can see.
+    setMaximizedId(null);
     return id;
   }, [tree]);
 
@@ -527,24 +511,34 @@ export function useChatGroups(appMode?: "chat" | "work") {
     dropOnEdge(target.chatGroupId, size.width >= size.height ? "right" : "bottom");
   }, [dropOnEdge, tree]);
 
+  // Any tile but the last can go, the primary included: once split, the
+  // primary is one tile among the others to the user, and a close that works
+  // on every tile but one reads as a bug on that one. Its loop stays — main
+  // gives it a blank conversation on release rather than tearing it down.
   const close = useCallback((id: string) => {
-    // The primary group is the window's conversation. Closing it would leave
-    // no tile that the session list, resume, and restore all address.
-    if (id === MAIN_CHAT_GROUP_ID) return;
-    setTree((current) => {
-      const next = closeLeaf(current, id);
-      if (next === current) return current;
-      const survivors = leafIds(next);
-      setFocusedId((focused) => (survivors.includes(focused) ? focused : survivors[0]!));
-      return next;
-    });
+    const next = closeLeaf(tree, id);
+    if (next === tree) return;
+    const survivors = leafIds(next);
+    setTree(next);
+    setFocusedId((focused) => (survivors.includes(focused) ? focused : survivors[0]!));
+    setMaximizedId((current) => (current === id ? null : current));
     setPanelOpenIds((current) => current.filter((each) => each !== id));
+  }, [tree]);
+
+  const toggleMaximize = useCallback((id: string) => {
+    setMaximizedId((current) => (current === id ? null : id));
+    setFocusedId(id);
   }, []);
 
   // Chat mode collapses to the focused tile rather than closing the others:
   // switching modes is a view change, and losing a conversation to it would
-  // make the toggle destructive.
-  const visibleTree = appMode === "chat" ? leaf(focusedId) : tree;
+  // make the toggle destructive. Maximizing is the same kind of choice, made
+  // in work mode; chat mode's own rule wins there, and since maximizing also
+  // focuses the tile the two agree on which one that is. `maximizedId` is
+  // always a tile the tree holds — closing that tile and adding another both
+  // clear it — so it is shown without a second check.
+  const shownAlone = appMode === "chat" ? focusedId : maximizedId;
+  const visibleTree: ChatGroupNode = shownAlone === null ? tree : leaf(shownAlone);
   const groups = useMemo<ChatGroupState[]>(
     () => layoutBoxes(visibleTree).map((box) => ({
       id: box.chatGroupId,
@@ -554,8 +548,15 @@ export function useChatGroups(appMode?: "chat" | "work") {
     // `visibleTree` is rebuilt each render in chat mode, so the tree and the
     // mode are the honest dependencies here, not the derived node.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tree, appMode, focusedId, panelOpenIds],
+    [tree, appMode, focusedId, maximizedId, panelOpenIds],
   );
+
+  // Once split, every tile can be closed and any one can be shown alone —
+  // even while one is: the tree, not the view, says how many there are. Not
+  // in chat mode, though: it shows one tile and nothing of the others, so a
+  // close there would swap in a conversation the user has no way to expect.
+  const closable = appMode !== "chat" && countLeaves(tree) > 1;
+  const canMaximize = appMode !== "chat" && countLeaves(tree) > 1;
 
   // Both halves can serve MAX_CHAT_GROUPS conversations now: main gives every
   // group its own ConversationLoop and labels every stream frame, and each tile
@@ -567,7 +568,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
   const gutters = useMemo(
     () => layoutGutters(visibleTree),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tree, appMode, focusedId],
+    [tree, appMode, focusedId, maximizedId],
   );
 
   const resize = useCallback((gutter: Pick<ChatGroupGutter, "path" | "index">, leadingShare: number) => {
@@ -601,6 +602,10 @@ export function useChatGroups(appMode?: "chat" | "work") {
     resize,
     previewResize,
     close,
+    closable,
+    canMaximize,
+    maximizedId,
+    toggleMaximize,
   };
 }
 

@@ -31,7 +31,6 @@ import type { ConversationRowActions, ProjectRowActions } from "./components/Sid
 import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups } from "./components/ChatGroupFrame.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
-import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
@@ -1440,9 +1439,11 @@ export function App() {
                                               : undefined);
                                           },
                                         } : {})}
-                                        {...(group.id === MAIN_CHAT_GROUP_ID
-                                          ? {}
-                                          : { onClose: () => closeChatGroup(group.id) })}
+                                        {...(chatGroups.closable ? { onClose: () => closeChatGroup(group.id) } : {})}
+                                        {...(chatGroups.canMaximize ? {
+                                          maximized: chatGroups.maximizedId === group.id,
+                                          onToggleMaximize: () => chatGroups.toggleMaximize(group.id),
+                                        } : {})}
                                       >
                                         {content}
                                       </ChatGroupFrame>

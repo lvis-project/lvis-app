@@ -16,14 +16,24 @@
  * Allowed `font.sizeScale` presets — multiplicative on the `1rem` base.
  * Discrete values keep the UI legible at every step (a free slider would let
  * users pick `0.4` and lock themselves out of the settings dialog).
+ *
+ * The ladder sits one step under the browser's 16px: the standard step is
+ * 0.875 (14px root), so the transcript's `text-sm` body reads at ~12px — the
+ * dense scale DESIGN.md describes — and "large" is the browser default.
  */
-export const FONT_SIZE_SCALE_VALUES = [0.875, 1, 1.125, 1.25] as const;
+export const FONT_SIZE_SCALE_VALUES = [0.75, 0.875, 1, 1.125] as const;
 export type FontSizeScale = (typeof FONT_SIZE_SCALE_VALUES)[number];
+/**
+ * The scale with no override persisted. `styles.css` repeats this number as
+ * the fallback of `var(--lvis-font-size-scale, …)`, and the settings dialog
+ * shows it as the standard step; the three must agree.
+ */
+export const FONT_SIZE_SCALE_DEFAULT: FontSizeScale = 0.875;
 
 export interface AppearanceFontSettings {
   /** `"system"` = HOST_FONT_STACK default; otherwise a validated raw CSS font-family stack. */
   family?: "system" | string;
-  /** Multiplier on `1rem` base. Allowed: 0.875 / 1 / 1.125 / 1.25. */
+  /** Multiplier on `1rem` base. Allowed: 0.75 / 0.875 / 1 / 1.125. */
   sizeScale?: FontSizeScale;
 }
 

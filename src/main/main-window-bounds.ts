@@ -1,4 +1,4 @@
-import { SIDE_PANEL_MIN_WIDTH } from "../shared/side-panel.js";
+import { SIDE_PANEL_MIN_RESERVE } from "../shared/side-panel.js";
 
 export type WorkAreaBounds = {
   x: number;
@@ -15,7 +15,7 @@ export const MAIN_WINDOW_MIN_HEIGHT = 640;
 // the panel's MINIMUM width (the drag handle cannot go below it) so the window
 // always has room for at least a collapsed panel; widening past it reflows the
 // chat column rather than growing the window. SoT: src/shared/side-panel.ts.
-export const CHAT_SIDE_PANEL_WIDTH = SIDE_PANEL_MIN_WIDTH;
+export const CHAT_SIDE_PANEL_WIDTH = SIDE_PANEL_MIN_RESERVE;
 const MAIN_WINDOW_TOP_GAP = 24;
 const MAIN_WINDOW_BOTTOM_GAP = 24;
 const MAIN_WINDOW_RIGHT_GAP = 10;

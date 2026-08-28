@@ -2577,6 +2577,8 @@ export const jaMessages: Record<string, string> = {
   "chatGroup.hideSidebar": "会話一覧を非表示",
   "chatGroup.split": "チャット領域を分割",
   "chatGroup.close": "チャット領域を閉じる",
+  "chatGroup.maximize": "このチャットのみ表示",
+  "chatGroup.restore": "すべてのチャット領域を表示",
   "chatGroup.resize": "チャット領域のサイズを変更",
   "chatGroup.sideChatTitle": "サイドチャット",
   "sidebar.unpinProject": "プロジェクトの固定を解除する",

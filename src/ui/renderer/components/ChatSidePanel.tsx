@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { createPortal } from "react-dom";
 import { cn } from "../../../lib/utils.js";
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
@@ -23,9 +22,8 @@ import {
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
+import { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_RESERVE } from "../../../shared/side-panel.js";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
-import { useChatGroupPanelBand } from "./ChatGroupFrame.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
@@ -593,7 +591,6 @@ export interface ChatSidePanelProps {
   files: WorkspaceFileItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onClose: () => void;
   /**
    * Workspace-tab store, lifted out of this component (see
    * `preview/workspace-tabs.ts`). ChatSidePanel is unmounted whenever the rail
@@ -623,14 +620,6 @@ export interface ChatSidePanelProps {
    * overflowing into the chat column.
    */
   resizeElementRef?: { current: HTMLElement | null };
-  /**
-   * A tile too narrow for two columns floats the panel over its transcript.
-   * Floating, the panel is self-contained: its tabs and close control stay
-   * inside it, and it reports no column width to the group header band —
-   * there is no column for the band to line up with, and a band sized to a
-   * floating panel would push the header's own controls off the tile.
-   */
-  floating?: boolean;
   className?: string;
 }
 
@@ -641,28 +630,17 @@ export function ChatSidePanel({
   files,
   selectedId,
   onSelect,
-  onClose,
   workspaceTabs,
   subAgentSpawns,
   width,
-  minWidth = SIDE_PANEL_MIN_WIDTH,
+  minWidth = SIDE_PANEL_MIN_RESERVE,
   maxWidth = Number.POSITIVE_INFINITY,
   onWidthChange,
   onWidthCommit,
   resizeElementRef,
-  floating = false,
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
-  // The group frame owns the header band; a docked panel reports its column
-  // width so the band's divider lands on that column's own edge.
-  const groupBand = useChatGroupPanelBand();
-  const panelBand = floating ? null : groupBand;
-  useEffect(() => {
-    if (!panelBand) return;
-    panelBand.setWidth(width);
-    return () => panelBand.setWidth(null);
-  }, [panelBand, width]);
 
   // ─── Tab-bar horizontal scroll / drag-pan (diagnosis ②) ──────────────────
   const tabScrollElRef = useRef<HTMLDivElement | null>(null);
@@ -807,14 +785,11 @@ export function ChatSidePanel({
     else if (r.right > c.right) el.scrollLeft += (r.right - c.right) + 8;
   }, [activeTab, tabs.length]);
 
-  // The panel's tabs ARE its header. Docked, they render in the group frame's
-  // band so the header line runs unbroken across both columns; a floating
-  // panel has no band of its own, so they render in place.
+  // The panel's tabs ARE its header: the card carries them itself, in every
+  // mode, so the group header above stays the conversation's line alone.
   const tabStripContent = (
     <div
-      className={panelBand?.slot
-        ? "flex h-full min-w-0 flex-1 items-center gap-1"
-        : "flex min-w-0 shrink-0 items-center gap-2 border-b px-2 py-1"}
+      className="flex min-w-0 shrink-0 items-center gap-2 border-b px-2 py-1"
       data-testid="chat-side-panel-tab-strip"
     >
           <div
@@ -893,47 +868,18 @@ export function ChatSidePanel({
           </div>
           <div className="flex shrink-0 items-center gap-1 border-l pl-2" data-testid="chat-side-panel-tab-actions">
             <WorkspaceLauncherMenu onOpen={addTab} />
-            {/* Docked, the group header band already carries the control that
-                closes this column. A floating panel has no band, so it keeps
-                its own. */}
-            {panelBand?.slot ? null : (
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                title={t("chatPreviewRail.close")}
-                aria-label={t("chatPreviewRail.close")}
-                onClick={onClose}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            )}
           </div>
     </div>
   );
-  const tabStrip = panelBand?.slot
-    ? createPortal(tabStripContent, panelBand.slot)
-    : tabStripContent;
 
   return (
     <aside
       data-testid="chat-side-panel"
-      // `width` is the complete docked flex reservation. The floating card's
-      // `mr-2` consumes 0.5rem of that reservation instead of overflowing it.
-      style={{ width: `${width}px` }}
+      // A raised card — the floating sidebar's own recipe — filling the box
+      // its tile reserves for it (the wrapper carries the card's insets), so a
+      // docked panel and a floating one are one surface at two positions.
       className={[
-        "min-h-0 min-w-0 bg-card backdrop-blur",
-        floating
-          // Floating: a raised card, the floating sidebar's own recipe, so the
-          // two overlays a window can show read as one kind of surface.
-          ? "lvis-surface-raised overflow-hidden rounded-2xl"
-          // Docked: a COLUMN of the chat group, not a card inside it. Its
-          // header segment lives in the group's header band, so the seam
-          // between the two columns has to be one unbroken line from that band
-          // to the bottom of the group; a card with its own margins and
-          // rounding would break the line and start the panel BELOW the
-          // header instead of level with it.
-          : "border-l border-border/(--opacity-half)",
+        "lvis-surface-raised h-full w-full min-h-0 min-w-0 overflow-hidden rounded-2xl bg-card backdrop-blur",
         className,
       ].join(" ")}
     >
@@ -941,7 +887,7 @@ export function ChatSidePanel({
         width={width}
         edge="start"
         // The card clips its overflow, so its handle sits inside the edge.
-        variant={floating ? "inset" : "straddle"}
+        variant="inset"
         onWidthChange={onWidthChange}
         onWidthCommit={onWidthCommit}
         min={minWidth}
@@ -955,7 +901,7 @@ export function ChatSidePanel({
         data-testid="chat-preview-rail"
         className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden"
       >
-        {tabStrip}
+        {tabStripContent}
 
         <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab?.kind} data-active-tab-mode={activeTab?.mode}>
           {activeTab == null ? (
