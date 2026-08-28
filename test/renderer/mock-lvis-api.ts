@@ -31,6 +31,9 @@ type HistoryMock = {
   sessionId?: string;
   sessionTitle?: string;
   sessionKind?: "main" | "routine";
+  projectRoot?: string;
+  projectName?: string;
+  restoredSubAgents?: unknown[];
   messages: unknown[];
 };
 
