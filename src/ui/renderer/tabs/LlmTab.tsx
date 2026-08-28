@@ -1279,7 +1279,17 @@ export function LlmTab(props: LlmTabProps) {
     void api.updateSettings({ llm: { pinnedModels: next } });
   }, [api, pinnedModels]);
 
-  const [providerConfigOpen, setProviderConfigOpen] = useState(false);
+  /**
+   * The row whose credential form is open, by row id.
+   *
+   * It used to be a bare boolean, which meant "open" and "which row" were two
+   * different questions answered by two different pieces of state: the flag
+   * here, and the ambient vendor over in the parent. Opening a row set the flag
+   * immediately but moved the vendor through the parent, so between those two
+   * renders the form hung under whichever row the OLD vendor still matched —
+   * a person clicking one provider saw a form appear under another.
+   */
+  const [openRowId, setOpenRowId] = useState<string | null>(null);
   const [addedRowIds, setAddedRowIds] = useState<readonly string[]>([]);
   /** The row a click just revealed, until it has been scrolled to and focused. */
   const [rowToReveal, setRowToReveal] = useState<string | null>(null);
@@ -1701,10 +1711,28 @@ export function LlmTab(props: LlmTabProps) {
     setRowToReveal(rowId);
   }, []);
 
-  const openApiConfig = useCallback((vendorId: string) => {
+  const openApiConfig = useCallback((rowId: string, vendorId: string) => {
     if (vendorId !== vendor) handleVendorChange(vendorId);
-    setProviderConfigOpen(true);
+    setOpenRowId(rowId);
   }, [handleVendorChange, vendor]);
+
+  /**
+   * Whether this row is showing its credential form.
+   *
+   * Both halves are required. `openRowId` is the row the user asked for;
+   * `formTargetsRow` is whether the fields BELOW — the key, the base URL, the
+   * saved-block comparison — have actually caught up to it. While the vendor is
+   * still moving, no row claims the form, which is the honest state: it belongs
+   * to a provider that is not on screen yet.
+   */
+  const rowFormOpen = useCallback(
+    (row: ProviderConnection): boolean => openRowId === row.id && formTargetsRow(row),
+    [openRowId, formTargetsRow],
+  );
+
+  /** Which row is actually showing a form right now — the signal the reveal
+   *  waits on, since the form arrives a render after the row does. */
+  const openFormRowId = visibleRows.find((row) => rowFormOpen(row))?.id ?? null;
 
   // A row that was just revealed has to be findable: the list can already be
   // longer than the panel, and a card that appears below the fold reads as a
@@ -1715,23 +1743,40 @@ export function LlmTab(props: LlmTabProps) {
       `[data-provider-row="${rowToReveal}"]`,
     );
     if (!node) return;
+    // The row appears before its form does: opening one moves the vendor
+    // through the parent, and the fields arrive a render later. Consuming the
+    // reveal on the bare row would put the caret on the disclosure button and
+    // leave nothing to move when the endpoint field finally lands, so wait for
+    // the form the reveal was actually asking for.
+    const form = node.querySelector<HTMLElement>(`#${CREDENTIAL_FORM_ID}`);
+    if (openRowId === rowToReveal && !form) return;
     setRowToReveal(null);
     node.scrollIntoView?.({ block: "nearest" });
     const focusTarget = node.querySelector<HTMLElement>('[data-testid="llm-base-url-input"]')
       ?? node.querySelector<HTMLElement>('[data-testid="llm-api-key-input"]')
       ?? node.querySelector<HTMLElement>("button");
     focusTarget?.focus();
-  }, [rowToReveal, visibleRowKey]);
+  }, [openFormRowId, openRowId, rowToReveal, visibleRowKey]);
 
-  // The credential form for whichever provider row is open. One form, because
-  // one vendor is being edited at a time — the row that owns it just moved.
-  const credentialForm = (
+  /**
+   * The credential form for one provider row. One form, because one provider is
+   * edited at a time — but WHICH one is the row's to say.
+   *
+   * Whether the endpoint is locked is read off `row.presetId`, not off the
+   * ambient preset id: a generic provider row has no preset, so it can never be
+   * locked by a preset selection that belongs to some other row.
+   */
+  const credentialFormFor = (row: ProviderConnection) => {
+    const rowPreset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
+    const rowInfo = rowPreset ? providerOptionFromPreset(rowPreset) : getVendorInfo(vendor);
+    const rowEndpointLocked = Boolean(row.presetId);
+    return (
       <div
         className="space-y-3"
         id={CREDENTIAL_FORM_ID}
         data-testid="llm-tab:manual-section"
       >
-        {vendor !== "vertex-ai" && endpointIsUserSupplied(vendor, vendorInfo, endpointLockedToMarketplacePreset) && (
+        {vendor !== "vertex-ai" && endpointIsUserSupplied(vendor, rowInfo, rowEndpointLocked) && (
           <div className="space-y-2">
             <Label className="text-sm font-medium">
               {t("llmTab.endpointBaseUrlLabel")} *
@@ -1740,7 +1785,7 @@ export function LlmTab(props: LlmTabProps) {
               data-testid="llm-base-url-input"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={vendorInfo.baseUrlPlaceholder ?? "https://..."}
+              placeholder={rowInfo.baseUrlPlaceholder ?? "https://..."}
             />
             <p className="text-[11px] text-muted-foreground">
               {t("llmTab.baseUrlDiscardWarning")}
@@ -1832,8 +1877,9 @@ export function LlmTab(props: LlmTabProps) {
             testId="llm-tab:save-providers"
           />
         )}
-        </div>
-  );
+      </div>
+    );
+  };
 
   // Which of this provider's two routes is serving chat right now. The user
   // asked for exactly this: the row says the provider, the badge says the mode.
@@ -1917,7 +1963,7 @@ export function LlmTab(props: LlmTabProps) {
    */
   const apiKeyChip = (row: ProviderConnection) => {
     if (!row.apiVendorId) return null;
-    const isOpen = providerConfigOpen && formTargetsRow(row);
+    const isOpen = rowFormOpen(row);
     return (
       <Button
         type="button"
@@ -1927,10 +1973,10 @@ export function LlmTab(props: LlmTabProps) {
         {...(isOpen ? { "aria-controls": CREDENTIAL_FORM_ID } : {})}
         onClick={() => {
           if (isOpen) {
-            setProviderConfigOpen(false);
+            setOpenRowId(null);
             return;
           }
-          openApiConfig(rowConfigTargetId(row));
+          openApiConfig(row.id, rowConfigTargetId(row));
           // Revealing a form and leaving the caret outside it makes the button
           // look like it did nothing; the reveal effect moves focus in.
           setRowToReveal(row.id);
@@ -1952,7 +1998,7 @@ export function LlmTab(props: LlmTabProps) {
    */
   const unsavedBadge = (row: ProviderConnection) => {
     if (!credentialDirty || !formTargetsRow(row)) return null;
-    if (providerConfigOpen) return null;
+    if (rowFormOpen(row)) return null;
     return (
       <Badge
         variant="outline"
@@ -1994,7 +2040,7 @@ export function LlmTab(props: LlmTabProps) {
           leading={<>{statusChip(row)}{modeBadge(row)}{unsavedBadge(row)}</>}
           subline={connectionSubline(row)}
           authAction={apiKeyChip(row)}
-          {...(providerConfigOpen && formTargetsRow(row) ? { trailing: credentialForm } : {})}
+          {...(rowFormOpen(row) ? { trailing: credentialFormFor(row) } : {})}
         />
       ) : (
         <div
@@ -2008,16 +2054,14 @@ export function LlmTab(props: LlmTabProps) {
           <button
             type="button"
             className="flex w-full min-w-0 items-center gap-2 text-left"
-            aria-expanded={providerConfigOpen && formTargetsRow(row)}
-            {...(providerConfigOpen && formTargetsRow(row)
-              ? { "aria-controls": CREDENTIAL_FORM_ID }
-              : {})}
+            aria-expanded={rowFormOpen(row)}
+            {...(rowFormOpen(row) ? { "aria-controls": CREDENTIAL_FORM_ID } : {})}
             onClick={() => {
-              if (providerConfigOpen && formTargetsRow(row)) {
-                setProviderConfigOpen(false);
+              if (rowFormOpen(row)) {
+                setOpenRowId(null);
                 return;
               }
-              openApiConfig(rowConfigTargetId(row));
+              openApiConfig(row.id, rowConfigTargetId(row));
               setRowToReveal(row.id);
             }}
             data-testid={`llm-tab:connection-toggle:${row.id}`}
@@ -2041,12 +2085,12 @@ export function LlmTab(props: LlmTabProps) {
             {statusChip(row)}
             <ChevronRight
               className={`size-4 shrink-0 text-muted-foreground transition-transform ${
-                providerConfigOpen && row.apiVendorId === vendor ? "rotate-90" : ""
+                rowFormOpen(row) ? "rotate-90" : ""
               }`}
               aria-hidden={true}
             />
           </button>
-          {providerConfigOpen && formTargetsRow(row) ? credentialForm : null}
+          {rowFormOpen(row) ? credentialFormFor(row) : null}
         </div>
       ))}
       <div className="flex flex-wrap items-center gap-2">
@@ -2064,7 +2108,7 @@ export function LlmTab(props: LlmTabProps) {
                 data-testid={`llm-tab:add-provider-item:${row.id}`}
                 onClick={() => {
                   revealRow(row.id);
-                  if (row.apiVendorId) openApiConfig(rowConfigTargetId(row));
+                  if (row.apiVendorId) openApiConfig(row.id, rowConfigTargetId(row));
                 }}
               >
                 {row.label}
@@ -2076,7 +2120,7 @@ export function LlmTab(props: LlmTabProps) {
                 data-testid={`llm-tab:add-provider-item:${option.id}`}
                 onClick={() => {
                   revealRow(option.id);
-                  openApiConfig(option.id);
+                  openApiConfig(option.id, option.id);
                 }}
               >
                 {option.label}

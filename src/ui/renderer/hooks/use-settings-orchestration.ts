@@ -230,15 +230,15 @@ export function useSettingsOrchestration(
       setMemoryCaptureMode(next.features?.memoryCaptureMode ?? "off");
       setSubAgentAutonomousWake(next.features?.subAgentAutonomousWake ?? false);
       setSubAgentMaxRounds(next.chat?.subAgentMaxRounds ?? SUBAGENT_MAX_ROUNDS_DEFAULT);
-      const nextProvider = isLLMVendor(next.llm.provider)
-        ? next.llm.provider
-        : DEFAULT_LLM_VENDOR;
+      // The INSTALLED list is external state and tracks the broadcast. Which
+      // preset the form is pointed at is not: it belongs to the same set of
+      // fields as the vendor, the base URL and the model, which this handler
+      // deliberately leaves alone so a broadcast cannot overwrite what the user
+      // is editing. Deriving it from the PERSISTED provider did exactly that —
+      // a form moved to another provider had its preset rewritten underneath
+      // it on the next unrelated save, which is how a generic provider ended up
+      // wearing a preset's endpoint lock.
       setMarketplaceProviderPresets(next.marketplace?.installedProviderPresets ?? []);
-      setMarketplaceProviderPresetId(
-        nextProvider === "openai-compatible"
-          ? next.llm.marketplaceProviderPresetId ?? ""
-          : "",
-      );
     });
   }, [api]);
 

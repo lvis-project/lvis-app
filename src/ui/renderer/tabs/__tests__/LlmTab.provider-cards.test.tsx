@@ -20,6 +20,9 @@ type MockApi = MockLvisApi;
 /** Stable identity: LlmTab's settings effect keys off this array. */
 const NO_PRESETS: readonly MarketplaceInstalledProviderPreset[] = [];
 
+/** The endpoint the live custom provider is configured with. */
+const CUSTOM_ENDPOINT = "http://10.232.178.100:30000/v1";
+
 function preset(
   providerId: string,
   label: string,
@@ -122,8 +125,8 @@ interface TabProps {
   fallbackOpen?: boolean;
 }
 
-async function renderTab(api: MockApi, props: TabProps = {}) {
-  const result = render(
+function tabTree(api: MockApi, props: TabProps) {
+  return (
     <TooltipProvider>
       <LlmTab
         api={api as never}
@@ -156,13 +159,29 @@ async function renderTab(api: MockApi, props: TabProps = {}) {
         onSave={vi.fn()}
         settingsLoaded={true}
       />
-    </TooltipProvider>,
+    </TooltipProvider>
   );
+}
+
+async function renderTab(api: MockApi, props: TabProps = {}) {
+  const result = render(tabTree(api, props));
   // The tab syncs the active vendor's catalogue on a debounce after mount.
   await act(async () => {
     await Promise.resolve();
   });
-  return result;
+  let current = props;
+  return {
+    ...result,
+    /** Move the props the parent owns — the vendor above all — as a click on
+     *  another provider's card really does. */
+    rerender: async (next: TabProps) => {
+      current = { ...current, ...next };
+      result.rerender(tabTree(api, current));
+      await act(async () => {
+        await Promise.resolve();
+      });
+    },
+  };
 }
 
 /** Radix menus open on pointerdown, not click. */
@@ -481,6 +500,122 @@ describe("LlmTab OpenAI model catalogue", () => {
     expect(screen.getByTestId("llm-tab:api-key-status")).toHaveTextContent(/설정됨|Configured|Set/);
     expect(screen.getByTestId("llm-api-key-input")).toBeInTheDocument();
     expect(screen.getByTestId("llm-tab:manual-section")).toHaveTextContent(/삭제|Delete|Remove/);
+  });
+
+  it("gives a generic openai-compatible row its own endpoint field with the saved value", async () => {
+    // The live shape: the persisted provider is OpenAI, so the form starts
+    // there, and the openai-compatible provider is configured with a custom
+    // endpoint of its own. Clicking its card must show THAT endpoint.
+    const api = makeApi({
+      hasApiKey: storedKeysFor("openai", "openai-compatible"),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: {
+          pinnedModels: [],
+          vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT, model: "qwen3.8-27b-gguf" } },
+          modelListCache: {
+            [["openai-compatible", CUSTOM_ENDPOINT, ""].join("\n")]: {
+              vendor: "openai-compatible",
+              baseUrl: CUSTOM_ENDPOINT,
+              endpoint: `${CUSTOM_ENDPOINT}/models`,
+              models: ["a", "b", "c", "d"],
+              fetchedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        },
+        marketplace: { installedProviderIds: [], installedProviderPresets: [] },
+      }),
+    });
+    installSubscription([codexView()]);
+    // `vendor` is what the parent moves on a click; the harness mirrors that.
+    const { rerender } = await renderTab(api, { vendor: "openai", model: "", hasKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("llm-tab:connection:openai-compatible")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    // Mid-move the form belongs to nobody: it must NOT hang under the row the
+    // ambient vendor still matches, which is how the OpenAI key field used to
+    // appear beside a card the user never opened.
+    expect(screen.queryByTestId("llm-tab:manual-section")).toBeNull();
+
+    await rerender({ vendor: "openai-compatible", baseUrl: CUSTOM_ENDPOINT, model: "qwen3.8-27b-gguf", hasKey: true });
+    const card = screen.getByTestId("llm-tab:connection:openai-compatible");
+    expect(card).toContainElement(screen.getByTestId("llm-tab:manual-section"));
+    expect(screen.getByTestId("llm-base-url-input")).toHaveValue(CUSTOM_ENDPOINT);
+  });
+
+  it("locks the endpoint on a preset row and not on the generic one beside it", async () => {
+    const presets = [preset("acme-gw", "Acme Gateway", "https://acme.example/v1")];
+    const api = makeApi({ hasApiKey: storedKeysFor("openai-compatible") });
+    await renderTab(api, {
+      vendor: "openai-compatible",
+      baseUrl: CUSTOM_ENDPOINT,
+      model: "local-model",
+      marketplaceProviderPresets: presets,
+    });
+
+    // The generic row: no preset, so no lock — the field is offered.
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    expect(screen.getByTestId("llm-base-url-input")).toHaveValue(CUSTOM_ENDPOINT);
+  });
+
+  it("keeps the generic endpoint field through an unrelated settings broadcast", async () => {
+    // A model-list sync persists its cache, which broadcasts settings. That
+    // broadcast must not rewrite which provider the form is editing.
+    const api = makeApi({ hasApiKey: storedKeysFor("openai-compatible") });
+    await renderTab(api, {
+      vendor: "openai-compatible",
+      baseUrl: CUSTOM_ENDPOINT,
+      model: "local-model",
+      marketplaceProviderPresets: [preset("acme-gw", "Acme Gateway", "https://acme.example/v1")],
+    });
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    expect(screen.getByTestId("llm-base-url-input")).toBeInTheDocument();
+
+    const handler = api.onSettingsUpdated.mock.calls.at(-1)?.[0] as ((s: unknown) => void) | undefined;
+    expect(handler).toBeTruthy();
+    await act(async () => {
+      handler!({
+        llm: {
+          provider: "openai-compatible",
+          marketplaceProviderPresetId: "acme-gw",
+          pinnedModels: [],
+          modelListCache: {},
+          vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+        },
+        marketplace: { installedProviderIds: [], installedProviderPresets: [] },
+      });
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("llm-base-url-input")).toHaveValue(CUSTOM_ENDPOINT);
+  });
+
+  it("appends a picked self-hosted provider above the button, with its endpoint focused", async () => {
+    // Ollama is not a built-in, so it is offered only once installed.
+    const api = makeApi({
+      getSettings: vi.fn().mockResolvedValue({
+        llm: { pinnedModels: [], modelListCache: {} },
+        marketplace: { installedProviderIds: ["ollama"], installedProviderPresets: [] },
+      }),
+    });
+    const { rerender } = await renderTab(api, { vendor: "claude", hasKey: false, model: "" });
+
+    // Radix opens the menu on pointerdown; a bare click never renders items.
+    fireEvent.click(screen.getByTestId("llm-tab:add-provider"));
+    expect(screen.queryByTestId("llm-tab:add-provider-item:ollama")).toBeNull();
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:ollama"));
+
+    // Directly above the button that created it.
+    const rows = rowOrder();
+    expect(rows[rows.length - 1]).toBe("ollama");
+
+    // And once the parent moves the vendor, the card offers its endpoint and
+    // the caret is in it.
+    await rerender({ vendor: "ollama", baseUrl: "http://127.0.0.1:11434/v1", model: "llama3" });
+    const field = screen.getByTestId("llm-base-url-input");
+    expect(screen.getByTestId("llm-tab:connection:ollama")).toContainElement(field);
+    expect(field).toHaveFocus();
   });
 
   it("draws no configured row from a handshake that only started", async () => {
