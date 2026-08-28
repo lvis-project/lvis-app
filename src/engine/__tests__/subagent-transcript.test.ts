@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SubAgentTranscriptAccumulator } from "../subagent-transcript.js";
 import type { ToolCallMeta } from "../../tools/executor.js";
 import { resolveMcpUiBackend } from "../../mcp/mcp-ui-backend-resolver.js";
@@ -166,17 +166,25 @@ describe("SubAgentTranscriptAccumulator", () => {
   });
 
   it("leaves the settled round identical to the round-fold-only path", () => {
-    const streamed = new SubAgentTranscriptAccumulator();
-    streamed.onReasoningDelta("partial thou");
-    streamed.onReasoningDelta("ght");
-    streamed.onAssistantRound("thinking about it", "final answer");
+    // Both accumulators stamp `createdAt` from the clock; the comparison is
+    // about shape, so the clock is held still or a millisecond boundary
+    // between the two rounds reads as a difference.
+    vi.useFakeTimers({ now: 1_700_000_000_000 });
+    try {
+      const streamed = new SubAgentTranscriptAccumulator();
+      streamed.onReasoningDelta("partial thou");
+      streamed.onReasoningDelta("ght");
+      streamed.onAssistantRound("thinking about it", "final answer");
 
-    const folded = new SubAgentTranscriptAccumulator();
-    folded.onAssistantRound("thinking about it", "final answer");
+      const folded = new SubAgentTranscriptAccumulator();
+      folded.onAssistantRound("thinking about it", "final answer");
 
-    // Persistence is unchanged by this feature: once the round closes, the
-    // streamed transcript is byte-identical to the one deltas never touched.
-    expect(streamed.snapshot()).toEqual(folded.snapshot());
+      // Persistence is unchanged by this feature: once the round closes, the
+      // streamed transcript is byte-identical to the one deltas never touched.
+      expect(streamed.snapshot()).toEqual(folded.snapshot());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("finalizes a streamed thought even when the round reports none", () => {
