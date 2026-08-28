@@ -39,7 +39,6 @@ import { FloatingRightLane } from "./components/FloatingRightLane.js";
 import { useChatGroupHeaderSlot } from "./components/ChatGroupFrame.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { useContainerNarrow } from "./hooks/use-container-narrow.js";
-import { WorkspaceRailDrawer } from "./components/WorkspaceRailDrawer.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -930,12 +929,17 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           />
         </div>
       ) : null}
-      {isNarrow ? (
-        <WorkspaceRailDrawer
-          open={previewRailVisible}
-          onOpenChange={(open) => {
-            if (!open) onSidePanelOpenChange?.(false);
-          }}
+      {isNarrow && previewRailVisible ? (
+        // A tile too narrow to dock the panel beside its transcript shows the
+        // panel over the transcript, inside the tile. Never a window-level
+        // sheet: four tiles can each have their own panel open, and a modal
+        // over the window would dim the other three and show one panel.
+        <div
+          id="chat-side-panel"
+          data-testid="chat-side-panel-cover"
+          role="region"
+          aria-label={t("chatPreviewRail.title")}
+          className="absolute inset-0 z-40 flex min-h-0 min-w-0 bg-background"
         >
           <ChatSidePanel
             api={api}
@@ -955,7 +959,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
             }}
             className="flex h-full min-h-0 w-full min-w-0"
           />
-        </WorkspaceRailDrawer>
+        </div>
       ) : null}
     </div>
   );

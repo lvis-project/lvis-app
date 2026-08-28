@@ -166,10 +166,14 @@ export function ChatGroupSession({
     [env.activeProject],
   );
 
+  // The tile's conversation, readable by the sub-agent frame filter before
+  // useCurrentSession (below) has run this render.
+  const currentSessionIdRef = useRef("");
+  const ownsSession = useCallback((sessionId: string) => sessionId === currentSessionIdRef.current, []);
   const {
     askQuestions, subAgentSpawns, loadedSkills,
     dismissAskQuestion, resetForNewSession, restoreSubAgentSpawns,
-  } = useWorkflowTools(api);
+  } = useWorkflowTools(api, { ownsSession });
 
   const {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted,
@@ -212,6 +216,7 @@ export function ChatGroupSession({
     freshProject: freshTileProject,
     focusSessionHolder: env.focusChatGroup,
   });
+  currentSessionIdRef.current = currentSessionId;
 
   // A composer draft belongs to the conversation it was typed into. Switching
   // this tile to another session has to drop it, or the next session opens

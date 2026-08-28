@@ -94,22 +94,26 @@ test.describe("workspace rail redesign", () => {
     await expect(page.getByTestId("chat-side-panel-width-splitter")).toBeVisible();
   });
 
-  test("narrow viewport falls back to the modal drawer", async () => {
+  test("a narrow tile shows the panel over its transcript, inside the tile", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
     await page.getByTestId("chat-group-panel-toggle").click();
     await expect(page.getByTestId("chat-side-panel")).toBeVisible();
 
-    // Shrink below the docked threshold → the rail moves into the drawer sheet.
+    // Shrink below the docked threshold → the panel covers the tile's own
+    // transcript; nothing window-level, nothing dimmed.
     await page.setViewportSize({ width: 460, height: 840 });
-    const drawer = page.getByTestId("workspace-rail-drawer");
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByTestId("chat-side-panel")).toBeVisible();
-    // The drawer variant drops the drag handle (the sheet owns width).
+    const cover = page.getByTestId("chat-side-panel-cover");
+    await expect(cover).toBeVisible();
+    await expect(cover.getByTestId("chat-side-panel")).toBeVisible();
+    await expect(page.getByTestId("chat-view-root").getByTestId("chat-side-panel-cover")).toHaveCount(1);
+    await expect(page.getByTestId("workspace-rail-drawer")).toHaveCount(0);
+    await expect(page.getByTestId("workspace-rail-drawer-backdrop")).toHaveCount(0);
+    // The cover variant drops the drag handle (the tile owns width).
     await expect(page.getByTestId("chat-side-panel-width-splitter")).toHaveCount(0);
 
     // Widen again → back to docked.
     await page.setViewportSize({ width: 1400, height: 840 });
-    await expect(page.getByTestId("workspace-rail-drawer")).toHaveCount(0);
+    await expect(page.getByTestId("chat-side-panel-cover")).toHaveCount(0);
     await expect(page.getByTestId("chat-side-panel-width-splitter")).toBeVisible();
   });
 });

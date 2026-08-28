@@ -18,6 +18,12 @@ export type SubAgentRunStatus = "running" | "waiting" | "done" | "error" | "inte
  */
 export interface AgentSpawnEvent<TEntry = unknown> {
   spawnId: string;
+  /**
+   * The conversation that spawned this sub-agent. Every tile receives every
+   * frame on one channel; a tile keeps only the frames of the conversation it
+   * is showing. Absent only when the tool ran without a session in context.
+   */
+  parentSessionId?: string;
   taskState: A2AProjectedTaskState;
   type: "start" | "activity" | "done" | "error";
   title?: string;

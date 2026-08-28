@@ -115,7 +115,10 @@ describe("agent_spawn background routing", () => {
       status: "waiting",
       taskState: "TASK_STATE_INPUT_REQUIRED",
       suspension: expect.objectContaining({ reason: "question" }),
+      // Every frame names the conversation that spawned it — the tile showing it keeps it.
+      parentSessionId: "parent-session",
     }));
+    expect(emit.mock.calls.every(([event]) => (event as { parentSessionId?: string }).parentSessionId === "parent-session")).toBe(true);
     expect(deliverToParent).not.toHaveBeenCalled();
   });
   it("delivers actionable text when the child run produced no summary", async () => {

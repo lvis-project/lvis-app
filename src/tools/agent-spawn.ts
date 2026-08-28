@@ -289,6 +289,12 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         typeof ctx.metadata?.toolUseId === "string"
           ? (ctx.metadata.toolUseId as string)
           : undefined;
+      // The one place this spawn's frames leave: every frame names the
+      // conversation that spawned it, so the tile showing that conversation —
+      // and only that tile — keeps it. Stamping per call site is how a frame
+      // escapes unlabelled.
+      const emit = (event: AgentSpawnEvent) =>
+        deps.emit(originSessionId ? { ...event, parentSessionId: originSessionId } : event);
       const spawnId = createDlpSafeUuid();
       const initialTaskState = resumeId
         ? projectSubAgentRunState("waiting")
@@ -318,7 +324,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         const taskState = projectSubAgentResultState(result);
         const status = subAgentRunStatusFromTaskState(taskState);
         if (status === "error") {
-          deps.emit({
+          emit({
             spawnId,
             type: "error",
             taskState,
@@ -328,7 +334,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             ...linkedPayload(),
           });
         } else {
-          deps.emit({
+          emit({
             spawnId,
             type: "done",
             taskState,
@@ -343,7 +349,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         }
         return { taskState, status };
       };
-      deps.emit({
+      emit({
         spawnId,
         type: "start",
         taskState: initialTaskState,
@@ -355,7 +361,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         const callbacks = {
           onLinked: ({ childSessionId }: { childSessionId: string }) => {
             linkedChildSessionId = childSessionId;
-            deps.emit({
+            emit({
               spawnId,
               type: "activity" as const,
               taskState: resumeId
@@ -366,7 +372,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             });
           },
           onActivity: (u: { entries: ChatEntry[]; toolCallCount: number }) =>
-            deps.emit({
+            emit({
               spawnId,
               type: "activity" as const,
               taskState: projectSubAgentRunState("running"),
@@ -594,7 +600,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         };      } catch (err) {
         const message = (err as Error).message ?? "agent_spawn failed";
         const taskState = projectSubAgentRunState("error");
-        deps.emit({ spawnId, type: "error", taskState, message, ...promptPayload, ...linkedPayload() });
+        emit({ spawnId, type: "error", taskState, message, ...promptPayload, ...linkedPayload() });
         return {
           output: JSON.stringify({
             error: message,

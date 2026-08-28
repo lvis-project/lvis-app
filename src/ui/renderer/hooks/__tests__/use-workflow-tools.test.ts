@@ -43,4 +43,30 @@ describe("useWorkflowTools", () => {
       }),
     ]);
   });
+
+  it("a tile keeps only the sub-agent frames of the conversation it is showing", () => {
+    let onSpawn: Parameters<LvisApi["onAgentSpawnEvent"]>[0] | undefined;
+    const api = {
+      onAskUserQuestion: vi.fn(() => () => undefined),
+      onAgentSpawnEvent: vi.fn((handler: Parameters<LvisApi["onAgentSpawnEvent"]>[0]) => {
+        onSpawn = handler;
+        return () => undefined;
+      }),
+      onSkillLoaded: vi.fn(() => () => undefined),
+      onAskUserQuestionTimeout: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+    const ownsSession = (sessionId: string) => sessionId === "session-mine";
+    const { result } = renderHook(() => useWorkflowTools(api, { ownsSession }));
+
+    act(() => {
+      onSpawn?.({ spawnId: "mine", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Mine", parentSessionId: "session-mine" });
+      onSpawn?.({ spawnId: "theirs", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Theirs", parentSessionId: "session-other-tile" });
+      // A frame that names no conversation is not another tile's — it is kept.
+      onSpawn?.({ spawnId: "unaddressed", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Unaddressed" });
+      // Later phases of another tile's agent are dropped too, not synthesized.
+      onSpawn?.({ spawnId: "theirs", type: "done", taskState: "TASK_STATE_COMPLETED", status: "done", summary: "x", parentSessionId: "session-other-tile" });
+    });
+
+    expect(result.current.subAgentSpawns.map((s) => s.spawnId)).toEqual(["mine", "unaddressed"]);
+  });
 });

@@ -73,7 +73,18 @@ import type { SkillBadgeProps } from "../components/SkillBadge.js";
  */
 const SKILL_BADGE_CAP = 10;
 
-export function useWorkflowTools(api: LvisApi) {
+export interface WorkflowToolsOptions {
+  /**
+   * Whether `sessionId` is the conversation this surface is showing. Sub-agent
+   * frames arrive on one window-wide channel; a tile keeps only the frames of
+   * its own conversation, or four tiles would each list every tile's agents.
+   * A surface showing the whole window passes nothing and keeps every frame.
+   */
+  ownsSession?: (sessionId: string) => boolean;
+}
+
+export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {}) {
+  const { ownsSession } = options;
   const [askQuestions, setAskQuestions] = useState<AskUserQuestionRequest[]>([]);
   const [subAgentSpawns, setSubAgentSpawns] = useState<SubAgentSpawn[]>([]);
   const [loadedSkills, setLoadedSkills] = useState<SkillBadgeProps[]>([]);
@@ -90,6 +101,7 @@ export function useWorkflowTools(api: LvisApi) {
       );
     });
     const unsubSpawn = api.onAgentSpawnEvent?.((event) => {
+      if (ownsSession && event.parentSessionId !== undefined && !ownsSession(event.parentSessionId)) return;
       setSubAgentSpawns((prev) => {
         const existingIdx = prev.findIndex((s) => s.spawnId === event.spawnId);
         if (event.type === "start") {
@@ -208,7 +220,7 @@ export function useWorkflowTools(api: LvisApi) {
       unsubSkill?.();
       unsubAskTimeout?.();
     };
-  }, [api]);
+  }, [api, ownsSession]);
 
   const dismissAskQuestion = useCallback((id: string) => {
     setAskQuestions((prev) => prev.filter((q) => q.id !== id));
