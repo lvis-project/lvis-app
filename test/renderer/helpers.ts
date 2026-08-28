@@ -27,6 +27,24 @@ export async function submitChatMessage(
   });
 }
 
+/**
+ * Halve the window into a second tile and hand back both frames.
+ *
+ * The split control lives in each tile's header, so this drives the same
+ * gesture a user would. Tests that need two CONVERSATIONS want this: the mock
+ * api gives every non-primary group its own session id.
+ */
+export async function splitIntoTwoTiles(container: HTMLElement): Promise<HTMLElement[]> {
+  const split = container.querySelector<HTMLButtonElement>('[data-testid="chat-group-split"]');
+  if (!split) throw new Error("no chat-group split control");
+  await act(async () => {
+    fireEvent.click(split);
+  });
+  const tiles = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="chat-group"]'));
+  if (tiles.length !== 2) throw new Error(`expected 2 tiles, got ${tiles.length}`);
+  return tiles;
+}
+
 export function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {

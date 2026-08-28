@@ -345,6 +345,15 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     },
 
     chatHasProvider: vi.fn(async () => hasProvider),
+    // A tile binds its own view of the window api through `chatGroupApi`, so a
+    // window with more than one tile needs this to exist at all — without it a
+    // split throws `chat-group-unavailable`. Each non-primary group answers
+    // with its OWN conversation id, which is what lets a test tell two tiles
+    // apart; everything else is deliberately the window's shared mock.
+    chatGroup: vi.fn((chatGroupId: string) => ({
+      chatGetHistory: vi.fn(async () => ({ ...(await history), sessionId: `session-${chatGroupId}` })),
+      chatGroupRelease: vi.fn(async () => ({ ok: true, released: true })),
+    })),
     captureUserKeyboardIntent: vi.fn(() => ({ inputOrigin: "user-keyboard", token: "mock-user-intent" })),
     chatSend: vi.fn(async () => ({ ok: true })),
     chatGuide: vi.fn(async () => ({ ok: true })),

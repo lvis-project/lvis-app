@@ -43,6 +43,7 @@ import type { ExactDenyDraft } from "./exact-permission-decision.js";
 
 // ─── Imports: types / constants / helpers / components / tabs ────────
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
+import { Button } from "../../components/ui/button.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { getPluginInstallAliases } from "./utils/plugin-install-aliases.js";
 import {
@@ -65,6 +66,7 @@ import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { useApproval } from "./hooks/use-approval.js";
+import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useApprovalSentence } from "./hooks/use-approval-sentence.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useStarred } from "./hooks/use-starred.js";
@@ -406,6 +408,15 @@ export function App() {
   const { announcements: marketplaceAnnouncements, dismiss: dismissMarketplaceAnnouncement } = useMarketplaceAnnouncements(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
+  // Approval-memory hit + permission review suggestion. Both report on the
+  // WINDOW's permission settings, not on one conversation, so they are
+  // subscribed and rendered once here — per tile they would raise the same
+  // toast in every open conversation at once.
+  const {
+    userApprovalHitToast,
+    permissionReviewSuggestion,
+    handleEnablePermissionReviewSuggestion,
+  } = usePermissionToasts();
   const [exactDenyDraft, setExactDenyDraft] = useState<ExactDenyDraft | null>(null);
   const {
     proposedChoice: approvalProposedChoice,
@@ -1278,6 +1289,71 @@ export function App() {
                       announcements={marketplaceAnnouncements}
                       onDismiss={handleMarketplaceAnnouncementDismiss}
                     />
+                    {/* Verdict-tier tint surfaces the trust gradient:
+                        low → --success (informational re-approval), medium →
+                        --warning, high → --destructive + role="alert" (the user
+                        is re-using a high-risk approval). Semantic tokens, so a
+                        theme bundle supplies the actual color. */}
+                    {userApprovalHitToast && (() => {
+                      const verdict = userApprovalHitToast.verdictAtApproval;
+                      const isHigh = verdict === "high";
+                      const token =
+                        verdict === "high" ? "destructive"
+                        : verdict === "medium" ? "warning"
+                        : "success";
+                      const tone = `border-[hsl(var(--${token})/0.4)] bg-[hsl(var(--${token})/0.1)] text-[hsl(var(--${token}))]`;
+                      return (
+                        <div
+                          data-testid="user-approval-hit-toast"
+                          data-verdict={verdict}
+                          role={isHigh ? "alert" : "status"}
+                          aria-live={isHigh ? "assertive" : "polite"}
+                          className={`rounded-md border px-3 py-2 text-xs ${tone}`}
+                        >
+                          <span className="font-medium">{t("chatView.approvalMemoryApplied")}</span>
+                          <span className="ml-2 text-muted-foreground">
+                            {userApprovalHitToast.toolName} · {userApprovalHitToast.scope === "persistent" ? t("chatView.approvalScopePersistent") : t("chatView.approvalScopeSession")} · {verdict.toUpperCase()}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    {permissionReviewSuggestion && (
+                      <div
+                        data-testid="permission-review-suggestion-toast"
+                        role="status"
+                        aria-live="polite"
+                        className="flex min-w-0 items-center gap-2 rounded-md border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.1)] px-3 py-2 text-xs text-[hsl(var(--warning))]"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-medium">{t("chatView.permissionReviewSuggestionTitle")}</span>
+                          <span className="ml-2 text-muted-foreground">
+                            {permissionReviewSuggestion.reason === "allow-always"
+                              ? t("chatView.permissionReviewSuggestionAllowAlways")
+                              : t("chatView.permissionReviewSuggestionRepeat", {
+                                  count: permissionReviewSuggestion.allowCount,
+                                  minutes: Math.max(1, Math.round(permissionReviewSuggestion.windowMs / 60000)),
+                                })}
+                          </span>
+                          {permissionReviewSuggestion.error && (
+                            <span className="ml-2 text-[hsl(var(--destructive))]">
+                              {permissionReviewSuggestion.error}
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 shrink-0 px-2 text-xs"
+                          disabled={permissionReviewSuggestion.busy === true}
+                          onClick={() => void handleEnablePermissionReviewSuggestion()}
+                        >
+                          {permissionReviewSuggestion.busy === true
+                            ? t("chatView.permissionReviewSuggestionBusy")
+                            : t("chatView.permissionReviewSuggestionAction")}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   {fallbackToast && (
                     <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
