@@ -36,6 +36,12 @@ const log = createLogger("lvis");
 export interface SkillLoadEvent {
   name: string;
   description: string;
+  /**
+   * Conversation the loading turn belongs to. The badge rides a window-wide
+   * channel, and a window holds several conversations at once, so without the
+   * asking session every tile would wear every tile's skill badges.
+   */
+  sessionId: string;
 }
 
 /**
@@ -260,6 +266,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       deps.emit({
         name: skill.name,
         description: skill.description,
+        sessionId,
       });
       return {
         output: JSON.stringify({

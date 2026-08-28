@@ -21,6 +21,7 @@ function askUserQuestionApi(opts: { respondDelay?: number } = {}) {
 function makeRequest(overrides: Partial<AskUserQuestionRequest> = {}): AskUserQuestionRequest {
   return {
     id: "req-1",
+    sessionId: "session-1",
     questions: [
       {
         question: "색상을 선택하세요",

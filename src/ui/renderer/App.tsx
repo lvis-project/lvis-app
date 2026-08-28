@@ -1489,6 +1489,7 @@ export function App() {
                                     registry={chatGroupSessions}
                                     env={chatGroupEnvironment}
                                     panelOpen={group.panelOpen}
+                                    focused={chatGroups.focusedId === group.id}
                                     onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
                                   >
                                     {({ actions, content, currentSessionId: tileSessionId }) => (

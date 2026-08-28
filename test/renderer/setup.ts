@@ -5,6 +5,7 @@
  *   - @testing-library/jest-dom matchers
  *   - global afterEach cleanup
  *   - matchMedia / scrollIntoView / pointer-capture polyfills
+ *   - a driveable IntersectionObserver (see `triggerIntersection`)
  */
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
@@ -39,9 +40,105 @@ if (typeof (vi as { unstubAllGlobals?: unknown }).unstubAllGlobals !== "function
   };
 }
 
+const liveIntersectionObservers = new Set<TestIntersectionObserver>();
+/**
+ * Each target's last reported intersection, which is what makes this stub model
+ * the real contract rather than a message bus: a browser hands a NEW observer
+ * the target's CURRENT state, so an observer built over a still-visible element
+ * fires again on its own. Without that, code whose observer must be rebuilt to
+ * keep going looks correct under test and stalls in the app.
+ */
+const intersectionStates = new Map<Element, boolean>();
+
 afterEach(() => {
   cleanup();
+  intersectionStates.clear();
 });
+
+/**
+ * jsdom lays nothing out, so a real IntersectionObserver would never report an
+ * intersection and scroll-driven UI could not be exercised at all. Every
+ * observer registers here instead, and `triggerIntersection` delivers the
+ * entry a test wants — the intersection becomes an explicit act of the test
+ * rather than layout jsdom will never produce.
+ */
+class TestIntersectionObserver implements IntersectionObserver {
+  readonly root: Element | Document | null;
+  readonly rootMargin: string;
+  readonly scrollMargin: string;
+  readonly thresholds: readonly number[];
+  private readonly targets = new Set<Element>();
+  private readonly callback: IntersectionObserverCallback;
+
+  constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+    this.callback = callback;
+    this.root = (options?.root as Element | Document | null | undefined) ?? null;
+    this.rootMargin = options?.rootMargin ?? "0px";
+    this.scrollMargin = options?.scrollMargin ?? "0px";
+    const threshold = options?.threshold ?? 0;
+    this.thresholds = Array.isArray(threshold) ? threshold : [threshold];
+    liveIntersectionObservers.add(this);
+  }
+
+  observe(target: Element): void {
+    this.targets.add(target);
+    // The browser reports the target's current state to a newly observing
+    // observer, asynchronously — so this delivery is queued, not immediate,
+    // exactly as the real one arrives after the caller's own frame.
+    queueMicrotask(() => {
+      this.deliver(target, intersectionStates.get(target) ?? false);
+    });
+  }
+
+  unobserve(target: Element): void {
+    this.targets.delete(target);
+  }
+
+  disconnect(): void {
+    this.targets.clear();
+    liveIntersectionObservers.delete(this);
+  }
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+
+  deliver(target: Element, isIntersecting: boolean): boolean {
+    if (!this.targets.has(target)) return false;
+    const rect = target.getBoundingClientRect();
+    this.callback(
+      [{
+        target,
+        isIntersecting,
+        intersectionRatio: isIntersecting ? 1 : 0,
+        boundingClientRect: rect,
+        intersectionRect: rect,
+        rootBounds: null,
+        time: 0,
+      } as IntersectionObserverEntry],
+      this,
+    );
+    return true;
+  }
+}
+
+/**
+ * Report `target` as having scrolled into (or out of) its observer's root.
+ * Returns the number of observers that were watching it, so a test can assert
+ * that the element it picked is actually observed.
+ *
+ * The state STICKS: an element left intersecting stays intersecting for every
+ * observer that starts watching it later, which is how the browser behaves and
+ * what lets a test drive a scroll ONCE and watch the consequences play out.
+ */
+export function triggerIntersection(target: Element, isIntersecting = true): number {
+  intersectionStates.set(target, isIntersecting);
+  let delivered = 0;
+  for (const observer of [...liveIntersectionObservers]) {
+    if (observer.deliver(target, isIntersecting)) delivered += 1;
+  }
+  return delivered;
+}
 
 if (typeof window !== "undefined") {
   if (!window.matchMedia) {
@@ -71,6 +168,9 @@ if (typeof window !== "undefined") {
   }
   if (!Element.prototype.releasePointerCapture) {
     Element.prototype.releasePointerCapture = function () {};
+  }
+  if (!window.IntersectionObserver) {
+    window.IntersectionObserver = TestIntersectionObserver;
   }
   if (!window.ResizeObserver) {
     window.ResizeObserver = class ResizeObserver {

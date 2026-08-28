@@ -18,7 +18,7 @@ import type {
   SubscriptionChatRuntimeSelection,
   SubscriptionUsageTelemetry,
 } from "../../shared/subscription-runtime.js";
-import type { ToolResultImage } from "../../tools/types.js";
+import type { ToolCategory, ToolResultImage, ToolSource } from "../../tools/types.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
 export { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -283,7 +283,10 @@ export function serializeMessageForEstimation(message: GenericMessage): string {
         content: message.content,
         thought: message.thought ?? "",
         thinkingBlocks: message.thinkingBlocks ?? [],
-        toolCalls: message.toolCalls ?? [],
+        // Only the three fields the wire mappers emit. A persisted call also
+        // carries host-side registry origin, which no request ever sends, and
+        // counting it here would inflate every caller's cost estimate.
+        toolCalls: (message.toolCalls ?? []).map(({ id, name, input }) => ({ id, name, input })),
       });
     case "tool_result":
       return JSON.stringify({
@@ -300,6 +303,21 @@ export interface ToolCallBlock {
   id: string;
   name: string;
   input: Record<string, unknown>;
+  /**
+   * Registry origin of the called tool, recorded when the call is persisted.
+   *
+   * HOST-SIDE ONLY. No provider ever sees these fields: the wire mappers name
+   * `id`/`name`/`input` explicitly rather than spreading the block, because a
+   * provider that receives unknown keys inside a `tool_use` block rejects the
+   * request. They exist so a reloaded transcript can still say a call came from
+   * a plugin or an MCP server — live streaming carries the same facts on
+   * `ToolCallMeta`, and without them the action panel's plugin/MCP counters
+   * read zero after a session reload.
+   */
+  source?: ToolSource;
+  category?: ToolCategory;
+  pluginId?: string;
+  mcpServerId?: string;
 }
 
 // ─── 도구 스키마 ────────────────────────────────────

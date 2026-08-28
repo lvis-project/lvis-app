@@ -46,6 +46,7 @@ describe("AskUserQuestionCard — single question", () => {
         api={api}
         request={{
           id: "q1",
+          sessionId: "session-1",
           questions: [
             { question: "Continue?", choices: ["yes", "no"] },
           ],
@@ -75,6 +76,7 @@ describe("AskUserQuestionCard — single question", () => {
         api={api}
         request={{
           id: "q-recommend",
+          sessionId: "session-1",
           questions: [
             {
               question: "수정 방향?",
@@ -104,6 +106,7 @@ describe("AskUserQuestionCard — single question", () => {
         api={api}
         request={{
           id: "q-rejected",
+          sessionId: "session-1",
           questions: [{ question: "Continue?", choices: ["yes", "no"] }],
           createdAt: 0,
         }}
@@ -128,6 +131,7 @@ describe("AskUserQuestionCard — single question", () => {
         api={api}
         request={{
           id: "q-alt",
+          sessionId: "session-1",
           questions: [
             {
               question: "방향?",
@@ -155,6 +159,7 @@ describe("AskUserQuestionCard — single question", () => {
         api={api}
         request={{
           id: "q-ph",
+          sessionId: "session-1",
           questions: [
             {
               question: "?",
@@ -180,6 +185,7 @@ describe("AskUserQuestionCard — single question", () => {
         api={api}
         request={{
           id: "q-dismiss",
+          sessionId: "session-1",
           questions: [{ question: "?", choices: ["계속", "중단"] }],
           createdAt: 0,
         }}
@@ -200,11 +206,13 @@ describe("QuestionOverlay — FIFO request identity", () => {
     const onResolved = vi.fn();
     const first = {
       id: "fifo-first",
+      sessionId: "session-1",
       questions: [{ question: "First?", choices: ["A", "B"] }],
       createdAt: 1,
     };
     const second = {
       id: "fifo-second",
+      sessionId: "session-1",
       questions: [
         { question: "Second one?", choices: ["C", "D"] },
         { question: "Second two?", choices: ["E", "F"] },
@@ -236,6 +244,7 @@ describe("QuestionOverlay — FIFO request identity", () => {
           api={api}
           requests={[{
             id: "question-beneath-approval",
+            sessionId: "session-1",
             questions: [{ question: "Range?", choices: ["Today", "This week"] }],
             createdAt: 1,
           }]}
@@ -266,6 +275,7 @@ describe("AskUserQuestionCard — multi-question", () => {
         api={api}
         request={{
           id: "multi",
+          sessionId: "session-1",
           questions: [
             { question: "Where?", choices: ["서울", "부산"] },
             { question: "When?", choices: ["오늘", "내일"] },

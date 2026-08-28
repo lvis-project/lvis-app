@@ -206,16 +206,38 @@ function hasValidUserContentPartComposition(raw: unknown): boolean {
   return true;
 }
 
+const IMPORTABLE_TOOL_SOURCES: ReadonlySet<string> = new Set(["builtin", "plugin", "mcp"]);
+const IMPORTABLE_TOOL_CATEGORIES: ReadonlySet<string> =
+  new Set(["read", "write", "shell", "network", "meta"]);
+
+function isValidOptionalMember(value: unknown, allowed: ReadonlySet<string>): boolean {
+  return value === undefined || (typeof value === "string" && allowed.has(value));
+}
+
+function isValidOptionalString(value: unknown): boolean {
+  return value === undefined || (typeof value === "string" && value.length > 0);
+}
+
 function isValidToolCallBlock(call: unknown): boolean {
   if (!call || typeof call !== "object" || Array.isArray(call)) return false;
   const c = call as Record<string, unknown>;
-  if (!hasOnlyKeys(c, ["id", "name", "input"])) return false;
+  // Registry origin travels with an exported call (the JSON export writes the
+  // stored messages verbatim), so an import that rejected it could not read
+  // back a file this app itself wrote. Every value is still checked against
+  // the closed vocabulary rather than trusted.
+  if (!hasOnlyKeys(c, ["id", "name", "input", "source", "category", "pluginId", "mcpServerId"])) {
+    return false;
+  }
   return (
     typeof c.id === "string" &&
     typeof c.name === "string" &&
     !!c.input &&
     typeof c.input === "object" &&
-    !Array.isArray(c.input)
+    !Array.isArray(c.input) &&
+    isValidOptionalMember(c.source, IMPORTABLE_TOOL_SOURCES) &&
+    isValidOptionalMember(c.category, IMPORTABLE_TOOL_CATEGORIES) &&
+    isValidOptionalString(c.pluginId) &&
+    isValidOptionalString(c.mcpServerId)
   );
 }
 

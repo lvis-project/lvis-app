@@ -81,6 +81,18 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
           isError: true,
         };
       }
+      // The card is routed to the conversation that asked it, so a call with no
+      // executing session has no surface to render on and must not open a gate
+      // only the timeout could close.
+      if (typeof ctx.metadata?.sessionId !== "string" || ctx.metadata.sessionId.length === 0) {
+        return {
+          output: JSON.stringify({
+            error: "ask_user_question requires an executing session",
+          }),
+          isError: true,
+        };
+      }
+      const sessionId = ctx.metadata.sessionId;
       const a = (rawInput ?? {}) as Record<string, unknown>;
       const rawQuestions = Array.isArray(a.questions) ? a.questions : null;
       if (!rawQuestions || rawQuestions.length === 0) {
@@ -193,6 +205,7 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
       }
       const response = await gate.ask({
         questions,
+        sessionId,
         // Honor the user's 중단 button — without this the gate sits on its
         // 5-minute timer regardless of the conversation loop's abort.
         abortSignal: ctx.abortSignal,

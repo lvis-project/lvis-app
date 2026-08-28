@@ -4,11 +4,20 @@ import type { Attachment } from "../types/attachments.js";
 import { extractFileEditDiff, type FileEditDiffData } from "../utils/file-diff.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import { getToolDisplayName } from "../utils/tool-display.js";
+// The web-artifact vocabulary is shared with the action panel on purpose: the
+// Browser tab and the Tool Activity list are two views of ONE set of fetched
+// pages, so both sides must classify web tools and extract URLs with the same
+// code. A second local collector here is what made the Browser tab read "no web
+// artifacts" while the activity popup listed dozens of sources.
+import {
+  ACTION_PANEL_ACTIVITY_LIMIT,
+  collectUrls,
+  isBrowserTool,
+} from "../utils/action-panel-activity.js";
 import {
   FILE_WRITE_TOOL_NAMES,
   READ_TOOL_PATTERN,
   TOOL_PATH_KEYS,
-  TOOL_URL_PATTERN,
   extractPatchPaths,
   isGlobPattern,
 } from "../utils/tool-input-paths.js";
@@ -97,7 +106,28 @@ export interface ToolResultPreviewTarget extends ChatPreviewTargetBase {
 export interface UrlPreviewTarget extends ChatPreviewTargetBase {
   kind: "url";
   url: string;
+  /**
+   * Where the address came from.
+   *
+   * `argument` means the turn asked for this page by name — the URL was in the
+   * call's own input. `result` means a page named it: third-party text that
+   * became a one-click webview navigation the moment it was listed here. The
+   * row says which, because those are not the same claim, and the viewer is
+   * entitled to know before following one. (Both remain gated by
+   * `normalizeBrowserNavigationUrl` at the open; this is disclosure, not a
+   * second permission.)
+   */
+  origin: UrlTargetOrigin;
 }
+
+/**
+ * `address` is the viewer's own: a URL typed into the browser tab's address
+ * bar, or a browser tab they opened. It exists so those synthetic targets do
+ * not have to claim one of the two transcript-derived provenances — a page the
+ * user asked for by hand is neither an argument the model wrote nor a link some
+ * result offered.
+ */
+type UrlTargetOrigin = "argument" | "result" | "address";
 
 export interface PluginPreviewTarget extends ChatPreviewTargetBase {
   kind: "plugin";
@@ -186,17 +216,6 @@ function trimPreviewText(value: string): string {
   return `${value.slice(0, MAX_TEXT_PREVIEW_CHARS)}\n\n[preview truncated: ${value.length - MAX_TEXT_PREVIEW_CHARS} chars hidden]`;
 }
 
-function collectUrls(value: unknown): string[] {
-  const urls = new Set<string>();
-  visitUnknown(value, (_key, item) => {
-    if (typeof item !== "string") return;
-    for (const match of item.matchAll(TOOL_URL_PATTERN)) {
-      urls.add(match[0]);
-    }
-  });
-  return [...urls];
-}
-
 function collectPathStrings(value: unknown): string[] {
   const paths = new Set<string>();
   visitUnknown(value, (key, item) => {
@@ -221,6 +240,66 @@ function collectPathStrings(value: unknown): string[] {
     if (isLikelyPath(item)) paths.add(item);
   });
   return [...paths];
+}
+
+/**
+ * A URL named in a call's ARGUMENTS outranks the same URL merely mentioned in a
+ * result. Mirrors {@link FILE_OPERATION_RANK}: the same artifact seen through a
+ * stronger relationship keeps the stronger attribution, so a page a
+ * `web_fetch` actually retrieved is credited to that fetch and not to the
+ * `web_search` that happened to list it first.
+ */
+type TranscriptUrlOrigin = Exclude<UrlTargetOrigin, "address">;
+
+const URL_ORIGIN_RANK: Record<TranscriptUrlOrigin, number> = {
+  result: 0,
+  argument: 1,
+};
+
+interface UrlAttribution {
+  /** The call the target is credited to — the only one that emits it. */
+  toolUseId: string;
+  origin: TranscriptUrlOrigin;
+}
+
+/**
+ * Which call owns each fetched page, and which pages make the list at all.
+ *
+ * Runs before the target walk because both answers need the whole transcript: a
+ * later call can outrank an earlier one for the same URL, and the cap keeps the
+ * MOST RECENT {@link ACTION_PANEL_ACTIVITY_LIMIT} pages — the same bound, and
+ * the same end of the list, the action panel keeps. Without it one link-heavy
+ * result (a search page quoting a hundred links) becomes a hundred rows in a
+ * tab that is meant to show what this conversation actually visited.
+ */
+function resolveUrlAttributions(entries: ChatEntry[]): Map<string, UrlAttribution> {
+  const attributions = new Map<string, UrlAttribution>();
+  /** Position of the LAST call that produced each URL — what "most recent" means. */
+  const lastProducedAt = new Map<string, number>();
+  let producedAt = 0;
+
+  for (const entry of entries) {
+    if (entry.kind !== "tool_group") continue;
+    for (const tool of entry.tools) {
+      if (!isBrowserTool(tool)) continue;
+      producedAt += 1;
+      const argumentUrls = new Set(collectUrls(tool.input));
+      for (const url of new Set([...argumentUrls, ...collectUrls(tool.result)])) {
+        const origin: TranscriptUrlOrigin = argumentUrls.has(url) ? "argument" : "result";
+        lastProducedAt.set(url, producedAt);
+        const existing = attributions.get(url);
+        if (existing && URL_ORIGIN_RANK[origin] <= URL_ORIGIN_RANK[existing.origin]) continue;
+        attributions.set(url, { toolUseId: tool.toolUseId, origin });
+      }
+    }
+  }
+
+  if (attributions.size <= ACTION_PANEL_ACTIVITY_LIMIT) return attributions;
+  const dropped = [...lastProducedAt]
+    .sort((left, right) => right[1] - left[1])
+    .slice(ACTION_PANEL_ACTIVITY_LIMIT);
+  for (const [url] of dropped) attributions.delete(url);
+  return attributions;
 }
 
 /**
@@ -366,6 +445,11 @@ export function collectChatPreviewModel({
   const files: WorkspaceFileItem[] = [];
   const targetIds = new Set<string>();
   const fileIds = new Set<string>();
+  // A fetched page is ONE artifact no matter how many calls surfaced it: a
+  // search that returns a link and the fetch that follows it are the same
+  // document. Decided up front — the winning call is the only one that emits
+  // it below, and pages past the shared cap are absent from the map entirely.
+  const urlAttributions = resolveUrlAttributions(entries);
   let order = 0;
 
   for (const attachment of attachments) {
@@ -540,19 +624,32 @@ export function collectChatPreviewModel({
         }
       }
 
-      for (const url of collectUrls(tool.input)) {
-        addUnique(targets, {
-          id: `url:${tool.toolUseId}:${url}`,
-          kind: "url",
-          title: url.replace(/^https?:\/\//i, ""),
-          subtitle: displayName,
-          sourceLabel,
-          createdOrder: order++,
-          toolUseId: tool.toolUseId,
-          toolName: tool.name,
-          status: tool.status,
-          url,
-        }, targetIds);
+      // A web tool's RESULT is where most fetched pages actually live — a
+      // `web_search` names its hits nowhere else — so the result is read on the
+      // same footing as the arguments. Restricted to web tools for the same
+      // reason the action panel restricts it: a URL quoted inside a source file
+      // a read tool returned is text, not a page this turn fetched. Accepted
+      // consequence: a non-web tool carrying a url-shaped argument no longer
+      // contributes a target. Nothing opened those addresses, and a row that
+      // offers to navigate to one is a claim the transcript does not support.
+      if (isBrowserTool(tool)) {
+        for (const url of new Set([...collectUrls(tool.input), ...collectUrls(tool.result)])) {
+          const attribution = urlAttributions.get(url);
+          if (attribution?.toolUseId !== tool.toolUseId) continue;
+          addUnique(targets, {
+            id: `url:${tool.toolUseId}:${url}`,
+            kind: "url",
+            title: url.replace(/^https?:\/\//i, ""),
+            subtitle: displayName,
+            sourceLabel,
+            createdOrder: order++,
+            toolUseId: tool.toolUseId,
+            toolName: tool.name,
+            status: tool.status,
+            url,
+            origin: attribution.origin,
+          }, targetIds);
+        }
       }
 
       if (tool.status === "done" && tool.uiPayload) {

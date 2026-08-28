@@ -36,6 +36,14 @@ export interface AskUserQuestionItem {
 
 export interface AskUserQuestionRequest {
   id: string;
+  /**
+   * The conversation whose turn asked. The request travels on a WINDOW channel
+   * and a window now holds several conversations side by side, so the card can
+   * only reach the right one if the request names it. Without it every tile
+   * draws the same card, and whichever tile the user answers resolves the gate
+   * — leaving the asking tile holding a prompt that can never be answered.
+   */
+  sessionId: string;
   questions: AskUserQuestionItem[];
   createdAt: number;
 }
@@ -215,9 +223,8 @@ export class AskUserQuestionGate {
      * against malformed multi-question shapes.
      */
     questions: AskUserQuestionItem[];
-
-
-
+    /** Conversation the asking turn belongs to; routes the card to its tile. */
+    sessionId: string;
     abortSignal?: AbortSignal;
   }): Promise<AskUserQuestionResponse> {
     if (!Array.isArray(input.questions) || input.questions.length === 0 || input.questions.length > MAX_QUESTIONS_PER_CARD) {
@@ -232,6 +239,7 @@ export class AskUserQuestionGate {
     }
     const req: AskUserQuestionRequest = {
       id: randomUUID(),
+      sessionId: input.sessionId,
       questions: normalizedQuestions as AskUserQuestionItem[],
       createdAt: Date.now(),
     };

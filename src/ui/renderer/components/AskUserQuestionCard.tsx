@@ -33,6 +33,8 @@ export interface AskUserQuestionItem {
 
 export interface AskUserQuestionRequest {
   id: string;
+  /** Conversation that asked; the tile owning it is the only one that draws the card. */
+  sessionId: string;
   questions: AskUserQuestionItem[];
   createdAt: number;
 }
