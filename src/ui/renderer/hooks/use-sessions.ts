@@ -116,7 +116,10 @@ export interface CurrentSessionDeps {
 export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
   const { applyInitialSession, onLoadedSession, restoreSubAgents, onSessionsChanged } = deps;
   const resumeWindowActiveSession = deps.resumeWindowActiveSession ?? true;
-  const { freshProject } = deps;
+  // Read at hydration time, not a dependency of it: the window's active
+  // project changing must not re-hydrate a tile that is holding a conversation.
+  const freshProjectRef = useRef(deps.freshProject);
+  freshProjectRef.current = deps.freshProject;
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [currentSessionKind, setCurrentSessionKind] = useState<"main" | "routine">("main");
   const [currentSessionTitle, setCurrentSessionTitle] = useState<string | undefined>(undefined);
@@ -143,7 +146,16 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
     ) => {
       // A loop already on an empty main session is the fresh state — unless
       // the conversation has to be created under a project, which only
-      // chatNew records.
+      // chatNew records. A loop that already holds a conversation is left
+      // holding it; this is the tile's start, not a reset.
+      if (!resumeWindowActiveSession && current.messages.length > 0) {
+        setCurrentSessionId(current.sessionId);
+        setCurrentSessionKind(current.sessionKind ?? "main");
+        setCurrentSessionTitle(current.sessionTitle);
+        setCurrentSessionProject(sessionProjectFromHistory(current));
+        applyInitialSession?.(historyToEntries(current.messages));
+        return;
+      }
       if (!project && (current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
         setCurrentSessionId(current.sessionId);
         setCurrentSessionKind("main");
@@ -170,7 +182,7 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       await onSessionsChanged?.();
       if (token !== sessionReadTokenRef.current) return;
       if (!resumeWindowActiveSession) {
-        await applyFreshMain(h, freshProject);
+        await applyFreshMain(h, freshProjectRef.current);
         return;
       }
       const activeState = await api.chatMainActiveState();
@@ -212,7 +224,7 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       restoreSubAgents?.(persisted.restoredSubAgents ?? []);
       applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
-  }, [api, applyInitialSession, restoreSubAgents, onSessionsChanged, resumeWindowActiveSession, freshProject]);
+  }, [api, applyInitialSession, restoreSubAgents, onSessionsChanged, resumeWindowActiveSession]);
 
   useEffect(() => { void hydrateInitialSession(); }, [hydrateInitialSession]);
 

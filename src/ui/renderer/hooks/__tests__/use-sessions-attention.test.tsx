@@ -147,6 +147,38 @@ describe("useCurrentSession — what a tile holds on mount", () => {
     expect(api.chatSessionResume).not.toHaveBeenCalled();
   });
 
+  it("a change of the window's active project does not re-hydrate a tile that holds a conversation", async () => {
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-fresh", messages: [] },
+    });
+    const first = { projectRoot: "/work/a", projectName: "a" };
+    const { result, rerender } = renderHook(
+      ({ project }: { project: { projectRoot: string; projectName: string } }) =>
+        useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, freshProject: project }),
+      { initialProps: { project: first } },
+    );
+    await waitFor(() => expect(api.chatNew).toHaveBeenCalledTimes(1));
+    rerender({ project: { projectRoot: "/work/b", projectName: "b" } });
+    await waitFor(() => expect(result.current.currentSessionId).toBe("loop-fresh"));
+    expect(api.chatNew).toHaveBeenCalledTimes(1);
+  });
+
+  it("a tile whose loop already holds a conversation keeps it on mount instead of starting over", async () => {
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-live", messages: [{ role: "user", content: "kept" }] },
+    });
+    const { result } = renderHook(() =>
+      useCurrentSession(api as unknown as LvisApi, {
+        resumeWindowActiveSession: false,
+        freshProject: { projectRoot: "/work/a", projectName: "a" },
+      }));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("loop-live"));
+    expect(api.chatNew).not.toHaveBeenCalled();
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+  });
+
   it("any other tile starts on its own loop's session and never touches the window's active state", async () => {
     const { api } = makeMockLvisApi({
       mainActiveState: resumeState,
