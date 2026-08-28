@@ -430,9 +430,9 @@ export function App() {
 
   // Routine + plugin-overlay IPC pipeline. Owns runningRoutines, the addFireRef
   // surfaced to OverlayContextProvider (populated during that provider's render),
-  // the overlay lookup map, and the routine/overlay IPC subscriptions. The
-  // forward-ref cycle is preserved: handlePluginPrimaryAction reads handleAskRef
-  // (App-owned, written by use-send-message). See use-routine-overlay.ts.
+  // the overlay lookup map, and the routine/overlay IPC subscriptions. A card's
+  // primary action reaches its tile through the registry, so the turn starts in
+  // the conversation the card was shown in. See use-routine-overlay.ts.
   const {
     addFireRef,
     runningRoutines,

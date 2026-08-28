@@ -2022,8 +2022,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //
   // The body is UNTRUSTED APP DATA. The store fences it and the prompt source labels it
   // "data, never instructions" — the same framing `<app-message>` bodies and the skills
-  // catalog already carry. A session MISMATCH drops the update (the card belongs to a
-  // conversation the user has left): fail-safe, one comparison, mirroring `ui/message`.
+  // catalog already carry. A session no OPEN conversation holds drops the update (the
+  // card belongs to a conversation the user has left): fail-safe, one lookup, mirroring
+  // `ui/message`.
   //
   // Sender: `validateHostRendererSender` — it mutates what the model reads next turn.
   ipcMain.handle(
