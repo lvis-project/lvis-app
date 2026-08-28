@@ -29,30 +29,33 @@ export const DOCK_ENTER_WIDTH = SIDE_PANEL_MIN_WIDTH + MIN_DOCKED_TRANSCRIPT_WID
 /** Exit width — 60px dead-band above enter to avoid flip-flop near the boundary. */
 export const DOCK_EXIT_WIDTH = DOCK_ENTER_WIDTH + 60;
 
-/**
- * Below the docking threshold the two columns cannot both keep their pixel
- * floors, so they share the container instead: the split bar moves between
- * these shares of its width, and the user still decides which column gets
- * the room.
- */
-const NARROW_PANEL_MIN_SHARE = 0.3;
-const NARROW_PANEL_MAX_SHARE = 0.7;
+type SidePanelLayoutMode = "docked" | "overlay";
+
+export interface SidePanelLayout {
+  /**
+   * `docked`: the panel is a column beside the transcript and pushes it.
+   * `overlay`: the container cannot hold both pixel floors, so the panel keeps
+   * its own floor and floats over the transcript's right edge inside the
+   * container — the transcript keeps its layout underneath instead of being
+   * crushed into a strip nobody could use. Never a window-level sheet.
+   */
+  mode: SidePanelLayoutMode;
+  /** The range the split bar moves in. */
+  min: number;
+  max: number;
+}
 
 /**
- * The width range a docked side panel may take inside a container `width`
- * px across. The panel is always a column of its container — never a sheet
- * over it — so the range is what changes with the container, not the
- * presentation. An unmeasured container (Infinity) keeps the pixel floors.
+ * How the side panel lays out inside a container `width` px across, and the
+ * width range it may take there. An unmeasured container (Infinity) docks
+ * with the pixel floors.
  */
-export function dockedPanelRange(width: number): { min: number; max: number } {
-  if (!Number.isFinite(width)) return { min: SIDE_PANEL_MIN_WIDTH, max: Number.POSITIVE_INFINITY };
+export function sidePanelLayout(width: number): SidePanelLayout {
+  if (!Number.isFinite(width)) return { mode: "docked", min: SIDE_PANEL_MIN_WIDTH, max: Number.POSITIVE_INFINITY };
   if (width >= DOCK_ENTER_WIDTH) {
-    return { min: SIDE_PANEL_MIN_WIDTH, max: width - MIN_DOCKED_TRANSCRIPT_WIDTH };
+    return { mode: "docked", min: SIDE_PANEL_MIN_WIDTH, max: width - MIN_DOCKED_TRANSCRIPT_WIDTH };
   }
-  return {
-    min: Math.round(width * NARROW_PANEL_MIN_SHARE),
-    max: Math.round(width * NARROW_PANEL_MAX_SHARE),
-  };
+  return { mode: "overlay", min: Math.min(SIDE_PANEL_MIN_WIDTH, width), max: width };
 }
 
 /**
@@ -60,8 +63,8 @@ export function dockedPanelRange(width: number): { min: number; max: number } {
  * — too narrow to hold both the side panel's and the transcript's pixel
  * floors — with hysteresis (enter < {@link DOCK_ENTER_WIDTH}, exit >=
  * {@link DOCK_EXIT_WIDTH}; 60px dead-band) so resizing near the boundary does
- * not flip-flop. ChatView reads `width` and sizes its docked panel through
- * {@link dockedPanelRange}; Settings reads `isNarrow` for its own layout.
+ * not flip-flop. ChatView reads `width` and lays its panel out through
+ * {@link sidePanelLayout}; Settings reads `isNarrow` for its own layout.
  *
  * Observe the PARENT of whatever the answer lays out, so the answer never
  * changes what is measured. In jsdom (no ResizeObserver) the width stays

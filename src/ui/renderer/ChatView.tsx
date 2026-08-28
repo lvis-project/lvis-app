@@ -38,7 +38,7 @@ import { createPortal } from "react-dom";
 import { FloatingRightLane } from "./components/FloatingRightLane.js";
 import { useChatGroupHeaderSlot } from "./components/ChatGroupFrame.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
-import { dockedPanelRange, useContainerNarrow } from "./hooks/use-container-narrow.js";
+import { sidePanelLayout, useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -244,15 +244,15 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     commitWidth: commitSidePanelWidth,
   } = usePanelWidth(api, SIDE_PANEL_WIDTH_PREF);
   const previewRailVisible = sidePanelOpen;
-  // The panel is a COLUMN of this tile, always: opening it pushes the
-  // transcript, never covers it, and never leaves the tile for a window-level
-  // sheet. The tile's width sets the range the split bar moves in — a tile too
-  // narrow for both pixel floors shares itself between the two columns.
+  // The panel lives INSIDE this tile, always — never a window-level sheet.
+  // With room for both, it is a column that pushes the transcript; without,
+  // it keeps its own floor and floats over the transcript's right edge
+  // (sidePanelLayout). The tile's width sets the range the split bar moves in.
   const chatViewRootRef = useRef<HTMLDivElement | null>(null);
   const dockedPanelMotionRef = useRef<HTMLDivElement | null>(null);
   const { width: containerWidth } = useContainerNarrow(chatViewRootRef);
-  const panelRange = dockedPanelRange(containerWidth);
-  const dockedPanelWidth = Math.min(panelRange.max, Math.max(panelRange.min, sidePanelWidth));
+  const panelLayout = sidePanelLayout(containerWidth);
+  const dockedPanelWidth = Math.min(panelLayout.max, Math.max(panelLayout.min, sidePanelWidth));
   const dockedPanelShouldOpen = previewRailVisible;
   const [dockedPanelPresent, setDockedPanelPresent] = useState(dockedPanelShouldOpen);
   // Always start collapsed so an initially-open persisted panel never paints
@@ -886,11 +886,15 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           ref={dockedPanelMotionRef}
           id="chat-side-panel"
           data-testid="chat-side-panel-motion"
+          data-panel-mode={panelLayout.mode}
           aria-hidden={!dockedPanelExpanded}
           inert={!dockedPanelExpanded}
           style={{ width: dockedPanelExpanded ? `${dockedPanelWidth}px` : "0px" }}
           className={[
-            "relative z-40 flex min-w-0 max-w-[calc(100vw-12rem)] shrink-0 origin-right justify-end self-stretch will-change-[width,opacity,transform]",
+            "z-40 flex min-w-0 max-w-[calc(100vw-12rem)] shrink-0 origin-right justify-end will-change-[width,opacity,transform]",
+            panelLayout.mode === "overlay"
+              ? "absolute inset-y-0 right-0 shadow-xl"
+              : "relative self-stretch",
             sidePanelResizing
               ? "transition-none"
               : "transition-[width,opacity,transform] duration-[var(--motion-layout)] ease-[var(--motion-ease-out)] motion-reduce:transition-none",
@@ -921,8 +925,8 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
             workspaceTabs={workspaceTabs}
             subAgentSpawns={subAgentSpawns}
             width={dockedPanelWidth}
-            minWidth={panelRange.min}
-            maxWidth={panelRange.max}
+            minWidth={panelLayout.min}
+            maxWidth={panelLayout.max}
             onWidthChange={handleSidePanelWidthChange}
             onWidthCommit={handleSidePanelWidthCommit}
             resizeElementRef={dockedPanelMotionRef}
