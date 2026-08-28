@@ -162,7 +162,7 @@ export function ChatGroupSession({
 
   const {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted,
-    beginStreamingRequest, finishStreamingRequest, markLastAssistantInterrupted,
+    beginStreamingRequest, finishStreamingRequest, markLastAssistantInterrupted, unmarkLastAssistantInterrupted,
     editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
@@ -267,8 +267,8 @@ export function ChatGroupSession({
   const { handleAsk } = useSendMessage({
     api, t, streaming, checkApiKey: env.checkApiKey, composeOutgoing,
     appendUserEntry, dropUserEntry, resetStreamAccumulators,
-    beginStreamingRequest, finishStreamingRequest, markLastAssistantInterrupted,
-    setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
+    beginStreamingRequest, finishStreamingRequest, markLastAssistantInterrupted, unmarkLastAssistantInterrupted,
+    appendSystemEntry, setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions: env.refreshSessions, attachments, setAttachments,
     llmVendor: env.llmVendor, llmModel: env.llmModel,
     llmReadyWithoutApiKey: env.chatReadyWithoutApiKey,

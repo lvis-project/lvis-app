@@ -6,9 +6,11 @@ import {
   applyExternalUserMessage,
   applyToolEnd,
   applyToolStart,
+  clearTurnAssistantInterrupted,
   dropOptimisticUserEntry,
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
+  markTurnAssistantInterrupted,
   setAssistantError,
   upsertPermissionReview,
   upsertStreamingReasoning,
@@ -630,6 +632,49 @@ describe("setAssistantError — Issue #911 systemNotice option", () => {
  * exists only in this renderer: absent from the session file, gone on reload, and
  * indistinguishable from one that was actually sent.
  */
+describe("markTurnAssistantInterrupted — the turn the abort cut short", () => {
+  const answered = (text: string): ChatEntry[] => [
+    { kind: "user", text: "q" },
+    { kind: "assistant", text, streaming: false },
+  ];
+
+  it("marks the last assistant entry whether or not it is still streaming", () => {
+    const out = markTurnAssistantInterrupted(answered("done"));
+    expect(out[1]).toMatchObject({ interrupted: true, streaming: false });
+  });
+
+  it("stops at the current turn's start — a previous answer is never marked", () => {
+    const entries: ChatEntry[] = [...answered("earlier"), { kind: "user", text: "next" }];
+    expect(markTurnAssistantInterrupted(entries)).toBe(entries);
+  });
+
+  it("is a no-op on an already marked entry, and clear restores the unmarked shape", () => {
+    const marked = markTurnAssistantInterrupted(answered("done"));
+    expect(markTurnAssistantInterrupted(marked)).toBe(marked);
+    const cleared = clearTurnAssistantInterrupted(marked);
+    expect(cleared[1]).not.toHaveProperty("interrupted");
+    expect(clearTurnAssistantInterrupted(cleared)).toBe(cleared);
+  });
+});
+
+describe("setAssistantError — the interrupted turn keeps what it had", () => {
+  it("keeps an empty interrupted answer empty instead of showing the abort as its text", () => {
+    const entries = markTurnAssistantInterrupted([
+      { kind: "user", text: "q" },
+      { kind: "assistant", text: "", streaming: true },
+    ]);
+    const out = setAssistantError(entries, "aborted", "");
+    expect(out[1]).toMatchObject({ kind: "assistant", text: "", interrupted: true, streaming: false });
+  });
+
+  it("carries the streaming entry's other fields through the error close", () => {
+    const entries = upsertStreamingAssistant([{ kind: "user", text: "q" }], "partial");
+    entries[1] = { ...(entries[1] as Extract<ChatEntry, { kind: "assistant" }>), phase: "final", interrupted: true };
+    const out = setAssistantError(entries, "aborted", "");
+    expect(out[1]).toMatchObject({ text: "partial", phase: "final", interrupted: true, streaming: false });
+  });
+});
+
 describe("dropOptimisticUserEntry", () => {
   it("removes the bubble the refused send appended", () => {
     const entries: ChatEntry[] = [

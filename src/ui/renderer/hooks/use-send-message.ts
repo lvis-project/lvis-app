@@ -68,6 +68,8 @@ export interface UseSendMessageDeps {
   beginStreamingRequest: ChatState["beginStreamingRequest"];
   finishStreamingRequest: ChatState["finishStreamingRequest"];
   markLastAssistantInterrupted?: ChatState["markLastAssistantInterrupted"];
+  unmarkLastAssistantInterrupted?: ChatState["unmarkLastAssistantInterrupted"];
+  appendSystemEntry: ChatState["appendSystemEntry"];
   setErrorWithThought: ChatState["setErrorWithThought"];
   handleCompactCommand: ChatState["handleCompactCommand"];
   sessionLoad: Sessions["handleLoadSession"];
@@ -143,6 +145,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
     api, t, streaming, checkApiKey, composeOutgoing,
     appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     markLastAssistantInterrupted,
+    unmarkLastAssistantInterrupted,
+    appendSystemEntry,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
     llmVendor, llmModel, llmReadyWithoutApiKey, subscriptionRuntimePolicy,
@@ -186,10 +190,6 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       const interrupt = (mode === "default" || mode === "mcp-prompt")
         && streaming
         && opts?.inputOrigin !== "queue-auto";
-      if (interrupt) {
-        if (debugStreamEnabled) debugLog("handleAsk", "interrupt:send");
-        markLastAssistantInterrupted?.();
-      }
       // Renderer only performs UX-level shortcuts for typed composer input.
       // Main owns the authoritative trust-origin classification.
 
@@ -312,7 +312,14 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       // The interrupted turn's closing frames still arrive after this point
       // and finalize their own entry with what they accumulated; only a
       // fresh turn starts from empty accumulators.
-      if (!interrupt) resetStreamAccumulators();
+      if (interrupt) {
+        // Marked here, not at entry: every gate above returns without a send,
+        // and a turn nothing interrupted must not wear the badge.
+        if (debugStreamEnabled) debugLog("handleAsk", "interrupt:send");
+        markLastAssistantInterrupted?.();
+      } else {
+        resetStreamAccumulators();
+      }
       try {
         const result = await api.chatSend(
           outgoing,
@@ -360,9 +367,16 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         const mappedKey = code === "user-keyboard-required"
           ? "app.sendNeedsKeyboard"
           : resolveIpcErrorKey(code);
-        setErrorWithThought(
-          mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage }),
-        );
+        const message = mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage });
+        if (interrupt && err instanceof ChatSendRefusedError) {
+          // Refused at admission: the host never stopped the running turn, so
+          // it goes on untouched — take the badge back and say so beside it
+          // rather than closing its entry with an error.
+          unmarkLastAssistantInterrupted?.();
+          appendSystemEntry(message);
+        } else {
+          setErrorWithThought(message);
+        }
         // Put the turn back the way it was. The bubble was appended optimistically and
         // the composer was cleared before the IPC resolved; a REFUSED send means main
         // recorded nothing, so leaving either would show the user a message that was
@@ -416,6 +430,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       beginStreamingRequest,
       finishStreamingRequest,
       setErrorWithThought,
+      unmarkLastAssistantInterrupted,
+      appendSystemEntry,
       handleCompactCommand,
       sessionLoad,
       applyLoadedSession,

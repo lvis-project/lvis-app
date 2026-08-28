@@ -75,12 +75,15 @@ function setup(options?: {
   checkApiKey?: UseSendMessageDeps["checkApiKey"];
   settingsReady?: boolean;
   streaming?: boolean;
+  handleCompactCommand?: UseSendMessageDeps["handleCompactCommand"];
 }) {
   const attachments = options?.attachments ?? [RESOURCE];
   const chatSend = options?.chatSend ?? vi.fn(async () => ({ ok: true }));
   const chatAbort = vi.fn(async () => ({ ok: true }));
   const resetStreamAccumulators = vi.fn();
   const markLastAssistantInterrupted = vi.fn();
+  const unmarkLastAssistantInterrupted = vi.fn();
+  const appendSystemEntry = vi.fn();
   const setQuestion = vi.fn();
   const activeSubscriptionRuntime = options?.activeSubscriptionRuntime ?? null;
   const subscriptionRuntimePolicy = options?.subscriptionRuntimePolicy
@@ -113,6 +116,8 @@ function setup(options?: {
     t: (key: string) => key,
     streaming: options?.streaming ?? false,
     markLastAssistantInterrupted,
+    unmarkLastAssistantInterrupted,
+    appendSystemEntry,
     checkApiKey: options?.checkApiKey ?? (async () => true),
     // The real composer output for "summarize [Resource #1]" plus one resource: the
     // marker stays in the body, the fence rides as its own part.
@@ -141,7 +146,7 @@ function setup(options?: {
     beginStreamingRequest: vi.fn(() => 1),
     finishStreamingRequest: vi.fn(),
     setErrorWithThought,
-    handleCompactCommand: vi.fn(),
+    handleCompactCommand: options?.handleCompactCommand ?? vi.fn(),
     sessionLoad: vi.fn(),
     applyLoadedSession: vi.fn(),
     refreshSessionId: vi.fn(),
@@ -161,7 +166,7 @@ function setup(options?: {
   const { result } = renderHook(() => useSendMessage(deps));
   return {
     result, chatSend, chatAbort, setQuestion, setAttachments, dropUserEntry, setErrorWithThought,
-    resetStreamAccumulators, markLastAssistantInterrupted,
+    resetStreamAccumulators, markLastAssistantInterrupted, unmarkLastAssistantInterrupted, appendSystemEntry,
   };
 }
 
@@ -427,6 +432,43 @@ describe("handleAsk — a send while a turn is still running", () => {
     // The interrupted turn's closing frame finalizes its own entry from the
     // accumulators; clearing them here would leave that entry open.
     expect(resetStreamAccumulators).not.toHaveBeenCalled();
+  });
+
+  it("marks the running turn only once the send actually goes out — a command handled locally leaves it alone", async () => {
+    const handleCompactCommand = vi.fn(async () => true);
+    const { result, chatSend, markLastAssistantInterrupted } = setup({
+      streaming: true, attachments: [], handleCompactCommand,
+    });
+
+    await act(async () => {
+      await result.current.handleAsk("/compact");
+    });
+
+    expect(handleCompactCommand).toHaveBeenCalledWith("/compact");
+
+    expect(chatSend).not.toHaveBeenCalled();
+    expect(markLastAssistantInterrupted).not.toHaveBeenCalled();
+  });
+
+  it("takes the marker back and notes the refusal beside the live answer when the host declines the interrupt", async () => {
+    const chatSend = vi.fn(async () => ({ ok: false, error: "user-keyboard-required" }));
+    const {
+      result, markLastAssistantInterrupted, unmarkLastAssistantInterrupted, appendSystemEntry,
+      setErrorWithThought, dropUserEntry, setQuestion,
+    } = setup({ chatSend, streaming: true, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("new direction");
+    });
+
+    expect(markLastAssistantInterrupted).toHaveBeenCalledTimes(1);
+    expect(unmarkLastAssistantInterrupted).toHaveBeenCalledTimes(1);
+    expect(appendSystemEntry).toHaveBeenCalledWith("app.sendNeedsKeyboard");
+    // The running turn's entry stays open for its own stream; an error close here would split the answer.
+    expect(setErrorWithThought).not.toHaveBeenCalled();
+    expect(dropUserEntry).toHaveBeenCalledTimes(1);
+    const restore = setQuestion.mock.calls.at(-1)?.[0] as ((q: string) => string) | string;
+    expect(typeof restore === "function" ? restore("") : restore).toBe("new direction");
   });
 
   it("never interrupts on behalf of a queue drain, even while the renderer still counts the turn as streaming", async () => {

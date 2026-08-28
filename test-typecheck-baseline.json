@@ -193,7 +193,6 @@
     "src/ui/renderer/components/__tests__/mcp-app-view.test.ts": 3,
     "src/ui/renderer/components/__tests__/McpAppView.test.tsx": 1,
     "src/ui/renderer/components/__tests__/PluginAuthSection.test.tsx": 1,
-    "src/ui/renderer/components/__tests__/Sidebar.test.tsx": 3,
     "src/ui/renderer/components/__tests__/SidebarPluginDoctor.test.tsx": 1,
     "src/ui/renderer/components/__tests__/SlashPicker.test.tsx": 5,
     "src/ui/renderer/components/__tests__/StarredView.test.tsx": 3,

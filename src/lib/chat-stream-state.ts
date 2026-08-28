@@ -388,6 +388,46 @@ function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
   return entry?.kind === "user" || entry?.kind === "imported_trigger";
 }
 
+/**
+ * The assistant entry of the turn currently at the end of the transcript —
+ * the one an abort or an interrupting send cuts short. Walking back from the
+ * end, the first assistant entry wins; crossing a turn start first means the
+ * current turn has produced no assistant entry yet (a tool round), and the
+ * previous turn's answer is not touched.
+ */
+function currentTurnAssistantIdx(entries: readonly ChatEntry[]): number {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry?.kind === "assistant") return i;
+    if (isTurnStartEntry(entry)) return -1;
+  }
+  return -1;
+}
+
+export function markTurnAssistantInterrupted(entries: ChatEntry[]): ChatEntry[] {
+  const idx = currentTurnAssistantIdx(entries);
+  if (idx < 0) return entries;
+  const entry = entries[idx] as AssistantEntry;
+  if (entry.interrupted) return entries;
+  const next = [...entries];
+  // `streaming` is left to the turn's own closing frame; the finalizer finds
+  // the entry to close by that flag.
+  next[idx] = { ...entry, interrupted: true };
+  return next;
+}
+
+/** Undo `markTurnAssistantInterrupted` for a send the host then refused. */
+export function clearTurnAssistantInterrupted(entries: ChatEntry[]): ChatEntry[] {
+  const idx = currentTurnAssistantIdx(entries);
+  if (idx < 0) return entries;
+  const entry = entries[idx] as AssistantEntry;
+  if (!entry.interrupted) return entries;
+  const next = [...entries];
+  const { interrupted: _interrupted, ...rest } = entry;
+  next[idx] = rest;
+  return next;
+}
+
 export function appendUserEntry(
   entries: ChatEntry[],
   text: string,
@@ -753,14 +793,15 @@ export function setAssistantError(
   );
 
   const current = assistantIdx >= 0 ? (next[assistantIdx] as AssistantEntry) : undefined;
-  // A turn the user cut short keeps the answer it had managed to deliver;
-  // the closing error is the abort itself, not something to show in its place.
+  // A turn the user cut short keeps whatever it had delivered — possibly
+  // nothing; the closing error is the abort itself, not something to show
+  // in its place.
   const interrupted = current?.interrupted === true;
-  const baseEntry = {
+  const baseEntry: AssistantEntry = {
+    ...current,
     kind: "assistant" as const,
-    text: interrupted && current?.text ? current.text : message,
+    text: interrupted ? current?.text ?? "" : message,
     streaming: false,
-    ...(interrupted ? { interrupted: true } : {}),
     ...(systemNotice !== undefined ? { systemNotice } : {}),
   };
 
