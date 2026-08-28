@@ -130,7 +130,7 @@ export function registerAwayAuthorityHandlers(deps: IpcDeps): void {
     try {
       // The conversation is read here, never received: the renderer says which
       // tile, and what that tile holds is main's to answer.
-      const loop = deps.findChatGroupLoop?.(payload.chatGroupId);
+      const loop = deps.findChatGroupLoop(payload.chatGroupId);
       if (!loop) return OPERATION_REJECTED;
       const conversationId = loop.getSessionId();
       if (typeof conversationId !== "string" || conversationId.length === 0) {
