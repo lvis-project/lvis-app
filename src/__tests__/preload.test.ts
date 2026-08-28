@@ -522,3 +522,67 @@ describe("preload — plugin webview asset URLs", () => {
     expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:index:update-if-unchanged", "# Old", "# New");
   });
 });
+
+describe("preload — per-tile chat push filtering", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    exposed.clear();
+    mockOn.mockClear();
+    mockRemoveListener.mockClear();
+  });
+
+  async function subscribeOn(
+    channel: string,
+    subscribe: (surface: Record<string, unknown>) => () => void,
+    chatGroupId?: string,
+  ): Promise<{ listener: (event: unknown, payload: unknown) => void; unsubscribe: () => void }> {
+    const { buildPublicSurface } = await import("../preload/public-surface.js");
+    const root = buildPublicSurface() as Record<string, unknown>;
+    const surface = chatGroupId === undefined
+      ? root
+      : (root["chatGroup"] as (id: string) => Record<string, unknown>)(chatGroupId);
+    const unsubscribe = subscribe(surface);
+    const call = mockOn.mock.calls.findLast((entry) => entry[0] === channel);
+    return { listener: call?.[1] as (event: unknown, payload: unknown) => void, unsubscribe };
+  }
+
+  // The fallback banner and the token stream ride one labelled adapter, so
+  // both must answer the same question: is this frame addressed to my tile?
+  it.each([
+    ["lvis:chat:stream", "onChatStream"],
+    ["lvis:chat:fallback", "onChatFallback"],
+  ])("%s reaches only the group it is addressed to", async (channel, apiKey) => {
+    const handler = vi.fn();
+    const { listener, unsubscribe } = await subscribeOn(
+      channel,
+      (surface) => (surface[apiKey] as (cb: (payload: unknown) => void) => () => void)(handler),
+      "group-2",
+    );
+
+    const mine = { from: "a", to: "b", chatGroupId: "group-2" };
+    listener({}, mine);
+    listener({}, { from: "a", to: "b", chatGroupId: "group-3" });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(mine);
+
+    unsubscribe();
+    expect(mockRemoveListener).toHaveBeenCalledWith(channel, listener);
+  });
+
+  it.each([
+    ["lvis:chat:stream", "onChatStream"],
+    ["lvis:chat:fallback", "onChatFallback"],
+  ])("%s with no group label reaches the surface unchanged", async (channel, apiKey) => {
+    const handler = vi.fn();
+    const { listener } = await subscribeOn(
+      channel,
+      (surface) => (surface[apiKey] as (cb: (payload: unknown) => void) => () => void)(handler),
+    );
+
+    const unlabelled = { from: "a", to: "b" };
+    listener({}, unlabelled);
+
+    expect(handler).toHaveBeenCalledWith(unlabelled);
+  });
+});

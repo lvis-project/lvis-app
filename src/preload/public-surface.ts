@@ -220,7 +220,14 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
     return () => ipcRenderer.removeListener(CHANNELS.chat.stream, listener);
   },
   onChatFallback: (handler: (payload: { from: string; to: string }) => void) => {
-    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    // The fallback rides the same labelled adapter as the stream, so it needs
+    // the same check: a provider swap happened in ONE conversation, and an
+    // unfiltered banner would announce it in every open tile at once.
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => {
+      const frameGroup = (payload as { chatGroupId?: unknown }).chatGroupId;
+      if (typeof frameGroup === "string" && frameGroup !== chatGroupId) return;
+      handler(payload);
+    };
     ipcRenderer.on(CHANNELS.chat.fallback, listener);
     return () => ipcRenderer.removeListener(CHANNELS.chat.fallback, listener);
   },
