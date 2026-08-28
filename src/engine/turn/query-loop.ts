@@ -362,8 +362,18 @@ export async function queryLoop(
         delivery.entries.map((entry) =>
           Promise.resolve().then(() => entry.onInjected?.())),
       );
+      // The row is appended before the round whose completion commits this
+      // delivery, so a committed batch without one is a broken invariant —
+      // surfacing it is the only way it ever gets fixed.
+      const committedRow = delivery.historyMessage;
+      if (committedRow === null) {
+        throw new Error("[guidance] committed a guidance batch that never reached history");
+      }
       try {
-        notifyGuidanceInjected(callbacks?.onGuidanceInjected, delivery.joined, delivery.subAgentSource);
+        callbacks?.onGuidanceInjected?.(delivery.joined, {
+          messageId: committedRow.meta.messageId,
+          ...(delivery.subAgentSource ? { source: delivery.subAgentSource } : {}),
+        });
       } catch {
         // Renderer notification failure must not invalidate a committed round.
       }
@@ -540,6 +550,12 @@ export async function queryLoop(
           // provenance, so a reload rebuilds the same box.
           meta: {
             hostInjectionId: randomUUID(),
+            // The stored content is the injection envelope, which is
+            // prompt-bearing but is not what the bubble shows. Recording the
+            // bare guide text keeps a reloaded transcript — and anything that
+            // hands a row's text back to the user, like restoring it into the
+            // composer — showing the same words the live bubble did.
+            displayText: joined,
             ...(subAgentHistoryMeta(subAgentSource).meta ?? {}),
           },
         });
@@ -1694,16 +1710,6 @@ function subAgentHistoryMeta(
       subAgentReport: source.title === undefined ? {} : { title: source.title },
     },
   };
-}
-
-/** Notify the renderer, keeping the one-argument shape for user-authored guides. */
-function notifyGuidanceInjected(
-  callback: TurnCallbacks["onGuidanceInjected"],
-  text: string,
-  source: GuidanceInjectionSource | undefined,
-): void {
-  if (source) callback?.(text, source);
-  else callback?.(text);
 }
 
 // ---------------------------------------------------------------------------

@@ -222,6 +222,23 @@ export type ChatEntry =
        * for entries that have no row behind them.
        */
       messageId?: string;
+      /**
+       * This bubble is the optimistic echo of a send whose row the host has not
+       * announced yet, and it is the ONE entry the next `user.message` frame is
+       * allowed to claim.
+       *
+       * Explicit because "the oldest user entry without an id" is not the same
+       * set: queued and sub-agent guidance bubbles arrive mid-turn without one,
+       * a session written before ids existed loads without one, and an imported
+       * session has its metadata stripped. Any of those sitting earlier in the
+       * transcript would absorb the id meant for the message the user just
+       * sent, and the actions that name a row would then act on a different
+       * message than the one clicked.
+       *
+       * Renderer-local display state: nothing writes it to disk, and
+       * `historyToEntries` never sets it, so a reloaded transcript has none.
+       */
+      awaitingHostId?: true;
     }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
   | {
@@ -472,7 +489,14 @@ export function appendUserEntry(
   // timestamp on fresh turns until the user reopens the session.
   return [
     ...entries,
-    { kind: "user", text, createdAt: Date.now(), ...(injectHint ? { injectHint } : {}) },
+    {
+      kind: "user",
+      text,
+      createdAt: Date.now(),
+      // Marks THIS bubble as the one the host is about to announce a row for.
+      awaitingHostId: true,
+      ...(injectHint ? { injectHint } : {}),
+    },
   ];
 }
 
@@ -513,10 +537,15 @@ export function applyUserMessageFrame(
     ];
   }
   if (frame.messageId === undefined) return entries;
-  const pending = entries.findIndex((e) => e.kind === "user" && e.messageId === undefined);
+  // Only a bubble that explicitly declared itself the pending echo may be
+  // claimed, and it is claimed once. Entries that merely happen to lack an id
+  // — guidance bubbles, a legacy session's rows, an imported session — are not
+  // waiting for anything and must never absorb this turn's identity.
+  const pending = entries.findIndex((e) => e.kind === "user" && e.awaitingHostId === true);
   if (pending < 0) return entries;
   const next = [...entries];
-  next[pending] = { ...(next[pending] as UserEntry), messageId: frame.messageId };
+  const { awaitingHostId: _claimed, ...claimedEntry } = next[pending] as UserEntry;
+  next[pending] = { ...claimedEntry, messageId: frame.messageId };
   return next;
 }
 

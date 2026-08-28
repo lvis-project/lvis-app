@@ -20,9 +20,13 @@
  * These tests drive the real registered IPC handlers against a history fake that
  * actually mutates, so they fail if the truncate or the write is dropped.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
 import { ConversationHistory } from "../../../engine/conversation-history.js";
+import { MemoryManager } from "../../../memory/memory-manager.js";
 import { serializeHistoryMessage } from "../../../shared/chat-history.js";
 import { historyToEntries } from "../../../ui/renderer/utils/history.js";
 import type { GenericMessage } from "../../../engine/llm/types.js";
@@ -95,7 +99,7 @@ function makeDeps(seed: GenericMessage[]) {
       loadSessionMetadata: vi.fn(() => null),
       rehydrateToolResultArtifacts: vi.fn((_id: string, msgs: GenericMessage[]) => msgs),
       markMainActiveResume: vi.fn(async () => undefined),
-      pruneCheckpointsToSurvivingBoundaries: vi.fn(async () => undefined),
+      pruneCheckpointsDiscardedByRewind: vi.fn(async () => undefined),
     } as any,
     auditLogger: { log: vi.fn() } as any,
     getMainWindow: vi.fn(() => null),
@@ -159,15 +163,40 @@ describe("lvis:chat:rewind-to", () => {
     expect(savedMessages(deps)).toEqual([]);
   });
 
-  it("drops the checkpoints whose boundary was discarded, so a reload cannot resurrect the message", async () => {
+  it("hands the pruner the rows this rewind discarded, not the rows that survived it", async () => {
+    // What the pruner may delete is decided by which boundaries THIS rewind
+    // threw away. Handing it the survivors instead would also condemn every
+    // boundary an earlier compaction had already summarized away.
     const deps = await setup(driftShapedHistory());
 
     await invokeRegisteredHandler<Promise<{ ok: boolean }>>(handlers, REWIND, "m-q1", "main");
 
-    expect(deps.memoryManager.pruneCheckpointsToSurvivingBoundaries).toHaveBeenCalledWith(
+    expect(deps.memoryManager.pruneCheckpointsDiscardedByRewind).toHaveBeenCalledWith(
       ACTIVE_SESSION,
-      [],
+      driftShapedHistory(),
     );
+  });
+
+  it("restores the words the bubble showed, not the envelope stored around them", async () => {
+    // A drained guide is stored wrapped in a routing envelope the user never
+    // wrote, with the bare text recorded alongside it. Returning to that row
+    // must put the user's own words in the composer.
+    const deps = await setup([
+      { role: "user", content: "first question", meta: { messageId: "m-q1" } },
+      {
+        role: "user",
+        content: "[injection envelope]\n더 짧게",
+        meta: { messageId: "m-guide", displayText: "더 짧게" },
+      },
+      { role: "assistant", content: "shorter answer", meta: { messageId: "m-a1" } },
+    ]);
+
+    const result = await invokeRegisteredHandler<Promise<{ ok: boolean; text?: string }>>(
+      handlers, REWIND, "m-guide", "main",
+    );
+
+    expect(result).toMatchObject({ ok: true, text: "더 짧게" });
+    expect(savedMessages(deps).map((m) => m.meta?.messageId)).toEqual(["m-q1"]);
   });
 
   it("refuses an assistant row — only the user's own input can be taken back", async () => {
@@ -378,6 +407,87 @@ describe("renderer entry → host row, end to end", () => {
     expect(result.text).toBe("third question");
     expect(history.getMessages().map((m) => m.content)).toEqual([
       "first question", "", "file body", "first answer", "[compacted]",
+    ]);
+  });
+});
+
+/**
+ * Sessions written before rows carried an identity are still on disk, and two
+ * readers open them: the sidebar renders a transcript from `loadSession`, and a
+ * resumed loop restores its history from the same call. If those two produced
+ * different identities for the same row, the id the user clicked would name
+ * nothing the host could find — so `loadSession` mints one identity per row,
+ * derived from the session and the row's position, and everything downstream
+ * inherits it.
+ */
+describe("a session written before rows carried an identity", () => {
+  const LEGACY_SESSION = "dddddddd-0000-1111-2222-333333333333";
+  let dir: string;
+  let mm: MemoryManager;
+
+  beforeEach(() => {
+    handlers.clear();
+    dir = mkdtempSync(join(tmpdir(), "lvis-legacy-rows-"));
+    mm = new MemoryManager({ lvisDir: dir });
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function writeLegacySession(): Promise<void> {
+    await mm.saveSession(LEGACY_SESSION, [
+      { role: "user", content: "first question" },
+      { role: "assistant", content: "first answer" },
+      { role: "user", content: "second question" },
+      { role: "assistant", content: "second answer" },
+    ]);
+  }
+
+  it("reads back the same identity for the same row on every load", async () => {
+    await writeLegacySession();
+
+    const first = mm.loadSession(LEGACY_SESSION)!;
+    const second = mm.loadSession(LEGACY_SESSION)!;
+
+    const ids = first.map((m) => (m as GenericMessage).meta?.messageId);
+    expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(second.map((m) => (m as GenericMessage).meta?.messageId)).toEqual(ids);
+  });
+
+  it("restores into the loop under the ids the transcript shows, and rewinds to the clicked row", async () => {
+    await writeLegacySession();
+    const loaded = mm.loadSession(LEGACY_SESSION) as GenericMessage[];
+
+    // The loop resumes from the same call the sidebar read.
+    const history = new ConversationHistory();
+    history.restore(loaded);
+    expect(history.getMessages().map((m) => m.meta?.messageId)).toEqual(
+      loaded.map((m) => m.meta?.messageId),
+    );
+
+    const deps = makeDeps([]);
+    deps.conversationLoop.getHistory = vi.fn(() => history) as never;
+    deps.conversationLoop.getSessionId = vi.fn(() => LEGACY_SESSION) as never;
+    vi.clearAllMocks();
+    const { registerChatHandlers } = await import("../chat.js");
+    registerChatHandlers(deps as never);
+
+    const entries = historyToEntries(
+      loaded.map((message, index) => serializeHistoryMessage(message, index)),
+    );
+    const clicked = entries.filter((e) => e.kind === "user").at(-1);
+    const messageId = clicked?.kind === "user" ? clicked.messageId : undefined;
+    expect(messageId, "a legacy row is addressable once loaded").toBeDefined();
+
+    const result = await invokeRegisteredHandler<Promise<{ ok: boolean; text?: string }>>(
+      handlers, REWIND, messageId!, "main",
+    );
+
+    expect(result).toMatchObject({ ok: true, text: "second question" });
+    expect(history.getMessages().map((m) => m.content)).toEqual([
+      "first question", "first answer",
     ]);
   });
 });

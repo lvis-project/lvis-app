@@ -145,6 +145,10 @@ export function useChatState(api: LvisApi) {
         // A sub-agent report is not the user's own queued message — it gets its
         // own box, carrying the child title so the user knows who reported.
         const subAgentReport = ev.subAgentReport;
+        // The row the host appended for this injection, so the bubble drawn
+        // live names the same row a reloaded transcript names and the
+        // row-addressed actions reach it without waiting for a reload.
+        const rowId = typeof ev.messageId === "string" ? { messageId: ev.messageId } : {};
         setEntries((p) => [
           ...p,
           subAgentReport
@@ -156,8 +160,9 @@ export function useChatState(api: LvisApi) {
                   ? { subAgentTitle: subAgentReport.title }
                   : {}),
                 createdAt: Date.now(),
+                ...rowId,
               }
-            : { kind: "user", text, injectHint: "queue", createdAt: Date.now() },
+            : { kind: "user", text, injectHint: "queue", createdAt: Date.now(), ...rowId },
         ]);
         return;
       }

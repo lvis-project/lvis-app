@@ -135,6 +135,10 @@ export class ConversationHistory {
     // local data URLs, but discard remote/malformed binary parts before any
     // resume, checkpoint, or retry can hand the history to a provider.
     const capped: GenericMessage[] = [];
+    // Two rows answering to one id is worse than a row with none: a lookup
+    // would silently take the first. A tampered or hand-merged file can carry
+    // duplicates, so the second one is re-minted rather than kept.
+    const seenIds = new Set<string>();
     for (const message of messages) {
       const normalized = normalizeRestoredUserContent(
         applyToolResultCap(message, { recompute: true }),
@@ -143,7 +147,7 @@ export class ConversationHistory {
       // invariant ("every row is addressable") holds for the whole session.
       // Rows that already carry one keep it, which is what lets a surface hold
       // an id across a reload.
-      if (normalized) capped.push(stampMessageId(normalized));
+      if (normalized) capped.push(stampMessageId(normalized, seenIds));
     }
     this.messages = normalizeToolPairInvariant(capped).messages;
     this.trim();
@@ -216,15 +220,17 @@ function stampCreatedAt(message: GenericMessage): GenericMessage {
  * re-read — a raw uuid that happened to match a redaction pattern would come
  * back masked and stop resolving.
  */
-function stampMessageId(message: GenericMessage): StoredMessage {
+function stampMessageId(message: GenericMessage, taken?: Set<string>): StoredMessage {
   const existing = message.meta?.messageId;
-  if (existing !== undefined) {
-    return { ...message, meta: { ...(message.meta ?? {}), messageId: existing } };
-  }
-  return {
-    ...message,
-    meta: { ...(message.meta ?? {}), messageId: createDlpSafeUuid() },
-  };
+  // An id read back from disk is only usable if it is actually a non-empty
+  // string and nothing else in this history already answers to it. A number, an
+  // empty string, or a duplicate would make `find by id` return the wrong row
+  // or no row, so those are re-minted rather than trusted.
+  const usable =
+    typeof existing === "string" && existing.length > 0 && !(taken?.has(existing) ?? false);
+  const messageId = usable ? existing : createDlpSafeUuid();
+  taken?.add(messageId);
+  return { ...message, meta: { ...(message.meta ?? {}), messageId } };
 }
 
 function normalizeMaxMessages(maxMessages: number | undefined): number {

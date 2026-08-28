@@ -145,6 +145,7 @@ function projectPlatformConversationEventToLegacyChatFrame(
       return streamFrame(streamChannel, withStreamId({
         type: "guidance_injected",
         text: event.text,
+        messageId: event.ownerDetail.messageId,
         ...(event.subAgentReport ? { subAgentReport: event.subAgentReport } : {}),
       }));
     case "guidance.dropped":

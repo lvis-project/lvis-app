@@ -762,7 +762,7 @@ describe("applyUserMessageFrame", () => {
   });
 
   it("binds the host's row identity onto the bubble this surface echoed", () => {
-    const entries: ChatEntry[] = [{ kind: "user", text: "already echoed" }];
+    const entries = appendUserEntry([], "already echoed");
     const next = applyUserMessageFrame(entries, {
       text: "already echoed",
       origin: "user-keyboard",
@@ -772,10 +772,7 @@ describe("applyUserMessageFrame", () => {
   });
 
   it("binds turns in arrival order when two echoes are still waiting", () => {
-    const entries: ChatEntry[] = [
-      { kind: "user", text: "first", messageId: undefined },
-      { kind: "user", text: "second" },
-    ];
+    const entries = appendUserEntry(appendUserEntry([], "first"), "second");
     const first = applyUserMessageFrame(entries, {
       text: "first", origin: "user-keyboard", messageId: "row-1",
     });
@@ -783,6 +780,64 @@ describe("applyUserMessageFrame", () => {
       text: "second", origin: "user-keyboard", messageId: "row-2",
     });
     expect(second.map((e) => (e.kind === "user" ? e.messageId : null))).toEqual(["row-1", "row-2"]);
+  });
+
+  it("leaves the mid-turn bubbles that merely lack an id alone", () => {
+    // The control group for binding by marker instead of by inference. A
+    // drained guide and a child's report are user bubbles the host announced
+    // separately; neither is waiting for this turn's identity, and each sits
+    // ahead of the echo in the transcript. Binding to "the first user entry
+    // without an id" would hand this turn's row id to one of them, and every
+    // action that names a row would then act on the wrong message.
+    const entries: ChatEntry[] = appendUserEntry(
+      [
+        { kind: "user", text: "queued guide", injectHint: "queue" },
+        { kind: "user", text: "child report", injectHint: "sub-agent" },
+      ],
+      "the message just sent",
+    );
+
+    const next = applyUserMessageFrame(entries, {
+      text: "the message just sent",
+      origin: "user-keyboard",
+      messageId: "row-of-this-turn",
+    });
+
+    expect(next.map((e) => (e.kind === "user" ? e.messageId : null))).toEqual([
+      undefined, undefined, "row-of-this-turn",
+    ]);
+  });
+
+  it("claims nothing in a transcript whose rows were rebuilt from disk", () => {
+    // A reloaded session's bubbles carry the ids they were saved with, and a
+    // session written before ids existed carries none — but neither is an
+    // optimistic echo, so a turn announced from another surface must not
+    // rewrite one of them.
+    const entries: ChatEntry[] = [
+      { kind: "user", text: "a row from a legacy session file" },
+    ];
+
+    expect(
+      applyUserMessageFrame(entries, {
+        text: "a row from a legacy session file",
+        origin: "user-keyboard",
+        messageId: "row-of-this-turn",
+      }),
+    ).toBe(entries);
+  });
+
+  it("hands the id to one echo only, leaving nothing claimable behind", () => {
+    const entries = appendUserEntry([], "sent once");
+    const bound = applyUserMessageFrame(entries, {
+      text: "sent once", origin: "user-keyboard", messageId: "row-1",
+    });
+    // A second frame for the same turn (a resubscribe replay) finds no pending
+    // echo, so it cannot overwrite the identity already bound.
+    const again = applyUserMessageFrame(bound, {
+      text: "sent once", origin: "user-keyboard", messageId: "row-2",
+    });
+    expect(again).toBe(bound);
+    expect(again[0]).toMatchObject({ kind: "user", messageId: "row-1" });
   });
 
   it("leaves an already-identified bubble alone when no id rides the frame", () => {

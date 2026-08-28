@@ -141,7 +141,7 @@ async function registerWithGroups(
     markMainActiveResume: vi.fn(async () => undefined),
     saveSessionMetadata: vi.fn(async () => undefined),
     saveSession: vi.fn(async () => undefined),
-    pruneCheckpointsToSurvivingBoundaries: vi.fn(async () => undefined),
+    pruneCheckpointsDiscardedByRewind: vi.fn(async () => undefined),
   };
   registerChatHandlers({
     conversationLoop: main,

@@ -415,6 +415,42 @@ describe("useChatState", () => {
     expect(assistants[0].streaming).toBe(true);
   });
 
+  it("guidance_injected carries the host row id onto the bubble it draws", async () => {
+    // The bubble a live injection draws must name the same row a reloaded
+    // transcript names, otherwise the actions that address a row work on a
+    // queued message only after a restart.
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      emitChatStream({
+        type: "guidance_injected",
+        text: "더 짧게",
+        messageId: "guide-row-1",
+        streamId: 1,
+      });
+    });
+    act(() => {
+      emitChatStream({
+        type: "guidance_injected",
+        text: "child reported",
+        messageId: "guide-row-2",
+        subAgentReport: { title: "child" },
+        streamId: 1,
+      });
+    });
+
+    await waitFor(() => {
+      const users = result.current.entries.filter((e) => e.kind === "user") as Array<{
+        text: string; messageId?: string;
+      }>;
+      expect(users.map((e) => [e.text, e.messageId])).toEqual([
+        ["더 짧게", "guide-row-1"],
+        ["child reported", "guide-row-2"],
+      ]);
+    });
+  });
+
   it("guidance_injected with empty text is a no-op (defense-in-depth)", () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));

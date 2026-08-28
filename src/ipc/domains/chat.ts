@@ -257,14 +257,21 @@ function isValidImportedMessage(raw: unknown): raw is GenericMessage {
   const m = raw as Record<string, unknown>;
   switch (m.role) {
     case "user": {
-      if (!hasOnlyKeys(m, ["role", "content"])) return false;
+      // `meta` is ACCEPTED here and DROPPED by normalizeImportedMessage below —
+      // this app's own JSON export writes whole history rows, so every row it
+      // produces carries meta, and rejecting the key made an export of this app
+      // fail to import at all. Accepting the key is not accepting its contents:
+      // the normalizer rebuilds each message from whitelisted fields only, so
+      // no imported meta (a forged compact boundary, a stub marker, a borrowed
+      // row identity) reaches the conversation. Ids are re-minted on load.
+      if (!hasOnlyKeys(m, ["role", "content", "meta"])) return false;
       const content = ownField(m, "content");
       if (content === UNREADABLE_FIELD) return false;
       if (typeof content === "string") return true;
       return hasValidUserContentPartComposition(content);
     }
     case "assistant": {
-      if (!hasOnlyKeys(m, ["role", "content", "thought", "toolCalls"])) return false;
+      if (!hasOnlyKeys(m, ["role", "content", "thought", "toolCalls", "meta"])) return false;
       if (typeof m.content !== "string") return false;
       if (m.thought !== undefined && typeof m.thought !== "string") return false;
       if (m.toolCalls !== undefined) {
@@ -273,7 +280,7 @@ function isValidImportedMessage(raw: unknown): raw is GenericMessage {
       return true;
     }
     case "tool_result": {
-      if (!hasOnlyKeys(m, ["role", "content", "toolName", "toolUseId", "isError"])) return false;
+      if (!hasOnlyKeys(m, ["role", "content", "toolName", "toolUseId", "isError", "meta"])) return false;
       if (typeof m.content !== "string") return false;
       if (typeof m.toolUseId !== "string") return false;
       if (m.toolName !== undefined && typeof m.toolName !== "string") return false;
@@ -529,13 +536,22 @@ function historyIndexOfMessageId(history: GenericMessage[], messageId: string): 
 function restorableRewindInput(
   message: Extract<GenericMessage, { role: "user" }>,
 ): { ok: true; text: string } | { ok: false; error: string } {
+  if (typeof message.content !== "string") {
+    if (message.content.some((part) => part.type !== "text")) {
+      return { ok: false, error: "attachment-not-restorable" };
+    }
+    if (countResourceAttachmentFences(message.content) > 0) {
+      return { ok: false, error: "attachment-not-restorable" };
+    }
+  }
+  // Rows whose stored content is a routing envelope — a drained guide batch,
+  // a child's report — record the words the bubble actually showed. The
+  // composer gets those, never the wrapper the user never wrote. Checked
+  // AFTER the attachment refusals so a row that carries both a display text
+  // and an unrebuildable attachment is still refused rather than half-restored.
+  const displayText = message.meta?.displayText;
+  if (typeof displayText === "string") return { ok: true, text: displayText };
   if (typeof message.content === "string") return { ok: true, text: message.content };
-  if (message.content.some((part) => part.type !== "text")) {
-    return { ok: false, error: "attachment-not-restorable" };
-  }
-  if (countResourceAttachmentFences(message.content) > 0) {
-    return { ok: false, error: "attachment-not-restorable" };
-  }
   return { ok: true, text: userContentText(message.content) };
 }
 
@@ -1315,6 +1331,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const personaPromptId = personaPromptIdFromUserMessage(target);
       if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
       const sessionId = conversationLoop.getSessionId();
+      // Captured before the truncate: the pruner needs the boundary rows THIS
+      // rewind threw away. Asking instead which boundaries still survive also
+      // condemns the ones a later compaction had already summarized away, so
+      // snapshots this rewind never reached would be deleted with it.
+      const discarded = history.slice(historyIndex);
       conversationLoop.getHistory().truncate(historyIndex);
       const remaining = conversationLoop.getHistory().getMessages() as GenericMessage[];
       // Drop the checkpoints whose boundary sat inside the discarded range
@@ -1323,7 +1344,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // renderable user row survives, so a rewind to the opening message of a
       // session that ever compacted would otherwise come back on reload with
       // the message the user had just discarded.
-      await memoryManager.pruneCheckpointsToSurvivingBoundaries(sessionId, remaining);
+      await memoryManager.pruneCheckpointsDiscardedByRewind(sessionId, discarded);
       await memoryManager.saveSession(sessionId, remaining);
       return {
         ok: true,

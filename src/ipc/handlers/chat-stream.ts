@@ -281,12 +281,13 @@ export async function runStreamedTurn(
         }),
       onLlmStatus: (status) => send({ kind: "model.status", ownerDetail: { status } }),
       onFallback: (from, to) => send({ kind: "model.fallback", from, to }),
-      onGuidanceInjected: (text, source) => send({
+      onGuidanceInjected: (text, row) => send({
         kind: "guidance.applied",
         text,
-        ...(source
-          ? { subAgentReport: source.title === undefined ? {} : { title: source.title } }
+        ...(row.source
+          ? { subAgentReport: row.source.title === undefined ? {} : { title: row.source.title } }
           : {}),
+        ownerDetail: { messageId: row.messageId },
       }),
       onGuidanceDropped: (text) => send({ kind: "guidance.dropped", text }),
     },

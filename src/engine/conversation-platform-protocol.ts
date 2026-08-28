@@ -196,6 +196,12 @@ export type PlatformConversationEvent =
     readonly text: string;
     /** Present when the whole injected batch was a sub-agent report. */
     readonly subAgentReport?: { readonly title?: string };
+    /**
+     * Durable identity of the user row this injection appended. Owner-only for
+     * the same reason the turn's and the round's ids are: it is a handle onto
+     * the owner's own history, useless to a shared surface.
+     */
+    readonly ownerDetail: { readonly messageId: string };
   }
   | { readonly kind: "guidance.dropped"; readonly text: string }
   | { readonly kind: "suggestions.updated"; readonly replies: readonly string[] }
