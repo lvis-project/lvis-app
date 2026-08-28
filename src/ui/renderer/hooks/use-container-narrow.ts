@@ -31,13 +31,22 @@ export const DOCK_EXIT_WIDTH = DOCK_ENTER_WIDTH + 60;
 
 type SidePanelLayoutMode = "docked" | "overlay";
 
+/**
+ * Horizontal room a floating panel leaves to the tile's edges — the same
+ * card-in-a-band inset the floating sidebar uses (`right-2` + a `left` gap of
+ * the same size). The range hands this back so the card never pokes past the
+ * tile it floats in.
+ */
+const FLOATING_PANEL_INSET = 16;
+
 export interface SidePanelLayout {
   /**
    * `docked`: the panel is a column beside the transcript and pushes it.
    * `overlay`: the container cannot hold both pixel floors, so the panel keeps
    * its own floor and floats over the transcript's right edge inside the
-   * container — the transcript keeps its layout underneath instead of being
-   * crushed into a strip nobody could use. Never a window-level sheet.
+   * container as a raised card — the same shape as the floating sidebar — and
+   * the transcript keeps its layout underneath instead of being crushed into
+   * a strip nobody could use. Never a window-level sheet.
    */
   mode: SidePanelLayoutMode;
   /** The range the split bar moves in. */
@@ -58,7 +67,8 @@ export function sidePanelLayout(width: number, narrow: boolean): SidePanelLayout
   if (!narrow) {
     return { mode: "docked", min: SIDE_PANEL_MIN_WIDTH, max: Math.max(SIDE_PANEL_MIN_WIDTH, width - MIN_DOCKED_TRANSCRIPT_WIDTH) };
   }
-  return { mode: "overlay", min: Math.min(SIDE_PANEL_MIN_WIDTH, width), max: width };
+  const room = Math.max(0, width - FLOATING_PANEL_INSET);
+  return { mode: "overlay", min: Math.min(SIDE_PANEL_MIN_WIDTH, room), max: room };
 }
 
 /**

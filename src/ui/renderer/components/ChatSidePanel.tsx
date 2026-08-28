@@ -921,17 +921,27 @@ export function ChatSidePanel({
       // `width` is the complete docked flex reservation. The floating card's
       // `mr-2` consumes 0.5rem of that reservation instead of overflowing it.
       style={{ width: `${width}px` }}
-      // A COLUMN of the chat group, not a card inside it. Docked, its header
-      // segment lives in the group's header band, so the seam between the two
-      // columns has to be one unbroken line from that band to the bottom of
-      // the group; a card with its own margins and rounding would break the
-      // line and start the panel BELOW the header instead of level with it.
-      // Floating keeps the same chrome: the transcript shows through nothing.
-      className={["min-h-0 min-w-0 border-l border-border/(--opacity-half) bg-card backdrop-blur", className].join(" ")}
+      className={[
+        "min-h-0 min-w-0 bg-card backdrop-blur",
+        floating
+          // Floating: a raised card, the floating sidebar's own recipe, so the
+          // two overlays a window can show read as one kind of surface.
+          ? "lvis-surface-raised overflow-hidden rounded-2xl"
+          // Docked: a COLUMN of the chat group, not a card inside it. Its
+          // header segment lives in the group's header band, so the seam
+          // between the two columns has to be one unbroken line from that band
+          // to the bottom of the group; a card with its own margins and
+          // rounding would break the line and start the panel BELOW the
+          // header instead of level with it.
+          : "border-l border-border/(--opacity-half)",
+        className,
+      ].join(" ")}
     >
       <EdgeResizeBar
         width={width}
         edge="start"
+        // The card clips its overflow, so its handle sits inside the edge.
+        variant={floating ? "inset" : "straddle"}
         onWidthChange={onWidthChange}
         onWidthCommit={onWidthCommit}
         min={minWidth}

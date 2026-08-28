@@ -1646,6 +1646,7 @@ describe("ChatSidePanel inside a chat group", () => {
     const band = screen.getByTestId("chat-group-panel-band");
     expect(band.style.width).toBe("448px");
     expect(within(band).getByTestId("chat-side-panel-tab-strip")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel").className).toContain("border-l");
     expect(
       within(screen.getByTestId("chat-side-panel")).queryByTestId("chat-side-panel-tab-strip"),
     ).toBeNull();
@@ -1657,6 +1658,9 @@ describe("ChatSidePanel inside a chat group", () => {
     expect(band.style.width).toBe("");
     expect(within(band).queryByTestId("chat-side-panel-tab-strip")).toBeNull();
     const panel = screen.getByTestId("chat-side-panel");
+    // A raised card like the floating sidebar, not a bordered column.
+    expect(panel.className).toContain("rounded-2xl");
+    expect(panel.className).not.toContain("border-l");
     const actions = within(within(panel).getByTestId("chat-side-panel-tab-strip")).getByTestId(
       "chat-side-panel-tab-actions",
     );

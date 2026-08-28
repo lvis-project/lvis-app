@@ -79,6 +79,16 @@ the floor a tile inherits. The main area is roughly 1000px wide with the sidebar
 open, so four columns give each tile 250px, under that floor. Four tiles have to
 nest. Once the layout nests at all, a flat list cannot describe it.
 
+The work panel inherits the same floor, and a tile that cannot hold the panel
+beside a usable transcript (under 768px: the panel floor plus 320px of
+transcript) does not squeeze either. The panel floats over the transcript's
+right edge **inside the tile**, as a raised card with the floating sidebar's
+insets and rounding — one kind of overlay surface in the window, never a
+window-level sheet — keeping its own floor and staying resizable; the
+transcript keeps its layout underneath. The mode comes from the container
+hook's hysteresis verdict so a gutter dragged across the threshold does not
+flip it.
+
 The addressability objection that argued for a flat list does not survive
 contact with the actual split: a leaf keeps its stable `chatGroupId` no matter
 where it sits, and the tree describes **geometry only**. Nothing that names a

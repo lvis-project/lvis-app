@@ -895,8 +895,11 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           style={{ width: dockedPanelExpanded ? `${dockedPanelWidth}px` : "0px" }}
           className={[
             "z-40 flex min-w-0 shrink-0 origin-right justify-end will-change-[width,opacity,transform]",
+            // Floating: the same card-in-a-band placement as the floating
+            // sidebar (inset from the tile's edges, the card carries its own
+            // elevation), so the two overlays read as one kind of surface.
             panelLayout.mode === "overlay"
-              ? "absolute inset-y-0 right-0 shadow-xl"
+              ? "absolute top-2 right-2 bottom-3"
               : "relative self-stretch",
             sidePanelResizing
               ? "transition-none"
