@@ -17,7 +17,7 @@ import { makeMockWebContents } from "../../__tests__/test-helpers.js";
 
 /** Convenience — most tests only care about the wait/abort/timeout shape. */
 function single(question: string) {
-  return { questions: [{ question, choices: ["Continue", "Stop"] }] };
+  return { sessionId: "session-1", questions: [{ question, choices: ["Continue", "Stop"] }] };
 }
 
 describe("AskUserQuestionGate — timeout path", () => {
@@ -171,43 +171,43 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);
 
-    const empty = await gate.ask({ questions: [] });
+    const empty = await gate.ask({ sessionId: "session-1", questions: [] });
     expect(empty.dismissed).toBe(true);
     expect(gate.pendingCount).toBe(0);
     expect(wc.send).not.toHaveBeenCalled();
 
-    const noChoices = await gate.ask({
+    const noChoices = await gate.ask({ sessionId: "session-1",
       questions: [{ question: "Pick one" } as never],
     });
     expect(noChoices.dismissed).toBe(true);
     expect(gate.pendingCount).toBe(0);
     expect(wc.send).not.toHaveBeenCalled();
 
-    const tooManyChoices = await gate.ask({
+    const tooManyChoices = await gate.ask({ sessionId: "session-1",
       questions: [{ question: "Pick one", choices: ["A", "B", "C", "D"] }],
     });
     expect(tooManyChoices.dismissed).toBe(true);
     expect(gate.pendingCount).toBe(0);
 
-    const nonStringChoice = await gate.ask({
+    const nonStringChoice = await gate.ask({ sessionId: "session-1",
       questions: [{ question: "Pick one", choices: ["A", 7] } as never],
     });
     expect(nonStringChoice.dismissed).toBe(true);
     expect(gate.pendingCount).toBe(0);
 
-    const duplicateChoices = await gate.ask({
+    const duplicateChoices = await gate.ask({ sessionId: "session-1",
       questions: [{ question: "Pick one", choices: ["A", " A "] }],
     });
     expect(duplicateChoices.dismissed).toBe(true);
     expect(gate.pendingCount).toBe(0);
 
-    const overlongChoice = await gate.ask({
+    const overlongChoice = await gate.ask({ sessionId: "session-1",
       questions: [{ question: "Pick one", choices: ["x".repeat(21)] }],
     });
     expect(overlongChoice.dismissed).toBe(true);
     expect(gate.pendingCount).toBe(0);
 
-    const oversized = await gate.ask({
+    const oversized = await gate.ask({ sessionId: "session-1",
       questions: Array.from({ length: 5 }, (_, i) => ({
         question: `q-${i}`,
         choices: ["A", "B"],
@@ -222,7 +222,7 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);
 
-    const slot = gate.ask({
+    const slot = gate.ask({ sessionId: "session-1",
       questions: [
         { question: "Where?", choices: ["A", "B"] },
         { question: "When?", choices: ["Now", "Later"] },
@@ -234,8 +234,10 @@ describe("AskUserQuestionGate — multi-question contract", () => {
       (c) => c[0] === "lvis:ask-user-question:request",
     );
     expect(reqCall).toBeDefined();
-    const payload = reqCall![1] as { questions: Array<{ question: string }> };
+    const payload = reqCall![1] as { sessionId: string; questions: Array<{ question: string }> };
     expect(payload.questions.map((q) => q.question)).toEqual(["Where?", "When?", "Why?"]);
+    // The channel is window-wide; only the named conversation may draw the card.
+    expect(payload.sessionId).toBe("session-1");
 
     gate.disposeAll();
     await slot;
@@ -245,7 +247,7 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);
 
-    const slot = gate.ask({
+    const slot = gate.ask({ sessionId: "session-1",
       questions: [
         {
           question: "범위는?",
@@ -281,7 +283,7 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);
 
-    const slot = gate.ask({
+    const slot = gate.ask({ sessionId: "session-1",
       questions: [
         { question: "Where?", choices: ["서울", "부산"] },
         { question: "When?", choices: ["오늘", "내일"] },
@@ -306,7 +308,7 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);
 
-    const slot = gate.ask({
+    const slot = gate.ask({ sessionId: "session-1",
       questions: [
         { question: "Where?", choices: ["서울", "부산"] },
         { question: "Tags?", choices: ["AI", "보안", "UX"], allowMultiple: true },

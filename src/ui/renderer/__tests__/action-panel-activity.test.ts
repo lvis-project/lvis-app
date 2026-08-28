@@ -149,4 +149,32 @@ describe("computeActionPanelActivity", () => {
     expect(activity.writtenFiles[0]?.target).toBe("/a.ts");
     expect(activity.readFiles[0]?.target).toBe("/b.ts");
   });
+
+  it("counts a web tool's result URLs and dedupes a page two calls surfaced", () => {
+    const entries: ChatEntry[] = [
+      toolGroup([
+        tool({
+          name: "web_search",
+          toolUseId: "s1",
+          category: "network",
+          input: { query: "lvis" },
+          result: JSON.stringify({ results: [{ url: "https://a.example/one" }, { url: "https://b.example/two" }] }),
+        }),
+        tool({
+          name: "web_fetch",
+          toolUseId: "u2",
+          category: "network",
+          input: { url: "https://a.example/one" },
+          result: "<html></html>",
+        }),
+      ]),
+    ];
+    const activity = computeActionPanelActivity(entries);
+    // Three URL mentions, two distinct pages.
+    expect(activity.fetchedPageCount).toBe(2);
+    expect(activity.fetchedPages.map((page) => page.detail).sort()).toEqual([
+      "https://a.example/one",
+      "https://b.example/two",
+    ]);
+  });
 });

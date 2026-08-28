@@ -130,6 +130,33 @@ export function tileHoldingSession(
 }
 
 /**
+ * Does this tile draw a window-wide card (a question, a skill badge) addressed
+ * to `sessionId`?
+ *
+ * Ownership alone is not enough. Turns run in sessions no tile is showing: a
+ * routine fires headless, a side chat runs beside the transcript, and a
+ * background sub-agent outlives the moment its parent tile switched to another
+ * conversation. `ask_user_question` is reachable from all three, and a card
+ * only its own tile may draw is a card nobody draws — the gate then sits out
+ * its full timeout with nothing on screen to answer.
+ *
+ * So an unheld session is ADOPTED by the focused tile. Exactly one tile is
+ * focused, so the card is drawn once; and a session another tile is showing is
+ * never adopted, because that tile draws it itself.
+ */
+export function tileDrawsSession(args: {
+  tiles: readonly TileSession[];
+  sessionId: string;
+  /** The tile already knows this session (its own conversation or a child it spawned). */
+  owned: boolean;
+  focused: boolean;
+}): boolean {
+  if (args.owned) return true;
+  if (!args.focused) return false;
+  return tileHoldingSession(args.tiles, args.sessionId) === undefined;
+}
+
+/**
  * The live handles, one per mounted tile.
  *
  * A store rather than React state because the writers are the CHILDREN: a tile

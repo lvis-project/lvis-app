@@ -1160,6 +1160,7 @@ export function buildInternalApiSurface() {
   onAskUserQuestion: (
     handler: (req: {
       id: string;
+      sessionId: string;
       questions: Array<{
         question: string;
         choices: string[];
@@ -1412,6 +1413,7 @@ export function buildInternalApiSurface() {
     handler: (event: {
       name: string;
       description: string;
+      sessionId: string;
     }) => void,
   ) => {
     const listener = (_e: unknown, ev: Parameters<typeof handler>[0]) => handler(ev);

@@ -379,6 +379,9 @@ describe("ChatSidePanel", () => {
         sourceLabel: "builtin",
         createdOrder: 2,
         url: "https://example.com/docs",
+        // Named by a page rather than asked for by the turn — the row has to
+        // say so before the viewer opens it in the webview.
+        origin: "result",
       },
       {
         id: "json-1",
@@ -418,6 +421,13 @@ describe("ChatSidePanel", () => {
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
     fireEvent.click(screen.getByTestId("chat-side-panel-file-source-session"));
     expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
+    // Each session file says why it is listed: the operation that put it there,
+    // and on hover the path plus the tool that touched it.
+    expect(screen.getByTestId("chat-side-panel-file-tree-operation")).toHaveTextContent("읽음");
+    expect(screen.getByTestId("chat-side-panel-file-tree-file")).toHaveAttribute(
+      "title",
+      "C:/workspace/report.md · read_file",
+    );
     const splitLayout = screen.getByTestId("chat-side-panel-file-split-layout") as HTMLElement;
     const splitter = screen.getByTestId("chat-side-panel-file-splitter");
     expect(splitLayout.style.gridTemplateRows).toContain("45%");
@@ -444,6 +454,9 @@ describe("ChatSidePanel", () => {
     fireEvent.click(screen.getByTestId("chat-side-panel-browser-search-trigger"));
     const rows = screen.getAllByTestId("chat-side-panel-browser-row");
     expect(rows.length).toBeGreaterThanOrEqual(2);
+    // The web row discloses where its address came from: this one was named by
+    // a page, not asked for by the turn.
+    expect(rows[1]!.textContent).toContain("결과에서");
     fireEvent.click(rows[1]!);
     const webview = container.querySelector('[data-testid="chat-side-panel-browser-webview"]');
     expect(webview?.getAttribute("src")).toBe("https://example.com/docs");

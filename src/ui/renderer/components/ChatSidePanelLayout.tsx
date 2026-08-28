@@ -49,6 +49,15 @@ export function TargetRows({
   rowTestId: string;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useTranslation();
+  // Where a web address came from, said on the row that offers to open it. A
+  // `result` address is third-party text — some page named it — and following
+  // it is not the same act as opening a page the turn asked for by name. An
+  // `address` is the viewer's own typing and needs no such warning.
+  const originLabel = (target: ChatPreviewTarget): string | null => {
+    if (target.kind !== "url" || target.origin === "address") return null;
+    return t(`chatPreviewRail.urlOrigin.${target.origin}`);
+  };
   return (
     <div className="space-y-1">
       {targets.map((target) => (
@@ -64,7 +73,11 @@ export function TargetRows({
           <span className="shrink-0 text-muted-foreground">{targetIcon(target.kind)}</span>
           <span className="min-w-0 flex-1">
             <span className="block truncate font-medium">{target.title}</span>
-            <span className="block truncate text-[10.5px] text-muted-foreground">{target.subtitle ?? target.sourceLabel}</span>
+            <span className="block truncate text-[10.5px] text-muted-foreground">
+              {[target.subtitle ?? target.sourceLabel, originLabel(target)]
+                .filter((part): part is string => Boolean(part))
+                .join(" · ")}
+            </span>
           </span>
           {target.status ? <span className={`shrink-0 text-[10px] ${statusTone(target.status)}`}>{target.status}</span> : null}
         </button>

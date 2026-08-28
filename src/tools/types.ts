@@ -117,9 +117,16 @@ export interface ToolExecutionContext {
    * It is minted only after allow-once and is consumed by bash/PowerShell.
    */
   hostShellExecutionPermit?: HostShellExecutionPermit;
-  metadata: Record<string, unknown>;
-
-
+  /**
+   * Per-invocation bookkeeping the executor threads to tools.
+   *
+   * `sessionId` is declared OPTIONAL on purpose: an invocation can be raised
+   * with no conversation behind it, and tools that cannot function unattributed
+   * (`ask_user_question`, `skill_load`, `todo_session_write`) refuse when it is
+   * missing. The executor therefore omits the key rather than substituting a
+   * placeholder, which would make every one of those refusals unreachable.
+   */
+  metadata: { sessionId?: string } & Record<string, unknown>;
 
   abortSignal?: AbortSignal;
 }

@@ -344,7 +344,13 @@ function serializedMessage(
       return {
         role: message.role,
         content: message.content,
-        ...(message.toolCalls?.length ? { toolCalls: message.toolCalls } : {}),
+        // Name the three wire fields instead of forwarding the block: a
+        // persisted call also carries host-side registry origin (source,
+        // category, plugin/MCP owner) that describes OUR runtime and has no
+        // place in a provider request.
+        ...(message.toolCalls?.length
+          ? { toolCalls: message.toolCalls.map(({ id, name, input }) => ({ id, name, input })) }
+          : {}),
       };
     case "tool_result":
       // API-key paths only replay tool-result image bytes for the Claude

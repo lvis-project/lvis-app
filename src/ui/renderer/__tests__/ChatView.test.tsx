@@ -1765,10 +1765,17 @@ describe("ChatView", () => {
 
   it("renders ask_user_question in the bottom overlay without scrolling chat history", async () => {
     const { container, emitAskUserQuestion } = await renderApp({ hasApiKey: true });
+    // A question can only be asked from inside a turn, so the tile has long
+    // since hydrated its conversation by then. Let the mount settle first, or
+    // the card would be addressed to a session the tile does not yet hold.
+    await act(async () => { await Promise.resolve(); });
 
     await act(async () => {
       emitAskUserQuestion({
         id: "ask-scroll-1",
+        // The tile draws only its own conversation's cards; "sess-default" is
+        // the session the mock api hands the main tile.
+        sessionId: "sess-default",
         createdAt: Date.now(),
         questions: [
           {

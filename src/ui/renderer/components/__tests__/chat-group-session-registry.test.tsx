@@ -8,6 +8,7 @@ import {
   useRegisterChatGroupSession,
   useTileSessions,
   type ChatGroupSessionHandle,
+  tileDrawsSession,
   tileHoldingSession,
 } from "../chat-group-session-registry.js";
 
@@ -185,5 +186,35 @@ describe("tileHoldingSession", () => {
     ];
     expect(tileHoldingSession(tiles, "s-2")?.chatGroupId).toBe("group-2");
     expect(tileHoldingSession(tiles, "s-9")).toBeUndefined();
+  });
+});
+
+describe("tileDrawsSession", () => {
+  // Two tiles, each showing a conversation of its own. "main" is focused.
+  const tiles = [
+    { chatGroupId: "main", sessionId: "s-main", streaming: false },
+    { chatGroupId: "group-2", sessionId: "s-other", streaming: false },
+  ];
+
+  it("adopts a routine's headless session into the focused tile, and only that tile", () => {
+    // A routine turn runs in a session no tile is showing. Its question has to
+    // land somewhere or the gate waits out its timeout against a blank window.
+    const routineSession = "s-routine";
+    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: true })).toBe(true);
+    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: false })).toBe(false);
+  });
+
+  it("never adopts a session another tile is showing — that tile draws it", () => {
+    expect(tileDrawsSession({ tiles, sessionId: "s-other", owned: false, focused: true })).toBe(false);
+  });
+
+  it("adopts a background child whose parent tile has since switched conversations", () => {
+    // The switch cleared the parent's spawn list, so the child is no longer
+    // owned by anyone and no tile holds its session.
+    expect(tileDrawsSession({ tiles, sessionId: "s-background-child", owned: false, focused: true })).toBe(true);
+  });
+
+  it("draws its own conversation whether or not it is the focused tile", () => {
+    expect(tileDrawsSession({ tiles, sessionId: "s-main", owned: true, focused: false })).toBe(true);
   });
 });

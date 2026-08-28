@@ -34,6 +34,7 @@ import { MemoryManager } from "../../memory/memory-manager.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import { historyToEntries } from "../../ui/renderer/utils/history.js";
+import { computeActionPanelActivity } from "../../ui/renderer/utils/action-panel-activity.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const SESSION_ID = "durability-session";
@@ -286,6 +287,80 @@ describe("transcript durability", () => {
 
       expect(entries.some((e) => e.kind === "user" && e.text === "리로드 확인")).toBe(true);
       expect(entries.some((e) => e.kind === "assistant" && e.text === "작업 시작")).toBe(true);
+    });
+  });
+
+  it("persists each tool call's registry origin so a reload keeps plugin/MCP counts", async () => {
+    await withTmpMemory(async (memoryManager) => {
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(
+        createDynamicTool({
+          name: "probe_plugin_tool",
+          description: "plugin-owned",
+          source: "plugin",
+          pluginId: "probe-plugin",
+          category: "read",
+          jsonSchema: { type: "object", properties: {} },
+          execute: async () => ({ output: "plugin ok", isError: false }),
+        }),
+      );
+      toolRegistry.register(
+        createDynamicTool({
+          name: "probe_mcp_tool",
+          description: "server-owned",
+          source: "mcp",
+          mcpServerId: "probe-server",
+          category: "read",
+          jsonSchema: { type: "object", properties: {} },
+          execute: async () => ({ output: "mcp ok", isError: false }),
+        }),
+      );
+      const provider = new ScriptedProvider([
+        [
+          { type: "tool_call", id: "call-plugin", name: "probe_plugin_tool", input: {} },
+          { type: "tool_call", id: "call-mcp", name: "probe_mcp_tool", input: {} },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+        [{ type: "text_delta", text: "끝" }, { type: "message_complete", stopReason: "end_turn" }],
+      ]);
+
+      await buildLoop(memoryManager, toolRegistry, provider).runTurn(
+        "출처 확인",
+        undefined,
+        undefined,
+        { inputOrigin: "user-keyboard" },
+      );
+
+      // Reload through an EMPTY registry: whatever the panel can still say about
+      // these calls has to have come off disk, not from a live lookup.
+      const reloadLoop = buildLoop(memoryManager, new ToolRegistry(), provider);
+      expect(reloadLoop.loadSession(SESSION_ID)).toBe(true);
+      const serialized = reloadLoop
+        .getHistory()
+        .getMessages()
+        .map((message, index) => serializeHistoryMessage(message, index));
+
+      const toolCalls = serialized.find((m) => m.role === "assistant" && m.toolCalls)?.toolCalls;
+      expect(toolCalls).toEqual([
+        expect.objectContaining({
+          id: "call-plugin",
+          name: "probe_plugin_tool",
+          source: "plugin",
+          category: "read",
+          pluginId: "probe-plugin",
+        }),
+        expect.objectContaining({
+          id: "call-mcp",
+          name: "probe_mcp_tool",
+          source: "mcp",
+          category: "read",
+          mcpServerId: "probe-server",
+        }),
+      ]);
+
+      const activity = computeActionPanelActivity(historyToEntries(serialized));
+      expect(activity.pluginCallCount).toBe(1);
+      expect(activity.mcpCallCount).toBe(1);
     });
   });
 });

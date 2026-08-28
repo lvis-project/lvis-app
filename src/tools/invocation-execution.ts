@@ -620,7 +620,11 @@ export async function executeAuthorizedToolInvocation(
     ...(hostShellExecutionPlan ? { hostShellExecutionPlan } : {}),
     ...(hostShellExecutionPermit ? { hostShellExecutionPermit } : {}),
     metadata: {
-      sessionId: sessionId ?? "unknown",
+      // Absent when the invocation has no conversation behind it. Tools that
+      // need one refuse without it; a placeholder string here would make every
+      // one of those guards unreachable and file the work under a synthetic
+      // session instead.
+      ...(sessionId !== undefined ? { sessionId } : {}),
       // C3(b): spawn depth visible to tools — `agent_spawn` reads this
       // and refuses when >= 1 (a sub-agent cannot itself spawn).
       spawnDepth: spawnDepth ?? 0,
