@@ -156,7 +156,8 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       // chatNew records.
       const alreadyUnderProject = !project
         || projectRootEquals(sessionProjectFromHistory(current).projectRoot, project.projectRoot);
-      if (alreadyUnderProject && (current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
+      // Only an empty loop reaches here: a held conversation was adopted above.
+      if (alreadyUnderProject && (current.sessionKind ?? "main") === "main") {
         setCurrentSessionId(current.sessionId);
         setCurrentSessionKind("main");
         setCurrentSessionTitle(undefined);
@@ -176,6 +177,7 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       setCurrentSessionKind("main");
       setCurrentSessionTitle(undefined);
       setCurrentSessionProject(sessionProjectFromHistory(fresh));
+      restoreSubAgents?.([]);
       applyInitialSession?.([]);
     };
 
