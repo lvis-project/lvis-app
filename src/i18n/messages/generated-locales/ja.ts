@@ -1869,6 +1869,7 @@ export const jaMessages: Record<string, string> = {
   "overlayCard.runningDescription": "ルーチンが実行されています。しばらくお待ちください。",
   "overlayCard.secondsAgo": "{count} 前",
   "overlayCardRegion.confirm": "確認する",
+  "overlayCardRegion.originConversationClosed": "このカードが属する会話は開いていません。会話を開き直すと続行できます。",
   "overlayCardRegion.viewResult": "結果を見る",
   "permissionDecisionCard.categoryMeta": "ポリシー",
   "permissionDecisionCard.categoryNetwork": "ネットワーク",

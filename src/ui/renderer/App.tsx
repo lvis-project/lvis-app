@@ -14,7 +14,7 @@ import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
-import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession, overlayCardTile } from "./components/chat-group-session-registry.js";
+import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession, overlayCardTile, type OverlayCardPlacement } from "./components/chat-group-session-registry.js";
 import { leafIds } from "./components/chat-group-tree.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
@@ -285,7 +285,7 @@ export function App() {
   // Which tile shows an overlay card. Only the window can answer it: it needs
   // every tile's conversation and which one is focused.
   const overlayCardTileForWindow = useCallback(
-    (originSessionId: string | undefined): string =>
+    (originSessionId: string | undefined): OverlayCardPlacement =>
       overlayCardTile(tileSessions, chatGroups.focusedId, originSessionId),
     [tileSessions, chatGroups.focusedId],
   );

@@ -58,6 +58,36 @@ export async function splitIntoTwoTiles(container: HTMLElement): Promise<Rendere
   return tiles;
 }
 
+/**
+ * Show one tile alone, or restore the split. Every other tile UNMOUNTS while a
+ * tile is maximized, which is one of the ways a card's origin conversation can
+ * stop being on screen.
+ */
+export async function toggleTileMaximized(tile: RenderedTile): Promise<void> {
+  const button = tile.element.querySelector<HTMLButtonElement>('[data-testid="chat-group-maximize"]');
+  if (!button) throw new Error(`tile ${tile.chatGroupId} has no maximize control`);
+  await act(async () => {
+    fireEvent.click(button);
+  });
+}
+
+/**
+ * Make every element report an overflowing summary.
+ *
+ * jsdom computes no layout, so `scrollHeight` and `clientHeight` are both 0 and
+ * the card's expand toggle never appears. Returns the undo.
+ */
+export function forceOverflowingSummaries(): () => void {
+  const scrollDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+  const clientDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => 120 });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 40 });
+  return () => {
+    if (scrollDesc) Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollDesc);
+    if (clientDesc) Object.defineProperty(HTMLElement.prototype, "clientHeight", clientDesc);
+  };
+}
+
 /** Move focus to a tile the way clicking into it does. */
 export async function focusTile(tile: RenderedTile): Promise<void> {
   const frame = tile.element.querySelector<HTMLElement>('[data-testid="chat-group"]');

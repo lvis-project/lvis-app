@@ -6,7 +6,10 @@ import type {
   OverlayContextValue,
   OverlayItem,
 } from "../context/OverlayContext.js";
-import type { ChatGroupSessionRegistry } from "../components/chat-group-session-registry.js";
+import {
+  tileHoldingSession,
+  type ChatGroupSessionRegistry,
+} from "../components/chat-group-session-registry.js";
 
 type Api = ReturnType<typeof getApi>;
 type TFn = ReturnType<typeof useTranslation>["t"];
@@ -60,6 +63,7 @@ export function useRoutineOverlay({
       title: evt.title,
       summary: evt.summary,
       running: false,
+      createdAt: evt.firedAt,
       routineSessionId: evt.routineSessionId,
     });
   }, []);
@@ -78,6 +82,7 @@ export function useRoutineOverlay({
         title,
         summary: "",
         running: true,
+        createdAt: firedAt,
       });
     });
 
@@ -98,12 +103,14 @@ export function useRoutineOverlay({
         next.delete(evt.routineId);
         return next;
       });
+      const failedAt = new Date().toISOString();
       addFireRef.current?.({
         id: `${evt.routineId}-running`,
-        source: { kind: "routine", routineId: evt.routineId, firedAt: new Date().toISOString() },
+        source: { kind: "routine", routineId: evt.routineId, firedAt: failedAt },
         title: t("app.routineFailedTitle"),
         summary: t("app.routineFailedSummary", { error: evt.error }),
         running: false,
+        createdAt: failedAt,
       });
     });
 
@@ -160,11 +167,20 @@ export function useRoutineOverlay({
       const { source, pendingPrompt, summary } = item;
       if (source.kind === "routine" || !pendingPrompt) return;
 
-      // The tile that SHOWED the card, not the focused one: an app card is
-      // attributed to the tile holding the conversation it came from, and that
-      // tile need not be the one in focus when the user gets to it.
-      const tile = registry.read(chatGroupId);
-      if (!tile) return;
+      // Resolved from the card's ORIGIN, not from the tile that rendered it.
+      // The two agree whenever the origin conversation is open — that is how
+      // the card got there — but the tile can close between the paint and the
+      // click, and inserting into the caller's tile then would put a prompt
+      // staged for one conversation into another. A card with no origin is
+      // the focused tile's by definition, so the caller's group stands.
+      const targetGroupId = item.originSessionId === undefined
+        ? chatGroupId
+        : tileHoldingSession(registry.readTiles(), item.originSessionId)?.chatGroupId;
+      const tile = targetGroupId === undefined ? undefined : registry.read(targetGroupId);
+      if (!tile) {
+        console.warn("[lvis] overlay confirm dropped: origin conversation is no longer open");
+        return;
+      }
 
       // Clean up lookup ref
       overlayItemsRef.current.delete(overlayItemId);

@@ -6,6 +6,7 @@ import { chatGroupApi } from "./ChatGroupFrame.js";
 import {
   useRegisterChatGroupSession,
   type ChatGroupSessionRegistry,
+  type OverlayCardPlacement,
 } from "./chat-group-session-registry.js";
 import { useChatState } from "../hooks/use-chat-state.js";
 import { useChatStatusIndicators } from "../hooks/use-chat-status-indicators.js";
@@ -115,7 +116,7 @@ export interface ChatGroupEnvironment {
    * Which tile shows an overlay card, given the conversation it came from —
    * the window's answer, since only it sees every tile.
    */
-  overlayCardTile: (originSessionId: string | undefined) => string;
+  overlayCardTile: (originSessionId: string | undefined) => OverlayCardPlacement;
   onPluginPrimaryAction: (id: string, chatGroupId: string) => void;
   onRoutineAcknowledge: React.ComponentProps<typeof ChatView>["onRoutineAcknowledge"];
   approvalSentenceInterceptSubmit: React.ComponentProps<typeof ChatView>["approvalSentenceInterceptSubmit"];

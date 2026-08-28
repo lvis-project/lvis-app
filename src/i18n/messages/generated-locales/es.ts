@@ -1865,6 +1865,7 @@ export const esMessages: Record<string, string> = {
   "overlayCard.runningDescription": "La rutina está en marcha. Espere un momento.",
   "overlayCard.secondsAgo": "Hace {count}s",
   "overlayCardRegion.confirm": "Confirmar",
+  "overlayCardRegion.originConversationClosed": "La conversación para la que se preparó esto no está abierta. Vuelve a abrirla para continuar.",
   "overlayCardRegion.viewResult": "Ver resultado",
   "permissionDecisionCard.categoryMeta": "Política",
   "permissionDecisionCard.categoryNetwork": "Red",

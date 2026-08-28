@@ -1852,6 +1852,7 @@ export const frMessages: Record<string, string> = {
   "overlayCard.runningDescription": "La routine est en cours. Veuillez patienter un moment.",
   "overlayCard.secondsAgo": "Il y a {count}s",
   "overlayCardRegion.confirm": "Confirmer",
+  "overlayCardRegion.originConversationClosed": "La conversation à laquelle ceci se rattache n'est pas ouverte. Rouvre-la pour continuer.",
   "overlayCardRegion.viewResult": "Afficher le résultat",
   "permissionDecisionCard.categoryMeta": "Politique",
   "permissionDecisionCard.categoryNetwork": "Réseau",

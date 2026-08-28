@@ -1849,6 +1849,7 @@ export const deMessages: Record<string, string> = {
   "overlayCard.runningDescription": "Die Routine läuft. Bitte warten Sie einen Moment.",
   "overlayCard.secondsAgo": "Vor {count}s",
   "overlayCardRegion.confirm": "Bestätigen",
+  "overlayCardRegion.originConversationClosed": "Die Unterhaltung, für die dies vorbereitet wurde, ist nicht geöffnet. Öffne sie erneut, um fortzufahren.",
   "overlayCardRegion.viewResult": "Ergebnis ansehen",
   "permissionDecisionCard.categoryMeta": "Politik",
   "permissionDecisionCard.categoryNetwork": "Netzwerk",

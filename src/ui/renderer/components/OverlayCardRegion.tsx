@@ -1,31 +1,37 @@
-// OverlayCardRegion — mounts the single active OverlayCard from OverlayContext.
+// OverlayCardRegion — mounts this tile's active OverlayCard from OverlayContext.
 //
 // Renders in a separate z-layer inside ChatView above the scroll area.
 // Never injects entries into chat history; routine sources remain isolated.
 //
-// Active item is resolved from OverlayContext queue. App.tsx also maintains an
-// overlayItemsRef Map for items that persist after dismiss.
-//
-// One card renders in ONE tile — see `overlayCardTile`.
+// One card renders in ONE tile — see `overlayCardTile`. The queue is the
+// window's, but the SLICE of it this tile shows, and which card of that slice
+// is active, belong to the tile: a window-wide counter would say "1/3" over a
+// tile that has one card, and stepping next would move to a card that renders
+// somewhere else entirely.
 //
 // Two source variants:
+//   - routine: primary action opens the routine's session (only when
+//     `routineSessionId` is present — notification-only routines hide it)
+//   - plugin / app (insertion-type): primary action deferred to
+//     `onPluginPrimaryAction`, and withheld entirely when the card's origin
+//     conversation is no longer open.
 
-//     — only shown when routineSessionId is present (notification-only routines hide the button)
-//   - plugin (insertion-type): primary action deferred to onPluginPrimaryAction prop
-
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useOverlayContext } from "../context/OverlayContext.js";
 import { OverlayCard } from "./OverlayCard.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { FLOATING_LANE_ITEM_WIDTH } from "./FloatingRightLane.js";
+import type { OverlayCardPlacement } from "./chat-group-session-registry.js";
 
 export interface OverlayCardRegionProps {
   /** The tile this region renders inside. */
   chatGroupId: string;
   /**
-   * Which tile a card belongs in, given the conversation it came from. The
-   * window answers it, because only the window can see every tile.
+   * Where a card belongs, given the conversation it came from, and whether
+   * that conversation is still open. The window answers it, because only the
+   * window can see every tile.
    */
-  overlayCardTile: (originSessionId: string | undefined) => string;
+  overlayCardTile: (originSessionId: string | undefined) => OverlayCardPlacement;
   /**
    * Called when the user confirms a plugin overlay item, with the tile that
    * showed the card — the conversation the staged prompt is inserted into and
@@ -39,14 +45,41 @@ export function OverlayCardRegion({
   chatGroupId, overlayCardTile, onPluginPrimaryAction, onRoutineAcknowledge,
 }: OverlayCardRegionProps) {
   const { t } = useTranslation();
-  const { active, queueIndex, queueTotal, prev, next, dismiss, openSession } =
+  const { queue, dismiss, openSession, expandedCardIds, setCardExpanded } =
     useOverlayContext();
 
+  // This tile's slice of the window queue. Every tile mounts a region and each
+  // one keeps only the cards attributed to it, so a card is shown — and so
+  // dismissed or confirmed — exactly once however many tiles are open.
+  const mine = useMemo(
+    () => queue.filter((item) => overlayCardTile(item.originSessionId).chatGroupId === chatGroupId),
+    [queue, overlayCardTile, chatGroupId],
+  );
+
+  const [activeIndex, setActiveIndex] = useState(0);
+  // Clamped rather than corrected in an effect: the slice can shrink between
+  // renders (a card dismissed, or one that followed focus to another tile),
+  // and rendering `undefined` for a frame would flash the card away and back.
+  const index = mine.length === 0 ? 0 : Math.min(activeIndex, mine.length - 1);
+  const active = mine[index] ?? null;
+
+  // A card that just arrived is the one the user means. Kept in an effect
+  // rather than inside a state updater because StrictMode double-invokes
+  // updaters, which would advance twice.
+  const previousCountRef = useRef(0);
+  useEffect(() => {
+    if (mine.length > previousCountRef.current) setActiveIndex(mine.length - 1);
+    previousCountRef.current = mine.length;
+  }, [mine.length]);
+
   if (!active) return null;
-  // The queue is the window's; the card is one tile's. Every tile mounts a
-  // region and all but one of them stands down, so a dismiss or a confirm
-  // happens once no matter how many conversations are open.
-  if (overlayCardTile(active.originSessionId) !== chatGroupId) return null;
+
+  const queueIndex = index + 1;
+  const queueTotal = mine.length;
+  const prev = () => setActiveIndex(Math.max(0, index - 1));
+  const next = () => setActiveIndex(Math.min(mine.length - 1, index + 1));
+  const expanded = expandedCardIds.has(active.id);
+  const onExpandedChange = (value: boolean) => setCardExpanded(active.id, value);
 
   if (active.source.kind === "routine") {
     const { routineId, firedAt } = active.source;
@@ -74,6 +107,8 @@ export function OverlayCardRegion({
               if (!active.running) onRoutineAcknowledge?.(routineId, firedAt);
               dismiss(active.id);
             }}
+            expanded={expanded}
+            onExpandedChange={onExpandedChange}
             onPrimaryAction={hasSession ? () => {
               void (async () => {
                 const opened = await openSession(active.routineSessionId!);
@@ -95,8 +130,12 @@ export function OverlayCardRegion({
   // `pendingPrompt` that only a user CLICK turns into a chat turn; they differ solely in
   // provenance (the envelope in `pendingPrompt` and the badge below).
   if (active.source.kind === "plugin" || active.source.kind === "app") {
-    const pluginFiredAt = active.createdAt ?? new Date().toISOString();
     const kind = active.source.kind;
+    // The card outlived the conversation it was staged for. Confirming would
+    // start the turn in whatever tile happens to be focused, which is the very
+    // mismatch main refuses on the way in — so the card keeps only its dismiss,
+    // and says why.
+    const { orphaned } = overlayCardTile(active.originSessionId);
     return (
       <div
         data-testid="overlay-card-region"
@@ -109,18 +148,21 @@ export function OverlayCardRegion({
             key={active.id}
             title={active.title}
             summary={active.summary}
-            firedAt={pluginFiredAt}
+            firedAt={active.createdAt}
             running={active.running}
             queueIndex={queueIndex}
             queueTotal={queueTotal}
             onPrev={prev}
             onNext={next}
             onDismiss={() => dismiss(active.id)}
-            onPrimaryAction={() => {
+            expanded={expanded}
+            onExpandedChange={onExpandedChange}
+            onPrimaryAction={orphaned ? undefined : () => {
               // Dismiss from queue first, then notify App for chat insert
               dismiss(active.id);
               onPluginPrimaryAction(active.id, chatGroupId);
             }}
+            {...(orphaned ? { notice: t("overlayCardRegion.originConversationClosed") } : {})}
             primaryActionLabel={active.primaryActionLabel ?? t("overlayCardRegion.confirm")}
             kind={kind}
           />

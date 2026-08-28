@@ -1869,6 +1869,7 @@ export const zhMessages: Record<string, string> = {
   "overlayCard.runningDescription": "例行程序正在运行。请稍等。",
   "overlayCard.secondsAgo": "{count}s 前",
   "overlayCardRegion.confirm": "确认",
+  "overlayCardRegion.originConversationClosed": "此卡片所属的对话未打开。重新打开该对话后即可继续。",
   "overlayCardRegion.viewResult": "查看结果",
   "permissionDecisionCard.categoryMeta": "政策",
   "permissionDecisionCard.categoryNetwork": "网络",

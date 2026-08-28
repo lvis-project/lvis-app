@@ -4,6 +4,7 @@ import { ChevronDown } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
+import type { OverlayCardPlacement } from "./components/chat-group-session-registry.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { type StatusBarProps } from "./components/StatusBar.js";
@@ -111,8 +112,11 @@ export interface ChatViewProps {
    * one of them.
    */
   chatGroupId: string;
-  /** Which tile an overlay card belongs in, given the conversation it came from. */
-  overlayCardTile: (originSessionId: string | undefined) => string;
+  /**
+   * Where an overlay card belongs, given the conversation it came from, and
+   * whether that conversation is still open.
+   */
+  overlayCardTile: (originSessionId: string | undefined) => OverlayCardPlacement;
   /**
    * Called when user confirms a plugin overlay item; id is the OverlayItem.id,
    * and the group is the tile that showed the card.

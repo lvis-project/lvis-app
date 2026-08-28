@@ -198,18 +198,31 @@ describe("overlayCardTile", () => {
   it("sends a card to the tile holding the conversation it came from", () => {
     // Not the focused tile: the card's action continues the conversation it
     // was raised in, which may be sitting unfocused beside it.
-    expect(overlayCardTile(tiles, "main", "s-2")).toBe("group-2");
+    expect(overlayCardTile(tiles, "main", "s-2")).toEqual({
+      chatGroupId: "group-2",
+      orphaned: false,
+    });
   });
 
   it("sends a card with no conversation behind it to the focused tile", () => {
-    expect(overlayCardTile(tiles, "group-2", undefined)).toBe("group-2");
-    expect(overlayCardTile(tiles, "main", undefined)).toBe("main");
+    expect(overlayCardTile(tiles, "group-2", undefined)).toEqual({
+      chatGroupId: "group-2",
+      orphaned: false,
+    });
+    expect(overlayCardTile(tiles, "main", undefined)).toEqual({
+      chatGroupId: "main",
+      orphaned: false,
+    });
   });
 
-  it("falls to the focused tile when the origin conversation is open nowhere", () => {
-    // The conversation was closed or replaced while the card waited. Showing
-    // the card nowhere would strand it; showing it in every tile is what this
-    // whole function exists to prevent.
-    expect(overlayCardTile(tiles, "group-2", "s-gone")).toBe("group-2");
+  it("shows an orphaned card in the focused tile, marked as having no origin", () => {
+    // The conversation was closed, maximized away, or folded out of sight
+    // while the card waited. Showing the card nowhere would strand it; showing
+    // it in every tile is what this whole function exists to prevent. What the
+    // flag buys is the third option: visible, dismissible, not actionable.
+    expect(overlayCardTile(tiles, "group-2", "s-gone")).toEqual({
+      chatGroupId: "group-2",
+      orphaned: true,
+    });
   });
 });
