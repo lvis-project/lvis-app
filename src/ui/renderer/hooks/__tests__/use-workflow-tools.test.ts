@@ -69,4 +69,59 @@ describe("useWorkflowTools", () => {
 
     expect(result.current.subAgentSpawns.map((s) => s.spawnId)).toEqual(["mine", "unaddressed"]);
   });
+
+  it("a tile draws only the question cards of the conversations it owns", () => {
+    let onAsk: Parameters<LvisApi["onAskUserQuestion"]>[0] | undefined;
+    const api = {
+      onAskUserQuestion: vi.fn((handler: Parameters<LvisApi["onAskUserQuestion"]>[0]) => {
+        onAsk = handler;
+        return () => undefined;
+      }),
+      onAgentSpawnEvent: vi.fn(() => () => undefined),
+      onSkillLoaded: vi.fn(() => () => undefined),
+      onAskUserQuestionTimeout: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+    // A tile owns its own conversation AND the child sessions of the agents it
+    // spawned — a question a sub-agent asks belongs to the tile that started it.
+    const ownsSession = (sessionId: string) =>
+      sessionId === "session-mine" || sessionId === "child-of-mine";
+    const { result } = renderHook(() => useWorkflowTools(api, { ownsSession }));
+
+    const ask = (id: string, sessionId: string) => ({
+      id,
+      sessionId,
+      questions: [{ question: `${id}?`, choices: ["yes", "no"] }],
+      createdAt: 0,
+    });
+
+    act(() => {
+      onAsk?.(ask("mine", "session-mine"));
+      onAsk?.(ask("child", "child-of-mine"));
+      onAsk?.(ask("theirs", "session-other-tile"));
+    });
+
+    expect(result.current.askQuestions.map((q) => q.id)).toEqual(["mine", "child"]);
+  });
+
+  it("a tile wears only the skill badges of its own conversation", () => {
+    let onSkill: Parameters<LvisApi["onSkillLoaded"]>[0] | undefined;
+    const api = {
+      onAskUserQuestion: vi.fn(() => () => undefined),
+      onAgentSpawnEvent: vi.fn(() => () => undefined),
+      onSkillLoaded: vi.fn((handler: Parameters<LvisApi["onSkillLoaded"]>[0]) => {
+        onSkill = handler;
+        return () => undefined;
+      }),
+      onAskUserQuestionTimeout: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+    const ownsSession = (sessionId: string) => sessionId === "session-mine";
+    const { result } = renderHook(() => useWorkflowTools(api, { ownsSession }));
+
+    act(() => {
+      onSkill?.({ name: "mine", description: "loaded here", sessionId: "session-mine" });
+      onSkill?.({ name: "theirs", description: "loaded elsewhere", sessionId: "session-other-tile" });
+    });
+
+    expect(result.current.loadedSkills.map((s) => s.name)).toEqual(["mine"]);
+  });
 });

@@ -29,6 +29,12 @@ export function isTerminalTool(tool: ToolEntryItem): boolean {
   return tool.category === "shell" || TERMINAL_TOOL_PATTERN.test(tool.name);
 }
 
+/**
+ * Does this call fetch web pages? Shared with the chat preview model
+ * (`preview/preview-targets.ts`), which builds the side panel's Browser tab
+ * from the same predicate — the tab and this panel list one set of pages, so
+ * they must agree on which calls produce them.
+ */
 export function isBrowserTool(tool: ToolEntryItem): boolean {
   return tool.category === "network" || BROWSER_TOOL_PATTERN.test(tool.name);
 }
@@ -61,6 +67,12 @@ export function looksLikeFilePath(value: string): boolean {
     /\.[A-Za-z0-9]{1,12}$/.test(trimmed);
 }
 
+/**
+ * Every http(s) URL reachable in a tool's arguments or result, with trailing
+ * prose punctuation trimmed (`(https://x/y)` in a summary is the page, not the
+ * bracket). Shared with `preview/preview-targets.ts`: two collectors would give
+ * the Browser tab and this panel different page lists for the same turn.
+ */
 export function collectUrls(value: unknown, depth = 0): string[] {
   if (depth > 4 || value == null) return [];
   if (typeof value === "string") {

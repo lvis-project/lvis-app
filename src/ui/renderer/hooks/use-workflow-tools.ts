@@ -75,9 +75,12 @@ const SKILL_BADGE_CAP = 10;
 
 export interface WorkflowToolsOptions {
   /**
-   * Whether `sessionId` is the conversation this surface is showing. Sub-agent
-   * frames arrive on one window-wide channel; a tile keeps only the frames of
-   * its own conversation, or four tiles would each list every tile's agents.
+   * Whether `sessionId` is a conversation this surface is showing. Sub-agent
+   * frames and question cards arrive on window-wide channels; a tile keeps only
+   * what belongs to its own conversation, or four tiles would each list every
+   * tile's agents and draw every tile's questions. A tile also owns the child
+   * sessions of the agents IT spawned, so a question a sub-agent asks lands in
+   * the tile that started it.
    * A surface showing the whole window passes nothing and keeps every frame.
    * Must be referentially stable (`useCallback`): it is a dependency of the
    * channel subscription, and a frame arriving during a resubscribe is lost.
@@ -98,6 +101,10 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
     // up new requests.
     if (typeof api.onAskUserQuestion !== "function") return undefined;
     const unsubAsk = api.onAskUserQuestion?.((req) => {
+      // A question belongs to ONE conversation. Drawn in every tile, it can be
+      // answered from a tile that never asked — that answer resolves the gate,
+      // and the asking tile is left holding a card the gate now refuses.
+      if (ownsSession && !ownsSession(req.sessionId)) return;
       setAskQuestions((prev) =>
         prev.some((p) => p.id === req.id) ? prev : [...prev, req],
       );
@@ -192,6 +199,9 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
       });
     });
     const unsubSkill = api.onSkillLoaded?.((event) => {
+      // Same conversation scoping as the cards above: a skill loaded in one
+      // tile's turn is not a badge on the tile beside it.
+      if (ownsSession && !ownsSession(event.sessionId)) return;
       // M4: dedupe by name (newest wins) and cap to last SKILL_BADGE_CAP.
       // Without this, a chatty assistant could grow the badge list
       // unbounded over a long session.

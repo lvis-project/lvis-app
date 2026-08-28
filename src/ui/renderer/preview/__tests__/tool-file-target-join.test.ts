@@ -148,3 +148,78 @@ describe("action panel <-> preview file-target join", () => {
     );
   });
 });
+
+/** Every fetched page the ActionPanel would render as a clickable row. */
+function actionPanelWebTargets(entries: ChatEntry[]): string[] {
+  return computeActionPanelActivity(entries)
+    .fetchedPages.map((item) => item.target)
+    .filter((target): target is string => typeof target === "string");
+}
+
+/** Every page the side panel's Browser tab would list (`BROWSER_TARGET_KINDS`). */
+function browserTabUrls(entries: ChatEntry[]): string[] {
+  return collectChatPreviewModel({ entries, attachments: [] })
+    .targets.filter((target) => target.kind === "url")
+    .map((target) => target.url);
+}
+
+/**
+ * The same invariant on the WEB axis. The Browser tab and the Tool Activity
+ * page list are two views of one set of fetched pages, so a page one side names
+ * and the other does not is the "no web artifacts" panel sitting next to an
+ * activity popup listing dozens of sources.
+ */
+describe("action panel <-> preview web-target join", () => {
+  it("lists a search's result URLs on both sides, once each", () => {
+    const entries = [toolGroup([
+      {
+        toolUseId: "search-1",
+        name: "web_search",
+        displayOrder: 0,
+        status: "done",
+        category: "network",
+        input: { query: "lvis" },
+        // A search names its hits ONLY in the result — the arguments carry a
+        // query string and nothing else.
+        result: JSON.stringify({
+          results: [
+            { url: "https://a.example/one", title: "One" },
+            { url: "https://b.example/two", title: "Two" },
+          ],
+        }),
+      },
+      {
+        toolUseId: "fetch-1",
+        name: "web_fetch",
+        displayOrder: 1,
+        status: "done",
+        category: "network",
+        // The follow-up fetch of a page the search already surfaced is the
+        // same artifact, not a second one.
+        input: { url: "https://a.example/one" },
+        result: "<html></html>",
+      },
+    ])];
+
+    const expected = ["https://a.example/one", "https://b.example/two"];
+    expect([...new Set(actionPanelWebTargets(entries))].sort()).toEqual(expected);
+    expect(browserTabUrls(entries).sort()).toEqual(expected);
+  });
+
+  it("neither side promotes a URL quoted inside a file a read tool returned", () => {
+    const entries = [toolGroup([
+      {
+        toolUseId: "read-1",
+        name: "read_file",
+        displayOrder: 0,
+        status: "done",
+        category: "read",
+        input: { path: "/docs/links.md" },
+        result: "see https://quoted.example/page for details",
+      },
+    ])];
+
+    expect(actionPanelWebTargets(entries)).toEqual([]);
+    expect(browserTabUrls(entries)).toEqual([]);
+  });
+});

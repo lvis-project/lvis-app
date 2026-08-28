@@ -893,7 +893,17 @@ describe("ConversationLoop queryLoop", () => {
         role: "assistant",
         content: "구조를 먼저 살펴보겠습니다.",
         thought: "먼저 프로젝트 구조를 확인합니다.",
-        toolCalls: [{ id: "tool-1", name: "list_directory", input: { path: "src" } },
+        // The persisted call names the registry entry it invoked, so a reloaded
+        // transcript can still attribute it (builtin here; plugin/MCP calls
+        // carry their owner the same way).
+        toolCalls: [
+          {
+            id: "tool-1",
+            name: "list_directory",
+            input: { path: "src" },
+            source: "builtin",
+            category: "read",
+          },
         ],
       },
       {

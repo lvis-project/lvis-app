@@ -418,6 +418,13 @@ describe("ChatSidePanel", () => {
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
     fireEvent.click(screen.getByTestId("chat-side-panel-file-source-session"));
     expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
+    // Each session file says why it is listed: the operation that put it there,
+    // and on hover the path plus the tool that touched it.
+    expect(screen.getByTestId("chat-side-panel-file-tree-operation")).toHaveTextContent("읽음");
+    expect(screen.getByTestId("chat-side-panel-file-tree-file")).toHaveAttribute(
+      "title",
+      "C:/workspace/report.md · read_file",
+    );
     const splitLayout = screen.getByTestId("chat-side-panel-file-split-layout") as HTMLElement;
     const splitter = screen.getByTestId("chat-side-panel-file-splitter");
     expect(splitLayout.style.gridTemplateRows).toContain("45%");

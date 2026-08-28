@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
  */
 import type { ConversationLoop as LoopContext } from "../conversation-loop.js";
 import type { GuidanceInjectionSource, TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
-import type { GenericMessage, LLMProvider, LLMVendor, MessageMeta, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, LLMVendor, MessageMeta, TokenUsage, TokenUsageByModel, ToolCallBlock, ToolSchema } from "../llm/types.js";
 import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
@@ -886,6 +886,24 @@ export async function queryLoop(
         pendingToolCallsCapped = pendingToolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
       }
 
+      // A persisted call must also record WHAT it called. The action panel
+      // counts plugin and MCP calls off the transcript, and a reload that kept
+      // only id/name/input reports zero of both — the origin lived solely on
+      // the live stream's ToolCallMeta. The registry is the authority for a
+      // tool's identity, so it is read here rather than inferred from the name;
+      // a name with no registry entry (an unloaded plugin) persists unchanged.
+      const persistedToolCalls: ToolCallBlock[] = pendingToolCallsCapped.map((toolCall) => {
+        const tool = self.deps.toolRegistry.findByName(toolCall.name);
+        if (!tool) return toolCall;
+        return {
+          ...toolCall,
+          source: tool.source,
+          category: tool.category,
+          ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+          ...(tool.mcpServerId ? { mcpServerId: tool.mcpServerId } : {}),
+        };
+      });
+
       // thinkingBlocks는 tool_use 체인이 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
       const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCallsCapped.length > 0;
       // Persist the MERGED answer (carry + this round). Non-continued turns have
@@ -899,7 +917,7 @@ export async function queryLoop(
         // that will receive a matching tool_result. Streaming UI still sees
         // the un-capped count below via the assistant-round callback so the
         // user can observe the original LLM intent (and the cap message).
-        ...(pendingToolCallsCapped.length > 0 && { toolCalls: pendingToolCallsCapped }),
+        ...(persistedToolCalls.length > 0 && { toolCalls: persistedToolCalls }),
       });
       // Continuation chain (if any) terminates HERE — merged message committed.
       continuationCarryText = "";

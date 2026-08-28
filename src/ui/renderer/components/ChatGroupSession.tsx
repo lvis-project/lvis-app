@@ -169,11 +169,29 @@ export function ChatGroupSession({
   // The tile's conversation, readable by the sub-agent frame filter before
   // useCurrentSession (below) has run this render.
   const currentSessionIdRef = useRef("");
-  const ownsSession = useCallback((sessionId: string) => sessionId === currentSessionIdRef.current, []);
+  // Sessions of the sub-agents THIS tile spawned. A child runs its own session,
+  // so anything it sends window-wide (a question card, its own frames) names an
+  // id that is not the tile's — without this the child's card belongs to no
+  // tile and is dropped by every one of them.
+  const ownedChildSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const ownsSession = useCallback(
+    (sessionId: string) =>
+      sessionId === currentSessionIdRef.current || ownedChildSessionIdsRef.current.has(sessionId),
+    [],
+  );
   const {
     askQuestions, subAgentSpawns, loadedSkills,
     dismissAskQuestion, resetForNewSession, restoreSubAgentSpawns,
   } = useWorkflowTools(api, { ownsSession });
+  // Same commit-time discipline as the session id below: the listener reads the
+  // ref from an IPC callback, so it must never see a render that was discarded.
+  useLayoutEffect(() => {
+    ownedChildSessionIdsRef.current = new Set(
+      subAgentSpawns
+        .map((spawn) => spawn.childSessionId)
+        .filter((childSessionId): childSessionId is string => Boolean(childSessionId)),
+    );
+  }, [subAgentSpawns]);
 
   const {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted,

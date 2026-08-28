@@ -4,11 +4,16 @@ import type { Attachment } from "../types/attachments.js";
 import { extractFileEditDiff, type FileEditDiffData } from "../utils/file-diff.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import { getToolDisplayName } from "../utils/tool-display.js";
+// The web-artifact vocabulary is shared with the action panel on purpose: the
+// Browser tab and the Tool Activity list are two views of ONE set of fetched
+// pages, so both sides must classify web tools and extract URLs with the same
+// code. A second local collector here is what made the Browser tab read "no web
+// artifacts" while the activity popup listed dozens of sources.
+import { collectUrls, isBrowserTool } from "../utils/action-panel-activity.js";
 import {
   FILE_WRITE_TOOL_NAMES,
   READ_TOOL_PATTERN,
   TOOL_PATH_KEYS,
-  TOOL_URL_PATTERN,
   extractPatchPaths,
   isGlobPattern,
 } from "../utils/tool-input-paths.js";
@@ -186,17 +191,6 @@ function trimPreviewText(value: string): string {
   return `${value.slice(0, MAX_TEXT_PREVIEW_CHARS)}\n\n[preview truncated: ${value.length - MAX_TEXT_PREVIEW_CHARS} chars hidden]`;
 }
 
-function collectUrls(value: unknown): string[] {
-  const urls = new Set<string>();
-  visitUnknown(value, (_key, item) => {
-    if (typeof item !== "string") return;
-    for (const match of item.matchAll(TOOL_URL_PATTERN)) {
-      urls.add(match[0]);
-    }
-  });
-  return [...urls];
-}
-
 function collectPathStrings(value: unknown): string[] {
   const paths = new Set<string>();
   visitUnknown(value, (key, item) => {
@@ -366,6 +360,11 @@ export function collectChatPreviewModel({
   const files: WorkspaceFileItem[] = [];
   const targetIds = new Set<string>();
   const fileIds = new Set<string>();
+  // A fetched page is ONE artifact no matter how many calls surfaced it: a
+  // search that returns a link and the fetch that follows it are the same
+  // document. Keyed by URL rather than by target id (which carries the
+  // producing call) so the second producer adds nothing.
+  const urlTargetKeys = new Set<string>();
   let order = 0;
 
   for (const attachment of attachments) {
@@ -540,19 +539,28 @@ export function collectChatPreviewModel({
         }
       }
 
-      for (const url of collectUrls(tool.input)) {
-        addUnique(targets, {
-          id: `url:${tool.toolUseId}:${url}`,
-          kind: "url",
-          title: url.replace(/^https?:\/\//i, ""),
-          subtitle: displayName,
-          sourceLabel,
-          createdOrder: order++,
-          toolUseId: tool.toolUseId,
-          toolName: tool.name,
-          status: tool.status,
-          url,
-        }, targetIds);
+      // A web tool's RESULT is where most fetched pages actually live — a
+      // `web_search` names its hits nowhere else — so the result is read on the
+      // same footing as the arguments. Restricted to web tools for the same
+      // reason the action panel restricts it: a URL quoted inside a source file
+      // a read tool returned is text, not a page this turn fetched.
+      if (isBrowserTool(tool)) {
+        for (const url of new Set([...collectUrls(tool.input), ...collectUrls(tool.result)])) {
+          if (urlTargetKeys.has(url)) continue;
+          urlTargetKeys.add(url);
+          addUnique(targets, {
+            id: `url:${tool.toolUseId}:${url}`,
+            kind: "url",
+            title: url.replace(/^https?:\/\//i, ""),
+            subtitle: displayName,
+            sourceLabel,
+            createdOrder: order++,
+            toolUseId: tool.toolUseId,
+            toolName: tool.name,
+            status: tool.status,
+            url,
+          }, targetIds);
+        }
       }
 
       if (tool.status === "done" && tool.uiPayload) {

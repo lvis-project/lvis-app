@@ -572,22 +572,28 @@ export function FileTreeRows({
   selectedFileId?: string;
   onSelectFile: (file: WorkspaceFileItem) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {nodes.map((node) => {
-        const isFile = Boolean(node.file);
-        const active = isFile && node.file?.id === selectedFileId;
+        const file = node.file;
+        const isFile = Boolean(file);
+        const active = isFile && file?.id === selectedFileId;
         return (
           <div key={node.id}>
             <button
               type="button"
               data-testid={isFile ? "chat-side-panel-file-tree-file" : "chat-side-panel-file-tree-folder"}
+              // A session file earns its place through a call: hovering names
+              // the path AND the tool that touched it, so the row answers "why
+              // is this here" without opening it.
+              title={file ? `${file.detail} · ${file.sourceLabel}` : node.path}
               className={`flex h-7 w-full min-w-0 items-center gap-2 rounded-md pr-2 text-left text-xs hover:bg-muted/(--opacity-muted) ${
                 active ? "bg-accent text-accent-foreground" : ""
               }`}
               style={{ paddingLeft: 8 + depth * 12 }}
               onClick={() => {
-                if (node.file) onSelectFile(node.file);
+                if (file) onSelectFile(file);
               }}
             >
               {isFile ? (
@@ -596,6 +602,14 @@ export function FileTreeRows({
                 <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className="min-w-0 flex-1 truncate">{node.label}</span>
+              {file ? (
+                <span
+                  data-testid="chat-side-panel-file-tree-operation"
+                  className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground"
+                >
+                  {t(`chatPreviewRail.fileOperation.${file.operation}`)}
+                </span>
+              ) : null}
             </button>
             {node.children.length > 0 ? (
               <FileTreeRows nodes={node.children} depth={depth + 1} selectedFileId={selectedFileId} onSelectFile={onSelectFile} />

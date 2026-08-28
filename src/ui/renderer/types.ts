@@ -1356,6 +1356,7 @@ export type LvisApi = {
   onAskUserQuestion: (
     h: (req: {
       id: string;
+      sessionId: string;
       questions: Array<{
         question: string;
         choices: string[];
@@ -1395,6 +1396,7 @@ export type LvisApi = {
     h: (event: {
       name: string;
       description: string;
+      sessionId: string;
     }) => void,
   ) => () => void;
   // ─── Notifications (#260) ────────────────────────

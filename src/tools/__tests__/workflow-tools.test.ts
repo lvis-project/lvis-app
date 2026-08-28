@@ -180,6 +180,9 @@ describe("ask_user_question tool", () => {
         { question: "Continue?", choices: ["yes", "no"] },
         { question: "When?", choices: ["now", "later"] },
       ],
+      // The card is addressed to the conversation that asked, so the gate is
+      // told which one that is.
+      sessionId: "session-x",
       abortSignal: undefined,
     });
   });
