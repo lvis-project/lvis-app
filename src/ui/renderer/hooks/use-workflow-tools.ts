@@ -79,6 +79,8 @@ export interface WorkflowToolsOptions {
    * frames arrive on one window-wide channel; a tile keeps only the frames of
    * its own conversation, or four tiles would each list every tile's agents.
    * A surface showing the whole window passes nothing and keeps every frame.
+   * Must be referentially stable (`useCallback`): it is a dependency of the
+   * channel subscription, and a frame arriving during a resubscribe is lost.
    */
   ownsSession?: (sessionId: string) => boolean;
 }
@@ -101,7 +103,7 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
       );
     });
     const unsubSpawn = api.onAgentSpawnEvent?.((event) => {
-      if (ownsSession && event.parentSessionId !== undefined && !ownsSession(event.parentSessionId)) return;
+      if (ownsSession && event.parentSessionId && !ownsSession(event.parentSessionId)) return;
       setSubAgentSpawns((prev) => {
         const existingIdx = prev.findIndex((s) => s.spawnId === event.spawnId);
         if (event.type === "start") {

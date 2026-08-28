@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { TileSession } from "../../components/chat-group-session-registry.js";
 import { turnsEnded, turnsEndedUnseen, useCurrentSession, useTurnAttention } from "../use-sessions.js";
@@ -232,6 +232,25 @@ describe("useCurrentSession — what a tile holds on mount", () => {
       useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, restoreSubAgents }));
     await waitFor(() => expect(result.current.currentSessionId).toBe("loop-live"));
     expect(restoreSubAgents).toHaveBeenCalledWith(restoredSubAgents);
+  });
+
+  it("loading a conversation restores its sub-agent rows AFTER the reset for the new session, not before", async () => {
+    const restoredSubAgents = [{ agentId: "sub-1", status: "completed" }];
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-live", messages: [] },
+      historyBySession: { other: { messages: [{ role: "user", content: "x" }], restoredSubAgents } },
+    });
+    const order: string[] = [];
+    const restoreSubAgents = vi.fn(() => { order.push("restore"); });
+    const onLoadedSession = vi.fn(() => { order.push("reset"); });
+    const { result } = renderHook(() =>
+      useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, restoreSubAgents, onLoadedSession }));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("loop-live"));
+    order.length = 0;
+    await act(async () => { await result.current.handleLoadSession("other", false, vi.fn()); });
+    expect(order).toEqual(["reset", "restore"]);
+    expect(restoreSubAgents).toHaveBeenLastCalledWith(restoredSubAgents);
   });
 
   it("loading a conversation another group holds brings that group forward instead of failing silently", async () => {

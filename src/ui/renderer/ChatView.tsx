@@ -39,6 +39,7 @@ import { FloatingRightLane } from "./components/FloatingRightLane.js";
 import { useChatGroupHeaderSlot } from "./components/ChatGroupFrame.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { sidePanelLayout, useContainerNarrow } from "./hooks/use-container-narrow.js";
+import { SIDE_PANEL_MIN_WIDTH } from "../../shared/side-panel.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -250,8 +251,8 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   // (sidePanelLayout). The tile's width sets the range the split bar moves in.
   const chatViewRootRef = useRef<HTMLDivElement | null>(null);
   const dockedPanelMotionRef = useRef<HTMLDivElement | null>(null);
-  const { width: containerWidth } = useContainerNarrow(chatViewRootRef);
-  const panelLayout = sidePanelLayout(containerWidth);
+  const { width: containerWidth, isNarrow: containerNarrow } = useContainerNarrow(chatViewRootRef);
+  const panelLayout = sidePanelLayout(containerWidth, containerNarrow);
   const dockedPanelWidth = Math.min(panelLayout.max, Math.max(panelLayout.min, sidePanelWidth));
   const dockedPanelShouldOpen = previewRailVisible;
   const [dockedPanelPresent, setDockedPanelPresent] = useState(dockedPanelShouldOpen);
@@ -314,7 +315,9 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     (px: number) => {
       setSidePanelResizing(false);
       setSidePanelWidth(px);
-      commitSidePanelWidth(px);
+      // The setting is the panel's docked width everywhere; a floating panel
+      // in a tile narrower than the floor may not write a sub-floor value.
+      commitSidePanelWidth(Math.max(SIDE_PANEL_MIN_WIDTH, px));
     },
     [commitSidePanelWidth, setSidePanelWidth],
   );
@@ -891,7 +894,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           inert={!dockedPanelExpanded}
           style={{ width: dockedPanelExpanded ? `${dockedPanelWidth}px` : "0px" }}
           className={[
-            "z-40 flex min-w-0 max-w-[calc(100vw-12rem)] shrink-0 origin-right justify-end will-change-[width,opacity,transform]",
+            "z-40 flex min-w-0 shrink-0 origin-right justify-end will-change-[width,opacity,transform]",
             panelLayout.mode === "overlay"
               ? "absolute inset-y-0 right-0 shadow-xl"
               : "relative self-stretch",
@@ -927,13 +930,14 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
             width={dockedPanelWidth}
             minWidth={panelLayout.min}
             maxWidth={panelLayout.max}
+            floating={panelLayout.mode === "overlay"}
             onWidthChange={handleSidePanelWidthChange}
             onWidthCommit={handleSidePanelWidthCommit}
             resizeElementRef={dockedPanelMotionRef}
             onClose={() => {
               onSidePanelOpenChange?.(false);
             }}
-            className="relative flex max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
+            className="relative flex shrink-0 self-stretch"
           />
         </div>
       ) : null}

@@ -257,9 +257,11 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
         const h = await api.chatSessionHistory(sessionId);
         if (token !== sessionReadTokenRef.current) return false;
         if (!h.ok) return false;
+        // Reset first: the reset clears the sub-agent rows, so restoring
+        // before it would hand the incoming conversation an empty panel.
+        onLoadedSession?.();
         restoreSubAgents?.(h.restoredSubAgents ?? []);
         applyLoadedSession(sessionHistoryToEntries(h));
-        onLoadedSession?.();
         setCurrentSessionId(sessionId);
         setCurrentSessionKind(h.sessionKind ?? "main");
         setCurrentSessionTitle(h.sessionTitle);

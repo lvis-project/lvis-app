@@ -11,7 +11,7 @@ export interface UseContainerNarrowResult {
 /**
  * Minimum transcript column width that must survive alongside the docked side
  * panel for docking to be usable. Below this the panel would crush the chat
- * transcript, so the drawer fallback is warranted; at or above it both panes
+ * transcript, so the panel floats over it instead; at or above it both panes
  * stay interactive side by side.
  */
 const MIN_DOCKED_TRANSCRIPT_WIDTH = 320;
@@ -22,8 +22,8 @@ const MIN_DOCKED_TRANSCRIPT_WIDTH = 320;
  * transcript floor rather than a magic constant, so it tracks the panel SoT.
  * Chat mode's OS window reserves exactly `SIDE_PANEL_MIN_WIDTH` on top of its
  * base width to host the docked panel, so its container clears this threshold
- * and docks (not the modal drawer). The drawer only triggers for genuinely
- * too-narrow containers (e.g. a hand-shrunk work-mode window).
+ * and docks. Floating only happens in genuinely too-narrow containers (a
+ * split tile, a hand-shrunk work-mode window).
  */
 export const DOCK_ENTER_WIDTH = SIDE_PANEL_MIN_WIDTH + MIN_DOCKED_TRANSCRIPT_WIDTH;
 /** Exit width — 60px dead-band above enter to avoid flip-flop near the boundary. */
@@ -47,13 +47,16 @@ export interface SidePanelLayout {
 
 /**
  * How the side panel lays out inside a container `width` px across, and the
- * width range it may take there. An unmeasured container (Infinity) docks
- * with the pixel floors.
+ * width range it may take there. `narrow` is {@link useContainerNarrow}'s
+ * hysteresis verdict, not a fresh comparison: the two modes give the panel
+ * different ranges, so a mode that flipped on a single threshold would jump
+ * the panel's width back and forth while a tile gutter is dragged across it.
+ * An unmeasured container (Infinity) docks with the pixel floors.
  */
-export function sidePanelLayout(width: number): SidePanelLayout {
+export function sidePanelLayout(width: number, narrow: boolean): SidePanelLayout {
   if (!Number.isFinite(width)) return { mode: "docked", min: SIDE_PANEL_MIN_WIDTH, max: Number.POSITIVE_INFINITY };
-  if (width >= DOCK_ENTER_WIDTH) {
-    return { mode: "docked", min: SIDE_PANEL_MIN_WIDTH, max: width - MIN_DOCKED_TRANSCRIPT_WIDTH };
+  if (!narrow) {
+    return { mode: "docked", min: SIDE_PANEL_MIN_WIDTH, max: Math.max(SIDE_PANEL_MIN_WIDTH, width - MIN_DOCKED_TRANSCRIPT_WIDTH) };
   }
   return { mode: "overlay", min: Math.min(SIDE_PANEL_MIN_WIDTH, width), max: width };
 }
@@ -63,8 +66,8 @@ export function sidePanelLayout(width: number): SidePanelLayout {
  * — too narrow to hold both the side panel's and the transcript's pixel
  * floors — with hysteresis (enter < {@link DOCK_ENTER_WIDTH}, exit >=
  * {@link DOCK_EXIT_WIDTH}; 60px dead-band) so resizing near the boundary does
- * not flip-flop. ChatView reads `width` and lays its panel out through
- * {@link sidePanelLayout}; Settings reads `isNarrow` for its own layout.
+ * not flip-flop. ChatView lays its panel out through {@link sidePanelLayout}
+ * from both; Settings reads `isNarrow` for its own layout.
  *
  * Observe the PARENT of whatever the answer lays out, so the answer never
  * changes what is measured. In jsdom (no ResizeObserver) the width stays

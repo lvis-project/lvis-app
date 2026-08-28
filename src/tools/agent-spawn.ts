@@ -293,8 +293,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       // conversation that spawned it, so the tile showing that conversation —
       // and only that tile — keeps it. Stamping per call site is how a frame
       // escapes unlabelled.
-      const emit = (event: AgentSpawnEvent) =>
-        deps.emit(originSessionId ? { ...event, parentSessionId: originSessionId } : event);
+      const emit = (event: AgentSpawnEvent) => deps.emit({ ...event, parentSessionId: originSessionId });
       const spawnId = createDlpSafeUuid();
       const initialTaskState = resumeId
         ? projectSubAgentRunState("waiting")

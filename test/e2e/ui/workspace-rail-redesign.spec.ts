@@ -108,9 +108,14 @@ test.describe("workspace rail redesign", () => {
     await expect(page.getByTestId("chat-view-root").getByTestId("chat-side-panel")).toBeVisible();
     await expect(page.getByTestId("workspace-rail-drawer")).toHaveCount(0);
     await expect(page.getByTestId("workspace-rail-drawer-backdrop")).toHaveCount(0);
+    // Floating means the transcript column is NOT narrowed by the panel: the
+    // composer keeps more than (root − panel), which a docked column cannot.
     const composer = await page.getByTestId("composer-textarea").boundingBox();
     const root = await page.getByTestId("chat-view-root").boundingBox();
-    expect((composer?.width ?? 0)).toBeGreaterThan((root?.width ?? 0) * 0.5);
+    const panel = await page.getByTestId("chat-side-panel").boundingBox();
+    expect(panel?.width ?? 0).toBeGreaterThanOrEqual(Math.min(448, root?.width ?? 0));
+    expect(panel?.width ?? 0).toBeLessThanOrEqual(root?.width ?? 0);
+    expect(composer?.width ?? 0).toBeGreaterThan((root?.width ?? 0) - (panel?.width ?? 0));
 
     // Widen again → back to a docked column.
     await page.setViewportSize({ width: 1400, height: 840 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { ChatContextProvider, type ChatContextValue } from "../context/ChatContext.js";
 import { ChatView } from "../ChatView.js";
@@ -216,7 +216,12 @@ export function ChatGroupSession({
     freshProject: freshTileProject,
     focusSessionHolder: env.focusChatGroup,
   });
-  currentSessionIdRef.current = currentSessionId;
+  // Written at commit, not in render: a render may be thrown away, and the
+  // frame listener (subscribed in an effect) must not read a session this
+  // tile never showed. Layout timing keeps it ahead of any IPC callback.
+  useLayoutEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
 
   // A composer draft belongs to the conversation it was typed into. Switching
   // this tile to another session has to drop it, or the next session opens

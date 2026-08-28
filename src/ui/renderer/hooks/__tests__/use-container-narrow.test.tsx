@@ -134,15 +134,22 @@ describe("useContainerNarrow", () => {
 
 describe("sidePanelLayout", () => {
   it("docks with the pixel floors when the container can hold both columns", () => {
-    expect(sidePanelLayout(Number.POSITIVE_INFINITY)).toEqual({ mode: "docked", min: 448, max: Number.POSITIVE_INFINITY });
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH)).toEqual({ mode: "docked", min: 448, max: DOCK_ENTER_WIDTH - 320 });
-    expect(sidePanelLayout(1200)).toEqual({ mode: "docked", min: 448, max: 880 });
+    expect(sidePanelLayout(Number.POSITIVE_INFINITY, false)).toEqual({ mode: "docked", min: 448, max: Number.POSITIVE_INFINITY });
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: 448, max: DOCK_ENTER_WIDTH - 320 });
+    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: 448, max: 880 });
   });
 
   it("floats over the transcript, keeping its own floor, when the container cannot", () => {
     // A 2×2 tile: the panel keeps 448 and the transcript stays laid out beneath.
-    expect(sidePanelLayout(496)).toEqual({ mode: "overlay", min: 448, max: 496 });
+    expect(sidePanelLayout(496, true)).toEqual({ mode: "overlay", min: 448, max: 496 });
     // Narrower than the panel's own floor: the panel fills the container.
-    expect(sidePanelLayout(400)).toEqual({ mode: "overlay", min: 400, max: 400 });
+    expect(sidePanelLayout(400, true)).toEqual({ mode: "overlay", min: 400, max: 400 });
+  });
+
+  it("takes the mode from the hysteresis verdict, so a gutter dragged across the threshold does not flip it", () => {
+    // Inside the dead-band: still narrow → still floating, its range still the container's.
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH + 30, true)).toEqual({ mode: "overlay", min: 448, max: DOCK_ENTER_WIDTH + 30 });
+    // Not yet narrow at the enter width: docked, the range never below the panel floor.
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH - 1, false)).toEqual({ mode: "docked", min: 448, max: 448 });
   });
 });

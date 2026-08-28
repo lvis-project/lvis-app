@@ -372,22 +372,15 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatMainActiveState: vi.fn(async () => mainActiveState),
     chatGetHistory: vi.fn(async () => history),
     chatSessionHistory: vi.fn(async (sessionId: string) => {
-      const sessionHistory = historyBySession[sessionId];
-      if (sessionHistory) {
-        const resolvedSessionHistory = await sessionHistory;
-        return {
-          ok: true,
-          sessionKind: resolvedSessionHistory.sessionKind ?? "main",
-          sessionTitle: resolvedSessionHistory.sessionTitle,
-          messages: resolvedSessionHistory.messages,
-        };
-      }
-      const resolvedHistory = await history;
+      const resolved = await (historyBySession[sessionId] ?? history);
       return {
         ok: true,
-        sessionKind: resolvedHistory.sessionKind ?? "main",
-        sessionTitle: resolvedHistory.sessionTitle,
-        messages: resolvedHistory.messages,
+        sessionKind: resolved.sessionKind ?? "main",
+        sessionTitle: resolved.sessionTitle,
+        projectRoot: resolved.projectRoot,
+        projectName: resolved.projectName,
+        restoredSubAgents: resolved.restoredSubAgents,
+        messages: resolved.messages,
       };
     }),
     chatEditResend: vi.fn(async () => ({ ok: true })),
