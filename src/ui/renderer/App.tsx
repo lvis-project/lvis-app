@@ -28,7 +28,7 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups } from "./components/ChatGroupFrame.js";
+import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
@@ -1387,7 +1387,7 @@ export function App() {
                                     than nested flex containers, so a tile's rectangle is
                                     one number that the layout, a drag hit-test, and a
                                     measurement in a test all read the same way. */}
-                                <div className="min-h-0 min-w-0 flex-1 pb-2 pl-1 pr-2 pt-0" data-testid="chat-group-row">
+                                <div className="min-h-0 min-w-0 flex-1 pb-(--chrome-gap) pl-(--chrome-gap-tight) pr-(--chrome-gap) pt-0" data-testid="chat-group-row">
                                 {/* The positioning context is INSIDE the padding: an
                                     absolutely-positioned child resolves against the padding
                                     box, so anchoring the tiles to the row itself would eat
@@ -1397,12 +1397,14 @@ export function App() {
                                 {chatGroups.groups.map((group) => (
                                 <div
                                   key={group.id}
-                                  /* p-1 is the half-gutter: two adjacent tiles make the
-                                     8px gap the row used to get from `gap-2`, and the row's
-                                     own padding is reduced by the same 4px so the outer
-                                     edges land exactly where they did — the chat group's
-                                     bottom line has to stay on the sidebar's. */
-                                  className="absolute flex p-1"
+                                  /* The half-gutter: two adjacent tiles make the 8px gap
+                                     between tiles, and the row's own padding is reduced by
+                                     the same 4px so the outer edges land on the sidebar
+                                     card's. Both read the chrome px tokens the sidebar's
+                                     insets use — the chat group's bottom line has to stay on
+                                     the sidebar's at every font scale, so neither side may
+                                     be rem. */
+                                  className="absolute flex p-(--chrome-gap-tight)"
                                   style={areaStyle(group.box)}
                                   data-testid={`chat-group-cell:${group.id}`}
                                 >
@@ -1432,9 +1434,10 @@ export function App() {
                                         onTogglePanel={() => chatGroups.setPanelOpen(group.id, !group.panelOpen)}
                                         actions={actions}
                                         {...(chatGroups.canSplit ? {
-                                          onSplit: () => {
+                                          onSplit: (axis: ChatGroupSplitAxis) => chatGroups.split(group.id, axis),
+                                          splitFits: (axis: ChatGroupSplitAxis) => {
                                             const canvas = chatGroupCanvasRef.current;
-                                            chatGroups.split(canvas
+                                            return chatGroups.splitFits(group.id, axis, canvas
                                               ? { width: canvas.clientWidth, height: canvas.clientHeight }
                                               : undefined);
                                           },

@@ -31,7 +31,7 @@ export function getCommonChromeOptions(): Partial<BrowserWindowConstructorOption
   return {
     frame: isDarwin,
     titleBarStyle: isDarwin ? "hiddenInset" : "hidden",
-    // y pairs with the h-9 (36px) band in CustomTitleBar: 12 + ≈12px of light
+    // y pairs with the 36px band (`--chrome-band-height` in styles.css): 12 + ≈12px of light
     // puts their centre at 18, the band's centre. Changing one without the
     // other leaves the lights off the band's line.
     trafficLightPosition: isDarwin ? { x: 18, y: 12 } : undefined,

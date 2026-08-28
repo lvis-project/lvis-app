@@ -1425,10 +1425,11 @@ function ClusterStrip({
   return (
     <div
       className={[
-        "flex h-7 shrink-0 items-center gap-0.5 pr-1",
-        // Clear the OS lights on darwin (≈76px from the card's left edge → first
-        // button lands at x≈84). Win/Linux + non-Electron have no OS lights.
-        leadClearance ? "pl-[4.75rem]" : "pl-1",
+        "flex h-(--chrome-control-height) shrink-0 items-center gap-(--chrome-gap-hair) pr-(--chrome-gap-tight)",
+        // Clear the OS lights on darwin: 76px from the card's left edge, in
+        // device px like the lights themselves, so the first button lands at
+        // x=84 at every font scale. Win/Linux + non-Electron have no OS lights.
+        leadClearance ? "pl-[76px]" : "pl-(--chrome-gap-tight)",
       ].join(" ")}
       data-testid="sidebar-cluster"
     >
@@ -1438,7 +1439,7 @@ function ClusterStrip({
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
+            className="h-(--chrome-icon-button) w-(--chrome-icon-button) aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
             onClick={onToggleCollapse}
             title={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
             aria-label={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
@@ -1457,7 +1458,7 @@ function ClusterStrip({
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 aspect-square p-0 shrink-0"
+            className="h-(--chrome-icon-button) w-(--chrome-icon-button) aspect-square p-0 shrink-0"
             onClick={onOpenUnifiedSearch}
             title={t("mainToolbar.unifiedSearch")}
             aria-label={t("mainToolbar.unifiedSearch")}
@@ -1592,8 +1593,8 @@ export function Sidebar({
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
-        "absolute left-2 bottom-3 z-30 flex min-h-0 flex-col",
-        darwinTopClearance ? "top-1" : "top-1.5",
+        "absolute left-[8px] bottom-[12px] z-30 flex min-h-0 flex-col",
+        darwinTopClearance ? "top-[4px]" : "top-[6px]",
         collapsed && "pointer-events-none",
       ].join(" ")}
       // The aside overlays the Electron drag band. Mark it no-drag so its controls

@@ -100,7 +100,7 @@ export function MainToolbar({
   return (
     <div
       data-testid="main-toolbar"
-      className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2"
+      className="flex min-w-0 flex-1 items-center gap-(--chrome-gap-tight) sm:gap-(--chrome-gap)"
     >
       {/* ── Location path, on the band's LEADING edge. The band itself reserves
           the sidebar card's width (CustomTitleBar's `leadClearance`), so this
@@ -141,7 +141,7 @@ export function MainToolbar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1 px-2 text-[10.5px] font-mono text-warning"
+                className="h-(--chrome-control-height) gap-1 px-2 text-[10.5px] font-mono text-warning"
                 onClick={onOpenDevTools}
                 title={t("mainToolbar.devToolsTitle")}
                 aria-label={t("mainToolbar.devToolsTitle")}
@@ -183,7 +183,7 @@ function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: App
       <Button
         variant="ghost"
         size="sm"
-        className={`h-6 rounded-md px-2 text-[11px] font-medium ${
+        className={`h-(--chrome-icon-button) rounded-md px-2 text-[11px] font-medium ${
           active
             ? "bg-primary text-primary-foreground hover:bg-primary"
             : "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -201,7 +201,7 @@ function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: App
     <div
       role="group"
       aria-label={t("appMode.groupAriaLabel")}
-      className="flex h-7 items-center gap-0.5 rounded-lg border border-border bg-muted/(--opacity-medium) p-px shrink-0"
+      className="flex h-(--chrome-control-height) items-center gap-0.5 rounded-lg border border-border bg-muted/(--opacity-medium) p-px shrink-0"
       data-testid="app-mode-toggle"
     >
       {segment("chat", t("appMode.chat"), t("appMode.chatAriaLabel"))}
@@ -248,7 +248,7 @@ function AppUpdateBadge({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/(--opacity-medium) bg-info/(--opacity-subtle) hover:bg-info/(--opacity-light) disabled:opacity-60"
+              className="h-(--chrome-control-height) gap-1 px-2 text-[11px] font-medium text-info border border-info/(--opacity-medium) bg-info/(--opacity-subtle) hover:bg-info/(--opacity-light) disabled:opacity-60"
               onClick={() => void onDownload?.()}
               disabled={inFlight}
               title={t("mainToolbar.updateAvailableTitle", { version: state.version })}
@@ -273,7 +273,7 @@ function AppUpdateBadge({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-[11px] font-medium text-muted-foreground border border-border bg-muted/(--opacity-medium) cursor-progress"
+            className="h-(--chrome-control-height) gap-1 px-2 text-[11px] font-medium text-muted-foreground border border-border bg-muted/(--opacity-medium) cursor-progress"
             disabled
             title={t("mainToolbar.downloadingTitle", { version: state.version, percent: state.percent })}
             aria-label={t("mainToolbar.downloadingAriaLabel", { percent: state.percent })}
@@ -296,7 +296,7 @@ function AppUpdateBadge({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/(--opacity-medium) bg-success/(--opacity-subtle) hover:bg-success/(--opacity-light) disabled:opacity-60"
+            className="h-(--chrome-control-height) gap-1 px-2 text-[11px] font-medium text-success border border-success/(--opacity-medium) bg-success/(--opacity-subtle) hover:bg-success/(--opacity-light) disabled:opacity-60"
             onClick={() => void onInstall?.()}
             disabled={inFlight}
             title={t("mainToolbar.downloadedTitle", { version: state.version })}
@@ -331,7 +331,7 @@ function SkipUpdateButton({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 aspect-square text-muted-foreground hover:text-foreground disabled:opacity-60"
+          className="h-(--chrome-control-height) w-(--chrome-control-height) aspect-square text-muted-foreground hover:text-foreground disabled:opacity-60"
           onClick={() => void onSkip()}
           disabled={disabled}
           title={t("mainToolbar.skipUpdateTitle", { version })}

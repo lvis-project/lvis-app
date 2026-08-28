@@ -4,9 +4,10 @@ import {
 } from "react";
 import {
   Columns2, Download, Maximize2, Minimize2, PanelBottomClose, PanelBottomOpen,
-  Pin, Upload, X,
+  Pin, Rows2, Upload, X,
 } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,7 +27,7 @@ import {
   dropTargetAt,
   type DropTarget,
 } from "./chat-group-drop.js";
-import {
+import { AXIS_OF,
   closeLeaf,
   countLeaves,
   layoutBoxes,
@@ -39,6 +40,7 @@ import {
   type ChatGroupGutter,
   type ChatGroupNode,
   type DropEdge,
+  type SplitAxis,
 } from "./chat-group-tree.js";
 
 /**
@@ -51,6 +53,11 @@ import {
  */
 const CHAT_GROUP_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
 const CHAT_GROUP_MIN_HEIGHT = 240;
+
+/** Which way a tile is halved: `row` puts the new tile beside it, `column` under it. */
+export type ChatGroupSplitAxis = SplitAxis;
+/** The drop edge a header split on an axis stands for: the new tile trails. */
+const SPLIT_EDGE: Record<ChatGroupSplitAxis, DropEdge> = { row: "right", column: "bottom" };
 
 /**
  * The chat group: an outlined work container with its own header.
@@ -94,8 +101,16 @@ export interface ChatGroupFrameProps {
    *  because it shows what THIS conversation is doing. */
   panelOpen: boolean;
   onTogglePanel: () => void;
-  /** Split off another group. Absent when no free conversation source remains. */
-  onSplit?: () => void;
+  /**
+   * Split off another group beside (`row`) or under (`column`) this one.
+   * Absent when no free conversation source remains.
+   */
+  onSplit?: (axis: ChatGroupSplitAxis) => void;
+  /**
+   * Whether a split on that axis leaves both halves above the tile floors.
+   * Read when the choice opens, so it sees the tile as it is then.
+   */
+  splitFits?: (axis: ChatGroupSplitAxis) => boolean;
   /**
    * Take a conversation dropped on this tile.
    *
@@ -127,7 +142,7 @@ export interface ChatGroupFrameProps {
 }
 
 const HEADER_BUTTON_CLASS =
-  "h-6 w-6 aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground";
+  "h-(--chrome-icon-button) w-(--chrome-icon-button) aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground";
 
 /**
  * The header's contributed-control slot.
@@ -144,6 +159,31 @@ export function useChatGroupHeaderSlot(): HTMLElement | null {
   return useContext(ChatGroupHeaderSlotContext);
 }
 
+/**
+ * The work panel is the same kind of guest. It stands as tall as the tile —
+ * beside the header, not under it — so the view portals it into a slot that
+ * is the tile's own child. `tile` is the frame itself, the box the panel's
+ * docked/overlay verdict is measured against: measuring the view would
+ * measure something the panel's own width changes.
+ */
+export interface ChatGroupPanelSlot {
+  panel: HTMLElement | null;
+  tile: HTMLElement | null;
+}
+
+/**
+ * `null` means no frame at all — the view is on its own and keeps the panel.
+ * Inside a frame the slot is published from the first render, with `panel`
+ * still null until the slot element commits; the view must tell the two
+ * apart, because rendering the panel inline and then moving it into the
+ * portal one render later would remount everything under it.
+ */
+const ChatGroupPanelSlotContext = createContext<ChatGroupPanelSlot | null>(null);
+
+export function useChatGroupPanelSlot(): ChatGroupPanelSlot | null {
+  return useContext(ChatGroupPanelSlotContext);
+}
+
 export function ChatGroupFrame({
   title,
   actions,
@@ -151,6 +191,7 @@ export function ChatGroupFrame({
   panelOpen,
   onTogglePanel,
   onSplit,
+  splitFits,
   onSessionDrop,
   canSplit,
   onClose,
@@ -161,6 +202,19 @@ export function ChatGroupFrame({
 }: ChatGroupFrameProps) {
   const { t } = useTranslation();
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
+  const [panelSlot, setPanelSlot] = useState<HTMLElement | null>(null);
+  const [tile, setTile] = useState<HTMLElement | null>(null);
+  const panelSlots = useMemo<ChatGroupPanelSlot>(() => ({ panel: panelSlot, tile }), [panelSlot, tile]);
+  // The split choice is settled when the popover OPENS, not on every render:
+  // the verdict reads the canvas's live size, which is a layout read that
+  // belongs in an event, and a verdict taken while the popover is open is
+  // what the user is looking at.
+  const [splitChoice, setSplitChoice] = useState<Record<ChatGroupSplitAxis, boolean> | null>(null);
+  const openSplitChoice = (open: boolean) => {
+    setSplitChoice(open
+      ? { row: splitFits ? splitFits("row") : true, column: splitFits ? splitFits("column") : true }
+      : null);
+  };
   const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
 
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -170,7 +224,10 @@ export function ChatGroupFrame({
   const readTarget = (event: React.DragEvent<HTMLElement>): DropTarget => {
     const rect = event.currentTarget.getBoundingClientRect();
     const landed = dropTargetAt(rect, { x: event.clientX, y: event.clientY });
-    return canSplit ? landed : "center";
+    if (!canSplit || landed === "center") return "center";
+    // An edge whose halves would fall under the tile floors demotes to the
+    // centre — the drop affordance and the split control state one rule.
+    return splitFits && !splitFits(AXIS_OF[landed]) ? "center" : landed;
   };
 
   return (
@@ -206,19 +263,22 @@ export function ChatGroupFrame({
       // second click on the chrome to say so would be a step with no purpose.
       onFocusCapture={onFocus}
       onMouseDownCapture={onFocus}
+      ref={setTile}
       className={[
         // `relative` so the drop indicator can cover the half the new tile
-        // would take, in the tile's own coordinates.
-        "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card",
+        // would take, in the tile's own coordinates. A row: the conversation
+        // column, then the work panel's slot beside it, as tall as the tile.
+        "relative flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden rounded-lg border bg-card",
         // Focus lives on the frame. `border-border` is the resting hairline;
         // the focused group swaps the whole border rather than adding a ring,
         // so a group never changes size when focus moves to it.
         focused ? "border-primary/(--opacity-half)" : "border-border",
       ].join(" ")}
     >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header
         data-testid="chat-group-header"
-        className="flex h-9 shrink-0 items-center gap-1 border-b border-border/(--opacity-half) px-2"
+        className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap-tight) border-b border-border/(--opacity-half) px-(--chrome-gap)"
       >
         <h2 className="min-w-0 flex-1 truncate text-caption font-medium text-foreground">
           {title}
@@ -280,27 +340,65 @@ export function ChatGroupFrame({
           ),
         )}
         {onSplit ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={HEADER_BUTTON_CLASS}
-                onClick={onSplit}
-                title={t("chatGroup.split")}
-                aria-label={t("chatGroup.split")}
-                data-testid="chat-group-split"
-              >
-                <Columns2 className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t("chatGroup.split")}</TooltipContent>
-          </Tooltip>
+          // Which way to halve is the user's call — beside the chat or under
+          // it — so the control drops that choice instead of guessing from
+          // the tile's shape. A direction the floors cannot afford is shown
+          // disabled rather than hidden: the limit reads in the control.
+          <Popover open={splitChoice !== null} onOpenChange={openSplitChoice}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={HEADER_BUTTON_CLASS}
+                    title={t("chatGroup.split")}
+                    aria-label={t("chatGroup.split")}
+                    aria-expanded={splitChoice !== null}
+                    data-testid="chat-group-split"
+                  >
+                    <Columns2 className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("chatGroup.split")}</TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              side="bottom"
+              align="end"
+              sideOffset={6}
+              className="flex w-auto gap-1 p-1"
+              aria-label={t("chatGroup.split")}
+              data-testid="chat-group-split-choice"
+            >
+              {splitChoice && !splitChoice.row && !splitChoice.column ? (
+                <p className="px-2 py-1 text-xs text-muted-foreground" data-testid="chat-group-split-no-room">
+                  {t("chatGroup.splitNoRoom")}
+                </p>
+              ) : (["row", "column"] as const).map((axis) => (
+                <Button
+                  key={axis}
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-2 px-2 text-xs"
+                  disabled={splitChoice ? !splitChoice[axis] : false}
+                  data-testid={`chat-group-split-${axis}`}
+                  onClick={() => {
+                    setSplitChoice(null);
+                    onSplit(axis);
+                  }}
+                >
+                  {axis === "row" ? <Columns2 className="h-4 w-4" /> : <Rows2 className="h-4 w-4" />}
+                  {axis === "row" ? t("chatGroup.splitRow") : t("chatGroup.splitColumn")}
+                </Button>
+              ))}
+            </PopoverContent>
+          </Popover>
         ) : null}
         {/* Trailing cluster: the controls that act on this GROUP as a tile —
             its work panel, its share of the area, its presence. The panel's
             own tabs live on the panel card, not here. */}
-        <div className="flex h-full shrink-0 items-center gap-1">
+        <div className="flex h-full shrink-0 items-center gap-(--chrome-gap-tight)">
         {/* The work panel is per-GROUP. It shows what THIS conversation is
             doing, so a single window-level toggle could only ever be right for
             one of the groups on screen. */}
@@ -364,8 +462,15 @@ export function ChatGroupFrame({
           copy of it inside the frame said the same thing twice and cost the
           transcript the width to say it. */}
       <ChatGroupHeaderSlotContext.Provider value={headerSlot}>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        <ChatGroupPanelSlotContext.Provider value={panelSlots}>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        </ChatGroupPanelSlotContext.Provider>
       </ChatGroupHeaderSlotContext.Provider>
+      </div>
+      {/* The work panel lands here: `contents` makes what the view portals
+          in the tile's own flex item (a column beside the conversation) or,
+          floating, a box positioned against the tile. */}
+      <div ref={setPanelSlot} className="contents" data-testid="chat-group-panel-slot" />
       {dropTarget ? (
         <div
           aria-hidden={true}
@@ -478,38 +583,35 @@ export function useChatGroups(appMode?: "chat" | "work") {
   }, [tree]);
 
   /**
-   * The split control, without a drop to say which way.
-   *
-   * It halves the focused tile along its LONGER side. Always splitting right
-   * would walk 4 tiles down to 124px columns — a quarter of the 448px floor a
-   * chat column needs — while halving the long side turns the same four clicks
-   * into the 2x2 the space actually affords.
-   *
-   * `canvasSize` is the tile area in pixels; the tree only knows fractions, and
-   * a fraction cannot tell you which side of a tile is longer.
+   * The header's split: halve `groupId` on `axis`, the new tile trailing —
+   * beside it for `row`, under it for `column`. The direction is the user's;
+   * the control offers only the ones {@link splitFits} allows.
    */
-  const split = useCallback((canvasSize?: { width: number; height: number }) => {
-    const area = canvasSize ?? { width: 16, height: 9 };
-    const boxes = layoutBoxes(tree);
-    if (boxes.length === 0) return;
+  const split = useCallback((groupId: string, axis: ChatGroupSplitAxis) => {
+    dropOnEdge(groupId, SPLIT_EDGE[axis]);
+  }, [dropOnEdge]);
 
-    // Halve the BIGGEST tile, not the focused one. Focus follows a split, so
-    // repeatedly halving the focused tile walks four clicks down to a 124px
-    // column — a quarter of the 448px floor a chat column needs. Taking the
-    // biggest each time is what turns the same four clicks into a 2x2.
-    const pixels = (box: typeof boxes[number]) => ({
-      width: (box.width / 100) * area.width,
-      height: (box.height / 100) * area.height,
-    });
-    const target = boxes.reduce((biggest, box) => {
-      const a = pixels(box);
-      const b = pixels(biggest);
-      return a.width * a.height > b.width * b.height ? box : biggest;
-    }, boxes[0]!);
+  // What a cell's frame loses to its half-gutter (4px each side) and border
+  // (1px each side) — the tile floors are on the frame's content, not the cell.
+  const CHAT_GROUP_CELL_INSET = 10;
 
-    const size = pixels(target);
-    dropOnEdge(target.chatGroupId, size.width >= size.height ? "right" : "bottom");
-  }, [dropOnEdge, tree]);
+  /**
+   * Whether halving `groupId` on `axis` leaves both halves at or above the
+   * tile floors, given the canvas the percentages are laid out in. An
+   * unmeasured canvas (no element yet) affords any split: nothing to check
+   * against, and the gutter floors still hold once it is laid out.
+   */
+  const splitFits = useCallback((groupId: string, axis: ChatGroupSplitAxis, canvasSize: { width: number; height: number } | undefined) => {
+    if (!canvasSize) return true;
+    const box = layoutBoxes(tree).find((each) => each.chatGroupId === groupId);
+    if (!box) return false;
+    const extent = axis === "row"
+      ? (box.width / 100) * canvasSize.width
+      : (box.height / 100) * canvasSize.height;
+    const floor = axis === "row" ? CHAT_GROUP_MIN_WIDTH : CHAT_GROUP_MIN_HEIGHT;
+    // Each half is a cell; the floor is on what the cell's frame gets to use.
+    return extent / 2 - CHAT_GROUP_CELL_INSET >= floor;
+  }, [tree]);
 
   // Any tile but the last can go, the primary included: once split, the
   // primary is one tile among the others to the user, and a close that works
@@ -598,6 +700,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
     setPanelOpen,
     canSplit,
     split,
+    splitFits,
     dropOnEdge,
     resize,
     previewResize,

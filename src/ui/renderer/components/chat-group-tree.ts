@@ -15,7 +15,7 @@
 
 /** Which way a split divides its space. Internal: it reaches callers through
  *  `ChatGroupGutter.axis`, never by name. */
-type SplitAxis = "row" | "column";
+export type SplitAxis = "row" | "column";
 
 export interface ChatGroupLeaf {
   kind: "leaf";
@@ -35,7 +35,7 @@ export type ChatGroupNode = ChatGroupLeaf | ChatGroupSplit;
 /** Which side of a tile a session was dropped on. */
 export type DropEdge = "left" | "right" | "top" | "bottom";
 
-const AXIS_OF: Record<DropEdge, SplitAxis> = {
+export const AXIS_OF: Record<DropEdge, SplitAxis> = {
   left: "row",
   right: "row",
   top: "column",

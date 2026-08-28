@@ -36,7 +36,7 @@ import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
 import { ActionPanel } from "./components/ActionPanel.js";
 import { createPortal } from "react-dom";
 import { FloatingRightLane } from "./components/FloatingRightLane.js";
-import { useChatGroupHeaderSlot } from "./components/ChatGroupFrame.js";
+import { useChatGroupHeaderSlot, useChatGroupPanelSlot } from "./components/ChatGroupFrame.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { sidePanelLayout, useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { SIDE_PANEL_MIN_RESERVE } from "../../shared/side-panel.js";
@@ -120,7 +120,7 @@ export interface ChatViewProps {
   onActionPanelOpenChange?: (open: boolean) => void;
   /** Controlled right-side work panel state, toggled from the title bar. */
   sidePanelOpen?: boolean;
-  onSidePanelOpenChange?: (open: boolean) => void;
+  onSidePanelOpenChange: (open: boolean) => void;
   /** Constrain transcript and composer to a centered reading column. */
   blogLayout?: boolean;
   /** Active project — drives the empty-state composer's project selector trigger label. */
@@ -248,10 +248,17 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   // The panel lives INSIDE this tile, always — never a window-level sheet.
   // With room for both, it is a column that pushes the transcript; without,
   // it keeps its own floor and floats over the transcript's right edge
-  // (sidePanelLayout). The tile's width sets the range the split bar moves in.
+  // (sidePanelLayout). It is as tall as the TILE and stands beside the
+  // header, so it is measured against the tile and portaled into the frame's
+  // slot; outside a frame it stays a child of this view and measures it.
   const chatViewRootRef = useRef<HTMLDivElement | null>(null);
   const dockedPanelMotionRef = useRef<HTMLDivElement | null>(null);
-  const { width: containerWidth, isNarrow: containerNarrow } = useContainerNarrow(chatViewRootRef);
+  const panelSlot = useChatGroupPanelSlot();
+  const inFrame = panelSlot !== null;
+  const panelHost = panelSlot?.panel ?? null;
+  const tileElement = panelSlot?.tile ?? null;
+  const tileRef = useMemo(() => ({ current: tileElement }), [tileElement]);
+  const { width: containerWidth, isNarrow: containerNarrow } = useContainerNarrow(inFrame ? tileRef : chatViewRootRef);
   const panelLayout = sidePanelLayout(containerWidth, containerNarrow);
   const dockedPanelWidth = Math.min(panelLayout.max, Math.max(panelLayout.min, sidePanelWidth));
   const dockedPanelShouldOpen = previewRailVisible;
@@ -352,7 +359,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         workspaceTabs.addTab("file-browser");
       }
     }
-    onSidePanelOpenChange?.(true);
+    onSidePanelOpenChange(true);
   }, [workspaceTabs, previewModel.targets, onSidePanelOpenChange]);
   const routeActivityItem = useCallback(
     (target: string, web: boolean) => routeActivity(target, web, "ephemeral"),
@@ -399,7 +406,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     }
     if (!sawNewSpawn) return;
     workspaceTabs.ensureContainerTab("subagent");
-    onSidePanelOpenChange?.(true);
+    onSidePanelOpenChange(true);
   }, [currentSessionId, subAgentSpawns, workspaceTabs, onSidePanelOpenChange]);
 
   useEffect(() => {
@@ -634,7 +641,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
       data-testid="chat-view-root"
     >
       <div
-        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [container-type:size]"
         data-testid="chat-main-column"
       >
       {/* Tool activity is derived HERE (only this view sees the transcript) but
@@ -884,7 +891,12 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         onProjectSelectorOpenChange={setProjectSelectorOpen}
       />
       </div>
-      {dockedPanelPresent ? (
+      {dockedPanelPresent ? (() => {
+        // Inside a frame the panel waits for the slot to commit: rendering it
+        // inline for one pass and portaling it on the next would remount the
+        // whole panel (a portal and a host element are different fiber kinds).
+        if (inFrame && !panelHost) return null;
+        const wrapper = (
         <div
           ref={dockedPanelMotionRef}
           id="chat-side-panel"
@@ -938,10 +950,19 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
             onWidthChange={handleSidePanelWidthChange}
             onWidthCommit={handleSidePanelWidthCommit}
             resizeElementRef={dockedPanelMotionRef}
+            onClose={() => onSidePanelOpenChange(false)}
+            activity={actionPanelActivity}
+            onOpenActivityItem={routeActivityItem}
+            onOpenActivityItemPinned={routeActivityItemPinned}
+            onOpenActivityItemInSystemApp={openActivityItemInSystemApp}
             className="relative flex shrink-0"
           />
         </div>
-      ) : null}
+        );
+        // Inside a frame the panel is the tile's guest, not this view's — see
+        // ChatGroupFrame's panel slot.
+        return panelHost ? createPortal(wrapper, panelHost) : wrapper;
+      })() : null}
     </div>
   );
 }

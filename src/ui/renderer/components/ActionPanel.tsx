@@ -220,14 +220,17 @@ function StatsDashboard({ stats }: { stats: ActivityStat[] }) {
   );
 }
 
-export function ActionPanel({
-  open,
-  onOpenChange,
+/**
+ * What the panel says: the six counters, then the items by category. Shared
+ * by the header popover and the workspace rail's empty launcher, so the two
+ * never disagree about what a session did.
+ */
+export function ToolActivityBody({
   activity,
   onOpenItem,
   onOpenItemPinned,
   onOpenItemInSystemApp,
-}: ActionPanelProps) {
+}: Pick<ActionPanelProps, "activity" | "onOpenItem" | "onOpenItemPinned" | "onOpenItemInSystemApp">) {
   const { t } = useTranslation();
   const allStats = [
     { icon: Wrench, label: t("actionPanel.toolCallsTitle"), count: activity.toolCallCount },
@@ -237,63 +240,9 @@ export function ActionPanel({
     { icon: FilePenLine, label: t("actionPanel.writtenFilesTitle"), count: activity.writtenFileCount },
     { icon: Globe2, label: t("actionPanel.fetchedPagesTitle"), count: activity.fetchedPageCount },
   ];
-  const populatedStats = allStats.filter((stat) => stat.count > 0);
-
-  const populatedCount = populatedStats.reduce((sum, stat) => sum + stat.count, 0);
-
-  // Anchored to the group header, opening DOWNWARD over the transcript.
-  // It used to float over the top-right of the chat column, which put it at
-  // the same point for every group on screen; a header-anchored disclosure
-  // says which conversation it is reporting on by where it hangs from.
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="relative h-6 w-6 aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground"
-              aria-label={open ? t("actionPanel.closeAriaLabel") : t("actionPanel.openAriaLabel")}
-              aria-expanded={open}
-              data-testid="action-panel-open"
-            >
-              <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
-              {populatedCount > 0 && (
-                // A count, not a dot: the panel's whole purpose is "how much
-                // did it just do", and that is answerable without opening it.
-                <span
-                  className="absolute -right-0.5 -top-0.5 min-w-3 rounded-full bg-primary px-0.5 text-[8px] font-medium leading-3 tabular-nums text-primary-foreground"
-                  data-testid="action-panel-badge"
-                >
-                  {populatedCount > 99 ? "99+" : populatedCount}
-                </span>
-              )}
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{t("actionPanel.title")}</TooltipContent>
-      </Tooltip>
-      <PopoverContent
-        side="bottom"
-        align="end"
-        sideOffset={6}
-        aria-label={t("actionPanel.title")}
-        className="flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
-        style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
-        data-testid="action-panel"
-      >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold leading-5">{t("actionPanel.title")}</h2>
-          <p className="truncate text-[11px] leading-4 text-muted-foreground">{t("actionPanel.subtitle")}</p>
-        </div>
-      </div>
-
+    <>
       <StatsDashboard stats={allStats} />
-
       <div className="min-h-0 flex-1 overflow-y-auto">
         <ActivitySection
           title={t("actionPanel.pluginCallsTitle")}
@@ -331,6 +280,83 @@ export function ActionPanel({
           web
         />
       </div>
+    </>
+  );
+}
+
+/** How much the session did, in one number for the badge: the populated counters summed. */
+export function toolActivityTotal(activity: ActionPanelActivityState): number {
+  return activity.toolCallCount + activity.pluginCallCount + activity.mcpCallCount
+    + activity.readFileCount + activity.writtenFileCount + activity.fetchedPageCount;
+}
+
+export function ActionPanel({
+  open,
+  onOpenChange,
+  activity,
+  onOpenItem,
+  onOpenItemPinned,
+  onOpenItemInSystemApp,
+}: ActionPanelProps) {
+  const { t } = useTranslation();
+  const populatedCount = toolActivityTotal(activity);
+
+  // Anchored to the group header, opening DOWNWARD over the transcript.
+  // It used to float over the top-right of the chat column, which put it at
+  // the same point for every group on screen; a header-anchored disclosure
+  // says which conversation it is reporting on by where it hangs from.
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="relative h-(--chrome-icon-button) w-(--chrome-icon-button) aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground"
+              aria-label={open ? t("actionPanel.closeAriaLabel") : t("actionPanel.openAriaLabel")}
+              aria-expanded={open}
+              data-testid="action-panel-open"
+            >
+              <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+              {populatedCount > 0 && (
+                // A count, not a dot: the panel's whole purpose is "how much
+                // did it just do", and that is answerable without opening it.
+                <span
+                  className="absolute -right-0.5 -top-0.5 min-w-3 rounded-full bg-primary px-0.5 text-[8px] font-medium leading-3 tabular-nums text-primary-foreground"
+                  data-testid="action-panel-badge"
+                >
+                  {populatedCount > 99 ? "99+" : populatedCount}
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t("actionPanel.title")}</TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        side="bottom"
+        align="end"
+        sideOffset={6}
+        aria-label={t("actionPanel.title")}
+        className="flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
+        style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
+        data-testid="action-panel"
+      >
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold leading-5">{t("actionPanel.title")}</h2>
+          <p className="truncate text-[11px] leading-4 text-muted-foreground">{t("actionPanel.subtitle")}</p>
+        </div>
+      </div>
+      <ToolActivityBody
+        activity={activity}
+        onOpenItem={onOpenItem}
+        onOpenItemPinned={onOpenItemPinned}
+        onOpenItemInSystemApp={onOpenItemInSystemApp}
+      />
       </PopoverContent>
     </Popover>
   );
