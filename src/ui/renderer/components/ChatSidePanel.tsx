@@ -612,6 +612,9 @@ export interface ChatSidePanelProps {
   width: number;
   /** Drag-live width update — state only, no persist. */
   onWidthChange: (px: number) => void;
+  /** The range the split bar may move in — set by the tile the panel is a column of. */
+  minWidth?: number;
+  maxWidth?: number;
   /** Persist width (drag-end / keyboard step). */
   onWidthCommit: (px: number) => void;
   /**
@@ -640,6 +643,8 @@ export function ChatSidePanel({
   workspaceTabs,
   subAgentSpawns,
   width,
+  minWidth = SIDE_PANEL_MIN_WIDTH,
+  maxWidth = Number.POSITIVE_INFINITY,
   onWidthChange,
   onWidthCommit,
   resizeElementRef,
@@ -725,8 +730,8 @@ export function ChatSidePanel({
   // safety cap. Evaluated live (not memoized) so a window resize mid-drag is
   // picked up by the next drag/keyboard interaction.
   const resolveSidePanelMaxWidth = useCallback(
-    () => Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192),
-    [],
+    () => Math.min(maxWidth, Math.max(minWidth, window.innerWidth - 192)),
+    [maxWidth, minWidth],
   );
   const {
     tabs,
@@ -942,7 +947,7 @@ export function ChatSidePanel({
           edge="start"
           onWidthChange={onWidthChange}
           onWidthCommit={onWidthCommit}
-          min={SIDE_PANEL_MIN_WIDTH}
+          min={minWidth}
           max={resolveSidePanelMaxWidth}
           resetWidth={SIDE_PANEL_DEFAULT_WIDTH}
           applyElementRef={resizeElementRef}

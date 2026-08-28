@@ -1,9 +1,10 @@
 import "../../../../../test/renderer/setup.js";
 
 /**
- * useContainerNarrow drives the ChatView docked-vs-drawer branch: `isNarrow`
- * false → the side panel DOCKS beside the transcript (both panes interactive),
- * true → the modal WorkspaceRailDrawer (backdrop-blur, focus-trap) fallback.
+ * useContainerNarrow measures the ChatView container; the side panel is
+ * always a docked column of it, and `dockedPanelRange(width)` is the range
+ * the split bar moves in — pixel floors when the container can hold both,
+ * shares of the container when it cannot.
  *
  * The docking threshold is derived from the shared side-panel min width plus a
  * transcript floor — NOT a magic constant that exceeds chat mode's reserved
@@ -14,11 +15,7 @@ import "../../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
-import {
-  DOCK_ENTER_WIDTH,
-  DOCK_EXIT_WIDTH,
-  useContainerNarrow,
-} from "../use-container-narrow.js";
+import { DOCK_ENTER_WIDTH, DOCK_EXIT_WIDTH, useContainerNarrow, dockedPanelRange } from "../use-container-narrow.js";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 
 /**
@@ -132,5 +129,21 @@ describe("useContainerNarrow", () => {
     } finally {
       observer.restore();
     }
+  });
+});
+
+describe("dockedPanelRange", () => {
+  it("keeps the pixel floors when the container can hold both columns", () => {
+    expect(dockedPanelRange(Number.POSITIVE_INFINITY)).toEqual({ min: 448, max: Number.POSITIVE_INFINITY });
+    expect(dockedPanelRange(DOCK_ENTER_WIDTH)).toEqual({ min: 448, max: DOCK_ENTER_WIDTH - 320 });
+    expect(dockedPanelRange(1200)).toEqual({ min: 448, max: 880 });
+  });
+
+  it("shares a narrow container between the two columns instead of covering one", () => {
+    // A 2×2 tile: the bar moves between 30% and 70% of the tile.
+    expect(dockedPanelRange(496)).toEqual({ min: 149, max: 347 });
+    const { min, max } = dockedPanelRange(600);
+    expect(min).toBeLessThan(max);
+    expect(max).toBeLessThan(600);
   });
 });

@@ -38,7 +38,7 @@ import { createPortal } from "react-dom";
 import { FloatingRightLane } from "./components/FloatingRightLane.js";
 import { useChatGroupHeaderSlot } from "./components/ChatGroupFrame.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
-import { useContainerNarrow } from "./hooks/use-container-narrow.js";
+import { dockedPanelRange, useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -244,14 +244,16 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     commitWidth: commitSidePanelWidth,
   } = usePanelWidth(api, SIDE_PANEL_WIDTH_PREF);
   const previewRailVisible = sidePanelOpen;
-  // Narrow-screen fallback: when the ChatView container is too narrow to dock
-  // the rail beside the transcript, render it as a modal drawer instead
-  // (§6.10.8). The observed element is the chat-view-root (the parent of the
-  // docked/drawer branch) so switching branches does not move the signal.
+  // The panel is a COLUMN of this tile, always: opening it pushes the
+  // transcript, never covers it, and never leaves the tile for a window-level
+  // sheet. The tile's width sets the range the split bar moves in — a tile too
+  // narrow for both pixel floors shares itself between the two columns.
   const chatViewRootRef = useRef<HTMLDivElement | null>(null);
   const dockedPanelMotionRef = useRef<HTMLDivElement | null>(null);
-  const { isNarrow } = useContainerNarrow(chatViewRootRef);
-  const dockedPanelShouldOpen = previewRailVisible && !isNarrow;
+  const { width: containerWidth } = useContainerNarrow(chatViewRootRef);
+  const panelRange = dockedPanelRange(containerWidth);
+  const dockedPanelWidth = Math.min(panelRange.max, Math.max(panelRange.min, sidePanelWidth));
+  const dockedPanelShouldOpen = previewRailVisible;
   const [dockedPanelPresent, setDockedPanelPresent] = useState(dockedPanelShouldOpen);
   // Always start collapsed so an initially-open persisted panel never paints
   // expanded before the opening transition lifecycle begins.
@@ -290,7 +292,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
 
     setDockedPanelExpanded(false);
     setSidePanelResizing(false);
-    if (reduceMotion || isNarrow) {
+    if (reduceMotion) {
       setDockedPanelPresent(false);
       return;
     }
@@ -299,7 +301,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
       SIDE_PANEL_LAYOUT_TRANSITION_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [dockedPanelShouldOpen, isNarrow]);
+  }, [dockedPanelShouldOpen]);
 
   const handleSidePanelWidthChange = useCallback(
     (px: number) => {
@@ -886,7 +888,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           data-testid="chat-side-panel-motion"
           aria-hidden={!dockedPanelExpanded}
           inert={!dockedPanelExpanded}
-          style={{ width: dockedPanelExpanded ? `${sidePanelWidth}px` : "0px" }}
+          style={{ width: dockedPanelExpanded ? `${dockedPanelWidth}px` : "0px" }}
           className={[
             "relative z-40 flex min-w-0 max-w-[calc(100vw-12rem)] shrink-0 origin-right justify-end self-stretch will-change-[width,opacity,transform]",
             sidePanelResizing
@@ -918,7 +920,9 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
             onSelect={setSelectedPreviewId}
             workspaceTabs={workspaceTabs}
             subAgentSpawns={subAgentSpawns}
-            width={sidePanelWidth}
+            width={dockedPanelWidth}
+            minWidth={panelRange.min}
+            maxWidth={panelRange.max}
             onWidthChange={handleSidePanelWidthChange}
             onWidthCommit={handleSidePanelWidthCommit}
             resizeElementRef={dockedPanelMotionRef}
@@ -926,38 +930,6 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
               onSidePanelOpenChange?.(false);
             }}
             className="relative flex max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
-          />
-        </div>
-      ) : null}
-      {isNarrow && previewRailVisible ? (
-        // A tile too narrow to dock the panel beside its transcript shows the
-        // panel over the transcript, inside the tile. Never a window-level
-        // sheet: four tiles can each have their own panel open, and a modal
-        // over the window would dim the other three and show one panel.
-        <div
-          id="chat-side-panel"
-          data-testid="chat-side-panel-cover"
-          role="region"
-          aria-label={t("chatPreviewRail.title")}
-          className="absolute inset-0 z-40 flex min-h-0 min-w-0 bg-background"
-        >
-          <ChatSidePanel
-            api={api}
-            sessionId={currentSessionId}
-            targets={previewModel.targets}
-            files={previewModel.files}
-            selectedId={selectedPreviewId}
-            onSelect={setSelectedPreviewId}
-            workspaceTabs={workspaceTabs}
-            subAgentSpawns={subAgentSpawns}
-            width={sidePanelWidth}
-            onWidthChange={setSidePanelWidth}
-            onWidthCommit={commitSidePanelWidth}
-            resizable={false}
-            onClose={() => {
-              onSidePanelOpenChange?.(false);
-            }}
-            className="flex h-full min-h-0 w-full min-w-0"
           />
         </div>
       ) : null}

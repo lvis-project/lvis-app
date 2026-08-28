@@ -94,26 +94,26 @@ test.describe("workspace rail redesign", () => {
     await expect(page.getByTestId("chat-side-panel-width-splitter")).toBeVisible();
   });
 
-  test("a narrow tile shows the panel over its transcript, inside the tile", async () => {
+  test("a narrow tile keeps the panel docked beside its transcript, with the split bar", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
     await page.getByTestId("chat-group-panel-toggle").click();
     await expect(page.getByTestId("chat-side-panel")).toBeVisible();
 
-    // Shrink below the docked threshold → the panel covers the tile's own
-    // transcript; nothing window-level, nothing dimmed.
+    // Shrink below the docking threshold → still a column of the tile: the
+    // transcript is pushed, not covered, and the bar still moves.
     await page.setViewportSize({ width: 460, height: 840 });
-    const cover = page.getByTestId("chat-side-panel-cover");
-    await expect(cover).toBeVisible();
-    await expect(cover.getByTestId("chat-side-panel")).toBeVisible();
-    await expect(page.getByTestId("chat-view-root").getByTestId("chat-side-panel-cover")).toHaveCount(1);
+    const root = page.getByTestId("chat-view-root");
+    await expect(root.getByTestId("chat-side-panel")).toBeVisible();
+    await expect(root.getByTestId("chat-side-panel-width-splitter")).toBeVisible();
     await expect(page.getByTestId("workspace-rail-drawer")).toHaveCount(0);
     await expect(page.getByTestId("workspace-rail-drawer-backdrop")).toHaveCount(0);
-    // The cover variant drops the drag handle (the tile owns width).
-    await expect(page.getByTestId("chat-side-panel-width-splitter")).toHaveCount(0);
+    const panelWidth = (await page.getByTestId("chat-side-panel").boundingBox())?.width ?? 0;
+    const rootWidth = (await root.boundingBox())?.width ?? 0;
+    expect(panelWidth).toBeGreaterThan(0);
+    expect(panelWidth).toBeLessThan(rootWidth);
 
-    // Widen again → back to docked.
+    // Widen again → the pixel floors return.
     await page.setViewportSize({ width: 1400, height: 840 });
-    await expect(page.getByTestId("chat-side-panel-cover")).toHaveCount(0);
     await expect(page.getByTestId("chat-side-panel-width-splitter")).toBeVisible();
   });
 });

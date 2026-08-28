@@ -30,16 +30,42 @@ export const DOCK_ENTER_WIDTH = SIDE_PANEL_MIN_WIDTH + MIN_DOCKED_TRANSCRIPT_WID
 export const DOCK_EXIT_WIDTH = DOCK_ENTER_WIDTH + 60;
 
 /**
- * Observe an element's inline size and report whether it is "narrow" — too
- * narrow to dock the side panel beside the transcript — with hysteresis
- * (enter < {@link DOCK_ENTER_WIDTH}, exit >= {@link DOCK_EXIT_WIDTH}; 60px
- * dead-band) so window / sidebar resizing near the boundary does not flip-flop.
+ * Below the docking threshold the two columns cannot both keep their pixel
+ * floors, so they share the container instead: the split bar moves between
+ * these shares of its width, and the user still decides which column gets
+ * the room.
+ */
+const NARROW_PANEL_MIN_SHARE = 0.3;
+const NARROW_PANEL_MAX_SHARE = 0.7;
+
+/**
+ * The width range a docked side panel may take inside a container `width`
+ * px across. The panel is always a column of its container — never a sheet
+ * over it — so the range is what changes with the container, not the
+ * presentation. An unmeasured container (Infinity) keeps the pixel floors.
+ */
+export function dockedPanelRange(width: number): { min: number; max: number } {
+  if (!Number.isFinite(width)) return { min: SIDE_PANEL_MIN_WIDTH, max: Number.POSITIVE_INFINITY };
+  if (width >= DOCK_ENTER_WIDTH) {
+    return { min: SIDE_PANEL_MIN_WIDTH, max: width - MIN_DOCKED_TRANSCRIPT_WIDTH };
+  }
+  return {
+    min: Math.round(width * NARROW_PANEL_MIN_SHARE),
+    max: Math.round(width * NARROW_PANEL_MAX_SHARE),
+  };
+}
+
+/**
+ * Observe an element's inline size and report it, plus whether it is "narrow"
+ * — too narrow to hold both the side panel's and the transcript's pixel
+ * floors — with hysteresis (enter < {@link DOCK_ENTER_WIDTH}, exit >=
+ * {@link DOCK_EXIT_WIDTH}; 60px dead-band) so resizing near the boundary does
+ * not flip-flop. ChatView reads `width` and sizes its docked panel through
+ * {@link dockedPanelRange}; Settings reads `isNarrow` for its own layout.
  *
- * The element to observe is the PARENT of the docked/drawer branch so that
- * switching branches (which removes the ~448px docked sibling from flow) does
- * NOT change the measured width — no self-oscillation. In jsdom (no
- * ResizeObserver) it reports the docked default (isNarrow=false), preserving
- * the existing layout for unit tests.
+ * Observe the PARENT of whatever the answer lays out, so the answer never
+ * changes what is measured. In jsdom (no ResizeObserver) the width stays
+ * Infinity and `isNarrow` false — the pixel-floor layout unit tests expect.
  */
 export function useContainerNarrow(
   ref: RefObject<HTMLElement | null>,
