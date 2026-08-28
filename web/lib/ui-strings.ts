@@ -3,7 +3,7 @@ import type { Locale } from "./i18n";
 /** Chrome-level UI strings (header/footer/sidebar/toc/page-nav/search). */
 export const ui = {
   ko: {
-    nav: { workday: "하루 일과", download: "다운로드", architecture: "아키텍처", roadmap: "로드맵", docs: "문서" },
+    nav: { workday: "하루 일과", workbench: "작업 영역", download: "다운로드", architecture: "아키텍처", roadmap: "로드맵", docs: "문서" },
     downloadApp: "앱 다운로드",
     skipToContent: "본문으로 건너뛰기",
     searchPlaceholder: "검색...",
@@ -21,7 +21,7 @@ export const ui = {
     footerLinks: { start: "시작하기", plugins: "플러그인", architecture: "아키텍처", roadmap: "로드맵" },
   },
   en: {
-    nav: { workday: "A Day with LVIS", download: "Download", architecture: "Architecture", roadmap: "Roadmap", docs: "Docs" },
+    nav: { workday: "A Day with LVIS", workbench: "Workbench", download: "Download", architecture: "Architecture", roadmap: "Roadmap", docs: "Docs" },
     downloadApp: "Download app",
     skipToContent: "Skip to content",
     searchPlaceholder: "Search...",

@@ -6,11 +6,10 @@ import { PageNav } from "@/components/docs/page-nav";
 import { Badge } from "@/components/ui/badge";
 
 const plugins = [
-  { slug: "local-indexer", title: "Local Indexer", id: "local-indexer", ver: "0.4.11", scope: "Local · RAG", desc: "kiwipiepy 한국어 형태소 + pymupdf4llm + FTS5 + LanceDB. chokidar 폴더 감시.", color: "from-teal/10 to-transparent" },
-  { slug: "ms-graph", title: "Microsoft 365 (Outlook)", id: "ms-graph", ver: "0.3.28", scope: "Mail · Calendar", desc: "MSAL OAuth + Electron safeStorage 토큰. mail + calendar 31개 도구.", color: "from-accent/60 to-transparent" },
-  { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.4.18", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec 청크.", color: "from-coral/10 to-transparent" },
-  { slug: "work-assistant", title: "Work Assistant (업무도우미)", id: "work-assistant", ver: "0.7.0", scope: "Proactive", desc: "10+ detector → triggerConversation. mail/calendar/meeting 신호 통합.", color: "from-citron/30 to-transparent" },
-  { slug: "agent-hub", title: "Agent Hub Sidebar", id: "agent-hub", ver: "0.8.1", scope: "Host UI Plugin", desc: "‘업무 보드’ 사이드바 + 43개 도구 + 5분 polling. agent-hub.lvisai.xyz 와 통신.", color: "from-ink/[0.06] to-transparent" },
+  { slug: "local-indexer", title: "Local Indexer", id: "local-indexer", ver: "0.6.2", scope: "Local · RAG", desc: "kiwipiepy 한국어 형태소 + pymupdf4llm + FTS5 + LanceDB. chokidar 폴더 감시.", color: "from-teal/10 to-transparent" },
+  { slug: "ms-graph", title: "Microsoft 365 (Outlook)", id: "ms-graph", ver: "0.5.2", scope: "Mail · Calendar", desc: "MSAL OAuth + Electron safeStorage 토큰. mail + calendar 31개 도구.", color: "from-accent/60 to-transparent" },
+  { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.8.3", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec 청크.", color: "from-coral/10 to-transparent" },
+  { slug: "work-assistant", title: "Work Assistant (업무도우미)", id: "work-assistant", ver: "0.11.2", scope: "Proactive", desc: "10+ detector → triggerConversation. mail/calendar/meeting 신호 통합.", color: "from-citron/30 to-transparent" },
 ];
 
 export const metadata = { title: "플러그인 — 개요" };
@@ -65,7 +64,8 @@ export default function Page() {
         <ul className="my-1 list-disc pl-5">
           <li><strong>lvis-plugin-email</strong> + <strong>lvis-plugin-calendar</strong> → <strong>ms-graph</strong> 로 통합 (2026-04-28/04-30 archive).</li>
           <li><strong>work-assistant</strong> 가 proactive 업무 제안 기능을 담당합니다.</li>
-          <li>사내망 전용 <strong>사내 포털 플러그인</strong> 은 6번째 active 플러그인이지만, 사내망 밖에서는 설치·동작하지 않아 공개 문서에는 개별 페이지를 두지 않습니다.</li>
+          <li><strong>agent-hub</strong> 사이드바 플러그인은 archive 되었고 (2026-06-15), 업무 보드는 앱에 내장된 개인 칸반 보드로 흡수되었습니다. 더 이상 설치 가능한 플러그인이 아닙니다.</li>
+          <li>사내망 전용 <strong>사내 포털 플러그인</strong> 은 5번째 active 플러그인이지만, 사내망 밖에서는 설치·동작하지 않아 공개 문서에는 개별 페이지를 두지 않습니다.</li>
         </ul>
       </Callout>
 
