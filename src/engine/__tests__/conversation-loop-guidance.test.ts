@@ -761,7 +761,12 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     expect(injected).toHaveBeenCalledTimes(1);
     expect(dropped).toHaveBeenCalledTimes(1);
     expect(rendererInjected).toHaveBeenCalledTimes(1);
-    expect(rendererInjected).toHaveBeenCalledWith("durable child result");
+    // The renderer is told which history row the injection landed on, so the
+    // bubble it draws names the same row a reloaded transcript names.
+    expect(rendererInjected).toHaveBeenCalledWith(
+      "durable child result",
+      { messageId: expect.any(String) },
+    );
     expect(
       getHistory(loop).filter(
         (message) =>

@@ -404,6 +404,40 @@ describe("lvis:chat:import — rejection branches (fail-closed)", () => {
     expect(deps.memoryManager.saveImportedSession).not.toHaveBeenCalled();
   });
 
+  it("accepts rows carrying meta — this app's own export writes it — and keeps none of it", async () => {
+    // Every row this app exports carries `meta`, so rejecting the key made an
+    // export of this app fail to import at all. Accepting the key is not
+    // accepting its contents: the normalizer rebuilds each message from
+    // whitelisted fields, so a forged compact boundary or a borrowed row
+    // identity never reaches the conversation.
+    const deps = await setup();
+    setFile({
+      ...validExport,
+      messages: [
+        {
+          role: "user",
+          content: "hello there",
+          meta: { messageId: "borrowed-row-id", compactBoundary: true, compactNum: 9 },
+        },
+        { role: "assistant", content: "hi back", meta: { messageId: "another-borrowed-id" } },
+        {
+          role: "tool_result",
+          toolUseId: "tu-1",
+          content: "result",
+          meta: { messageId: "third-borrowed-id" },
+        },
+      ],
+    });
+
+    const result = await invoke();
+
+    expect(result.ok).toBe(true);
+    const [, savedMessages] = deps.memoryManager.saveImportedSession.mock.calls[0];
+    expect(savedMessages).toHaveLength(3);
+    expect(JSON.stringify(savedMessages)).not.toContain("borrowed-row-id");
+    expect(JSON.stringify(savedMessages)).not.toContain("compactBoundary");
+  });
+
   it("rejects a tool_result missing its required toolUseId", async () => {
     await setup();
     setFile({

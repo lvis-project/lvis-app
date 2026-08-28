@@ -42,6 +42,18 @@ export interface MessageMeta {
   interrupted?: boolean;
   /** Host-minted nonce for rollbackable injected rows across history cloning. */
   hostInjectionId?: string;
+  /**
+   * Durable identity of ONE history row, minted where the row is created.
+   *
+   * Why this exists rather than an index: a row's position is not stable.
+   * Compaction rewrites the prefix, so every index a surface captured earlier
+   * silently points at a different row afterwards. Renderer-facing actions that
+   * address a past message (rewind, edit-and-resend, fork) therefore carry this
+   * id, and the host resolves the row by it — one rule, one implementation, and
+   * a row that has been compacted away resolves to nothing instead of to its
+   * neighbour.
+   */
+  messageId?: string;
   /** Structured provenance for plugin/proactive imported trigger turns. */
   importedTrigger?: {
     sessionId: string;

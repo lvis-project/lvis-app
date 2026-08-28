@@ -76,14 +76,13 @@ export interface ChatGroupEnvironment {
   handleToggleSessionStar: (sessionId: string, title?: string) => Promise<void>;
   starredIsEntry: (
     entryIdx: number,
+    entries: ChatEntry[],
     sessionId: string,
-    entryIndexToHistoryIndex: Map<number, number>,
   ) => string | null;
   starredToggle: (
     entryIdx: number,
     entries: ChatEntry[],
     sessionId: string,
-    entryIndexToHistoryIndex: Map<number, number>,
   ) => void;
 
   // the window's status surface. Toasts about a project error or an update are
@@ -224,7 +223,7 @@ export function ChatGroupSession({
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted,
     beginStreamingRequest, finishStreamingRequest, markLastAssistantInterrupted, unmarkLastAssistantInterrupted,
     editingEntryIdx, setEditingEntryIdx, editBusy,
-    entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
+    handleEditSave, handleRetryEffort, handleContinueFromLastUser,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, dropUserEntry, appendSystemEntry,
     applyInitialSession, applyLoadedSession, truncateToEntry,
@@ -361,20 +360,60 @@ export function ChatGroupSession({
 
   const isEntryStarred = useCallback(
     (entryIdx: number): string | null =>
-      env.starredIsEntry(entryIdx, currentSessionId, entryIndexToHistoryIndex),
-    [env, currentSessionId, entryIndexToHistoryIndex],
+      env.starredIsEntry(entryIdx, entries, currentSessionId),
+    [env, entries, currentSessionId],
   );
 
   const handleFork = useCallback(async (entryIdx: number) => {
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return;
-    await sessionFork(histIdx, entryIdx, truncateToEntry);
-  }, [entryIndexToHistoryIndex, sessionFork, truncateToEntry]);
+    const target = entries[entryIdx];
+    if (target?.kind !== "user" && target?.kind !== "assistant") return;
+    if (target.messageId === undefined) return;
+    await sessionFork(target.messageId, entryIdx, truncateToEntry);
+  }, [entries, sessionFork, truncateToEntry]);
+
+  // Rewind: the message's own input goes back to the composer and everything
+  // from it onward is discarded, in this session.
+  //
+  // The host is asked FIRST and hands back the input to restore. It owns that
+  // text because the transcript entry only ever held a flattened rendering of
+  // the row — and it is the host that knows when a row cannot be handed back
+  // whole (an image it cannot re-stage, a resource fence that must not be
+  // folded into the user's own body), in which case nothing is cut at all.
+  const handleReturnHere = useCallback(async (entryIdx: number): Promise<{ ok: boolean }> => {
+    const entry = entries[entryIdx];
+    if (entry?.kind !== "user") return { ok: false };
+    if (entry.messageId === undefined) {
+      appendSystemEntry(t("chatView.returnHereFailed", {
+        error: formatIpcError("message-not-found", undefined),
+      }));
+      return { ok: false };
+    }
+    const res = await api.chatRewindTo(entry.messageId);
+    if (!res.ok) {
+      // The wire code is a kebab-case token; formatIpcError owns turning it
+      // into a sentence, the same as every other refusal surfaced here.
+      appendSystemEntry(
+        t("chatView.returnHereFailed", { error: formatIpcError(res.error, undefined) }),
+      );
+      return { ok: false };
+    }
+    // The bubble goes too: its text is in the composer now, and leaving it in
+    // the transcript would read as a message that is still part of the thread.
+    truncateToEntry(entryIdx - 1);
+    setQuestion(res.text);
+    // The turn ran under this persona, so the composer returns to it — coming
+    // back to the moment before a send means coming back to how it was addressed.
+    if (res.personaPromptId !== undefined) env.setActivePresetId(res.personaPromptId);
+    // The sidebar row previews the last thing said in the conversation, and
+    // that is no longer what it was a moment ago.
+    await env.refreshSessions();
+    return { ok: true };
+  }, [api, entries, truncateToEntry, appendSystemEntry, env, t]);
 
   const handleToggleStar = useCallback(
     (entryIdx: number) =>
-      env.starredToggle(entryIdx, entries, currentSessionId, entryIndexToHistoryIndex),
-    [env, entries, currentSessionId, entryIndexToHistoryIndex],
+      env.starredToggle(entryIdx, entries, currentSessionId),
+    [env, entries, currentSessionId],
   );
 
   const handleAbort = useCallback(async () => {
@@ -581,6 +620,7 @@ export function ChatGroupSession({
         onRunMcpPrompt={handleRunMcpPrompt}
         onEditSave={handleEditSave}
         onFork={handleFork}
+        onReturnHere={handleReturnHere}
         onToggleStar={handleToggleStar}
         onRetryEffort={handleRetryEffort}
         onContinueFromLastUser={handleContinueFromLastUser}

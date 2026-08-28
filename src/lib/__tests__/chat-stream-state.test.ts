@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendImportedTriggerEntry,
   appendUserEntry,
-  applyExternalUserMessage,
+  applyUserMessageFrame,
   applyToolEnd,
   applyToolStart,
   clearTurnAssistantInterrupted,
@@ -723,10 +723,10 @@ describe("dropOptimisticUserEntry", () => {
  * needs a row for it. External-surface turns (bridge/Tailnet/loopback) do;
  * origins this surface echoed optimistically at send time must not duplicate.
  */
-describe("applyExternalUserMessage", () => {
+describe("applyUserMessageFrame", () => {
   it("appends a user row carrying its external origin for a bridge turn", () => {
     const entries: ChatEntry[] = [{ kind: "assistant", text: "earlier reply" }];
-    const next = applyExternalUserMessage(entries, {
+    const next = applyUserMessageFrame(entries, {
       text: "텔레그램에서 보낸 메시지",
       origin: "platform-bridge",
     });
@@ -740,12 +740,12 @@ describe("applyExternalUserMessage", () => {
 
   it("appends for every external surface origin", () => {
     for (const origin of ["surface-user", "tailnet-surface", "platform-bridge"]) {
-      const next = applyExternalUserMessage([], { text: "remote input", origin });
+      const next = applyUserMessageFrame([], { text: "remote input", origin });
       expect(next).toHaveLength(1);
     }
   });
 
-  it("ignores origins the desktop already echoed optimistically", () => {
+  it("adds no second row for origins the desktop already echoed optimistically", () => {
     for (const origin of [
       "user-keyboard",
       "queue-auto",
@@ -756,13 +756,98 @@ describe("applyExternalUserMessage", () => {
       undefined,
     ]) {
       const entries: ChatEntry[] = [{ kind: "user", text: "already echoed" }];
-      expect(applyExternalUserMessage(entries, { text: "already echoed", origin })).toBe(entries);
+      const next = applyUserMessageFrame(entries, { text: "already echoed", origin });
+      expect(next).toHaveLength(1);
     }
+  });
+
+  it("binds the host's row identity onto the bubble this surface echoed", () => {
+    const entries = appendUserEntry([], "already echoed");
+    const next = applyUserMessageFrame(entries, {
+      text: "already echoed",
+      origin: "user-keyboard",
+      messageId: "row-9",
+    });
+    expect(next[0]).toMatchObject({ kind: "user", messageId: "row-9" });
+  });
+
+  it("binds turns in arrival order when two echoes are still waiting", () => {
+    const entries = appendUserEntry(appendUserEntry([], "first"), "second");
+    const first = applyUserMessageFrame(entries, {
+      text: "first", origin: "user-keyboard", messageId: "row-1",
+    });
+    const second = applyUserMessageFrame(first, {
+      text: "second", origin: "user-keyboard", messageId: "row-2",
+    });
+    expect(second.map((e) => (e.kind === "user" ? e.messageId : null))).toEqual(["row-1", "row-2"]);
+  });
+
+  it("leaves the mid-turn bubbles that merely lack an id alone", () => {
+    // The control group for binding by marker instead of by inference. A
+    // drained guide and a child's report are user bubbles the host announced
+    // separately; neither is waiting for this turn's identity, and each sits
+    // ahead of the echo in the transcript. Binding to "the first user entry
+    // without an id" would hand this turn's row id to one of them, and every
+    // action that names a row would then act on the wrong message.
+    const entries: ChatEntry[] = appendUserEntry(
+      [
+        { kind: "user", text: "queued guide", injectHint: "queue" },
+        { kind: "user", text: "child report", injectHint: "sub-agent" },
+      ],
+      "the message just sent",
+    );
+
+    const next = applyUserMessageFrame(entries, {
+      text: "the message just sent",
+      origin: "user-keyboard",
+      messageId: "row-of-this-turn",
+    });
+
+    expect(next.map((e) => (e.kind === "user" ? e.messageId : null))).toEqual([
+      undefined, undefined, "row-of-this-turn",
+    ]);
+  });
+
+  it("claims nothing in a transcript whose rows were rebuilt from disk", () => {
+    // A reloaded session's bubbles carry the ids they were saved with, and a
+    // session written before ids existed carries none — but neither is an
+    // optimistic echo, so a turn announced from another surface must not
+    // rewrite one of them.
+    const entries: ChatEntry[] = [
+      { kind: "user", text: "a row from a legacy session file" },
+    ];
+
+    expect(
+      applyUserMessageFrame(entries, {
+        text: "a row from a legacy session file",
+        origin: "user-keyboard",
+        messageId: "row-of-this-turn",
+      }),
+    ).toBe(entries);
+  });
+
+  it("hands the id to one echo only, leaving nothing claimable behind", () => {
+    const entries = appendUserEntry([], "sent once");
+    const bound = applyUserMessageFrame(entries, {
+      text: "sent once", origin: "user-keyboard", messageId: "row-1",
+    });
+    // A second frame for the same turn (a resubscribe replay) finds no pending
+    // echo, so it cannot overwrite the identity already bound.
+    const again = applyUserMessageFrame(bound, {
+      text: "sent once", origin: "user-keyboard", messageId: "row-2",
+    });
+    expect(again).toBe(bound);
+    expect(again[0]).toMatchObject({ kind: "user", messageId: "row-1" });
+  });
+
+  it("leaves an already-identified bubble alone when no id rides the frame", () => {
+    const entries: ChatEntry[] = [{ kind: "user", text: "echoed", messageId: "row-3" }];
+    expect(applyUserMessageFrame(entries, { text: "echoed", origin: "user-keyboard" })).toBe(entries);
   });
 
   it("ignores an empty or missing text payload", () => {
     const entries: ChatEntry[] = [];
-    expect(applyExternalUserMessage(entries, { origin: "platform-bridge" })).toBe(entries);
-    expect(applyExternalUserMessage(entries, { text: "", origin: "platform-bridge" })).toBe(entries);
+    expect(applyUserMessageFrame(entries, { origin: "platform-bridge" })).toBe(entries);
+    expect(applyUserMessageFrame(entries, { text: "", origin: "platform-bridge" })).toBe(entries);
   });
 });

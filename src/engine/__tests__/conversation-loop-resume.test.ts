@@ -228,7 +228,10 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(mem.loadSession).toHaveBeenCalledTimes(1);
     expect(mem.loadSession).toHaveBeenCalledWith("child-session");
     expect(mem.loadSession).not.toHaveBeenCalledWith("parent-session");
-    expect(loop.getHistory().getMessages()).toEqual(childHistory);
+    // The store stamps a row identity on restore; the claim here is that the
+    // CHILD's rows loaded and the parent's did not.
+    expect(loop.getHistory().getMessages()).toMatchObject(childHistory);
+    expect(loop.getHistory().getMessages()).toHaveLength(childHistory.length);
     expect(systemPromptBuilder.setSummaryPreamble).toHaveBeenCalledWith("요약된 부모 맥락",
     );
   });

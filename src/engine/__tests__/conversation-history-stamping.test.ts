@@ -152,7 +152,9 @@ describe("ConversationHistory.restore attachment boundary", () => {
     }]);
 
     const restored = history.getMessages();
-    expect(restored).toEqual([{
+    // The assertion is about which CONTENT parts survived; the store also
+    // stamps a row identity on restore, which is not part of that claim.
+    expect(restored).toMatchObject([{
       role: "user",
       content: [
         { type: "text", text: "retain this" },
@@ -160,6 +162,7 @@ describe("ConversationHistory.restore attachment boundary", () => {
         { type: "file", data: localFile, mimeType: "text/plain" },
       ],
     }]);
+    expect(restored[0].content).toHaveLength(3);
 
     const mapped = genericToModelMessages(restored);
     expect(mapped).toEqual([{

@@ -75,12 +75,20 @@ type FakeLoop = {
   getSessionId: () => string;
   getSessionKind: () => "main";
   hasActiveTurn: () => boolean;
-  getHistory: () => { length: number; getMessages: () => unknown[]; truncate: () => void; restore: () => void };
+  getHistory: () => {
+    length: number;
+    getMessages: () => unknown[];
+    truncate: (count: number) => void;
+    restore: () => void;
+  };
   refreshProvider: () => void;
   resetAndResume: ReturnType<typeof vi.fn>;
 };
 
-function fakeLoop(id: string, messages: unknown[] = []): FakeLoop {
+function fakeLoop(id: string, seed: unknown[] = []): FakeLoop {
+  // Truncation really removes rows here: a no-op would let a handler that cuts
+  // the WRONG tile's conversation still look correct.
+  let messages = [...seed];
   const loop: FakeLoop = {
     id,
     sessionId: `session-of-${id}`,
@@ -90,7 +98,12 @@ function fakeLoop(id: string, messages: unknown[] = []): FakeLoop {
     getSessionId: () => loop.sessionId,
     getSessionKind: () => "main",
     hasActiveTurn: () => false,
-    getHistory: () => ({ length: messages.length, getMessages: () => messages, truncate: () => {}, restore: () => {} }),
+    getHistory: () => ({
+      length: messages.length,
+      getMessages: () => messages,
+      truncate: (count: number) => { messages = messages.slice(0, count); },
+      restore: () => {},
+    }),
     refreshProvider: () => {},
     resetAndResume: vi.fn((sessionId: string) => {
       loop.sessionId = sessionId;
@@ -102,13 +115,22 @@ function fakeLoop(id: string, messages: unknown[] = []): FakeLoop {
 
 type RendererEvents = Record<string, ((...args: unknown[]) => void)[]>;
 
-async function registerWithGroups(window?: { webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void } }) {
+async function registerWithGroups(
+  window?: { webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void } },
+  groupSeed?: unknown[],
+) {
   const { createConversationSurfaceRuntime } = await import("../../../engine/conversation-surface-runtime.js");
-  const main = fakeLoop(MAIN_CHAT_GROUP_ID, [{ role: "user", content: "from main" }]);
+  const main = fakeLoop(MAIN_CHAT_GROUP_ID, [
+    { role: "user", content: "from main", meta: { messageId: "main-q1" } },
+    { role: "assistant", content: "main answer", meta: { messageId: "main-a1" } },
+  ]);
   const groups = new Map<string, FakeLoop>();
   const resolveChatGroupLoop = vi.fn((chatGroupId: string) => {
     let loop = groups.get(chatGroupId);
-    if (!loop) { loop = fakeLoop(chatGroupId); groups.set(chatGroupId, loop); }
+    if (!loop) {
+      loop = fakeLoop(chatGroupId, groupSeed ?? []);
+      groups.set(chatGroupId, loop);
+    }
     return loop;
   });
   const releaseChatGroupLoop = vi.fn((chatGroupId: string) => { groups.delete(chatGroupId); });
@@ -118,6 +140,8 @@ async function registerWithGroups(window?: { webContents: { on: (name: string, f
     markMainActiveFresh: vi.fn(async () => undefined),
     markMainActiveResume: vi.fn(async () => undefined),
     saveSessionMetadata: vi.fn(async () => undefined),
+    saveSession: vi.fn(async () => undefined),
+    pruneCheckpointsDiscardedByRewind: vi.fn(async () => undefined),
   };
   registerChatHandlers({
     conversationLoop: main,
@@ -184,6 +208,58 @@ describe("lvis:chat:* with chat groups", () => {
     // And the session check is against the group's session, not the primary's.
     const mismatched = await invoke(CHANNELS.chat.continueLastUser, { sessionId: "session-of-main" }, "group-2");
     expect(mismatched).toEqual({ ok: false, error: "session-mismatch" });
+  });
+
+  it("rewinds the tile that asked and leaves the other tile's conversation whole", async () => {
+    const { invoke, groups, main, memoryManager } = await registerWithGroups(undefined, [
+      { role: "user", content: "tile question", meta: { messageId: "tile-q1" } },
+      { role: "assistant", content: "tile answer", meta: { messageId: "tile-a1" } },
+    ]);
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    const tile = groups.get("group-2")!;
+
+    const result = await invoke(CHANNELS.chat.rewindTo, "tile-q1", "group-2");
+
+    expect(result).toMatchObject({ ok: true, text: "tile question" });
+    expect(tile.getHistory().getMessages()).toEqual([]);
+    // The primary is a different conversation and a rewind in one tile is not
+    // an edit of another.
+    expect(main.getHistory().getMessages()).toHaveLength(2);
+    expect(memoryManager.saveSession).toHaveBeenCalledWith("session-of-group-2", []);
+  });
+
+  it("refuses a rewind while that tile is mid-turn", async () => {
+    const { invoke, memoryManager } = await registerWithGroups(undefined, [
+      { role: "user", content: "tile question", meta: { messageId: "tile-q1" } },
+    ]);
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    // The tile's own runtime is the one created for it — the primary's is first.
+    const tileRuntime = runtimes[runtimes.length - 1];
+    let releaseTurn = () => {};
+    const heldTurn = tileRuntime.activity.tryTrackTurn(
+      () => new Promise<void>((resolve) => { releaseTurn = resolve; }),
+    );
+
+    const result = await invoke(CHANNELS.chat.rewindTo, "tile-q1", "group-2");
+
+    expect(result).toEqual({ ok: false, error: "streaming-active" });
+    expect(memoryManager.saveSession).not.toHaveBeenCalled();
+    releaseTurn();
+    await heldTurn;
+  });
+
+  it("refuses a rewind naming a row that lives in another tile", async () => {
+    const { invoke, memoryManager } = await registerWithGroups(undefined, [
+      { role: "user", content: "tile question", meta: { messageId: "tile-q1" } },
+    ]);
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+
+    // "main-q1" is a real row — in the PRIMARY's conversation. A tile resolves
+    // ids against its own history only.
+    const result = await invoke(CHANNELS.chat.rewindTo, "main-q1", "group-2");
+
+    expect(result).toEqual({ ok: false, error: "message-not-found" });
+    expect(memoryManager.saveSession).not.toHaveBeenCalled();
   });
 
   it("opens a session in one tile at a time — a resume of one another tile holds is refused", async () => {

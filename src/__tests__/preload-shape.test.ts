@@ -255,6 +255,7 @@ describe("preload contextBridge world shape lock", () => {
           "chatMainActiveState": "function",
           "chatNew": "function",
           "chatRetryEffort": "function",
+          "chatRewindTo": "function",
           "chatSend": "function",
           "chatSessionDelete": "function",
           "chatSessionHistory": "function",

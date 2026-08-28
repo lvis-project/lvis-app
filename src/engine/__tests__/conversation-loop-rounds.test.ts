@@ -68,6 +68,7 @@ function withoutRuntimeMeta(messages: ReadonlyArray<GenericMessage>) {
     if (!meta) return rest;
     const {
       createdAt: _createdAt,
+      messageId: _messageId,
       turnSummary: _turnSummary,
       toolDisplay: _toolDisplay,
       ...stableMeta

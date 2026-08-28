@@ -23,7 +23,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import type React from "react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { TranscriptRenderer, type TurnSummary } from "../components/TranscriptRenderer.js";
@@ -51,6 +51,7 @@ const toolGroup = (toolUseId = "t1"): ChatEntry => ({
 // Korean labels — the jsdom vitest project pins the runtime locale to ko.
 const RETRY_TITLE = "다시 시도 (깊이: high)";
 const EDIT_TITLE = "편집"; // chatView.editButtonTitle
+const RETURN_HERE_TITLE = "여기로 되돌아가기"; // chatView.returnHereButtonTitle
 
 const completedTurnSummary = (): Map<number, TurnSummary> => new Map([[
   0,
@@ -260,21 +261,83 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
     expect(queryByTitle(RETRY_TITLE)).not.toBeNull();
   });
 
-  it("keeps the pinned user-message indicator visible when hover actions are wired", () => {
-    const { getByTestId } = renderCore(
+  it("offers no pin control on the user card — pinning is a conversation-level action", () => {
+    const { getByTestId, queryByTitle } = renderCore(
       <TranscriptRenderer
-        entries={[user("pinned question"), assistant("answer")]}
+        entries={[user("question"), assistant("answer")]}
         streaming={false}
         currentSessionId="s1"
         actions={{
-          isEntryStarred: (idx) => idx === 0 ? "star-1" : null,
+          isEntryStarred: (idx) => (idx === 0 ? "star-1" : null),
           onToggleStar: vi.fn(),
+          onReturnHere: vi.fn(),
         }}
       />,
     );
 
     expect(getByTestId("user-message-actions")).toBeTruthy();
-    expect(getByTestId("user-message-pin-indicator")).toBeTruthy();
+    // starredView.unstar / chatView pin titles are gone from the user bubble;
+    // the assistant footer keeps its own pin control.
+    expect(queryByTitle("핀 고정")).toBeNull();
+  });
+
+  it("renders the return-here control on the user card and hands it the entry index", async () => {
+    const onReturnHere = vi.fn();
+    const { getAllByTitle } = renderCore(
+      <TranscriptRenderer
+        entries={[user("first"), assistant("answer"), user("second")]}
+        streaming={false}
+        currentSessionId="s1"
+        actions={{ onReturnHere }}
+      />,
+    );
+
+    const buttons = getAllByTitle(RETURN_HERE_TITLE);
+    expect(buttons.length).toBe(2);
+    fireEvent.click(buttons[1]);
+    expect(onReturnHere).toHaveBeenCalledWith(2);
+  });
+
+  it("disables return-here while a turn is streaming — the rewind would race the turn it discards", () => {
+    const onReturnHere = vi.fn();
+    const { getAllByTitle } = renderCore(
+      <TranscriptRenderer
+        entries={[user("first"), assistant("answering", { streaming: true })]}
+        streaming
+        currentSessionId="s1"
+        actions={{ onReturnHere }}
+      />,
+    );
+
+    const button = getAllByTitle(RETURN_HERE_TITLE)[0] as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onReturnHere).not.toHaveBeenCalled();
+  });
+
+  it("shows the send time recorded on a user message", () => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[{ kind: "user", text: "timed", createdAt: Date.UTC(2026, 0, 2, 4, 26) }]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    // formatHhMmKst — UTC 04:26 is 13:26 in Asia/Seoul.
+    expect(getByTestId("user-message-time").textContent).toContain("01:26");
+  });
+
+  it("shows no time on a message that never recorded one", () => {
+    const { queryByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[user("untimed")]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    expect(queryByTestId("user-message-time")).toBeNull();
   });
 });
 

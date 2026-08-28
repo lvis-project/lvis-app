@@ -30,8 +30,7 @@ export const NATIVE_CONTEXT_MENU_COMMANDS = [
   "message.copy",
   "message.edit",
   "message.fork",
-  "message.pin",
-  "message.unpin",
+  "message.returnHere",
   "command.activate",
   "command.copy",
 ] as const;
@@ -98,6 +97,6 @@ export const NATIVE_CONTEXT_MENU_COMMANDS_BY_KIND = {
     "conversation.delete",
     "conversation.import",
   ],
-  message: ["message.copy", "message.edit", "message.fork", "message.pin", "message.unpin"],
+  message: ["message.copy", "message.edit", "message.fork", "message.returnHere"],
   "command-item": ["command.activate", "command.copy"],
 } as const satisfies Record<NativeContextMenuKind, readonly NativeContextMenuCommand[]>;

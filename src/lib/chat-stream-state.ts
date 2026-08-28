@@ -37,6 +37,12 @@ export type StreamEvent = {
   text?: string;
   /** Host-resolved input provenance carried by `user_message` frames. */
   origin?: string;
+  /**
+   * Durable identity of the history row a `user_message` / `assistant_round`
+   * frame is about. The transcript binds it onto the entry so later actions can
+   * name the row instead of counting to it.
+   */
+  messageId?: string;
   thought?: string;
   name?: string;
   error?: string;
@@ -208,6 +214,31 @@ export type ChatEntry =
       /** Sanitized child title shown on the sub-agent report box. */
       subAgentTitle?: string;
       createdAt?: number;
+      /**
+       * Durable identity of the history row this bubble was built from. It is
+       * how every action that addresses a past message (rewind, edit-and-resend,
+       * fork) names its target — a position would be rewritten by the next
+       * compaction while the entry kept pointing at the old number. Absent only
+       * for entries that have no row behind them.
+       */
+      messageId?: string;
+      /**
+       * This bubble is the optimistic echo of a send whose row the host has not
+       * announced yet, and it is the ONE entry the next `user.message` frame is
+       * allowed to claim.
+       *
+       * Explicit because "the oldest user entry without an id" is not the same
+       * set: queued and sub-agent guidance bubbles arrive mid-turn without one,
+       * a session written before ids existed loads without one, and an imported
+       * session has its metadata stripped. Any of those sitting earlier in the
+       * transcript would absorb the id meant for the message the user just
+       * sent, and the actions that name a row would then act on a different
+       * message than the one clicked.
+       *
+       * Renderer-local display state: nothing writes it to disk, and
+       * `historyToEntries` never sets it, so a reloaded transcript has none.
+       */
+      awaitingHostId?: true;
     }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
   | {
@@ -216,6 +247,8 @@ export type ChatEntry =
       streaming?: boolean;
       route?: "command";
       phase?: "work" | "final";
+      /** Durable identity of the assistant row this card was built from. */
+      messageId?: string;
       createdAt?: number;
       systemNotice?: "context-error" | "stream-error";
       interrupted?: boolean;
@@ -365,6 +398,7 @@ export type ChatEntry =
 
 type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
 type AssistantEntry = Extract<ChatEntry, { kind: "assistant" }>;
+type UserEntry = Extract<ChatEntry, { kind: "user" }>;
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
 
@@ -455,30 +489,64 @@ export function appendUserEntry(
   // timestamp on fresh turns until the user reopens the session.
   return [
     ...entries,
-    { kind: "user", text, createdAt: Date.now(), ...(injectHint ? { injectHint } : {}) },
+    {
+      kind: "user",
+      text,
+      createdAt: Date.now(),
+      // Marks THIS bubble as the one the host is about to announce a row for.
+      awaitingHostId: true,
+      ...(injectHint ? { injectHint } : {}),
+    },
   ];
 }
 
 /**
- * Apply a `user_message` stream frame — the timeline's record of the input
- * text that started a turn. Every turn emits one regardless of origin ("one
- * stream, two origins"); this is the desktop transcript's single normalization
- * point for it. Turns this surface submitted itself (keyboard, staged, queue,
- * replay, agent wake) are already echoed optimistically at send time, so only
- * turns submitted by an external surface append a row here — with their origin
- * kept for the provenance badge.
+ * Apply a `user_message` stream frame — the timeline's record of the input that
+ * started a turn, and of the history row the host minted for it. Every turn
+ * emits exactly one regardless of origin ("one stream, two origins"), and this
+ * is the desktop transcript's single normalization point for it.
+ *
+ * Two shapes of the same job, because a turn reaches this transcript one of two
+ * ways and both end with the frame's row bound to the entry that stands for it:
+ *
+ *   - an EXTERNAL surface submitted it (bridge / Tailnet / loopback), so no
+ *     bubble exists yet and the frame appends one;
+ *   - THIS surface submitted it and already echoed a bubble optimistically at
+ *     send time, so the frame binds its id to that bubble.
+ *
+ * The optimistic echoes are matched in arrival order — the oldest bubble still
+ * missing an id belongs to the oldest turn still waiting to be announced, which
+ * is the order the host announces them in.
  */
-export function applyExternalUserMessage(
+export function applyUserMessageFrame(
   entries: ChatEntry[],
-  frame: { text?: string; origin?: string },
+  frame: { text?: string; origin?: string; messageId?: string },
 ): ChatEntry[] {
-  if (!isExternalSurfaceInputOrigin(frame.origin)) return entries;
-  const text = typeof frame.text === "string" ? frame.text : "";
-  if (text.length === 0) return entries;
-  return [
-    ...entries,
-    { kind: "user", text, origin: frame.origin, createdAt: Date.now() },
-  ];
+  if (isExternalSurfaceInputOrigin(frame.origin)) {
+    const text = typeof frame.text === "string" ? frame.text : "";
+    if (text.length === 0) return entries;
+    return [
+      ...entries,
+      {
+        kind: "user",
+        text,
+        origin: frame.origin,
+        createdAt: Date.now(),
+        ...(frame.messageId !== undefined ? { messageId: frame.messageId } : {}),
+      },
+    ];
+  }
+  if (frame.messageId === undefined) return entries;
+  // Only a bubble that explicitly declared itself the pending echo may be
+  // claimed, and it is claimed once. Entries that merely happen to lack an id
+  // — guidance bubbles, a legacy session's rows, an imported session — are not
+  // waiting for anything and must never absorb this turn's identity.
+  const pending = entries.findIndex((e) => e.kind === "user" && e.awaitingHostId === true);
+  if (pending < 0) return entries;
+  const next = [...entries];
+  const { awaitingHostId: _claimed, ...claimedEntry } = next[pending] as UserEntry;
+  next[pending] = { ...claimedEntry, messageId: frame.messageId };
+  return next;
 }
 
 /**
@@ -644,6 +712,14 @@ export function finalizeStreamingAssistant(
     phase?: "work" | "final";
     overrideText?: string;
     /**
+     * Durable identity of the assistant row this entry represents. Supplied by
+     * disk replay from the persisted row, and by the live path once the host
+     * announces the row it appended for the round. Sticky on re-finalize: a
+     * later round in the same turn re-points the entry at the row that now
+     * holds the answer, but an omitted id never clears one already learned.
+     */
+    messageId?: string;
+    /**
      * Persisted creation timestamp from disk replay. When supplied, overrides
      * the live `Date.now()` stamp so reloaded sessions show the original turn
      * time. Live streaming callers omit this — the live path stamps Date.now().
@@ -712,6 +788,9 @@ export function finalizeStreamingAssistant(
           route: opts?.route,
           phase: opts?.phase,
           createdAt: opts?.createdAt ?? assistant.createdAt ?? Date.now(),
+          ...(opts?.messageId ?? assistant.messageId
+            ? { messageId: opts?.messageId ?? assistant.messageId }
+            : {}),
           ...(opts?.systemNotice !== undefined
             ? { systemNotice: opts.systemNotice }
             : assistant.systemNotice !== undefined
@@ -745,6 +824,9 @@ export function finalizeStreamingAssistant(
       // until the next session reload, defeating the PR's user-visible goal.
       // Preserve existing createdAt on re-finalize (idempotency).
       createdAt: opts?.createdAt ?? assistant.createdAt ?? Date.now(),
+      ...(opts?.messageId ?? assistant.messageId
+        ? { messageId: opts?.messageId ?? assistant.messageId }
+        : {}),
       ...(opts?.systemNotice !== undefined
         ? { systemNotice: opts.systemNotice }
         : assistant.systemNotice !== undefined
@@ -780,6 +862,7 @@ export function finalizeStreamingAssistant(
     route: opts?.route,
     phase: opts?.phase,
     ...(opts?.createdAt !== undefined ? { createdAt: opts.createdAt } : {}),
+    ...(opts?.messageId !== undefined ? { messageId: opts.messageId } : {}),
     ...(opts?.systemNotice !== undefined ? { systemNotice: opts.systemNotice } : {}),
     ...(opts?.interrupted === true ? { interrupted: true } : {}),
     ...(opts?.restored === true ? { restored: true } : {}),

@@ -137,6 +137,7 @@ export function TurnActionBar({
               type="button"
               variant="ghost"
               size="icon"
+              data-testid="turn-pin-button"
               className="h-5 w-5 text-muted-foreground hover:text-foreground"
               onClick={actions.onToggleStar}
             >

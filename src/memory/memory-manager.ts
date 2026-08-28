@@ -621,6 +621,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const LEGACY_ROW_ID_MAX_ATTEMPTS = 8;
+
+/**
+ * Deterministic per-row identity for a session row that has none.
+ *
+ * Hashed rather than concatenated because the id is persisted on the next save
+ * and read back: the digest is hex, so it cannot carry anything a redaction
+ * pass would rewrite, and the DLP check still proves it for the same reason
+ * `createDlpSafeUuid` proves its own output. The attempt counter keeps the
+ * retry deterministic, so a second read of the same file lands on the same id
+ * as the first.
+ */
+function legacyRowId(sessionId: string, index: number): string {
+  for (let attempt = 0; attempt < LEGACY_ROW_ID_MAX_ATTEMPTS; attempt += 1) {
+    const digest = createHash("sha256")
+      .update(`${sessionId}:${index}:${attempt}`)
+      .digest("hex")
+      .slice(0, 32);
+    const candidate = `row-${digest}`;
+    if (maskSensitiveData(candidate).detections.length === 0) return candidate;
+  }
+  throw new Error("[legacy-row-id] could not derive a redaction-safe row identity");
+}
+
+/**
+ * Give the rows of a session written before row ids existed an identity, so the
+ * transcript can address them.
+ *
+ * Derived, not random, and that is the whole point. `loadSession` is the ONE
+ * door both readers of a session file come through — the sidebar's history read
+ * and the conversation loop's resume — and they read it independently. A fresh
+ * uuid here would hand each of them a different name for the same row, so the
+ * id the transcript showed would resolve to nothing when the host went looking.
+ * Deriving from (session, position in the file just read) makes the two reads
+ * agree without either of them writing anything back.
+ *
+ * Only rows with no usable id are touched; once a session has been written by a
+ * build that mints on append, this does nothing.
+ */
+function stampLegacyRowIds(sessionId: string, messages: unknown[]): unknown[] {
+  return messages.map((message, index) => {
+    if (!isRecord(message)) return message;
+    const meta = isRecord(message.meta) ? message.meta : undefined;
+    const existing = meta?.messageId;
+    if (typeof existing === "string" && existing.length > 0) return message;
+    return { ...message, meta: { ...(meta ?? {}), messageId: legacyRowId(sessionId, index) } };
+  });
+}
+
 function isCompactBoundaryRecord(value: unknown): boolean {
   if (!isRecord(value)) return false;
   const meta = isRecord(value.meta) ? value.meta : {};
@@ -2037,7 +2086,10 @@ export class MemoryManager {
         log.warn({ sessionId }, "skipping malformed session line");
       }
     }
-    return this.recoverLatestCheckpointUserIfMissing(sessionId, messages);
+    return stampLegacyRowIds(
+      sessionId,
+      this.recoverLatestCheckpointUserIfMissing(sessionId, messages),
+    );
   }
 
   private recoverLatestCheckpointUserIfMissing(sessionId: string, messages: unknown[]): unknown[] {
@@ -2651,6 +2703,87 @@ export class MemoryManager {
   appendCheckpoint(metadata: SessionMetadata, checkpoint: Checkpoint): SessionMetadata {
     const existing = Array.isArray(metadata.checkpoints) ? metadata.checkpoints : [];
     return { ...metadata, checkpoints: [...existing, checkpoint] };
+  }
+
+  /**
+   * Drop the checkpoints whose compact boundary THIS rewind discarded, and
+   * delete the pre-compact snapshots those checkpoints owned.
+   *
+   * The chain is a second record of the same conversation:
+   * `recoverLatestCheckpointUserIfMissing` re-inserts the latest checkpoint's
+   * user message when a loaded session has no renderable user row left, so a
+   * rewind back to the opening message of a session that had ever compacted
+   * would come back on reload carrying the very message the user discarded.
+   * Cutting the transcript therefore has to cut the chain that mirrors it.
+   *
+   * Read off the DISCARDED rows, never off the surviving ones. A boundary stub
+   * does not live forever: the next compaction summarizes the previous one away
+   * (`findRecentTurnPreserveStart` steps over boundary rows), so after two
+   * compactions only the newest boundary is still a row. Asking "which
+   * boundaries are still present" would therefore call checkpoint #1 missing
+   * before the user touched anything, and every rewind — even of the last
+   * message — would delete a snapshot `branchFromCheckpoint` still needs.
+   * Asking "which boundaries did this cut remove" only ever names boundaries
+   * the cut actually removed.
+   *
+   * A checkpoint with no `compactNum` owns no boundary row and no snapshot file
+   * to key on, so it is never dropped here.
+   */
+  async pruneCheckpointsDiscardedByRewind(
+    sessionId: string,
+    discardedMessages: readonly unknown[],
+  ): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`pruneCheckpointsDiscardedByRewind: invalid sessionId "${sessionId}"`);
+    }
+    const metadata = this.loadSessionMetadata(sessionId);
+    const checkpoints = metadata?.checkpoints ?? [];
+    if (!metadata || checkpoints.length === 0) return;
+
+    const discardedCompactNums = new Set<number>();
+    for (const message of discardedMessages) {
+      if (!isCompactBoundaryRecord(message)) continue;
+      const meta = isRecord(message) && isRecord(message.meta) ? message.meta : {};
+      if (typeof meta.compactNum === "number") discardedCompactNums.add(meta.compactNum);
+    }
+    if (discardedCompactNums.size === 0) return;
+
+    const kept = checkpoints.filter(
+      (checkpoint) =>
+        checkpoint.compactNum === undefined || !discardedCompactNums.has(checkpoint.compactNum),
+    );
+    if (kept.length === checkpoints.length) return;
+
+    for (const compactNum of discardedCompactNums) {
+      const snapshotPath = join(this.checkpointsDir, sessionId, `${compactNum}.jsonl`);
+      try {
+        rmSync(snapshotPath, { force: true });
+      } catch (err) {
+        log.warn(
+          { sessionId, compactNum },
+          `pruneCheckpointsDiscardedByRewind: failed to remove snapshot: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // The preamble summarizes the conversation up to the LATEST boundary. It
+    // survives as long as that boundary's checkpoint does; losing the newest
+    // checkpoint means losing what the preamble was describing, while losing an
+    // older one leaves the description still true.
+    const latestCompactNum = checkpoints
+      .map((checkpoint) => checkpoint.compactNum)
+      .filter((compactNum): compactNum is number => compactNum !== undefined)
+      .reduce<number | undefined>(
+        (highest, compactNum) => (highest === undefined || compactNum > highest ? compactNum : highest),
+        undefined,
+      );
+    const latestSurvives =
+      latestCompactNum === undefined || !discardedCompactNums.has(latestCompactNum);
+    const { summaryPreamble: _describedDiscardedTurns, ...withoutPreamble } = metadata;
+    await this.saveSessionMetadata(sessionId, {
+      ...(latestSurvives ? metadata : withoutPreamble),
+      checkpoints: kept.length > 0 ? kept : undefined,
+    });
   }
 
   /**

@@ -12,7 +12,14 @@ function withoutRuntimeMeta(messages: ReadonlyArray<GenericMessage>) {
   return messages.map((message) => {
     const { meta, ...rest } = message;
     if (!meta) return rest;
-    const { createdAt: _createdAt, turnSummary: _turnSummary, ...stableMeta } = meta;
+    // `createdAt` and `messageId` are stamped by the store on the way in, not
+    // supplied by the caller — these assertions are about the caller's message.
+    const {
+      createdAt: _createdAt,
+      messageId: _messageId,
+      turnSummary: _turnSummary,
+      ...stableMeta
+    } = meta;
     return Object.keys(stableMeta).length > 0 ? { ...rest, meta: stableMeta } : rest;
   });
 }
@@ -112,7 +119,7 @@ describe("ConversationHistory tool-call invariant", () => {
       },
     ]);
 
-    expect(h.getMessages()).toEqual([
+    expect(withoutRuntimeMeta(h.getMessages())).toEqual([
       { role: "assistant", content: "visible text" },
       { role: "assistant", content: "final" },
     ]);
@@ -134,7 +141,7 @@ describe("ConversationHistory tool-call invariant", () => {
       },
     ]);
 
-    expect(h.getMessages()).toEqual([
+    expect(withoutRuntimeMeta(h.getMessages())).toEqual([
       { role: "assistant", content: "visible text" },
     ]);
   });
@@ -189,5 +196,64 @@ describe("ConversationHistory tool-call invariant", () => {
         content: "A",
       },
     ]);
+  });
+});
+
+/**
+ * A restored row's identity is what every row-addressed action resolves
+ * against, and `restore` reads it off a file the user (or an import) can write.
+ * A value that is not a usable identity, or one a row earlier in the same
+ * history already answers to, would make "find the row named X" return the
+ * wrong row or none — so those are re-minted instead of trusted.
+ */
+describe("ConversationHistory.restore — row identity", () => {
+  const idsOf = (h: ConversationHistory) => h.getMessages().map((m) => m.meta?.messageId);
+
+  it("keeps a usable identity the file already carried", () => {
+    const h = new ConversationHistory();
+    h.restore([
+      { role: "user", content: "q", meta: { messageId: "row-from-disk" } },
+    ] as GenericMessage[]);
+    expect(idsOf(h)).toEqual(["row-from-disk"]);
+  });
+
+  it("re-mints when two rows answer to one identity", () => {
+    const h = new ConversationHistory();
+    h.restore([
+      { role: "user", content: "q1", meta: { messageId: "duplicate" } },
+      { role: "user", content: "q2", meta: { messageId: "duplicate" } },
+    ] as GenericMessage[]);
+
+    const ids = idsOf(h);
+    expect(ids[0]).toBe("duplicate");
+    expect(ids[1]).not.toBe("duplicate");
+    expect(typeof ids[1]).toBe("string");
+  });
+
+  it("re-mints an identity that is not a non-empty string", () => {
+    const h = new ConversationHistory();
+    h.restore([
+      { role: "user", content: "q1", meta: { messageId: 7 } },
+      { role: "user", content: "q2", meta: { messageId: "" } },
+    ] as unknown as GenericMessage[]);
+
+    for (const id of idsOf(h)) {
+      expect(typeof id).toBe("string");
+      expect(id).not.toBe("");
+    }
+    expect(idsOf(h)[0]).not.toBe(7);
+  });
+
+  it("gives every row of a session written before identities existed its own", () => {
+    const h = new ConversationHistory();
+    h.restore([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" },
+    ] as GenericMessage[]);
+
+    const ids = idsOf(h);
+    expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+    expect(new Set(ids).size).toBe(3);
   });
 });

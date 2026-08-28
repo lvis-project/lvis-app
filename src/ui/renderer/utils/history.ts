@@ -141,6 +141,7 @@ export function historyToEntries(
             }
           : {}),
         ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
+        ...(m.messageId !== undefined ? { messageId: m.messageId } : {}),
       });
     } else if (m.role === "assistant") {
       const text = textContent(m.content);
@@ -165,6 +166,7 @@ export function historyToEntries(
         // does not re-present as a fresh one on session reload.
         restored: true,
         ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
+        ...(m.messageId !== undefined ? { messageId: m.messageId } : {}),
         ...(isReplayableSystemNotice(m.systemNotice)
           ? { systemNotice: m.systemNotice }
           : {}),

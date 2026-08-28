@@ -55,6 +55,7 @@ function projectPlatformConversationEventToLegacyChatFrame(
         type: "user_message",
         text: event.ownerDetail.text,
         origin: event.origin,
+        messageId: event.ownerDetail.messageId,
       }));
     case "assistant.reasoning.delta":
       return streamFrame(streamChannel, withStreamId({
@@ -66,6 +67,7 @@ function projectPlatformConversationEventToLegacyChatFrame(
     case "assistant.round.completed":
       return streamFrame(streamChannel, withStreamId({
         type: "assistant_round",
+        messageId: event.round.ownerDetail.messageId,
         roundIndex: event.round.roundIndex,
         text: event.round.text,
         thought: event.round.ownerDetail.thought,
@@ -143,6 +145,7 @@ function projectPlatformConversationEventToLegacyChatFrame(
       return streamFrame(streamChannel, withStreamId({
         type: "guidance_injected",
         text: event.text,
+        messageId: event.ownerDetail.messageId,
         ...(event.subAgentReport ? { subAgentReport: event.subAgentReport } : {}),
       }));
     case "guidance.dropped":

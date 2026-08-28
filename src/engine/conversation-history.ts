@@ -3,12 +3,23 @@
 
 
 import type { GenericMessage } from "./llm/types.js";
+import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { trimOversizedToolResult } from "../shared/tool-result-trim.js";
 import { normalizeLocalUserContentParts } from "../main/subscription-attachment-input.js";
 
 export interface ConversationHistoryOptions {
   maxMessages?: number;
 }
+
+/**
+ * A message that has been through {@link ConversationHistory.append}, and so is
+ * guaranteed addressable. Callers that need to name the row they just stored
+ * read `meta.messageId` off this without a presence check — the guarantee is in
+ * the type so a future append path cannot quietly stop honouring it.
+ */
+export type StoredMessage = GenericMessage & {
+  meta: NonNullable<GenericMessage["meta"]> & { messageId: string };
+};
 
 const DEFAULT_MAX_MESSAGES = Number.POSITIVE_INFINITY;
 
@@ -22,8 +33,8 @@ export class ConversationHistory {
     this.maxMessages = normalizeMaxMessages(options?.maxMessages);
   }
 
-  append(message: GenericMessage): GenericMessage {
-    const stored = stampCreatedAt(applyToolResultCap(message));
+  append(message: GenericMessage): StoredMessage {
+    const stored = stampMessageId(stampCreatedAt(applyToolResultCap(message)));
     this.messages.push(stored);
     this.trim();
     return stored;
@@ -124,11 +135,19 @@ export class ConversationHistory {
     // local data URLs, but discard remote/malformed binary parts before any
     // resume, checkpoint, or retry can hand the history to a provider.
     const capped: GenericMessage[] = [];
+    // Two rows answering to one id is worse than a row with none: a lookup
+    // would silently take the first. A tampered or hand-merged file can carry
+    // duplicates, so the second one is re-minted rather than kept.
+    const seenIds = new Set<string>();
     for (const message of messages) {
       const normalized = normalizeRestoredUserContent(
         applyToolResultCap(message, { recompute: true }),
       );
-      if (normalized) capped.push(normalized);
+      // Rows written before ids existed get one here so the in-memory
+      // invariant ("every row is addressable") holds for the whole session.
+      // Rows that already carry one keep it, which is what lets a surface hold
+      // an id across a reload.
+      if (normalized) capped.push(stampMessageId(normalized, seenIds));
     }
     this.messages = normalizeToolPairInvariant(capped).messages;
     this.trim();
@@ -190,6 +209,28 @@ interface NormalizeToolPairOptions {
 function stampCreatedAt(message: GenericMessage): GenericMessage {
   if (message.meta?.createdAt !== undefined) return message;
   return { ...message, meta: { ...(message.meta ?? {}), createdAt: Date.now() } };
+}
+
+/**
+ * Give the row a durable identity if it does not already carry one.
+ *
+ * Idempotent by design: a caller that minted the id before the append (so it
+ * could announce the row on the timeline in the same breath) keeps its own,
+ * and compaction clones keep theirs. DLP-safe because the id is persisted and
+ * re-read — a raw uuid that happened to match a redaction pattern would come
+ * back masked and stop resolving.
+ */
+function stampMessageId(message: GenericMessage, taken?: Set<string>): StoredMessage {
+  const existing = message.meta?.messageId;
+  // An id read back from disk is only usable if it is actually a non-empty
+  // string and nothing else in this history already answers to it. A number, an
+  // empty string, or a duplicate would make `find by id` return the wrong row
+  // or no row, so those are re-minted rather than trusted.
+  const usable =
+    typeof existing === "string" && existing.length > 0 && !(taken?.has(existing) ?? false);
+  const messageId = usable ? existing : createDlpSafeUuid();
+  taken?.add(messageId);
+  return { ...message, meta: { ...(message.meta ?? {}), messageId } };
 }
 
 function normalizeMaxMessages(maxMessages: number | undefined): number {

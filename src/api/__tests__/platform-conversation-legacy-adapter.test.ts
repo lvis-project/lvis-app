@@ -58,7 +58,7 @@ describe("platform conversation legacy adapter", () => {
       event: {
         kind: "user.message",
         origin: "platform-bridge",
-        ownerDetail: { text: "bridge-submitted input" },
+        ownerDetail: { text: "bridge-submitted input", messageId: "row-bridge" },
       },
     });
 
@@ -67,6 +67,9 @@ describe("platform conversation legacy adapter", () => {
       type: "user_message",
       text: "bridge-submitted input",
       origin: "platform-bridge",
+      // The row identity travels with the input; it is how a surface binds the
+      // bubble it draws to the row the host stored.
+      messageId: "row-bridge",
     });
   });
 

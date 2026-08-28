@@ -58,6 +58,22 @@ export interface GuidanceInjectionSource {
   title?: string;
 }
 
+/** The history row an injected guidance batch committed. */
+interface GuidanceInjectionRow {
+  /**
+   * Durable identity of the appended user row. Carried so the bubble the
+   * renderer draws for an injected batch names the same row a reloaded
+   * transcript names, and the row-addressed actions work on it either way.
+   */
+  messageId: string;
+  /**
+   * Present only when EVERY delivered guide in this batch was a sub-agent
+   * report, so the renderer can draw the child-report box without
+   * mislabelling a batch that also carried the user's own guide text.
+   */
+  source?: GuidanceInjectionSource;
+}
+
 export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
@@ -78,6 +94,8 @@ export interface TurnCallbacks {
     thought: string;
     stopReason: "end_turn" | "tool_use" | "max_tokens";
     hasToolCalls: boolean;
+    /** Durable identity of the assistant row this round just committed. */
+    messageId: string;
   }) => void;
   onTurnComplete?: (fullText: string) => void;
   onPermissionModeChanged?: (mode: "default" | "strict" | "auto" | "allow",
@@ -140,12 +158,7 @@ export interface TurnCallbacks {
 
 
 
-  /**
-   * `source` is present only when EVERY delivered guide in this batch was a
-   * sub-agent report, so the renderer can draw the child-report box without
-   * mislabelling a batch that also carried the user's own guide text.
-   */
-  onGuidanceInjected?: (text: string, source?: GuidanceInjectionSource) => void;
+  onGuidanceInjected?: (text: string, row: GuidanceInjectionRow) => void;
   /**
    * Fired once at turn end if any queued guide utterances never reached a
    * round boundary (single-round turn — typical of short text-only

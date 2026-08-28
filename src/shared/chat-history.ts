@@ -47,6 +47,12 @@ type SerializedPermissionReviewMeta = NonNullable<MessageMeta["permissionReview"
 // assistant/tool structure remains available for turn/work reconstruction.
 export type SerializedHistoryMessage = {
   index: number;
+  /**
+   * Durable row identity (see MessageMeta.messageId). The renderer carries this
+   * onto the entry it builds and sends it back when addressing the row, so a
+   * later compaction cannot make a stale position point at the wrong message.
+   */
+  messageId?: string;
   role: "user" | "assistant" | "tool_result";
   content: string;
   thought?: string;
@@ -97,6 +103,7 @@ export function serializeHistoryMessage(
       ? meta.createdAt
       : undefined;
   const metaFields = {
+    ...(typeof meta?.messageId === "string" ? { messageId: meta.messageId } : {}),
     ...(createdAt !== undefined ? { createdAt } : {}),
     ...(displayText !== undefined ? { displayText } : {}),
     ...(importedTrigger !== undefined ? { importedTrigger } : {}),

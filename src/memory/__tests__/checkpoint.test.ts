@@ -651,9 +651,11 @@ describe("saveCheckpointSnapshot post-compaction simulation", () => {
     const loaded = mm.loadCheckpointSnapshot(SESSION_BRANCH, 1);
     expect(loaded).toEqual(preCompact);
 
-    // Main session now reflects post-compact state
+    // Main session now reflects post-compact state. `loadSession` mints a row
+    // identity for every row that has none, so the comparison is on the message
+    // itself rather than on byte-equality with the saved literal.
     const main = mm.loadSession(SESSION_BRANCH);
-    expect(main).toEqual(postCompact);
+    expect(main).toMatchObject(postCompact);
   });
 });
 
@@ -704,7 +706,7 @@ describe("saveSession / loadSession — invalid sessionId protection", () => {
       { role: "assistant", content: "정리해보니 delete_file 은 디렉터리에 쓸 수 없습니다." },
     ]);
 
-    expect(mm.loadSession(sessionId)).toEqual([
+    expect(mm.loadSession(sessionId)).toMatchObject([
       { role: "user", content: "폴더 전체를 삭제" },
       { role: "assistant", content: "정리해보니 delete_file 은 디렉터리에 쓸 수 없습니다." },
     ]);
@@ -756,5 +758,104 @@ describe("round-trip — write then read preserves all new fields", () => {
     expect(loaded!.summaryPreamble).toBe("prior context summary");
     expect(loaded!.checkpoints).toHaveLength(1);
     expect(loaded!.checkpoints![0]).toEqual(ckpt);
+  });
+});
+
+describe("pruneCheckpointsDiscardedByRewind", () => {
+  const boundary = (compactNum: number) => ({
+    role: "user",
+    content: "[compacted]",
+    meta: { compactBoundary: true, compactNum, messageId: `boundary-${compactNum}` },
+  });
+  const question = (text: string) => ({
+    role: "user",
+    content: text,
+    meta: { messageId: `q-${text}` },
+  });
+
+  it("keeps every checkpoint when the rewind discarded no boundary", async () => {
+    // The shape a session in its second compaction cycle has: boundary #1 was
+    // summarized away when #2 was written, so it is no longer a row anywhere.
+    // Rewinding the last message must not read that absence as a reason to
+    // delete the snapshot the first checkpoint still owns.
+    await mm.saveSessionMetadata(SESSION_A, {
+      checkpoints: [makeCheckpoint({ compactNum: 1 }), makeCheckpoint({ id: "ckpt-0002", compactNum: 2 })],
+    });
+    await mm.saveCheckpointSnapshot(SESSION_A, 1, [question("first cycle")]);
+    await mm.saveCheckpointSnapshot(SESSION_A, 2, [question("second cycle")]);
+
+    await mm.pruneCheckpointsDiscardedByRewind(SESSION_A, [question("the last message")]);
+
+    expect(mm.loadSessionMetadata(SESSION_A)?.checkpoints?.map((c) => c.compactNum)).toEqual([1, 2]);
+    expect(mm.loadCheckpointSnapshot(SESSION_A, 1)).not.toBeNull();
+    expect(mm.loadCheckpointSnapshot(SESSION_A, 2)).not.toBeNull();
+  });
+
+  it("drops only the checkpoint whose boundary this rewind discarded", async () => {
+    await mm.saveSessionMetadata(SESSION_A, {
+      checkpoints: [makeCheckpoint({ compactNum: 1 }), makeCheckpoint({ id: "ckpt-0002", compactNum: 2 })],
+    });
+    await mm.saveCheckpointSnapshot(SESSION_A, 1, [question("first cycle")]);
+    await mm.saveCheckpointSnapshot(SESSION_A, 2, [question("second cycle")]);
+
+    await mm.pruneCheckpointsDiscardedByRewind(SESSION_A, [boundary(2), question("after the boundary")]);
+
+    expect(mm.loadSessionMetadata(SESSION_A)?.checkpoints?.map((c) => c.compactNum)).toEqual([1]);
+    expect(mm.loadCheckpointSnapshot(SESSION_A, 1)).not.toBeNull();
+    expect(mm.loadCheckpointSnapshot(SESSION_A, 2)).toBeNull();
+  });
+
+  it("keeps a checkpoint that never recorded a compact number", async () => {
+    await mm.saveSessionMetadata(SESSION_B, {
+      checkpoints: [makeCheckpoint({ id: "ckpt-manual" }), makeCheckpoint({ id: "ckpt-0003", compactNum: 3 })],
+    });
+
+    await mm.pruneCheckpointsDiscardedByRewind(SESSION_B, [boundary(3)]);
+
+    expect(mm.loadSessionMetadata(SESSION_B)?.checkpoints?.map((c) => c.id)).toEqual(["ckpt-manual"]);
+  });
+
+  it("deletes the pre-compact snapshot a dropped checkpoint owned", async () => {
+    await mm.saveSessionMetadata(SESSION_B, { checkpoints: [makeCheckpoint({ compactNum: 3 })] });
+    await mm.saveCheckpointSnapshot(SESSION_B, 3, [question("archived")]);
+    expect(mm.loadCheckpointSnapshot(SESSION_B, 3)).not.toBeNull();
+
+    await mm.pruneCheckpointsDiscardedByRewind(SESSION_B, [boundary(3)]);
+
+    expect(mm.loadCheckpointSnapshot(SESSION_B, 3)).toBeNull();
+  });
+
+  it("drops the summary preamble only when the newest checkpoint goes with it", async () => {
+    // The preamble describes the conversation up to the LATEST boundary. Losing
+    // an older checkpoint leaves that description still true; losing the newest
+    // one leaves a summary of turns nothing points at any more.
+    await mm.saveSessionMetadata(SESSION_A, {
+      summaryPreamble: "prior context summary",
+      checkpoints: [makeCheckpoint({ compactNum: 1 }), makeCheckpoint({ id: "ckpt-0002", compactNum: 2 })],
+    });
+
+    await mm.pruneCheckpointsDiscardedByRewind(SESSION_A, [boundary(1)]);
+    expect(mm.loadSessionMetadata(SESSION_A)?.summaryPreamble).toBe("prior context summary");
+
+    await mm.pruneCheckpointsDiscardedByRewind(SESSION_A, [boundary(2)]);
+    expect(mm.loadSessionMetadata(SESSION_A)?.summaryPreamble).toBeUndefined();
+  });
+
+  it("a session rewound to its opening message reloads empty, not carrying the discarded message back", async () => {
+    // A session that compacted once: the checkpoint holds a snapshot in which
+    // the user's message still exists, and the loader re-inserts that message
+    // whenever the session on disk has no renderable user row left. A rewind to
+    // the opening message leaves exactly that state, so without pruning the
+    // discarded message reappears on the next load.
+    await mm.saveSessionMetadata(SESSION_C, { checkpoints: [makeCheckpoint({ compactNum: 1 })] });
+    await mm.saveCheckpointSnapshot(SESSION_C, 1, [question("the discarded question")]);
+    await mm.saveSession(SESSION_C, [boundary(1)] as never);
+    // Precondition — this is the resurrection the prune has to prevent.
+    expect(JSON.stringify(mm.loadSession(SESSION_C))).toContain("the discarded question");
+
+    await mm.pruneCheckpointsDiscardedByRewind(SESSION_C, [boundary(1), question("the discarded question")]);
+    await mm.saveSession(SESSION_C, [] as never);
+
+    expect(mm.loadSession(SESSION_C)).toEqual([]);
   });
 });

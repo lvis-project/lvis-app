@@ -66,6 +66,12 @@ export interface ChatViewProps {
   onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
+  /**
+   * Rewind to just before this user message: discard the conversation from it
+   * onward and put its text back in the composer, unsent. Reports whether the
+   * host accepted, because a refusal must leave everything as it was.
+   */
+  onReturnHere: (idx: number) => Promise<{ ok: boolean }>;
   onToggleStar: (idx: number) => void | Promise<void>;
   onRetryEffort: () => void | Promise<void>;
   onContinueFromLastUser?: (sessionId: string) => void | Promise<void>;
@@ -150,7 +156,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -506,6 +512,16 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     interceptSubmit: approvalSentenceInterceptSubmit,
   });
 
+  // Queued messages were written to be said AFTER the point being rewound to,
+  // so a rewind discards them with everything else that came after it. The
+  // queue lives here, so the clear happens here — and only once the host has
+  // confirmed the conversation was actually cut.
+  const handleReturnHere = useCallback(async (idx: number) => {
+    const result = await onReturnHere(idx);
+    if (result.ok) messageQueueStore.clear();
+    return result;
+  }, [onReturnHere, messageQueueStore]);
+
   const handleInsertSlashCommand = useCallback((cmd: string) => {
     setQuestion((prev) => (prev ? `${prev}${cmd} ` : `${cmd} `));
   }, [setQuestion]);
@@ -626,6 +642,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
       actions={{
         isEntryStarred,
         onFork,
+        onReturnHere: handleReturnHere,
         onToggleStar,
         onRetryEffort,
         onFeedback,
