@@ -1,19 +1,19 @@
 # Getting Started
 
-Status: Active English default. The Korean archive keeps earlier review history and original discussion, but this page must be usable on its own.
+Status: Active English default. A Korean mirror of this page is kept in step with it, but this page must be usable on its own.
 
-Korean archive: [docs/ko mirror](../ko/guides/getting-started.md).
+Korean mirror: [docs/ko/guides/getting-started.md](../ko/guides/getting-started.md).
 
 ## What This Page Owns
 
-This page owns the clean-checkout setup path for running, testing, and understanding the desktop app. Use it as the first review surface when changing this area; use the archive for background, not as a substitute for current English guidance.
+This page owns the clean-checkout setup path for running, testing, and understanding the desktop app. Use it as the first review surface when changing this area, and update the Korean mirror in the same commit.
 
 ## Current Operating Contract
 
 - English is the default review and contributor language for this app surface.
 - The document must name the behavior that still matters today, the code or test locations that enforce it, and the conditions that make the note stale.
 - Source files and tests are authoritative when this prose and implementation disagree.
-- Korean-only material stays in the mirrored archive unless it is translated or summarized here.
+- The Korean mirror states the same things as this page; when the two disagree, this page and the source are authoritative.
 
 ## Clean-Checkout Setup
 
@@ -59,4 +59,4 @@ With a provider connected you can open a conversation and split the main area in
 
 ## Review Notes
 
-This English page should let a reviewer understand scope, risk, and validation without opening the Korean archive. If the archive contains rationale that still matters, translate the relevant part into this page and keep the archive link as provenance.
+This English page should let a reviewer understand scope, risk, and validation on its own. When it changes, the Korean mirror changes with it.

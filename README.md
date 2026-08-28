@@ -47,7 +47,6 @@ Current managed plugin families include:
 - `@lvis/plugin-meeting`
 - `@lvis/plugin-ms-graph`
 - `@lvis/plugin-work-assistant`
-- `@lvis/plugin-agent-hub`
 
 ### Marketplace And Local Development
 
@@ -84,6 +83,8 @@ The renderer includes production chat primitives for:
 - Status bar visibility for model, mode, tool, permission, and runtime state.
 
 **Composer.** A send that the host refuses is reported rather than swallowed: the message comes back to the composer with its attachments and draft text, and the refusal says why. While a turn is running, plain Enter adds the message to the queue — the queue is handed to the running turn at its next brake point, and anything still pending when the turn ends is sent as a new message. Cmd/Ctrl+Enter interrupts instead, stopping the running turn inside the same send call so the keystroke that authorised the send is still the one that carries it. Queued and interrupting messages are labelled as such in the transcript, and an answer the user stopped keeps a "stopped by user" badge.
+
+**Message card.** Hovering your own message reveals three actions: edit, fork, and return here. Return here puts that message's text back into the composer and discards everything from it onward — in the transcript, in the messages queued to be said later, and in the session on disk — so the input can be retyped in the same conversation instead of branched into a new one. It is offered only when no turn is still producing output, and a message whose input cannot be handed back whole is refused with the conversation left untouched. The send time sits under each card. Pinning is no longer offered per message; the conversation itself is still pinned from the tile header and from its sidebar row.
 
 **Sidebar.** Conversation rows carry rename, mark unread, mark read, archive, share, copy, and delete; project rows carry edit and archive alongside pin, reveal, and remove. A row whose conversation is mid-turn shows a responding indicator, and a turn that ends where the user is not looking — an unfocused tile, or the focused tile behind another view — leaves the conversation marked unread until they look at it. The Chats list reveals a further page as the reader scrolls rather than ending in a count of hidden rows, and each group in the Projects tab pages behind its own button so one long project cannot push its siblings below the fold.
 
