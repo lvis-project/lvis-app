@@ -142,6 +142,7 @@ function TabSaveBar({
 
 export function SettingsContent({
   api,
+  chatGroupId,
   onSaved,
   initialTab = "llm",
   onTabChange,
@@ -150,6 +151,12 @@ export function SettingsContent({
   onDiscardExactDeny,
 }: {
   api: LvisApi;
+  /**
+   * The tile the away-authority grant would bind to — the focused conversation.
+   * Threaded from the window because settings has no conversation of its own,
+   * and main refuses a grant that names no tile.
+   */
+  chatGroupId: string;
   onSaved: () => void;
   initialTab?: string;
   /**
@@ -647,7 +654,7 @@ export function SettingsContent({
               onDiscardExactDeny={onDiscardExactDeny}
             />
           </TabsContent>
-          <TabsContent value="remote-surfaces" className={tabContentCls}><RemoteSurfacesTab api={api} /></TabsContent>
+          <TabsContent value="remote-surfaces" className={tabContentCls}><RemoteSurfacesTab api={api} chatGroupId={chatGroupId} /></TabsContent>
           <TabsContent value="roles" className={tabContentCls}><RolesTab api={api} /></TabsContent>
           <TabsContent value="usage" className={tabContentCls}>
             <UsageDashboard

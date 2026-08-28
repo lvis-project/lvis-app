@@ -20,6 +20,12 @@ import type { LvisApi } from "../types.js";
 
 export interface TelegramConnectionContentProps {
   api: LvisApi;
+  /**
+   * The tile the away-authority grant would bind to — the focused conversation.
+   * Threaded from the window because settings has no conversation of its own,
+   * and main refuses a grant that names no tile.
+   */
+  chatGroupId: string;
 }
 
 type Feedback = { readonly tone: "error" | "success"; readonly text: string } | null;
@@ -81,7 +87,7 @@ function sharedConversationIsOpen(snapshot: TelegramConnectionSnapshot): boolean
  * freshly minted pairing code, which main returns exactly once and which no
  * snapshot can reproduce.
  */
-export function TelegramConnectionContent({ api }: TelegramConnectionContentProps) {
+export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnectionContentProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TelegramConnectionSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -413,6 +419,7 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
             {snapshot.approval !== null && !readOnly ? (
               <AwayAuthorityContent
                 api={api}
+                chatGroupId={chatGroupId}
                 shareIsLive={snapshot.state === "active" && sharedConversationIsOpen(snapshot)}
               />
             ) : null}

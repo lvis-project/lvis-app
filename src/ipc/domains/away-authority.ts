@@ -4,10 +4,12 @@
  * Arming is the one gesture in this feature that changes who may answer an
  * approval, so it is the most tightly bound: the host-renderer sender guard,
  * then a live local keyboard intent, then the shape guard, and only then the
- * gate. The renderer never names a conversation — main resolves the open one at
- * execution, the same rule the Tailnet and Telegram owner surfaces follow — so
- * a caller cannot arm an authority over a conversation the owner is not
- * looking at.
+ * gate. The renderer names a TILE, never a conversation — main reads what that
+ * tile is holding at execution, the same rule the Tailnet and Telegram owner
+ * surfaces follow — so a caller cannot arm an authority over a conversation the
+ * owner is not looking at. A tile the window is not showing is refused rather
+ * than resolved to the primary one, which would arm a conversation nobody
+ * named.
  *
  * Nothing here decides what a legal grant is. `parseAwayAuthorityGrant` owns
  * every bound (armable categories, lifetime ceiling, budget ceiling, directory
@@ -126,9 +128,11 @@ export function registerAwayAuthorityHandlers(deps: IpcDeps): void {
     if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
     if (!isAwayAuthorityArmInput(payload)) return INPUT_INVALID;
     try {
-      // Resolved here, never received: the renderer cannot name a conversation,
-      // so it cannot arm an authority over one the owner is not looking at.
-      const conversationId = deps.conversationLoop.getSessionId();
+      // The conversation is read here, never received: the renderer says which
+      // tile, and what that tile holds is main's to answer.
+      const loop = deps.findChatGroupLoop(payload.chatGroupId);
+      if (!loop) return OPERATION_REJECTED;
+      const conversationId = loop.getSessionId();
       if (typeof conversationId !== "string" || conversationId.length === 0) {
         return OPERATION_REJECTED;
       }

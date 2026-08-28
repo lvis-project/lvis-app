@@ -210,6 +210,9 @@ export function ChatGroupFrame({
   // belongs in an event, and a verdict taken while the popover is open is
   // what the user is looking at.
   const [splitChoice, setSplitChoice] = useState<Record<ChatGroupSplitAxis, boolean> | null>(null);
+  // Choosing a direction hands focus to the NEW tile; the popover must not
+  // return it to the trigger on close, or this tile would take focus back.
+  const splitChosenRef = useRef(false);
   const openSplitChoice = (open: boolean) => {
     setSplitChoice(open
       ? { row: splitFits ? splitFits("row") : true, column: splitFits ? splitFits("column") : true }
@@ -367,6 +370,11 @@ export function ChatGroupFrame({
               side="bottom"
               align="end"
               sideOffset={6}
+              onCloseAutoFocus={(event) => {
+                if (!splitChosenRef.current) return;
+                splitChosenRef.current = false;
+                event.preventDefault();
+              }}
               className="flex w-auto gap-1 p-1"
               aria-label={t("chatGroup.split")}
               data-testid="chat-group-split-choice"
@@ -384,6 +392,7 @@ export function ChatGroupFrame({
                   disabled={splitChoice ? !splitChoice[axis] : false}
                   data-testid={`chat-group-split-${axis}`}
                   onClick={() => {
+                    splitChosenRef.current = true;
                     setSplitChoice(null);
                     onSplit(axis);
                   }}

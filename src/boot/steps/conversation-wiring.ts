@@ -485,6 +485,22 @@ export async function wireConversation(
     groupLoops.delete(chatGroupId);
   };
 
+  // Which conversation a session belongs to, for the surfaces that are handed
+  // a session id by something outside the chat domain — an MCP app card, a
+  // notification. They must not read the primary loop as "the current
+  // session": with several tiles open that answer is wrong for all but one of
+  // them. A session no live loop holds has no owner, and `undefined` says so.
+  ctx.findLoopBySessionId = (sessionId: string): ConversationLoop | undefined =>
+    [conversationLoop, ...groupLoops.values()]
+      .find((loop) => loop.getSessionId() === sessionId);
+
+  // Which loop a tile is running, for surfaces the owner drives from window
+  // chrome and that name the tile they meant. `groupLoops` holds the tiles
+  // that exist; a name that is not in it, and is not the primary, is a tile
+  // this window does not have.
+  ctx.findChatGroupLoop = (chatGroupId: string): ConversationLoop | undefined =>
+    chatGroupId === MAIN_CHAT_GROUP_ID ? conversationLoop : groupLoops.get(chatGroupId);
+
 
 
   lateBinding.conversationLoopRef.fn = conversationLoop;

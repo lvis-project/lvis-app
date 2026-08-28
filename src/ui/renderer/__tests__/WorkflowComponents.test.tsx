@@ -398,7 +398,7 @@ describe("SessionTodoPanel", () => {
 
   it("hides when no items", async () => {
     const api = fakeApi();
-    const { container } = render(<SessionTodoPanel api={api} />);
+    const { container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
     // Async initial fetch resolves to []; panel should not render.
     await act(async () => {
       await Promise.resolve();
@@ -414,7 +414,7 @@ describe("SessionTodoPanel", () => {
           { id: "t2", content: "step 2", status: "completed" },
         ]),
     });
-    const { findByText, container } = render(<SessionTodoPanel api={api} />);
+    const { findByText, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
     await findByText("세션 TO-DO");
     await openPanel(container);
     expect(await findByText("step 1")).toBeInTheDocument();
@@ -441,7 +441,7 @@ describe("SessionTodoPanel", () => {
           { id: "t3", content: "next thing", status: "pending" },
         ]),
     });
-    const { findByTestId, queryAllByTestId, findByText, container } = render(<SessionTodoPanel api={api} />);
+    const { findByTestId, queryAllByTestId, findByText, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
     await findByText("세션 TO-DO");
     await openPanel(container);
     const active = await findByTestId("session-todo-active-row");
@@ -460,7 +460,7 @@ describe("SessionTodoPanel", () => {
           { id: "t3", content: "next thing", status: "pending" },
         ]),
     });
-    const { findByText, container } = render(<SessionTodoPanel api={api} />);
+    const { findByText, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
     // Panel starts collapsed by default — the active item should already show
     // next to the count without any toggle.
     await findByText("current thing");
@@ -478,7 +478,7 @@ describe("SessionTodoPanel", () => {
           { id: "t2", content: "second pending", status: "pending" },
         ]),
     });
-    const { findByText, container } = render(<SessionTodoPanel api={api} />);
+    const { findByText, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
     // Starts collapsed; with no in_progress item the header surfaces the first
     // non-completed item instead of going blank.
     await findByText("first pending");

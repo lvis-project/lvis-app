@@ -50,11 +50,28 @@ export interface OverlayCardProps {
   /**
    * Called when the user clicks the primary action button.
    * When undefined, the primary action button is not rendered
-   * (e.g. notification-only routine with no conversation session).
+   * (e.g. notification-only routine with no conversation session, or a staged
+   * card whose origin conversation is no longer open).
    */
   onPrimaryAction?: () => void;
 
   primaryActionLabel?: string;
+
+  /**
+   * Why this card has no primary action, in the user's words. Rendered in
+   * place of the action so a card that can only be dismissed says so.
+   */
+  notice?: string;
+
+  /**
+   * Whether the summary is expanded, and how to change it.
+   *
+   * Controlled by the overlay queue rather than held here: the card unmounts
+   * when it moves between tiles, and local state would collapse the summary
+   * the user just opened.
+   */
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 
   /** `app` = an MCP App's `ui/message` staged for user confirmation (no turn in flight). */
   kind?: "routine" | "plugin" | "app";
@@ -90,10 +107,12 @@ export function OverlayCard({
   onDismiss,
   onPrimaryAction,
   primaryActionLabel,
+  notice,
+  expanded,
+  onExpandedChange,
   kind = "routine",
 }: OverlayCardProps) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
   const summaryRef = useRef<HTMLParagraphElement | null>(null);
   const relTime = useMemo(() => relativeTime(firedAt, t), [firedAt, t]);
@@ -234,7 +253,7 @@ export function OverlayCard({
                 className="mt-1 h-6 gap-1 px-1 text-[11px] text-muted-foreground hover:text-foreground"
                 data-testid="overlay-card-expand-toggle"
                 aria-expanded={expanded}
-                onClick={() => setExpanded((v) => !v)}
+                onClick={() => onExpandedChange(!expanded)}
               >
                 {expanded ? (
                   <>
@@ -252,6 +271,14 @@ export function OverlayCard({
           </>
         ) : (
           <p className="text-xs text-muted-foreground/(--opacity-half)">{t("overlayCard.noSummary")}</p>
+        )}
+        {!running && !onPrimaryAction && notice && (
+          <p
+            data-testid="overlay-card-notice"
+            className="mt-2 text-[11px] text-muted-foreground/(--opacity-stronger)"
+          >
+            {notice}
+          </p>
         )}
         {!running && onPrimaryAction && (
           <div className="mt-2 flex justify-end">

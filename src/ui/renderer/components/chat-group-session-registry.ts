@@ -129,6 +129,51 @@ export function tileHoldingSession(
   return tiles.find((tile) => tile.sessionId === sessionId);
 }
 
+/** Where an overlay card renders, and whether it can still be acted on. */
+export interface OverlayCardPlacement {
+  /** The one tile that shows the card. */
+  chatGroupId: string;
+  /**
+   * The card names a conversation NO mounted tile is holding — it was closed,
+   * maximized away, or folded out of sight by chat mode.
+   *
+   * The card is still shown, in the focused tile, because a staged prompt the
+   * user can neither see nor dismiss is worse than one they can dismiss. What
+   * it must not have is its primary action: that action continues the origin
+   * conversation, and running it in the focused tile would put a prompt staged
+   * for one conversation into a different one. Main refuses exactly that
+   * mismatch on the way in, and the renderer must not undo the refusal.
+   */
+  orphaned: boolean;
+}
+
+/**
+ * The ONE tile an overlay card belongs in.
+ *
+ * A card is a single thing the user acts on once, so it has to render in
+ * exactly one tile: rendering it in all of them gives the user N copies of
+ * which only the one they happen to click in does anything, and dismissing
+ * one leaves the rest behind.
+ *
+ * A card that names the conversation it came from goes to the tile holding
+ * that conversation, because its action continues THAT conversation. A card
+ * with no conversation behind it — a routine fire, a plugin event — goes to
+ * the focused tile, which is the conversation the user is looking at.
+ */
+export function overlayCardTile(
+  tiles: readonly TileSession[],
+  focusedChatGroupId: string,
+  originSessionId: string | undefined,
+): OverlayCardPlacement {
+  if (originSessionId === undefined) {
+    return { chatGroupId: focusedChatGroupId, orphaned: false };
+  }
+  const holder = tileHoldingSession(tiles, originSessionId);
+  return holder === undefined
+    ? { chatGroupId: focusedChatGroupId, orphaned: true }
+    : { chatGroupId: holder.chatGroupId, orphaned: false };
+}
+
 /**
  * Does this tile draw a window-wide card (a question, a skill badge) addressed
  * to `sessionId`?

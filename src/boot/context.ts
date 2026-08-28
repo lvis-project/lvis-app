@@ -213,6 +213,10 @@ export class BootContext {
   declare resolveChatGroupLoop: (chatGroupId: string) => ConversationLoop;
   /** Releases that loop when the tile closes — see IpcDeps. */
   declare releaseChatGroupLoop: (chatGroupId: string) => void;
+  /** The loop holding one session, or none — see IpcDeps. */
+  declare findLoopBySessionId: (sessionId: string) => ConversationLoop | undefined;
+  /** The loop behind an already-open chat group, or none — see IpcDeps. */
+  declare findChatGroupLoop: (chatGroupId: string) => ConversationLoop | undefined;
   declare preferenceRefreshService: PreferenceRefreshService;
   declare memoryConsolidationService: MemoryConsolidationService;
   declare memoryMaintenanceCoordinator: MemoryMaintenanceCoordinator;
@@ -326,6 +330,8 @@ const BOOT_CONTEXT_FIELDS = [
   "sideChatConversationLoop",
   "resolveChatGroupLoop",
   "releaseChatGroupLoop",
+  "findLoopBySessionId",
+  "findChatGroupLoop",
   "preferenceRefreshService",
   "memoryConsolidationService",
   "memoryMaintenanceCoordinator",

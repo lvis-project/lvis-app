@@ -47,7 +47,11 @@ function renderLane() {
     <TooltipProvider>
       <OverlayContextProvider onOpenSession={() => true} addFireRef={addFireRef}>
         <FloatingRightLane>
-          <OverlayCardRegion onPluginPrimaryAction={vi.fn()} />
+          <OverlayCardRegion
+            chatGroupId="main"
+            overlayCardTile={() => ({ chatGroupId: "main", orphaned: false })}
+            onPluginPrimaryAction={vi.fn()}
+          />
         </FloatingRightLane>
       </OverlayContextProvider>
     </TooltipProvider>,

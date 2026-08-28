@@ -1552,8 +1552,15 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return notify(title, body, severity);
     }
 
-    // ── Path B — invariant 2: the card's session must still be the live one.
-    if (cardSessionId !== deps.conversationLoop.getSessionId()) {
+    // ── Path B — invariant 2: the card's session must still be OPEN, and the
+    // guidance must reach the loop that is holding it. The window can have
+    // several conversations at once, so "the live session" is not the primary
+    // loop's — reading it there would drop every card raised in another tile
+    // and inject the ones that matched into a conversation that never asked.
+    // A session no open loop holds is a mismatch, exactly as a stale one is.
+    const cardSession = typeof cardSessionId === "string" ? cardSessionId : "";
+    const cardLoop = cardSession ? deps.findLoopBySessionId(cardSession) : undefined;
+    if (!cardLoop) {
       auditMcpApp("info", `[mcp-app:${serverId}] ui/message session mismatch → notification fallback`);
       // No app-authored title on this path — the source tag IS the title.
       return notify("", intent.text);
@@ -1562,7 +1569,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const envelope = formatAppMessageEnvelope(intent.text, source);
 
     // ── Path B — invariant 3: turn policy. `queueGuidance` IS the atomic check.
-    const queued = deps.conversationLoop.queueGuidance(envelope);
+    const queued = cardLoop.queueGuidance(envelope);
     if (queued === "queued") {
       auditMcpApp("info", `[mcp-app:${serverId}] ui/message → guidance queued (active turn)`);
       return { ok: true, disposition: "queued" } satisfies McpUiMessageOutcome;
@@ -1584,6 +1591,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const overlayItem = {
       id: `app:${serverId}:${eventId}`,
       source: { kind: "app" as const, serverId, eventId },
+      // The card was raised INSIDE this conversation, so the tile holding it is
+      // the one that shows the card and the one the confirm click starts a turn
+      // in. Without this the window would guess, and every tile would show a
+      // copy of a card only one of them can act on.
+      originSessionId: cardSession,
       title: serverId,
       summary: deriveOverlaySummaryForDisplay({ prompt: intent.text }),
       running: false,
@@ -2009,8 +2021,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //
   // The body is UNTRUSTED APP DATA. The store fences it and the prompt source labels it
   // "data, never instructions" — the same framing `<app-message>` bodies and the skills
-  // catalog already carry. A session MISMATCH drops the update (the card belongs to a
-  // conversation the user has left): fail-safe, one comparison, mirroring `ui/message`.
+  // catalog already carry. A session no OPEN conversation holds drops the update (the
+  // card belongs to a conversation the user has left): fail-safe, one lookup, mirroring
+  // `ui/message`.
   //
   // Sender: `validateHostRendererSender` — it mutates what the model reads next turn.
   ipcMain.handle(
@@ -2026,9 +2039,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       if (typeof serverId !== "string" || typeof cardId !== "string") {
         return { ok: false, error: "invalid-binding", message: "serverId and cardId must be strings" } satisfies McpUiModelContextOutcome;
       }
-      if (typeof cardSessionId !== "string" || cardSessionId !== deps.conversationLoop.getSessionId()) {
+      // The card's conversation must still be open SOMEWHERE — in any tile,
+      // not just the primary one. Comparing against the primary loop dropped
+      // every update from a card whose conversation had been split into
+      // another tile, permanently: this handler has no retry.
+      if (typeof cardSessionId !== "string" || !deps.findLoopBySessionId(cardSessionId)) {
         auditContext("info", `[mcp-app:${serverId}] ui/update-model-context dropped: session mismatch`);
-        return { ok: false, error: "session-mismatch", message: "the card's session is not the active conversation" } satisfies McpUiModelContextOutcome;
+        return { ok: false, error: "session-mismatch", message: "the card's session is not an open conversation" } satisfies McpUiModelContextOutcome;
       }
 
       const record = asPlainRecord(params);

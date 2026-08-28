@@ -2,8 +2,9 @@
  * OverlayContext — routine fire overlay queue.
  *
  * Policy:
- *   - Single active card + queue navigation (prev/next)
- *   - queueIndex / queueTotal display
+ *   - ONE queue for the window; each tile renders its own slice of it and
+ *     navigates that slice (see `OverlayCardRegion`). A window-wide "1/3" would
+ *     count cards the tile does not show and step onto cards it cannot render.
  *   - dismiss (permanent removal)
  *   - snooze removed (production smoke test: UX risk)
  *   - stale fire replace: new fire for same routineId replaces all prior entries
@@ -16,7 +17,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
   type RefObject,
@@ -50,29 +50,52 @@ export interface OverlayItem {
    */
   pendingPrompt?: string;
   /**
-   * ISO timestamp when the item was created/received. Used by OverlayCard
-   * relativeTime display for plugin-source items (which lack a firedAt on source).
+   * When the card came into being, as an ISO timestamp.
+   *
+   * Required, and never minted at render: an insertion card shows this as its
+   * relative time, and a card that re-derived "now" whenever it was re-rendered
+   * — which a focus change does, since the card moves between tiles — would
+   * reset its own age in front of the user. Main stamps it on the two emit
+   * paths; a routine item takes the instant it fired.
    */
-  createdAt?: string;
+  createdAt: string;
+  /**
+   * The conversation this card CAME FROM, when main knew one.
+   *
+   * An MCP app card is raised by a card mounted in a specific conversation, so
+   * it belongs to whichever tile is holding that conversation. A routine fires
+   * on a schedule and a plugin trigger fires on an event — neither has a
+   * conversation behind it, and both leave this absent, which is what makes
+   * them the focused tile's to show.
+   *
+   * NOT `source.eventId`: that identifies the plugin EVENT, not a session.
+   */
+  originSessionId?: string;
 }
 
 export interface OverlayContextValue {
-  /** Currently displayed item (head of visible queue) */
-  active: OverlayItem | null;
-  /** 1-based index of active within visible queue */
-  queueIndex: number;
-  /** Total items in visible queue */
-  queueTotal: number;
-  /** Navigate to previous item */
-  prev: () => void;
-  /** Navigate to next item */
-  next: () => void;
+  /**
+   * Every live card, oldest first. The WINDOW's queue: which of these a given
+   * tile shows, and which one of those is active there, is that tile's own
+   * question — see `OverlayCardRegion`.
+   */
+  queue: readonly OverlayItem[];
   /** Permanently remove from queue */
   dismiss: (id: string) => void;
   /** Add or update an overlay item. Replaces existing entry with same source key. */
   addFire: (item: OverlayItem) => void;
   /** Open routine conversation session by exact unified session id. */
   openSession: (sessionId: string) => Promise<boolean>;
+  /**
+   * Cards the user has expanded, by id.
+   *
+   * Held here rather than inside the card because the card UNMOUNTS whenever it
+   * moves between tiles (a focus change moves every card with no origin), and a
+   * summary the user opened must not close itself because they looked at
+   * another tile.
+   */
+  expandedCardIds: ReadonlySet<string>;
+  setCardExpanded: (id: string, expanded: boolean) => void;
 }
 
 const OverlayContext = createContext<OverlayContextValue | null>(null);
@@ -98,18 +121,7 @@ export function OverlayContextProvider({
   runningRoutines?: Set<string>;
 }) {
   const [queue, setQueue] = useState<OverlayItem[]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  const active = queue[activeIndex] ?? null;
-  const queueIndex = queue.length > 0 ? Math.min(activeIndex, queue.length - 1) + 1 : 0;
-  const queueTotal = queue.length;
-
-  // Clamp activeIndex when queue shrinks
-  useEffect(() => {
-    if (activeIndex >= queue.length && queue.length > 0) {
-      setActiveIndex(queue.length - 1);
-    }
-  }, [queue.length, activeIndex]);
+  const [expandedCardIds, setExpandedCardIds] = useState<ReadonlySet<string>>(() => new Set());
 
   // C1: sync running flag from runningRoutines set whenever it changes
   useEffect(() => {
@@ -168,17 +180,6 @@ export function OverlayContextProvider({
     });
   }, []);
 
-  // M7: navigate to tail (newest item) when a new fire arrives.
-  // Kept outside setQueue updater to avoid setState-inside-updater side-effect
-  // (StrictMode double-invokes updaters, which would double-advance activeIndex).
-  const prevQueueLengthRef = useRef(0);
-  useEffect(() => {
-    if (queue.length > prevQueueLengthRef.current) {
-      setActiveIndex(queue.length - 1);
-    }
-    prevQueueLengthRef.current = queue.length;
-  }, [queue.length]);
-
   // Expose addFire via ref so App.tsx can call it from IPC subscription
   if (addFireRef) {
     // Safe: synchronous assignment during render, before effects
@@ -187,15 +188,25 @@ export function OverlayContextProvider({
 
   const dismiss = useCallback((id: string) => {
     setQueue((prev) => prev.filter((it) => it.id !== id));
+    // A dismissed card's expansion has nothing left to describe; keeping it
+    // would silently pre-expand a later card that reused the id.
+    setExpandedCardIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }, []);
 
-  const prev = useCallback(() => {
-    setActiveIndex((i) => Math.max(0, i - 1));
+  const setCardExpanded = useCallback((id: string, expanded: boolean) => {
+    setExpandedCardIds((prev) => {
+      if (prev.has(id) === expanded) return prev;
+      const next = new Set(prev);
+      if (expanded) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   }, []);
-
-  const next = useCallback(() => {
-    setActiveIndex((i) => Math.min(queue.length - 1, i + 1));
-  }, [queue.length]);
 
   const openSession = useCallback(
     (sessionId: string) => Promise.resolve(onOpenSession(sessionId)),
@@ -203,8 +214,8 @@ export function OverlayContextProvider({
   );
 
   const value = useMemo<OverlayContextValue>(
-    () => ({ active, queueIndex, queueTotal, prev, next, dismiss, addFire, openSession }),
-    [active, queueIndex, queueTotal, prev, next, dismiss, addFire, openSession],
+    () => ({ queue, dismiss, addFire, openSession, expandedCardIds, setCardExpanded }),
+    [queue, dismiss, addFire, openSession, expandedCardIds, setCardExpanded],
   );
 
   return <OverlayContext.Provider value={value}>{children}</OverlayContext.Provider>;

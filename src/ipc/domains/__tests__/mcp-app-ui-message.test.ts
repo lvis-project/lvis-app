@@ -29,6 +29,8 @@ vi.mock("electron", () => ({
 
 const CHANNEL = "lvis:mcp:ui-message";
 const SESSION = "session-live";
+/** A conversation held by a SECOND tile — open, but not the primary loop's. */
+const TILE_SESSION = "session-second-tile";
 const invoke = makeAppIpcInvoker(handlers);
 
 const textParams = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
@@ -48,7 +50,19 @@ async function setup(opts?: { queueGuidance?: () => string; sessionId?: string }
   const send = vi.fn();
   const impl = opts?.queueGuidance ?? (() => "no-active-turn");
   const queueGuidance = vi.fn((_text: string) => impl());
+  const tileQueueGuidance = vi.fn((_text: string) => impl());
   const fire = vi.fn();
+  const primarySession = opts?.sessionId ?? SESSION;
+  const conversationLoop = {
+    getSessionId: vi.fn(() => primarySession),
+    queueGuidance,
+  };
+  // The window holds two conversations. `findLoopBySessionId` is how a surface
+  // handed a session id finds the loop that owns it; anything else is unheld.
+  const tileLoop = {
+    getSessionId: vi.fn(() => TILE_SESSION),
+    queueGuidance: tileQueueGuidance,
+  };
 
   const deps = {
     pluginRuntime: { getPerfStats: vi.fn(() => ({})) },
@@ -60,10 +74,12 @@ async function setup(opts?: { queueGuidance?: () => string; sessionId?: string }
     auditLogger: { log: vi.fn() },
     pluginMarketplace: { list: vi.fn(async () => []) },
     refreshPluginNotifications: vi.fn(),
-    conversationLoop: {
-      getSessionId: vi.fn(() => opts?.sessionId ?? SESSION),
-      queueGuidance,
-    },
+    conversationLoop,
+    findLoopBySessionId: vi.fn((sessionId: string) => {
+      if (sessionId === primarySession) return conversationLoop;
+      if (sessionId === TILE_SESSION) return tileLoop;
+      return undefined;
+    }),
     notificationService: { fire },
     getMainWindow: vi.fn(() => ({
       isDestroyed: () => false,
@@ -74,7 +90,7 @@ async function setup(opts?: { queueGuidance?: () => string; sessionId?: string }
 
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, serverId, send, queueGuidance, fire };
+  return { deps, serverId, send, queueGuidance, tileQueueGuidance, fire };
 }
 
 /** Overlay pushes staged to the renderer (the user-gated cards). */
@@ -208,6 +224,9 @@ describe("lvis:mcp:ui-message — path B: turn policy", () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]).toMatchObject({
       source: { kind: "app", serverId },
+      // The card names the conversation it came from, so the renderer can put
+      // it in the ONE tile holding that conversation rather than in all of them.
+      originSessionId: SESSION,
       summary: "open the invoice",
       pendingPrompt: `<app-message source="app:${serverId}">\nopen the invoice\n</app-message>`,
       running: false,
@@ -217,15 +236,41 @@ describe("lvis:mcp:ui-message — path B: turn policy", () => {
     expect(fire).not.toHaveBeenCalled();
   });
 
-  it("card session ≠ live session → notification-only fallback (never injects)", async () => {
-    const { serverId, queueGuidance, fire, send } = await setup({ queueGuidance: () => "queued" });
+  it("card session held by no open conversation → notification-only fallback (never injects)", async () => {
+    const { serverId, queueGuidance, tileQueueGuidance, fire, send } = await setup({ queueGuidance: () => "queued" });
 
     const result = await invoke(CHANNEL, serverId, "session-the-user-left", textParams("do the thing"));
 
     expect(result).toEqual({ ok: true, disposition: "notified" });
     expect(fire).toHaveBeenCalledWith({ kind: "plugin", title: `app:${serverId}`, body: "do the thing" });
     expect(queueGuidance).not.toHaveBeenCalled();
+    expect(tileQueueGuidance).not.toHaveBeenCalled();
     expect(stagedCards(send)).toHaveLength(0);
+  });
+
+  it("card from a SECOND tile's conversation reaches that tile's loop, not the primary", async () => {
+    const { serverId, queueGuidance, tileQueueGuidance, fire } = await setup({ queueGuidance: () => "queued" });
+
+    const result = await invoke(CHANNEL, serverId, TILE_SESSION, textParams("summarize this card"));
+
+    expect(result).toEqual({ ok: true, disposition: "queued" });
+    expect(tileQueueGuidance.mock.calls[0]?.[0]).toBe(
+      `<app-message source="app:${serverId}">\nsummarize this card\n</app-message>`,
+    );
+    // The primary conversation never saw a message addressed to another tile.
+    expect(queueGuidance).not.toHaveBeenCalled();
+    expect(fire).not.toHaveBeenCalled();
+  });
+
+  it("stages a user-gated card for a second tile's conversation when no turn is running", async () => {
+    const { serverId, send, tileQueueGuidance } = await setup({ queueGuidance: () => "no-active-turn" });
+
+    const result = await invoke(CHANNEL, serverId, TILE_SESSION, textParams("open the invoice"));
+
+    expect(result).toEqual({ ok: true, disposition: "staged" });
+    expect(stagedCards(send)).toHaveLength(1);
+    expect(stagedCards(send)[0]).toMatchObject({ originSessionId: TILE_SESSION });
+    expect(tileQueueGuidance).toHaveReturnedWith("no-active-turn");
   });
 
   it("neutralizes app text that closes the provenance fence (mid-turn guidance path)", async () => {

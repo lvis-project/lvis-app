@@ -10,6 +10,7 @@ import {
   type ChatGroupSessionHandle,
   tileDrawsSession,
   tileHoldingSession,
+  overlayCardTile,
 } from "../chat-group-session-registry.js";
 
 // `entries` identity is the store's change signal — useChatState owns it as
@@ -186,6 +187,44 @@ describe("tileHoldingSession", () => {
     ];
     expect(tileHoldingSession(tiles, "s-2")?.chatGroupId).toBe("group-2");
     expect(tileHoldingSession(tiles, "s-9")).toBeUndefined();
+  });
+});
+
+describe("overlayCardTile", () => {
+  const tiles = [
+    { chatGroupId: "main", sessionId: "s-1", streaming: false },
+    { chatGroupId: "group-2", sessionId: "s-2", streaming: false },
+  ];
+
+  it("sends a card to the tile holding the conversation it came from", () => {
+    // Not the focused tile: the card's action continues the conversation it
+    // was raised in, which may be sitting unfocused beside it.
+    expect(overlayCardTile(tiles, "main", "s-2")).toEqual({
+      chatGroupId: "group-2",
+      orphaned: false,
+    });
+  });
+
+  it("sends a card with no conversation behind it to the focused tile", () => {
+    expect(overlayCardTile(tiles, "group-2", undefined)).toEqual({
+      chatGroupId: "group-2",
+      orphaned: false,
+    });
+    expect(overlayCardTile(tiles, "main", undefined)).toEqual({
+      chatGroupId: "main",
+      orphaned: false,
+    });
+  });
+
+  it("shows an orphaned card in the focused tile, marked as having no origin", () => {
+    // The conversation was closed, maximized away, or folded out of sight
+    // while the card waited. Showing the card nowhere would strand it; showing
+    // it in every tile is what this whole function exists to prevent. What the
+    // flag buys is the third option: visible, dismissible, not actionable.
+    expect(overlayCardTile(tiles, "group-2", "s-gone")).toEqual({
+      chatGroupId: "group-2",
+      orphaned: true,
+    });
   });
 });
 

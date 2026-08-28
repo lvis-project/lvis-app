@@ -27,7 +27,6 @@ import {
   SESSION_ID_PREFIX_LOOKUP_QUERY,
   findSessionByIdPrefix,
 } from "../../../shared/session-lookup.js";
-import type { HandleAskRefFn } from "./use-routine-overlay.js";
 
 type Api = ReturnType<typeof getApi>;
 type TFn = ReturnType<typeof useTranslation>["t"];
@@ -89,10 +88,10 @@ export interface UseSendMessageDeps {
   onOpenSettings: (tab?: string) => void;
   setQuestion: Dispatch<SetStateAction<string>>;
   /**
-   * App-owned forward-ref cycle bridge. This hook WRITES it
-   * (`handleAskRef.current = handleAsk`) each render so use-routine-overlay's
-   * handlePluginPrimaryAction can read the latest handleAsk. Do NOT inline-break
-   * the cycle — the ref is the seam.
+   * Tile-owned forward-ref cycle bridge. This hook WRITES it
+   * (`handleAskRef.current = handleAsk`) each render so the tile's MCP-prompt
+   * path can read the latest handleAsk. Do NOT inline-break the cycle — the
+   * ref is the seam.
    */
   handleAskRef: MutableRefObject<HandleAskRefFn>;
 }
@@ -104,6 +103,19 @@ export interface UseSendMessageDeps {
  * trust origin in main.
  */
 export type SendMode = "default" | "trigger-import" | "app-message" | "mcp-prompt";
+
+/**
+ * The forward-ref bridge this hook writes.
+ *
+ * The TILE owns the ref: this hook sets `ref.current = handleAsk` each render
+ * and the tile's own MCP-prompt path reads it. It surfaces the first three
+ * params only — its readers never pass the 4th `opts`.
+ */
+export type HandleAskRefFn = (
+  q: string,
+  mode?: SendMode,
+  userIntent?: UserKeyboardIntentSnapshot,
+) => Promise<void>;
 
 /**
  * Send mode → turn-entry origin. A TOTAL map, not a ternary chain: the previous

@@ -9,15 +9,26 @@
  *     reset pattern from OverlayCardRegion → React remount per item)
  */
 import "./setup.js";
+import { useState } from "react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "../../src/components/ui/tooltip.js";
 import { OverlayCard } from "../../src/ui/renderer/components/OverlayCard.js";
 
-function renderCard(props: Parameters<typeof OverlayCard>[0]) {
+/**
+ * The card's expansion is CONTROLLED — the overlay queue owns it so a card that
+ * moves between tiles does not collapse itself. These cases are about the
+ * toggle, so the harness supplies the state the queue would.
+ */
+function ControlledCard(props: Omit<Parameters<typeof OverlayCard>[0], "expanded" | "onExpandedChange">) {
+  const [expanded, setExpanded] = useState(false);
+  return <OverlayCard {...props} expanded={expanded} onExpandedChange={setExpanded} />;
+}
+
+function renderCard(props: Parameters<typeof ControlledCard>[0]) {
   return render(
     <TooltipProvider>
-      <OverlayCard {...props} />
+      <ControlledCard {...props} />
     </TooltipProvider>,
   );
 }

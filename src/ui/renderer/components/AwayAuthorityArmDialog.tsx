@@ -28,6 +28,12 @@ import type { LvisApi } from "../types.js";
 
 export interface AwayAuthorityArmDialogProps {
   api: LvisApi;
+  /**
+   * The tile the away-authority grant would bind to — the focused conversation.
+   * Threaded from the window because settings has no conversation of its own,
+   * and main refuses a grant that names no tile.
+   */
+  chatGroupId: string;
   open: boolean;
   onCancel: () => void;
   /** Called after main confirms the arming, so the caller can refetch status. */
@@ -74,6 +80,7 @@ function durationLabel(
  */
 export function AwayAuthorityArmDialog({
   api,
+  chatGroupId,
   open,
   onCancel,
   onArmed,
@@ -143,6 +150,7 @@ export function AwayAuthorityArmDialog({
     setError(null);
     try {
       const result = await api.awayAuthority.arm({
+        chatGroupId,
         mode,
         directories: selected,
         duration,
@@ -158,7 +166,7 @@ export function AwayAuthorityArmDialog({
     } finally {
       setBusy(false);
     }
-  }, [api, budget, duration, mode, onArmed, selected, t]);
+  }, [api, budget, chatGroupId, duration, mode, onArmed, selected, t]);
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>

@@ -1384,9 +1384,9 @@ export function buildInternalApiSurface() {
   },
 
   // todo_session_write — assistant's current-turn checklist
-  listSessionTodos: async (sessionId?: string) =>
+  listSessionTodos: async (sessionId: string) =>
     ipcRenderer.invoke(CHANNELS.sessionTodo.list, sessionId),
-  clearSessionTodos: async (sessionId?: string) =>
+  clearSessionTodos: async (sessionId: string) =>
     ipcRenderer.invoke(CHANNELS.sessionTodo.clear, sessionId),
   onSessionTodoChanged: (
     handler: (payload: {

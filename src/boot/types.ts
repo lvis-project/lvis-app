@@ -121,6 +121,31 @@ export interface AppServices {
   /** Forgets a group's loop once its tile is gone, so the ceiling counts live tiles only. */
   releaseChatGroupLoop?: (chatGroupId: string) => void;
   /**
+   * The loop HOLDING `sessionId` right now, the primary included.
+   *
+   * A lookup, never a constructor: {@link resolveChatGroupLoop} would build
+   * the tile it was asked about, which is the opposite of what a surface
+   * asking "whose conversation is this?" means. `undefined` is a real answer —
+   * no open conversation holds that session — and callers must treat it as a
+   * mismatch rather than reaching for the primary loop.
+   *
+   * Always wired. Unlike the two above it has no "groups unavailable" answer to
+   * stand in for it — a surface that could not ask would read every card as a
+   * stale session — so main composition owes it to every consumer.
+   */
+  findLoopBySessionId: (sessionId: string) => ConversationLoop | undefined;
+  /**
+   * The loop behind an ALREADY-OPEN chat group, or `undefined` for a group the
+   * window is not holding.
+   *
+   * The lookup half of {@link resolveChatGroupLoop}. A surface that is told
+   * which tile the owner meant must not CREATE that tile as a side effect of
+   * asking, and a group id it does not recognise is a caller naming a tile that
+   * does not exist — a refusal, never the primary loop standing in.
+   * Always wired, for the same reason as {@link findLoopBySessionId}.
+   */
+  findChatGroupLoop: (chatGroupId: string) => ConversationLoop | undefined;
+  /**
    * The tiled chat group this bundle is bound to. Set only on the per-group
    * bundle `chat.ts` derives for a non-primary tile; the bundle assembled at
    * boot has none and is the primary's.

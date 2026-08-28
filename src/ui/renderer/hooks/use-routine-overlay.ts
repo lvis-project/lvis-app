@@ -1,36 +1,18 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type MutableRefObject,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import type { getApi } from "../api-client.js";
 import type { useTranslation } from "../../../i18n/react.js";
 import type { RoutineFiredPayload } from "../../../shared/routines-types.js";
-import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type {
   OverlayContextValue,
   OverlayItem,
 } from "../context/OverlayContext.js";
-import type { useChatState } from "./use-chat-state.js";
+import {
+  tileHoldingSession,
+  type ChatGroupSessionRegistry,
+} from "../components/chat-group-session-registry.js";
 
 type Api = ReturnType<typeof getApi>;
 type TFn = ReturnType<typeof useTranslation>["t"];
-type InsertImportedTriggerEntry = ReturnType<typeof useChatState>["insertImportedTriggerEntry"];
-
-/**
- * handleAsk ref signature — the forward-ref cycle bridge. App owns this ref;
- * use-send-message writes it (`ref.current = handleAsk`) and this hook reads it
- * (`ref.current(prompt, "trigger-import")`) from handlePluginPrimaryAction. The
- * ref only surfaces the first three params (the overlay-import call site never
- * passes the 4th `opts`), matching App's original declaration exactly.
- */
-export type HandleAskRefFn = (
-  q: string,
-  mode?: "default" | "trigger-import" | "app-message",
-  userIntent?: UserKeyboardIntentSnapshot,
-) => Promise<void>;
 
 export interface UseRoutineOverlayResult {
   /**
@@ -41,7 +23,7 @@ export interface UseRoutineOverlayResult {
   addFireRef: MutableRefObject<OverlayContextValue["addFire"] | null>;
   /** In-flight LLM routine sessions; OverlayContextProvider derives running flags. */
   runningRoutines: Set<string>;
-  handlePluginPrimaryAction: (overlayItemId: string) => Promise<void>;
+  handlePluginPrimaryAction: (overlayItemId: string, chatGroupId: string) => Promise<void>;
   handleRoutineAcknowledge: (routineId: string, firedAt: string) => void;
 }
 
@@ -54,21 +36,19 @@ export interface UseRoutineOverlayResult {
  * drain; plugin overlay show/dismiss). Also owns the two overlay action
  * callbacks.
  *
- * Forward-ref cycle: `handlePluginPrimaryAction` calls `handleAskRef.current(...)`
- * to start a trigger-import turn. The ref is owned by App and written by
- * use-send-message, so the cycle is preserved through the shared ref rather than
- * an inline forward declaration.
+ * `handlePluginPrimaryAction` reaches a conversation through the tile registry
+ * rather than a captured callback: the card is shown in ONE tile, and the turn
+ * it starts belongs to that tile's conversation, which the window cannot know
+ * at subscribe time.
  */
 export function useRoutineOverlay({
   api,
   t,
-  insertImportedTriggerEntry,
-  handleAskRef,
+  registry,
 }: {
   api: Api;
   t: TFn;
-  insertImportedTriggerEntry: InsertImportedTriggerEntry;
-  handleAskRef: MutableRefObject<HandleAskRefFn>;
+  registry: ChatGroupSessionRegistry;
 }): UseRoutineOverlayResult {
   // runningRoutines tracks in-flight LLM sessions.
   const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
@@ -83,6 +63,7 @@ export function useRoutineOverlay({
       title: evt.title,
       summary: evt.summary,
       running: false,
+      createdAt: evt.firedAt,
       routineSessionId: evt.routineSessionId,
     });
   }, []);
@@ -101,6 +82,7 @@ export function useRoutineOverlay({
         title,
         summary: "",
         running: true,
+        createdAt: firedAt,
       });
     });
 
@@ -121,12 +103,14 @@ export function useRoutineOverlay({
         next.delete(evt.routineId);
         return next;
       });
+      const failedAt = new Date().toISOString();
       addFireRef.current?.({
         id: `${evt.routineId}-running`,
-        source: { kind: "routine", routineId: evt.routineId, firedAt: new Date().toISOString() },
+        source: { kind: "routine", routineId: evt.routineId, firedAt: failedAt },
         title: t("app.routineFailedTitle"),
         summary: t("app.routineFailedSummary", { error: evt.error }),
         running: false,
+        createdAt: failedAt,
       });
     });
 
@@ -176,34 +160,49 @@ export function useRoutineOverlay({
   // provenance, which rides the envelope already inside `pendingPrompt` and the send
   // mode (→ `plugin-emitted` / `app-emitted` trust origin in main).
   const handlePluginPrimaryAction = useCallback(
-    async (overlayItemId: string) => {
+    async (overlayItemId: string, chatGroupId: string) => {
       const item = overlayItemsRef.current.get(overlayItemId);
       if (!item) return;
 
       const { source, pendingPrompt, summary } = item;
       if (source.kind === "routine" || !pendingPrompt) return;
 
+      // Resolved from the card's ORIGIN, not from the tile that rendered it.
+      // The two agree whenever the origin conversation is open — that is how
+      // the card got there — but the tile can close between the paint and the
+      // click, and inserting into the caller's tile then would put a prompt
+      // staged for one conversation into another. A card with no origin is
+      // the focused tile's by definition, so the caller's group stands.
+      const targetGroupId = item.originSessionId === undefined
+        ? chatGroupId
+        : tileHoldingSession(registry.readTiles(), item.originSessionId)?.chatGroupId;
+      const tile = targetGroupId === undefined ? undefined : registry.read(targetGroupId);
+      if (!tile) {
+        console.warn("[lvis] overlay confirm dropped: origin conversation is no longer open");
+        return;
+      }
+
       // Clean up lookup ref
       overlayItemsRef.current.delete(overlayItemId);
 
       // Insert as imported_trigger entry — staged provenance preserved, NOT a plain
       // user bubble (architecture §9 plugin provenance contract; same rule for apps).
-      insertImportedTriggerEntry({
+      tile.insertImportedTriggerEntry({
         sessionId: source.eventId,
         source: source.kind === "plugin" ? `plugin:${source.pluginId}` : `app:${source.serverId}`,
         prompt: pendingPrompt,
         summary,
       });
 
-      // Start the main ConversationLoop turn (user-in-the-loop confirm →
-      // auto-process). Both modes skip the user-bubble append since the
-      // imported_trigger marker already represents the staged prompt.
-      void handleAskRef.current(
+      // Start THAT tile's turn (user-in-the-loop confirm → auto-process). Both
+      // modes skip the user-bubble append since the imported_trigger marker
+      // already represents the staged prompt.
+      void tile.ask(
         pendingPrompt,
         source.kind === "plugin" ? "trigger-import" : "app-message",
       );
     },
-    [insertImportedTriggerEntry, handleAskRef],
+    [registry],
   );
 
   const handleRoutineAcknowledge = useCallback(

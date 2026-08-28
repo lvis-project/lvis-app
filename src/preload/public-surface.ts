@@ -26,6 +26,29 @@ import type { StreamEvent } from "../lib/chat-stream-state.js";
  *
  * See docs/design/tiled-chat-groups.md.
  */
+/**
+ * Subscribe to a main->renderer push that carries a group label.
+ *
+ * Every group's frames arrive on the same channel, so a surface only forwards
+ * the ones addressed to ITS group. Dropping the check would put another tile's
+ * tokens in this tile's transcript, and another tile's provider swap in this
+ * tile's banner. An unlabelled frame is addressed to no group and reaches
+ * every surface.
+ */
+function subscribeForChatGroup<T>(
+  channel: string,
+  chatGroupId: string,
+  handler: (payload: T) => void,
+): () => void {
+  const listener = (_event: unknown, payload: T) => {
+    const frameGroup = (payload as { chatGroupId?: unknown }).chatGroupId;
+    if (typeof frameGroup === "string" && frameGroup !== chatGroupId) return;
+    handler(payload);
+  };
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 function buildSurfaceForChatGroup(chatGroupId: string) {
   return {
   // ─── Chat (ConversationLoop) ─────────────────────
@@ -207,23 +230,13 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
     ipcRenderer.invoke(CHANNELS.starred.add, entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke(CHANNELS.starred.remove, opts),
-  onChatStream: (handler: (event: StreamEvent) => void) => {
-    // Every group's frames arrive on the same channel, so a surface only
-    // forwards the ones addressed to ITS group. Dropping the check would put
-    // another tile's tokens in this tile's transcript.
-    const listener = (_event: unknown, payload: StreamEvent) => {
-      const frameGroup = (payload as { chatGroupId?: unknown }).chatGroupId;
-      if (typeof frameGroup === "string" && frameGroup !== chatGroupId) return;
-      handler(payload);
-    };
-    ipcRenderer.on(CHANNELS.chat.stream, listener);
-    return () => ipcRenderer.removeListener(CHANNELS.chat.stream, listener);
-  },
-  onChatFallback: (handler: (payload: { from: string; to: string }) => void) => {
-    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
-    ipcRenderer.on(CHANNELS.chat.fallback, listener);
-    return () => ipcRenderer.removeListener(CHANNELS.chat.fallback, listener);
-  },
+  onChatStream: (handler: (event: StreamEvent) => void) =>
+    subscribeForChatGroup<StreamEvent>(CHANNELS.chat.stream, chatGroupId, handler),
+  // The fallback rides the same labelled adapter as the stream, so it answers
+  // the same question: a provider swap happened in ONE conversation, and an
+  // unfiltered banner would announce it in every open tile at once.
+  onChatFallback: (handler: (payload: { from: string; to: string }) => void) =>
+    subscribeForChatGroup(CHANNELS.chat.fallback, chatGroupId, handler),
   listMarketplacePlugins: async () => ipcRenderer.invoke(CHANNELS.plugins.marketplaceList),
   listPluginCards: async () => ipcRenderer.invoke(CHANNELS.plugins.cards),
   // ─── Plugin Performance (Observability) ──────────

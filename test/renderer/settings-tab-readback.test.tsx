@@ -46,6 +46,7 @@ async function renderWithConsumer(embedder: Embedder) {
         {embedder === "content" ? (
           <SettingsContent
             api={api as never}
+            chatGroupId="main"
             onSaved={() => {}}
             initialTab={settingsTab}
             onTabChange={setSettingsTab}
@@ -53,6 +54,7 @@ async function renderWithConsumer(embedder: Embedder) {
         ) : (
           <SettingsInlineView
             api={api as never}
+            chatGroupId="main"
             onSaved={() => {}}
             initialTab={settingsTab}
             onTabChange={setSettingsTab}

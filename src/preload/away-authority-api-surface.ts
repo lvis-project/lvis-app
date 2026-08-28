@@ -54,12 +54,14 @@ export function buildAwayAuthorityApiSurface(): AwayAuthorityOwnerApi {
     },
 
     arm(input: {
+      chatGroupId: string;
       mode: AwayAuthorityMode;
       directories: readonly string[];
       duration: AwayAuthorityDurationPreset;
       budget: AwayAuthorityBudgetPreset;
     }): Promise<AwayAuthorityMutationResult> {
       return invokeMutation(CHANNELS.awayAuthority.arm, {
+        chatGroupId: input.chatGroupId,
         mode: input.mode,
         // Rebuilt rather than forwarded: the array crosses a context bridge and
         // main's shape guard demands exact keys, so a caller's exotic array

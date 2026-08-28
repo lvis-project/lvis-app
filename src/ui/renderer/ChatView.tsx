@@ -4,6 +4,7 @@ import { ChevronDown } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
+import type { OverlayCardPlacement } from "./components/chat-group-session-registry.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { type StatusBarProps } from "./components/StatusBar.js";
@@ -41,7 +42,6 @@ import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { sidePanelLayout, useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { SIDE_PANEL_MIN_RESERVE } from "../../shared/side-panel.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
-import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
 import { useMessageQueue } from "./hooks/use-message-queue.js";
 import { useAttachmentPicker } from "./hooks/use-attachment-picker.js";
@@ -107,8 +107,21 @@ export interface ChatViewProps {
   onCommandPopoverOpenChange: (open: boolean) => void;
   // Fork-based revert is replaced by the same-session checkpoint chain.
   // sessionId remains stable until the user explicitly branches from a checkpoint.
-  /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
-  onPluginPrimaryAction?: (overlayItemId: string) => void;
+  /**
+   * The tile this view renders inside — an overlay card is shown by exactly
+   * one of them.
+   */
+  chatGroupId: string;
+  /**
+   * Where an overlay card belongs, given the conversation it came from, and
+   * whether that conversation is still open.
+   */
+  overlayCardTile: (originSessionId: string | undefined) => OverlayCardPlacement;
+  /**
+   * Called when user confirms a plugin overlay item; id is the OverlayItem.id,
+   * and the group is the tile that showed the card.
+   */
+  onPluginPrimaryAction?: (overlayItemId: string, chatGroupId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   /** Toast surface rendered directly above the composer input. */
@@ -137,7 +150,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -166,14 +179,6 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   // (auto-scroll suppression) + transcript slicing, and written by
   // useCheckpointView (setViewMode).
   const [viewMode, setViewMode] = useState<ViewModeState | null>(null);
-
-  // User-approval memory-hit (#793) + permission review suggestion disclosure
-  // toasts — IPC subscriptions + auto-dismiss timers + enable action.
-  const {
-    userApprovalHitToast,
-    permissionReviewSuggestion,
-    handleEnablePermissionReviewSuggestion,
-  } = usePermissionToasts();
 
   // In view-mode, show only the sliced entries up to the checkpoint.
   const visibleEntries = useMemo(
@@ -664,6 +669,8 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
       <FloatingRightLane>
         {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
         <OverlayCardRegion
+          chatGroupId={chatGroupId}
+          overlayCardTile={overlayCardTile}
           onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
           onRoutineAcknowledge={onRoutineAcknowledge}
         />
@@ -680,74 +687,6 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           className="sticky top-0 z-30 mx-3 mt-2 rounded-md border border-[hsl(var(--action-branch)/0.4)] bg-[hsl(var(--action-branch)/0.1)] px-3 py-2 text-xs text-[hsl(var(--action-branch))]"
         >
           {forkToast}
-        </div>
-      )}
-      {/* User-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
-          Verdict-tier tint surfaces the trust gradient:
-          - low    → --success (informational, safe re-approval)
-          - medium → --warning (moderate risk)
-          - high   → --destructive + role="alert" (urgent — user is re-using a high-risk approval)
-          The disclosure surface must be visually distinguishable per tier.
-          Uses semantic theme tokens (--success / --warning / --destructive) so bundles
-          (tokyo-night / forest / etc.) supply the actual color — the toast adapts. */}
-      {userApprovalHitToast && (() => {
-        const verdict = userApprovalHitToast.verdictAtApproval;
-        const isHigh = verdict === "high";
-        const token =
-          verdict === "high" ? "destructive"
-          : verdict === "medium" ? "warning"
-          : "success";
-        const tone = `border-[hsl(var(--${token})/0.4)] bg-[hsl(var(--${token})/0.1)] text-[hsl(var(--${token}))]`;
-  return (
-          <div
-            data-testid="user-approval-hit-toast"
-            data-verdict={verdict}
-            role={isHigh ? "alert" : "status"}
-            aria-live={isHigh ? "assertive" : "polite"}
-            className={`sticky top-0 z-30 mx-3 mt-2 rounded-md border px-3 py-2 text-xs ${tone}`}
-          >
-            <span className="font-medium">{t("chatView.approvalMemoryApplied")}</span>
-            <span className="ml-2 text-muted-foreground">
-              {userApprovalHitToast.toolName} · {userApprovalHitToast.scope === "persistent" ? t("chatView.approvalScopePersistent") : t("chatView.approvalScopeSession")} · {verdict.toUpperCase()}
-            </span>
-          </div>
-        );
-      })()}
-      {permissionReviewSuggestion && (
-        <div
-          data-testid="permission-review-suggestion-toast"
-          role="status"
-          aria-live="polite"
-          className="sticky top-0 z-30 mx-3 mt-2 flex min-w-0 items-center gap-2 rounded-md border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.1)] px-3 py-2 text-xs text-[hsl(var(--warning))]"
-        >
-          <div className="min-w-0 flex-1">
-            <span className="font-medium">{t("chatView.permissionReviewSuggestionTitle")}</span>
-            <span className="ml-2 text-muted-foreground">
-              {permissionReviewSuggestion.reason === "allow-always"
-                ? t("chatView.permissionReviewSuggestionAllowAlways")
-                : t("chatView.permissionReviewSuggestionRepeat", {
-                    count: permissionReviewSuggestion.allowCount,
-                    minutes: Math.max(1, Math.round(permissionReviewSuggestion.windowMs / 60000)),
-                  })}
-            </span>
-            {permissionReviewSuggestion.error && (
-              <span className="ml-2 text-[hsl(var(--destructive))]">
-                {permissionReviewSuggestion.error}
-              </span>
-            )}
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 shrink-0 px-2 text-xs"
-            disabled={permissionReviewSuggestion.busy === true}
-            onClick={() => void handleEnablePermissionReviewSuggestion()}
-          >
-            {permissionReviewSuggestion.busy === true
-              ? t("chatView.permissionReviewSuggestionBusy")
-              : t("chatView.permissionReviewSuggestionAction")}
-          </Button>
         </div>
       )}
       {currentSessionKind === "routine" && (

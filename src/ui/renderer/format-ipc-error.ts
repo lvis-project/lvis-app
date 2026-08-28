@@ -322,6 +322,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "chat-group-limit-reached": "formatIpcError.chatGroupLimitReached",
   "chat-groups-unavailable": "formatIpcError.chatGroupsUnavailable",
   "chat-group-required": "formatIpcError.chatGroupRequired",
+  "session-id-required": "formatIpcError.sessionIdRequired",
   "preference-refresh-service-unavailable": "formatIpcError.preferenceRefreshServiceUnavailable",
   "production-disabled": "formatIpcError.productionDisabled",
   // ── Diagnostics bundle + log tail + crash list ──

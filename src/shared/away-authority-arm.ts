@@ -48,6 +48,8 @@ export type AwayAuthorityMode = (typeof AWAY_AUTHORITY_MODES)[number];
  */
 export const AWAY_AUTHORITY_MAX_DIRECTORIES = 16;
 const MAX_DIRECTORY_CHARS = 4096;
+/** Cross-boundary bound on the tile name, which main looks up and never parses. */
+const MAX_CHAT_GROUP_ID_CHARS = 128;
 
 const AWAY_AUTHORITY_ERROR_CODES = [
   "unauthorized",
@@ -62,6 +64,17 @@ type AwayAuthorityErrorCode = (typeof AWAY_AUTHORITY_ERROR_CODES)[number];
 
 export interface AwayAuthorityArmInputPayload {
   readonly intent: UserKeyboardIntent;
+  /**
+   * The TILE the owner is arming, not the conversation in it.
+   *
+   * The main area can hold several conversations at once, so "the open one" is
+   * no longer a fact main can resolve — it would arm whichever conversation the
+   * primary loop happened to hold, which is the wrong one for every other tile.
+   * A group id still cannot name a conversation the owner is not looking at:
+   * main reads what that tile holds AT EXECUTION, and refuses a group the
+   * window is not showing.
+   */
+  readonly chatGroupId: string;
   readonly mode: AwayAuthorityMode;
   readonly directories: readonly string[];
   readonly duration: AwayAuthorityDurationPreset;
@@ -111,11 +124,13 @@ export type AwayAuthorityStatusResult =
 /**
  * The only away-authority surface exposed to the trusted Electron renderer.
  * Both mutations carry a preload-minted live keyboard intent, and neither names
- * a conversation: main resolves the open one when the mutation runs.
+ * a conversation: arming names a TILE, and main reads what that tile is holding
+ * when the mutation runs.
  */
 export interface AwayAuthorityOwnerApi {
   status(): Promise<AwayAuthorityStatusResult>;
   arm(input: {
+    chatGroupId: string;
     mode: AwayAuthorityMode;
     directories: readonly string[];
     duration: AwayAuthorityDurationPreset;
@@ -169,8 +184,11 @@ function isDirectoryList(value: unknown): value is readonly string[] {
  */
 export function isAwayAuthorityArmInput(value: unknown): value is AwayAuthorityArmInputPayload {
   return record(value)
-    && exactKeys(value, ["budget", "directories", "duration", "intent", "mode"])
+    && exactKeys(value, ["budget", "chatGroupId", "directories", "duration", "intent", "mode"])
     && hasUserKeyboardIntent(value.intent)
+    && typeof value.chatGroupId === "string"
+    && value.chatGroupId.trim().length > 0
+    && value.chatGroupId.length <= MAX_CHAT_GROUP_ID_CHARS
     && isAwayAuthorityMode(value.mode)
     && isDirectoryList(value.directories)
     && isAwayAuthorityDurationPreset(value.duration)

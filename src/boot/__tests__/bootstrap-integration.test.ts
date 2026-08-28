@@ -629,6 +629,8 @@ describe("bootstrap() integration lock", () => {
         "clearAuthPartitionService",
         "conversationLoop",
         "feedbackStore",
+        "findChatGroupLoop",
+        "findLoopBySessionId",
         "forgetPluginAuthPartitionsService",
         "getApprovalSentenceSelector",
         "getPluginToolInvoker",

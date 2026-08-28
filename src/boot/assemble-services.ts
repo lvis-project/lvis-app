@@ -56,6 +56,8 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     // domain ends up unable to build any group but the primary.
     resolveChatGroupLoop: ctx.resolveChatGroupLoop,
     releaseChatGroupLoop: ctx.releaseChatGroupLoop,
+    findLoopBySessionId: ctx.findLoopBySessionId,
+    findChatGroupLoop: ctx.findChatGroupLoop,
     routineEngine: ctx.routineEngine,
     mcpManager: ctx.mcpManager,
     pluginLoopbackManager: ctx.pluginLoopbackManager,

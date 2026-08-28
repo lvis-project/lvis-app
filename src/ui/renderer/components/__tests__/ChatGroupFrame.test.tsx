@@ -100,6 +100,16 @@ describe("ChatGroupFrame", () => {
     expect(choice.isConnected).toBe(false);
   });
 
+  it("does not take focus back from the new tile after a direction is chosen", () => {
+    render(frame({ onSplit: vi.fn() }));
+    const trigger = screen.getByTestId("chat-group-split");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByTestId("chat-group-split-row"));
+    // The popover's close would normally return focus to its trigger — inside
+    // THIS tile, whose focus capture would then undo the new tile's focus.
+    expect(document.activeElement).not.toBe(trigger);
+  });
+
   it("says why when neither direction fits, instead of offering two dead buttons", () => {
     render(frame({ onSplit: vi.fn(), splitFits: () => false }));
     fireEvent.click(screen.getByTestId("chat-group-split"));

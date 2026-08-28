@@ -33,6 +33,8 @@ vi.mock("electron", () => ({
 
 
 const ACTIVE_SESSION = "session-live";
+/** A conversation open in a SECOND tile — not the primary loop's. */
+const TILE_SESSION = "session-second-tile";
 
 /** Every mutating conversation entry point — none of them may be reachable from here. */
 const loopSpies = {
@@ -49,6 +51,13 @@ function makeDeps() {
     getMainWindow: () => null,
     mcpAppModelContext,
     conversationLoop: { getSessionId: () => ACTIVE_SESSION, ...loopSpies },
+    // Two conversations are open. The handler asks which loop HOLDS the card's
+    // session, so a card belonging to the second tile is as live as one
+    // belonging to the primary.
+    findLoopBySessionId: (sessionId: string) =>
+      sessionId === ACTIVE_SESSION || sessionId === TILE_SESSION
+        ? { getSessionId: () => sessionId, ...loopSpies }
+        : undefined,
     pluginRuntime: { on: vi.fn(), listPluginCards: () => [], getMethodOwner: () => undefined },
     pluginMarketplace: { list: async () => [], getFetcher: () => ({}) },
     settingsService: { get: () => ({}), getSettings: () => ({}) },
@@ -108,11 +117,21 @@ describe("lvis:mcp:ui-model-context", () => {
     expect(mcpAppModelContext.size()).toBe(1);
   });
 
-  it("DROPS a card whose session is no longer the live conversation", async () => {
+  it("DROPS a card whose session no open conversation holds", async () => {
     const result = await invoke(hostFrameEvent(), "github", "session-the-user-left", "card-1", params);
 
     expect(result).toMatchObject({ ok: false, error: "session-mismatch" });
     expect(mcpAppModelContext.size()).toBe(0);
+  });
+
+  it("stores an update from a card whose conversation lives in another tile", async () => {
+    const result = await invoke(hostFrameEvent(), "github", TILE_SESSION, "card-1", params);
+
+    expect(result).toEqual({ ok: true, disposition: "stored" });
+    // Slotted under the card's OWN session, so the tile holding it is the one
+    // whose next prompt reads it.
+    expect(mcpAppModelContext.buildSection(TILE_SESSION)).toContain("cart: 3 items");
+    expect(mcpAppModelContext.buildSection(ACTIVE_SESSION)).not.toContain("cart: 3 items");
   });
 
   it("refuses an over-cap body without disturbing what the card already stored", async () => {

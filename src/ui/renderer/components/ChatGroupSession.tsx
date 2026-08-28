@@ -7,6 +7,7 @@ import {
   tileDrawsSession,
   useRegisterChatGroupSession,
   type ChatGroupSessionRegistry,
+  type OverlayCardPlacement,
 } from "./chat-group-session-registry.js";
 import { useChatState } from "../hooks/use-chat-state.js";
 import { useChatStatusIndicators } from "../hooks/use-chat-status-indicators.js";
@@ -14,7 +15,7 @@ import { useContextBudget } from "../hooks/use-context-budget.js";
 import { useCostEstimate } from "../hooks/use-cost-estimate.js";
 import { useCurrentSession } from "../hooks/use-sessions.js";
 import { MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
-import { useSendMessage } from "../hooks/use-send-message.js";
+import { useSendMessage, type HandleAskRefFn } from "../hooks/use-send-message.js";
 import type { useStatusBar } from "../hooks/use-status-bar.js";
 import { useWorkflowTools } from "../hooks/use-workflow-tools.js";
 import { buildChatGroupActions } from "./ChatGroupFrame.js";
@@ -29,7 +30,6 @@ import type { McpPromptEntry } from "./slash-picker-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 
 /**
  * Everything a tile needs that is NOT its own conversation.
@@ -113,7 +113,12 @@ export interface ChatGroupEnvironment {
   commandActions: React.ComponentProps<typeof ChatView>["commandActions"];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: Dispatch<SetStateAction<boolean>>;
-  onPluginPrimaryAction: (id: string) => void;
+  /**
+   * Which tile shows an overlay card, given the conversation it came from —
+   * the window's answer, since only it sees every tile.
+   */
+  overlayCardTile: (originSessionId: string | undefined) => OverlayCardPlacement;
+  onPluginPrimaryAction: (id: string, chatGroupId: string) => void;
   onRoutineAcknowledge: React.ComponentProps<typeof ChatView>["onRoutineAcknowledge"];
   approvalSentenceInterceptSubmit: React.ComponentProps<typeof ChatView>["approvalSentenceInterceptSubmit"];
 
@@ -236,13 +241,7 @@ export function ChatGroupSession({
   // it each render and this tile's MCP-prompt path reads it. Keeping it per
   // tile is what stops an unfocused tile's prompt from starting a turn in the
   // focused tile's conversation.
-  const handleAskRef = useRef<(
-    q: string,
-    mode?: "default" | "trigger-import" | "app-message" | "mcp-prompt",
-    userIntent?: UserKeyboardIntentSnapshot,
-  ) => Promise<void>>(
-    async () => { /* populated below */ },
-  );
+  const handleAskRef = useRef<HandleAskRefFn>(async () => { /* populated below */ });
 
   const {
     currentSessionId, currentSessionKind, currentSessionTitle, currentSessionProject,
@@ -606,6 +605,8 @@ export function ChatGroupSession({
         commandActions={env.commandActions}
         commandPopoverOpen={env.commandPopoverOpen}
         onCommandPopoverOpenChange={env.onCommandPopoverOpenChange}
+        chatGroupId={chatGroupId}
+        overlayCardTile={env.overlayCardTile}
         onPluginPrimaryAction={env.onPluginPrimaryAction}
         onRoutineAcknowledge={env.onRoutineAcknowledge}
         statusBar={env.statusBar}
