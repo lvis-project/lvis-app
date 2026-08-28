@@ -1444,6 +1444,7 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.chatGroupLimitReached": "Es können keine weiteren Chat-Kacheln geöffnet werden.",
   "formatIpcError.chatGroupsUnavailable": "Chat-Kacheln sind in diesem Fenster nicht verfügbar.",
   "formatIpcError.chatGroupRequired": "Diese Anfrage hat nicht angegeben, für welche Chat-Kachel sie bestimmt ist.",
+  "formatIpcError.sessionIdRequired": "Diese Anfrage hat nicht angegeben, für welche Unterhaltung sie bestimmt ist.",
   "formatIpcError.unauthorizedFrame": "Anfrage von einem nicht vertrauenswürdigen Frame. Bitte aktualisieren Sie das Fenster oder starten Sie die App neu.",
   "formatIpcError.uninstallFailed": "Das Entfernen des Plugins ist fehlgeschlagen.",
   "formatIpcError.acpSubscriptionProviderNotSupported": "Dieser Abonnementanbieter wird nicht unterstützt.",

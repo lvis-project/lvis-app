@@ -1461,6 +1461,7 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.chatGroupLimitReached": "これ以上チャットタイルを開けません。",
   "formatIpcError.chatGroupsUnavailable": "このウィンドウではチャットタイルを使用できません。",
   "formatIpcError.chatGroupRequired": "このリクエストはどのチャットタイルに対するものか指定していません。",
+  "formatIpcError.sessionIdRequired": "このリクエストはどの会話に対するものか指定していません。",
   "formatIpcError.unauthorizedFrame": "信頼されていないフレームからのリクエスト。ウィンドウを更新するか、アプリを再起動してください。",
   "formatIpcError.uninstallFailed": "プラグインの削除に失敗しました。",
   "formatIpcError.acpSubscriptionProviderNotSupported": "このサブスクリプションプロバイダーはサポートされていません。",

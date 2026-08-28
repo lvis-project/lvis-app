@@ -65,19 +65,30 @@ describe("session-todo IPC", () => {
     expect(store.clear).toHaveBeenCalledWith("tile-2-session");
   });
 
+  // A refusal in the channel's own shape, not a throw: the panel's read is
+  // fire-and-forget, so a rejected promise would surface as an unhandled
+  // rejection rather than as an answer.
   it.each([
-    ["list", CHANNELS.sessionTodo.list],
-    ["clear", CHANNELS.sessionTodo.clear],
-  ])("%s rejects a call that names no session instead of resolving one", async (_name, channel) => {
+    ["nothing at all", undefined],
+    ["whitespace", "   "],
+  ])("refuses a list that names no session (%s) instead of resolving one", async (_name, argument) => {
     const { store, getSessionId } = await setup();
 
-    // `ipcMain.handle` turns a thrown handler into a rejected renderer promise;
-    // the helper calls the handler directly, so the throw is seen here.
-    expect(() => invokeFileIpcHandler(handlers, channel)).toThrow("session-id-required");
-    expect(() => invokeFileIpcHandler(handlers, channel, "   ")).toThrow("session-id-required");
-
+    await expect(invokeFileIpcHandler(handlers, CHANNELS.sessionTodo.list, argument))
+      .resolves.toEqual([]);
     expect(getSessionId).not.toHaveBeenCalled();
     expect(store.list).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["nothing at all", undefined],
+    ["whitespace", "   "],
+  ])("refuses a clear that names no session (%s) instead of resolving one", async (_name, argument) => {
+    const { store, getSessionId } = await setup();
+
+    await expect(invokeFileIpcHandler(handlers, CHANNELS.sessionTodo.clear, argument))
+      .resolves.toEqual({ ok: false, error: "session-id-required" });
+    expect(getSessionId).not.toHaveBeenCalled();
     expect(store.clear).not.toHaveBeenCalled();
   });
 });

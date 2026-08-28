@@ -1461,6 +1461,7 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.chatGroupLimitReached": "无法再打开更多聊天分块。",
   "formatIpcError.chatGroupsUnavailable": "此窗口不支持聊天分块。",
   "formatIpcError.chatGroupRequired": "此请求未指明属于哪个聊天分块。",
+  "formatIpcError.sessionIdRequired": "此请求未指明属于哪个对话。",
   "formatIpcError.unauthorizedFrame": "来自不受信任的框架的请求。请刷新窗口或重新启动应用程序。",
   "formatIpcError.uninstallFailed": "插件删除失败。",
   "formatIpcError.acpSubscriptionProviderNotSupported": "不支持此订阅提供商。",

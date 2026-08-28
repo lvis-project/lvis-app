@@ -1447,6 +1447,7 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.chatGroupLimitReached": "Impossible d’ouvrir d’autres tuiles de discussion.",
   "formatIpcError.chatGroupsUnavailable": "Les tuiles de discussion ne sont pas disponibles dans cette fenêtre.",
   "formatIpcError.chatGroupRequired": "Cette requête n’a pas précisé à quelle tuile de discussion elle s’adressait.",
+  "formatIpcError.sessionIdRequired": "Cette requête n’a pas précisé à quelle conversation elle s’adressait.",
   "formatIpcError.unauthorizedFrame": "Demande provenant d'un cadre non fiable. Veuillez actualiser la fenêtre ou redémarrer l'application.",
   "formatIpcError.uninstallFailed": "La suppression du plugin a échoué.",
   "formatIpcError.acpSubscriptionProviderNotSupported": "Ce fournisseur d’abonnement n’est pas pris en charge.",

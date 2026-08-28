@@ -1458,6 +1458,7 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.chatGroupLimitReached": "No se pueden abrir más mosaicos de chat.",
   "formatIpcError.chatGroupsUnavailable": "Los mosaicos de chat no están disponibles en esta ventana.",
   "formatIpcError.chatGroupRequired": "Esta solicitud no indicó a qué mosaico de chat corresponde.",
+  "formatIpcError.sessionIdRequired": "Esta solicitud no indicó a qué conversación corresponde.",
   "formatIpcError.unauthorizedFrame": "Solicitud desde un marco que no es de confianza. Actualice la ventana o reinicie la aplicación.",
   "formatIpcError.uninstallFailed": "Error al eliminar el complemento.",
   "formatIpcError.acpSubscriptionProviderNotSupported": "Este proveedor de suscripción no es compatible.",
