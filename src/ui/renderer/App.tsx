@@ -15,6 +15,7 @@ import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
 import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession } from "./components/chat-group-session-registry.js";
+import { leafIds } from "./components/chat-group-tree.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
 // each (each renders nothing while no card occupies its slot).
@@ -276,11 +277,21 @@ export function App() {
 
   // A conversation open in another tile is brought forward, not loaded a
   // second time — see `tileHoldingSession`.
+  // Read through refs so the callback is stable: it sits in the environment
+  // every tile receives, and a fresh identity per render would re-render every
+  // tile on every stream delta.
+  const chatGroupsRef = useRef(chatGroups);
+  chatGroupsRef.current = chatGroups;
+  const { focus: focusGroup } = chatGroups;
   const focusChatGroup = useCallback((chatGroupId: string): boolean => {
-    if (chatGroupId === chatGroups.focusedId) return false;
-    chatGroups.focus(chatGroupId);
+    const { tree, focusedId } = chatGroupsRef.current;
+    // The host can name a tile that is already closed (its release is still
+    // in flight); focusing an id the tree does not hold would put the window
+    // on a tile that exists nowhere.
+    if (chatGroupId === focusedId || !leafIds(tree).includes(chatGroupId)) return false;
+    focusGroup(chatGroupId);
     return true;
-  }, [chatGroups]);
+  }, [focusGroup]);
   const focusTileHolding = useCallback((sessionId: string): boolean => {
     const holder = tileHoldingSession(tileSessions, sessionId);
     return holder !== undefined && focusChatGroup(holder.chatGroupId);

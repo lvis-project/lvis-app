@@ -4,6 +4,7 @@ import type { TileSession } from "../components/chat-group-session-registry.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 import { historyToEntries } from "../utils/history.js";
+import { projectRootEquals } from "../../../shared/project-identity.js";
 
 export interface SessionSummary {
   id: string;
@@ -152,23 +153,15 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
     ) => {
       // A loop already on an empty main session is the fresh state — unless
       // the conversation has to be created under a project, which only
-      // chatNew records. A loop that already holds a conversation is left
-      // holding it; this is the tile's start, not a reset.
-      if (!resumeWindowActiveSession && current.messages.length > 0) {
-        setCurrentSessionId(current.sessionId);
-        setCurrentSessionKind(current.sessionKind ?? "main");
-        setCurrentSessionTitle(current.sessionTitle);
-        setCurrentSessionProject(sessionProjectFromHistory(current));
-        restoreSubAgents?.(current.restoredSubAgents ?? []);
-        applyInitialSession?.(historyToEntries(current.messages));
-        return;
-      }
-      const alreadyUnderProject = !project || sessionProjectFromHistory(current).projectRoot === project.projectRoot;
+      // chatNew records.
+      const alreadyUnderProject = !project
+        || projectRootEquals(sessionProjectFromHistory(current).projectRoot, project.projectRoot);
       if (alreadyUnderProject && (current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
         setCurrentSessionId(current.sessionId);
         setCurrentSessionKind("main");
         setCurrentSessionTitle(undefined);
         setCurrentSessionProject(sessionProjectFromHistory(current));
+        restoreSubAgents?.([]);
         applyInitialSession?.([]);
         return;
       }
@@ -192,6 +185,21 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       // Hydration is also the window's first chance to fill its list.
       await onSessionsChanged?.();
       if (token !== sessionReadTokenRef.current) return;
+      // A loop that already holds a conversation is the authority for what its
+      // tile shows. This is a mount, not a reset: a tile folded away by chat
+      // mode and brought back, or a holder brought forward for the conversation
+      // it holds, must show that conversation — the window's main-active
+      // pointer may name another one (it never names a routine session).
+      // Nothing here touches the persisted main-active state.
+      if (h.messages.length > 0) {
+        setCurrentSessionId(h.sessionId);
+        setCurrentSessionKind(h.sessionKind ?? "main");
+        setCurrentSessionTitle(h.sessionTitle);
+        setCurrentSessionProject(sessionProjectFromHistory(h));
+        restoreSubAgents?.(h.restoredSubAgents ?? []);
+        applyInitialSession?.(historyToEntries(h.messages));
+        return;
+      }
       if (!resumeWindowActiveSession) {
         await applyFreshMain(h, freshProjectRef.current);
         return;
@@ -200,20 +208,6 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       if (token !== sessionReadTokenRef.current) return;
       if (!activeState || activeState.mainActiveMode === "fresh" || !activeState.mainActiveSessionId) {
         await applyFreshMain(h);
-        return;
-      }
-
-      if ((h.sessionKind ?? "main") === "main" && h.sessionId === activeState.mainActiveSessionId && h.messages.length > 0) {
-        setCurrentSessionId(h.sessionId);
-        setCurrentSessionKind("main");
-        setCurrentSessionTitle(h.sessionTitle);
-        setCurrentSessionProject(sessionProjectFromHistory(h));
-        // The renderer state contract is: active in-memory stream entries and
-        // persisted session replay both enter ChatView as ChatEntry[]. Hydrate
-        // only the exact active main session so routine re-entry never replaces
-        // the persisted main active state.
-        restoreSubAgents?.(h.restoredSubAgents ?? []);
-        applyInitialSession?.(historyToEntries(h.messages));
         return;
       }
       const resumed = await api.chatSessionResume(activeState.mainActiveSessionId);

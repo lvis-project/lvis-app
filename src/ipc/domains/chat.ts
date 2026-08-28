@@ -1120,17 +1120,19 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     const group = groupOf(chatGroupId);
     const conversationLoop = group.loop;
+    // The loop refuses this on its own (ConversationLoopDeps.sessionHeldElsewhere);
+    // naming the holder is what lets the renderer bring that tile forward —
+    // it may be folded away by chat mode and unknown to the renderer's tiles.
+    // Answered before this group's lease: bringing another tile forward
+    // touches nothing here, so this group's own turn must not hide the holder.
+    const holder = groupHolding(sessionId);
+    if (holder && holder !== group) {
+      return {
+        ok: false, compacted: false, compactedAt: null, removedMessageCount: 0,
+        error: SESSION_OPEN_IN_OTHER_GROUP, holderChatGroupId: chatGroupIdOf(holder),
+      };
+    }
     const mutation = group.turns.trackSessionMutation(async () => {
-      // The loop refuses this on its own (ConversationLoopDeps.sessionHeldElsewhere);
-      // naming the holder is what lets the renderer bring that tile forward —
-      // it may be folded away by chat mode and unknown to the renderer's tiles.
-      const holder = groupHolding(sessionId);
-      if (holder && holder !== group) {
-        return {
-          ok: false, compacted: false, compactedAt: null, removedMessageCount: 0,
-          error: SESSION_OPEN_IN_OTHER_GROUP, holderChatGroupId: chatGroupIdOf(holder),
-        };
-      }
       const result = conversationLoop.resetAndResume(sessionId);
       if (result.ok && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {

@@ -205,6 +205,23 @@ describe("lvis:chat:* with chat groups", () => {
     expect(second.resetAndResume).toHaveBeenCalledWith("session-archived");
   });
 
+  it("names the holder even while the asking tile is busy — bringing another tile forward touches nothing here", async () => {
+    const { invoke, groups } = await registerWithGroups();
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    const second = groups.get("group-2")!;
+
+    // The first resume holds group-2's session-mutation lease until it settles;
+    // the two calls below are issued while it is still held.
+    const first = invoke(CHANNELS.chat.sessionResume, "session-archived", "group-2");
+    const refused = invoke(CHANNELS.chat.sessionResume, "session-of-main", "group-2");
+    const busy = invoke(CHANNELS.chat.sessionResume, "session-older", "group-2");
+    await expect(refused).resolves.toMatchObject({ ok: false, error: "session-open-in-other-group", holderChatGroupId: MAIN_CHAT_GROUP_ID });
+    // A conversation nobody holds is what the lease refuses.
+    await expect(busy).resolves.toMatchObject({ ok: false, error: "streaming-active" });
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(second.resetAndResume).toHaveBeenCalledTimes(1);
+  });
+
   it("only the primary tile's resume becomes the window's main-active conversation", async () => {
     const { invoke, memoryManager } = await registerWithGroups();
     invoke(CHANNELS.chat.hasProvider, "group-2");

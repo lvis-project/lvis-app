@@ -134,6 +134,20 @@ describe("useCurrentSession — what a tile holds on mount", () => {
     expect(api.chatSessionResume).toHaveBeenCalledWith("main-active");
   });
 
+  it("the primary tile keeps the conversation its loop holds even when the window's main-active pointer names another", async () => {
+    // A routine session is never the main-active pointer; a folded primary
+    // brought forward for it must show it, not the pointer's session.
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "routine-held", sessionKind: "routine", messages: [{ role: "user", content: "held" }] },
+      historyBySession: { "main-active": { messages: [{ role: "user", content: "hi" }] } },
+    });
+    const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("routine-held"));
+    expect(result.current.currentSessionKind).toBe("routine");
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+  });
+
   it("a tile under a project creates its fresh conversation there, so the sidebar files it with the project", async () => {
     const { api } = makeMockLvisApi({
       mainActiveState: resumeState,
