@@ -27,22 +27,44 @@ export async function submitChatMessage(
   });
 }
 
+/** One open tile: its chat-group id and the element its content renders in. */
+export interface RenderedTile {
+  chatGroupId: string;
+  /** The tile's cell — everything that tile renders is inside it. */
+  element: HTMLElement;
+}
+
 /**
- * Halve the window into a second tile and hand back both frames.
+ * Halve the window into a second tile and hand back both, in layout order.
  *
  * The split control lives in each tile's header, so this drives the same
  * gesture a user would. Tests that need two CONVERSATIONS want this: the mock
- * api gives every non-primary group its own session id.
+ * api gives every non-primary group its own session id. Focus follows a split,
+ * so the SECOND tile is the focused one on return.
  */
-export async function splitIntoTwoTiles(container: HTMLElement): Promise<HTMLElement[]> {
+export async function splitIntoTwoTiles(container: HTMLElement): Promise<RenderedTile[]> {
   const split = container.querySelector<HTMLButtonElement>('[data-testid="chat-group-split"]');
   if (!split) throw new Error("no chat-group split control");
   await act(async () => {
     fireEvent.click(split);
   });
-  const tiles = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="chat-group"]'));
+  const prefix = "chat-group-cell:";
+  const tiles = Array.from(container.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`))
+    .map((element) => ({
+      chatGroupId: element.getAttribute("data-testid")!.slice(prefix.length),
+      element,
+    }));
   if (tiles.length !== 2) throw new Error(`expected 2 tiles, got ${tiles.length}`);
   return tiles;
+}
+
+/** Move focus to a tile the way clicking into it does. */
+export async function focusTile(tile: RenderedTile): Promise<void> {
+  const frame = tile.element.querySelector<HTMLElement>('[data-testid="chat-group"]');
+  if (!frame) throw new Error(`tile ${tile.chatGroupId} has no frame`);
+  await act(async () => {
+    fireEvent.mouseDown(frame);
+  });
 }
 
 export function deferred<T>() {

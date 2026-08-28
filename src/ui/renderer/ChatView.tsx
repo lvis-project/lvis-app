@@ -106,8 +106,18 @@ export interface ChatViewProps {
   onCommandPopoverOpenChange: (open: boolean) => void;
   // Fork-based revert is replaced by the same-session checkpoint chain.
   // sessionId remains stable until the user explicitly branches from a checkpoint.
-  /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
-  onPluginPrimaryAction?: (overlayItemId: string) => void;
+  /**
+   * The tile this view renders inside — an overlay card is shown by exactly
+   * one of them.
+   */
+  chatGroupId: string;
+  /** Which tile an overlay card belongs in, given the conversation it came from. */
+  overlayCardTile: (originSessionId: string | undefined) => string;
+  /**
+   * Called when user confirms a plugin overlay item; id is the OverlayItem.id,
+   * and the group is the tile that showed the card.
+   */
+  onPluginPrimaryAction?: (overlayItemId: string, chatGroupId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   /** Toast surface rendered directly above the composer input. */
@@ -136,7 +146,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -655,6 +665,8 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
       <FloatingRightLane>
         {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
         <OverlayCardRegion
+          chatGroupId={chatGroupId}
+          overlayCardTile={overlayCardTile}
           onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
           onRoutineAcknowledge={onRoutineAcknowledge}
         />

@@ -9,6 +9,7 @@ import {
   useTileSessions,
   type ChatGroupSessionHandle,
   tileHoldingSession,
+  overlayCardTile,
 } from "../chat-group-session-registry.js";
 
 // `entries` identity is the store's change signal — useChatState owns it as
@@ -185,5 +186,30 @@ describe("tileHoldingSession", () => {
     ];
     expect(tileHoldingSession(tiles, "s-2")?.chatGroupId).toBe("group-2");
     expect(tileHoldingSession(tiles, "s-9")).toBeUndefined();
+  });
+});
+
+describe("overlayCardTile", () => {
+  const tiles = [
+    { chatGroupId: "main", sessionId: "s-1", streaming: false },
+    { chatGroupId: "group-2", sessionId: "s-2", streaming: false },
+  ];
+
+  it("sends a card to the tile holding the conversation it came from", () => {
+    // Not the focused tile: the card's action continues the conversation it
+    // was raised in, which may be sitting unfocused beside it.
+    expect(overlayCardTile(tiles, "main", "s-2")).toBe("group-2");
+  });
+
+  it("sends a card with no conversation behind it to the focused tile", () => {
+    expect(overlayCardTile(tiles, "group-2", undefined)).toBe("group-2");
+    expect(overlayCardTile(tiles, "main", undefined)).toBe("main");
+  });
+
+  it("falls to the focused tile when the origin conversation is open nowhere", () => {
+    // The conversation was closed or replaced while the card waited. Showing
+    // the card nowhere would strand it; showing it in every tile is what this
+    // whole function exists to prevent.
+    expect(overlayCardTile(tiles, "group-2", "s-gone")).toBe("group-2");
   });
 });

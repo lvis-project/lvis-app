@@ -14,7 +14,7 @@ import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
-import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession } from "./components/chat-group-session-registry.js";
+import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession, overlayCardTile } from "./components/chat-group-session-registry.js";
 import { leafIds } from "./components/chat-group-tree.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
@@ -79,7 +79,6 @@ import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
-import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 import { toViewLocation, viewLocationBreadcrumb, type ViewLocation } from "./utils/view-location.js";
 import { useViewHistory } from "./hooks/use-view-history.js";
@@ -236,16 +235,6 @@ export function App() {
 
   const focusedSession = useChatGroupSession(chatGroupSessions, chatGroups.focusedId);
   const tileSessions = useTileSessions(chatGroupSessions);
-  // use-routine-overlay wants a REF it can read at fire time. The focused tile
-  // can change between mount and fire, so the ref is re-pointed each render
-  // rather than captured — otherwise a routine would start its turn in
-  // whichever tile happened to be focused when the overlay mounted.
-  const focusedAskRef = useRef<(
-    q: string,
-    mode?: "default" | "trigger-import" | "app-message" | "mcp-prompt",
-    userIntent?: UserKeyboardIntentSnapshot,
-  ) => Promise<void>>(async () => {});
-  focusedAskRef.current = focusedSession.ask;
   const { entries, streaming, currentSessionId, currentSessionProject, fallbackToast } = focusedSession;
 
   // Search is window chrome (the panel is an overlay over everything), reading
@@ -293,6 +282,14 @@ export function App() {
     focusGroup(chatGroupId);
     return true;
   }, [focusGroup]);
+  // Which tile shows an overlay card. Only the window can answer it: it needs
+  // every tile's conversation and which one is focused.
+  const overlayCardTileForWindow = useCallback(
+    (originSessionId: string | undefined): string =>
+      overlayCardTile(tileSessions, chatGroups.focusedId, originSessionId),
+    [tileSessions, chatGroups.focusedId],
+  );
+
   const focusTileHolding = useCallback((sessionId: string): boolean => {
     const holder = tileHoldingSession(tileSessions, sessionId);
     return holder !== undefined && focusChatGroup(holder.chatGroupId);
@@ -441,13 +438,7 @@ export function App() {
     runningRoutines,
     handlePluginPrimaryAction,
     handleRoutineAcknowledge,
-  } = useRoutineOverlay({
-    api, t,
-    // Both reach the FOCUSED tile: a routine firing has a conversation to say
-    // something to, and the one it means is the tile the user is looking at.
-    insertImportedTriggerEntry: (input) => focusedSession.insertImportedTriggerEntry(input),
-    handleAskRef: focusedAskRef,
-  });
+  } = useRoutineOverlay({ api, t, registry: chatGroupSessions });
 
   // Marketplace + plugin UI extensions
   const {
@@ -1118,7 +1109,11 @@ export function App() {
     appMode,
     onOpenApprovalQueue: () => setDeferredQueueOpen(true),
     commandActions, commandPopoverOpen, onCommandPopoverOpenChange: setCommandPopoverOpen,
-    onPluginPrimaryAction: (id: string) => { void handlePluginPrimaryAction(id); },
+    // The window answers where a card goes, because only it sees every tile.
+    overlayCardTile: overlayCardTileForWindow,
+    onPluginPrimaryAction: (id: string, chatGroupId: string) => {
+      void handlePluginPrimaryAction(id, chatGroupId);
+    },
     onRoutineAcknowledge: handleRoutineAcknowledge,
     approvalSentenceInterceptSubmit: interceptApprovalSentence,
     activeProject: activeProject ?? defaultWorkspaceProject,
@@ -1141,7 +1136,8 @@ export function App() {
     searchHighlight, searchChangeQuery, searchToggleCase, searchNext, searchPrev,
     searchCloseOverlay, searchToggleOverlay,
     handleExport, handleImport, pluginEntries, handleViewSelectWithDoctor, appMode,
-    commandActions, commandPopoverOpen, handlePluginPrimaryAction, handleRoutineAcknowledge,
+    commandActions, commandPopoverOpen, overlayCardTileForWindow,
+    handlePluginPrimaryAction, handleRoutineAcknowledge,
     interceptApprovalSentence, activeProject, defaultWorkspaceProject, workspaceProjects,
     onNewChatForProject, refreshWorkspaceProjects, handleProjectError,
   ]);

@@ -6,6 +6,8 @@
 // Active item is resolved from OverlayContext queue. App.tsx also maintains an
 // overlayItemsRef Map for items that persist after dismiss.
 //
+// One card renders in ONE tile — see `overlayCardTile`.
+//
 // Two source variants:
 
 //     — only shown when routineSessionId is present (notification-only routines hide the button)
@@ -17,21 +19,34 @@ import { useTranslation } from "../../../i18n/react.js";
 import { FLOATING_LANE_ITEM_WIDTH } from "./FloatingRightLane.js";
 
 export interface OverlayCardRegionProps {
+  /** The tile this region renders inside. */
+  chatGroupId: string;
   /**
-   * Called when the user confirms a plugin overlay item.
-   * Receives the overlay item id; App.tsx resolves it to the full item
-   * via OverlayContext and inserts pendingPrompt into main chat.
+   * Which tile a card belongs in, given the conversation it came from. The
+   * window answers it, because only the window can see every tile.
    */
-  onPluginPrimaryAction: (overlayItemId: string) => void;
+  overlayCardTile: (originSessionId: string | undefined) => string;
+  /**
+   * Called when the user confirms a plugin overlay item, with the tile that
+   * showed the card — the conversation the staged prompt is inserted into and
+   * the turn is started in.
+   */
+  onPluginPrimaryAction: (overlayItemId: string, chatGroupId: string) => void;
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
 }
 
-export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge }: OverlayCardRegionProps) {
+export function OverlayCardRegion({
+  chatGroupId, overlayCardTile, onPluginPrimaryAction, onRoutineAcknowledge,
+}: OverlayCardRegionProps) {
   const { t } = useTranslation();
   const { active, queueIndex, queueTotal, prev, next, dismiss, openSession } =
     useOverlayContext();
 
   if (!active) return null;
+  // The queue is the window's; the card is one tile's. Every tile mounts a
+  // region and all but one of them stands down, so a dismiss or a confirm
+  // happens once no matter how many conversations are open.
+  if (overlayCardTile(active.originSessionId) !== chatGroupId) return null;
 
   if (active.source.kind === "routine") {
     const { routineId, firedAt } = active.source;
@@ -104,7 +119,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
             onPrimaryAction={() => {
               // Dismiss from queue first, then notify App for chat insert
               dismiss(active.id);
-              onPluginPrimaryAction(active.id);
+              onPluginPrimaryAction(active.id, chatGroupId);
             }}
             primaryActionLabel={active.primaryActionLabel ?? t("overlayCardRegion.confirm")}
             kind={kind}

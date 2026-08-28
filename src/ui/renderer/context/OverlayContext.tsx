@@ -54,6 +54,18 @@ export interface OverlayItem {
    * relativeTime display for plugin-source items (which lack a firedAt on source).
    */
   createdAt?: string;
+  /**
+   * The conversation this card CAME FROM, when main knew one.
+   *
+   * An MCP app card is raised by a card mounted in a specific conversation, so
+   * it belongs to whichever tile is holding that conversation. A routine fires
+   * on a schedule and a plugin trigger fires on an event — neither has a
+   * conversation behind it, and both leave this absent, which is what makes
+   * them the focused tile's to show.
+   *
+   * NOT `source.eventId`: that identifies the plugin EVENT, not a session.
+   */
+  originSessionId?: string;
 }
 
 export interface OverlayContextValue {

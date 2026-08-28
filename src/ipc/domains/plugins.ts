@@ -1592,6 +1592,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const overlayItem = {
       id: `app:${serverId}:${eventId}`,
       source: { kind: "app" as const, serverId, eventId },
+      // The card was raised INSIDE this conversation, so the tile holding it is
+      // the one that shows the card and the one the confirm click starts a turn
+      // in. Without this the window would guess, and every tile would show a
+      // copy of a card only one of them can act on.
+      originSessionId: cardSessionId,
       title: serverId,
       summary: deriveOverlaySummaryForDisplay({ prompt: intent.text }),
       running: false,

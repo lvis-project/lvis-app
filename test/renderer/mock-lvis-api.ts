@@ -377,6 +377,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       };
     }),
     chatSessionResume: vi.fn(async (id: string) => ({ ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 })),
+    // Reached whenever a tile that is NOT focused takes stream activity — the
+    // window marks that conversation unread. A window with two tiles hits it
+    // in the ordinary course of a test.
+    chatSessionUpdate: vi.fn(async () => ({ ok: true as const })),
     chatCompact: vi.fn(async () => ({ compacted: false, compactedAt: null, summary: "불필요", removedMessageCount: 0 })),
     chatMainActiveState: vi.fn(async () => mainActiveState),
     chatGetHistory: vi.fn(async () => history),

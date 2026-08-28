@@ -130,6 +130,28 @@ export function tileHoldingSession(
 }
 
 /**
+ * The ONE tile an overlay card belongs in.
+ *
+ * A card is a single thing the user acts on once, so it has to render in
+ * exactly one tile: rendering it in all of them gives the user N copies of
+ * which only the one they happen to click in does anything, and dismissing
+ * one leaves the rest behind.
+ *
+ * A card that names the conversation it came from goes to the tile holding
+ * that conversation, because its action continues THAT conversation. A card
+ * with no conversation behind it — a routine fire, a plugin event — goes to
+ * the focused tile, which is the conversation the user is looking at.
+ */
+export function overlayCardTile(
+  tiles: readonly TileSession[],
+  focusedChatGroupId: string,
+  originSessionId: string | undefined,
+): string {
+  const holder = originSessionId ? tileHoldingSession(tiles, originSessionId) : undefined;
+  return holder?.chatGroupId ?? focusedChatGroupId;
+}
+
+/**
  * The live handles, one per mounted tile.
  *
  * A store rather than React state because the writers are the CHILDREN: a tile

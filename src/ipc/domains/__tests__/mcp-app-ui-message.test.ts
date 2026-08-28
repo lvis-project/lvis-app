@@ -224,6 +224,9 @@ describe("lvis:mcp:ui-message — path B: turn policy", () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]).toMatchObject({
       source: { kind: "app", serverId },
+      // The card names the conversation it came from, so the renderer can put
+      // it in the ONE tile holding that conversation rather than in all of them.
+      originSessionId: SESSION,
       summary: "open the invoice",
       pendingPrompt: `<app-message source="app:${serverId}">\nopen the invoice\n</app-message>`,
       running: false,
@@ -266,6 +269,7 @@ describe("lvis:mcp:ui-message — path B: turn policy", () => {
 
     expect(result).toEqual({ ok: true, disposition: "staged" });
     expect(stagedCards(send)).toHaveLength(1);
+    expect(stagedCards(send)[0]).toMatchObject({ originSessionId: TILE_SESSION });
     expect(tileQueueGuidance).toHaveReturnedWith("no-active-turn");
   });
 
