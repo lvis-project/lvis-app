@@ -289,6 +289,14 @@ export interface ConversationLoopDeps {
   rationaleCoordinatorFactory?: RationaleCoordinatorFactory;
   /** Invalidates host rationale authority before this loop changes sessions. */
   closeRationaleSession?: (sessionId: string) => void;
+  /**
+   * Whether another live conversation loop in this process is holding
+   * `sessionId`. A session belongs to one loop at a time: two loops on one
+   * id would each flush their own history to the same file, and the turn
+   * that settled last would erase the other's. The host owns the set of
+   * loops, so it supplies the predicate; `loadSession` refuses on `true`.
+   */
+  sessionHeldElsewhere?: (sessionId: string) => boolean;
   /** Test-only override; ignored unless NODE_ENV is exactly "test". */
   enableDormantRationaleForTesting?: boolean;
   /** Host-owned capability; omitted/false surfaces cannot accept background parent delivery. */

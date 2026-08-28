@@ -65,6 +65,25 @@ import type { RationaleCoordinatorFactory } from "../../engine/turn/rationale-co
 
 const log = createLogger("lvis");
 
+/**
+ * The predicate behind `ConversationLoopDeps.sessionHeldElsewhere` for one
+ * loop among many: true when a DIFFERENT loop in `loops()` currently holds
+ * `sessionId`. Both sides are read lazily because the loops are created
+ * after the predicate is handed out.
+ */
+export function sessionHeldByOtherLoop(
+  loops: () => Iterable<ConversationLoop>,
+  self: () => ConversationLoop,
+): (sessionId: string) => boolean {
+  return (sessionId) => {
+    const me = self();
+    for (const loop of loops()) {
+      if (loop !== me && loop.getSessionId() === sessionId) return true;
+    }
+    return false;
+  };
+}
+
 export interface SubscriptionChatLoopBindings {
   readonly subscriptionProviderFactory: (
     selection: SubscriptionChatRuntimeSelection,
@@ -290,6 +309,13 @@ export async function wireConversation(
 
   // §4.5: ConversationLoop.
   let conversationLoop!: ConversationLoop;
+  // The primary loop and every chat-group loop share one memory manager, so
+  // any of them can be asked for a session another one is holding. Each loop
+  // gets the predicate that looks at all the OTHERS; `groupLoops` is filled by
+  // `resolveChatGroupLoop` below.
+  const groupLoops = new Map<string, ConversationLoop>();
+  const sessionHeldElsewhereFor = (self: () => ConversationLoop) =>
+    sessionHeldByOtherLoop(() => [conversationLoop, ...groupLoops.values()], self);
   const rationaleBindings = createLoopRationaleBindings({
     service: rationaleHostService,
     permissionManager,
@@ -331,6 +357,7 @@ export async function wireConversation(
     rewireReviewerAgent,
     llmFetch,
     subscriptionProviderFactory,
+    sessionHeldElsewhere: sessionHeldElsewhereFor(() => conversationLoop),
     ...rationaleBindings,
   });
 
@@ -387,7 +414,6 @@ export async function wireConversation(
   // primary loop drives: `idleScheduler` and `memoryCaptureService` fire once
   // per window, and handing each group its own copy would multiply idle
   // maintenance by the number of open tiles. Same reasoning as the side chat.
-  const groupLoops = new Map<string, ConversationLoop>();
   const resolveChatGroupLoop = (chatGroupId: string): ConversationLoop => {
     if (chatGroupId === MAIN_CHAT_GROUP_ID) return conversationLoop;
     const existing = groupLoops.get(chatGroupId);
@@ -440,6 +466,7 @@ export async function wireConversation(
       rewireReviewerAgent,
       llmFetch,
       subscriptionProviderFactory,
+      sessionHeldElsewhere: sessionHeldElsewhereFor(() => groupLoop),
       ...groupRationaleBindings,
     });
     groupLoops.set(chatGroupId, groupLoop);

@@ -118,15 +118,6 @@ export interface TileSession {
 }
 
 /**
- * The live handles, one per mounted tile.
- *
- * A store rather than React state because the writers are the CHILDREN: a tile
- * publishing during App's render would be a render-phase update, and publishing
- * to state in an effect would re-render every tile whenever any one of them
- * streamed. Subscribers here are woken by group id, so a tile's own churn stays
- * inside that tile.
- */
-/**
  * The tile already holding `sessionId`, if any. A conversation is opened in
  * one tile at a time: two loops on one session would each flush their own
  * history to the same file. Callers focus the holder instead of loading again.
@@ -138,6 +129,15 @@ export function tileHoldingSession(
   return tiles.find((tile) => tile.sessionId === sessionId);
 }
 
+/**
+ * The live handles, one per mounted tile.
+ *
+ * A store rather than React state because the writers are the CHILDREN: a tile
+ * publishing during App's render would be a render-phase update, and publishing
+ * to state in an effect would re-render every tile whenever any one of them
+ * streamed. Subscribers here are woken by group id, so a tile's own churn stays
+ * inside that tile.
+ */
 export class ChatGroupSessionRegistry {
   /** The newest handle a tile published — where every call is dispatched. */
   private readonly latest = new Map<string, ChatGroupSessionHandle>();

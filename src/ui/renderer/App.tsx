@@ -599,20 +599,22 @@ export function App() {
 
   const handleOpenRoutineSession = useCallback(
     async (sessionId: string) => {
+      setActiveView("home");
+      // Moving focus to the tile already showing it touches no conversation,
+      // so it is not held back by the focused tile's stream.
+      if (focusTileHolding(sessionId)) return true;
       if (streaming) {
         console.warn("[lvis] openRoutineSession blocked during streaming");
         return false;
       }
       try {
-        setActiveView("home");
-        if (focusTileHolding(sessionId)) return true;
         return await focusedSession.loadSession(sessionId);
       } catch (err) {
         console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
         return false;
       }
     },
-    [focusedSession, setActiveView],
+    [focusedSession, focusTileHolding, setActiveView, streaming],
   );
 
   useEffect(() => {

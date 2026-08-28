@@ -90,6 +90,7 @@ export const esMessages: Record<string, string> = {
   "app.mcpPromptClipped": "El host recortó el prompt MCP \"{name}\": parte de lo que devolvió el servidor no se incluye.",
   "app.mcpPromptFailed": "No se pudo ejecutar el prompt MCP \"{name}\".",
   "app.sessionNotFound": "Sesión no encontrada: {requested}",
+  "app.sessionLoadFailed": "No se pudo abrir la sesión: {requested}",
   "app.thinkingStatus": "Pensamiento...",
   "app.subscriptionAttachmentUnsupported": "El tiempo de ejecución de suscripción de {provider} todavía no puede enviar este tipo de archivo adjunto. Tu borrador y tus archivos adjuntos se conservan.",
   "app.visionNotSupportedConfirm": "El modelo actual ({llmModel}) no admite imágenes.\nNo se enviarán imágenes; solo se transmitirán rutas de archivos/texto.\n\n¿Enviar de todos modos? Cancele para cambiar de modelo e inténtelo de nuevo.",

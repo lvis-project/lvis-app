@@ -203,6 +203,8 @@ export interface ConversationDeps {
   rationaleCoordinatorFactory?: RationaleCoordinatorFactory;
   /** Invalidates host rationale authority before a session is discarded. */
   closeRationaleSession?: (sessionId: string) => void;
+  /** See ConversationLoopDeps.sessionHeldElsewhere — supplied by the host that owns every loop. */
+  sessionHeldElsewhere?: (sessionId: string) => boolean;
   /** Host-owned capability; defaults false when omitted. */
   supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;
@@ -540,6 +542,7 @@ export function createConversationLoop(deps: ConversationDeps,
     rewireReviewerAgent: deps.rewireReviewerAgent,
     llmFetch: deps.llmFetch,
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
+    sessionHeldElsewhere: deps.sessionHeldElsewhere,
   });
   loop.newConversation("main");
   return loop;

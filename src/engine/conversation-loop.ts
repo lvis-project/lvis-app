@@ -816,6 +816,11 @@ export class ConversationLoop {
     return loadSession(this, sessionId);
   }
 
+  /** Whether another loop in this process holds `sessionId` — the reason `loadSession` would refuse it. */
+  sessionHeldElsewhere(sessionId: string): boolean {
+    return this.deps.sessionHeldElsewhere?.(sessionId) === true;
+  }
+
   async startRoutineConversation(routineId: string, routineTitle: string, routineFiredAt?: string): Promise<string> {
     return startRoutineConversation(this, routineId, routineTitle, routineFiredAt);
   }

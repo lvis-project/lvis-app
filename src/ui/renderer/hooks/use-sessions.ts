@@ -164,8 +164,11 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
         applyInitialSession?.([]);
         return;
       }
-      await api.chatNew(project);
+      const created = await api.chatNew(project);
       if (token !== sessionReadTokenRef.current) return;
+      // A refused chatNew left the loop on its old session; emptying the
+      // transcript here would show a conversation the loop does not hold.
+      if (!created.ok) return;
       const fresh = await api.chatGetHistory();
       if (token !== sessionReadTokenRef.current) return;
       setCurrentSessionId(fresh.sessionId);

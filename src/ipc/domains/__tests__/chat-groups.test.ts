@@ -77,6 +77,7 @@ type FakeLoop = {
   getHistory: () => { length: number; getMessages: () => unknown[]; truncate: () => void; restore: () => void };
   refreshProvider: () => void;
   resetAndResume: ReturnType<typeof vi.fn>;
+  sessionHeldElsewhere: (sessionId: string) => boolean;
 };
 
 function fakeLoop(id: string, messages: unknown[] = []): FakeLoop {
@@ -94,6 +95,7 @@ function fakeLoop(id: string, messages: unknown[] = []): FakeLoop {
       loop.sessionId = sessionId;
       return { ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }),
+    sessionHeldElsewhere: () => false,
   };
   return loop;
 }
@@ -104,9 +106,17 @@ async function registerWithGroups(window?: { webContents: { on: (name: string, f
   const { createConversationSurfaceRuntime } = await import("../../../engine/conversation-surface-runtime.js");
   const main = fakeLoop(MAIN_CHAT_GROUP_ID, [{ role: "user", content: "from main" }]);
   const groups = new Map<string, FakeLoop>();
+  // What boot wires into every loop (sessionHeldByOtherLoop): the others' ids.
+  const heldElsewhere = (self: FakeLoop) => (sessionId: string) =>
+    [main, ...groups.values()].some((loop) => loop !== self && loop.sessionId === sessionId);
+  main.sessionHeldElsewhere = heldElsewhere(main);
   const resolveChatGroupLoop = vi.fn((chatGroupId: string) => {
     let loop = groups.get(chatGroupId);
-    if (!loop) { loop = fakeLoop(chatGroupId); groups.set(chatGroupId, loop); }
+    if (!loop) {
+      loop = fakeLoop(chatGroupId);
+      loop.sessionHeldElsewhere = heldElsewhere(loop);
+      groups.set(chatGroupId, loop);
+    }
     return loop;
   });
   const releaseChatGroupLoop = vi.fn((chatGroupId: string) => { groups.delete(chatGroupId); });

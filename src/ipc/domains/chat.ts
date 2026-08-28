@@ -689,17 +689,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
   /** Window-scoped "main active" state is the primary tile's to write. */
   const isPrimaryGroup = (group: ChatGroupContext): boolean =>
     group.deps.chatGroupId === undefined || group.deps.chatGroupId === MAIN_CHAT_GROUP_ID;
-  /**
-   * A session is open in one tile at a time. Two loops on one session id
-   * would each flush their own history to the same file, and the turn that
-   * settled last would erase the other tile's.
-   */
-  const sessionOpenInOtherGroup = (sessionId: string, group: ChatGroupContext): boolean => {
-    for (const other of groupContexts.values()) {
-      if (other !== group && other.loop.getSessionId() === sessionId) return true;
-    }
-    return false;
-  };
   const chatGroupContext = (chatGroupId: string): ChatGroupContext => {
     const cached = groupContexts.get(chatGroupId);
     if (cached) return cached;
@@ -1127,7 +1116,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     const group = groupOf(chatGroupId);
     const conversationLoop = group.loop;
-    if (sessionOpenInOtherGroup(sessionId, group)) {
+    // The loop would refuse this anyway (ConversationLoopDeps.sessionHeldElsewhere);
+    // asking first is what turns the refusal into a reason the renderer can show.
+    if (conversationLoop.sessionHeldElsewhere(sessionId)) {
       return {
         ok: false, compacted: false, compactedAt: null, removedMessageCount: 0,
         error: SESSION_OPEN_IN_OTHER_GROUP,
