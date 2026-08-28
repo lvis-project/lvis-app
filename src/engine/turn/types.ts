@@ -78,6 +78,8 @@ export interface TurnCallbacks {
     thought: string;
     stopReason: "end_turn" | "tool_use" | "max_tokens";
     hasToolCalls: boolean;
+    /** Durable identity of the assistant row this round just committed. */
+    messageId: string;
   }) => void;
   onTurnComplete?: (fullText: string) => void;
   onPermissionModeChanged?: (mode: "default" | "strict" | "auto" | "allow",

@@ -28,11 +28,15 @@ describe("runStreamedTurn user.message emission", () => {
 
     const events = eventsOf(sink);
     expect(events[0]).toEqual({ kind: "turn.started" });
-    expect(events[1]).toEqual({
+    expect(events[1]).toMatchObject({
       kind: "user.message",
       origin: "platform-bridge",
       ownerDetail: { text: "안녕, 데스크톱" },
     });
+    // The row identity rides with the input so a surface can bind the bubble it
+    // draws to the row the host stores, instead of counting to it later.
+    const announced = events[1] as { ownerDetail: { messageId?: unknown } };
+    expect(typeof announced.ownerDetail.messageId).toBe("string");
   });
 
   it("emits uniformly for desktop keyboard turns too — one stream, two origins", async () => {
@@ -41,11 +45,11 @@ describe("runStreamedTurn user.message emission", () => {
 
     await runStreamedTurn(loop, "local question", sink, STREAM_TURN_OPTIONS);
 
-    expect(eventsOf(sink)).toContainEqual({
+    expect(eventsOf(sink)).toContainEqual(expect.objectContaining({
       kind: "user.message",
       origin: "user-keyboard",
-      ownerDetail: { text: "local question" },
-    });
+      ownerDetail: expect.objectContaining({ text: "local question" }),
+    }));
   });
 
   it("prefers the caller-supplied displayText so folded replay rows keep what the user saw", async () => {
@@ -57,10 +61,10 @@ describe("runStreamedTurn user.message emission", () => {
       displayText: "summarize [Resource #1]",
     });
 
-    expect(eventsOf(sink)).toContainEqual({
+    expect(eventsOf(sink)).toContainEqual(expect.objectContaining({
       kind: "user.message",
       origin: "user-keyboard",
-      ownerDetail: { text: "summarize [Resource #1]" },
-    });
+      ownerDetail: expect.objectContaining({ text: "summarize [Resource #1]" }),
+    }));
   });
 });

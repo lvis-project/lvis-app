@@ -1351,13 +1351,14 @@ B${i}
         role: "user",
         content: "old text",
         meta: {
+          messageId: "row-old-text",
           activePersonaPrompt: {
             id: "reviewer",
             name: "Reviewer",
           },
         },
       },
-      { role: "assistant", content: "old answer" },
+      { role: "assistant", content: "old answer", meta: { messageId: "row-old-answer" } },
     ]);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     const personaPromptStore = {
@@ -1369,7 +1370,7 @@ B${i}
     };
     await setupHandlers(loop, { personaPromptStore });
 
-    await invoke("lvis:chat:edit-resend", 0, "new text", "main");
+    await invoke("lvis:chat:edit-resend", "row-old-text", "new text", "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       "new text",
@@ -1418,8 +1419,8 @@ B${i}
     });
 
     const editLoop = makeConversationLoop("session-edit-redaction", [
-      { role: "user", content: "old text" },
-      { role: "assistant", content: "old answer" },
+      { role: "user", content: "old text", meta: { messageId: "row-old-text" } },
+      { role: "assistant", content: "old answer", meta: { messageId: "row-old-answer" } },
     ]);
     editLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     const editDeps = await setupHandlers(editLoop, {
@@ -1433,7 +1434,7 @@ B${i}
     const restoreRedactor = await redactPii();
 
     try {
-      await invoke("lvis:chat:edit-resend", 0, "contact alice@example.com", "main");
+      await invoke("lvis:chat:edit-resend", "row-old-text", "contact alice@example.com", "main");
 
       expect(editLoop.runTurn.mock.calls[0]?.[0]).toBe("contact [REDACTED:EMAIL]");
       // Every frame carries the tiled chat group it belongs to, so a second
@@ -1547,8 +1548,8 @@ B${i}
     });
     const stagedInput = '<app-message source="app:010-1234-5678">\\nstaged body\\n</app-message>';
     const original = [
-      { role: "user", content: "existing user text" },
-      { role: "assistant", content: "existing assistant text" },
+      { role: "user", content: "existing user text", meta: { messageId: "row-existing-user" } },
+      { role: "assistant", content: "existing assistant text", meta: { messageId: "row-existing-assistant" } },
     ];
 
     try {
@@ -1560,7 +1561,7 @@ B${i}
         return {};
       });
 
-      await expect(invoke("lvis:chat:edit-resend", 0, stagedInput, "main"))
+      await expect(invoke("lvis:chat:edit-resend", "row-existing-user", stagedInput, "main"))
         .rejects.toThrow("missing-app-envelope");
       expect(editLoop.runTurn).not.toHaveBeenCalled();
       expect(editLoop.getHistory().restore).toHaveBeenCalledWith(original);
@@ -2186,8 +2187,8 @@ describe("lvis:chat:continue-last-user — a resource turn's row", () => {
 describe("shared main-conversation lease on replay commands", () => {
   it("does not truncate history or patch retry settings while another surface owns the turn", async () => {
     const messages = [
-      { role: "user", content: "previous question" },
-      { role: "assistant", content: "previous answer" },
+      { role: "user", content: "previous question", meta: { messageId: "row-lease-user" } },
+      { role: "assistant", content: "previous answer", meta: { messageId: "row-lease-assistant" } },
     ];
     const loop = makeConversationLoop("shared-lease-session", messages);
     const turnEntered = new SessionMutationGate<void>();
@@ -2208,7 +2209,7 @@ describe("shared main-conversation lease on replay commands", () => {
     }, "main") as Promise<unknown>;
     await turnEntered.promise;
 
-    await expect(invoke(CHANNELS.chat.editResend, 0, "replacement", "main"))
+    await expect(invoke(CHANNELS.chat.editResend, "row-lease-user", "replacement", "main"))
       .resolves.toEqual({ ok: false, error: "streaming-active" });
     await expect(invoke(CHANNELS.chat.continueLastUser, {
       sessionId: "shared-lease-session",

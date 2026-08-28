@@ -77,7 +77,15 @@ export interface ConversationAssistantRound {
   readonly stopReason: "end_turn" | "tool_use" | "max_tokens";
   readonly hasToolCalls: boolean;
   /** Reasoning is intentionally owner-only by default. */
-  readonly ownerDetail: { readonly thought: string };
+  readonly ownerDetail: {
+    readonly thought: string;
+    /**
+     * Durable identity of the assistant row this round committed. Owner-only:
+     * it is a handle onto the owner's own history, useless to a shared surface
+     * and not something a shared surface may address.
+     */
+    readonly messageId: string;
+  };
 }
 
 export interface ConversationPermissionReview {
@@ -119,7 +127,16 @@ export type PlatformConversationEvent =
     readonly kind: "user.message";
     /** Host-resolved input provenance; a surface payload cannot supply it. */
     readonly origin: ChatInputOrigin;
-    readonly ownerDetail: { readonly text: string };
+    readonly ownerDetail: {
+      readonly text: string;
+      /**
+       * Durable identity the host minted for the row this turn is about to
+       * append. Announced with the input so a surface can bind the row it
+       * renders to the row the host stored, without counting positions.
+       * Owner-only for the same reason the round's id is.
+       */
+      readonly messageId: string;
+    };
   }
   | { readonly kind: "assistant.reasoning.delta"; readonly ownerDetail: { readonly text: string } }
   | { readonly kind: "assistant.text.delta"; readonly text: string }

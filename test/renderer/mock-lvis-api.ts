@@ -37,6 +37,24 @@ type HistoryMock = {
   messages: unknown[];
 };
 
+/**
+ * Give seeded history rows the identity main always serializes.
+ *
+ * Every row main hands the renderer has been through `ConversationHistory`,
+ * which stamps `messageId` — so a fixture without one is not a smaller version
+ * of production, it is a shape production never produces, and the actions that
+ * address a row by id would be unreachable in every test that uses it. Ids are
+ * derived from the row's position here only because a fixture is static; the
+ * app never derives them that way.
+ */
+function withSeededMessageIds(messages: unknown[]): unknown[] {
+  return messages.map((message, index) =>
+    message !== null && typeof message === "object" && !("messageId" in message)
+      ? { ...(message as Record<string, unknown>), messageId: `seed-msg-${index}` }
+      : message,
+  );
+}
+
 type AgentSpawnEvent = SharedAgentSpawnEvent<ChatEntry>;
 
 type ApiOverrides = {
@@ -159,6 +177,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     sessionKind: session.sessionKind ?? "main",
   }));
   const currentSession = overrides.currentSession ?? "sess-default";
+  let sentTurnCount = 0;
   const starred = overrides.starred ?? [];
   const history = overrides.history ?? { sessionId: currentSession, messages: [] };
   const historyBySession = overrides.historyBySession ?? {};
@@ -355,7 +374,24 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       chatGroupRelease: vi.fn(async () => ({ ok: true, released: true })),
     })),
     captureUserKeyboardIntent: vi.fn(() => ({ inputOrigin: "user-keyboard", token: "mock-user-intent" })),
-    chatSend: vi.fn(async () => ({ ok: true })),
+    // Mirrors `runStreamedTurn`: every accepted turn announces its input and
+    // the identity of the row the host appended for it, which is how the
+    // transcript's optimistic bubble learns which row it stands for. Without
+    // this the bubble would never become addressable and every action that
+    // names a past message would be dead in tests but alive in the app.
+    chatSend: vi.fn(async (payload?: unknown) => {
+      const text = typeof payload === "string"
+        ? payload
+        : (payload as { input?: string } | undefined)?.input ?? "";
+      sentTurnCount += 1;
+      chatStreamHandlers.forEach((h) => h({
+        type: "user_message",
+        text,
+        origin: "user-keyboard",
+        messageId: `sent-msg-${sentTurnCount}`,
+      } as StreamEvent));
+      return { ok: true };
+    }),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
     chatSessions: vi.fn(async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => {
@@ -383,7 +419,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatSessionUpdate: vi.fn(async () => ({ ok: true as const })),
     chatCompact: vi.fn(async () => ({ compacted: false, compactedAt: null, summary: "불필요", removedMessageCount: 0 })),
     chatMainActiveState: vi.fn(async () => mainActiveState),
-    chatGetHistory: vi.fn(async () => history),
+    chatGetHistory: vi.fn(async () => {
+      const resolved = await history;
+      return { ...resolved, messages: withSeededMessageIds(resolved.messages) };
+    }),
     chatSessionHistory: vi.fn(async (sessionId: string) => {
       const resolved = await (historyBySession[sessionId] ?? history);
       return {
@@ -393,11 +432,24 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
         projectRoot: resolved.projectRoot,
         projectName: resolved.projectName,
         restoredSubAgents: resolved.restoredSubAgents,
-        messages: resolved.messages,
+        messages: withSeededMessageIds(resolved.messages),
       };
     }),
     chatEditResend: vi.fn(async () => ({ ok: true })),
-    chatRewindTo: vi.fn(async () => ({ ok: true as const })),
+    // Main hands back the input to restore, resolved from the row it cut, so
+    // the double resolves it from the seeded history the same way rather than
+    // returning an empty string the composer would silently accept.
+    chatRewindTo: vi.fn(async (messageId: string) => {
+      const resolved = await history;
+      const row = withSeededMessageIds(resolved.messages).find(
+        (m): m is Record<string, unknown> =>
+          m !== null && typeof m === "object" && (m as Record<string, unknown>).messageId === messageId,
+      );
+      return {
+        ok: true as const,
+        text: typeof row?.content === "string" ? row.content : "",
+      };
+    }),
     chatFork: vi.fn(async () => ({ ok: true, sessionId: currentSession })),
     // Shapes match actual preload/IPC return types exactly — discriminated union:
     // success paths have no `ok` field (enter → { messageIndexAtCreation }, branch → { newSessionId, ...branchState });

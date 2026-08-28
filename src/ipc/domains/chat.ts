@@ -17,6 +17,7 @@ import { t } from "../../i18n/index.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
+import { countResourceAttachmentFences } from "../../shared/mcp-resource-bounds.js";
 import { normalizeToolPairInvariant } from "../../engine/conversation-history.js";
 import {
   MAX_LOCAL_USER_CONTENT_PARTS,
@@ -491,16 +492,51 @@ function vendorBaseUrlSignature(llm: LLMSettings): string {
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 
-function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number): number {
-  if (ordinal < 0) return -1;
-  let count = 0;
-  for (let i = 0; i < history.length; i++) {
-    if (history[i].role === "user" || history[i].role === "assistant") {
-      if (count === ordinal) return i;
-      count += 1;
-    }
+/**
+ * Resolve the row a surface named by its durable id.
+ *
+ * This replaced an ordinal walk that counted user/assistant ROWS while the
+ * renderer counted user/assistant ENTRIES. The two disagree by one for every
+ * pure tool round (an assistant row with empty content renders as a tool group,
+ * not a card), every compact boundary (a user row that renders as a checkpoint
+ * divider), and every imported trigger — so "the third message" meant a
+ * different message on each side, and a rewind or an edit cut the conversation
+ * at the wrong turn. Addressing the row directly removes the second rule
+ * instead of trying to keep two counters in agreement.
+ *
+ * Returns -1 when no row carries the id, which is what a caller sees after the
+ * row it was holding has been compacted away.
+ */
+function historyIndexOfMessageId(history: GenericMessage[], messageId: string): number {
+  return history.findIndex((m) => m.meta?.messageId === messageId);
+}
+
+/**
+ * The text a rewind can hand back to the composer, or the reason it cannot.
+ *
+ * A rewind puts the user back in front of what they typed, so it has to return
+ * the WHOLE input or none of it. Two kinds of turn cannot be handed back:
+ *
+ *   - one carrying image/file parts, because the composer stages those from a
+ *     picked path and a thumbnail that history does not keep;
+ *   - one carrying MCP resource attachments, because the fenced server text
+ *     rides as its own content part precisely so it never sits inside the
+ *     user's own body — folding it into the composer would undo that seam.
+ *
+ * Both are refused rather than partially restored: dropping the attachment and
+ * keeping the words would look like it worked.
+ */
+function restorableRewindInput(
+  message: Extract<GenericMessage, { role: "user" }>,
+): { ok: true; text: string } | { ok: false; error: string } {
+  if (typeof message.content === "string") return { ok: true, text: message.content };
+  if (message.content.some((part) => part.type !== "text")) {
+    return { ok: false, error: "attachment-not-restorable" };
   }
-  return -1;
+  if (countResourceAttachmentFences(message.content) > 0) {
+    return { ok: false, error: "attachment-not-restorable" };
+  }
+  return { ok: true, text: userContentText(message.content) };
 }
 
 export function registerChatHandlers(deps: IpcDeps): void {
@@ -1215,19 +1251,19 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return handleChatSessionHistory(deps, sessionId);
   });
 
-  ipcMain.handle(CHANNELS.chat.editResend, async (e, messageIndex: number, newText: string, chatGroupId?: unknown) => {
+  ipcMain.handle(CHANNELS.chat.editResend, async (e, messageId: string, newText: string, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.editResend, e); return UNAUTHORIZED_FRAME; }
     const group = groupOf(chatGroupId);
     const conversationLoop = group.loop;
-    if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
+    if (typeof messageId !== "string" || messageId.length === 0) return { ok: false, error: "invalid-message-id" };
     if (typeof newText !== "string" || newText.trim().length === 0) return { ok: false, error: "empty-text" };
     const turn = group.turns.tryStreamTurn(async (transport) => {
       // Read, persona-resolve, and truncate only after the exclusive lease is
       // visible. A Local API/CLI turn cannot leave this replay with a partial
       // history when it wins the race.
       const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
-      const historyIndex = entryOrdinalToHistoryIndex(history, messageIndex);
-      if (historyIndex < 0) return { ok: false, error: "index-out-of-range" };
+      const historyIndex = historyIndexOfMessageId(history, messageId);
+      if (historyIndex < 0) return { ok: false, error: "message-not-found" };
       const personaPromptId = personaPromptIdFromUserMessage(history[historyIndex]);
       if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
       const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
@@ -1258,36 +1294,62 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // `editResend` leaves persistence to the turn it starts, and this path
   // starts no turn. Without the write, the discarded turns would come back on
   // the next session load.
-  ipcMain.handle(CHANNELS.chat.rewindTo, async (e, messageIndex: number, chatGroupId?: unknown) => {
+  ipcMain.handle(CHANNELS.chat.rewindTo, async (e, messageId: string, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.rewindTo, e); return UNAUTHORIZED_FRAME; }
     const group = groupOf(chatGroupId);
     const conversationLoop = group.loop;
-    if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
+    if (typeof messageId !== "string" || messageId.length === 0) return { ok: false, error: "invalid-message-id" };
     const mutation = group.turns.trackSessionMutation(async () => {
       const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
-      const historyIndex = entryOrdinalToHistoryIndex(history, messageIndex);
-      if (historyIndex < 0) return { ok: false, error: "index-out-of-range" };
-      if (history[historyIndex].role !== "user") return { ok: false, error: "not-a-user-message" };
+      const historyIndex = historyIndexOfMessageId(history, messageId);
+      if (historyIndex < 0) return { ok: false, error: "message-not-found" };
+      const target = history[historyIndex];
+      if (target.role !== "user") return { ok: false, error: "not-a-user-message" };
+      // Everything the composer has to be handed back is resolved BEFORE the
+      // truncate, and a message whose input cannot be handed back whole is
+      // refused with the conversation untouched. The alternative — cut first,
+      // then discover the image cannot be rebuilt — destroys the turn and the
+      // attachment together, which is the one outcome a rewind must not have.
+      const restorable = restorableRewindInput(target);
+      if (!restorable.ok) return { ok: false, error: restorable.error };
+      const personaPromptId = personaPromptIdFromUserMessage(target);
+      if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
+      const sessionId = conversationLoop.getSessionId();
       conversationLoop.getHistory().truncate(historyIndex);
-      await memoryManager.saveSession(
-        conversationLoop.getSessionId(),
-        conversationLoop.getHistory().getMessages() as GenericMessage[],
-      );
-      return { ok: true };
+      const remaining = conversationLoop.getHistory().getMessages() as GenericMessage[];
+      // Drop the checkpoints whose boundary sat inside the discarded range
+      // BEFORE the session is written. `recoverLatestCheckpointUserIfMissing`
+      // re-inserts the latest checkpoint's user message on load when no
+      // renderable user row survives, so a rewind to the opening message of a
+      // session that ever compacted would otherwise come back on reload with
+      // the message the user had just discarded.
+      await memoryManager.pruneCheckpointsToSurvivingBoundaries(sessionId, remaining);
+      await memoryManager.saveSession(sessionId, remaining);
+      return {
+        ok: true,
+        text: restorable.text,
+        ...(personaPromptId.personaPromptId !== undefined
+          ? { personaPromptId: personaPromptId.personaPromptId }
+          : {}),
+      };
     });
     return mutation ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
-  ipcMain.handle(CHANNELS.chat.fork, async (e, messageIndex: number, chatGroupId?: unknown) => {
+  ipcMain.handle(CHANNELS.chat.fork, async (e, messageId: unknown, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.fork, e); return UNAUTHORIZED_FRAME; }
     const group = groupOf(chatGroupId);
     const conversationLoop = group.loop;
     const mutation = group.turns.trackSessionMutation(async () => {
       const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
       let upto = current.length;
-      if (typeof messageIndex === "number" && messageIndex >= 0) {
-        const historyIndex = entryOrdinalToHistoryIndex(current, messageIndex);
-        if (historyIndex >= 0) upto = Math.min(historyIndex + 1, current.length);
+      // Omitted id means "branch the whole conversation" — the checkpoint
+      // branch path calls it that way. A named row that no longer exists is a
+      // different thing and must not silently become the whole conversation.
+      if (typeof messageId === "string" && messageId.length > 0) {
+        const historyIndex = historyIndexOfMessageId(current, messageId);
+        if (historyIndex < 0) return { ok: false, sessionId: null, error: "message-not-found" };
+        upto = Math.min(historyIndex + 1, current.length);
       }
       const sliced = current.slice(0, upto);
       // Repair tool-pair invariant before the slice is written to a NEW session

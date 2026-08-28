@@ -12,7 +12,14 @@ function withoutRuntimeMeta(messages: ReadonlyArray<GenericMessage>) {
   return messages.map((message) => {
     const { meta, ...rest } = message;
     if (!meta) return rest;
-    const { createdAt: _createdAt, turnSummary: _turnSummary, ...stableMeta } = meta;
+    // `createdAt` and `messageId` are stamped by the store on the way in, not
+    // supplied by the caller — these assertions are about the caller's message.
+    const {
+      createdAt: _createdAt,
+      messageId: _messageId,
+      turnSummary: _turnSummary,
+      ...stableMeta
+    } = meta;
     return Object.keys(stableMeta).length > 0 ? { ...rest, meta: stableMeta } : rest;
   });
 }
@@ -112,7 +119,7 @@ describe("ConversationHistory tool-call invariant", () => {
       },
     ]);
 
-    expect(h.getMessages()).toEqual([
+    expect(withoutRuntimeMeta(h.getMessages())).toEqual([
       { role: "assistant", content: "visible text" },
       { role: "assistant", content: "final" },
     ]);
@@ -134,7 +141,7 @@ describe("ConversationHistory tool-call invariant", () => {
       },
     ]);
 
-    expect(h.getMessages()).toEqual([
+    expect(withoutRuntimeMeta(h.getMessages())).toEqual([
       { role: "assistant", content: "visible text" },
     ]);
   });

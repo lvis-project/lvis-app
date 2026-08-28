@@ -908,7 +908,7 @@ export async function queryLoop(
       const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCallsCapped.length > 0;
       // Persist the MERGED answer (carry + this round). Non-continued turns have
       // empty carries ⇒ original single-round content.
-      self.history.append({
+      const committedAssistantRow = self.history.append({
         role: "assistant",
         content: wasCapped ? `${mergedText}\n\n[capped at ${MAX_TOOL_CALLS_PER_ROUND} of ${pendingToolCalls.length} tool_use blocks]` : mergedText,
         ...(mergedThought && { thought: mergedThought }),
@@ -932,6 +932,10 @@ export async function queryLoop(
         text: mergedText,
         thought: mergedThought,
         stopReason,
+        // The row the surface's card stands for. Every round re-announces it,
+        // so a card that spans several rounds ends up naming the row that
+        // actually holds the answer it is showing.
+        messageId: committedAssistantRow.meta.messageId,
         // The UI / telemetry callback receives the un-capped count so the
         // user sees the LLM's full intent — only persisted history is capped.
         hasToolCalls: pendingToolCalls.length > 0,

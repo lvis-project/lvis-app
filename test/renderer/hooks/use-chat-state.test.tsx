@@ -820,7 +820,9 @@ describe("useCurrentSession (streaming guard)", () => {
 
     await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("persisted-sess"));
     await waitFor(() => {
-      expect(applyInitial).toHaveBeenCalledWith([
+      // Rebuilt rows carry the identity main serialized for them; the claim
+      // here is about which entries were hydrated, not about that identity.
+      expect(applyInitial.mock.lastCall?.[0]).toMatchObject([
         { kind: "user", text: "이전 질문" },
         { kind: "assistant", text: "이전 답변", streaming: false, route: undefined, restored: true },
       ]);
@@ -851,7 +853,7 @@ describe("useCurrentSession (streaming guard)", () => {
     );
 
     await waitFor(() => {
-      expect(applyInitial).toHaveBeenCalledWith([
+      expect(applyInitial.mock.lastCall?.[0]).toMatchObject([
         { kind: "user", text: "진행 중 질문" },
         { kind: "assistant", text: "진행 중 답변", streaming: false, route: undefined, restored: true },
       ]);
@@ -899,7 +901,7 @@ describe("useCurrentSession (streaming guard)", () => {
 
     await waitFor(() => expect(result.current.currentSessionId).toBe("routine-sess"));
     expect(api.chatSessionResume).not.toHaveBeenCalled();
-    expect(applyInitial).toHaveBeenCalledWith([
+    expect(applyInitial.mock.lastCall?.[0]).toMatchObject([
       { kind: "user", text: "루틴 질문" },
       { kind: "assistant", text: "루틴 답변", streaming: false, route: undefined, restored: true },
     ]);
@@ -932,7 +934,7 @@ describe("useCurrentSession (streaming guard)", () => {
     await waitFor(() => expect(result.current.currentSessionId).toBe("routine-sess"));
     expect(api.chatNew).not.toHaveBeenCalled();
     expect(api.chatSessionResume).not.toHaveBeenCalled();
-    expect(applyInitial).toHaveBeenCalledWith([{ kind: "user", text: "루틴 질문" }]);
+    expect(applyInitial.mock.lastCall?.[0]).toMatchObject([{ kind: "user", text: "루틴 질문" }]);
     expect(result.current.currentSessionKind).toBe("routine");
   });
 
@@ -1018,17 +1020,15 @@ describe("useStarred (toggle semantics)", () => {
       { kind: "user", text: "hi" },
       { kind: "user", text: "next" },
     ];
-    const idxMap = new Map<number, number>([[0, 0], [1, 1]]);
-
     // entry 0 is already starred → remove path.
     await act(async () => {
-      await result.current.handleToggleStar(0, entries, "sess-a", idxMap);
+      await result.current.handleToggleStar(0, entries, "sess-a");
     });
     expect(api.starredRemove).toHaveBeenCalledWith({ id: "star-1" });
 
     // entry 1 is not starred → add path.
     await act(async () => {
-      await result.current.handleToggleStar(1, entries, "sess-a", idxMap);
+      await result.current.handleToggleStar(1, entries, "sess-a");
     });
     expect(api.starredAdd).toHaveBeenCalled();
   });

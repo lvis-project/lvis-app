@@ -89,7 +89,7 @@ export interface TranscriptActionProps {
    * discarded and its text goes back into the composer, unsent. Distinct from
    * edit (which resends) and fork (which branches into a new session).
    */
-  onReturnHere?: (idx: number) => void | Promise<void>;
+  onReturnHere?: (idx: number) => void | Promise<{ ok: boolean }>;
   onToggleStar?: (idx: number) => void | Promise<void>;
   onRetryEffort?: () => void | Promise<void>;
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;

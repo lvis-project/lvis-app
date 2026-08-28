@@ -15,7 +15,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "./render-app.js";
-import { deferred, submitChatMessage } from "./helpers.js";
+import { clearQueueStoreHandle, deferred, getQueueStore, submitChatMessage } from "./helpers.js";
 
 describe("Chat edit & resend (Phase 3.2 regression net)", () => {
   it("submitting a user message appends a user entry", async () => {
@@ -134,8 +134,9 @@ describe("Chat edit & resend (Phase 3.2 regression net)", () => {
     await waitFor(() => {
       expect(api.chatEditResend).toHaveBeenCalled();
     });
-    const [histIdx, text] = (api.chatEditResend.mock.calls[0] ?? []) as unknown[];
-    expect(typeof histIdx).toBe("number");
+    const [messageId, text] = (api.chatEditResend.mock.calls[0] ?? []) as unknown[];
+    // The row is named, never counted to — see chat-row-addressing.test.ts.
+    expect(messageId).toBe("sent-msg-1");
     expect(text).toBe("edited text");
     // Minimally assert userEvent import is usable (future-proofing).
     expect(user).toBeTruthy();
@@ -305,7 +306,7 @@ describe("Return here — rewind without resending", () => {
     });
 
     // Main truncates at the message's own history index — the message goes too.
-    await waitFor(() => expect(api.chatRewindTo).toHaveBeenCalledWith(0));
+    await waitFor(() => expect(api.chatRewindTo).toHaveBeenCalledWith("seed-msg-0"));
     await waitFor(() => {
       expect(container.textContent).not.toContain("an answer to be discarded");
       // The bubble goes too — its text is only in the composer now, which is
@@ -342,6 +343,66 @@ describe("Return here — rewind without resending", () => {
     expect(composer(container).value).toBe("");
   });
 
+  it("restores the host's copy of the input, not the transcript's rendering of it", async () => {
+    const { container, api } = await renderApp({ history: answeredTurn });
+    await waitFor(() => expect(container.textContent).toContain("an answer to be discarded"));
+    // The bubble only ever showed a flattened rendering of the row. The host
+    // owns the text to restore, so the composer takes what the host hands back.
+    api.chatRewindTo.mockResolvedValueOnce({ ok: true, text: "the row's own text" });
+
+    await act(async () => {
+      fireEvent.click(await returnHereButton(container));
+    });
+
+    await waitFor(() => expect(composer(container).value).toBe("the row's own text"));
+  });
+
+  it("surfaces the refusal when the message carries an attachment that cannot be re-staged", async () => {
+    const { container, api } = await renderApp({ history: answeredTurn });
+    await waitFor(() => expect(container.textContent).toContain("an answer to be discarded"));
+    api.chatRewindTo.mockResolvedValueOnce({ ok: false, error: "attachment-not-restorable" });
+
+    await act(async () => {
+      fireEvent.click(await returnHereButton(container));
+    });
+
+    await waitFor(() =>
+      expect(container.textContent).toContain("입력창으로 되돌릴 수 없는 첨부"),
+    );
+    // Refused means nothing moved: the answer is still there and the composer
+    // is still empty.
+    expect(container.textContent).toContain("an answer to be discarded");
+    expect(composer(container).value).toBe("");
+  });
+
+  it("discards the queued messages, which were written to be said after this point", async () => {
+    const pendingSend = deferred<{ ok: true }>();
+    const { container, api } = await renderApp({
+      history: answeredTurn,
+      lvisEnv: { isDev: true, isE2E: true },
+    });
+    await waitFor(() => expect(container.textContent).toContain("an answer to be discarded"));
+
+    // Queue one message behind an in-flight turn, then let the turn finish so
+    // the rewind is offered again.
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+    await submitChatMessage(container, "a turn in flight");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getQueueStore()).toBeDefined());
+    await submitChatMessage(container, "say this next");
+    await waitFor(() => expect(getQueueStore()!.size()).toBe(1));
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await pendingSend.promise;
+    });
+
+    await act(async () => {
+      fireEvent.click(await returnHereButton(container));
+    });
+
+    await waitFor(() => expect(getQueueStore()!.size()).toBe(0));
+  });
+
   it("is unavailable while a turn is streaming", async () => {
     const pendingSend = deferred<{ ok: true }>();
     const { container, api } = await renderApp();
@@ -365,5 +426,6 @@ describe("Return here — rewind without resending", () => {
 });
 
 afterEach(() => {
+  clearQueueStoreHandle();
   vi.unstubAllGlobals();
 });

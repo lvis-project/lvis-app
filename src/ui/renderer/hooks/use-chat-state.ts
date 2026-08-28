@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/runtime.js";
 import {
   appendImportedTriggerEntry,
   appendUserEntry,
-  applyExternalUserMessage,
+  applyUserMessageFrame,
   dropOptimisticUserEntry,
   applyToolEnd,
   applyToolStart,
@@ -113,20 +113,6 @@ export function useChatState(api: LvisApi) {
       aliveRef.current = false;
     };
   }, []);
-
-  // Map renderer `entries` (which include reasoning/tool_group/system) to
-  // backend history indices which only track user + assistant messages.
-  const entryIndexToHistoryIndex = useMemo(() => {
-    const map = new Map<number, number>();
-    let backend = 0;
-    entries.forEach((e, i) => {
-      if (e.kind === "user" || e.kind === "assistant") {
-        map.set(i, backend);
-        backend += 1;
-      }
-    });
-    return map;
-  }, [entries]);
 
   // Stream subscription absorbed from App.tsx.
   useEffect(() => {
@@ -248,11 +234,12 @@ export function useChatState(api: LvisApi) {
         }
       }
       if (ev.type === "user_message") {
-        // Turn-input row from the shared timeline. applyExternalUserMessage is
-        // the single normalization point: it appends only for turns an
-        // external surface submitted (bridge/Tailnet/loopback) and ignores the
-        // origins this renderer already echoed optimistically.
-        setEntries((p) => applyExternalUserMessage(p, ev));
+        // Turn-input row from the shared timeline. applyUserMessageFrame is the
+        // single normalization point: it appends a row for turns an external
+        // surface submitted (bridge/Tailnet/loopback), and for the origins this
+        // renderer already echoed optimistically it binds the host's row
+        // identity onto the bubble it echoed.
+        setEntries((p) => applyUserMessageFrame(p, ev));
       } else if (ev.type === "llm_status") {
         const message = formatLlmStatusMessage(ev);
         if (!message) return;
@@ -369,7 +356,11 @@ export function useChatState(api: LvisApi) {
           const rawText = roundRawText;
           const detected = detectFromStream(rawText);
           const finalText = visibleAssistantText(detected.cleanedText);
-          next = finalizeStreamingAssistant(next, finalText, { phase, overrideText: finalText });
+          next = finalizeStreamingAssistant(next, finalText, {
+            phase,
+            overrideText: finalText,
+            ...(ev.messageId !== undefined ? { messageId: ev.messageId } : {}),
+          });
           const afterAssistantCount = next.length;
           if (debugStreamEnabled) {
             debugLog("stream", "assistant_round:finalized", {
@@ -737,8 +728,9 @@ export function useChatState(api: LvisApi) {
 
   const handleEditSave = useCallback(
     async (entryIdx: number, newText: string) => {
-      const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-      if (histIdx === undefined) return;
+      const target = entries[entryIdx];
+      const messageId = target?.kind === "user" ? target.messageId : undefined;
+      if (messageId === undefined) return;
       setEditBusy(true);
       const prevEntries = entries;
       let failed = false;
@@ -749,7 +741,7 @@ export function useChatState(api: LvisApi) {
         thoughtRef.current = "";
         resetStreamTracking();
         finalAssistantRoundClosedRef.current = false;
-        const res = await api.chatEditResend(histIdx, newText);
+        const res = await api.chatEditResend(messageId, newText);
         if (!res?.ok) {
           failed = true;
           setEntries(
@@ -777,7 +769,7 @@ export function useChatState(api: LvisApi) {
         if (!failed) setEditingEntryIdx(null);
       }
     },
-    [api, entries, entryIndexToHistoryIndex, beginStreamingRequest, finishStreamingRequest],
+    [api, entries, beginStreamingRequest, finishStreamingRequest],
   );
 
   const handleRetryEffort = useCallback(async () => {
@@ -982,7 +974,6 @@ export function useChatState(api: LvisApi) {
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,
-    entryIndexToHistoryIndex,
     fallbackToast,
     handleEditSave,
     handleRetryEffort,

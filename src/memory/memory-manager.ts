@@ -2654,6 +2654,71 @@ export class MemoryManager {
   }
 
   /**
+   * Drop every checkpoint whose compact boundary no longer exists in `messages`,
+   * and delete the pre-compact snapshots those checkpoints owned.
+   *
+   * Called after a rewind cuts the conversation. The checkpoint chain is a
+   * second record of the same conversation: `recoverLatestCheckpointUserIfMissing`
+   * re-inserts the latest checkpoint's user message when a loaded session has no
+   * renderable user row left, so a rewind back to the opening message of a
+   * session that had ever compacted would come back on reload carrying the very
+   * message the user discarded. Cutting the transcript therefore has to cut the
+   * chain that mirrors it.
+   *
+   * Which checkpoints survive is read off the surviving boundary ROWS rather
+   * than compared against a count, so it stays correct however the cut fell.
+   */
+  async pruneCheckpointsToSurvivingBoundaries(
+    sessionId: string,
+    messages: readonly unknown[],
+  ): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`pruneCheckpointsToSurvivingBoundaries: invalid sessionId "${sessionId}"`);
+    }
+    const metadata = this.loadSessionMetadata(sessionId);
+    const checkpoints = metadata?.checkpoints ?? [];
+    if (!metadata || checkpoints.length === 0) return;
+
+    const survivingCompactNums = new Set<number>();
+    for (const message of messages) {
+      if (!isCompactBoundaryRecord(message)) continue;
+      const meta = isRecord(message) && isRecord(message.meta) ? message.meta : {};
+      if (typeof meta.compactNum === "number") survivingCompactNums.add(meta.compactNum);
+    }
+
+    const kept = checkpoints.filter(
+      (checkpoint) =>
+        checkpoint.compactNum !== undefined && survivingCompactNums.has(checkpoint.compactNum),
+    );
+    if (kept.length === checkpoints.length) return;
+
+    const droppedCompactNums = checkpoints
+      .map((checkpoint) => checkpoint.compactNum)
+      .filter((compactNum): compactNum is number => compactNum !== undefined)
+      .filter((compactNum) => !survivingCompactNums.has(compactNum));
+    for (const compactNum of droppedCompactNums) {
+      const snapshotPath = join(this.checkpointsDir, sessionId, `${compactNum}.jsonl`);
+      try {
+        rmSync(snapshotPath, { force: true });
+      } catch (err) {
+        log.warn(
+          { sessionId, compactNum },
+          `pruneCheckpointsToSurvivingBoundaries: failed to remove snapshot: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // The preamble summarizes turns that are no longer in the conversation, and
+    // it is prepended to every future request. Losing the last checkpoint means
+    // losing what the preamble described.
+    const { summaryPreamble: _droppedPreamble, ...withoutPreamble } = metadata;
+    await this.saveSessionMetadata(sessionId, {
+      ...(kept.length > 0 ? metadata : withoutPreamble),
+      checkpoints: kept.length > 0 ? kept : undefined,
+    });
+  }
+
+  /**
    * Sets (or replaces) the summaryPreamble in session metadata.
    * Truncates to MAX_SUMMARY_PREAMBLE_CHARS if the value exceeds the limit.
    * Returns the updated metadata (does NOT persist — caller must call saveSessionMetadata).

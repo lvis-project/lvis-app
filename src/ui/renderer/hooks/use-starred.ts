@@ -44,8 +44,8 @@ export function useStarred(api: LvisApi) {
   }, [starred]);
 
   const isEntryStarred = useCallback(
-    (entryIdx: number, currentSessionId: string, entryIndexToHistoryIndex: Map<number, number>): string | null => {
-      const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+    (entryIdx: number, entries: ChatEntry[], currentSessionId: string): string | null => {
+      const histIdx = starredMessageIndexOfEntry(entries, entryIdx);
       if (histIdx === undefined) return null;
       return starredIndex.get(`${currentSessionId}:${histIdx}`) ?? null;
     },
@@ -57,13 +57,12 @@ export function useStarred(api: LvisApi) {
       entryIdx: number,
       entries: ChatEntry[],
       currentSessionId: string,
-      entryIndexToHistoryIndex: Map<number, number>,
     ) => {
       const entry = entries[entryIdx];
       if (!entry || (entry.kind !== "user" && entry.kind !== "assistant")) return;
-      const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+      const histIdx = starredMessageIndexOfEntry(entries, entryIdx);
       if (histIdx === undefined) return;
-      const existingId = isEntryStarred(entryIdx, currentSessionId, entryIndexToHistoryIndex);
+      const existingId = isEntryStarred(entryIdx, entries, currentSessionId);
       try {
         if (existingId) {
           await api.starredRemove({ id: existingId });
@@ -119,4 +118,29 @@ export function useStarred(api: LvisApi) {
     isSessionStarred,
     handleToggleSessionStar,
   };
+}
+
+/**
+ * The key the starred store has always used: how many user/assistant ENTRIES
+ * precede this one in the transcript.
+ *
+ * Deliberately NOT the row-addressing rule the rewind / edit / fork actions
+ * use. Those name a row by its durable `messageId` because they mutate the
+ * conversation and must not act on the wrong turn. A pin is a bookmark whose
+ * key is already written into `~/.lvis` under this scheme, so it keeps its own
+ * scheme rather than silently reinterpreting every stored row.
+ */
+function starredMessageIndexOfEntry(
+  entries: ChatEntry[],
+  entryIdx: number,
+): number | undefined {
+  if (entryIdx < 0 || entryIdx >= entries.length) return undefined;
+  const target = entries[entryIdx];
+  if (target.kind !== "user" && target.kind !== "assistant") return undefined;
+  let ordinal = 0;
+  for (let i = 0; i < entryIdx; i += 1) {
+    const kind = entries[i].kind;
+    if (kind === "user" || kind === "assistant") ordinal += 1;
+  }
+  return ordinal;
 }

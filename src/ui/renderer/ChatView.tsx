@@ -68,9 +68,10 @@ export interface ChatViewProps {
   onFork: (idx: number) => void | Promise<void>;
   /**
    * Rewind to just before this user message: discard the conversation from it
-   * onward and put its text back in the composer, unsent.
+   * onward and put its text back in the composer, unsent. Reports whether the
+   * host accepted, because a refusal must leave everything as it was.
    */
-  onReturnHere: (idx: number) => void | Promise<void>;
+  onReturnHere: (idx: number) => Promise<{ ok: boolean }>;
   onToggleStar: (idx: number) => void | Promise<void>;
   onRetryEffort: () => void | Promise<void>;
   onContinueFromLastUser?: (sessionId: string) => void | Promise<void>;
@@ -511,6 +512,16 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     interceptSubmit: approvalSentenceInterceptSubmit,
   });
 
+  // Queued messages were written to be said AFTER the point being rewound to,
+  // so a rewind discards them with everything else that came after it. The
+  // queue lives here, so the clear happens here — and only once the host has
+  // confirmed the conversation was actually cut.
+  const handleReturnHere = useCallback(async (idx: number) => {
+    const result = await onReturnHere(idx);
+    if (result.ok) messageQueueStore.clear();
+    return result;
+  }, [onReturnHere, messageQueueStore]);
+
   const handleInsertSlashCommand = useCallback((cmd: string) => {
     setQuestion((prev) => (prev ? `${prev}${cmd} ` : `${cmd} `));
   }, [setQuestion]);
@@ -631,7 +642,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
       actions={{
         isEntryStarred,
         onFork,
-        onReturnHere,
+        onReturnHere: handleReturnHere,
         onToggleStar,
         onRetryEffort,
         onFeedback,

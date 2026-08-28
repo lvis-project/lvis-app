@@ -116,7 +116,7 @@ describe("platform conversation protocol", () => {
     expect(projectSharedConversationEvent({
       kind: "user.message",
       origin: "platform-bridge",
-      ownerDetail: { text: "the user's own words" },
+      ownerDetail: { text: "the user's own words", messageId: "row-own" },
     })).toBeUndefined();
   });
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendImportedTriggerEntry,
   appendUserEntry,
-  applyExternalUserMessage,
+  applyUserMessageFrame,
   applyToolEnd,
   applyToolStart,
   clearTurnAssistantInterrupted,
@@ -723,10 +723,10 @@ describe("dropOptimisticUserEntry", () => {
  * needs a row for it. External-surface turns (bridge/Tailnet/loopback) do;
  * origins this surface echoed optimistically at send time must not duplicate.
  */
-describe("applyExternalUserMessage", () => {
+describe("applyUserMessageFrame", () => {
   it("appends a user row carrying its external origin for a bridge turn", () => {
     const entries: ChatEntry[] = [{ kind: "assistant", text: "earlier reply" }];
-    const next = applyExternalUserMessage(entries, {
+    const next = applyUserMessageFrame(entries, {
       text: "텔레그램에서 보낸 메시지",
       origin: "platform-bridge",
     });
@@ -740,12 +740,12 @@ describe("applyExternalUserMessage", () => {
 
   it("appends for every external surface origin", () => {
     for (const origin of ["surface-user", "tailnet-surface", "platform-bridge"]) {
-      const next = applyExternalUserMessage([], { text: "remote input", origin });
+      const next = applyUserMessageFrame([], { text: "remote input", origin });
       expect(next).toHaveLength(1);
     }
   });
 
-  it("ignores origins the desktop already echoed optimistically", () => {
+  it("adds no second row for origins the desktop already echoed optimistically", () => {
     for (const origin of [
       "user-keyboard",
       "queue-auto",
@@ -756,13 +756,43 @@ describe("applyExternalUserMessage", () => {
       undefined,
     ]) {
       const entries: ChatEntry[] = [{ kind: "user", text: "already echoed" }];
-      expect(applyExternalUserMessage(entries, { text: "already echoed", origin })).toBe(entries);
+      const next = applyUserMessageFrame(entries, { text: "already echoed", origin });
+      expect(next).toHaveLength(1);
     }
+  });
+
+  it("binds the host's row identity onto the bubble this surface echoed", () => {
+    const entries: ChatEntry[] = [{ kind: "user", text: "already echoed" }];
+    const next = applyUserMessageFrame(entries, {
+      text: "already echoed",
+      origin: "user-keyboard",
+      messageId: "row-9",
+    });
+    expect(next[0]).toMatchObject({ kind: "user", messageId: "row-9" });
+  });
+
+  it("binds turns in arrival order when two echoes are still waiting", () => {
+    const entries: ChatEntry[] = [
+      { kind: "user", text: "first", messageId: undefined },
+      { kind: "user", text: "second" },
+    ];
+    const first = applyUserMessageFrame(entries, {
+      text: "first", origin: "user-keyboard", messageId: "row-1",
+    });
+    const second = applyUserMessageFrame(first, {
+      text: "second", origin: "user-keyboard", messageId: "row-2",
+    });
+    expect(second.map((e) => (e.kind === "user" ? e.messageId : null))).toEqual(["row-1", "row-2"]);
+  });
+
+  it("leaves an already-identified bubble alone when no id rides the frame", () => {
+    const entries: ChatEntry[] = [{ kind: "user", text: "echoed", messageId: "row-3" }];
+    expect(applyUserMessageFrame(entries, { text: "echoed", origin: "user-keyboard" })).toBe(entries);
   });
 
   it("ignores an empty or missing text payload", () => {
     const entries: ChatEntry[] = [];
-    expect(applyExternalUserMessage(entries, { origin: "platform-bridge" })).toBe(entries);
-    expect(applyExternalUserMessage(entries, { text: "", origin: "platform-bridge" })).toBe(entries);
+    expect(applyUserMessageFrame(entries, { origin: "platform-bridge" })).toBe(entries);
+    expect(applyUserMessageFrame(entries, { text: "", origin: "platform-bridge" })).toBe(entries);
   });
 });

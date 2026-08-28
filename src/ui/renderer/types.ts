@@ -944,14 +944,23 @@ export type LvisApi = {
     /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
     preambleChars?: number;
   }>;
-  chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Replace one user message and re-run the conversation from it. `messageId`
+   * is the row's durable identity (see ChatEntry.messageId) — a position would
+   * name a different row after the next compaction.
+   */
+  chatEditResend: (messageId: string, newText: string) => Promise<{ ok: boolean; error?: string }>;
   /**
    * Discard the conversation from this user message onward, in place. The
    * message itself goes too — the caller owns putting its text back in the
    * composer, which is what makes this a rewind rather than a delete.
    */
-  chatRewindTo: (messageIndex: number) => Promise<{ ok: true } | { ok: false; error: string }>;
-  chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
+  chatRewindTo: (messageId: string) => Promise<
+    | { ok: true; text: string; personaPromptId?: string }
+    | { ok: false; error: string }
+  >;
+  /** Branch into a new session up to and including `messageId`; omit it to branch the whole conversation. */
+  chatFork: (messageId?: string) => Promise<{ ok: boolean; sessionId: string | null; error?: string }>;
   chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   /** `sessionId` targets a conversation other than the loaded one. */

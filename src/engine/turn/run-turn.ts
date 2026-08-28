@@ -132,6 +132,8 @@ export async function runTurn(
        * fenced body inside the user's own bubble.
        */
       displayText?: string;
+      /** Identity to stamp on this turn's user row (see ConversationLoop.runTurn). */
+      userMessageId?: string;
     },
   ): Promise<TurnResult> {
     const effectiveSessionId = options?.sessionIdOverride ?? self.sessionId;
@@ -405,6 +407,10 @@ export async function runTurn(
     // server-attached content" has one answer here and at the bound that enforces it.
     const carriesResourceAttachment = countResourceAttachmentFences(attachmentParts) > 0;
     const userMeta: MessageMeta = {
+      // Pre-minted by the caller that already announced this row. `append`
+      // mints one for rows that arrive without it, so the field is an
+      // agreement about WHICH id, never about whether there is one.
+      ...(options.userMessageId !== undefined ? { messageId: options.userMessageId } : {}),
       ...(agentMessageInputId ? { hostInjectionId: agentMessageInputId } : {}),
       ...(personaPromptMeta ? { activePersonaPrompt: personaPromptMeta } : {}),
       ...(options.displayText !== undefined

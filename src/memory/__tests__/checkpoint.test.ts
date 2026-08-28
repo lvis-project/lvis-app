@@ -758,3 +758,55 @@ describe("round-trip — write then read preserves all new fields", () => {
     expect(loaded!.checkpoints![0]).toEqual(ckpt);
   });
 });
+
+describe("pruneCheckpointsToSurvivingBoundaries", () => {
+  const boundary = (compactNum: number) => ({
+    role: "user",
+    content: "[compacted]",
+    meta: { compactBoundary: true, compactNum, messageId: `boundary-${compactNum}` },
+  });
+  const question = (text: string) => ({
+    role: "user",
+    content: text,
+    meta: { messageId: `q-${text}` },
+  });
+
+  it("keeps the checkpoints whose boundary is still in the conversation", async () => {
+    await mm.saveSessionMetadata(SESSION_A, {
+      checkpoints: [makeCheckpoint({ compactNum: 1 }), makeCheckpoint({ id: "ckpt-0002", compactNum: 2 })],
+    });
+
+    await mm.pruneCheckpointsToSurvivingBoundaries(SESSION_A, [boundary(1), question("still here")]);
+
+    const metadata = mm.loadSessionMetadata(SESSION_A);
+    expect(metadata?.checkpoints?.map((c) => c.compactNum)).toEqual([1]);
+  });
+
+  it("deletes the pre-compact snapshot a dropped checkpoint owned", async () => {
+    await mm.saveSessionMetadata(SESSION_B, { checkpoints: [makeCheckpoint({ compactNum: 3 })] });
+    await mm.saveCheckpointSnapshot(SESSION_B, 3, [question("archived")]);
+    expect(mm.loadCheckpointSnapshot(SESSION_B, 3)).not.toBeNull();
+
+    await mm.pruneCheckpointsToSurvivingBoundaries(SESSION_B, []);
+
+    expect(mm.loadCheckpointSnapshot(SESSION_B, 3)).toBeNull();
+  });
+
+  it("a session rewound to its opening message reloads empty, not carrying the discarded message back", async () => {
+    // A session that compacted once: the checkpoint holds a snapshot in which
+    // the user's message still exists, and the loader re-inserts that message
+    // whenever the session on disk has no renderable user row left. A rewind to
+    // the opening message leaves exactly that state, so without pruning the
+    // discarded message reappears on the next load.
+    await mm.saveSessionMetadata(SESSION_C, { checkpoints: [makeCheckpoint({ compactNum: 1 })] });
+    await mm.saveCheckpointSnapshot(SESSION_C, 1, [question("the discarded question")]);
+    await mm.saveSession(SESSION_C, [boundary(1)] as never);
+    // Precondition — this is the resurrection the prune has to prevent.
+    expect(JSON.stringify(mm.loadSession(SESSION_C))).toContain("the discarded question");
+
+    await mm.pruneCheckpointsToSurvivingBoundaries(SESSION_C, []);
+    await mm.saveSession(SESSION_C, [] as never);
+
+    expect(mm.loadSession(SESSION_C)).toEqual([]);
+  });
+});

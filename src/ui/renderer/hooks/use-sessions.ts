@@ -276,12 +276,12 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
 
   const handleFork = useCallback(
     async (
-      histIdx: number,
+      messageId: string,
       entryIdx: number,
       truncateToEntry: (entryIndex: number) => void,
     ): Promise<{ ok: boolean }> => {
       try {
-        const res = await api.chatFork(histIdx);
+        const res = await api.chatFork(messageId);
         if (res.ok) {
           truncateToEntry(entryIdx);
           await refreshSessionId();

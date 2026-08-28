@@ -906,6 +906,12 @@ export class ConversationLoop {
        * fenced body inside the user's own bubble.
        */
       displayText?: string;
+      /**
+       * Identity to stamp on the user row this turn appends. Supplied by the
+       * caller that already announced the row on the timeline, so the row the
+       * surface is showing and the row stored here are the same row.
+       */
+      userMessageId?: string;
     },
   ): Promise<TurnResult> {
     return turnExtensionPolicyContext.run(

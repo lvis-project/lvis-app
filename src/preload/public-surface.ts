@@ -151,12 +151,14 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
       /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
       preambleChars?: number;
     }>,
-  chatEditResend: async (messageIndex: number, newText: string) =>
-    ipcRenderer.invoke(CHANNELS.chat.editResend, messageIndex, newText, chatGroupId),
-  chatRewindTo: async (messageIndex: number) =>
-    ipcRenderer.invoke(CHANNELS.chat.rewindTo, messageIndex, chatGroupId) as
-      Promise<{ ok: true } | { ok: false; error: string }>,
-  chatFork: async (messageIndex: number) => ipcRenderer.invoke(CHANNELS.chat.fork, messageIndex, chatGroupId),
+  chatEditResend: async (messageId: string, newText: string) =>
+    ipcRenderer.invoke(CHANNELS.chat.editResend, messageId, newText, chatGroupId),
+  chatRewindTo: async (messageId: string) =>
+    ipcRenderer.invoke(CHANNELS.chat.rewindTo, messageId, chatGroupId) as Promise<
+      | { ok: true; text: string; personaPromptId?: string }
+      | { ok: false; error: string }
+    >,
+  chatFork: async (messageId?: string) => ipcRenderer.invoke(CHANNELS.chat.fork, messageId, chatGroupId),
   chatContinueLastUser: async (sessionId: string) =>
     ipcRenderer.invoke(CHANNELS.chat.continueLastUser, { sessionId }, chatGroupId) as Promise<{ ok: boolean; error?: string }>,
   chatRetryEffort: async (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) =>

@@ -19,6 +19,7 @@ import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/ch
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import type { UserContentPart } from "../../engine/llm/types.js";
+import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
 import {
   countResourceAttachmentFences,
@@ -70,6 +71,12 @@ export async function runStreamedTurn(
     abortSignal?: AbortSignal;
   },
 ): Promise<TurnResult> {
+  // Minted HERE rather than read back after the append, because the input is
+  // announced on the timeline before `runTurn` stores it. Handing the same id
+  // to both means the row a surface renders and the row the host writes are
+  // the same row by construction, with no window in which a surface holds an
+  // identity the history has not got yet.
+  const userMessageId = createDlpSafeUuid();
   if (options.abortSignal?.aborted) {
     throw new Error("turn-cancelled-before-start");
   }
@@ -130,7 +137,7 @@ export async function runStreamedTurn(
   send({
     kind: "user.message",
     origin: inputOrigin,
-    ownerDetail: { text: options.displayText ?? input },
+    ownerDetail: { text: options.displayText ?? input, messageId: userMessageId },
   });
   const result = await conversationLoop.runTurn(
     input,
@@ -143,7 +150,7 @@ export async function runStreamedTurn(
         const visible = suggestedRepliesFilter.feed(text);
         if (visible) send({ kind: "assistant.text.delta", text: visible });
       },
-      onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) =>
+      onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls, messageId }) =>
         send({
           kind: "assistant.round.completed",
           round: {
@@ -151,7 +158,7 @@ export async function runStreamedTurn(
             text: stripSuggestedReplies(text),
             stopReason,
             hasToolCalls,
-            ownerDetail: { thought },
+            ownerDetail: { thought, messageId },
           },
         }),
       onToolStart: (name, toolInput, meta) =>
@@ -303,6 +310,7 @@ export async function runStreamedTurn(
         ? { remoteControllerAuthority: options.remoteControllerAuthority }
         : {}),
       ...(options.displayText !== undefined ? { displayText: options.displayText } : {}),
+      userMessageId,
     },
   );
   const { trailing, suggestedReplies } = suggestedRepliesFilter.finish();
