@@ -858,7 +858,11 @@ describe("useCurrentSession (streaming guard)", () => {
     });
   });
 
-  it("ignores active routine history on startup and resumes the explicit active main session", async () => {
+  // Routines run on their own loops (routine-engine createConversationLoop),
+  // so the primary loop holds a routine conversation only because the user
+  // opened it there. What a loop holds is what its tile shows; the window's
+  // main-active pointer — which never names a routine — is for an empty loop.
+  it("shows the routine conversation the loop already holds instead of the window's main-active session", async () => {
     const { api } = makeMockLvisApi({
       currentSession: "routine-sess",
       history: {
@@ -893,17 +897,17 @@ describe("useCurrentSession (streaming guard)", () => {
       useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
     );
 
-    await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("main-sess"));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("routine-sess"));
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
     expect(applyInitial).toHaveBeenCalledWith([
-      { kind: "user", text: "메인 질문" },
-      { kind: "assistant", text: "메인 답변", streaming: false, route: undefined, restored: true },
+      { kind: "user", text: "루틴 질문" },
+      { kind: "assistant", text: "루틴 답변", streaming: false, route: undefined, restored: true },
     ]);
-    expect(result.current.currentSessionId).toBe("main-sess");
-    expect(result.current.currentSessionKind).toBe("main");
-    expect(result.current.currentSessionTitle).toBe("Main session");
+    expect(result.current.currentSessionKind).toBe("routine");
+    expect(result.current.currentSessionTitle).toBe("Daily routine");
   });
 
-  it("resets routine in-memory history to a blank main session when active main state is fresh", async () => {
+  it("keeps a held routine conversation even when the window's main-active state is fresh", async () => {
     const { api } = makeMockLvisApi({
       currentSession: "routine-sess",
       history: {
@@ -919,28 +923,17 @@ describe("useCurrentSession (streaming guard)", () => {
         updatedAt: "2026-05-11T03:00:00.000Z",
       },
     });
-    api.chatGetHistory.mockReset();
-    api.chatGetHistory
-      .mockResolvedValueOnce({
-        sessionId: "routine-sess",
-        sessionKind: "routine",
-        messages: [{ index: 0, role: "user", content: "루틴 질문" }],
-      })
-      .mockResolvedValueOnce({
-        sessionId: "fresh-main",
-        sessionKind: "main",
-        messages: [],
-      });
     const applyInitial = vi.fn();
 
     const { result } = renderHook(() =>
       useCurrentSession(api as unknown as LvisApi, { applyInitialSession: applyInitial }),
     );
 
-    await waitFor(() => expect(api.chatNew).toHaveBeenCalledTimes(1));
-    expect(applyInitial).toHaveBeenCalledWith([]);
-    expect(result.current.currentSessionId).toBe("fresh-main");
-    expect(result.current.currentSessionKind).toBe("main");
+    await waitFor(() => expect(result.current.currentSessionId).toBe("routine-sess"));
+    expect(api.chatNew).not.toHaveBeenCalled();
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+    expect(applyInitial).toHaveBeenCalledWith([{ kind: "user", text: "루틴 질문" }]);
+    expect(result.current.currentSessionKind).toBe("routine");
   });
 
   it("does not auto-resume the latest listed session when active main state is fresh", async () => {
