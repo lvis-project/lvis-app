@@ -48,6 +48,13 @@ export async function splitIntoTwoTiles(container: HTMLElement): Promise<Rendere
   await act(async () => {
     fireEvent.click(split);
   });
+  // The split control opens a direction choice (portaled, so it is looked up
+  // on the document); either direction yields two tiles.
+  const sideBySide = document.querySelector<HTMLButtonElement>('[data-testid="chat-group-split-row"]');
+  if (!sideBySide) throw new Error("no split direction choice");
+  await act(async () => {
+    fireEvent.click(sideBySide);
+  });
   const prefix = "chat-group-cell:";
   const tiles = Array.from(container.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`))
     .map((element) => ({

@@ -1508,8 +1508,11 @@ export function App() {
                                         {...(chatGroups.canSplit ? {
                                           onSplit: (axis: ChatGroupSplitAxis) => chatGroups.split(group.id, axis),
                                           splitFits: (axis: ChatGroupSplitAxis) => {
+                                            // A canvas that has not been laid out yet measures 0×0;
+                                            // that is "unmeasured", not "no room".
                                             const canvas = chatGroupCanvasRef.current;
-                                            return chatGroups.splitFits(group.id, axis, canvas
+                                            const measured = canvas && canvas.clientWidth > 0 && canvas.clientHeight > 0;
+                                            return chatGroups.splitFits(group.id, axis, measured
                                               ? { width: canvas.clientWidth, height: canvas.clientHeight }
                                               : undefined);
                                           },
