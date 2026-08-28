@@ -151,7 +151,6 @@ function makeConversationLoop(
     refreshProvider: vi.fn(),
     abortCurrentTurn: vi.fn(),
     resetAndResume: vi.fn(),
-    sessionHeldElsewhere: vi.fn(() => false),
     manualCompact: vi.fn(),
     startRoutineConversation: vi.fn(),
   };

@@ -97,6 +97,12 @@ export interface CurrentSessionDeps {
    * "chats" tab while the user is looking at the project's group.
    */
   freshProject?: { projectRoot?: string; projectName?: string };
+  /**
+   * A session this tile asked for is held by another chat group — one that
+   * may be folded away by chat mode, so the renderer's mounted tiles cannot
+   * find it. Returns whether that group was brought forward.
+   */
+  focusSessionHolder?: (chatGroupId: string) => boolean;
 }
 
 /**
@@ -114,7 +120,7 @@ export interface CurrentSessionDeps {
  * history index and a `setEntries` truncator.
  */
 export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
-  const { applyInitialSession, onLoadedSession, restoreSubAgents, onSessionsChanged } = deps;
+  const { applyInitialSession, onLoadedSession, restoreSubAgents, onSessionsChanged, focusSessionHolder } = deps;
   const resumeWindowActiveSession = deps.resumeWindowActiveSession ?? true;
   // Read at hydration time, not a dependency of it: the window's active
   // project changing must not re-hydrate a tile that is holding a conversation.
@@ -153,10 +159,12 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
         setCurrentSessionKind(current.sessionKind ?? "main");
         setCurrentSessionTitle(current.sessionTitle);
         setCurrentSessionProject(sessionProjectFromHistory(current));
+        restoreSubAgents?.(current.restoredSubAgents ?? []);
         applyInitialSession?.(historyToEntries(current.messages));
         return;
       }
-      if (!project && (current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
+      const alreadyUnderProject = !project || sessionProjectFromHistory(current).projectRoot === project.projectRoot;
+      if (alreadyUnderProject && (current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
         setCurrentSessionId(current.sessionId);
         setCurrentSessionKind("main");
         setCurrentSessionTitle(undefined);
@@ -246,7 +254,10 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       try {
         const res = await api.chatSessionResume(sessionId);
         if (token !== sessionReadTokenRef.current) return false;
-        if (!res?.ok) return false;
+        if (!res?.ok) {
+          // Held by another group: showing that group IS showing the session.
+          return res?.holderChatGroupId !== undefined && (focusSessionHolder?.(res.holderChatGroupId) ?? false);
+        }
         const h = await api.chatSessionHistory(sessionId);
         if (token !== sessionReadTokenRef.current) return false;
         if (!h.ok) return false;
@@ -262,7 +273,7 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
         return false;
       }
     },
-    [api, onLoadedSession],
+    [api, onLoadedSession, focusSessionHolder],
   );
 
   const handleFork = useCallback(

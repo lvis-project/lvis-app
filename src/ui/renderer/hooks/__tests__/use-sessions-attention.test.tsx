@@ -193,6 +193,56 @@ describe("useCurrentSession — what a tile holds on mount", () => {
     // No project to file it under: the loop's own empty session is the fresh state.
     expect(api.chatNew).not.toHaveBeenCalled();
   });
+
+  it("an empty tile already filed under the requested project is the fresh state — re-hydration makes no new session", async () => {
+    const project = { projectRoot: "/work/a", projectName: "a" };
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-fresh", messages: [], ...project },
+    });
+    const { result } = renderHook(() =>
+      useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, freshProject: project }));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("loop-fresh"));
+    expect(result.current.currentSessionProject).toMatchObject(project);
+    expect(api.chatNew).not.toHaveBeenCalled();
+  });
+
+  it("a tile that keeps its loop's conversation also gets that conversation's sub-agent cards back", async () => {
+    const restoredSubAgents = [{ agentId: "sub-1", status: "completed" }];
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-live", messages: [{ role: "user", content: "kept" }], restoredSubAgents },
+    });
+    const restoreSubAgents = vi.fn();
+    const { result } = renderHook(() =>
+      useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, restoreSubAgents }));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("loop-live"));
+    expect(restoreSubAgents).toHaveBeenCalledWith(restoredSubAgents);
+  });
+
+  it("loading a conversation another group holds brings that group forward instead of failing silently", async () => {
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-fresh", messages: [] },
+    });
+    api.chatSessionResume.mockResolvedValue({
+      ok: false, compacted: false, compactedAt: null, removedMessageCount: 0,
+      error: "session-open-in-other-group", holderChatGroupId: "group-2",
+    });
+    const focusSessionHolder = vi.fn(() => true);
+    const { result } = renderHook(() =>
+      useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, focusSessionHolder }));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("loop-fresh"));
+
+    const applyLoadedSession = vi.fn();
+    const loaded = await result.current.handleLoadSession("held-elsewhere", false, applyLoadedSession);
+    expect(loaded).toBe(true);
+    expect(focusSessionHolder).toHaveBeenCalledWith("group-2");
+    expect(api.chatSessionHistory).not.toHaveBeenCalledWith("held-elsewhere");
+    expect(applyLoadedSession).not.toHaveBeenCalled();
+    // This tile still shows what it held; the conversation is on the other tile.
+    expect(result.current.currentSessionId).toBe("loop-fresh");
+  });
 });
 
 describe("turn ends refresh the window's list, seen or not", () => {

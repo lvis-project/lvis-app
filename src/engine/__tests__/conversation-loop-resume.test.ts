@@ -75,7 +75,6 @@ describe("ConversationLoop.resetAndResume", () => {
     const held = vi.fn((sessionId: string) => sessionId === RESUME_SESSION_ID);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, sessionHeldElsewhere: held }));
 
-    expect(loop.sessionHeldElsewhere(RESUME_SESSION_ID)).toBe(true);
     // Both entry points — the IPC resume and the engine `/load` command.
     expect(loop.resetAndResume(RESUME_SESSION_ID).ok).toBe(false);
     expect(loop.loadSession(RESUME_SESSION_ID)).toBe(false);

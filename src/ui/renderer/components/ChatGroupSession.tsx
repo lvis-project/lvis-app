@@ -68,6 +68,8 @@ export interface ChatGroupEnvironment {
 
   // the window's conversation list and stars
   refreshSessions: () => void | Promise<void>;
+  /** Bring a chat group forward, including one chat mode has folded away. Returns whether focus moved. */
+  focusChatGroup: (chatGroupId: string) => boolean;
   sessions: readonly { id: string; title: string }[];
   isSessionStarred: (sessionId: string) => boolean;
   handleToggleSessionStar: (sessionId: string, title?: string) => Promise<void>;
@@ -208,6 +210,7 @@ export function ChatGroupSession({
     onSessionsChanged: env.refreshSessions,
     resumeWindowActiveSession: chatGroupId === MAIN_CHAT_GROUP_ID,
     freshProject: freshTileProject,
+    focusSessionHolder: env.focusChatGroup,
   });
 
   // A composer draft belongs to the conversation it was typed into. Switching

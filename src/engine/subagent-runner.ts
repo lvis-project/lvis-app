@@ -2452,6 +2452,9 @@ export class SubAgentRunner {
       // Sub-agent runs are fire-and-forget — no post-turn hook chain to keep
       // the parent session unaffected.
       postTurnHookChain: undefined,
+      // The child's sessions live in the sub-agent namespace; the parent's
+      // predicate scans the window's main loops and must not judge them.
+      sessionHeldElsewhere: undefined,
       // Sub-agent does not request_plugin (its tool surface is fixed at spawn).
       pluginRuntime: undefined,
       forcedActivePluginIds,

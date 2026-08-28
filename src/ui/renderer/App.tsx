@@ -276,12 +276,15 @@ export function App() {
 
   // A conversation open in another tile is brought forward, not loaded a
   // second time — see `tileHoldingSession`.
+  const focusChatGroup = useCallback((chatGroupId: string): boolean => {
+    if (chatGroupId === chatGroups.focusedId) return false;
+    chatGroups.focus(chatGroupId);
+    return true;
+  }, [chatGroups]);
   const focusTileHolding = useCallback((sessionId: string): boolean => {
     const holder = tileHoldingSession(tileSessions, sessionId);
-    if (!holder || holder.chatGroupId === chatGroups.focusedId) return false;
-    chatGroups.focus(holder.chatGroupId);
-    return true;
-  }, [tileSessions, chatGroups]);
+    return holder !== undefined && focusChatGroup(holder.chatGroupId);
+  }, [tileSessions, focusChatGroup]);
 
   const handleLoadSessionAndRefresh = useCallback(
     async (sessionId: string) => focusTileHolding(sessionId) || focusedSession.loadSession(sessionId),
@@ -599,15 +602,18 @@ export function App() {
 
   const handleOpenRoutineSession = useCallback(
     async (sessionId: string) => {
-      setActiveView("home");
       // Moving focus to the tile already showing it touches no conversation,
       // so it is not held back by the focused tile's stream.
-      if (focusTileHolding(sessionId)) return true;
+      if (focusTileHolding(sessionId)) {
+        setActiveView("home");
+        return true;
+      }
       if (streaming) {
         console.warn("[lvis] openRoutineSession blocked during streaming");
         return false;
       }
       try {
+        setActiveView("home");
         return await focusedSession.loadSession(sessionId);
       } catch (err) {
         console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
@@ -1068,7 +1074,7 @@ export function App() {
     onOpenSettings, maxOutputTokens: MAX_OUTPUT_TOKENS,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     enableThinkingChat, toggleThinking,
-    refreshSessions, sessions,
+    refreshSessions, sessions, focusChatGroup,
     isSessionStarred: (sessionId: string) => Boolean(isSessionStarred(sessionId)),
     handleToggleSessionStar,
     starredIsEntry, starredToggle,
@@ -1106,7 +1112,7 @@ export function App() {
     apiUsageProjectionAvailable, activeSubscriptionRuntime,
     effectiveLlmReady, chatReadyWithoutApiKey, checkApiKey, onOpenSettings,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    enableThinkingChat, toggleThinking, refreshSessions, sessions,
+    enableThinkingChat, toggleThinking, refreshSessions, focusChatGroup, sessions,
     isSessionStarred, handleToggleSessionStar, starredIsEntry, starredToggle,
     statusPersistent, statusVisibleToast, statusPendingCount, handleStatusToastClick,
     statusRemoveToast, statusPushToast, statusUpsertPersistent, statusRemovePersistent,

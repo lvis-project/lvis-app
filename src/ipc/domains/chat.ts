@@ -689,6 +689,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
   /** Window-scoped "main active" state is the primary tile's to write. */
   const isPrimaryGroup = (group: ChatGroupContext): boolean =>
     group.deps.chatGroupId === undefined || group.deps.chatGroupId === MAIN_CHAT_GROUP_ID;
+  const chatGroupIdOf = (group: ChatGroupContext): string => group.deps.chatGroupId ?? MAIN_CHAT_GROUP_ID;
+  /** The group whose loop holds `sessionId` right now, the primary included. */
+  const groupHolding = (sessionId: string): ChatGroupContext | undefined =>
+    [...groupContexts.values()].find((group) => group.loop.getSessionId() === sessionId);
   const chatGroupContext = (chatGroupId: string): ChatGroupContext => {
     const cached = groupContexts.get(chatGroupId);
     if (cached) return cached;
@@ -1116,15 +1120,17 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     const group = groupOf(chatGroupId);
     const conversationLoop = group.loop;
-    // The loop would refuse this anyway (ConversationLoopDeps.sessionHeldElsewhere);
-    // asking first is what turns the refusal into a reason the renderer can show.
-    if (conversationLoop.sessionHeldElsewhere(sessionId)) {
-      return {
-        ok: false, compacted: false, compactedAt: null, removedMessageCount: 0,
-        error: SESSION_OPEN_IN_OTHER_GROUP,
-      };
-    }
     const mutation = group.turns.trackSessionMutation(async () => {
+      // The loop refuses this on its own (ConversationLoopDeps.sessionHeldElsewhere);
+      // naming the holder is what lets the renderer bring that tile forward —
+      // it may be folded away by chat mode and unknown to the renderer's tiles.
+      const holder = groupHolding(sessionId);
+      if (holder && holder !== group) {
+        return {
+          ok: false, compacted: false, compactedAt: null, removedMessageCount: 0,
+          error: SESSION_OPEN_IN_OTHER_GROUP, holderChatGroupId: chatGroupIdOf(holder),
+        };
+      }
       const result = conversationLoop.resetAndResume(sessionId);
       if (result.ok && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
@@ -1451,7 +1457,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     // mutation guard — and any tile may be the one holding it. Holding a
     // delete of some other conversation behind a loop would refuse a safe
     // action for a reason that does not apply to it.
-    const holder = [...groupContexts.values()].find((group) => group.loop.getSessionId() === sessionId);
+    const holder = groupHolding(sessionId);
     if (!holder) {
       await memoryManager.deleteSession(sessionId);
       return { ok: true, wasLoaded: false };
