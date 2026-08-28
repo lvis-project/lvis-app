@@ -254,6 +254,8 @@ export function SubscriptionProviderRow({
   actions,
   label,
   leading,
+  subline,
+  authAction,
   trailing,
 }: {
   provider: SubscriptionProviderView;
@@ -264,6 +266,12 @@ export function SubscriptionProviderRow({
   actions: SubscriptionProviderActions;
   /** Contributed beside the provider name — the API-key half of this provider. */
   leading?: ReactNode;
+  /** Contributed under the provider name — what the API half reaches and what
+   *  its last model-list handshake did. */
+  subline?: ReactNode;
+  /** Contributed among the sign-in buttons — the API-key route is one of the
+   *  ways in, so it belongs with the others rather than beside the name. */
+  authAction?: ReactNode;
   /** Contributed at the end of the row — the API-key credential form. */
   trailing?: ReactNode;
 }) {
@@ -321,6 +329,7 @@ export function SubscriptionProviderRow({
   return (
     <div
       className="space-y-3 rounded-md border bg-card p-3"
+      data-provider-row={descriptor.id}
       data-testid={`subscription-provider:${descriptor.id}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-2" aria-live="polite">
@@ -349,6 +358,7 @@ export function SubscriptionProviderRow({
           {descriptor.description ? (
             <p className="text-xs text-muted-foreground">{descriptor.description}</p>
           ) : null}
+          {subline}
         </div>
         {actions.refreshStatus ? (
           <Button
@@ -565,6 +575,8 @@ export function SubscriptionProviderRow({
                 : t("subscriptionProvidersSection.loginDeviceCode")}
           </Button>
         )) : null}
+
+        {authAction}
 
         {connected && actions.useForChat ? (
           <Button

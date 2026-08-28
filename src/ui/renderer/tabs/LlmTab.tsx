@@ -33,6 +33,7 @@ import {
 import {
   canUseLlmVendorWithoutApiKey,
   isLLMVendor,
+  isOpenAICompatiblePresetVendor,
   isOpenAICompatibleVendor,
   isRetiredLlmModel,
 } from "../../../shared/llm-vendor-defaults.js";
@@ -360,6 +361,20 @@ function providerOptionsForPresets(
   return presets.map(providerOptionFromPreset);
 }
 
+/**
+ * Vendors whose model-list endpoint is fixed and known, so their catalogue is
+ * always fetchable without the user supplying a base URL.
+ *
+ * This is the renderer's half of `STANDARD_MODEL_LIST_BASE_URLS` in
+ * `engine/llm/model-list.ts`: main resolves the URL, this decides that asking
+ * is worthwhile. Kept as one set so the two questions the tab asks about these
+ * vendors — "sync it?" and "may a static seed stand in?" — cannot disagree.
+ */
+const STANDARD_CATALOGUE_ENDPOINT_VENDORS: ReadonlySet<string> = new Set([
+  "openai",
+  "copilot",
+]);
+
 function shouldSyncModelList(
   vendorId: string,
   info: ProviderOption | VendorOption,
@@ -369,7 +384,7 @@ function shouldSyncModelList(
   if (!vendorId) return false;
   if (modelDiscoveryPolicyUsesSeededOptions(modelDiscoveryPolicy)) return false;
   if (baseUrl?.trim()) return true;
-  if (vendorId === "openai" || vendorId === "copilot") return true;
+  if (STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(vendorId)) return true;
   if (!info.needsBaseUrl) return false;
   return vendorId !== "openai-compatible" && vendorId !== "azure-foundry";
 }
@@ -384,6 +399,40 @@ function isOpenAICompatibleFamilyVendor(vendorId: string): boolean {
   return isLLMVendor(vendorId) && isOpenAICompatibleVendor(vendorId);
 }
 
+/**
+ * Whether this vendor's catalogue is the endpoint's word rather than ours.
+ *
+ * Two kinds qualify: the openai-compatible family, whose catalogue is defined
+ * by whatever endpoint it points at, and the vendors with a fixed, known
+ * `/models` endpoint. For both, a bundled list of model ids is a guess about
+ * someone else's inventory, so it must never stand in for the answer — a
+ * failed handshake has to READ as a failed handshake, not as a short catalogue.
+ */
+function usesEndpointModelCatalogue(vendorId: string): boolean {
+  return isOpenAICompatibleFamilyVendor(vendorId)
+    || STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(vendorId);
+}
+
+/**
+ * Whether the endpoint is the user's to supply.
+ *
+ * A vendor whose endpoint is fixed has nothing to ask for here, and an empty
+ * optional field beside a fixed endpoint reads as a setting that still needs
+ * filling in. Only two cases genuinely need one: the generic OpenAI-compatible
+ * provider, and Azure, whose resource host differs per account. Every preset
+ * vendor ships its base URL in `LLM_VENDOR_DEFAULTS`, and a marketplace preset
+ * carries its own — both are already answered.
+ */
+function endpointIsUserSupplied(
+  vendorId: string,
+  info: ProviderOption | VendorOption,
+  lockedToMarketplacePreset: boolean,
+): boolean {
+  if (lockedToMarketplacePreset) return false;
+  if (!info.needsBaseUrl) return false;
+  return !isOpenAICompatiblePresetVendor(vendorId);
+}
+
 function modelOptionsFor(
   vendorId: string,
   selectedModel: string,
@@ -392,14 +441,15 @@ function modelOptionsFor(
   modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy,
 ): string[] {
   const hasSynced = Boolean(syncedOptions && syncedOptions.length > 0);
-  // Handshake-only: for openai-compatible-family providers whose discovery
-  // policy is not seeded (static/manual), never fall back to the static
-  // `info.modelOptions` seed or the seeded default model. The list stays empty
-  // until a live /models fetch succeeds; only the user's persisted selection is
-  // surfaced so an already-configured provider still shows its saved model.
+  // Handshake-only: for every provider whose catalogue is the endpoint's word
+  // (see `usesEndpointModelCatalogue`) and whose discovery policy is not seeded
+  // (static/manual), never fall back to the static `info.modelOptions` seed or
+  // the seeded default model. The list stays empty until a live /models fetch
+  // succeeds; only the user's persisted selection is surfaced so an
+  // already-configured provider still shows its saved model.
   const handshakeOnly =
     !hasSynced &&
-    isOpenAICompatibleFamilyVendor(vendorId) &&
+    usesEndpointModelCatalogue(vendorId) &&
     !modelDiscoveryPolicyUsesSeededOptions(modelDiscoveryPolicy);
 
   const options = hasSynced
@@ -1128,6 +1178,9 @@ export function LlmTab(props: LlmTabProps) {
 
   const [providerConfigOpen, setProviderConfigOpen] = useState(false);
   const [addedRowIds, setAddedRowIds] = useState<readonly string[]>([]);
+  /** The row a click just revealed, until it has been scrolled to and focused. */
+  const [rowToReveal, setRowToReveal] = useState<string | null>(null);
+  const connectionsRef = useRef<HTMLDivElement | null>(null);
   // A vendor with no usable credential has not answered the checklist yet.
   const apiPathConfigured = hasKey || !activeProviderRequiresApiKey;
 
@@ -1263,14 +1316,24 @@ export function LlmTab(props: LlmTabProps) {
   // is `vendor\nbaseUrl\ncredentialScope`, so the endpoint and the size of the
   // catalogue it handed back are both already here — no extra call to show
   // them, and no second source that could disagree with the chooser.
+  //
+  // The handshake's STATUS travels with them. A vendor whose endpoint is fixed
+  // has no base URL in its cache key, so a row that could only report a URL and
+  // a count said nothing at all about itself — which is exactly how a provider
+  // ends up looking like it serves a built-in list.
   const apiFacts = useMemo(() => {
-    const facts = new Map<string, { baseUrl: string; modelCount: number }>();
+    const facts = new Map<string, {
+      endpoint: string;
+      modelCount: number;
+      status: ModelListState["status"];
+    }>();
     for (const [cacheKey, state] of Object.entries(modelLists)) {
       const [cachedVendor, baseUrl] = cacheKey.split("\n");
       if (!cachedVendor) continue;
       facts.set(cachedVendor, {
-        baseUrl: baseUrl ?? "",
+        endpoint: state.endpoint ?? baseUrl ?? "",
         modelCount: state.options?.length ?? 0,
+        status: state.status,
       });
     }
     return facts;
@@ -1303,16 +1366,46 @@ export function LlmTab(props: LlmTabProps) {
         connected: true,
       });
     }
+    // A vendor picked from "add a provider" has no row yet — it is neither a
+    // subscription runtime nor configured — and its credential form lives ON a
+    // row, so without this the provider a user just chose does not appear at
+    // all. `providerSelectOptions` is the only source that knows the label for
+    // both a built-in vendor and a marketplace preset.
+    for (const rowId of addedRowIds) {
+      if (rows.some((row) => row.id === rowId)) continue;
+      const option = providerSelectOptions.find((candidate) => candidate.id === rowId);
+      if (!option) continue;
+      rows.push({
+        id: rowId,
+        label: option.label,
+        apiVendorId: rowId,
+        apiConfigured: false,
+        connected: false,
+      });
+    }
     return rows;
-  }, [subscription.providers, configuredApiVendorIds]);
+  }, [subscription.providers, configuredApiVendorIds, addedRowIds, providerSelectOptions]);
 
-  // A provider picked from "add a provider" has to STAY on screen while it is
-  // being set up: signing in to a subscription runtime happens on its row, and
-  // a row that vanishes because it is not connected yet takes the login button
-  // with it.
-  const visibleRows = connections.filter(
-    (row) => row.connected || addedRowIds.includes(row.id),
-  );
+  // The order the user built the list in: everything already connected, then
+  // each provider they added, in the order they added it. A newly added card
+  // therefore lands at the END — directly above the button that created it —
+  // instead of wherever the catalogue happens to sort it. A provider picked
+  // from "add a provider" also has to STAY on screen while it is being set up:
+  // signing in to a subscription runtime happens on its row, and a row that
+  // vanishes because it is not connected yet takes the login button with it.
+  const visibleRows = useMemo<ProviderConnection[]>(() => {
+    const rows = connections.filter((row) => row.connected);
+    const seen = new Set(rows.map((row) => row.id));
+    for (const rowId of addedRowIds) {
+      if (seen.has(rowId)) continue;
+      const row = connections.find((candidate) => candidate.id === rowId);
+      if (!row) continue;
+      seen.add(rowId);
+      rows.push(row);
+    }
+    return rows;
+  }, [connections, addedRowIds]);
+  const visibleRowKey = visibleRows.map((row) => row.id).join("\n");
   // Everything else goes behind "add a provider". The catalogue keeps growing
   // with marketplace presets, so the list's length has to track the number of
   // providers the user actually USES, not the number that exist.
@@ -1322,18 +1415,50 @@ export function LlmTab(props: LlmTabProps) {
   const addableVendors = useMemo(
     () => providerSelectOptions.filter((option) =>
       !configuredApiVendorIds.has(option.id)
+      && !addedRowIds.includes(option.id)
       && !connections.some((row) => row.apiVendorId === option.id)),
-    [providerSelectOptions, configuredApiVendorIds, connections],
+    [providerSelectOptions, configuredApiVendorIds, connections, addedRowIds],
   );
 
   const revealRow = useCallback((rowId: string) => {
     setAddedRowIds((current) => current.includes(rowId) ? current : [...current, rowId]);
+    setRowToReveal(rowId);
   }, []);
 
   const openApiConfig = useCallback((vendorId: string) => {
     if (vendorId !== vendor) handleVendorChange(vendorId);
     setProviderConfigOpen(true);
   }, [handleVendorChange, vendor]);
+
+  /**
+   * "Add a provider" picked an entry. The row it opens is the one the form
+   * will actually point at: a marketplace preset is edited THROUGH the
+   * openai-compatible vendor, so revealing the preset's own id would leave the
+   * new card without a form.
+   */
+  const addProvider = useCallback((optionId: string) => {
+    const preset = marketplaceProviderPresets.find(
+      (entry) => marketplaceProviderPresetSecretId(entry.providerId) === optionId,
+    );
+    revealRow(preset ? "openai-compatible" : optionId);
+    openApiConfig(optionId);
+  }, [marketplaceProviderPresets, openApiConfig, revealRow]);
+
+  // A row that was just revealed has to be findable: the list can already be
+  // longer than the panel, and a card that appears below the fold reads as a
+  // click that did nothing.
+  useEffect(() => {
+    if (!rowToReveal) return;
+    const node = connectionsRef.current?.querySelector<HTMLElement>(
+      `[data-provider-row="${rowToReveal}"]`,
+    );
+    if (!node) return;
+    setRowToReveal(null);
+    node.scrollIntoView?.({ block: "nearest" });
+    const focusTarget = node.querySelector<HTMLElement>('[data-testid="llm-api-key-input"]')
+      ?? node.querySelector<HTMLElement>("button");
+    focusTarget?.focus();
+  }, [rowToReveal, visibleRowKey]);
 
   // The credential form for whichever provider row is open. One form, because
   // one vendor is being edited at a time — the row that owns it just moved.
@@ -1342,20 +1467,16 @@ export function LlmTab(props: LlmTabProps) {
         className="space-y-3"
         data-testid="llm-tab:manual-section"
       >
-        {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+        {vendor !== "vertex-ai" && endpointIsUserSupplied(vendor, vendorInfo, endpointLockedToMarketplacePreset) && (
           <div className="space-y-2">
             <Label className="text-sm font-medium">
-              {t("llmTab.endpointBaseUrlLabel")}{vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
+              {t("llmTab.endpointBaseUrlLabel")} *
             </Label>
             <Input
               data-testid="llm-base-url-input"
-              value={selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl}
-              onChange={(e) => {
-                if (endpointLockedToMarketplacePreset) return;
-                setBaseUrl(e.target.value);
-              }}
-              placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
-              readOnly={endpointLockedToMarketplacePreset}
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder={vendorInfo.baseUrlPlaceholder ?? "https://..."}
             />
             <p className="text-[11px] text-muted-foreground">
               {t("llmTab.baseUrlDiscardWarning")}
@@ -1365,11 +1486,6 @@ export function LlmTab(props: LlmTabProps) {
                 {t("llmTab.azureEndpointFormat")}
                 {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
                 {" "}— {t("llmTab.azureDeploymentNote")}
-              </p>
-            )}
-            {(vendor === "openai" || vendor === "copilot") && (
-              <p className="text-[11px] text-muted-foreground">
-                {t("llmTab.proxyEndpointNote")}
               </p>
             )}
           </div>
@@ -1439,6 +1555,18 @@ export function LlmTab(props: LlmTabProps) {
             />
           </div>
         )}
+        {/* Save belongs to the card whose fields it commits. A page-level
+            button sat below every provider and the "add provider" control, so
+            the one thing a half-filled new card needed was the one control
+            furthest from it — and it read as committing the whole page. */}
+        {hasOnSave && (
+          <SectionSaveBar
+            onSave={onSave!}
+            saving={saving}
+            settingsLoaded={settingsLoaded}
+            testId="llm-tab:save-providers"
+          />
+        )}
         </div>
   );
 
@@ -1499,15 +1627,20 @@ export function LlmTab(props: LlmTabProps) {
     if (!row.apiVendorId) return null;
     const facts = apiFacts.get(row.apiVendorId);
     if (!facts) return null;
-    const parts = [
-      facts.baseUrl,
-      facts.modelCount > 0 ? t("llmTab.modelSynced", { count: facts.modelCount }) : "",
-    ].filter(Boolean);
+    const syncLabel = facts.status === "loading"
+      ? t("llmTab.modelSyncing")
+      : facts.status === "error"
+        ? t("llmTab.modelSyncFailed")
+        : facts.modelCount > 0
+          ? t("llmTab.modelSynced", { count: facts.modelCount })
+          : "";
+    const parts = [facts.endpoint, syncLabel].filter(Boolean);
     if (parts.length === 0) return null;
     return (
       <p
-        className="truncate text-[11px] text-muted-foreground"
+        className={`truncate text-[11px] ${facts.status === "error" ? "text-destructive" : "text-muted-foreground"}`}
         title={parts.join(" · ")}
+        data-provider-sync-status={facts.status}
         data-testid={`llm-tab:connection-subline:${row.id}`}
       >
         {parts.join(" · ")}
@@ -1515,27 +1648,32 @@ export function LlmTab(props: LlmTabProps) {
     );
   };
 
+  /**
+   * The API-key route, as a third way in beside the sign-in buttons.
+   *
+   * It sits with them because it IS one of them — the same decision, taken the
+   * same way — and the key field itself stays folded away until this is pressed,
+   * so a provider a user signs in to never shows a key box it does not need.
+   */
   const apiKeyChip = (row: ProviderConnection) => {
     if (!row.apiVendorId) return null;
     const isOpen = providerConfigOpen && row.apiVendorId === vendor;
     return (
-      <>
-        <Button
-          type="button"
-          size="sm"
-          variant={isOpen ? "secondary" : "outline"}
-          className="h-6 px-2 text-[11px]"
-          onClick={() => (isOpen ? setProviderConfigOpen(false) : openApiConfig(row.apiVendorId!))}
-          data-testid={`llm-tab:connection-api-key:${row.id}`}
-        >
-          {t("llmTab.authApiKey")}
-        </Button>
-      </>
+      <Button
+        type="button"
+        size="sm"
+        variant={isOpen ? "secondary" : "outline"}
+        aria-expanded={isOpen}
+        onClick={() => (isOpen ? setProviderConfigOpen(false) : openApiConfig(row.apiVendorId!))}
+        data-testid={`llm-tab:connection-api-key:${row.id}`}
+      >
+        {t("llmTab.authApiKey")}
+      </Button>
     );
   };
 
   const connectionsList = (
-    <div className="space-y-3" data-testid="llm-tab:connections">
+    <div className="space-y-3" data-testid="llm-tab:connections" ref={connectionsRef}>
       <p className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 text-xs text-muted-foreground">
         {t("subscriptionProvidersSection.securityNotice")}
       </p>
@@ -1561,13 +1699,16 @@ export function LlmTab(props: LlmTabProps) {
           activeSelection={subscription.props.activeSelection}
           chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
           actions={subscription.props.actions}
-          leading={<>{statusChip(row)}{modeBadge(row)}{apiKeyChip(row)}</>}
+          leading={<>{statusChip(row)}{modeBadge(row)}</>}
+          subline={connectionSubline(row)}
+          authAction={apiKeyChip(row)}
           {...(providerConfigOpen && row.apiVendorId === vendor ? { trailing: credentialForm } : {})}
         />
       ) : (
         <div
           key={row.id}
           className="space-y-3 rounded-md border bg-card p-3"
+          data-provider-row={row.id}
           data-testid={`llm-tab:connection:${row.id}`}
         >
           {/* The whole head is the disclosure: the row IS the provider, so
@@ -1632,7 +1773,7 @@ export function LlmTab(props: LlmTabProps) {
               <DropdownMenuItem
                 key={option.id}
                 data-testid={`llm-tab:add-provider-item:${option.id}`}
-                onClick={() => openApiConfig(option.id)}
+                onClick={() => addProvider(option.id)}
               >
                 {option.label}
               </DropdownMenuItem>
@@ -1671,6 +1812,7 @@ export function LlmTab(props: LlmTabProps) {
       >
         <div
           className="space-y-3"
+          data-settings-loaded={settingsLoaded ? "true" : "false"}
           data-testid="llm-tab:section-providers"
         >
           <div className="space-y-2">
@@ -1773,15 +1915,6 @@ export function LlmTab(props: LlmTabProps) {
             testIdPrefix="llm-tab:api-provider"
           />
           {connectionsList}
-
-          {hasOnSave && (
-            <SectionSaveBar
-              onSave={onSave!}
-              saving={saving}
-              settingsLoaded={settingsLoaded}
-              testId="llm-tab:save-providers"
-            />
-          )}
         </div>
       </SettingsSection>
 
