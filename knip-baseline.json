@@ -739,11 +739,6 @@
     },
     {
       "type": "exports",
-      "file": "src/shared/llm-vendor-defaults.ts",
-      "name": "isOpenAICompatiblePresetVendor"
-    },
-    {
-      "type": "exports",
       "file": "src/shared/marketplace-announcements.ts",
       "name": "MARKETPLACE_ANNOUNCEMENT_LEVELS"
     },

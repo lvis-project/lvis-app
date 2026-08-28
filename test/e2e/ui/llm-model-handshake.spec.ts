@@ -2,8 +2,7 @@ import { test, expect } from './fixtures';
 import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
- * Handshake-only OpenAI-compatible model list
- * (fix/llm-openai-compatible-model-handshake).
+ * Handshake-only OpenAI-compatible model list.
  *
  * The openai-compatible provider is endpoint-defined: its model dropdown must be
  * populated ONLY by a live /models handshake against the user-entered endpoint.
@@ -20,23 +19,19 @@ import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 test('openai-compatible model dropdown shows no hardcoded seed before an endpoint is entered', async ({
   app,
   mainWindow,
-  t,
 }) => {
   const settingsPage = await openInlineSettings(app, mainWindow, 'llm');
 
-  // Select the OpenAI-compatible provider from the searchable vendor dropdown.
-  const vendorTrigger = settingsPage.locator('#vendor-select');
-  await expect(vendorTrigger).toBeVisible({ timeout: 10_000 });
-  await vendorTrigger.click();
-  const vendorSearch = settingsPage.getByTestId('llm-tab:vendor-search');
-  await expect(vendorSearch).toBeVisible();
-  const compatLabel = t('constants.vendorOpenAiCompatibleLabel');
-  await vendorSearch.fill(compatLabel);
-  await settingsPage.getByRole('option', { name: compatLabel }).click();
+  // Providers are a list of cards now, not a vendor dropdown: an unconfigured
+  // provider is reached through "add a provider", which reveals its card and
+  // opens the credential form on it.
+  await settingsPage.getByTestId('llm-tab:add-provider').click();
+  await settingsPage.getByTestId('llm-tab:add-provider-item:openai-compatible').click();
 
   // A fresh openai-compatible block ships with no base URL, so no /models
   // handshake runs and there is nothing to populate the dropdown with yet.
   const baseUrl = settingsPage.getByTestId('llm-base-url-input');
+  await expect(baseUrl).toBeVisible({ timeout: 10_000 });
   await expect(baseUrl).toHaveValue('');
 
   // Open the model dropdown: the former hardcoded LVIS-cluster seed must be gone.
