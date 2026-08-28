@@ -59,7 +59,6 @@ export const navigation: NavGroup[] = [
       { title: "Microsoft 365 (Outlook)", href: "/docs/plugins/ms-graph" },
       { title: "Meeting (회의 녹음)", href: "/docs/plugins/meeting" },
       { title: "Work Assistant (업무도우미)", href: "/docs/plugins/work-assistant" },
-      { title: "Agent Hub", href: "/docs/plugins/agent-hub" },
     ],
   },
   {
@@ -73,11 +72,6 @@ export const navigation: NavGroup[] = [
       { title: "Marketplace — Skills", href: "/docs/servers/marketplace/skills" },
       { title: "Marketplace — 퍼블리셔", href: "/docs/servers/marketplace/publisher" },
       { title: "Marketplace — 어드민", href: "/docs/servers/marketplace/admin" },
-      { title: "Agent Hub 서버 개요", href: "/docs/servers/agent-hub" },
-      { title: "Agent Hub — 워크보드", href: "/docs/servers/agent-hub/workboard" },
-      { title: "Agent Hub — 인박스", href: "/docs/servers/agent-hub/inbox" },
-      { title: "Agent Hub — 리포트", href: "/docs/servers/agent-hub/report" },
-      { title: "Agent Hub — 팀 피드 구독", href: "/docs/servers/agent-hub/subscription" },
     ],
   },
   {

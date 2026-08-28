@@ -33,7 +33,7 @@ export default function Page() {
             body: <p>호스트의 명령 팔레트에서 Agent 이름을 직접 검색해 부릅니다. 가장 흔한 사용 방식.</p>,
           },
           {
-            title: "Agent Hub 메시지로 위임",
+            title: "업무 보드에서 위임",
             body: <p>업무 보드에서 ‘이 작업 이 Agent 에게 맡기기’ → Agent 가 백그라운드에서 결과를 만들고 메시지로 돌려줍니다.</p>,
           },
           {

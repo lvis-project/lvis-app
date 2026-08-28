@@ -6,7 +6,7 @@ import type { Locale } from "@/lib/i18n";
 const copy = {
   ko: {
     heading: "두 개의 접점, 하나의 흐름.",
-    lead: "앱이 신호를 모으고, Marketplace에서 기능을 더하며, Agent Hub가 결과를 기록합니다.",
+    lead: "앱이 신호를 모으고, Marketplace에서 기능을 더하며, 앱 안의 업무 보드가 결과를 기록합니다.",
     marketplaceEyebrow: "Marketplace",
     marketplaceHeading: "플러그인을 탐색하고 설치합니다.",
     marketplaceBody: "버전, 배포 패키지, 설치 정책을 한 곳에서 확인합니다. 앱은 이 카탈로그를 통해 필요한 플러그인을 내려받고 검증한 뒤 등록합니다.",
@@ -16,7 +16,7 @@ const copy = {
       { name: "Meeting", meta: "meeting · v0.8.3 · 사용자 설치 가능", chip: "설치", installed: false },
       { name: "Local Indexer", meta: "local-indexer · v0.6.2 · 사용자 설치 가능", chip: "설치됨", installed: true },
     ],
-    hubEyebrow: "개인 Agent Hub",
+    hubEyebrow: "개인 업무 보드",
     hubHeading: "내 작업을 칸반 보드로 정리합니다.",
     hubBody: "에이전트가 만든 할 일·승인 요청·일일 리포트를 LVIS 앱 안의 개인 칸반 보드에 모읍니다. 할 일 · 진행 중 · 완료로 흐름을 한눈에 보고, 실행은 언제나 당신의 승인으로 시작됩니다.",
     hubNote: "LVIS 앱에 내장된 개인 보드입니다.",
@@ -34,7 +34,7 @@ const copy = {
   },
   en: {
     heading: "Two surfaces, one flow.",
-    lead: "The app gathers signals, the Marketplace adds capabilities, and Agent Hub records the results.",
+    lead: "The app gathers signals, the Marketplace adds capabilities, and the work board inside the app records the results.",
     marketplaceEyebrow: "Marketplace",
     marketplaceHeading: "Discover and install plugins.",
     marketplaceBody: "Check versions, distribution packages, and install policies in one place. The app downloads, verifies, and registers the plugins you need through this catalog.",
@@ -44,7 +44,7 @@ const copy = {
       { name: "Meeting", meta: "meeting · v0.8.3 · user-installable", chip: "Install", installed: false },
       { name: "Local Indexer", meta: "local-indexer · v0.6.2 · user-installable", chip: "Installed", installed: true },
     ],
-    hubEyebrow: "Personal Agent Hub",
+    hubEyebrow: "Personal work board",
     hubHeading: "Organize your work on a kanban board.",
     hubBody: "To-dos, approval requests, and daily reports your agents create are collected on a personal kanban board inside the LVIS app. See the flow at a glance across To do · In progress · Done — execution always starts with your approval.",
     hubNote: "A personal board built into the LVIS app.",

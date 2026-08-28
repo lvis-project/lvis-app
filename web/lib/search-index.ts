@@ -12,7 +12,7 @@ export const searchIndex: SearchEntry[] = [
   // Getting Started
   { group: "시작하기", href: "/docs/", title: "LVIS AI 개요", snippet: "데스크톱 호스트 · 플러그인 런타임 · 스토리지 · 서버 4 레이어", keywords: ["overview", "intro"] },
   { group: "시작하기", href: "/docs/getting-started/install", title: "설치 & 첫 실행", snippet: "macOS arm64 / Windows / Linux AppImage · electron-updater · lvis:// 등록" },
-  { group: "시작하기", href: "/docs/getting-started/login", title: "로그인 & 첫 화면", snippet: "Marketplace SSO · ApiKey sha256 · Agent Hub PKCE", keywords: ["sso", "auth"] },
+  { group: "시작하기", href: "/docs/getting-started/login", title: "로그인 & 첫 화면", snippet: "Marketplace SSO · ApiKey sha256", keywords: ["sso", "auth"] },
   { group: "시작하기", href: "/docs/getting-started/updates", title: "앱 업데이트", snippet: "electron-updater · autoDownload=false · 4h interval · channel=latest" },
 
   // Host · Chat
@@ -45,7 +45,6 @@ export const searchIndex: SearchEntry[] = [
   { group: "플러그인", href: "/docs/plugins/ms-graph", title: "Microsoft 365 (Outlook)", snippet: "MSAL OAuth · safeStorage · 31개 도구 · scopes: User.Read Mail.* Calendars.*", keywords: ["outlook", "calendar", "mail"] },
   { group: "플러그인", href: "/docs/plugins/meeting", title: "Meeting (회의 녹음)", snippet: "OpenAI Whisper · PCM16LE 16kHz/3sec · 18개 도구 · meeting.ended", keywords: ["stt", "whisper", "audio"] },
   { group: "플러그인", href: "/docs/plugins/work-assistant", title: "Work Assistant (업무도우미)", snippet: "10 detectors · proactive triggerConversation · daily briefing" },
-  { group: "플러그인", href: "/docs/plugins/agent-hub", title: "Agent Hub Sidebar", snippet: "ui[] slot=sidebar · 43 tools · 5분 polling · agent-hub.lvisai.xyz" },
 
   // Servers
   { group: "서버", href: "/docs/servers/marketplace", title: "Marketplace 개요", snippet: "FastAPI + SQLAlchemy 2.0 · 단일 Plugin 모델 + plugin_type · Ed25519" },
@@ -55,11 +54,6 @@ export const searchIndex: SearchEntry[] = [
   { group: "서버", href: "/docs/servers/marketplace/skills", title: "Marketplace — Skills", snippet: "SKILL.md · references · 검증된 지침 번들" },
   { group: "서버", href: "/docs/servers/marketplace/publisher", title: "Marketplace — 퍼블리셔", snippet: "POST /plugins/{slug}/versions · Ed25519 sig · @lvis-marketplace/cli" },
   { group: "서버", href: "/docs/servers/marketplace/admin", title: "Marketplace — 어드민", snippet: "AdminPage 단일 페이지 · 4 탭 Catalog/Approvals/Manage/API Keys" },
-  { group: "서버", href: "/docs/servers/agent-hub", title: "Agent Hub 서버 개요", snippet: "FastAPI + asyncpg + alembic · HTTPBearer + ApiKey sha256 · React 19 admin" },
-  { group: "서버", href: "/docs/servers/agent-hub/workboard", title: "Agent Hub — Workboard", snippet: "work_items + work_logs append-only signed chain" },
-  { group: "서버", href: "/docs/servers/agent-hub/inbox", title: "Agent Hub — Inbox", snippet: "DirectMessage · ApprovalRequest · Notification 3 모델" },
-  { group: "서버", href: "/docs/servers/agent-hub/report", title: "Agent Hub — Report", snippet: "/reports/personal · /reports/team/{team_code}" },
-  { group: "서버", href: "/docs/servers/agent-hub/subscription", title: "Agent Hub — 팀 피드 구독", snippet: "Subscription = team-feed opt-in (플랜/라이선스 모델 없음)" },
 
   // Architecture
   { group: "아키텍처", href: "/docs/architecture/overview", title: "시스템 한 눈에 보기", snippet: "4 layers · 플러그인 · ~/.lvis · servers" },

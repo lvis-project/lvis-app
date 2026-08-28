@@ -14,7 +14,7 @@ export const ui = {
     sidebarLabel: "문서 사이드바",
     tocLabel: "페이지 목차",
     footerTagline:
-      "앱 · 플러그인 · 에이전트 허브가 같은 사용자 신호 위에서 함께 움직이는 업무 AI. 실제 소스에서 검증된 통합 가이드.",
+      "앱과 플러그인이 같은 사용자 신호 위에서 함께 움직이는 업무 AI. 실제 소스에서 검증된 통합 가이드.",
     footerProduct: "제품",
     footerDocs: "문서",
     footerHome: "홈",
@@ -32,7 +32,7 @@ export const ui = {
     sidebarLabel: "Docs sidebar",
     tocLabel: "Table of contents",
     footerTagline:
-      "A work AI where the app, plugins, and the agent hub move together on the same user signals. A unified guide verified against the actual source.",
+      "A work AI where the app and its plugins move together on the same user signals. A unified guide verified against the actual source.",
     footerProduct: "Product",
     footerDocs: "Docs",
     footerHome: "Home",

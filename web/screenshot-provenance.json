@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pendingReplacementBaseline": 9,
+  "pendingReplacementBaseline": 7,
   "seededAccounts": [
     "work-board-seed",
     "marketplace-dev",
@@ -16,58 +16,6 @@
       "surface": "site brand mark",
       "data": "synthetic",
       "action": "none"
-    },
-    "screenshots/agent-hub-my-work.png": {
-      "surface": "work board plugin panel",
-      "data": "third-party",
-      "action": "redact"
-    },
-    "screenshots/agent-hub-team-board.png": {
-      "surface": "work board plugin panel",
-      "data": "third-party",
-      "action": "redact"
-    },
-    "screenshots/ah-dashboard.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-inbox.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-report.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-subscription.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-workboard.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-worklog.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
     },
     "screenshots/chat-app-update.png": {
       "surface": "host chat surface",

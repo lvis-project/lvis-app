@@ -29,7 +29,7 @@ export default function Page() {
           { title: "Summary generated", body: <p>The meeting plugin summarizes the transcript and extracts <code>actionItems</code> using the host LLM (<code>callLlm</code>). The result is emitted as <code>meeting.summary.created</code>.</p> },
           { title: "Work Assistant detector kicks in", body: <p>On the plugin side, <code>src/decision/meeting-summary-detector.ts</code> subscribes to the event. It evaluates policy (allow-listed domains, etc.) and then decides whether to surface it. <em>That path is in the plugin's own repository, not the host repository.</em></p>, badge: "work-assistant" },
           { title: "Proactive card", body: <p>When surfacing is decided, <code>hostApi.triggerConversation</code> shows a card in the chat body. User options are displayed (TODO / mail / save summary).</p> },
-          { title: "Follow-up action", body: <p>Once the user chooses, work-assistant carries out the actual task using ms-graph / agent-hub tools (e.g. adding a calendar entry, creating a work item).</p>, badge: "Final" },
+          { title: "Follow-up action", body: <p>Once the user chooses, work-assistant carries out the actual task using ms-graph tools (e.g. adding a calendar entry, creating a work-board card).</p>, badge: "Final" },
         ]}
       />
 
