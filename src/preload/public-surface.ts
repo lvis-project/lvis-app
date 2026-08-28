@@ -153,6 +153,9 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
     }>,
   chatEditResend: async (messageIndex: number, newText: string) =>
     ipcRenderer.invoke(CHANNELS.chat.editResend, messageIndex, newText, chatGroupId),
+  chatRewindTo: async (messageIndex: number) =>
+    ipcRenderer.invoke(CHANNELS.chat.rewindTo, messageIndex, chatGroupId) as
+      Promise<{ ok: true } | { ok: false; error: string }>,
   chatFork: async (messageIndex: number) => ipcRenderer.invoke(CHANNELS.chat.fork, messageIndex, chatGroupId),
   chatContinueLastUser: async (sessionId: string) =>
     ipcRenderer.invoke(CHANNELS.chat.continueLastUser, { sessionId }, chatGroupId) as Promise<{ ok: boolean; error?: string }>,

@@ -97,6 +97,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-event-type": "formatIpcError.invalidEventType",
   "invalid-index": "formatIpcError.invalidIndex",
   "index-out-of-range": "formatIpcError.indexOutOfRange",
+  "not-a-user-message": "formatIpcError.notAUserMessage",
   "invalid-session-id": "formatIpcError.invalidSessionId",
   "invalid-origin-session-id": "formatIpcError.invalidOriginSessionId",
   "origin-session-not-active": "formatIpcError.originSessionNotActive",

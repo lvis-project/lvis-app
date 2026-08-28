@@ -252,6 +252,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:chat:main-active-state",
         "lvis:chat:new",
         "lvis:chat:retry-effort",
+        "lvis:chat:rewind-to",
         "lvis:chat:send",
         "lvis:chat:session-delete",
         "lvis:chat:session-history",

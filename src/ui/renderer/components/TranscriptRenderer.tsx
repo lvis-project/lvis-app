@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { parseStagedEnvelope } from "../../../shared/staged-origins.js";
 import { Button } from "../../../components/ui/button.js";
-import { Bot, Brain, ChevronDown, ChevronRight, GitBranch, Loader2, Pencil, Pin } from "lucide-react";
+import { Bot, Brain, ChevronDown, ChevronRight, GitBranch, Loader2, Pencil, Undo2 } from "lucide-react";
 import type { ChatEntry, CheckpointTrigger } from "../../../lib/chat-stream-state.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { debugLog } from "../../../lib/debug-stream.js";
@@ -14,6 +14,7 @@ import { lookupBillablePricingOptional } from "../../../shared/pricing-data.js";
 import { highlightText } from "../utils/html-preview.js";
 import { trustOriginLabel } from "../utils/trust-origin-label.js";
 import { classifyTurnEntries, isTurnStartEntry } from "../utils/classify-turn-entries.js";
+import { formatHhMmKst } from "../utils/format-time.js";
 import { entryRenderRevision } from "../utils/chat-entry-revision.js";
 import { AssistantCard } from "./AssistantCard.js";
 import { UserMessageEditor } from "./UserMessageEditor.js";
@@ -74,15 +75,21 @@ export interface TranscriptSearchProps {
 }
 
 /**
- * Action-cluster props: mutating per-entry / per-turn actions (fork, star,
- * retry, feedback) + checkpoint navigation. Each action renders only when its
- * callback is present (side-chat omits the cluster to opt out of all actions).
- * `isEntryStarred` defaults to `() => null` so the star indicator is inert when
- * the caller does not track starred state.
+ * Action-cluster props: mutating per-entry / per-turn actions (fork, rewind,
+ * star, retry, feedback) + checkpoint navigation. Each action renders only when
+ * its callback is present (side-chat omits the cluster to opt out of all
+ * actions). `isEntryStarred` defaults to `() => null` so the star indicator is
+ * inert when the caller does not track starred state.
  */
 export interface TranscriptActionProps {
   isEntryStarred?: (idx: number) => string | null;
   onFork?: (idx: number) => void | Promise<void>;
+  /**
+   * Rewind to just before this user message: the conversation from it onward is
+   * discarded and its text goes back into the composer, unsent. Distinct from
+   * edit (which resends) and fork (which branches into a new session).
+   */
+  onReturnHere?: (idx: number) => void | Promise<void>;
   onToggleStar?: (idx: number) => void | Promise<void>;
   onRetryEffort?: () => void | Promise<void>;
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
@@ -176,6 +183,7 @@ export function TranscriptRenderer({
 
   const isEntryStarred = actions?.isEntryStarred ?? NO_STAR;
   const onFork = actions?.onFork;
+  const onReturnHere = actions?.onReturnHere;
   const onToggleStar = actions?.onToggleStar;
   const onRetryEffort = actions?.onRetryEffort;
   const onFeedback = actions?.onFeedback;
@@ -292,13 +300,14 @@ export function TranscriptRenderer({
           </div>
         );
       } else {
-        const starId = isEntryStarred(idx);
-        const starActive = !!starId;
         // Hover actions render only when their callbacks are present. Main
         // passes them (identical to pre-extraction); read-only sources omit
         // the edit/action clusters, so no dangling handlers are wired.
         const showHoverActions =
-          !viewMode && (!!setEditingEntryIdx || !!onFork || !!onToggleStar);
+          !viewMode && (!!setEditingEntryIdx || !!onFork || !!onReturnHere);
+        // The send time is persisted on the message, so it is shown as recorded
+        // or not at all — a card with no recorded time must not invent one.
+        const sentAtLabel = formatHhMmKst(entry.createdAt);
         rendered.push(
           <div
             key={idx}
@@ -313,11 +322,8 @@ export function TranscriptRenderer({
                 ...(!viewMode && onFork
                   ? { "message.fork": () => void onFork(idx) }
                   : {}),
-                ...(!viewMode && onToggleStar
-                  ? {
-                      [starActive ? "message.unpin" : "message.pin"]: () =>
-                        void onToggleStar(idx),
-                    }
+                ...(!viewMode && onReturnHere && !streaming
+                  ? { "message.returnHere": () => void onReturnHere(idx) }
                   : {}),
               } as NativeContextMenuHandlers)
             }
@@ -345,34 +351,41 @@ export function TranscriptRenderer({
                   {t("chatView.interruptLabel")}
                 </div>
               ) : null}
-              {starActive ? (
-                <div className="mb-1 flex justify-end">
-                  <Pin data-testid="user-message-pin-indicator" key="active" className="h-3 w-3 fill-message-user-emphasis text-message-user-emphasis lvis-anim-star" />
-                </div>
-              ) : null}
               <div className="cursor-text select-text whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
             </div>
-            {/* Keep a fixed action slot outside the bubble. Revealing controls
-                changes only opacity/transform, never message or transcript height. */}
-            {showHoverActions && (
-              <div
-                data-testid="user-message-actions"
-                className="mt-1 flex h-7 translate-y-1 justify-end gap-1 opacity-0 pointer-events-none transition-[opacity,transform] duration-[var(--motion-fast)] ease-[var(--motion-ease-out)] group-hover:translate-y-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100 group-focus-within:pointer-events-auto motion-reduce:transition-none motion-reduce:transform-none"
-              >
-                {setEditingEntryIdx ? (
-                  <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.editButtonTitle")} onClick={() => setEditingEntryIdx(idx)}>
-                    <Pencil className="h-3 w-3" />
-                  </Button>
+            {/* Keep a fixed footer slot outside the bubble. The send time holds
+                the row open, so revealing the controls changes only opacity and
+                transform, never message or transcript height. */}
+            {(showHoverActions || sentAtLabel) && (
+              <div className="mt-1 flex h-7 items-center justify-end gap-1">
+                {sentAtLabel ? (
+                  <span data-testid="user-message-time" className="shrink-0 px-1 text-xs text-muted-foreground">
+                    {sentAtLabel}
+                  </span>
                 ) : null}
-                {onFork ? (
-                  <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.forkButtonTitle")} onClick={() => void onFork(idx)}>
-                    <GitBranch className="h-3 w-3" />
-                  </Button>
-                ) : null}
-                {onToggleStar ? (
-                  <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.starButtonTitle")} onClick={() => void onToggleStar(idx)}>
-                    <Pin key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-                  </Button>
+                {showHoverActions ? (
+                  <div
+                    data-testid="user-message-actions"
+                    className="flex translate-y-1 gap-1 opacity-0 pointer-events-none transition-[opacity,transform] duration-[var(--motion-fast)] ease-[var(--motion-ease-out)] group-hover:translate-y-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100 group-focus-within:pointer-events-auto motion-reduce:transition-none motion-reduce:transform-none"
+                  >
+                    {setEditingEntryIdx ? (
+                      <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.editButtonTitle")} onClick={() => setEditingEntryIdx(idx)}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    ) : null}
+                    {onFork ? (
+                      <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.forkButtonTitle")} onClick={() => void onFork(idx)}>
+                        <GitBranch className="h-3 w-3" />
+                      </Button>
+                    ) : null}
+                    {/* Rewinding drops the turns after this message, so it is
+                        offered only when no turn is producing more of them. */}
+                    {onReturnHere ? (
+                      <Button type="button" variant="ghost" size="icon-xs" disabled={streaming} className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring" title={t("chatView.returnHereButtonTitle")} onClick={() => void onReturnHere(idx)}>
+                        <Undo2 className="h-3 w-3" />
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             )}
@@ -743,6 +756,7 @@ export function TranscriptRenderer({
     onFeedback,
     onFork,
     onRetryEffort,
+    onReturnHere,
     onToggleStar,
     openNativeContextMenu,
     searchHighlight,

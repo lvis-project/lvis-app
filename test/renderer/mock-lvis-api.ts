@@ -397,6 +397,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       };
     }),
     chatEditResend: vi.fn(async () => ({ ok: true })),
+    chatRewindTo: vi.fn(async () => ({ ok: true as const })),
     chatFork: vi.fn(async () => ({ ok: true, sessionId: currentSession })),
     // Shapes match actual preload/IPC return types exactly — discriminated union:
     // success paths have no `ok` field (enter → { messageIndexAtCreation }, branch → { newSessionId, ...branchState });

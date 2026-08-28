@@ -78,6 +78,12 @@ export const CHANNELS = {
     mainActiveState: "lvis:chat:main-active-state",
     sessionHistory: "lvis:chat:session-history",
     editResend: "lvis:chat:edit-resend",
+    // Rewind the conversation to just before one of its own user messages and
+    // stop there — no replay. Distinct from `editResend` (rewind THEN resend)
+    // and from `fork` (branch into a NEW session): this discards everything
+    // from that message onward in the SAME session so the user can retype the
+    // input. INTERNAL (mutating; destructive by intent).
+    rewindTo: "lvis:chat:rewind-to",
     fork: "lvis:chat:fork",
     continueLastUser: "lvis:chat:continue-last-user",
     retryEffort: "lvis:chat:retry-effort",

@@ -1250,6 +1250,34 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return turn ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
+  // Rewind-only counterpart of `editResend`: same read → ordinal-resolve →
+  // truncate sequence, then it stops. The renderer puts the message text back
+  // in the composer, so replaying it is the user's next keystroke, not ours.
+  //
+  // The truncated history is written to disk here because nothing else will:
+  // `editResend` leaves persistence to the turn it starts, and this path
+  // starts no turn. Without the write, the discarded turns would come back on
+  // the next session load.
+  ipcMain.handle(CHANNELS.chat.rewindTo, async (e, messageIndex: number, chatGroupId?: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.rewindTo, e); return UNAUTHORIZED_FRAME; }
+    const group = groupOf(chatGroupId);
+    const conversationLoop = group.loop;
+    if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
+    const mutation = group.turns.trackSessionMutation(async () => {
+      const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
+      const historyIndex = entryOrdinalToHistoryIndex(history, messageIndex);
+      if (historyIndex < 0) return { ok: false, error: "index-out-of-range" };
+      if (history[historyIndex].role !== "user") return { ok: false, error: "not-a-user-message" };
+      conversationLoop.getHistory().truncate(historyIndex);
+      await memoryManager.saveSession(
+        conversationLoop.getSessionId(),
+        conversationLoop.getHistory().getMessages() as GenericMessage[],
+      );
+      return { ok: true };
+    });
+    return mutation ?? { ok: false, error: STREAMING_ACTIVE };
+  });
+
   ipcMain.handle(CHANNELS.chat.fork, async (e, messageIndex: number, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.fork, e); return UNAUTHORIZED_FRAME; }
     const group = groupOf(chatGroupId);

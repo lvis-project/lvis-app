@@ -945,6 +945,12 @@ export type LvisApi = {
     preambleChars?: number;
   }>;
   chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Discard the conversation from this user message onward, in place. The
+   * message itself goes too — the caller owns putting its text back in the
+   * composer, which is what makes this a rewind rather than a delete.
+   */
+  chatRewindTo: (messageIndex: number) => Promise<{ ok: true } | { ok: false; error: string }>;
   chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
   chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;

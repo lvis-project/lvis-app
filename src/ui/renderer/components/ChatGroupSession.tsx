@@ -371,6 +371,30 @@ export function ChatGroupSession({
     await sessionFork(histIdx, entryIdx, truncateToEntry);
   }, [entryIndexToHistoryIndex, sessionFork, truncateToEntry]);
 
+  // Rewind: the message's own text goes back to the composer and everything
+  // from it onward is discarded, in this session. The persisted history is cut
+  // FIRST — if main refuses (a turn holds the session), the transcript on
+  // screen still matches what is on disk.
+  const handleReturnHere = useCallback(async (entryIdx: number) => {
+    const entry = entries[entryIdx];
+    if (entry?.kind !== "user") return;
+    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+    if (histIdx === undefined) return;
+    const res = await api.chatRewindTo(histIdx);
+    if (!res.ok) {
+      // The wire code is a kebab-case token; formatIpcError owns turning it
+      // into a sentence, the same as every other refusal surfaced here.
+      appendSystemEntry(
+        t("chatView.returnHereFailed", { error: formatIpcError(res.error, undefined) }),
+      );
+      return;
+    }
+    // The bubble goes too: its text is in the composer now, and leaving it in
+    // the transcript would read as a message that is still part of the thread.
+    truncateToEntry(entryIdx - 1);
+    setQuestion(entry.text);
+  }, [api, entries, entryIndexToHistoryIndex, truncateToEntry, appendSystemEntry, t]);
+
   const handleToggleStar = useCallback(
     (entryIdx: number) =>
       env.starredToggle(entryIdx, entries, currentSessionId, entryIndexToHistoryIndex),
@@ -581,6 +605,7 @@ export function ChatGroupSession({
         onRunMcpPrompt={handleRunMcpPrompt}
         onEditSave={handleEditSave}
         onFork={handleFork}
+        onReturnHere={handleReturnHere}
         onToggleStar={handleToggleStar}
         onRetryEffort={handleRetryEffort}
         onContinueFromLastUser={handleContinueFromLastUser}

@@ -71,7 +71,7 @@ const NATIVE_LAYOUT: Record<
   message: [
     ["message.copy"],
     ["message.edit", "message.fork"],
-    ["message.pin", "message.unpin"],
+    ["message.returnHere"],
   ],
   "command-item": [
     ["command.activate"],
@@ -120,8 +120,7 @@ const NATIVE_LABEL: Record<NativeContextMenuCommand, () => string> = {
   "message.copy": () => t("turnActionBar.copyButton"),
   "message.edit": () => t("chatView.editButtonTitle"),
   "message.fork": () => t("chatView.forkButtonTitle"),
-  "message.pin": () => t("chatView.starButtonTitle"),
-  "message.unpin": () => t("starredView.unstar"),
+  "message.returnHere": () => t("chatView.returnHereButtonTitle"),
   "command.activate": () => t("chatPreviewRail.ctxOpen"),
   "command.copy": () => t("turnActionBar.copyButton"),
 };
