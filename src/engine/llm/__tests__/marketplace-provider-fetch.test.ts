@@ -6,12 +6,13 @@ import {
   createGuardedModelProviderFetch,
   isGuardedInsecureCredentialedModelProviderFetch,
 } from "../marketplace-provider-fetch.js";
+import { TOOL_TIMEOUT_POLICY } from "../../../shared/tool-timeout-policy.js";
 
 describe("guarded model-provider fetch", () => {
   it("rejects a public cross-origin request before it can forward credentials", async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const providerFetch = createGuardedModelProviderFetch(
-      "http://10.232.178.100:30000/v1",
+      "http://10.0.0.8:30000/v1",
       fetchImpl,
     );
 
@@ -24,7 +25,7 @@ describe("guarded model-provider fetch", () => {
   });
 
   it("permits credentialed HTTP only for the self-hosted guarded fetch", () => {
-    const baseUrl = "http://10.232.178.100:30000/v1";
+    const baseUrl = "http://10.0.0.8:30000/v1";
     const selfHostedFetch = createGuardedModelProviderFetch(baseUrl);
     const marketplaceFetch = createGuardedMarketplaceProviderFetch(baseUrl, {
       providerId: "private-marketplace",
@@ -58,6 +59,37 @@ describe("guarded model-provider fetch", () => {
     expect(
       isGuardedInsecureCredentialedModelProviderFetch("not a url", providerFetch),
     ).toBe(false);
+  });
+});
+
+describe("how long a model provider may stay silent", () => {
+  it("waits the model stream ceiling for the response, not the web-fetch tool budget", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted = false;
+      const fetchImpl = vi.fn((_url: unknown, init?: RequestInit) => new Promise<Response>((resolve) => {
+        init?.signal?.addEventListener("abort", () => {
+          aborted = true;
+          resolve(new Response(null, { status: 499 }));
+        }, { once: true });
+      })) as unknown as typeof fetch;
+      const providerFetch = createGuardedModelProviderFetch("http://10.0.0.8:30000/v1", fetchImpl);
+
+      const pending = providerFetch("http://10.0.0.8:30000/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: "Bearer internal-key" },
+        body: "{}",
+      });
+      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.networkFetchDefaultMs + 1_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.modelStreamIdleCeilingMs);
+      expect(aborted).toBe(true);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

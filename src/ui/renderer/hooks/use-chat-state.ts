@@ -15,6 +15,8 @@ import {
   upsertStreamingReasoning,
   normalizeSubscriptionUsageList,
   type ChatEntry,
+  markTurnAssistantInterrupted,
+  clearTurnAssistantInterrupted,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
@@ -76,6 +78,25 @@ export function useChatState(api: LvisApi) {
   const streamRef = useRef("");
   const thoughtRef = useRef("");
   const activeStreamIdRef = useRef<number | null>(null);
+  // The stream an interrupt send marked as cut short. Its closing frame may
+// never come (the turn can reject instead of settling), so the first frame
+// of a newer stream closes it here and takes its place.
+  const supersededStreamIdRef = useRef<number | null>(null);
+  // A superseded stream that was closed here. Its stragglers must not be
+  // adopted as a fresh stream once the newer one has finished.
+  const retiredStreamIdRef = useRef<number | null>(null);
+  // A stream closing lets go of the active id and any supersede in flight;
+  // the retired id outlives it, since the retired stream's stragglers can
+  // still land after its successor has finished. Only a transcript boundary
+  // — new chat, load, edit, truncate, fresh turn — forgets all three.
+  const releaseActiveStream = useCallback(() => {
+    activeStreamIdRef.current = null;
+    supersededStreamIdRef.current = null;
+  }, []);
+  const resetStreamTracking = useCallback(() => {
+    releaseActiveStream();
+    retiredStreamIdRef.current = null;
+  }, [releaseActiveStream]);
   const streamingRequestRef = useRef(0);
   // Final assistant text is canonical at assistant_round(end_turn). Later
   // deltas in the same stream are protocol tail noise, not a new response.
@@ -176,18 +197,54 @@ export function useChatState(api: LvisApi) {
         return;
       }
       if (streamId !== null) {
+        // A retired stream's tool results still close their cards; nothing
+        // else it says is taken up again.
+        const retiredToolEnd = retiredStreamIdRef.current === streamId && ev.type === "tool_end";
         if (activeStreamIdRef.current === null) {
-          activeStreamIdRef.current = streamId;
-          if (debugStreamEnabled) debugLog("stream", "activeStreamId:adopt", { streamId });
-        } else if (activeStreamIdRef.current !== streamId) {
-          if (debugStreamEnabled) {
-            debugLog("stream", "ev:rejected-stale-streamId", {
-              evStreamId: streamId,
-              active: activeStreamIdRef.current,
-              evType: ev.type,
-            });
+          if (retiredStreamIdRef.current === streamId) {
+            if (!retiredToolEnd) return;
+          } else {
+            activeStreamIdRef.current = streamId;
+            if (debugStreamEnabled) debugLog("stream", "activeStreamId:adopt", { streamId });
           }
-          return;
+        } else if (activeStreamIdRef.current !== streamId) {
+          if (
+            activeStreamIdRef.current === supersededStreamIdRef.current
+            && streamId > activeStreamIdRef.current
+          ) {
+            // A newer stream is speaking: the interrupted one is over whether
+            // or not its own closing frame ever arrives. Close it the way its
+            // own `done` would have. Ids climb, so only a higher one is the
+            // successor — a straggler from an older stream must not take the
+            // active slot while the interrupted turn is still armed.
+            if (finalAssistantRoundClosedRef.current || (!streamRef.current && !thoughtRef.current)) {
+              setEntries((p) => dropPendingLlmStatusAssistant(p));
+            } else {
+              const detected = detectFromStream(streamRef.current);
+              const finalText = visibleAssistantText(detected.cleanedText);
+              setEntries((p) => finalizeStreamingAssistant(
+                finalizeStreamingReasoning(p, thoughtRef.current),
+                finalText,
+                { overrideText: finalText, interrupted: true },
+              ));
+            }
+            streamRef.current = "";
+            thoughtRef.current = "";
+            finalAssistantRoundClosedRef.current = false;
+            retiredStreamIdRef.current = activeStreamIdRef.current;
+            supersededStreamIdRef.current = null;
+            activeStreamIdRef.current = streamId;
+            if (debugStreamEnabled) debugLog("stream", "activeStreamId:supersede", { streamId });
+          } else if (!retiredToolEnd) {
+            if (debugStreamEnabled) {
+              debugLog("stream", "ev:rejected-stale-streamId", {
+                evStreamId: streamId,
+                active: activeStreamIdRef.current,
+                evType: ev.type,
+              });
+            }
+            return;
+          }
         }
       }
       if (ev.type === "user_message") {
@@ -384,7 +441,7 @@ export function useChatState(api: LvisApi) {
         );
         streamRef.current = "";
         thoughtRef.current = "";
-        activeStreamIdRef.current = null;
+        releaseActiveStream();
         finalAssistantRoundClosedRef.current = false;
       } else if (ev.type === "redact_notice") {
         // 발신 turn 콘텐츠(초안 + 텍스트 첨부)의 PII 리댁션을 알리는 시스템 배지.
@@ -531,7 +588,7 @@ export function useChatState(api: LvisApi) {
             });
           }
         }
-        activeStreamIdRef.current = null;
+        releaseActiveStream();
         finalAssistantRoundClosedRef.current = false;
       }
     };
@@ -657,29 +714,25 @@ export function useChatState(api: LvisApi) {
   }, []);
 
   /**
-   * Mark the entry the aborted turn was streaming into as interrupted.
+   * Mark the current turn's assistant entry as interrupted.
    *
    * The live counterpart of the persisted `meta.interrupted`: the abort
-   * INITIATOR (stop button, or a new message interrupting the turn) calls this
-   * after `chatAbort` settles, so the badge appears without the engine pushing
-   * a "[중단됨]" literal through the text-delta stream. Marks the LAST assistant
-   * entry — the turn that just settled is by definition the newest — and never
-   * touches earlier turns.
+   * INITIATOR (stop button after `chatAbort` settles, or an interrupting send
+   * as it goes out) calls this, so the badge appears without the engine
+   * pushing a "[중단됨]" literal through the text-delta stream. Only the turn
+   * at the end of the transcript is a candidate; a tool round that has no
+   * assistant entry yet has nothing to mark, and the reload path (persisted
+   * meta) still carries its badge.
    */
   const markLastAssistantInterrupted = useCallback(() => {
-    setEntries((prev) => {
-      for (let i = prev.length - 1; i >= 0; i--) {
-        const entry = prev[i];
-        if (entry.kind !== "assistant") continue;
-        if (entry.interrupted) return prev;
-        const next = [...prev];
-        next[i] = { ...entry, interrupted: true, streaming: false };
-        return next;
-      }
-      // Tool-abort with no streamed text yet: nothing to mark; the reload
-      // path (persisted meta) still carries the badge.
-      return prev;
-    });
+    supersededStreamIdRef.current = activeStreamIdRef.current;
+    setEntries(markTurnAssistantInterrupted);
+  }, []);
+  // The host refused the interrupting send at admission, so the turn it
+  // would have cut short is still running untouched.
+  const unmarkLastAssistantInterrupted = useCallback(() => {
+    supersededStreamIdRef.current = null;
+    setEntries(clearTurnAssistantInterrupted);
   }, []);
 
   const handleEditSave = useCallback(
@@ -694,7 +747,7 @@ export function useChatState(api: LvisApi) {
         setEntries((p) => [...p.slice(0, entryIdx), { kind: "user", text: newText, createdAt: Date.now() }]);
         streamRef.current = "";
         thoughtRef.current = "";
-        activeStreamIdRef.current = null;
+        resetStreamTracking();
         finalAssistantRoundClosedRef.current = false;
         const res = await api.chatEditResend(histIdx, newText);
         if (!res?.ok) {
@@ -744,7 +797,7 @@ export function useChatState(api: LvisApi) {
     });
     streamRef.current = "";
     thoughtRef.current = "";
-    activeStreamIdRef.current = null;
+    resetStreamTracking();
     finalAssistantRoundClosedRef.current = false;
     try {
       const res = await api.chatRetryEffort({
@@ -779,7 +832,7 @@ export function useChatState(api: LvisApi) {
   const resetStreamAccumulators = useCallback(() => {
     streamRef.current = "";
     thoughtRef.current = "";
-    activeStreamIdRef.current = null;
+    resetStreamTracking();
     finalAssistantRoundClosedRef.current = false;
   }, []);
 
@@ -788,7 +841,7 @@ export function useChatState(api: LvisApi) {
     setEntries((p) => setAssistantError(p, message, thoughtRef.current));
     streamRef.current = "";
     thoughtRef.current = "";
-    activeStreamIdRef.current = null;
+    releaseActiveStream();
     finalAssistantRoundClosedRef.current = false;
   }, []);
 
@@ -805,7 +858,7 @@ export function useChatState(api: LvisApi) {
     setEntries([]);
     streamRef.current = "";
     thoughtRef.current = "";
-    activeStreamIdRef.current = null;
+    resetStreamTracking();
     finalAssistantRoundClosedRef.current = false;
     // The prior conversation's suggested replies are stale for the same reason
     // its compact indicator is: they describe a turn the user has left behind.
@@ -835,7 +888,7 @@ export function useChatState(api: LvisApi) {
     const requestId = beginStreamingRequest();
     streamRef.current = "";
     thoughtRef.current = "";
-    activeStreamIdRef.current = null;
+    resetStreamTracking();
     finalAssistantRoundClosedRef.current = false;
     appendAssistantStatus(t("useChatState.continueFromLastUserStatus"));
     try {
@@ -861,7 +914,7 @@ export function useChatState(api: LvisApi) {
     // arrive for this hook instance — the StatusBar hint would stick.
     streamRef.current = "";
     thoughtRef.current = "";
-    activeStreamIdRef.current = null;
+    resetStreamTracking();
     finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
     // The loaded session did not produce the pending suggestions; whatever the
@@ -882,7 +935,7 @@ export function useChatState(api: LvisApi) {
     // the indicator here too — same class as applyLoadedSession / clearForNewChat.
     streamRef.current = "";
     thoughtRef.current = "";
-    activeStreamIdRef.current = null;
+    resetStreamTracking();
     finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
     // The rewind drops the assistant turn the suggestions were generated from,
@@ -925,6 +978,7 @@ export function useChatState(api: LvisApi) {
     beginStreamingRequest,
     finishStreamingRequest,
     markLastAssistantInterrupted,
+    unmarkLastAssistantInterrupted,
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,

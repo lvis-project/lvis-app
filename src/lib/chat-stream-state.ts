@@ -388,6 +388,60 @@ function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
   return entry?.kind === "user" || entry?.kind === "imported_trigger";
 }
 
+/**
+ * The assistant entry of the turn currently at the end of the transcript —
+ * the one an abort or an interrupting send cuts short. Walking back from the
+ * end, the first assistant entry wins; crossing a turn start first means the
+ * current turn has produced no assistant entry yet (a tool round), and the
+ * previous turn's answer is not touched.
+ *
+ * An injected user line (queued guidance, a sub-agent report) lands inside a
+ * running turn as well as at the start of a drained one. Crossing one, the
+ * answer before it is still this turn's only while it is streaming; a
+ * finished answer behind an injected line belongs to the turn before.
+ */
+function currentTurnAssistantIdx(entries: readonly ChatEntry[]): number {
+  let crossedInjectedLine = false;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry?.kind === "assistant") {
+      return crossedInjectedLine && !entry.streaming ? -1 : i;
+    }
+    if (isTurnStartEntry(entry)) {
+      if (entry?.kind === "user" && entry.injectHint) {
+        crossedInjectedLine = true;
+        continue;
+      }
+      return -1;
+    }
+  }
+  return -1;
+}
+
+export function markTurnAssistantInterrupted(entries: ChatEntry[]): ChatEntry[] {
+  const idx = currentTurnAssistantIdx(entries);
+  if (idx < 0) return entries;
+  const entry = entries[idx] as AssistantEntry;
+  if (entry.interrupted) return entries;
+  const next = [...entries];
+  // `streaming` is left to the turn's own closing frame; the finalizer finds
+  // the entry to close by that flag.
+  next[idx] = { ...entry, interrupted: true };
+  return next;
+}
+
+/** Undo `markTurnAssistantInterrupted` for a send the host then refused. */
+export function clearTurnAssistantInterrupted(entries: ChatEntry[]): ChatEntry[] {
+  const idx = currentTurnAssistantIdx(entries);
+  if (idx < 0) return entries;
+  const entry = entries[idx] as AssistantEntry;
+  if (!entry.interrupted) return entries;
+  const next = [...entries];
+  const { interrupted: _interrupted, ...rest } = entry;
+  next[idx] = rest;
+  return next;
+}
+
 export function appendUserEntry(
   entries: ChatEntry[],
   text: string,
@@ -524,11 +578,12 @@ export function upsertStreamingAssistant(
       entry.kind === "assistant" && !!entry.streaming,
   );
 
-  const assistant = { kind: "assistant" as const, text, streaming: true };
   if (assistantIdx >= 0) {
-    next[assistantIdx] = assistant;
+    // Keep what the entry already carries — an interrupted marker set while
+    // the stream was still delivering must survive the next delta.
+    next[assistantIdx] = { ...(next[assistantIdx] as AssistantEntry), text, streaming: true };
   } else {
-    next.push(assistant);
+    next.push({ kind: "assistant" as const, text, streaming: true });
   }
   return next;
 }
@@ -641,9 +696,13 @@ export function finalizeStreamingAssistant(
       // turn's content and the entry must stay so the history timeline is
       // intact.  Only splice when the entry is truly orphaned (no siblings
       // in the current turn).
-      const lastTurnStartIdx = findLastIdx(next, isTurnStartEntry);
+      // The turn that owns this entry starts before it and ends where the
+      // next one starts — a question the user sent while this turn was still
+      // closing is not one of its siblings.
+      const turnStartIdx = findLastIdx(next.slice(0, assistantIdx), isTurnStartEntry);
+      const nextTurnStartIdx = next.findIndex((e, i) => i > assistantIdx && isTurnStartEntry(e));
       const hasTurnSiblings = next
-        .slice(lastTurnStartIdx + 1)
+        .slice(turnStartIdx + 1, nextTurnStartIdx === -1 ? next.length : nextTurnStartIdx)
         .some((e) => e.kind === "tool_group" || e.kind === "checkpoint");
       if (hasTurnSiblings) {
         next[assistantIdx] = {
@@ -747,9 +806,15 @@ export function setAssistantError(
       entry.kind === "assistant" && !!entry.streaming,
   );
 
-  const baseEntry = {
+  const current = assistantIdx >= 0 ? (next[assistantIdx] as AssistantEntry) : undefined;
+  // A turn the user cut short keeps whatever it had delivered — possibly
+  // nothing; the closing error is the abort itself, not something to show
+  // in its place.
+  const interrupted = current?.interrupted === true;
+  const baseEntry: AssistantEntry = {
+    ...current,
     kind: "assistant" as const,
-    text: message,
+    text: interrupted ? current?.text ?? "" : message,
     streaming: false,
     ...(systemNotice !== undefined ? { systemNotice } : {}),
   };

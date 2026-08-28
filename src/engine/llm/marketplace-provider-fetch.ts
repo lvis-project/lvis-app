@@ -4,6 +4,7 @@ import {
   isSelfHostedTrustedNetworkVendor,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 /**
  * The three NetworkGuard axes a provider fetch may open, each already narrowed
@@ -134,6 +135,8 @@ function createOriginLockedProviderFetch(
       ...networkAccess,
       fetchImpl,
       maxRedirects: 0,
+      // Not the web-fetch tool budget: a model answers on its own clock.
+      timeoutMs: TOOL_TIMEOUT_POLICY.modelStreamIdleCeilingMs,
     });
   };
   if (configuredOrigin) {

@@ -905,6 +905,7 @@ export type LvisApi = {
     inputOrigin: ChatSendInputOrigin,
     userIntent?: import("../../shared/chat-origin.js").UserKeyboardIntentSnapshot,
     personaPromptId?: string,
+    options?: { interrupt?: boolean },
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<

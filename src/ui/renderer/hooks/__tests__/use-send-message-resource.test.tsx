@@ -16,6 +16,9 @@ import "../../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useSendMessage, type UseSendMessageDeps } from "../use-send-message.js";
+import { useChatState } from "../use-chat-state.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import type { LvisApi } from "../../types.js";
 import { MCP_RESOURCE_FENCE_OPEN } from "../../../../shared/mcp-resource-bounds.js";
 import type { Attachment } from "../../types/attachments.js";
 import type { UserContentPart } from "../../../../engine/llm/types.js";
@@ -74,9 +77,18 @@ function setup(options?: {
   llmModel?: UseSendMessageDeps["llmModel"];
   checkApiKey?: UseSendMessageDeps["checkApiKey"];
   settingsReady?: boolean;
+  streaming?: boolean;
+  handleCompactCommand?: UseSendMessageDeps["handleCompactCommand"];
+  /** Drive the real transcript hook instead of mocks for its entry functions. */
+  realChatState?: boolean;
 }) {
   const attachments = options?.attachments ?? [RESOURCE];
   const chatSend = options?.chatSend ?? vi.fn(async () => ({ ok: true }));
+  const chatAbort = vi.fn(async () => ({ ok: true }));
+  const resetStreamAccumulators = vi.fn();
+  const markLastAssistantInterrupted = vi.fn();
+  const unmarkLastAssistantInterrupted = vi.fn();
+  const appendSystemEntry = vi.fn();
   const setQuestion = vi.fn();
   const activeSubscriptionRuntime = options?.activeSubscriptionRuntime ?? null;
   const subscriptionRuntimePolicy = options?.subscriptionRuntimePolicy
@@ -104,10 +116,15 @@ function setup(options?: {
   const appendUserEntry = vi.fn();
   const setErrorWithThought = vi.fn();
 
+  const { api: mockApi, emitChatStream } = makeMockLvisApi();
+  const api = { ...mockApi, chatSend, chatAbort } as unknown as LvisApi;
   const deps = {
-    api: { chatSend },
+    api,
     t: (key: string) => key,
-    streaming: false,
+    streaming: options?.streaming ?? false,
+    markLastAssistantInterrupted,
+    unmarkLastAssistantInterrupted,
+    appendSystemEntry,
     checkApiKey: options?.checkApiKey ?? (async () => true),
     // The real composer output for "summarize [Resource #1]" plus one resource: the
     // marker stays in the body, the fence rides as its own part.
@@ -132,11 +149,11 @@ function setup(options?: {
     }),
     appendUserEntry,
     dropUserEntry,
-    resetStreamAccumulators: vi.fn(),
+    resetStreamAccumulators,
     beginStreamingRequest: vi.fn(() => 1),
     finishStreamingRequest: vi.fn(),
     setErrorWithThought,
-    handleCompactCommand: vi.fn(),
+    handleCompactCommand: options?.handleCompactCommand ?? vi.fn(),
     sessionLoad: vi.fn(),
     applyLoadedSession: vi.fn(),
     refreshSessionId: vi.fn(),
@@ -153,8 +170,29 @@ function setup(options?: {
     handleAskRef: { current: null },
   } as unknown as UseSendMessageDeps;
 
-  const { result } = renderHook(() => useSendMessage(deps));
-  return { result, chatSend, setQuestion, setAttachments, dropUserEntry, setErrorWithThought };
+  let chat: ReturnType<typeof useChatState> | null = null;
+  const { result } = renderHook(() => {
+    const chatState = useChatState(api);
+    chat = chatState;
+    return useSendMessage(options?.realChatState
+      ? {
+        ...deps,
+        appendUserEntry: chatState.appendUserEntry,
+        dropUserEntry: chatState.dropUserEntry,
+        resetStreamAccumulators: chatState.resetStreamAccumulators,
+        markLastAssistantInterrupted: chatState.markLastAssistantInterrupted,
+        unmarkLastAssistantInterrupted: chatState.unmarkLastAssistantInterrupted,
+        appendSystemEntry: chatState.appendSystemEntry,
+        setErrorWithThought: chatState.setErrorWithThought,
+      }
+      : deps);
+  });
+  return {
+    result, chatSend, chatAbort, setQuestion, setAttachments, dropUserEntry, setErrorWithThought,
+    resetStreamAccumulators, markLastAssistantInterrupted, unmarkLastAssistantInterrupted, appendSystemEntry,
+    chat: () => chat as unknown as ReturnType<typeof useChatState>,
+    emitChatStream,
+  };
 }
 
 describe("handleAsk — a turn carrying an attached resource", () => {
@@ -366,5 +404,179 @@ describe("handleAsk — a turn carrying an attached resource", () => {
 
     expect(checkApiKey).not.toHaveBeenCalled();
     expect(chatSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleAsk — the host refuses the send with a resolved value", () => {
+  it.each([
+    ["the command port's { ok: false }", { ok: false, error: "session-mismatch" }, "formatIpcError.sessionMismatch"],
+    ["the taken-lease { error } frame", { error: "streaming-active" }, "formatIpcError.streamingActive"],
+    ["an expired keyboard intent", { ok: false, error: "user-keyboard-required" }, "app.sendNeedsKeyboard"],
+  ])("takes the bubble back and tells the user — %s", async (_label, frame, expectedKey) => {
+    const chatSend = vi.fn(async () => frame);
+    const { result, setQuestion, dropUserEntry, setErrorWithThought } = setup({ chatSend, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("a question");
+    });
+
+    expect(dropUserEntry).toHaveBeenCalledWith("a question");
+    expect(setErrorWithThought).toHaveBeenCalledWith(expectedKey);
+    const restore = setQuestion.mock.calls[setQuestion.mock.calls.length - 1]?.[0] as (current: string) => string;
+    expect(restore("")).toBe("a question");
+  });
+
+  it("treats a turn result as success — it has no error and no ok flag", async () => {
+    const chatSend = vi.fn(async () => ({ text: "answer", toolCalls: [], route: "llm" }));
+    const { result, dropUserEntry, setErrorWithThought } = setup({ chatSend, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("a question");
+    });
+
+    expect(dropUserEntry).not.toHaveBeenCalled();
+    expect(setErrorWithThought).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleAsk — a send while a turn is still running", () => {
+  it("asks the host to interrupt inside the same call instead of awaiting an abort first", async () => {
+    const { result, chatSend, chatAbort, resetStreamAccumulators, markLastAssistantInterrupted } = setup({
+      streaming: true,
+      attachments: [],
+    });
+
+    await act(async () => {
+      await result.current.handleAsk("new direction");
+    });
+
+    expect(chatAbort).not.toHaveBeenCalled();
+    expect(markLastAssistantInterrupted).toHaveBeenCalledTimes(1);
+    expect(chatSend).toHaveBeenCalledTimes(1);
+    expect(chatSend.mock.calls[0]?.[5]).toEqual({ interrupt: true });
+    // The interrupted turn's closing frame finalizes its own entry from the
+    // accumulators; clearing them here would leave that entry open.
+    expect(resetStreamAccumulators).not.toHaveBeenCalled();
+  });
+
+  it("marks the running turn only once the send actually goes out — a command handled locally leaves it alone", async () => {
+    const handleCompactCommand = vi.fn(async () => true);
+    const { result, chatSend, markLastAssistantInterrupted } = setup({
+      streaming: true, attachments: [], handleCompactCommand,
+    });
+
+    await act(async () => {
+      await result.current.handleAsk("/compact");
+    });
+
+    expect(handleCompactCommand).toHaveBeenCalledWith("/compact");
+
+    expect(chatSend).not.toHaveBeenCalled();
+    expect(markLastAssistantInterrupted).not.toHaveBeenCalled();
+  });
+
+  it("takes the marker back and notes the refusal beside the live answer when the host declines the interrupt", async () => {
+    const chatSend = vi.fn(async () => ({ ok: false, error: "user-keyboard-required" }));
+    const {
+      result, markLastAssistantInterrupted, unmarkLastAssistantInterrupted, appendSystemEntry,
+      setErrorWithThought, dropUserEntry, setQuestion,
+    } = setup({ chatSend, streaming: true, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("new direction");
+    });
+
+    expect(markLastAssistantInterrupted).toHaveBeenCalledTimes(1);
+    expect(unmarkLastAssistantInterrupted).toHaveBeenCalledTimes(1);
+    expect(appendSystemEntry).toHaveBeenCalledWith("app.sendNeedsKeyboard");
+    // The running turn's entry stays open for its own stream; an error close here would split the answer.
+    expect(setErrorWithThought).not.toHaveBeenCalled();
+    expect(dropUserEntry).toHaveBeenCalledTimes(1);
+    const restore = setQuestion.mock.calls.at(-1)?.[0] as ((q: string) => string) | string;
+    expect(typeof restore === "function" ? restore("") : restore).toBe("new direction");
+  });
+
+  it("keeps the badge when the host refused only after it had already stopped the turn", async () => {
+    const chatSend = vi.fn(async () => ({ ok: false, error: "session-mismatch", interrupted: true }));
+    const {
+      result, markLastAssistantInterrupted, unmarkLastAssistantInterrupted, appendSystemEntry, setErrorWithThought,
+    } = setup({ chatSend, streaming: true, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("new direction");
+    });
+
+    expect(markLastAssistantInterrupted).toHaveBeenCalledTimes(1);
+    expect(unmarkLastAssistantInterrupted).not.toHaveBeenCalled();
+    expect(appendSystemEntry).toHaveBeenCalledTimes(1);
+    expect(setErrorWithThought).not.toHaveBeenCalled();
+  });
+
+  it("in the real transcript: the streaming answer wears the badge and the new question lands after it", async () => {
+    const { result, chat, emitChatStream } = setup({ streaming: true, attachments: [], realChatState: true });
+    act(() => chat().appendUserEntry("first"));
+    act(() => emitChatStream({ type: "text_delta", streamId: 1, text: "partial answer" }));
+
+    await act(async () => {
+      await result.current.handleAsk("second");
+    });
+
+    expect(chat().entries.map((e) => e.kind)).toEqual(["user", "assistant", "user"]);
+    expect(chat().entries[1]).toMatchObject({ text: "partial answer", interrupted: true, streaming: true });
+    expect(chat().entries[2]).toMatchObject({ kind: "user", text: "second" });
+  });
+
+  it("in the real transcript: a refusal at admission takes the badge back and leaves a note, not a bubble", async () => {
+    const chatSend = vi.fn(async () => ({ ok: false, error: "user-keyboard-required" }));
+    const { result, chat, emitChatStream } = setup({ chatSend, streaming: true, attachments: [], realChatState: true });
+    act(() => chat().appendUserEntry("first"));
+    act(() => emitChatStream({ type: "text_delta", streamId: 1, text: "partial answer" }));
+
+    await act(async () => {
+      await result.current.handleAsk("second");
+    });
+
+    expect(chat().entries.map((e) => e.kind)).toEqual(["user", "assistant", "system"]);
+    expect(chat().entries[1]).toMatchObject({ text: "partial answer", streaming: true });
+    expect(chat().entries[1]).not.toHaveProperty("interrupted");
+    expect(chat().entries[2]).toMatchObject({ text: "app.sendNeedsKeyboard" });
+  });
+
+  it("in the real transcript: a refusal after the abort keeps the badge on the cut-short answer", async () => {
+    const chatSend = vi.fn(async () => ({ ok: false, error: "session-mismatch", interrupted: true }));
+    const { result, chat, emitChatStream } = setup({ chatSend, streaming: true, attachments: [], realChatState: true });
+    act(() => chat().appendUserEntry("first"));
+    act(() => emitChatStream({ type: "text_delta", streamId: 1, text: "partial answer" }));
+
+    await act(async () => {
+      await result.current.handleAsk("second");
+    });
+    act(() => emitChatStream({ type: "done", streamId: 1 }));
+
+    expect(chat().entries.map((e) => e.kind)).toEqual(["user", "assistant", "system"]);
+    expect(chat().entries[1]).toMatchObject({ text: "partial answer", interrupted: true, streaming: false });
+  });
+
+  it("never interrupts on behalf of a queue drain, even while the renderer still counts the turn as streaming", async () => {
+    const { result, chatSend, markLastAssistantInterrupted } = setup({ streaming: true, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("queued text", "default", undefined, { injectHint: "queue", inputOrigin: "queue-auto" });
+    });
+
+    expect(markLastAssistantInterrupted).not.toHaveBeenCalled();
+    expect(chatSend.mock.calls[0]?.[5]).toBeUndefined();
+  });
+
+  it("starts a fresh turn from empty accumulators and no interrupt flag when nothing is running", async () => {
+    const { result, chatSend, resetStreamAccumulators, markLastAssistantInterrupted } = setup({ attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("first question");
+    });
+
+    expect(markLastAssistantInterrupted).not.toHaveBeenCalled();
+    expect(chatSend.mock.calls[0]?.[5]).toBeUndefined();
+    expect(resetStreamAccumulators).toHaveBeenCalledTimes(1);
   });
 });

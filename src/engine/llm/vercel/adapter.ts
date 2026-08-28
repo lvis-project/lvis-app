@@ -51,6 +51,7 @@ import {
   type ProviderErrorDiagnostics,
 } from "../provider-error-diagnostics.js";
 import { lookupPricing } from "../../../shared/pricing-data.js";
+import { TOOL_TIMEOUT_POLICY } from "../../../shared/tool-timeout-policy.js";
 import {
   normalizeProviderToolAliasText,
   OPENAI_RESPONSES_TOOL_SEARCH_ALIAS,
@@ -98,7 +99,7 @@ const OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE: Readonly<Record<string, string>>
 // the provider stream is treated as stalled and aborted (a hung proxy / dropped
 // upstream would otherwise block the turn forever). Re-armed on every delta, so
 // only a genuine stall — not slow first-token reasoning — trips it.
-const STREAM_IDLE_CEILING_MS = 300_000;
+const STREAM_IDLE_CEILING_MS = TOOL_TIMEOUT_POLICY.modelStreamIdleCeilingMs;
 
 export function isOpenAIReasoningModel(model: string): boolean {
   const m = model.toLowerCase();

@@ -6,9 +6,11 @@ import {
   applyExternalUserMessage,
   applyToolEnd,
   applyToolStart,
+  clearTurnAssistantInterrupted,
   dropOptimisticUserEntry,
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
+  markTurnAssistantInterrupted,
   setAssistantError,
   upsertPermissionReview,
   upsertStreamingReasoning,
@@ -452,6 +454,44 @@ describe("chat-stream-state", () => {
   });
 });
 
+describe("finalizeStreamingAssistant — the turn that owns the entry", () => {
+  it("keeps an empty interrupted entry whose tool cards belong to it, even after the next question was appended", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "first");
+    entries = upsertStreamingAssistant(entries, "x");
+    entries = [...entries.slice(0, 1), { ...(entries[1] as Extract<ChatEntry, { kind: "assistant" }>), text: "", interrupted: true }];
+    entries = applyToolStart(entries, {
+      groupId: "round-1",
+      toolUseId: "tool-1",
+      name: "web_fetch",
+      displayOrder: 0,
+      input: { url: "https://example.com/a" },
+    });
+    entries = appendUserEntry(entries, "second");
+
+    const closed = finalizeStreamingAssistant(entries, "", { overrideText: "" });
+
+    expect(closed.map((e) => e.kind)).toEqual(["user", "assistant", "tool_group", "user"]);
+    expect(closed[1]).toMatchObject({ kind: "assistant", text: "", streaming: false, interrupted: true });
+  });
+
+  it("drops an empty entry whose only tool cards belong to the next turn", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "first");
+    entries = upsertStreamingAssistant(entries, "x");
+    entries = [...entries.slice(0, 1), { ...(entries[1] as Extract<ChatEntry, { kind: "assistant" }>), text: "" }];
+    entries = appendUserEntry(entries, "second");
+    entries = applyToolStart(entries, {
+      groupId: "round-2",
+      toolUseId: "tool-2",
+      name: "web_fetch",
+      displayOrder: 0,
+      input: { url: "https://example.com/b" },
+    });
+
+    const closed = finalizeStreamingAssistant(entries, "", { overrideText: "" });
+    expect(closed.map((e) => e.kind)).toEqual(["user", "user", "tool_group"]);
+  });
+});
+
 describe("imported_trigger helpers (overlay import marker lifecycle)", () => {
   const trigger = {
     sessionId: "s1",
@@ -592,6 +632,64 @@ describe("setAssistantError — Issue #911 systemNotice option", () => {
  * exists only in this renderer: absent from the session file, gone on reload, and
  * indistinguishable from one that was actually sent.
  */
+describe("markTurnAssistantInterrupted — the turn the abort cut short", () => {
+  const answered = (text: string): ChatEntry[] => [
+    { kind: "user", text: "q" },
+    { kind: "assistant", text, streaming: false },
+  ];
+
+  it("marks the last assistant entry whether or not it is still streaming", () => {
+    const out = markTurnAssistantInterrupted(answered("done"));
+    expect(out[1]).toMatchObject({ interrupted: true, streaming: false });
+  });
+
+  it("stops at the current turn's start — a previous answer is never marked", () => {
+    const entries: ChatEntry[] = [...answered("earlier"), { kind: "user", text: "next" }];
+    expect(markTurnAssistantInterrupted(entries)).toBe(entries);
+  });
+
+  it("crosses an injected user line to a still-streaming answer, but not to a finished one", () => {
+    const streaming: ChatEntry[] = [
+      { kind: "user", text: "q" },
+      { kind: "assistant", text: "partial", streaming: true },
+      { kind: "user", text: "steer", injectHint: "queue" },
+    ];
+    expect(markTurnAssistantInterrupted(streaming)[1]).toMatchObject({ interrupted: true });
+    const finished: ChatEntry[] = [
+      { kind: "user", text: "q" },
+      { kind: "assistant", text: "earlier", streaming: false },
+      { kind: "user", text: "queued", injectHint: "queue" },
+    ];
+    expect(markTurnAssistantInterrupted(finished)).toBe(finished);
+  });
+
+  it("is a no-op on an already marked entry, and clear restores the unmarked shape", () => {
+    const marked = markTurnAssistantInterrupted(answered("done"));
+    expect(markTurnAssistantInterrupted(marked)).toBe(marked);
+    const cleared = clearTurnAssistantInterrupted(marked);
+    expect(cleared[1]).not.toHaveProperty("interrupted");
+    expect(clearTurnAssistantInterrupted(cleared)).toBe(cleared);
+  });
+});
+
+describe("setAssistantError — the interrupted turn keeps what it had", () => {
+  it("keeps an empty interrupted answer empty instead of showing the abort as its text", () => {
+    const entries = markTurnAssistantInterrupted([
+      { kind: "user", text: "q" },
+      { kind: "assistant", text: "", streaming: true },
+    ]);
+    const out = setAssistantError(entries, "aborted", "");
+    expect(out[1]).toMatchObject({ kind: "assistant", text: "", interrupted: true, streaming: false });
+  });
+
+  it("carries the streaming entry's other fields through the error close", () => {
+    const entries = upsertStreamingAssistant([{ kind: "user", text: "q" }], "partial");
+    entries[1] = { ...(entries[1] as Extract<ChatEntry, { kind: "assistant" }>), phase: "final", interrupted: true };
+    const out = setAssistantError(entries, "aborted", "");
+    expect(out[1]).toMatchObject({ text: "partial", phase: "final", interrupted: true, streaming: false });
+  });
+});
+
 describe("dropOptimisticUserEntry", () => {
   it("removes the bubble the refused send appended", () => {
     const entries: ChatEntry[] = [

@@ -36,6 +36,27 @@ type Sessions = ReturnType<typeof useCurrentSession>;
 type Settings = ReturnType<typeof useSettings>;
 type ComposeOutgoingFn = (raw: string) => ReturnType<typeof composeOutgoingUtil>;
 
+/**
+ * The host answers a refused send with a resolved value, not a rejection:
+ * `{ ok: false, error }` from the command port, or `{ error: "streaming-active" }`
+ * when the lease is taken. A resolved value the caller does not read leaves
+ * the user's bubble on screen and nothing behind it.
+ */
+function chatSendRefusal(result: unknown): { code: string; interrupted: boolean } | undefined {
+  if (result === null || typeof result !== "object") return undefined;
+  const { ok, error, interrupted } = result as { ok?: unknown; error?: unknown; interrupted?: unknown };
+  if (ok === true || typeof error !== "string") return undefined;
+  return { code: error, interrupted: interrupted === true };
+}
+
+class ChatSendRefusedError extends Error {
+  /** `interrupted`: the host had already stopped the running turn when it refused. */
+  constructor(readonly code: string, readonly interrupted: boolean) {
+    super(code);
+    this.name = "ChatSendRefusedError";
+  }
+}
+
 export interface UseSendMessageDeps {
   api: Api;
   t: TFn;
@@ -48,6 +69,8 @@ export interface UseSendMessageDeps {
   beginStreamingRequest: ChatState["beginStreamingRequest"];
   finishStreamingRequest: ChatState["finishStreamingRequest"];
   markLastAssistantInterrupted?: ChatState["markLastAssistantInterrupted"];
+  unmarkLastAssistantInterrupted?: ChatState["unmarkLastAssistantInterrupted"];
+  appendSystemEntry: ChatState["appendSystemEntry"];
   setErrorWithThought: ChatState["setErrorWithThought"];
   handleCompactCommand: ChatState["handleCompactCommand"];
   sessionLoad: Sessions["handleLoadSession"];
@@ -123,6 +146,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
     api, t, streaming, checkApiKey, composeOutgoing,
     appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     markLastAssistantInterrupted,
+    unmarkLastAssistantInterrupted,
+    appendSystemEntry,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
     llmVendor, llmModel, llmReadyWithoutApiKey, subscriptionRuntimePolicy,
@@ -159,20 +184,13 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       // `trackStreamTurn` and surfaces a raw "stream already active" error. The
       // staged modes that are NOT user-initiated stay out — they are queued or
       // injected by the host, and must never abort the turn the user is watching.
-      if ((mode === "default" || mode === "mcp-prompt") && streaming) {
-        // Issue #622: interrupt the current turn and start a new one.
-        // chatAbort awaits until the active stream turn settles (interrupted),
-        // then returns. The in-flight turn's finally block calls
-        // finishStreamingRequest; the turnRequestRef increment below makes
-        // its requestId stale so the call is a safe no-op. Partial response
-        // is committed to history by post-turn-hook-chain with
-        // stopReason="interrupted".
-        if (debugStreamEnabled) debugLog("handleAsk", "interrupt:abort-and-proceed");
-        try { await api.chatAbort(); } catch { /* no-op */ }
-        // Same contract as the stop button: the initiator marks the settled
-        // turn interrupted; the engine no longer streams a literal marker.
-        markLastAssistantInterrupted?.();
-      }
+      // A send while a turn is running interrupts it. The host stops the
+      // running turn inside the same chatSend call (see the `interrupt`
+      // payload flag); awaiting a separate abort here first let the keyboard
+      // intent expire, and the send that followed was silently refused.
+      const interrupt = (mode === "default" || mode === "mcp-prompt")
+        && streaming
+        && opts?.inputOrigin !== "queue-auto";
       // Renderer only performs UX-level shortcuts for typed composer input.
       // Main owns the authoritative trust-origin classification.
 
@@ -289,12 +307,24 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       // Staged modes skip only the user-bubble append. The imported_trigger marker
       // already represents the plugin-authored / app-authored prompt visibly, and
       // rendering the wrapped envelope as a user bubble would misattribute authorship.
+      // The interrupted turn's closing frames still arrive after this point
+      // and finalize their own entry with what they accumulated; only a
+      // fresh turn starts from empty accumulators.
+      if (interrupt) {
+        // Marked here, not at entry: every gate above returns without a send,
+        // and a turn nothing interrupted must not wear the badge. And before
+        // the new bubble: the mark walks back to the running turn's answer
+        // and stops at a user line.
+        if (debugStreamEnabled) debugLog("handleAsk", "interrupt:send");
+        markLastAssistantInterrupted?.();
+      } else {
+        resetStreamAccumulators();
+      }
       if (mode === "default") {
         appendUserEntry(trimmed, opts?.injectHint);
       }
-      resetStreamAccumulators();
       try {
-        await api.chatSend(
+        const result = await api.chatSend(
           outgoing,
           outgoingAttachments,
           opts?.inputOrigin === "queue-auto" ? "queue-auto" : SEND_MODE_ORIGIN[mode],
@@ -306,7 +336,10 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
           opts?.inputOrigin === "queue-auto"
             ? undefined
             : mode === "default" ? composed.personaPromptId : undefined,
+          ...(interrupt ? [{ interrupt: true }] : []),
         );
+        const refusal = chatSendRefusal(result);
+        if (refusal !== undefined) throw new ChatSendRefusedError(refusal.code, refusal.interrupted);
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
         // already cleared by setQuestion(""). N counter persists across
@@ -329,11 +362,15 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         // previous localized framing — an unmapped failure must not lose it just
         // because this path learned to map the mapped ones.
         const rawMessage = (err as Error).message;
-        const code = rawMessage.match(/(?:^|Error:\s*)([a-z][a-z0-9-]*)\s*$/)?.[1];
-        const mappedKey = resolveIpcErrorKey(code);
-        setErrorWithThought(
-          mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage }),
-        );
+        const code = err instanceof ChatSendRefusedError
+          ? err.code
+          : rawMessage.match(/(?:^|Error:\s*)([a-z][a-z0-9-]*)\s*$/)?.[1];
+        // The generic sentence for this code speaks of permission changes;
+        // for a chat send the user needs to know their message did not go.
+        const mappedKey = code === "user-keyboard-required"
+          ? "app.sendNeedsKeyboard"
+          : resolveIpcErrorKey(code);
+        const message = mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage });
         // Put the turn back the way it was. The bubble was appended optimistically and
         // the composer was cleared before the IPC resolved; a REFUSED send means main
         // recorded nothing, so leaving either would show the user a message that was
@@ -341,8 +378,21 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         // already restores the draft for its own refusal — this is the same repair for
         // every other one, which until now only the guard had.
         //
+        // The bubble goes first: the error or note below must land after the
+        // turn it belongs to, and the walk back to that turn's answer stops
+        // at a user line.
+        if (mode === "default") dropUserEntry(trimmed);
+        if (interrupt && err instanceof ChatSendRefusedError) {
+          // The running turn is not closed here with an error: refused at
+          // admission it goes on untouched, and refused after the abort its
+          // own closing frame finalizes it. Only the first case takes the
+          // badge back.
+          if (!err.interrupted) unmarkLastAssistantInterrupted?.();
+          appendSystemEntry(message);
+        } else {
+          setErrorWithThought(message);
+        }
         if (mode === "default") {
-          dropUserEntry(trimmed);
           // Text AND attachments, together. They are one thing: the composer derives its
           // chips from the markers in the body, so a body restored without its
           // attachments is a draft with dangling references. Restored only when the
@@ -387,6 +437,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       beginStreamingRequest,
       finishStreamingRequest,
       setErrorWithThought,
+      unmarkLastAssistantInterrupted,
+      appendSystemEntry,
       handleCompactCommand,
       sessionLoad,
       applyLoadedSession,

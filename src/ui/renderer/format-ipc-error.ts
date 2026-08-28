@@ -317,6 +317,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "open-failed": "formatIpcError.openFailed",
   "checkpoint-not-found": "formatIpcError.checkpointNotFound",
   "session-mismatch": "formatIpcError.sessionMismatch",
+  "streaming-active": "formatIpcError.streamingActive",
   // ── Tiled chat groups ──
   "chat-group-limit-reached": "formatIpcError.chatGroupLimitReached",
   "chat-groups-unavailable": "formatIpcError.chatGroupsUnavailable",

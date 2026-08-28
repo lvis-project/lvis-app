@@ -1040,3 +1040,188 @@ describe("useStarred (toggle semantics)", () => {
     expect(api.starredAdd).toHaveBeenCalled();
   });
 });
+
+describe("useChatState — a turn interrupted by the next send", () => {
+  const mount = () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    return { result, dispatch: (ev: Parameters<typeof emitChatStream>[0]) => act(() => emitChatStream(ev)) };
+  };
+
+  it("keeps the interrupted entry open until its own closing frame, which lands after the new question", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "partial answer" });
+    act(() => result.current.markLastAssistantInterrupted());
+    act(() => result.current.appendUserEntry("second"));
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant", "user"]);
+    expect(result.current.entries[1]).toMatchObject({ interrupted: true, streaming: true });
+
+    dispatch({ type: "done", streamId: 1 });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant", "user"]);
+    expect(result.current.entries[1]).toMatchObject({ kind: "assistant", text: "partial answer", interrupted: true, streaming: false });
+  });
+
+  it("keeps the interrupted marker through deltas that were still in flight", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "part" });
+    act(() => result.current.markLastAssistantInterrupted());
+    dispatch({ type: "text_delta", streamId: 1, text: "ial" });
+    expect(result.current.entries[1]).toMatchObject({ text: "partial", interrupted: true, streaming: true });
+    dispatch({ type: "done", streamId: 1 });
+    expect(result.current.entries[1]).toMatchObject({ text: "partial", interrupted: true, streaming: false });
+  });
+
+  it("keeps the delivered text when the interrupted turn closes with an error frame", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "partial answer" });
+    act(() => result.current.markLastAssistantInterrupted());
+    dispatch({ type: "error", streamId: 1, error: "aborted" });
+    expect(result.current.entries[1]).toMatchObject({ text: "partial answer", interrupted: true, streaming: false });
+  });
+
+  it("closes the interrupted stream when the next stream speaks first, and gives the new text its own entry", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "partial answer" });
+    act(() => result.current.markLastAssistantInterrupted());
+    act(() => result.current.appendUserEntry("second"));
+    // The first turn rejected instead of settling: no done, no error — only the new stream arrives.
+    dispatch({ type: "text_delta", streamId: 2, text: "fresh" });
+    dispatch({ type: "done", streamId: 2 });
+
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(result.current.entries[1]).toMatchObject({ text: "partial answer", interrupted: true, streaming: false });
+    expect(result.current.entries[3]).toMatchObject({ text: "fresh", streaming: false });
+    expect(result.current.entries[3]).not.toHaveProperty("interrupted");
+    // A straggler from the old stream is dropped, not adopted.
+    dispatch({ type: "text_delta", streamId: 1, text: " late" });
+    expect(result.current.entries[1]).toMatchObject({ text: "partial answer" });
+    expect(result.current.entries).toHaveLength(4);
+  });
+
+  it("marks the current turn's answer even after its done frame — the Stop button resolves after the stream closed", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "done answer" });
+    dispatch({ type: "done", streamId: 1 });
+    act(() => result.current.markLastAssistantInterrupted());
+    expect(result.current.entries[1]).toMatchObject({ text: "done answer", interrupted: true, streaming: false });
+  });
+
+  it("leaves the previous turn's answer alone when the current turn has produced none yet", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "earlier answer" });
+    dispatch({ type: "done", streamId: 1 });
+    act(() => result.current.appendUserEntry("second"));
+    act(() => result.current.markLastAssistantInterrupted());
+    expect(result.current.entries[1]).not.toHaveProperty("interrupted");
+    expect(result.current.entries).toHaveLength(3);
+  });
+
+  it("takes the marker back when the host refuses the interrupting send, and the turn goes on", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "part" });
+    act(() => result.current.markLastAssistantInterrupted());
+    act(() => result.current.unmarkLastAssistantInterrupted());
+    expect(result.current.entries[1]).not.toHaveProperty("interrupted");
+    dispatch({ type: "text_delta", streamId: 1, text: "ial" });
+    dispatch({ type: "done", streamId: 1 });
+    expect(result.current.entries[1]).toMatchObject({ text: "partial", streaming: false });
+    expect(result.current.entries[1]).not.toHaveProperty("interrupted");
+  });
+
+  it("supersedes a tool-only turn without leaving a stray entry, and lets the retired stream close its tool card", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "tool_start", streamId: 1, name: "slow_tool", groupId: "g1", toolUseId: "t1" });
+    act(() => result.current.markLastAssistantInterrupted());
+    act(() => result.current.appendUserEntry("second"));
+    dispatch({ type: "text_delta", streamId: 2, text: "fresh" });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "tool_group", "user", "assistant"]);
+    expect(result.current.entries[3]).toMatchObject({ text: "fresh", streaming: true });
+
+    // The old stream's tool result still arrives — the card must not stay "running".
+    dispatch({ type: "tool_end", streamId: 1, name: "slow_tool", groupId: "g1", toolUseId: "t1", result: "aborted" });
+    const group = result.current.entries[1] as Extract<typeof result.current.entries[number], { kind: "tool_group" }>;
+    expect(group.tools[0]).toMatchObject({ toolUseId: "t1", status: "done" });
+    expect(result.current.entries[3]).toMatchObject({ text: "fresh", streaming: true });
+
+    dispatch({ type: "done", streamId: 2 });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "tool_group", "user", "assistant"]);
+    expect(result.current.entries[3]).toMatchObject({ text: "fresh", streaming: false });
+  });
+
+  it("supersedes on the new stream's status frame, before any text of its own", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "partial answer" });
+    act(() => result.current.markLastAssistantInterrupted());
+    act(() => result.current.appendUserEntry("second"));
+    dispatch({ type: "llm_status", streamId: 2, phase: "retry", attempt: 1, maxAttempts: 5 });
+    expect(result.current.entries[1]).toMatchObject({ text: "partial answer", interrupted: true, streaming: false });
+    dispatch({ type: "text_delta", streamId: 2, text: "fresh" });
+    dispatch({ type: "done", streamId: 2 });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(result.current.entries[3]).toMatchObject({ text: "fresh", streaming: false });
+  });
+
+  it("marks the streaming answer even after guidance was injected behind it", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "partial" });
+    dispatch({ type: "guidance_injected", streamId: 1, text: "steer this way" });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant", "user"]);
+    act(() => result.current.markLastAssistantInterrupted());
+    expect(result.current.entries[1]).toMatchObject({ text: "partial", interrupted: true });
+  });
+
+  it("does not reach back past a drained queue line to a finished answer", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "earlier answer" });
+    dispatch({ type: "done", streamId: 1 });
+    act(() => result.current.appendUserEntry("queued", "queue"));
+    dispatch({ type: "tool_start", streamId: 2, name: "slow_tool", groupId: "g2", toolUseId: "t2" });
+    act(() => result.current.markLastAssistantInterrupted());
+    expect(result.current.entries[1]).not.toHaveProperty("interrupted");
+  });
+
+  it("does not let an older stream's straggler take the active slot while an interrupt is armed", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "old answer" });
+    dispatch({ type: "done", streamId: 1 });
+    act(() => result.current.appendUserEntry("second"));
+    dispatch({ type: "text_delta", streamId: 2, text: "current" });
+    act(() => result.current.markLastAssistantInterrupted());
+    // A late frame of stream 1 is not the successor of stream 2.
+    dispatch({ type: "text_delta", streamId: 1, text: " late" });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(result.current.entries[3]).toMatchObject({ text: "current", interrupted: true, streaming: true });
+    dispatch({ type: "done", streamId: 2 });
+    expect(result.current.entries[3]).toMatchObject({ text: "current", interrupted: true, streaming: false });
+    // The next real turn still renders.
+    act(() => result.current.appendUserEntry("third"));
+    dispatch({ type: "text_delta", streamId: 3, text: "next" });
+    expect(result.current.entries[5]).toMatchObject({ text: "next", streaming: true });
+  });
+
+  it("forgets the retired stream on a new chat, so the id can be reused", () => {
+    const { result, dispatch } = mount();
+    act(() => result.current.appendUserEntry("first"));
+    dispatch({ type: "text_delta", streamId: 1, text: "partial" });
+    act(() => result.current.markLastAssistantInterrupted());
+    dispatch({ type: "text_delta", streamId: 2, text: "fresh" });
+    dispatch({ type: "done", streamId: 2 });
+    act(() => result.current.clearForNewChat());
+    act(() => result.current.appendUserEntry("again"));
+    dispatch({ type: "text_delta", streamId: 1, text: "reused id" });
+    expect(result.current.entries.map((e) => e.kind)).toEqual(["user", "assistant"]);
+    expect(result.current.entries[1]).toMatchObject({ text: "reused id", streaming: true });
+  });
+});

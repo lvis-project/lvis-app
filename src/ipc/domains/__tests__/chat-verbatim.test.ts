@@ -2224,3 +2224,99 @@ describe("shared main-conversation lease on replay commands", () => {
     await activeTurn;
   });
 });
+
+describe("an interrupt send while a turn is running", () => {
+  function runningTurn() {
+    const loop = makeConversationLoop("interrupt-session", []);
+    const turnEntered = new SessionMutationGate<void>();
+    let finishTurn!: (result: { text: string; toolCalls: unknown[]; route: string; stopReason: string }) => void;
+    loop.runTurn.mockImplementation(async () => ({ text: "second answer", toolCalls: [], route: "llm", stopReason: "end_turn" }));
+    loop.runTurn.mockImplementationOnce(() => {
+      turnEntered.resolve(undefined);
+      return new Promise((resolve) => {
+        finishTurn = resolve;
+      });
+    });
+    loop.abortCurrentTurn.mockImplementation(() => {
+      finishTurn({ text: "", toolCalls: [], route: "llm", stopReason: "aborted" });
+    });
+    return { loop, turnEntered };
+  }
+
+  it("stops the running turn inside the send and runs the new one after it settles", async () => {
+    const { loop, turnEntered } = runningTurn();
+    await setupHandlers(loop);
+
+    const first = invoke(CHANNELS.chat.send, {
+      input: "first", inputOrigin: "user-keyboard", userActivation: true,
+    }, "main") as Promise<unknown>;
+    await turnEntered.promise;
+
+    const second = await invoke(CHANNELS.chat.send, {
+      input: "second", inputOrigin: "user-keyboard", userActivation: true, interrupt: true,
+    }, "main");
+    await first;
+
+    expect(loop.abortCurrentTurn).toHaveBeenCalledTimes(1);
+    expect(loop.runTurn).toHaveBeenCalledTimes(2);
+    expect(second).toMatchObject({ text: "second answer" });
+  });
+
+  it("leaves the running turn alone when the interrupting send would be refused", async () => {
+    const { loop, turnEntered } = runningTurn();
+    await setupHandlers(loop);
+
+    const first = invoke(CHANNELS.chat.send, {
+      input: "first", inputOrigin: "user-keyboard", userActivation: true,
+    }, "main") as Promise<unknown>;
+    await turnEntered.promise;
+
+    // Expired keyboard intent: no userActivation.
+    await expect(invoke(CHANNELS.chat.send, {
+      input: "second", inputOrigin: "user-keyboard", interrupt: true,
+    }, "main")).resolves.toEqual({ ok: false, error: "user-keyboard-required" });
+    expect(loop.abortCurrentTurn).not.toHaveBeenCalled();
+
+    loop.abortCurrentTurn();
+    await first;
+  });
+
+  it("reports that the turn was already stopped when the refusal comes after the abort", async () => {
+    const { loop, turnEntered } = runningTurn();
+    await setupHandlers(loop);
+
+    const first = invoke(CHANNELS.chat.send, {
+      input: "first", inputOrigin: "user-keyboard", userActivation: true,
+    }, "main") as Promise<unknown>;
+    await turnEntered.promise;
+
+    // Admitted at the door, refused later while resolving its persona prompt.
+    const second = await invoke(CHANNELS.chat.send, {
+      input: "second", inputOrigin: "user-keyboard", userActivation: true, interrupt: true,
+      personaPromptId: "persona-that-does-not-exist",
+    }, "main");
+    await first;
+
+    expect(loop.abortCurrentTurn).toHaveBeenCalledTimes(1);
+    expect(second).toMatchObject({ ok: false, interrupted: true });
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("without the flag a send during a running turn is refused, and nothing is aborted", async () => {
+    const { loop, turnEntered } = runningTurn();
+    await setupHandlers(loop);
+
+    const first = invoke(CHANNELS.chat.send, {
+      input: "first", inputOrigin: "user-keyboard", userActivation: true,
+    }, "main") as Promise<unknown>;
+    await turnEntered.promise;
+
+    await expect(invoke(CHANNELS.chat.send, {
+      input: "second", inputOrigin: "user-keyboard", userActivation: true,
+    }, "main")).resolves.toEqual({ error: "streaming-active" });
+    expect(loop.abortCurrentTurn).not.toHaveBeenCalled();
+
+    loop.abortCurrentTurn();
+    await first;
+  });
+});

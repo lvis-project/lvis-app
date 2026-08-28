@@ -380,11 +380,6 @@
     {
       "type": "exports",
       "file": "src/ipc/handlers/chat.ts",
-      "name": "parseChatSendPayload"
-    },
-    {
-      "type": "exports",
-      "file": "src/ipc/handlers/chat.ts",
       "name": "SESSION_KIND_VALUES"
     },
     {

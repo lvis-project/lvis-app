@@ -39,12 +39,17 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
     inputOrigin: ChatSendInputOrigin,
     userIntent?: UserKeyboardIntentSnapshot,
     personaPromptId?: string,
+    options?: { interrupt?: boolean },
   ) =>
     ipcRenderer.invoke(CHANNELS.chat.send, {
       input,
       attachments,
       inputOrigin,
       ...(personaPromptId ? { personaPromptId } : {}),
+      // The user's Enter while a turn is running is one gesture: the host
+      // aborts the running turn inside this same call, so the keyboard intent
+      // consumed just below is the one that authorises the send.
+      ...(options?.interrupt === true ? { interrupt: true } : {}),
       ...(inputOrigin === "user-keyboard"
         ? { userActivation: consumeUserKeyboardIntent(userIntent) }
         : {}),
