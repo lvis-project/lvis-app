@@ -23,11 +23,23 @@ Korean documentation: [docs/ko/app-readme.md](./docs/ko/app-readme.md)
 
 LVIS is designed as a reliable desktop environment where chat, work mode, tools, plugins, settings, and local status can coexist without visual noise. The UI makes model state, tool calls, plugin activity, file effects, approvals, indexing, and permissions visible enough for repeated daily work.
 
+The main area follows a workbench model: it is divided into framed chat groups, called tiles below, and each tile is a conversation of its own rather than a second view of the same one. Work mode holds up to four tiles; chat mode holds exactly one. Focus is drawn on the tile's frame, so which tile the next keystroke lands in is answerable at a glance.
+
+- **A tile owns one conversation.** Each tile is backed by its own conversation loop and can stream while the others stream. A session is open in at most one tile: clicking its row in the sidebar focuses the tile that already holds it instead of loading a duplicate, and a newly split tile starts a fresh conversation under the active project.
+- **The frame carries its own controls.** The tile header holds the conversation title on the leading edge and the conversation's actions on the trailing edge — pin, export (Markdown or JSON), import — followed by the tile's own controls: show conversations, split chat area, show only this chat, and close chat area. Every tile is closable once the area is split; the last remaining tile is not.
+- **Splitting is a choice of direction.** The split control offers "Side by side" or "Top and bottom". A direction whose halves would fall below the minimum tile size is offered as unavailable, and when neither fits the reason is stated instead of the control silently doing nothing.
+- **The work panel is one card.** Files, Preview, Browser, Terminal, Sub-agents, and Side chat live in a card that stands the full height of its tile — docked beside the transcript when the tile is wide enough, floating over the transcript's trailing edge when it is not. The header's close button closes the tile; the panel's own close button closes the panel.
+- **Pushed surfaces belong to one tile.** Overlay cards, MCP app cards, inline question cards, away authority, and the session TODO attach to the tile holding the conversation they came from, and to the focused tile when no tile holds it. Permission disclosure toasts are raised once per window rather than once per tile.
+
+The design record for this area is [docs/design/tiled-chat-groups.md](./docs/design/tiled-chat-groups.md); it is the source of truth for the group model, the channel split, and the geometry.
+
 ### Plugin Runtime
 
-Installed plugins live under `~/.lvis/plugins/<id>/plugin.json`, and `~/.lvis/plugins/registry.json` controls the active plugin set. The app no longer relies on an in-tree `plugins/installed/...` layout.
+Installed plugins live under `~/.lvis/plugins/<id>/plugin.json`, and `~/.lvis/plugins/registry.json` controls the active plugin set. The app no longer relies on an in-tree `plugins/installed/...` layout. More generally, the `~/.lvis/` root holds only cross-cutting resources — `settings.json`, `audit.log`, `secrets/` — and everything a single domain owns lives under `~/.lvis/<feature>/`, so one domain can be backed up or cleared as one directory. Skill approvals are read from `~/.lvis/skills/approvals.json` and starred messages from `~/.lvis/sessions/starred.json`; a file left in the root by an older build is moved into its namespace on first load.
 
 Plugins expose a host entry, methods such as `index_scan` or `meeting_start`, optional UI modules, declared capabilities, emitted events, subscriptions, and notification events. The main app does not import plugin implementations directly; `PluginRuntime` reads manifests, dynamically loads plugin host entries, manages lifecycle, and bridges IPC calls into plugin methods.
+
+A plugin's own startup failure is degraded, not fatal: the instance stays constructed and every other plugin keeps dispatching, and each call to the failed plugin reports its real reason. Only a failure of the host's own generation fence closes dispatch for the session.
 
 Current managed plugin families include:
 
@@ -35,7 +47,6 @@ Current managed plugin families include:
 - `@lvis/plugin-meeting`
 - `@lvis/plugin-ms-graph`
 - `@lvis/plugin-work-assistant`
-- `@lvis/plugin-agent-hub`
 
 ### Marketplace And Local Development
 
@@ -67,9 +78,17 @@ The renderer includes production chat primitives for:
 
 - Streaming conversation turns and abort.
 - Session resume, fork, branch from checkpoint, edit/resend, export, and compact.
-- Inline `ask_user_question` cards with stable response routing.
+- Inline `ask_user_question` cards with stable response routing, drawn in the one tile that owns the conversation.
 - Suggested replies.
 - Status bar visibility for model, mode, tool, permission, and runtime state.
+
+**Composer.** A send that the host refuses is reported rather than swallowed: the message comes back to the composer with its attachments and draft text, and the refusal says why. While a turn is running, plain Enter adds the message to the queue — the queue is handed to the running turn at its next brake point, and anything still pending when the turn ends is sent as a new message. Cmd/Ctrl+Enter interrupts instead, stopping the running turn inside the same send call so the keystroke that authorised the send is still the one that carries it. Queued and interrupting messages are labelled as such in the transcript, and an answer the user stopped keeps a "stopped by user" badge.
+
+**Message card.** Hovering your own message reveals three actions: edit, fork, and return here. Return here puts that message's text back into the composer and discards everything from it onward — in the transcript, in the messages queued to be said later, and in the session on disk — so the input can be retyped in the same conversation instead of branched into a new one. It is offered only when no turn is still producing output, and a message whose input cannot be handed back whole is refused with the conversation left untouched. The send time sits under each card. Pinning is no longer offered per message; the conversation itself is still pinned from the tile header and from its sidebar row.
+
+**Sidebar.** Conversation rows carry rename, mark unread, mark read, archive, share, copy, and delete; project rows carry edit and archive alongside pin, reveal, and remove. A row whose conversation is mid-turn shows a responding indicator, and a turn that ends where the user is not looking — an unfocused tile, or the focused tile behind another view — leaves the conversation marked unread until they look at it. The Chats list reveals a further page as the reader scrolls rather than ending in a count of hidden rows, and each group in the Projects tab pages behind its own button so one long project cannot push its siblings below the fold.
+
+**Work panel.** The Browser tab lists the web sources of the session's tool activity, taken from both the tool input and the tool result, each labelled with whether it was requested or came back in a result. The Files tab lists the session's files with the operation that touched each one — read, written, attached, or tool. The activity dashboard's plugin and MCP call counters are recovered from the transcript, so they survive a reload of the session. An empty panel shows the same activity content as the header's tool-activity popover.
 
 Key IPC domains live under `src/ipc/domains/*.ts`. Representative channels include:
 
@@ -277,6 +296,8 @@ A retired historical E2E script is no longer the source of truth. Current host-s
 - Korean app README: [docs/ko/app-readme.md](./docs/ko/app-readme.md)
 - Korean documentation hub: [docs/ko/README.md](./docs/ko/README.md)
 - Architecture: [docs/architecture/README.md](./docs/architecture/README.md)
+- Design: [docs/design/README.md](./docs/design/README.md)
+- Tiled chat groups: [docs/design/tiled-chat-groups.md](./docs/design/tiled-chat-groups.md)
 - Production release checklist: [docs/references/production-release-checklist.md](./docs/references/production-release-checklist.md)
 - Windows setup: [docs/guides/windows-setup.md](./docs/guides/windows-setup.md)
 - Plugin development: [docs/guides/plugin-development.md](./docs/guides/plugin-development.md)
