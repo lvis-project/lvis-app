@@ -2259,7 +2259,26 @@ describe("an interrupt send while a turn is running", () => {
 
     expect(loop.abortCurrentTurn).toHaveBeenCalledTimes(1);
     expect(loop.runTurn).toHaveBeenCalledTimes(2);
-    expect(second).not.toMatchObject({ error: "streaming-active" });
+    expect(second).toMatchObject({ text: "second answer" });
+  });
+
+  it("leaves the running turn alone when the interrupting send would be refused", async () => {
+    const { loop, turnEntered } = runningTurn();
+    await setupHandlers(loop);
+
+    const first = invoke(CHANNELS.chat.send, {
+      input: "first", inputOrigin: "user-keyboard", userActivation: true,
+    }, "main") as Promise<unknown>;
+    await turnEntered.promise;
+
+    // Expired keyboard intent: no userActivation.
+    await expect(invoke(CHANNELS.chat.send, {
+      input: "second", inputOrigin: "user-keyboard", interrupt: true,
+    }, "main")).resolves.toEqual({ ok: false, error: "user-keyboard-required" });
+    expect(loop.abortCurrentTurn).not.toHaveBeenCalled();
+
+    loop.abortCurrentTurn();
+    await first;
   });
 
   it("without the flag a send during a running turn is refused, and nothing is aborted", async () => {

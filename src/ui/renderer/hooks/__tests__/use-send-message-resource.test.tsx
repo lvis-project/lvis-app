@@ -429,6 +429,17 @@ describe("handleAsk — a send while a turn is still running", () => {
     expect(resetStreamAccumulators).not.toHaveBeenCalled();
   });
 
+  it("never interrupts on behalf of a queue drain, even while the renderer still counts the turn as streaming", async () => {
+    const { result, chatSend, markLastAssistantInterrupted } = setup({ streaming: true, attachments: [] });
+
+    await act(async () => {
+      await result.current.handleAsk("queued text", "default", undefined, { injectHint: "queue", inputOrigin: "queue-auto" });
+    });
+
+    expect(markLastAssistantInterrupted).not.toHaveBeenCalled();
+    expect(chatSend.mock.calls[0]?.[5]).toBeUndefined();
+  });
+
   it("starts a fresh turn from empty accumulators and no interrupt flag when nothing is running", async () => {
     const { result, chatSend, resetStreamAccumulators, markLastAssistantInterrupted } = setup({ attachments: [] });
 

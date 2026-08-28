@@ -452,6 +452,44 @@ describe("chat-stream-state", () => {
   });
 });
 
+describe("finalizeStreamingAssistant — the turn that owns the entry", () => {
+  it("keeps an empty interrupted entry whose tool cards belong to it, even after the next question was appended", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "first");
+    entries = upsertStreamingAssistant(entries, "x");
+    entries = [...entries.slice(0, 1), { ...(entries[1] as Extract<ChatEntry, { kind: "assistant" }>), text: "", interrupted: true }];
+    entries = applyToolStart(entries, {
+      groupId: "round-1",
+      toolUseId: "tool-1",
+      name: "web_fetch",
+      displayOrder: 0,
+      input: { url: "https://example.com/a" },
+    });
+    entries = appendUserEntry(entries, "second");
+
+    const closed = finalizeStreamingAssistant(entries, "", { overrideText: "" });
+
+    expect(closed.map((e) => e.kind)).toEqual(["user", "assistant", "tool_group", "user"]);
+    expect(closed[1]).toMatchObject({ kind: "assistant", text: "", streaming: false, interrupted: true });
+  });
+
+  it("drops an empty entry whose only tool cards belong to the next turn", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "first");
+    entries = upsertStreamingAssistant(entries, "x");
+    entries = [...entries.slice(0, 1), { ...(entries[1] as Extract<ChatEntry, { kind: "assistant" }>), text: "" }];
+    entries = appendUserEntry(entries, "second");
+    entries = applyToolStart(entries, {
+      groupId: "round-2",
+      toolUseId: "tool-2",
+      name: "web_fetch",
+      displayOrder: 0,
+      input: { url: "https://example.com/b" },
+    });
+
+    const closed = finalizeStreamingAssistant(entries, "", { overrideText: "" });
+    expect(closed.map((e) => e.kind)).toEqual(["user", "user", "tool_group"]);
+  });
+});
+
 describe("imported_trigger helpers (overlay import marker lifecycle)", () => {
   const trigger = {
     sessionId: "s1",

@@ -76,6 +76,13 @@ export function useChatState(api: LvisApi) {
   const streamRef = useRef("");
   const thoughtRef = useRef("");
   const activeStreamIdRef = useRef<number | null>(null);
+  // The stream an interrupt send marked as cut short. Its closing frame may
+// never come (the turn can reject instead of settling), so the first frame
+// of a newer stream closes it here and takes its place.
+  const supersededStreamIdRef = useRef<number | null>(null);
+  // A superseded stream that was closed here. Its stragglers must not be
+  // adopted as a fresh stream once the newer one has finished.
+  const retiredStreamIdRef = useRef<number | null>(null);
   const streamingRequestRef = useRef(0);
   // Final assistant text is canonical at assistant_round(end_turn). Later
   // deltas in the same stream are protocol tail noise, not a new response.
@@ -177,17 +184,37 @@ export function useChatState(api: LvisApi) {
       }
       if (streamId !== null) {
         if (activeStreamIdRef.current === null) {
+          if (retiredStreamIdRef.current === streamId) return;
           activeStreamIdRef.current = streamId;
           if (debugStreamEnabled) debugLog("stream", "activeStreamId:adopt", { streamId });
         } else if (activeStreamIdRef.current !== streamId) {
-          if (debugStreamEnabled) {
-            debugLog("stream", "ev:rejected-stale-streamId", {
-              evStreamId: streamId,
-              active: activeStreamIdRef.current,
-              evType: ev.type,
-            });
+          if (activeStreamIdRef.current === supersededStreamIdRef.current) {
+            // A newer stream is speaking: the interrupted one is over whether
+            // or not its own closing frame ever arrives.
+            const detected = detectFromStream(streamRef.current);
+            const finalText = visibleAssistantText(detected.cleanedText);
+            setEntries((p) => finalizeStreamingAssistant(
+              finalizeStreamingReasoning(p, thoughtRef.current),
+              finalText,
+              { overrideText: finalText, interrupted: true },
+            ));
+            streamRef.current = "";
+            thoughtRef.current = "";
+            finalAssistantRoundClosedRef.current = false;
+            retiredStreamIdRef.current = activeStreamIdRef.current;
+            supersededStreamIdRef.current = null;
+            activeStreamIdRef.current = streamId;
+            if (debugStreamEnabled) debugLog("stream", "activeStreamId:supersede", { streamId });
+          } else {
+            if (debugStreamEnabled) {
+              debugLog("stream", "ev:rejected-stale-streamId", {
+                evStreamId: streamId,
+                active: activeStreamIdRef.current,
+                evType: ev.type,
+              });
+            }
+            return;
           }
-          return;
         }
       }
       if (ev.type === "user_message") {
@@ -385,6 +412,7 @@ export function useChatState(api: LvisApi) {
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
+        supersededStreamIdRef.current = null;
         finalAssistantRoundClosedRef.current = false;
       } else if (ev.type === "redact_notice") {
         // 발신 turn 콘텐츠(초안 + 텍스트 첨부)의 PII 리댁션을 알리는 시스템 배지.
@@ -532,6 +560,7 @@ export function useChatState(api: LvisApi) {
           }
         }
         activeStreamIdRef.current = null;
+        supersededStreamIdRef.current = null;
         finalAssistantRoundClosedRef.current = false;
       }
     };
@@ -667,10 +696,11 @@ export function useChatState(api: LvisApi) {
    * touches earlier turns.
    */
   const markLastAssistantInterrupted = useCallback(() => {
+    supersededStreamIdRef.current = activeStreamIdRef.current;
     setEntries((prev) => {
       for (let i = prev.length - 1; i >= 0; i--) {
         const entry = prev[i];
-        if (entry.kind !== "assistant") continue;
+        if (entry.kind !== "assistant" || !entry.streaming) continue;
         if (entry.interrupted) return prev;
         const next = [...prev];
         // `streaming` is left to the turn's own closing frame: an interrupt
@@ -698,6 +728,7 @@ export function useChatState(api: LvisApi) {
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
+        supersededStreamIdRef.current = null;
         finalAssistantRoundClosedRef.current = false;
         const res = await api.chatEditResend(histIdx, newText);
         if (!res?.ok) {
@@ -783,6 +814,7 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
+    supersededStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
   }, []);
 

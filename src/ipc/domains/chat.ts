@@ -63,6 +63,7 @@ import {
   prepareParentMailboxTurn,
   acknowledgeParentMailboxAfterTurn,
   resolveChatNewProjectPayload,
+  parseChatSendPayload,
 } from "../handlers/chat.js";
 import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
@@ -933,7 +934,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
     // happens inside this call rather than as a separate round trip the
     // renderer awaits first: that wait outlived the five-second keyboard
     // intent, and the send that followed was refused as not user-initiated.
-    if (isInterruptSend(payload)) await interruptActiveTurn(group);
+    if (isInterruptSend(payload)) {
+      // Only a send the host would accept from the keyboard may stop the
+      // running turn: a refused payload must leave the answer the user was
+      // watching alone.
+      const admitted = parseChatSendPayload(payload);
+      if (admitted.ok && admitted.payload.inputOrigin === "user-keyboard") {
+        await interruptActiveTurn(group);
+      }
+    }
     try {
       return await group.commandPort.execute(DESKTOP_CONVERSATION_ACTOR, {
         kind: "message.send",

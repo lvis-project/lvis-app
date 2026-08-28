@@ -524,11 +524,12 @@ export function upsertStreamingAssistant(
       entry.kind === "assistant" && !!entry.streaming,
   );
 
-  const assistant = { kind: "assistant" as const, text, streaming: true };
   if (assistantIdx >= 0) {
-    next[assistantIdx] = assistant;
+    // Keep what the entry already carries — an interrupted marker set while
+    // the stream was still delivering must survive the next delta.
+    next[assistantIdx] = { ...(next[assistantIdx] as AssistantEntry), text, streaming: true };
   } else {
-    next.push(assistant);
+    next.push({ kind: "assistant" as const, text, streaming: true });
   }
   return next;
 }
@@ -641,9 +642,13 @@ export function finalizeStreamingAssistant(
       // turn's content and the entry must stay so the history timeline is
       // intact.  Only splice when the entry is truly orphaned (no siblings
       // in the current turn).
-      const lastTurnStartIdx = findLastIdx(next, isTurnStartEntry);
+      // The turn that owns this entry starts before it and ends where the
+      // next one starts — a question the user sent while this turn was still
+      // closing is not one of its siblings.
+      const turnStartIdx = findLastIdx(next.slice(0, assistantIdx), isTurnStartEntry);
+      const nextTurnStartIdx = next.findIndex((e, i) => i > assistantIdx && isTurnStartEntry(e));
       const hasTurnSiblings = next
-        .slice(lastTurnStartIdx + 1)
+        .slice(turnStartIdx + 1, nextTurnStartIdx === -1 ? next.length : nextTurnStartIdx)
         .some((e) => e.kind === "tool_group" || e.kind === "checkpoint");
       if (hasTurnSiblings) {
         next[assistantIdx] = {
@@ -747,10 +752,15 @@ export function setAssistantError(
       entry.kind === "assistant" && !!entry.streaming,
   );
 
+  const current = assistantIdx >= 0 ? (next[assistantIdx] as AssistantEntry) : undefined;
+  // A turn the user cut short keeps the answer it had managed to deliver;
+  // the closing error is the abort itself, not something to show in its place.
+  const interrupted = current?.interrupted === true;
   const baseEntry = {
     kind: "assistant" as const,
-    text: message,
+    text: interrupted && current?.text ? current.text : message,
     streaming: false,
+    ...(interrupted ? { interrupted: true } : {}),
     ...(systemNotice !== undefined ? { systemNotice } : {}),
   };
 

@@ -183,7 +183,9 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       // running turn inside the same chatSend call (see the `interrupt`
       // payload flag); awaiting a separate abort here first let the keyboard
       // intent expire, and the send that followed was silently refused.
-      const interrupt = (mode === "default" || mode === "mcp-prompt") && streaming;
+      const interrupt = (mode === "default" || mode === "mcp-prompt")
+        && streaming
+        && opts?.inputOrigin !== "queue-auto";
       if (interrupt) {
         if (debugStreamEnabled) debugLog("handleAsk", "interrupt:send");
         markLastAssistantInterrupted?.();
