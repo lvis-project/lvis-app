@@ -38,8 +38,8 @@ import { createPortal } from "react-dom";
 import { FloatingRightLane } from "./components/FloatingRightLane.js";
 import { useChatGroupHeaderSlot } from "./components/ChatGroupFrame.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
-import { useContainerNarrow } from "./hooks/use-container-narrow.js";
-import { WorkspaceRailDrawer } from "./components/WorkspaceRailDrawer.js";
+import { sidePanelLayout, useContainerNarrow } from "./hooks/use-container-narrow.js";
+import { SIDE_PANEL_MIN_WIDTH } from "../../shared/side-panel.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -245,14 +245,16 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     commitWidth: commitSidePanelWidth,
   } = usePanelWidth(api, SIDE_PANEL_WIDTH_PREF);
   const previewRailVisible = sidePanelOpen;
-  // Narrow-screen fallback: when the ChatView container is too narrow to dock
-  // the rail beside the transcript, render it as a modal drawer instead
-  // (§6.10.8). The observed element is the chat-view-root (the parent of the
-  // docked/drawer branch) so switching branches does not move the signal.
+  // The panel lives INSIDE this tile, always — never a window-level sheet.
+  // With room for both, it is a column that pushes the transcript; without,
+  // it keeps its own floor and floats over the transcript's right edge
+  // (sidePanelLayout). The tile's width sets the range the split bar moves in.
   const chatViewRootRef = useRef<HTMLDivElement | null>(null);
   const dockedPanelMotionRef = useRef<HTMLDivElement | null>(null);
-  const { isNarrow } = useContainerNarrow(chatViewRootRef);
-  const dockedPanelShouldOpen = previewRailVisible && !isNarrow;
+  const { width: containerWidth, isNarrow: containerNarrow } = useContainerNarrow(chatViewRootRef);
+  const panelLayout = sidePanelLayout(containerWidth, containerNarrow);
+  const dockedPanelWidth = Math.min(panelLayout.max, Math.max(panelLayout.min, sidePanelWidth));
+  const dockedPanelShouldOpen = previewRailVisible;
   const [dockedPanelPresent, setDockedPanelPresent] = useState(dockedPanelShouldOpen);
   // Always start collapsed so an initially-open persisted panel never paints
   // expanded before the opening transition lifecycle begins.
@@ -291,7 +293,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
 
     setDockedPanelExpanded(false);
     setSidePanelResizing(false);
-    if (reduceMotion || isNarrow) {
+    if (reduceMotion) {
       setDockedPanelPresent(false);
       return;
     }
@@ -300,7 +302,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
       SIDE_PANEL_LAYOUT_TRANSITION_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [dockedPanelShouldOpen, isNarrow]);
+  }, [dockedPanelShouldOpen]);
 
   const handleSidePanelWidthChange = useCallback(
     (px: number) => {
@@ -313,7 +315,9 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     (px: number) => {
       setSidePanelResizing(false);
       setSidePanelWidth(px);
-      commitSidePanelWidth(px);
+      // The setting is the panel's docked width everywhere; a floating panel
+      // in a tile narrower than the floor may not write a sub-floor value.
+      commitSidePanelWidth(Math.max(SIDE_PANEL_MIN_WIDTH, px));
     },
     [commitSidePanelWidth, setSidePanelWidth],
   );
@@ -885,11 +889,18 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           ref={dockedPanelMotionRef}
           id="chat-side-panel"
           data-testid="chat-side-panel-motion"
+          data-panel-mode={panelLayout.mode}
           aria-hidden={!dockedPanelExpanded}
           inert={!dockedPanelExpanded}
-          style={{ width: dockedPanelExpanded ? `${sidePanelWidth}px` : "0px" }}
+          style={{ width: dockedPanelExpanded ? `${dockedPanelWidth}px` : "0px" }}
           className={[
-            "relative z-40 flex min-w-0 max-w-[calc(100vw-12rem)] shrink-0 origin-right justify-end self-stretch will-change-[width,opacity,transform]",
+            "z-40 flex min-w-0 shrink-0 origin-right justify-end will-change-[width,opacity,transform]",
+            // Floating: the same card-in-a-band placement as the floating
+            // sidebar (inset from the tile's edges, the card carries its own
+            // elevation), so the two overlays read as one kind of surface.
+            panelLayout.mode === "overlay"
+              ? "absolute top-2 right-2 bottom-3"
+              : "relative self-stretch",
             sidePanelResizing
               ? "transition-none"
               : "transition-[width,opacity,transform] duration-[var(--motion-layout)] ease-[var(--motion-ease-out)] motion-reduce:transition-none",
@@ -919,43 +930,19 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
             onSelect={setSelectedPreviewId}
             workspaceTabs={workspaceTabs}
             subAgentSpawns={subAgentSpawns}
-            width={sidePanelWidth}
+            width={dockedPanelWidth}
+            minWidth={panelLayout.min}
+            maxWidth={panelLayout.max}
+            floating={panelLayout.mode === "overlay"}
             onWidthChange={handleSidePanelWidthChange}
             onWidthCommit={handleSidePanelWidthCommit}
             resizeElementRef={dockedPanelMotionRef}
             onClose={() => {
               onSidePanelOpenChange?.(false);
             }}
-            className="relative flex max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
+            className="relative flex shrink-0 self-stretch"
           />
         </div>
-      ) : null}
-      {isNarrow ? (
-        <WorkspaceRailDrawer
-          open={previewRailVisible}
-          onOpenChange={(open) => {
-            if (!open) onSidePanelOpenChange?.(false);
-          }}
-        >
-          <ChatSidePanel
-            api={api}
-            sessionId={currentSessionId}
-            targets={previewModel.targets}
-            files={previewModel.files}
-            selectedId={selectedPreviewId}
-            onSelect={setSelectedPreviewId}
-            workspaceTabs={workspaceTabs}
-            subAgentSpawns={subAgentSpawns}
-            width={sidePanelWidth}
-            onWidthChange={setSidePanelWidth}
-            onWidthCommit={commitSidePanelWidth}
-            resizable={false}
-            onClose={() => {
-              onSidePanelOpenChange?.(false);
-            }}
-            className="flex h-full min-h-0 w-full min-w-0"
-          />
-        </WorkspaceRailDrawer>
       ) : null}
     </div>
   );

@@ -217,7 +217,10 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
             setErrorWithThought(t("app.sessionNotFound", { requested }));
             return;
           }
-          await sessionLoad(match.id, false, applyLoadedSession);
+          if (!(await sessionLoad(match.id, false, applyLoadedSession))) {
+            setErrorWithThought(t("app.sessionLoadFailed", { requested }));
+            return;
+          }
           await refreshSessionId();
           await refreshSessions();
           if (debugStreamEnabled) debugLog("handleAsk", "load-session:handled", { sessionId: match.id });

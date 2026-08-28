@@ -612,6 +612,9 @@ export interface ChatSidePanelProps {
   width: number;
   /** Drag-live width update — state only, no persist. */
   onWidthChange: (px: number) => void;
+  /** The range the split bar may move in — set by the tile the panel is a column of. */
+  minWidth?: number;
+  maxWidth?: number;
   /** Persist width (drag-end / keyboard step). */
   onWidthCommit: (px: number) => void;
   /**
@@ -621,11 +624,13 @@ export interface ChatSidePanelProps {
    */
   resizeElementRef?: { current: HTMLElement | null };
   /**
-   * Docked variant applies the persisted width + drag handle. The narrow-screen
-   * drawer variant sets this false: the sheet controls width (w-full), so the
-   * inline width and left splitter are dropped.
+   * A tile too narrow for two columns floats the panel over its transcript.
+   * Floating, the panel is self-contained: its tabs and close control stay
+   * inside it, and it reports no column width to the group header band —
+   * there is no column for the band to line up with, and a band sized to a
+   * floating panel would push the header's own controls off the tile.
    */
-  resizable?: boolean;
+  floating?: boolean;
   className?: string;
 }
 
@@ -640,21 +645,24 @@ export function ChatSidePanel({
   workspaceTabs,
   subAgentSpawns,
   width,
+  minWidth = SIDE_PANEL_MIN_WIDTH,
+  maxWidth = Number.POSITIVE_INFINITY,
   onWidthChange,
   onWidthCommit,
   resizeElementRef,
-  resizable = true,
+  floating = false,
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
-  // The group frame owns the header band; the panel reports its column width
-  // so the band's divider lands on that column's own edge.
-  const panelBand = useChatGroupPanelBand();
+  // The group frame owns the header band; a docked panel reports its column
+  // width so the band's divider lands on that column's own edge.
+  const groupBand = useChatGroupPanelBand();
+  const panelBand = floating ? null : groupBand;
   useEffect(() => {
-    if (!resizable) return;
-    panelBand?.setWidth(width);
-    return () => panelBand?.setWidth(null);
-  }, [panelBand, resizable, width]);
+    if (!panelBand) return;
+    panelBand.setWidth(width);
+    return () => panelBand.setWidth(null);
+  }, [panelBand, width]);
 
   // ─── Tab-bar horizontal scroll / drag-pan (diagnosis ②) ──────────────────
   const tabScrollElRef = useRef<HTMLDivElement | null>(null);
@@ -721,13 +729,6 @@ export function ChatSidePanel({
     }
   };
 
-  // Dynamic max width — 12rem viewport margin == the max-w-[calc(100vw-12rem)]
-  // safety cap. Evaluated live (not memoized) so a window resize mid-drag is
-  // picked up by the next drag/keyboard interaction.
-  const resolveSidePanelMaxWidth = useCallback(
-    () => Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192),
-    [],
-  );
   const {
     tabs,
     activeTabId,
@@ -806,9 +807,9 @@ export function ChatSidePanel({
     else if (r.right > c.right) el.scrollLeft += (r.right - c.right) + 8;
   }, [activeTab, tabs.length]);
 
-  // The panel's tabs ARE its header. When the group frame offers its band,
-  // they render there so the header line runs unbroken across both columns;
-  // the narrow-screen drawer has no such band, so they render in place.
+  // The panel's tabs ARE its header. Docked, they render in the group frame's
+  // band so the header line runs unbroken across both columns; a floating
+  // panel has no band of its own, so they render in place.
   const tabStripContent = (
     <div
       className={panelBand?.slot
@@ -893,7 +894,7 @@ export function ChatSidePanel({
           <div className="flex shrink-0 items-center gap-1 border-l pl-2" data-testid="chat-side-panel-tab-actions">
             <WorkspaceLauncherMenu onOpen={addTab} />
             {/* Docked, the group header band already carries the control that
-                closes this column. The drawer has no such band, so it keeps
+                closes this column. A floating panel has no band, so it keeps
                 its own. */}
             {panelBand?.slot ? null : (
               <Button
@@ -919,37 +920,37 @@ export function ChatSidePanel({
       data-testid="chat-side-panel"
       // `width` is the complete docked flex reservation. The floating card's
       // `mr-2` consumes 0.5rem of that reservation instead of overflowing it.
-      style={resizable ? { width: `${width}px` } : undefined}
+      style={{ width: `${width}px` }}
       className={[
-        "min-h-0 min-w-0 backdrop-blur",
-        resizable
-          ? // Docked variant — a COLUMN of the chat group, not a card floating
-            // inside it. Its header segment lives in the group's header band,
-            // so the seam between the two columns has to be one unbroken line
-            // from that band to the bottom of the group; a floating card with
-            // its own margins and rounding would break the line and start the
-            // panel BELOW the header instead of level with it.
-            "border-l border-border/(--opacity-half) bg-card"
-          : // Narrow-screen drawer variant fills its WorkspaceRailDrawer sheet —
-            // no floating chrome (the sheet itself is already the surface).
-            "bg-background/(--opacity-solid)",
+        "min-h-0 min-w-0 bg-card backdrop-blur",
+        floating
+          // Floating: a raised card, the floating sidebar's own recipe, so the
+          // two overlays a window can show read as one kind of surface.
+          ? "lvis-surface-raised overflow-hidden rounded-2xl"
+          // Docked: a COLUMN of the chat group, not a card inside it. Its
+          // header segment lives in the group's header band, so the seam
+          // between the two columns has to be one unbroken line from that band
+          // to the bottom of the group; a card with its own margins and
+          // rounding would break the line and start the panel BELOW the
+          // header instead of level with it.
+          : "border-l border-border/(--opacity-half)",
         className,
       ].join(" ")}
     >
-      {resizable ? (
-        <EdgeResizeBar
-          width={width}
-          edge="start"
-          onWidthChange={onWidthChange}
-          onWidthCommit={onWidthCommit}
-          min={SIDE_PANEL_MIN_WIDTH}
-          max={resolveSidePanelMaxWidth}
-          resetWidth={SIDE_PANEL_DEFAULT_WIDTH}
-          applyElementRef={resizeElementRef}
-          ariaLabel={t("chatPreviewRail.resizePanel")}
-          data-testid="chat-side-panel-width-splitter"
-        />
-      ) : null}
+      <EdgeResizeBar
+        width={width}
+        edge="start"
+        // The card clips its overflow, so its handle sits inside the edge.
+        variant={floating ? "inset" : "straddle"}
+        onWidthChange={onWidthChange}
+        onWidthCommit={onWidthCommit}
+        min={minWidth}
+        max={Math.max(minWidth, maxWidth)}
+        resetWidth={SIDE_PANEL_DEFAULT_WIDTH}
+        applyElementRef={resizeElementRef}
+        ariaLabel={t("chatPreviewRail.resizePanel")}
+        data-testid="chat-side-panel-width-splitter"
+      />
       <div
         data-testid="chat-preview-rail"
         className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden"

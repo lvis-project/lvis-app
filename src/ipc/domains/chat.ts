@@ -73,6 +73,9 @@ import type { ConversationSurfaceRuntime } from "../../engine/conversation-surfa
 import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
+
+/** Refusal: the session named is already open in another tile of this window. */
+const SESSION_OPEN_IN_OTHER_GROUP = "session-open-in-other-group";
 const log = createLogger("chat");
 const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
 const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
@@ -683,6 +686,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
     unsubscribeStream: () => void;
   }
   const groupContexts = new Map<string, ChatGroupContext>();
+  /** Window-scoped "main active" state is the primary tile's to write. */
+  const isPrimaryGroup = (group: ChatGroupContext): boolean =>
+    group.deps.chatGroupId === undefined || group.deps.chatGroupId === MAIN_CHAT_GROUP_ID;
+  const chatGroupIdOf = (group: ChatGroupContext): string => group.deps.chatGroupId ?? MAIN_CHAT_GROUP_ID;
+  /** The group whose loop holds `sessionId` right now, the primary included. */
+  const groupHolding = (sessionId: string): ChatGroupContext | undefined =>
+    [...groupContexts.values()].find((group) => group.loop.getSessionId() === sessionId);
   const chatGroupContext = (chatGroupId: string): ChatGroupContext => {
     const cached = groupContexts.get(chatGroupId);
     if (cached) return cached;
@@ -1052,7 +1062,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
           ...(project.projectName ? { projectName: project.projectName } : {}),
         });
       }
-      await memoryManager.markMainActiveFresh();
+      if (isPrimaryGroup(group)) await memoryManager.markMainActiveFresh();
       return { ok: true as const };
     });
     return mutation ?? { ok: false as const, error: STREAMING_ACTIVE };
@@ -1110,9 +1120,21 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     const group = groupOf(chatGroupId);
     const conversationLoop = group.loop;
+    // The loop refuses this on its own (ConversationLoopDeps.sessionHeldElsewhere);
+    // naming the holder is what lets the renderer bring that tile forward —
+    // it may be folded away by chat mode and unknown to the renderer's tiles.
+    // Answered before this group's lease: bringing another tile forward
+    // touches nothing here, so this group's own turn must not hide the holder.
+    const holder = groupHolding(sessionId);
+    if (holder && holder !== group) {
+      return {
+        ok: false, compacted: false, compactedAt: null, removedMessageCount: 0,
+        error: SESSION_OPEN_IN_OTHER_GROUP, holderChatGroupId: chatGroupIdOf(holder),
+      };
+    }
     const mutation = group.turns.trackSessionMutation(async () => {
       const result = conversationLoop.resetAndResume(sessionId);
-      if (result.ok && conversationLoop.getSessionKind() === "main") {
+      if (result.ok && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
           log.warn("session-resume markMainActiveResume failed: %s", (err as Error).message);
         });
@@ -1229,7 +1251,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
       });
       const loaded = conversationLoop.loadSession(newId);
-      if (loaded && conversationLoop.getSessionKind() === "main") {
+      if (loaded && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(newId).catch((err: unknown) => {
           log.warn("chat:fork markMainActiveResume failed: %s", (err as Error).message);
         });
@@ -1437,7 +1459,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     // mutation guard — and any tile may be the one holding it. Holding a
     // delete of some other conversation behind a loop would refuse a safe
     // action for a reason that does not apply to it.
-    const holder = [...groupContexts.values()].find((group) => group.loop.getSessionId() === sessionId);
+    const holder = groupHolding(sessionId);
     if (!holder) {
       await memoryManager.deleteSession(sessionId);
       return { ok: true, wasLoaded: false };

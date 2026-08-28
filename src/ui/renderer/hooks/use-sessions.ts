@@ -4,6 +4,7 @@ import type { TileSession } from "../components/chat-group-session-registry.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 import { historyToEntries } from "../utils/history.js";
+import { projectRootEquals } from "../../../shared/project-identity.js";
 
 export interface SessionSummary {
   id: string;
@@ -82,6 +83,27 @@ export interface CurrentSessionDeps {
    * sidebar has to learn about it — but the LIST is not this hook's to hold.
    */
   onSessionsChanged?: () => void | Promise<void>;
+  /**
+   * Whether this tile is the one the window's "main active" state addresses.
+   * Only the primary tile resumes that conversation on mount; any other tile
+   * starts on its own loop's fresh session. The state is window-scoped, so a
+   * second tile resuming it would hold the SAME session id as the primary —
+   * two loops flushing their own history to one file, last turn wins.
+   */
+  resumeWindowActiveSession?: boolean;
+  /**
+   * The project a non-primary tile's fresh conversation is created under —
+   * the window's active one. The sidebar files a conversation by its
+   * project, so a tile that started unscoped would show up in the plain
+   * "chats" tab while the user is looking at the project's group.
+   */
+  freshProject?: { projectRoot?: string; projectName?: string };
+  /**
+   * A session this tile asked for is held by another chat group — one that
+   * may be folded away by chat mode, so the renderer's mounted tiles cannot
+   * find it. Returns whether that group was brought forward.
+   */
+  focusSessionHolder?: (chatGroupId: string) => boolean;
 }
 
 /**
@@ -99,7 +121,12 @@ export interface CurrentSessionDeps {
  * history index and a `setEntries` truncator.
  */
 export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
-  const { applyInitialSession, onLoadedSession, restoreSubAgents, onSessionsChanged } = deps;
+  const { applyInitialSession, onLoadedSession, restoreSubAgents, onSessionsChanged, focusSessionHolder } = deps;
+  const resumeWindowActiveSession = deps.resumeWindowActiveSession ?? true;
+  // Read at hydration time, not a dependency of it: the window's active
+  // project changing must not re-hydrate a tile that is holding a conversation.
+  const freshProjectRef = useRef(deps.freshProject);
+  freshProjectRef.current = deps.freshProject;
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [currentSessionKind, setCurrentSessionKind] = useState<"main" | "routine">("main");
   const [currentSessionTitle, setCurrentSessionTitle] = useState<string | undefined>(undefined);
@@ -120,23 +147,37 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
 
   const hydrateInitialSession = useCallback(async () => {
     const token = ++sessionReadTokenRef.current;
-    const applyFreshMain = async (current: Awaited<ReturnType<LvisApi["chatGetHistory"]>>) => {
-      if ((current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
+    const applyFreshMain = async (
+      current: Awaited<ReturnType<LvisApi["chatGetHistory"]>>,
+      project?: { projectRoot?: string; projectName?: string },
+    ) => {
+      // A loop already on an empty main session is the fresh state — unless
+      // the conversation has to be created under a project, which only
+      // chatNew records.
+      const alreadyUnderProject = !project
+        || projectRootEquals(sessionProjectFromHistory(current).projectRoot, project.projectRoot);
+      // Only an empty loop reaches here: a held conversation was adopted above.
+      if (alreadyUnderProject && (current.sessionKind ?? "main") === "main") {
         setCurrentSessionId(current.sessionId);
         setCurrentSessionKind("main");
         setCurrentSessionTitle(undefined);
         setCurrentSessionProject(sessionProjectFromHistory(current));
+        restoreSubAgents?.([]);
         applyInitialSession?.([]);
         return;
       }
-      await api.chatNew();
+      const created = await api.chatNew(project);
       if (token !== sessionReadTokenRef.current) return;
+      // A refused chatNew left the loop on its old session; emptying the
+      // transcript here would show a conversation the loop does not hold.
+      if (!created.ok) return;
       const fresh = await api.chatGetHistory();
       if (token !== sessionReadTokenRef.current) return;
       setCurrentSessionId(fresh.sessionId);
       setCurrentSessionKind("main");
       setCurrentSessionTitle(undefined);
       setCurrentSessionProject(sessionProjectFromHistory(fresh));
+      restoreSubAgents?.([]);
       applyInitialSession?.([]);
     };
 
@@ -146,24 +187,29 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       // Hydration is also the window's first chance to fill its list.
       await onSessionsChanged?.();
       if (token !== sessionReadTokenRef.current) return;
+      // A loop that already holds a conversation is the authority for what its
+      // tile shows. This is a mount, not a reset: a tile folded away by chat
+      // mode and brought back, or a holder brought forward for the conversation
+      // it holds, must show that conversation — the window's main-active
+      // pointer may name another one (it never names a routine session).
+      // Nothing here touches the persisted main-active state.
+      if (h.messages.length > 0) {
+        setCurrentSessionId(h.sessionId);
+        setCurrentSessionKind(h.sessionKind ?? "main");
+        setCurrentSessionTitle(h.sessionTitle);
+        setCurrentSessionProject(sessionProjectFromHistory(h));
+        restoreSubAgents?.(h.restoredSubAgents ?? []);
+        applyInitialSession?.(historyToEntries(h.messages));
+        return;
+      }
+      if (!resumeWindowActiveSession) {
+        await applyFreshMain(h, freshProjectRef.current);
+        return;
+      }
       const activeState = await api.chatMainActiveState();
       if (token !== sessionReadTokenRef.current) return;
       if (!activeState || activeState.mainActiveMode === "fresh" || !activeState.mainActiveSessionId) {
         await applyFreshMain(h);
-        return;
-      }
-
-      if ((h.sessionKind ?? "main") === "main" && h.sessionId === activeState.mainActiveSessionId && h.messages.length > 0) {
-        setCurrentSessionId(h.sessionId);
-        setCurrentSessionKind("main");
-        setCurrentSessionTitle(h.sessionTitle);
-        setCurrentSessionProject(sessionProjectFromHistory(h));
-        // The renderer state contract is: active in-memory stream entries and
-        // persisted session replay both enter ChatView as ChatEntry[]. Hydrate
-        // only the exact active main session so routine re-entry never replaces
-        // the persisted main active state.
-        restoreSubAgents?.(h.restoredSubAgents ?? []);
-        applyInitialSession?.(historyToEntries(h.messages));
         return;
       }
       const resumed = await api.chatSessionResume(activeState.mainActiveSessionId);
@@ -185,7 +231,7 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       restoreSubAgents?.(persisted.restoredSubAgents ?? []);
       applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
-  }, [api, applyInitialSession, restoreSubAgents, onSessionsChanged]);
+  }, [api, applyInitialSession, restoreSubAgents, onSessionsChanged, resumeWindowActiveSession]);
 
   useEffect(() => { void hydrateInitialSession(); }, [hydrateInitialSession]);
 
@@ -204,13 +250,18 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       try {
         const res = await api.chatSessionResume(sessionId);
         if (token !== sessionReadTokenRef.current) return false;
-        if (!res?.ok) return false;
+        if (!res?.ok) {
+          // Held by another group: showing that group IS showing the session.
+          return res?.holderChatGroupId !== undefined && (focusSessionHolder?.(res.holderChatGroupId) ?? false);
+        }
         const h = await api.chatSessionHistory(sessionId);
         if (token !== sessionReadTokenRef.current) return false;
         if (!h.ok) return false;
+        // Reset first: the reset clears the sub-agent rows, so restoring
+        // before it would hand the incoming conversation an empty panel.
+        onLoadedSession?.();
         restoreSubAgents?.(h.restoredSubAgents ?? []);
         applyLoadedSession(sessionHistoryToEntries(h));
-        onLoadedSession?.();
         setCurrentSessionId(sessionId);
         setCurrentSessionKind(h.sessionKind ?? "main");
         setCurrentSessionTitle(h.sessionTitle);
@@ -220,7 +271,7 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
         return false;
       }
     },
-    [api, onLoadedSession],
+    [api, onLoadedSession, focusSessionHolder],
   );
 
   const handleFork = useCallback(
@@ -294,24 +345,33 @@ export function turnsEndedUnseen(
   current: readonly TileSession[],
   attention: Attention,
 ): string[] {
-  const before = new Map(previous.map((tile) => [tile.chatGroupId, tile]));
-  const now = new Map(current.map((tile) => [tile.chatGroupId, tile]));
-  // "Looking" is a property of the conversation, not the tile: the same session
-  // can sit in two tiles at once (split clones the focused one), and the user
-  // sees its turn end through whichever tile is focused.
+  // "Looking" is a property of the conversation, not the tile, and the user
+  // sees its turn end through the focused tile.
   const watched = attention.conversationVisible
-    ? now.get(attention.focusedChatGroupId)?.sessionId
+    ? current.find((tile) => tile.chatGroupId === attention.focusedChatGroupId)?.sessionId
     : undefined;
-  const unseen: string[] = [];
-  for (const [chatGroupId, was] of before) {
+  return turnsEnded(previous, current).filter((sessionId) => sessionId !== watched);
+}
+
+/**
+ * The conversations whose turn ended between two readings of the tiles,
+ * whether or not anyone was looking. A tile that left the canvas mid-turn
+ * (closed, or collapsed by chat mode) took the turn with it, and one that
+ * moved to another conversation no longer speaks for the turn that ended.
+ */
+export function turnsEnded(
+  previous: readonly TileSession[],
+  current: readonly TileSession[],
+): string[] {
+  const now = new Map(current.map((tile) => [tile.chatGroupId, tile]));
+  const ended: string[] = [];
+  for (const was of previous) {
     if (!was.streaming || !was.sessionId) continue;
-    const tile = now.get(chatGroupId);
-    // A tile that left the canvas mid-turn (closed, or collapsed by chat mode)
-    // took the user's view of that turn with it; nothing will report its end.
+    const tile = now.get(was.chatGroupId);
     if (tile && (tile.streaming || tile.sessionId !== was.sessionId)) continue;
-    if (was.sessionId !== watched && !unseen.includes(was.sessionId)) unseen.push(was.sessionId);
+    if (!ended.includes(was.sessionId)) ended.push(was.sessionId);
   }
-  return unseen;
+  return ended;
 }
 
 /**
@@ -329,6 +389,12 @@ export function useTurnAttention(input: {
   attention: Attention;
   isUnread: (sessionId: string) => boolean;
   setUnread: (sessionId: string, unread: boolean) => void | Promise<void>;
+  /**
+   * Every turn end, seen or not. The window's conversation list is read, not
+   * pushed, and a turn is what gives a fresh tile's session a file and a
+   * title — without this the list learns about it only by chance.
+   */
+  onTurnsEnded?: (sessionIds: readonly string[]) => void | Promise<void>;
 }): void {
   const { tiles, attention } = input;
   const { focusedChatGroupId, conversationVisible } = attention;
@@ -339,6 +405,8 @@ export function useTurnAttention(input: {
   useEffect(() => {
     const previous = previousTiles.current;
     previousTiles.current = tiles;
+    const ended = turnsEnded(previous, tiles);
+    if (ended.length > 0) void latest.current.onTurnsEnded?.(ended);
     for (const sessionId of turnsEndedUnseen(previous, tiles, latest.current.attention)) {
       if (!latest.current.isUnread(sessionId)) void latest.current.setUnread(sessionId, true);
     }

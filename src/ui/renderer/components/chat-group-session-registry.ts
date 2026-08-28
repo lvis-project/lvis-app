@@ -118,6 +118,18 @@ export interface TileSession {
 }
 
 /**
+ * The tile already holding `sessionId`, if any. A conversation is opened in
+ * one tile at a time: two loops on one session would each flush their own
+ * history to the same file. Callers focus the holder instead of loading again.
+ */
+export function tileHoldingSession(
+  tiles: readonly TileSession[],
+  sessionId: string,
+): TileSession | undefined {
+  return tiles.find((tile) => tile.sessionId === sessionId);
+}
+
+/**
  * The live handles, one per mounted tile.
  *
  * A store rather than React state because the writers are the CHILDREN: a tile

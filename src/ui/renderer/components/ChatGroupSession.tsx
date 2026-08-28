@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { ChatContextProvider, type ChatContextValue } from "../context/ChatContext.js";
 import { ChatView } from "../ChatView.js";
@@ -12,6 +12,7 @@ import { useChatStatusIndicators } from "../hooks/use-chat-status-indicators.js"
 import { useContextBudget } from "../hooks/use-context-budget.js";
 import { useCostEstimate } from "../hooks/use-cost-estimate.js";
 import { useCurrentSession } from "../hooks/use-sessions.js";
+import { MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 import { useSendMessage } from "../hooks/use-send-message.js";
 import type { useStatusBar } from "../hooks/use-status-bar.js";
 import { useWorkflowTools } from "../hooks/use-workflow-tools.js";
@@ -67,6 +68,8 @@ export interface ChatGroupEnvironment {
 
   // the window's conversation list and stars
   refreshSessions: () => void | Promise<void>;
+  /** Bring a chat group forward, including one chat mode has folded away. Returns whether focus moved. */
+  focusChatGroup: (chatGroupId: string) => boolean;
   sessions: readonly { id: string; title: string }[];
   isSessionStarred: (sessionId: string) => boolean;
   handleToggleSessionStar: (sessionId: string, title?: string) => Promise<void>;
@@ -154,11 +157,23 @@ export function ChatGroupSession({
   const { t } = useTranslation();
 
   const api = useMemo(() => chatGroupApi(windowApi, chatGroupId), [windowApi, chatGroupId]);
+  // Stable identity: the hook re-hydrates when this changes, and the default
+  // (unscoped) project is no project at all.
+  const freshTileProject = useMemo(
+    () => (env.activeProject && !env.activeProject.isDefault
+      ? { projectRoot: env.activeProject.projectRoot, projectName: env.activeProject.projectName }
+      : undefined),
+    [env.activeProject],
+  );
 
+  // The tile's conversation, readable by the sub-agent frame filter before
+  // useCurrentSession (below) has run this render.
+  const currentSessionIdRef = useRef("");
+  const ownsSession = useCallback((sessionId: string) => sessionId === currentSessionIdRef.current, []);
   const {
     askQuestions, subAgentSpawns, loadedSkills,
     dismissAskQuestion, resetForNewSession, restoreSubAgentSpawns,
-  } = useWorkflowTools(api);
+  } = useWorkflowTools(api, { ownsSession });
 
   const {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted,
@@ -197,7 +212,16 @@ export function ChatGroupSession({
     onLoadedSession: resetForNewSession,
     restoreSubAgents: restoreSubAgentSpawns,
     onSessionsChanged: env.refreshSessions,
+    resumeWindowActiveSession: chatGroupId === MAIN_CHAT_GROUP_ID,
+    freshProject: freshTileProject,
+    focusSessionHolder: env.focusChatGroup,
   });
+  // Written at commit, not in render: a render may be thrown away, and the
+  // frame listener (subscribed in an effect) must not read a session this
+  // tile never showed. Layout timing keeps it ahead of any IPC callback.
+  useLayoutEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
 
   // A composer draft belongs to the conversation it was typed into. Switching
   // this tile to another session has to drop it, or the next session opens

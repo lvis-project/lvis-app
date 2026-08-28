@@ -223,6 +223,10 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
       log.warn({ sessionId }, "loadSession rejected unsafe sessionId");
       return false;
     }
+    if (self.deps.sessionHeldElsewhere?.(sessionId)) {
+      log.warn({ sessionId }, "loadSession refused: session open in another conversation loop");
+      return false;
+    }
     const messages = self.deps.memoryManager.loadSession(sessionId);
     if (!messages) return false;
 

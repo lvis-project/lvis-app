@@ -90,6 +90,7 @@ export const deMessages: Record<string, string> = {
   "app.mcpPromptClipped": "Der MCP-Prompt \"{name}\" wurde vom Host gekürzt — ein Teil der Serverantwort ist nicht enthalten.",
   "app.mcpPromptFailed": "MCP-Prompt \"{name}\" konnte nicht ausgeführt werden.",
   "app.sessionNotFound": "Sitzung nicht gefunden: {requested}",
+  "app.sessionLoadFailed": "Sitzung konnte nicht geöffnet werden: {requested}",
   "app.thinkingStatus": "Denken...",
   "app.subscriptionAttachmentUnsupported": "Die {provider}-Abonnement-Laufzeit kann diesen Anhangstyp noch nicht senden. Ihr Entwurf und Ihre Anhänge bleiben erhalten.",
   "app.visionNotSupportedConfirm": "Das aktuelle Modell ({llmModel}) unterstützt keine Bilder.\nEs werden keine Bilder versendet, sondern nur Dateipfade/Texte.\n\nTrotzdem senden? Abbrechen, um das Modell zu wechseln, und es erneut versuchen.",

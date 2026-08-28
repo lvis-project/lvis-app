@@ -90,6 +90,7 @@ export const frMessages: Record<string, string> = {
   "app.mcpPromptClipped": "L'hôte a tronqué le prompt MCP \"{name}\" : une partie de la réponse du serveur n'est pas incluse.",
   "app.mcpPromptFailed": "Impossible d'exécuter le prompt MCP \"{name}\".",
   "app.sessionNotFound": "Session introuvable: {requested}",
+  "app.sessionLoadFailed": "Impossible d'ouvrir la session: {requested}",
   "app.thinkingStatus": "Pensée...",
   "app.subscriptionAttachmentUnsupported": "L'environnement d'exécution d'abonnement {provider} ne peut pas encore envoyer ce type de pièce jointe. Votre brouillon et vos pièces jointes sont conservés.",
   "app.visionNotSupportedConfirm": "Le modèle actuel ({llmModel}) ne prend pas en charge les images.\nLes images ne seront pas envoyées — seuls les chemins de fichiers/textes seront transmis.\n\nEnvoyer quand même? Annulez pour changer de modèle et réessayez.",

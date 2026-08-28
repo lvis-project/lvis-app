@@ -94,22 +94,32 @@ test.describe("workspace rail redesign", () => {
     await expect(page.getByTestId("chat-side-panel-width-splitter")).toBeVisible();
   });
 
-  test("narrow viewport falls back to the modal drawer", async () => {
+  test("a narrow tile floats the panel over its transcript instead of crushing it", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
     await page.getByTestId("chat-group-panel-toggle").click();
-    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
+    const motion = page.getByTestId("chat-side-panel-motion");
+    await expect(motion).toHaveAttribute("data-panel-mode", "docked");
 
-    // Shrink below the docked threshold → the rail moves into the drawer sheet.
+    // Shrink below the docking threshold → the panel keeps its floor and
+    // floats over the transcript's right edge, inside the tile. Nothing
+    // window-level, nothing dimmed, the transcript laid out underneath.
     await page.setViewportSize({ width: 460, height: 840 });
-    const drawer = page.getByTestId("workspace-rail-drawer");
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByTestId("chat-side-panel")).toBeVisible();
-    // The drawer variant drops the drag handle (the sheet owns width).
-    await expect(page.getByTestId("chat-side-panel-width-splitter")).toHaveCount(0);
-
-    // Widen again → back to docked.
-    await page.setViewportSize({ width: 1400, height: 840 });
+    await expect(motion).toHaveAttribute("data-panel-mode", "overlay");
+    await expect(page.getByTestId("chat-view-root").getByTestId("chat-side-panel")).toBeVisible();
     await expect(page.getByTestId("workspace-rail-drawer")).toHaveCount(0);
+    await expect(page.getByTestId("workspace-rail-drawer-backdrop")).toHaveCount(0);
+    // Floating means the transcript column is NOT narrowed by the panel: the
+    // composer keeps more than (root − panel), which a docked column cannot.
+    const composer = await page.getByTestId("composer-textarea").boundingBox();
+    const root = await page.getByTestId("chat-view-root").boundingBox();
+    const panel = await page.getByTestId("chat-side-panel").boundingBox();
+    expect(panel?.width ?? 0).toBeGreaterThanOrEqual(Math.min(448, root?.width ?? 0));
+    expect(panel?.width ?? 0).toBeLessThanOrEqual(root?.width ?? 0);
+    expect(composer?.width ?? 0).toBeGreaterThan((root?.width ?? 0) - (panel?.width ?? 0));
+
+    // Widen again → back to a docked column.
+    await page.setViewportSize({ width: 1400, height: 840 });
+    await expect(motion).toHaveAttribute("data-panel-mode", "docked");
     await expect(page.getByTestId("chat-side-panel-width-splitter")).toBeVisible();
   });
 });

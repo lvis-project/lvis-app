@@ -965,7 +965,12 @@ export type LvisApi = {
     { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }
   >;
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
-  chatSessionResume: (sessionId: string) => Promise<{ ok: boolean; compacted: boolean; compactedAt: string | null; removedMessageCount: number }>;
+  chatSessionResume: (sessionId: string) => Promise<{
+    ok: boolean; compacted: boolean; compactedAt: string | null; removedMessageCount: number;
+    error?: string;
+    /** On `session-open-in-other-group`: the chat group whose loop holds the session. */
+    holderChatGroupId?: string;
+  }>;
   // Checkpoint view and explicit branch actions.
   // Note: enter/branch return discriminated unions without `ok`; exit follows the
   // standard { ok: boolean } pattern. Callers guard with `"error" in result`.

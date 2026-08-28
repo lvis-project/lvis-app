@@ -77,6 +77,7 @@ export const zhMessages: Record<string, string> = {
   "app.mcpPromptClipped": "MCP 提示词 \"{name}\" 已被宿主截断——服务器返回的部分内容未包含在内。",
   "app.mcpPromptFailed": "无法运行 MCP 提示词 \"{name}\"。",
   "app.sessionNotFound": "未找到会话：{requested}",
+  "app.sessionLoadFailed": "无法打开会话：{requested}",
   "app.thinkingStatus": "思维...",
   "app.subscriptionAttachmentUnsupported": "{provider} 订阅运行时暂时无法发送此类附件。你的草稿和附件会被保留。",
   "app.visionNotSupportedConfirm": "当前型号（{llmModel}）不支持图像。\n不会发送图像 - 只会传输文件路径/文本。\n\n还是发送？取消切换型号并重试。",

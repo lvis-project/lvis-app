@@ -14,7 +14,8 @@ import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
-import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions } from "./components/chat-group-session-registry.js";
+import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession } from "./components/chat-group-session-registry.js";
+import { leafIds } from "./components/chat-group-tree.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
 // each (each renders nothing while no card occupies its slot).
@@ -274,9 +275,31 @@ export function App() {
     }
   }, [api]);
 
+  // A conversation open in another tile is brought forward, not loaded a
+  // second time — see `tileHoldingSession`.
+  // Read through refs so the callback is stable: it sits in the environment
+  // every tile receives, and a fresh identity per render would re-render every
+  // tile on every stream delta.
+  const chatGroupsRef = useRef(chatGroups);
+  chatGroupsRef.current = chatGroups;
+  const { focus: focusGroup } = chatGroups;
+  const focusChatGroup = useCallback((chatGroupId: string): boolean => {
+    const { tree, focusedId } = chatGroupsRef.current;
+    // The host can name a tile that is already closed (its release is still
+    // in flight); focusing an id the tree does not hold would put the window
+    // on a tile that exists nowhere.
+    if (chatGroupId === focusedId || !leafIds(tree).includes(chatGroupId)) return false;
+    focusGroup(chatGroupId);
+    return true;
+  }, [focusGroup]);
+  const focusTileHolding = useCallback((sessionId: string): boolean => {
+    const holder = tileHoldingSession(tileSessions, sessionId);
+    return holder !== undefined && focusChatGroup(holder.chatGroupId);
+  }, [tileSessions, focusChatGroup]);
+
   const handleLoadSessionAndRefresh = useCallback(
-    (sessionId: string) => focusedSession.loadSession(sessionId),
-    [focusedSession],
+    async (sessionId: string) => focusTileHolding(sessionId) || focusedSession.loadSession(sessionId),
+    [focusedSession, focusTileHolding],
   );
 
   const handleImportAndLoad = useCallback(async () => {
@@ -312,6 +335,11 @@ export function App() {
     sessionId: string,
     target: DropTarget,
   ) => {
+    const holder = tileHoldingSession(tileSessions, sessionId);
+    if (holder) {
+      chatGroups.focus(holder.chatGroupId);
+      return;
+    }
     if (target === "center") {
       chatGroups.focus(targetGroupId);
       void chatGroupSessions.read(targetGroupId)?.loadSession(sessionId);
@@ -321,7 +349,7 @@ export function App() {
     // null is the ceiling: four tiles already. Nothing to say — the frame
     // stops offering edges once `canSplit` is false.
     if (created) setPendingSessionDrop({ chatGroupId: created, sessionId });
-  }, [chatGroups, chatGroupSessions]);
+  }, [chatGroups, chatGroupSessions, tileSessions]);
 
   useEffect(() => {
     if (!pendingSessionDrop) return;
@@ -585,6 +613,12 @@ export function App() {
 
   const handleOpenRoutineSession = useCallback(
     async (sessionId: string) => {
+      // Moving focus to the tile already showing it touches no conversation,
+      // so it is not held back by the focused tile's stream.
+      if (focusTileHolding(sessionId)) {
+        setActiveView("home");
+        return true;
+      }
       if (streaming) {
         console.warn("[lvis] openRoutineSession blocked during streaming");
         return false;
@@ -597,7 +631,7 @@ export function App() {
         return false;
       }
     },
-    [focusedSession, setActiveView],
+    [focusedSession, focusTileHolding, setActiveView, streaming],
   );
 
   useEffect(() => {
@@ -952,6 +986,7 @@ export function App() {
     attention: { focusedChatGroupId: chatGroups.focusedId, conversationVisible: activeView === "home" },
     isUnread: conversationActions.isUnread,
     setUnread: conversationActions.onSetUnread,
+    onTurnsEnded: refreshSessions,
   });
 
   // The work panel is per-GROUP state now (each conversation carries its own),
@@ -1050,7 +1085,7 @@ export function App() {
     onOpenSettings, maxOutputTokens: MAX_OUTPUT_TOKENS,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     enableThinkingChat, toggleThinking,
-    refreshSessions, sessions,
+    refreshSessions, sessions, focusChatGroup,
     isSessionStarred: (sessionId: string) => Boolean(isSessionStarred(sessionId)),
     handleToggleSessionStar,
     starredIsEntry, starredToggle,
@@ -1088,7 +1123,7 @@ export function App() {
     apiUsageProjectionAvailable, activeSubscriptionRuntime,
     effectiveLlmReady, chatReadyWithoutApiKey, checkApiKey, onOpenSettings,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    enableThinkingChat, toggleThinking, refreshSessions, sessions,
+    enableThinkingChat, toggleThinking, refreshSessions, focusChatGroup, sessions,
     isSessionStarred, handleToggleSessionStar, starredIsEntry, starredToggle,
     statusPersistent, statusVisibleToast, statusPendingCount, handleStatusToastClick,
     statusRemoveToast, statusPushToast, statusUpsertPersistent, statusRemovePersistent,

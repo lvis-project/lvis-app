@@ -77,6 +77,7 @@ export const jaMessages: Record<string, string> = {
   "app.mcpPromptClipped": "MCP プロンプト \"{name}\" はホストで切り詰められました — サーバーが返した内容の一部は含まれていません。",
   "app.mcpPromptFailed": "MCP プロンプト \"{name}\" を実行できませんでした。",
   "app.sessionNotFound": "セッションが見つかりません: {requested}",
+  "app.sessionLoadFailed": "セッションを開けませんでした: {requested}",
   "app.thinkingStatus": "考え...",
   "app.subscriptionAttachmentUnsupported": "{provider} のサブスクリプション ランタイムは、この種類の添付をまだ送信できません。下書きと添付ファイルは保持されます。",
   "app.visionNotSupportedConfirm": "現在のモデル ({llmModel}) はイメージをサポートしていません。\n画像は送信されません。ファイル パス/テキストのみが送信されます。\n\nとにかく送信しますか?キャンセルして機種を変更し、もう一度お試しください。",
