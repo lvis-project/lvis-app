@@ -84,9 +84,14 @@ const FETCH_FAILED: LlmModelListResult = {
 function makeApi(overrides: MockApi = {}): MockApi {
   const api = installMockLvisApi();
   api.listLlmModels = vi.fn().mockResolvedValue(FETCH_FAILED);
-  api.hasApiKey = vi.fn().mockResolvedValue(true);
+  api.hasApiKey = vi.fn().mockResolvedValue(false);
   for (const [name, impl] of Object.entries(overrides)) api[name] = impl;
   return api;
+}
+
+/** A credential store holding keys for exactly these providers. */
+function storedKeysFor(...providerIds: string[]) {
+  return vi.fn(async (providerId: string) => providerIds.includes(providerId));
 }
 
 /** `getSettings` carrying a model-list cache, so a handshake can be pre-landed. */
@@ -346,7 +351,7 @@ describe("LlmTab unsaved provider input", () => {
   it("keeps a card with uncommitted input on screen and marks it when collapsed", async () => {
     // Nothing was added and nothing is configured: this row exists only
     // because the draft does — which is the part that survives a remount.
-    await renderTab(makeApi({ hasApiKey: vi.fn().mockResolvedValue(false) }), {
+    await renderTab(makeApi(), {
       vendor: "claude",
       hasKey: false,
       keyInput: "sk-ant-typed",
@@ -366,6 +371,7 @@ describe("LlmTab unsaved provider input", () => {
 describe("LlmTab OpenAI model catalogue", () => {
   it("offers the endpoint's catalogue rather than the bundled list", async () => {
     const api = makeApi({
+      hasApiKey: storedKeysFor("openai"),
       listLlmModels: vi.fn().mockResolvedValue({
         ok: true,
         vendor: "openai",
@@ -396,7 +402,7 @@ describe("LlmTab OpenAI model catalogue", () => {
   });
 
   it("says the handshake failed instead of standing in a bundled list", async () => {
-    await renderTab(makeApi(), { model: "" });
+    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), { model: "" });
 
     await waitFor(() => {
       expect(screen.getByTestId("llm-tab:connection-subline:openai"))
@@ -407,6 +413,7 @@ describe("LlmTab OpenAI model catalogue", () => {
 
   it("distinguishes a failure that left a catalogue standing from one that did not", async () => {
     const api = makeApi({
+      hasApiKey: storedKeysFor("openai"),
       getSettings: settingsWithCache({
         [["openai", "", ""].join("\n")]: {
           vendor: "openai",
@@ -428,7 +435,7 @@ describe("LlmTab OpenAI model catalogue", () => {
   });
 
   it("does not spend a credentialed handshake when no key is stored", async () => {
-    const api = makeApi({ hasApiKey: vi.fn().mockResolvedValue(false) });
+    const api = makeApi();
     installSubscription([codexView({
       status: { runtime: "ready", connection: "connected", models: [] },
     } as Partial<SubscriptionProviderView>)]);
@@ -442,6 +449,38 @@ describe("LlmTab OpenAI model catalogue", () => {
     expect(subline).not.toHaveClass("text-destructive");
     // And no second, API-side OpenAI row conjured out of the attempt.
     expect(rowOrder()).toEqual(["codex"]);
+  });
+
+  it("keeps a provider with a stored key on screen when its handshake fails", async () => {
+    // The live regression: OpenAI's key is stored but stale, the /models call
+    // comes back failed, and the form is pointed at a DIFFERENT provider — so
+    // nothing but the credential itself can put this row on the page.
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    installSubscription([codexView()]);
+    await renderTab(api, { vendor: "claude", model: "", hasKey: false });
+
+    // The pairing carries it: one OpenAI row on the Codex runtime, not a
+    // second plain card beside it.
+    await waitFor(() => expect(rowOrder()).toEqual(["codex"]));
+    const subline = screen.getByTestId("llm-tab:connection-subline:codex");
+    expect(subline).toHaveAttribute("data-provider-sync-status", "error");
+    // A key exists and it is not working: that is a fault, and it reads as one.
+    expect(subline).toHaveClass("text-destructive");
+  });
+
+  it("keeps the stored key replaceable on a row whose handshake failed", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    installSubscription([codexView()]);
+    await renderTab(api, { vendor: "openai", model: "", hasKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("llm-tab:connection-subline:codex"))
+        .toHaveAttribute("data-provider-sync-status", "error");
+    });
+    fireEvent.click(screen.getByTestId("llm-tab:connection-api-key:codex"));
+    expect(screen.getByTestId("llm-tab:api-key-status")).toHaveTextContent(/설정됨|Configured|Set/);
+    expect(screen.getByTestId("llm-api-key-input")).toBeInTheDocument();
+    expect(screen.getByTestId("llm-tab:manual-section")).toHaveTextContent(/삭제|Delete|Remove/);
   });
 
   it("draws no configured row from a handshake that only started", async () => {

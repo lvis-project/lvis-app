@@ -48,6 +48,7 @@ import {
   isOpenRouterFreeModel,
 } from "../../../shared/openrouter-free-models.js";
 import {
+  marketplaceProviderPresetIdFromSecretId,
   marketplaceProviderPresetSecretId,
   modelDiscoveryPolicyUsesSeededOptions,
   type MarketplaceInstalledProviderPreset,
@@ -973,6 +974,20 @@ export function LlmTab(props: LlmTabProps) {
   const [savedVendorBlocks, setSavedVendorBlocks] = useState<
     Readonly<Record<string, { baseUrl?: string; vertexProject?: string; vertexLocation?: string }>>
   >({});
+  /**
+   * Which providers actually have a key in the store.
+   *
+   * A stored credential IS a configuration, whatever the endpoint has since
+   * said back. Reading configuration off the handshake alone made a provider
+   * whose key had gone stale vanish from the page — taking with it the only
+   * place that key can be replaced or deleted.
+   */
+  const [credentialedProviderIds, setCredentialedProviderIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  /** Bumped on every settings broadcast; `setApiKey`/`deleteApiKey` send one,
+   *  so this is what re-asks the credential store. */
+  const [settingsRevision, setSettingsRevision] = useState(0);
   const [modelLists, setModelLists] = useState<Record<string, ModelListState>>({});
   const modelListsRef = useRef<Record<string, ModelListState>>({});
   const modelListCacheRef = useRef<LlmModelListCache>({});
@@ -1284,6 +1299,7 @@ export function LlmTab(props: LlmTabProps) {
       const ids = settings.marketplace?.installedProviderIds;
       setMarketplaceProviderIds(Array.isArray(ids) ? ids : []);
       setSavedVendorBlocks(settings.llm?.vendors ?? {});
+      setSettingsRevision((current) => current + 1);
       setPinnedModels(settings.llm?.pinnedModels ?? []);
       const cache = settings.llm?.modelListCache ?? {};
       modelListCacheRef.current = cache;
@@ -1319,6 +1335,36 @@ export function LlmTab(props: LlmTabProps) {
     ],
     [marketplaceProviderIds, marketplaceProviderPresetOptions, vendor],
   );
+  // Every provider that could own a row, including the API counterparts of the
+  // subscription runtimes — a paired provider's key belongs to its runtime's
+  // row, and that runtime need not be in the vendor catalogue.
+  const credentialCandidateKey = useMemo(
+    () => [...new Set([
+      ...providerSelectOptions.map((option) => option.id),
+      ...Object.values(SUBSCRIPTION_RUNTIME_API_COUNTERPART),
+    ])].filter(Boolean).sort().join("\n"),
+    [providerSelectOptions],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const candidates = credentialCandidateKey.split("\n").filter(Boolean);
+    void (async () => {
+      const found = new Set<string>();
+      await Promise.all(candidates.map(async (providerId) => {
+        try {
+          if (await api.hasApiKey(providerId)) found.add(providerId);
+        } catch {
+          /* a provider we cannot ask about is not one we can claim is keyed */
+        }
+      }));
+      if (cancelled) return;
+      setCredentialedProviderIds((current) =>
+        current.size === found.size && [...found].every((id) => current.has(id))
+          ? current
+          : found);
+    })();
+    return () => { cancelled = true; };
+  }, [api, credentialCandidateKey, settingsRevision]);
   useEffect(() => {
     if (!settingsLoaded) return;
     const timer = window.setTimeout(() => {
@@ -1397,6 +1443,11 @@ export function LlmTab(props: LlmTabProps) {
    * `openai-compatible` vendor, so a route — not a vendor id — is what a row
    * is built from, and what its facts are looked up by.
    */
+  const installedPresetById = useMemo(
+    () => new Map(marketplaceProviderPresets.map((preset) => [preset.providerId, preset])),
+    [marketplaceProviderPresets],
+  );
+
   const configuredApiRoutes = useMemo<readonly ConfiguredApiRoute[]>(() => {
     const routes = new Map<string, ConfiguredApiRoute>();
     const add = (route: ConfiguredApiRoute) => {
@@ -1413,6 +1464,16 @@ export function LlmTab(props: LlmTabProps) {
         modelListKey: activeModelListKey,
       });
     }
+    // Whatever key a route's handshake was filed under, whether or not it
+    // succeeded — so a credentialed row can still point at its own status line
+    // when that status is a failure.
+    const keyByRow = new Map<string, string>();
+    for (const cacheKey of Object.keys(modelLists)) {
+      const [cachedVendor, , scope] = cacheKey.split("\n");
+      if (!cachedVendor) continue;
+      const rowId = scope ? marketplaceProviderPresetSecretId(scope) : cachedVendor;
+      if (!keyByRow.has(rowId)) keyByRow.set(rowId, cacheKey);
+    }
     for (const [cacheKey, state] of Object.entries(modelLists)) {
       // A handshake that only STARTED is not evidence of configuration. A bare
       // `loading` key used to be enough to draw a "connected" row for a
@@ -1423,17 +1484,31 @@ export function LlmTab(props: LlmTabProps) {
       if (!cachedVendor) continue;
       add({ vendorId: cachedVendor, ...(scope ? { presetId: scope } : {}), modelListKey: cacheKey });
     }
+    // And a stored key is a configuration in its own right. This is the half
+    // that does not depend on the endpoint agreeing: a provider whose key has
+    // gone stale must keep its row, because that row is where the key is
+    // replaced or removed.
+    for (const providerId of credentialedProviderIds) {
+      const presetId = marketplaceProviderPresetIdFromSecretId(providerId);
+      const preset = presetId ? installedPresetById.get(presetId) : undefined;
+      if (presetId && !preset) continue;
+      const vendorId = presetId ? "openai-compatible" : providerId;
+      add({
+        vendorId,
+        ...(presetId ? { presetId } : {}),
+        modelListKey: keyByRow.get(providerId)
+          ?? llmModelListCacheKey(vendorId, preset?.baseUrl ?? "", presetId ?? ""),
+      });
+    }
     return [...routes.values()];
-  }, [modelLists, apiPathConfigured, vendor, marketplaceProviderPresetId, activeModelListKey]);
+  }, [
+    modelLists, apiPathConfigured, vendor, marketplaceProviderPresetId, activeModelListKey,
+    credentialedProviderIds, installedPresetById,
+  ]);
 
   const configuredRowIds = useMemo(
     () => new Set(configuredApiRoutes.map(apiRouteRowId)),
     [configuredApiRoutes],
-  );
-
-  const installedPresetById = useMemo(
-    () => new Map(marketplaceProviderPresets.map((preset) => [preset.providerId, preset])),
-    [marketplaceProviderPresets],
   );
 
   /**
@@ -1474,6 +1549,30 @@ export function LlmTab(props: LlmTabProps) {
       : addedRowIds),
     [addedRowIds, credentialDirty, activeFormRowId],
   );
+
+  // A provider we hold a key for gets a row, and a row has to be able to say
+  // what its endpoint last answered. The debounced sync above only covers the
+  // provider being edited, so without this a configured provider that is not
+  // the open one shows a name and nothing else — including the one whose key
+  // has gone stale, which is exactly the row that needs to say so.
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    for (const providerId of credentialedProviderIds) {
+      if (providerId === activeFormRowId) continue;
+      const presetId = marketplaceProviderPresetIdFromSecretId(providerId);
+      const preset = presetId ? installedPresetById.get(presetId) : undefined;
+      if (presetId && !preset) continue;
+      void requestModelList(preset ? "openai-compatible" : providerId, {
+        ...(preset ? { baseUrl: preset.baseUrl, credentialScope: preset.providerId } : {}),
+        ...(preset?.modelDiscoveryPolicy
+          ? { modelDiscoveryPolicy: preset.modelDiscoveryPolicy }
+          : {}),
+      });
+    }
+  }, [
+    activeFormRowId, credentialedProviderIds, installedPresetById,
+    requestModelList, settingsLoaded,
+  ]);
 
   const connections = useMemo<ProviderConnection[]>(() => {
     const claimed = new Set<string>();
