@@ -2537,6 +2537,7 @@ export const frMessages: Record<string, string> = {
   "sidebar.marketplace": "Marché",
   "sidebar.minutesAgo": "{count} min",
   "sidebar.moreSessions": "{count} de plus",
+  "sidebar.fewerSessions": "Afficher moins",
   "sidebar.newProjectChat": "Nouveau chat dans {project}",
   "sidebar.noProjectSessions": "Aucune conversation récente",
   "sidebar.projectsLabel": "Projets",

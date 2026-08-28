@@ -2554,6 +2554,7 @@ export const esMessages: Record<string, string> = {
   "sidebar.marketplace": "Mercado",
   "sidebar.minutesAgo": "{count} min",
   "sidebar.moreSessions": "{count} más",
+  "sidebar.fewerSessions": "Mostrar menos",
   "sidebar.newProjectChat": "Nuevo chat en {project}",
   "sidebar.noProjectSessions": "No hay conversaciones recientes",
   "sidebar.projectsLabel": "Proyectos",
