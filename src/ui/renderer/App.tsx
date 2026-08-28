@@ -1627,6 +1627,7 @@ export function App() {
                                   detached settings window on this path. */}
                               <SettingsInlineView
                                 api={api}
+                                chatGroupId={chatGroups.focusedId}
                                 initialTab={settingsTab}
                                 onSaved={handleInlineSettingsSaved}
                                 onTabChange={setSettingsTab}

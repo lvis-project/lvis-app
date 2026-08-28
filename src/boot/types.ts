@@ -134,6 +134,16 @@ export interface AppServices {
    */
   findLoopBySessionId?: (sessionId: string) => ConversationLoop | undefined;
   /**
+   * The loop behind an ALREADY-OPEN chat group, or `undefined` for a group the
+   * window is not holding.
+   *
+   * The lookup half of {@link resolveChatGroupLoop}. A surface that is told
+   * which tile the owner meant must not CREATE that tile as a side effect of
+   * asking, and a group id it does not recognise is a caller naming a tile that
+   * does not exist — a refusal, not a reason to fall back to the primary.
+   */
+  findChatGroupLoop?: (chatGroupId: string) => ConversationLoop | undefined;
+  /**
    * The tiled chat group this bundle is bound to. Set only on the per-group
    * bundle `chat.ts` derives for a non-primary tile; the bundle assembled at
    * boot has none and is the primary's.

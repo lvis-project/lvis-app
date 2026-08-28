@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CHANNELS } from "../../../contract/app-contract.js";
+import { CHANNELS, MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 import { invokeFileIpcHandler } from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const intent = Object.freeze({ inputOrigin: "user-keyboard" as const, userActivation: true as const });
 const CONVERSATION_ID = "conv-away-1";
+/** A second tile, holding a conversation of its own. */
+const TILE_GROUP = "group-2";
+const TILE_CONVERSATION_ID = "conv-away-tile-2";
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -33,16 +36,24 @@ async function setup(options: {
   vi.clearAllMocks();
   const gate = options.gate ?? gateFixture();
   const auditLogger = { log: vi.fn() };
+  const primaryLoop = { getSessionId: vi.fn(() => options.sessionId ?? CONVERSATION_ID) };
+  const tileLoop = { getSessionId: vi.fn(() => TILE_CONVERSATION_ID) };
+  // Two tiles are open. Arming names one of them; a name the window is not
+  // showing resolves to nothing.
+  const findChatGroupLoop = vi.fn((chatGroupId: string) => {
+    if (chatGroupId === MAIN_CHAT_GROUP_ID) return primaryLoop;
+    if (chatGroupId === TILE_GROUP) return tileLoop;
+    return undefined;
+  });
   const { registerAwayAuthorityHandlers } = await import("../away-authority.js");
   registerAwayAuthorityHandlers({
     auditLogger,
     approvalGate: gate,
-    conversationLoop: {
-      getSessionId: vi.fn(() => options.sessionId ?? CONVERSATION_ID),
-    },
+    conversationLoop: primaryLoop,
+    findChatGroupLoop,
     getMainWindow: () => null,
   } as never);
-  return { gate, auditLogger };
+  return { gate, auditLogger, findChatGroupLoop };
 }
 
 async function setupDisabled() {
@@ -52,6 +63,7 @@ async function setupDisabled() {
   registerAwayAuthorityHandlers({
     auditLogger: { log: vi.fn() },
     conversationLoop: { getSessionId: vi.fn(() => CONVERSATION_ID) },
+    findChatGroupLoop: vi.fn(() => ({ getSessionId: vi.fn(() => CONVERSATION_ID) })),
     getMainWindow: () => null,
   } as never);
 }
@@ -60,6 +72,7 @@ async function setupDisabled() {
 function armPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     intent,
+    chatGroupId: MAIN_CHAT_GROUP_ID,
     mode: "read-only",
     directories: ["/home/owner/project"],
     duration: "1h",
@@ -161,6 +174,9 @@ describe("Away authority arm IPC boundary", () => {
       directories: Array.from({ length: 17 }, (_unused, index) => `/home/owner/p${index}`),
     })],
     ["an extra field", armPayload({ conversationId: "conv-other" })],
+    ["no chat group at all", (() => { const p = armPayload(); delete p["chatGroupId"]; return p; })()],
+    ["a blank chat group", armPayload({ chatGroupId: "   " })],
+    ["a chat group that is not a string", armPayload({ chatGroupId: 2 })],
   ])("refuses %s without calling the gate", async (_label, payload) => {
     const { gate } = await setup();
 
@@ -217,6 +233,32 @@ describe("Away authority arm IPC boundary", () => {
     await expect(invokeFileIpcHandler(handlers, CHANNELS.awayAuthority.arm, armPayload()))
       .resolves.toEqual({ ok: false, error: "away-authority-operation-rejected" });
     expect(gate.armAwayAuthority).toHaveBeenCalledTimes(1);
+  });
+
+  it("arms the conversation the NAMED tile is holding, not the primary one", async () => {
+    const { gate, findChatGroupLoop } = await setup();
+
+    await expect(invokeFileIpcHandler(
+      handlers,
+      CHANNELS.awayAuthority.arm,
+      armPayload({ chatGroupId: TILE_GROUP }),
+    )).resolves.toEqual({ ok: true });
+
+    expect(findChatGroupLoop).toHaveBeenCalledWith(TILE_GROUP);
+    expect(gate.armAwayAuthority).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: TILE_CONVERSATION_ID,
+    }));
+  });
+
+  it("refuses a tile the window is not showing rather than arming the primary", async () => {
+    const { gate } = await setup();
+
+    await expect(invokeFileIpcHandler(
+      handlers,
+      CHANNELS.awayAuthority.arm,
+      armPayload({ chatGroupId: "group-that-was-closed" }),
+    )).resolves.toEqual({ ok: false, error: "away-authority-operation-rejected" });
+    expect(gate.armAwayAuthority).not.toHaveBeenCalled();
   });
 
   it("refuses to arm when no conversation is open", async () => {

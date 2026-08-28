@@ -15,6 +15,7 @@ const intent = { inputOrigin: "user-keyboard" as const, userActivation: true as 
  */
 const VALID: Readonly<Record<string, unknown>> = Object.freeze({
   intent,
+  chatGroupId: "main",
   mode: "read-only",
   directories: ["/home/owner/project"],
   duration: "1h",
@@ -40,6 +41,9 @@ function liveStatus(overrides: Record<string, unknown> = {}): Record<string, unk
 describe("away authority arm wire contract", () => {
   it("accepts a payload the desk can actually produce", () => {
     expect(isAwayAuthorityArmInput({ ...VALID })).toBe(true);
+    // A tile other than the primary is an ordinary payload: the window can hold
+    // several conversations, and any of them may be the one on screen.
+    expect(isAwayAuthorityArmInput({ ...VALID, chatGroupId: "group-3" })).toBe(true);
     expect(isAwayAuthorityArmInput({ ...VALID, mode: "read-write", duration: "4h", budget: 50 }))
       .toBe(true);
   });
@@ -68,6 +72,10 @@ describe("away authority arm wire contract", () => {
       directories: Array.from({ length: 17 }, (_unused, i) => `/p${i}`),
     }],
     ["a conversation the caller tried to name", { ...VALID, conversationId: "conv-1" }],
+    ["no tile at all", without("chatGroupId")],
+    ["a blank tile name", { ...VALID, chatGroupId: "   " }],
+    ["a tile name that is not a string", { ...VALID, chatGroupId: 3 }],
+    ["a tile name past the wire bound", { ...VALID, chatGroupId: "g".repeat(129) }],
     ["a raw ttl the caller tried to smuggle in", { ...VALID, ttlMs: 999 }],
     ["an array", []],
     ["null", null],

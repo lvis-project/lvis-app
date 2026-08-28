@@ -7,6 +7,12 @@ import type { LvisApi } from "../types.js";
 
 export interface RemoteSurfacesTabProps {
   api: LvisApi;
+  /**
+   * The tile the away-authority grant would bind to — the focused conversation.
+   * Threaded from the window because settings has no conversation of its own,
+   * and main refuses a grant that names no tile.
+   */
+  chatGroupId: string;
 }
 
 /**
@@ -14,7 +20,7 @@ export interface RemoteSurfacesTabProps {
  * conversation from somewhere else. Each surface keeps its own trust story and
  * its own section; they deliberately do not share a single enable switch.
  */
-export function RemoteSurfacesTab({ api }: RemoteSurfacesTabProps) {
+export function RemoteSurfacesTab({ api, chatGroupId }: RemoteSurfacesTabProps) {
   const { t } = useTranslation();
 
   return (
@@ -24,7 +30,7 @@ export function RemoteSurfacesTab({ api }: RemoteSurfacesTabProps) {
         description={t("remoteSurfacesTab.pageDescription")}
       />
       <TailnetAccessContent api={api} />
-      <TelegramConnectionContent api={api} />
+      <TelegramConnectionContent api={api} chatGroupId={chatGroupId} />
       <LocalApiSurfacesSection />
     </div>
   );

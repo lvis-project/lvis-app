@@ -37,10 +37,13 @@ function stubWorkspaceRoots(roots: readonly string[]): void {
   };
 }
 
-async function openDialog(roots: readonly string[] = [PROJECT, NOTES]) {
+async function openDialog(
+  roots: readonly string[] = [PROJECT, NOTES],
+  chatGroupId = "main",
+) {
   stubWorkspaceRoots(roots);
   const harness = makeApi(null);
-  render(<AwayAuthorityContent api={harness.api} shareIsLive />);
+  render(<AwayAuthorityContent api={harness.api} chatGroupId={chatGroupId} shareIsLive />);
   await screen.findByTestId("away-authority-not-armed");
   fireEvent.click(screen.getByTestId("away-authority-open-arm-dialog"));
   await screen.findByTestId("away-authority-arm-dialog");
@@ -65,7 +68,7 @@ describe("Away authority desk controls", () => {
     stubWorkspaceRoots([PROJECT]);
     const harness = makeApi(null);
 
-    render(<AwayAuthorityContent api={harness.api} shareIsLive />);
+    render(<AwayAuthorityContent api={harness.api} chatGroupId="main" shareIsLive />);
 
     expect(await screen.findByTestId("away-authority-not-armed")).toBeInTheDocument();
     expect(screen.getByTestId("away-authority-open-arm-dialog")).toBeEnabled();
@@ -76,7 +79,7 @@ describe("Away authority desk controls", () => {
     stubWorkspaceRoots([PROJECT]);
     const harness = makeApi(null);
 
-    render(<AwayAuthorityContent api={harness.api} shareIsLive={false} />);
+    render(<AwayAuthorityContent api={harness.api} chatGroupId="main" shareIsLive={false} />);
 
     await screen.findByTestId("away-authority-not-armed");
     expect(screen.getByTestId("away-authority-open-arm-dialog")).toBeDisabled();
@@ -93,7 +96,7 @@ describe("Away authority desk controls", () => {
       remaining: 7,
     });
 
-    render(<AwayAuthorityContent api={harness.api} shareIsLive />);
+    render(<AwayAuthorityContent api={harness.api} chatGroupId="main" shareIsLive />);
 
     const armed = await screen.findByTestId("away-authority-armed");
     expect(armed).toHaveTextContent("answering file reads and writes");
@@ -111,7 +114,7 @@ describe("Away authority desk controls", () => {
       remaining: 4,
     });
 
-    render(<AwayAuthorityContent api={harness.api} shareIsLive />);
+    render(<AwayAuthorityContent api={harness.api} chatGroupId="main" shareIsLive />);
 
     const armed = await screen.findByTestId("away-authority-armed");
     expect(armed).toHaveTextContent("answering file reads");
@@ -127,7 +130,7 @@ describe("Away authority desk controls", () => {
       remaining: 4,
     });
 
-    render(<AwayAuthorityContent api={harness.api} shareIsLive />);
+    render(<AwayAuthorityContent api={harness.api} chatGroupId="main" shareIsLive />);
     await screen.findByTestId("away-authority-armed");
     harness.setStatus(null);
     fireEvent.click(screen.getByTestId("away-authority-disarm"));
@@ -197,11 +200,25 @@ describe("Away authority arm dialog — arming write deliberately", () => {
 
     await waitFor(() => expect(harness.arm).toHaveBeenCalledTimes(1));
     expect(harness.arm).toHaveBeenCalledWith({
+      chatGroupId: "main",
       mode: "read-only",
       directories: [PROJECT],
       duration: "1h",
       budget: 10,
     });
+  });
+
+  it("names the focused tile, so the grant binds to the conversation on screen", async () => {
+    // Main reads what THAT tile is holding. Sending nothing would leave main
+    // arming whatever the primary loop happened to hold — a conversation the
+    // owner may not even be looking at.
+    const harness = await openDialog([PROJECT], "group-3");
+    fireEvent.click(screen.getByTestId(`away-authority-folder-${PROJECT}`));
+
+    fireEvent.click(screen.getByTestId("away-authority-confirm-arm"));
+
+    await waitFor(() => expect(harness.arm).toHaveBeenCalledTimes(1));
+    expect(harness.arm).toHaveBeenCalledWith(expect.objectContaining({ chatGroupId: "group-3" }));
   });
 
   it("will not arm writing until the consequence is acknowledged", async () => {

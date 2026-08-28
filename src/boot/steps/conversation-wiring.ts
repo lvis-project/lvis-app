@@ -494,6 +494,13 @@ export async function wireConversation(
     [conversationLoop, ...groupLoops.values()]
       .find((loop) => loop.getSessionId() === sessionId);
 
+  // Which loop a tile is running, for surfaces the owner drives from window
+  // chrome and that name the tile they meant. `groupLoops` holds the tiles
+  // that exist; a name that is not in it, and is not the primary, is a tile
+  // this window does not have.
+  ctx.findChatGroupLoop = (chatGroupId: string): ConversationLoop | undefined =>
+    chatGroupId === MAIN_CHAT_GROUP_ID ? conversationLoop : groupLoops.get(chatGroupId);
+
 
 
   lateBinding.conversationLoopRef.fn = conversationLoop;

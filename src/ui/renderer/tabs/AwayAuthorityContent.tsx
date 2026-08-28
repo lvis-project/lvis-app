@@ -9,6 +9,12 @@ import type { LvisApi } from "../types.js";
 export interface AwayAuthorityContentProps {
   api: LvisApi;
   /**
+   * The tile the away-authority grant would bind to — the focused conversation.
+   * Threaded from the window because settings has no conversation of its own,
+   * and main refuses a grant that names no tile.
+   */
+  chatGroupId: string;
+  /**
    * Whether the paired Telegram share can actually raise an approval in the
    * conversation on screen. A grant binds to the open conversation and answers
    * nothing else, so arming while some other conversation is shared would
@@ -33,7 +39,7 @@ function formattedTime(value: number): string {
  * for the moment the grant expires, because otherwise a desk left open would go
  * on displaying "armed" for a grant that can no longer answer anything.
  */
-export function AwayAuthorityContent({ api, shareIsLive }: AwayAuthorityContentProps) {
+export function AwayAuthorityContent({ api, chatGroupId, shareIsLive }: AwayAuthorityContentProps) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<AwayAuthorityStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +166,7 @@ export function AwayAuthorityContent({ api, shareIsLive }: AwayAuthorityContentP
 
       <AwayAuthorityArmDialog
         api={api}
+        chatGroupId={chatGroupId}
         open={arming}
         onCancel={() => setArming(false)}
         onArmed={() => {

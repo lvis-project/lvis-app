@@ -11,11 +11,17 @@ import { describe, it, expect, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import { splitIntoTwoTiles } from "./helpers.js";
+import type { MockLvisApi } from "./mock-lvis-api.js";
+
+/** The permission namespace's subscriptions, as the mock records them. */
+function permissionSubscription(api: MockLvisApi, name: string): ReturnType<typeof vi.fn> {
+  return (api.permission as unknown as Record<string, ReturnType<typeof vi.fn>>)[name]!;
+}
 
 describe("permission disclosure toasts with two tiles", () => {
   it("subscribes and renders once for the window, not once per tile", async () => {
     const { container, api } = await renderApp({ hasApiKey: true });
-    const onHit = api.permission.onUserApprovalHit as unknown as ReturnType<typeof vi.fn>;
+    const onHit = permissionSubscription(api, "onUserApprovalHit");
     await waitFor(() => expect(onHit).toHaveBeenCalled());
 
     await splitIntoTwoTiles(container);
@@ -42,7 +48,7 @@ describe("permission disclosure toasts with two tiles", () => {
 
   it("raises the review suggestion once however many conversations are open", async () => {
     const { container, api } = await renderApp({ hasApiKey: true });
-    const onSuggestion = api.permission.onReviewSuggestion as unknown as ReturnType<typeof vi.fn>;
+    const onSuggestion = permissionSubscription(api, "onReviewSuggestion");
     await waitFor(() => expect(onSuggestion).toHaveBeenCalled());
 
     await splitIntoTwoTiles(container);
