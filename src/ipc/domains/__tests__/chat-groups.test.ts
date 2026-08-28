@@ -76,20 +76,26 @@ type FakeLoop = {
   hasActiveTurn: () => boolean;
   getHistory: () => { length: number; getMessages: () => unknown[]; truncate: () => void; restore: () => void };
   refreshProvider: () => void;
+  resetAndResume: ReturnType<typeof vi.fn>;
 };
 
 function fakeLoop(id: string, messages: unknown[] = []): FakeLoop {
-  return {
+  const loop: FakeLoop = {
     id,
     sessionId: `session-of-${id}`,
     hasProvider: vi.fn(() => id !== MAIN_CHAT_GROUP_ID),
     abortCurrentTurn: vi.fn(),
-    getSessionId: () => `session-of-${id}`,
+    getSessionId: () => loop.sessionId,
     getSessionKind: () => "main",
     hasActiveTurn: () => false,
     getHistory: () => ({ length: messages.length, getMessages: () => messages, truncate: () => {}, restore: () => {} }),
     refreshProvider: () => {},
+    resetAndResume: vi.fn((sessionId: string) => {
+      loop.sessionId = sessionId;
+      return { ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 };
+    }),
   };
+  return loop;
 }
 
 type RendererEvents = Record<string, ((...args: unknown[]) => void)[]>;
@@ -105,6 +111,12 @@ async function registerWithGroups(window?: { webContents: { on: (name: string, f
   });
   const releaseChatGroupLoop = vi.fn((chatGroupId: string) => { groups.delete(chatGroupId); });
   const { registerChatHandlers } = await import("../chat.js");
+  const memoryManager = {
+    loadMainActiveSessionState: vi.fn(() => null),
+    markMainActiveFresh: vi.fn(async () => undefined),
+    markMainActiveResume: vi.fn(async () => undefined),
+    saveSessionMetadata: vi.fn(async () => undefined),
+  };
   registerChatHandlers({
     conversationLoop: main,
     conversationSurfaceRuntime: createConversationSurfaceRuntime(),
@@ -114,16 +126,12 @@ async function registerWithGroups(window?: { webContents: { on: (name: string, f
       get: vi.fn((key?: string) => (key === "llm" ? fakeLlmSettings() : {})),
       patch: vi.fn(async () => undefined),
     },
-    memoryManager: {
-      loadMainActiveSessionState: vi.fn(() => null),
-      markMainActiveFresh: vi.fn(async () => undefined),
-      saveSessionMetadata: vi.fn(async () => undefined),
-    },
+    memoryManager,
     auditLogger: { log: vi.fn() },
     getMainWindow: vi.fn(() => window ?? null),
   } as unknown as Parameters<typeof registerChatHandlers>[0]);
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!(RENDERER_EVENT, ...args);
-  return { main, groups, resolveChatGroupLoop, releaseChatGroupLoop, invoke };
+  return { main, groups, resolveChatGroupLoop, releaseChatGroupLoop, invoke, memoryManager };
 }
 
 function fakeRenderer(): { window: { webContents: { on: (name: string, fn: (...args: unknown[]) => void) => void } }; events: RendererEvents } {
@@ -174,6 +182,37 @@ describe("lvis:chat:* with chat groups", () => {
     // And the session check is against the group's session, not the primary's.
     const mismatched = await invoke(CHANNELS.chat.continueLastUser, { sessionId: "session-of-main" }, "group-2");
     expect(mismatched).toEqual({ ok: false, error: "session-mismatch" });
+  });
+
+  it("opens a session in one tile at a time — a resume of one another tile holds is refused", async () => {
+    const { invoke, groups, main } = await registerWithGroups();
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+    const second = groups.get("group-2")!;
+
+    // The primary's conversation cannot be pulled into the second tile...
+    const refused = await invoke(CHANNELS.chat.sessionResume, "session-of-main", "group-2");
+    expect(refused).toMatchObject({ ok: false, error: "session-open-in-other-group" });
+    expect(second.resetAndResume).not.toHaveBeenCalled();
+    // ...and the second tile's cannot be pulled into the primary.
+    const refusedBack = await invoke(CHANNELS.chat.sessionResume, "session-of-group-2", MAIN_CHAT_GROUP_ID);
+    expect(refusedBack).toMatchObject({ ok: false, error: "session-open-in-other-group" });
+    expect(main.resetAndResume).not.toHaveBeenCalled();
+
+    // A conversation no tile holds loads normally.
+    const loaded = await invoke(CHANNELS.chat.sessionResume, "session-archived", "group-2");
+    expect(loaded).toMatchObject({ ok: true });
+    expect(second.resetAndResume).toHaveBeenCalledWith("session-archived");
+  });
+
+  it("only the primary tile's resume becomes the window's main-active conversation", async () => {
+    const { invoke, memoryManager } = await registerWithGroups();
+    invoke(CHANNELS.chat.hasProvider, "group-2");
+
+    await invoke(CHANNELS.chat.sessionResume, "session-archived", "group-2");
+    expect(memoryManager.markMainActiveResume).not.toHaveBeenCalled();
+
+    await invoke(CHANNELS.chat.sessionResume, "session-older", MAIN_CHAT_GROUP_ID);
+    expect(memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-older");
   });
 
   it("releases a closed tile's group: turn stopped, loop forgotten, a later use builds afresh", async () => {

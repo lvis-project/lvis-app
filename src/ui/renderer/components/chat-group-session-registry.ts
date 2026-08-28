@@ -126,6 +126,18 @@ export interface TileSession {
  * streamed. Subscribers here are woken by group id, so a tile's own churn stays
  * inside that tile.
  */
+/**
+ * The tile already holding `sessionId`, if any. A conversation is opened in
+ * one tile at a time: two loops on one session would each flush their own
+ * history to the same file. Callers focus the holder instead of loading again.
+ */
+export function tileHoldingSession(
+  tiles: readonly TileSession[],
+  sessionId: string,
+): TileSession | undefined {
+  return tiles.find((tile) => tile.sessionId === sessionId);
+}
+
 export class ChatGroupSessionRegistry {
   /** The newest handle a tile published — where every call is dispatched. */
   private readonly latest = new Map<string, ChatGroupSessionHandle>();

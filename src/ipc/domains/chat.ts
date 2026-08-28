@@ -73,6 +73,9 @@ import type { ConversationSurfaceRuntime } from "../../engine/conversation-surfa
 import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
+
+/** Refusal: the session named is already open in another tile of this window. */
+const SESSION_OPEN_IN_OTHER_GROUP = "session-open-in-other-group";
 const log = createLogger("chat");
 const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
 const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
@@ -683,6 +686,20 @@ export function registerChatHandlers(deps: IpcDeps): void {
     unsubscribeStream: () => void;
   }
   const groupContexts = new Map<string, ChatGroupContext>();
+  /** Window-scoped "main active" state is the primary tile's to write. */
+  const isPrimaryGroup = (group: ChatGroupContext): boolean =>
+    group.deps.chatGroupId === undefined || group.deps.chatGroupId === MAIN_CHAT_GROUP_ID;
+  /**
+   * A session is open in one tile at a time. Two loops on one session id
+   * would each flush their own history to the same file, and the turn that
+   * settled last would erase the other tile's.
+   */
+  const sessionOpenInOtherGroup = (sessionId: string, group: ChatGroupContext): boolean => {
+    for (const other of groupContexts.values()) {
+      if (other !== group && other.loop.getSessionId() === sessionId) return true;
+    }
+    return false;
+  };
   const chatGroupContext = (chatGroupId: string): ChatGroupContext => {
     const cached = groupContexts.get(chatGroupId);
     if (cached) return cached;
@@ -1052,7 +1069,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
           ...(project.projectName ? { projectName: project.projectName } : {}),
         });
       }
-      await memoryManager.markMainActiveFresh();
+      if (isPrimaryGroup(group)) await memoryManager.markMainActiveFresh();
       return { ok: true as const };
     });
     return mutation ?? { ok: false as const, error: STREAMING_ACTIVE };
@@ -1110,9 +1127,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
     const group = groupOf(chatGroupId);
     const conversationLoop = group.loop;
+    if (sessionOpenInOtherGroup(sessionId, group)) {
+      return {
+        ok: false, compacted: false, compactedAt: null, removedMessageCount: 0,
+        error: SESSION_OPEN_IN_OTHER_GROUP,
+      };
+    }
     const mutation = group.turns.trackSessionMutation(async () => {
       const result = conversationLoop.resetAndResume(sessionId);
-      if (result.ok && conversationLoop.getSessionKind() === "main") {
+      if (result.ok && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(sessionId).catch((err: unknown) => {
           log.warn("session-resume markMainActiveResume failed: %s", (err as Error).message);
         });
@@ -1229,7 +1252,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         ...(currentMeta?.summaryPreamble ? { summaryPreamble: currentMeta.summaryPreamble } : {}),
       });
       const loaded = conversationLoop.loadSession(newId);
-      if (loaded && conversationLoop.getSessionKind() === "main") {
+      if (loaded && conversationLoop.getSessionKind() === "main" && isPrimaryGroup(group)) {
         await memoryManager.markMainActiveResume(newId).catch((err: unknown) => {
           log.warn("chat:fork markMainActiveResume failed: %s", (err as Error).message);
         });

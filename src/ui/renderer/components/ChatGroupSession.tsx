@@ -12,6 +12,7 @@ import { useChatStatusIndicators } from "../hooks/use-chat-status-indicators.js"
 import { useContextBudget } from "../hooks/use-context-budget.js";
 import { useCostEstimate } from "../hooks/use-cost-estimate.js";
 import { useCurrentSession } from "../hooks/use-sessions.js";
+import { MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 import { useSendMessage } from "../hooks/use-send-message.js";
 import type { useStatusBar } from "../hooks/use-status-bar.js";
 import { useWorkflowTools } from "../hooks/use-workflow-tools.js";
@@ -154,6 +155,14 @@ export function ChatGroupSession({
   const { t } = useTranslation();
 
   const api = useMemo(() => chatGroupApi(windowApi, chatGroupId), [windowApi, chatGroupId]);
+  // Stable identity: the hook re-hydrates when this changes, and the default
+  // (unscoped) project is no project at all.
+  const freshTileProject = useMemo(
+    () => (env.activeProject && !env.activeProject.isDefault
+      ? { projectRoot: env.activeProject.projectRoot, projectName: env.activeProject.projectName }
+      : undefined),
+    [env.activeProject],
+  );
 
   const {
     askQuestions, subAgentSpawns, loadedSkills,
@@ -197,6 +206,8 @@ export function ChatGroupSession({
     onLoadedSession: resetForNewSession,
     restoreSubAgents: restoreSubAgentSpawns,
     onSessionsChanged: env.refreshSessions,
+    resumeWindowActiveSession: chatGroupId === MAIN_CHAT_GROUP_ID,
+    freshProject: freshTileProject,
   });
 
   // A composer draft belongs to the conversation it was typed into. Switching

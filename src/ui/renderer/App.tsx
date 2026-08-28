@@ -14,7 +14,7 @@ import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
-import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions } from "./components/chat-group-session-registry.js";
+import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession } from "./components/chat-group-session-registry.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
 // each (each renders nothing while no card occupies its slot).
@@ -274,9 +274,18 @@ export function App() {
     }
   }, [api]);
 
+  // A conversation open in another tile is brought forward, not loaded a
+  // second time — see `tileHoldingSession`.
+  const focusTileHolding = useCallback((sessionId: string): boolean => {
+    const holder = tileHoldingSession(tileSessions, sessionId);
+    if (!holder || holder.chatGroupId === chatGroups.focusedId) return false;
+    chatGroups.focus(holder.chatGroupId);
+    return true;
+  }, [tileSessions, chatGroups]);
+
   const handleLoadSessionAndRefresh = useCallback(
-    (sessionId: string) => focusedSession.loadSession(sessionId),
-    [focusedSession],
+    async (sessionId: string) => focusTileHolding(sessionId) || focusedSession.loadSession(sessionId),
+    [focusedSession, focusTileHolding],
   );
 
   const handleImportAndLoad = useCallback(async () => {
@@ -312,6 +321,11 @@ export function App() {
     sessionId: string,
     target: DropTarget,
   ) => {
+    const holder = tileHoldingSession(tileSessions, sessionId);
+    if (holder) {
+      chatGroups.focus(holder.chatGroupId);
+      return;
+    }
     if (target === "center") {
       chatGroups.focus(targetGroupId);
       void chatGroupSessions.read(targetGroupId)?.loadSession(sessionId);
@@ -321,7 +335,7 @@ export function App() {
     // null is the ceiling: four tiles already. Nothing to say — the frame
     // stops offering edges once `canSplit` is false.
     if (created) setPendingSessionDrop({ chatGroupId: created, sessionId });
-  }, [chatGroups, chatGroupSessions]);
+  }, [chatGroups, chatGroupSessions, tileSessions]);
 
   useEffect(() => {
     if (!pendingSessionDrop) return;
@@ -591,6 +605,7 @@ export function App() {
       }
       try {
         setActiveView("home");
+        if (focusTileHolding(sessionId)) return true;
         return await focusedSession.loadSession(sessionId);
       } catch (err) {
         console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
@@ -952,6 +967,7 @@ export function App() {
     attention: { focusedChatGroupId: chatGroups.focusedId, conversationVisible: activeView === "home" },
     isUnread: conversationActions.isUnread,
     setUnread: conversationActions.onSetUnread,
+    onTurnsEnded: refreshSessions,
   });
 
   // The work panel is per-GROUP state now (each conversation carries its own),

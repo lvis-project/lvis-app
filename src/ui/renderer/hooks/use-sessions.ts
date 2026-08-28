@@ -82,6 +82,21 @@ export interface CurrentSessionDeps {
    * sidebar has to learn about it — but the LIST is not this hook's to hold.
    */
   onSessionsChanged?: () => void | Promise<void>;
+  /**
+   * Whether this tile is the one the window's "main active" state addresses.
+   * Only the primary tile resumes that conversation on mount; any other tile
+   * starts on its own loop's fresh session. The state is window-scoped, so a
+   * second tile resuming it would hold the SAME session id as the primary —
+   * two loops flushing their own history to one file, last turn wins.
+   */
+  resumeWindowActiveSession?: boolean;
+  /**
+   * The project a non-primary tile's fresh conversation is created under —
+   * the window's active one. The sidebar files a conversation by its
+   * project, so a tile that started unscoped would show up in the plain
+   * "chats" tab while the user is looking at the project's group.
+   */
+  freshProject?: { projectRoot?: string; projectName?: string };
 }
 
 /**
@@ -100,6 +115,8 @@ export interface CurrentSessionDeps {
  */
 export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
   const { applyInitialSession, onLoadedSession, restoreSubAgents, onSessionsChanged } = deps;
+  const resumeWindowActiveSession = deps.resumeWindowActiveSession ?? true;
+  const { freshProject } = deps;
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [currentSessionKind, setCurrentSessionKind] = useState<"main" | "routine">("main");
   const [currentSessionTitle, setCurrentSessionTitle] = useState<string | undefined>(undefined);
@@ -120,8 +137,14 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
 
   const hydrateInitialSession = useCallback(async () => {
     const token = ++sessionReadTokenRef.current;
-    const applyFreshMain = async (current: Awaited<ReturnType<LvisApi["chatGetHistory"]>>) => {
-      if ((current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
+    const applyFreshMain = async (
+      current: Awaited<ReturnType<LvisApi["chatGetHistory"]>>,
+      project?: { projectRoot?: string; projectName?: string },
+    ) => {
+      // A loop already on an empty main session is the fresh state — unless
+      // the conversation has to be created under a project, which only
+      // chatNew records.
+      if (!project && (current.sessionKind ?? "main") === "main" && current.messages.length === 0) {
         setCurrentSessionId(current.sessionId);
         setCurrentSessionKind("main");
         setCurrentSessionTitle(undefined);
@@ -129,7 +152,7 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
         applyInitialSession?.([]);
         return;
       }
-      await api.chatNew();
+      await api.chatNew(project);
       if (token !== sessionReadTokenRef.current) return;
       const fresh = await api.chatGetHistory();
       if (token !== sessionReadTokenRef.current) return;
@@ -146,6 +169,10 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       // Hydration is also the window's first chance to fill its list.
       await onSessionsChanged?.();
       if (token !== sessionReadTokenRef.current) return;
+      if (!resumeWindowActiveSession) {
+        await applyFreshMain(h, freshProject);
+        return;
+      }
       const activeState = await api.chatMainActiveState();
       if (token !== sessionReadTokenRef.current) return;
       if (!activeState || activeState.mainActiveMode === "fresh" || !activeState.mainActiveSessionId) {
@@ -185,7 +212,7 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
       restoreSubAgents?.(persisted.restoredSubAgents ?? []);
       applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
-  }, [api, applyInitialSession, restoreSubAgents, onSessionsChanged]);
+  }, [api, applyInitialSession, restoreSubAgents, onSessionsChanged, resumeWindowActiveSession, freshProject]);
 
   useEffect(() => { void hydrateInitialSession(); }, [hydrateInitialSession]);
 
@@ -294,24 +321,33 @@ export function turnsEndedUnseen(
   current: readonly TileSession[],
   attention: Attention,
 ): string[] {
-  const before = new Map(previous.map((tile) => [tile.chatGroupId, tile]));
-  const now = new Map(current.map((tile) => [tile.chatGroupId, tile]));
-  // "Looking" is a property of the conversation, not the tile: the same session
-  // can sit in two tiles at once (split clones the focused one), and the user
-  // sees its turn end through whichever tile is focused.
+  // "Looking" is a property of the conversation, not the tile, and the user
+  // sees its turn end through the focused tile.
   const watched = attention.conversationVisible
-    ? now.get(attention.focusedChatGroupId)?.sessionId
+    ? current.find((tile) => tile.chatGroupId === attention.focusedChatGroupId)?.sessionId
     : undefined;
-  const unseen: string[] = [];
-  for (const [chatGroupId, was] of before) {
+  return turnsEnded(previous, current).filter((sessionId) => sessionId !== watched);
+}
+
+/**
+ * The conversations whose turn ended between two readings of the tiles,
+ * whether or not anyone was looking. A tile that left the canvas mid-turn
+ * (closed, or collapsed by chat mode) took the turn with it, and one that
+ * moved to another conversation no longer speaks for the turn that ended.
+ */
+export function turnsEnded(
+  previous: readonly TileSession[],
+  current: readonly TileSession[],
+): string[] {
+  const now = new Map(current.map((tile) => [tile.chatGroupId, tile]));
+  const ended: string[] = [];
+  for (const was of previous) {
     if (!was.streaming || !was.sessionId) continue;
-    const tile = now.get(chatGroupId);
-    // A tile that left the canvas mid-turn (closed, or collapsed by chat mode)
-    // took the user's view of that turn with it; nothing will report its end.
+    const tile = now.get(was.chatGroupId);
     if (tile && (tile.streaming || tile.sessionId !== was.sessionId)) continue;
-    if (was.sessionId !== watched && !unseen.includes(was.sessionId)) unseen.push(was.sessionId);
+    if (!ended.includes(was.sessionId)) ended.push(was.sessionId);
   }
-  return unseen;
+  return ended;
 }
 
 /**
@@ -329,6 +365,12 @@ export function useTurnAttention(input: {
   attention: Attention;
   isUnread: (sessionId: string) => boolean;
   setUnread: (sessionId: string, unread: boolean) => void | Promise<void>;
+  /**
+   * Every turn end, seen or not. The window's conversation list is read, not
+   * pushed, and a turn is what gives a fresh tile's session a file and a
+   * title — without this the list learns about it only by chance.
+   */
+  onTurnsEnded?: (sessionIds: readonly string[]) => void | Promise<void>;
 }): void {
   const { tiles, attention } = input;
   const { focusedChatGroupId, conversationVisible } = attention;
@@ -339,6 +381,8 @@ export function useTurnAttention(input: {
   useEffect(() => {
     const previous = previousTiles.current;
     previousTiles.current = tiles;
+    const ended = turnsEnded(previous, tiles);
+    if (ended.length > 0) void latest.current.onTurnsEnded?.(ended);
     for (const sessionId of turnsEndedUnseen(previous, tiles, latest.current.attention)) {
       if (!latest.current.isUnread(sessionId)) void latest.current.setUnread(sessionId, true);
     }

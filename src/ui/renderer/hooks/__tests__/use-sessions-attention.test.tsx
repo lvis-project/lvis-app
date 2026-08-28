@@ -1,7 +1,9 @@
-import { renderHook } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { TileSession } from "../../components/chat-group-session-registry.js";
-import { turnsEndedUnseen, useTurnAttention } from "../use-sessions.js";
+import { turnsEnded, turnsEndedUnseen, useCurrentSession, useTurnAttention } from "../use-sessions.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import type { LvisApi } from "../../types.js";
 
 const tile = (chatGroupId: string, sessionId: string, streaming: boolean): TileSession =>
   ({ chatGroupId, sessionId, streaming });
@@ -111,5 +113,79 @@ describe("useTurnAttention", () => {
     rerender({ tiles, focused: "main", visible: false });
     rerender({ tiles, focused: "main", visible: true });
     expect(setUnread).toHaveBeenLastCalledWith("s-1", false);
+  });
+});
+
+describe("useCurrentSession — what a tile holds on mount", () => {
+  const resumeState = {
+    mainActiveSessionId: "main-active",
+    mainActiveMode: "resume" as const,
+    updatedAt: new Date().toISOString(),
+  };
+
+  it("the primary tile resumes the window's main-active conversation", async () => {
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-fresh", messages: [] },
+      historyBySession: { "main-active": { messages: [{ role: "user", content: "hi" }] } },
+    });
+    const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("main-active"));
+    expect(api.chatSessionResume).toHaveBeenCalledWith("main-active");
+  });
+
+  it("a tile under a project creates its fresh conversation there, so the sidebar files it with the project", async () => {
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-fresh", messages: [] },
+    });
+    const project = { projectRoot: "/work/lvis", projectName: "lvis" };
+    const { result } = renderHook(() =>
+      useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, freshProject: project }));
+    await waitFor(() => expect(api.chatNew).toHaveBeenCalledWith(project));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("loop-fresh"));
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+  });
+
+  it("any other tile starts on its own loop's session and never touches the window's active state", async () => {
+    const { api } = makeMockLvisApi({
+      mainActiveState: resumeState,
+      history: { sessionId: "loop-fresh", messages: [] },
+      historyBySession: { "main-active": { messages: [{ role: "user", content: "hi" }] } },
+    });
+    const { result } = renderHook(() =>
+      useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false }));
+    await waitFor(() => expect(result.current.currentSessionId).toBe("loop-fresh"));
+    expect(api.chatMainActiveState).not.toHaveBeenCalled();
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+    // No project to file it under: the loop's own empty session is the fresh state.
+    expect(api.chatNew).not.toHaveBeenCalled();
+  });
+});
+
+describe("turn ends refresh the window's list, seen or not", () => {
+  const tile = (chatGroupId: string, sessionId: string, streaming: boolean): TileSession =>
+    ({ chatGroupId, sessionId, streaming });
+
+  it("turnsEnded names every conversation whose tile stopped streaming", () => {
+    const before = [tile("main", "s-1", true), tile("group-2", "s-2", true), tile("group-3", "s-3", false)];
+    const after = [tile("main", "s-1", false), tile("group-2", "s-2", true), tile("group-3", "s-3", false)];
+    expect(turnsEnded(before, after)).toEqual(["s-1"]);
+    // A tile that moved on mid-turn no longer speaks for the turn that ended.
+    expect(turnsEnded(before, [tile("main", "s-9", false), tile("group-2", "s-2", true)])).toEqual([]);
+  });
+
+  it("reports the end of a turn the user watched, which is not marked unread", () => {
+    const onTurnsEnded = vi.fn();
+    const setUnread = vi.fn();
+    const attention = { focusedChatGroupId: "group-2", conversationVisible: true };
+    const { rerender } = renderHook(
+      ({ tiles }: { tiles: TileSession[] }) =>
+        useTurnAttention({ tiles, attention, isUnread: () => false, setUnread, onTurnsEnded }),
+      { initialProps: { tiles: [tile("main", "s-1", false), tile("group-2", "s-2", true)] } },
+    );
+    rerender({ tiles: [tile("main", "s-1", false), tile("group-2", "s-2", false)] });
+    expect(onTurnsEnded).toHaveBeenCalledWith(["s-2"]);
+    expect(setUnread).not.toHaveBeenCalled();
   });
 });

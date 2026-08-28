@@ -8,6 +8,7 @@ import {
   useRegisterChatGroupSession,
   useTileSessions,
   type ChatGroupSessionHandle,
+  tileHoldingSession,
 } from "../chat-group-session-registry.js";
 
 // `entries` identity is the store's change signal — useChatState owns it as
@@ -173,5 +174,16 @@ describe("tile sessions — every tile at once", () => {
     expect(result.current).toEqual([{ chatGroupId: "group-2", sessionId: "s-2", streaming: true }]);
     act(() => registry.retract("group-2"));
     expect(result.current).toEqual([]);
+  });
+});
+
+describe("tileHoldingSession", () => {
+  it("names the tile already holding a conversation, and nothing when none does", () => {
+    const tiles = [
+      { chatGroupId: "main", sessionId: "s-1", streaming: false },
+      { chatGroupId: "group-2", sessionId: "s-2", streaming: true },
+    ];
+    expect(tileHoldingSession(tiles, "s-2")?.chatGroupId).toBe("group-2");
+    expect(tileHoldingSession(tiles, "s-9")).toBeUndefined();
   });
 });
