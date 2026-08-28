@@ -23,6 +23,7 @@ import {
 } from "../../../components/ui/dropdown-menu.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_RESERVE } from "../../../shared/side-panel.js";
+import { ToolActivityBody, toolActivityTotal, type ActionPanelActivityState } from "./ActionPanel.js";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
@@ -503,14 +504,42 @@ function LauncherItems({
  * vertical, centered picker of the openable content kinds. Shares the item list
  * with the tab-bar "+" dropdown via `LauncherItems`.
  */
-function WorkspaceLauncher({ onOpen }: { onOpen: (kind: WorkspaceTabKind) => void }) {
+function WorkspaceLauncher({
+  onOpen,
+  activity,
+  onOpenActivityItem,
+  onOpenActivityItemPinned,
+  onOpenActivityItemInSystemApp,
+}: {
+  onOpen: (kind: WorkspaceTabKind) => void;
+} & Pick<ChatSidePanelProps, "activity" | "onOpenActivityItem" | "onOpenActivityItemPinned" | "onOpenActivityItemInSystemApp">) {
   const { t } = useTranslation();
+  // The empty panel is where the conversation's tool activity reads best: no
+  // tab is competing for the space, and the items there open the very tabs
+  // the picker below offers.
+  const showActivity = activity !== undefined && toolActivityTotal(activity) > 0;
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col items-center justify-center overflow-auto p-6"
+      className={cn(
+        "flex h-full min-h-0 w-full flex-col overflow-auto p-6",
+        showActivity ? "gap-4" : "items-center justify-center",
+      )}
       data-testid="chat-side-panel-launcher"
     >
-      <div className="w-full max-w-xs space-y-3">
+      {showActivity ? (
+        <div
+          className="flex max-h-[50%] min-h-0 w-full shrink-0 flex-col overflow-hidden"
+          data-testid="chat-side-panel-launcher-activity"
+        >
+          <ToolActivityBody
+            activity={activity}
+            onOpenItem={onOpenActivityItem}
+            onOpenItemPinned={onOpenActivityItemPinned}
+            onOpenItemInSystemApp={onOpenActivityItemInSystemApp}
+          />
+        </div>
+      ) : null}
+      <div className={cn("w-full max-w-xs space-y-3", showActivity && "self-center")}>
         <div className="flex flex-col items-center gap-1 text-center">
           <LayoutGrid className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
           <div className="text-sm font-semibold">{t("chatPreviewRail.launcher.title")}</div>
@@ -620,6 +649,16 @@ export interface ChatSidePanelProps {
    * overflowing into the chat column.
    */
   resizeElementRef?: { current: HTMLElement | null };
+  /** The card's own close. It stands beside the group header, over it when floating, so this is the way out. */
+  onClose: () => void;
+  /**
+   * What this conversation did — the empty launcher shows it above the tab
+   * picker, so an open panel with nothing in it still says something.
+   */
+  activity?: ActionPanelActivityState;
+  onOpenActivityItem?: (target: string, web: boolean) => void;
+  onOpenActivityItemPinned?: (target: string, web: boolean) => void;
+  onOpenActivityItemInSystemApp?: (target: string, web: boolean) => void;
   className?: string;
 }
 
@@ -638,6 +677,11 @@ export function ChatSidePanel({
   onWidthChange,
   onWidthCommit,
   resizeElementRef,
+  onClose,
+  activity,
+  onOpenActivityItem,
+  onOpenActivityItemPinned,
+  onOpenActivityItemInSystemApp,
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
@@ -868,6 +912,21 @@ export function ChatSidePanel({
           </div>
           <div className="flex shrink-0 items-center gap-1 border-l pl-2" data-testid="chat-side-panel-tab-actions">
             <WorkspaceLauncherMenu onOpen={addTab} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  data-testid="chat-side-panel-close"
+                  aria-label={t("chatPreviewRail.close")}
+                  onClick={onClose}
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("chatPreviewRail.close")}</TooltipContent>
+            </Tooltip>
           </div>
     </div>
   );
@@ -905,7 +964,13 @@ export function ChatSidePanel({
 
         <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab?.kind} data-active-tab-mode={activeTab?.mode}>
           {activeTab == null ? (
-            <WorkspaceLauncher onOpen={addTab} />
+            <WorkspaceLauncher
+              onOpen={addTab}
+              activity={activity}
+              onOpenActivityItem={onOpenActivityItem}
+              onOpenActivityItemPinned={onOpenActivityItemPinned}
+              onOpenActivityItemInSystemApp={onOpenActivityItemInSystemApp}
+            />
           ) : activeTab.content ? (
             <ContentTabView api={api} sessionId={sessionId} tab={activeTab} targetById={targetById} />
           ) : activeTab.kind === "file-browser" ? (

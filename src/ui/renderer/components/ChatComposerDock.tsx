@@ -203,7 +203,11 @@ export function ChatComposerDock({
   // room for the no-API-key transcript card; that card is gone (its affordance
   // is now the zero-height `ComposerApiKeyChip` in the strip above), so an empty
   // conversation always centers the composer the same way, key or no key.
-  const centeredMarginClass = centered ? "mb-[clamp(9rem,32vh,20rem)]" : "mb-0";
+  // The lift is a share of the CHAT COLUMN's height (cqh — the column is a size
+  // container), not of the viewport: a tile that is half the window tall must
+  // centre its composer in its own half, not at the window's centre line. The
+  // floor is low enough that a half-height tile's share is not clamped away.
+  const centeredMarginClass = centered ? "mb-[clamp(4rem,32cqh,20rem)]" : "mb-0";
 
   // Stable identity, not an inline arrow. `allocateN` is a dependency of the mention
   // hook's accept callback, which is a dependency of the composer's memoized keydown

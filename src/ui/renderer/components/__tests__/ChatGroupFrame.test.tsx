@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, createEvent, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
-import { ChatGroupFrame, ChatGroupGutter, buildChatGroupActions, chatGroupApi, useChatGroups } from "../ChatGroupFrame.js";
+import { ChatGroupFrame, ChatGroupGutter, buildChatGroupActions, chatGroupApi, useChatGroupPanelSlot, useChatGroups, type ChatGroupPanelSlot } from "../ChatGroupFrame.js";
 import { layoutBoxes, layoutGutters, leaf, resizeGutter, splitLeaf, type ChatGroupGutter as ChatGroupGutterShape } from "../chat-group-tree.js";
 import { CHAT_SESSION_DRAG_TYPE } from "../chat-group-drop.js";
 import type { LvisApi } from "../../types.js";
@@ -86,6 +86,64 @@ describe("ChatGroupFrame", () => {
     expect(onTogglePanel).toHaveBeenCalledTimes(1);
   });
 
+  it("drops a two-way split choice — beside or under — instead of guessing from the tile's shape", () => {
+    const onSplit = vi.fn();
+    const splitFits = vi.fn((axis: "row" | "column") => axis === "row");
+    render(frame({ onSplit, splitFits }));
+    fireEvent.click(screen.getByTestId("chat-group-split"));
+    expect(onSplit).not.toHaveBeenCalled();
+    const choice = screen.getByTestId("chat-group-split-choice");
+    // A direction the floors cannot afford is offered disabled, not hidden.
+    expect((screen.getByTestId("chat-group-split-column") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("chat-group-split-row"));
+    expect(onSplit).toHaveBeenCalledWith("row");
+    expect(choice.isConnected).toBe(false);
+  });
+
+  it("says why when neither direction fits, instead of offering two dead buttons", () => {
+    render(frame({ onSplit: vi.fn(), splitFits: () => false }));
+    fireEvent.click(screen.getByTestId("chat-group-split"));
+    const reason = screen.getByTestId("chat-group-split-no-room").textContent ?? "";
+    expect(reason.length).toBeGreaterThan(0);
+    expect(reason).not.toBe("chatGroup.splitNoRoom");
+    expect(screen.queryByTestId("chat-group-split-row")).toBeNull();
+    expect(screen.queryByTestId("chat-group-split-column")).toBeNull();
+  });
+
+  it("publishes no panel slot outside a frame, and inside one before the slot element commits", () => {
+    const seen: Array<ChatGroupPanelSlot | null> = [];
+    function Probe() {
+      seen.push(useChatGroupPanelSlot());
+      return null;
+    }
+    render(<Probe />);
+    expect(seen).toEqual([null]);
+
+    seen.length = 0;
+    render(
+      <TooltipProvider>
+        <ChatGroupFrame title="a" actions={[]} panelOpen={false} onTogglePanel={vi.fn()}>
+          <Probe />
+        </ChatGroupFrame>
+      </TooltipProvider>,
+    );
+    // The first render already says "inside a frame" — an object, not null —
+    // so a view can hold its panel back until the slot element is there.
+    expect(seen[0]).toEqual({ panel: null, tile: null });
+    expect(seen[seen.length - 1]!.panel).toBe(screen.getByTestId("chat-group-panel-slot"));
+  });
+
+  it("lends the work panel a slot beside the conversation column, tall as the tile", () => {
+    render(frame());
+    const slot = screen.getByTestId("chat-group-panel-slot");
+    const header = screen.getByTestId("chat-group-header");
+    // The slot is the tile's own child, a sibling of the column that holds the
+    // header — not a descendant of it — so a panel there stands beside the
+    // header rather than under it.
+    expect(slot.parentElement).toBe(header.parentElement!.parentElement);
+    expect(slot.contains(header)).toBe(false);
+  });
+
   it("does not render a conversation list of its own — that is the window's sidebar", () => {
     render(frame());
     expect(screen.queryByTestId("chat-group-sidebar")).toBeNull();
@@ -137,6 +195,31 @@ describe("useChatGroups", () => {
     const { result } = renderHook(() => useChatGroups());
     expect(result.current.groups.map((group) => group.id)).toEqual(["main"]);
     expect(result.current.focusedId).toBe("main");
+  });
+
+  it("halves a tile on the axis the user chose, the new tile trailing", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "column"));
+    expect(result.current.tree).toMatchObject({ kind: "split", axis: "column" });
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2"]);
+    expect(result.current.focusedId).toBe("group-2");
+    act(() => result.current.split("group-2", "row"));
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2", "group-3"]);
+  });
+
+  it("says which split directions the floors still afford", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    // 1000 wide: two 500px columns clear the 448 floor; 500 tall: two 250px rows clear 240.
+    expect(result.current.splitFits("main", "row", { width: 1000, height: 500 })).toBe(true);
+    expect(result.current.splitFits("main", "column", { width: 1000, height: 500 })).toBe(true);
+    // 800 wide: 400px columns are under the floor; 400 tall: 200px rows are too.
+    expect(result.current.splitFits("main", "row", { width: 800, height: 400 })).toBe(false);
+    expect(result.current.splitFits("main", "column", { width: 800, height: 400 })).toBe(false);
+    // Unmeasured: nothing to check against.
+    expect(result.current.splitFits("main", "row", undefined)).toBe(true);
+    // After a side-by-side split each half is 500 of 1000 — a second split beside no longer fits.
+    act(() => result.current.split("main", "row"));
+    expect(result.current.splitFits("main", "row", { width: 1000, height: 500 })).toBe(false);
   });
 
   it("tracks the work panel per group rather than per window", () => {
@@ -388,6 +471,19 @@ describe("ChatGroupFrame drop gesture", () => {
 
     drag("dragOver", tile, carriedSession, { x: 795, y: 300 });
     expect(tile.getAttribute("data-drop-target")).toBe("center");
+
+    drag("drop", tile, carriedSession, { x: 795, y: 300 });
+    expect(onSessionDrop).toHaveBeenCalledWith("session-7", "center");
+  });
+
+  it("demotes an edge drop the floors cannot afford to the centre, the same rule the split control states", () => {
+    const onSessionDrop = vi.fn();
+    const tile = tileWithRect({ onSessionDrop, canSplit: true, splitFits: (axis) => axis === "column" });
+
+    drag("dragOver", tile, carriedSession, { x: 795, y: 300 });
+    expect(tile.getAttribute("data-drop-target")).toBe("center");
+    drag("dragOver", tile, carriedSession, { x: 400, y: 5 });
+    expect(tile.getAttribute("data-drop-target")).toBe("top");
 
     drag("drop", tile, carriedSession, { x: 795, y: 300 });
     expect(onSessionDrop).toHaveBeenCalledWith("session-7", "center");

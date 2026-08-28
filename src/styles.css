@@ -1759,6 +1759,21 @@
   html {
     font-size: calc(1rem * var(--lvis-font-size-scale, 0.875));
   }
+  /* Window-chrome geometry — px, never rem. The title band, the sidebar's
+   * cluster strip and the chat group headers sit on the line of the OS
+   * traffic lights (`trafficLightPosition` in main/window-chrome.ts, drawn in
+   * device px), so their heights, control boxes and gaps must not follow the
+   * type scale above: a smaller default font would otherwise drop every
+   * chrome row a few px under the lights. Band 36 centres a 28px control and
+   * the ~12px lights (y 12) on the same y=18. */
+  :root {
+    --chrome-band-height: 36px;
+    --chrome-control-height: 28px;
+    --chrome-icon-button: 24px;
+    --chrome-gap: 8px;
+    --chrome-gap-tight: 4px;
+    --chrome-gap-hair: 2px;
+  }
   body {
     @apply bg-background text-foreground;
     /* SoT: src/shared/host-font-stack.ts (HOST_FONT_STACK) — mirrored verbatim

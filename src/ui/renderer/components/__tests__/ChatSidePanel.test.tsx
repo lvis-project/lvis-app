@@ -9,6 +9,8 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
 import { ChatGroupFrame } from "../ChatGroupFrame.js";
+import { emptyActionPanelActivity } from "../../../../../test/renderer/helpers.js";
+import type { ActionPanelActivityState } from "../ActionPanel.js";
 import { useWorkspaceTabs } from "../../preview/workspace-tabs.js";
 import type { SubAgentSpawn } from "../../subagents/types.js";
 import type {
@@ -84,6 +86,9 @@ function HarnessPanel({
   initialSelectedId,
   panelMounted = true,
   subAgentSpawns = [],
+  onClose = vi.fn(),
+  activity,
+  onOpenActivityItem,
 }: {
   api: LvisApi;
   sessionId?: string;
@@ -92,6 +97,9 @@ function HarnessPanel({
   initialSelectedId: string | null;
   panelMounted?: boolean;
   subAgentSpawns?: SubAgentSpawn[];
+  onClose?: () => void;
+  activity?: ActionPanelActivityState;
+  onOpenActivityItem?: (target: string, web: boolean) => void;
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId);
   const workspaceTabs = useWorkspaceTabs();
@@ -109,6 +117,9 @@ function HarnessPanel({
       width={448}
       onWidthChange={vi.fn()}
       onWidthCommit={vi.fn()}
+      onClose={onClose}
+      activity={activity}
+      onOpenActivityItem={onOpenActivityItem}
     />
   );
 }
@@ -1622,10 +1633,11 @@ describe("ChatSidePanel", () => {
 });
 
 describe("ChatSidePanel inside a chat group", () => {
-  it("is a self-contained card: its tabs stay on it and the header keeps the only close", () => {
+  it("is a self-contained card: its tabs and its own close stay on it, not on the group header", () => {
+    const onClose = vi.fn();
     renderPanel(
       <ChatGroupFrame title="a" actions={[]} panelOpen={true} onTogglePanel={vi.fn()}>
-        <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />
+        <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} onClose={onClose} />
       </ChatGroupFrame>,
     );
     const panel = screen.getByTestId("chat-side-panel");
@@ -1634,7 +1646,40 @@ describe("ChatSidePanel inside a chat group", () => {
     expect(
       within(screen.getByTestId("chat-group-header")).queryByTestId("chat-side-panel-tab-strip"),
     ).toBeNull();
-    const actions = within(panel).getByTestId("chat-side-panel-tab-actions");
-    expect(within(actions).queryByLabelText(/닫기|close/i)).toBeNull();
+    // The card stands beside the group header (over it when floating), so
+    // the way out is the card's own close — the header's × closes the tile.
+    fireEvent.click(within(panel).getByTestId("chat-side-panel-close"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the conversation's tool activity on the empty launcher, and nothing when there is none", () => {
+    const onOpenActivityItem = vi.fn();
+    const activity = {
+      ...emptyActionPanelActivity(),
+      toolCallCount: 3,
+      fetchedPageCount: 1,
+      fetchedPages: [{ id: "url:1", label: "example.com", detail: "https://example.com/a", target: "https://example.com/a", status: "done" as const }],
+    };
+    const { unmount } = renderPanel(
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={[]}
+        files={[]}
+        initialSelectedId={null}
+        activity={activity}
+        onOpenActivityItem={onOpenActivityItem}
+      />,
+    );
+    const launcher = screen.getByTestId("chat-side-panel-launcher");
+    expect(within(launcher).getByTestId("chat-side-panel-launcher-activity")).toBeTruthy();
+    fireEvent.click(within(launcher).getByTestId("action-panel-activity-url:1"));
+    expect(onOpenActivityItem).toHaveBeenCalledWith("https://example.com/a", true);
+    unmount();
+
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} activity={emptyActionPanelActivity()} />,
+    );
+    expect(screen.queryByTestId("chat-side-panel-launcher-activity")).toBeNull();
   });
 });

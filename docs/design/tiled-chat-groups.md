@@ -81,14 +81,44 @@ nest. Once the layout nests at all, a flat list cannot describe it.
 
 The work panel is a raised card with the floating sidebar's insets and
 rounding at every size — one kind of overlay surface in the window — carrying
-its own tabs, so the group header stays the conversation's line: title, its
-actions, and the tile controls (panel, show-alone, close). A tile with room
-for the card beside a usable transcript (at least the card's reserve plus
-320px) docks it as a column that pushes the transcript; a narrower tile floats
-the same card over the transcript's right edge **inside the tile**, never a
-window-level sheet, the transcript keeping its layout underneath. The mode
-comes from the container hook's hysteresis verdict so a gutter dragged across
-the threshold does not flip it.
+its own tabs and its own close, so the group header stays the conversation's
+line: title, its actions, and the tile controls (panel, split, show-alone,
+close the tile). The card is as tall as the tile and stands beside the header,
+not under it: the frame lends it a slot that is the tile's own flex child, and
+the view portals the card there. So the header's × closes the conversation
+tile and the card's × closes the panel — two closes, each owning one thing. A
+tile with room for the card beside a usable transcript (at least the card's
+reserve plus 320px) docks it as a column that pushes the transcript; a
+narrower tile floats the same card over the transcript's right edge **inside
+the tile**, never a window-level sheet, the transcript keeping its layout
+underneath — and, floating, it covers the header row too, its own strip taking
+over. The mode comes from the container hook's hysteresis verdict so a gutter
+dragged across the threshold does not flip it.
+
+When the card has no tab open, its launcher shows the conversation's tool
+activity — the six counters and the items by category, the same body the
+header's tool-activity popover shows — so an empty panel still reports on the
+conversation, and its items open the very tabs the picker offers.
+
+Which way a tile is halved is the user's call: the header's split control
+drops two buttons — beside the chat, under it — rather than guessing from the
+tile's shape, and a direction whose halves would fall under the tile floors
+(448px wide, 240px tall) is offered disabled — with a one-line reason when
+neither fits — so the limit reads in the control instead of arriving as a
+rejection. Dropping a conversation on a tile's edge answers to the same floors:
+an edge that would not fit lands in the centre.
+
+The window's chrome rows — title band, sidebar cluster strip, group headers —
+take their heights, their lead clearance past the OS lights, and the insets
+that line the chat group's bottom edge up with the sidebar card's from px
+tokens (`--chrome-band-height` and kin in `styles.css`), never rem: those
+measurements sit on the OS traffic lights' line, which is drawn in device px,
+and the user's type scale must not move them off it. Glyph sizes inside the
+controls still follow the type scale.
+
+An empty tile lifts its composer by a share of the tile's own chat column
+(`cqh`), not of the window: a tile that is half the window tall centres in its
+own half.
 
 Once split, every tile can be closed — the primary included, whose loop main
 keeps and hands a blank conversation on release — and any tile can be shown

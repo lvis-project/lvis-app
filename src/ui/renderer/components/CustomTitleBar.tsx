@@ -172,7 +172,7 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
     return (
       <div
         data-testid="custom-titlebar-plain"
-        className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pr-3 text-foreground select-none"
+        className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap) border-b border-border/(--opacity-half) bg-background pr-[12px] text-foreground select-none"
         style={{ paddingLeft: `${Math.max(PLAIN_LEAD_PAD, leadClearance)}px` }}
       >
         {children}
@@ -187,10 +187,12 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
     // hosts the toolbar content with left padding (pl-20 ≈ 80px) so the first
     // control clears the traffic lights with no hover overlap.
     //
-    // The band is h-9 (36px). It is deliberately NOT taller than the composer's
+    // The band is 36px (`--chrome-band-height`, a px token: the lights are drawn
+    // in device px, so the band must not follow the type scale). It is
+    // deliberately NOT taller than the composer's
     // action row at the window's bottom edge: a window reads as top-heavy the
     // moment its title band outweighs its footer, and the band carries less
-    // than the footer does. h-9 also matches the chat group's own header, so
+    // than the footer does. It also matches the chat group's own header, so
     // every chrome row in the window is one height.
     //
     // 36px with items-center centers an h-7 (28px) control at cy=18, and the
@@ -200,7 +202,7 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
     return (
       <div
         data-testid="custom-titlebar-darwin"
-        className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pr-3 text-foreground select-none"
+        className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap) border-b border-border/(--opacity-half) bg-background pr-[12px] text-foreground select-none"
         style={{
           paddingLeft: `${Math.max(DARWIN_LEAD_PAD, leadClearance)}px`,
           // @ts-expect-error — Electron-specific CSS extension
@@ -218,7 +220,7 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
   return (
     <div
       data-testid="custom-titlebar"
-      className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background text-foreground select-none"
+      className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap) border-b border-border/(--opacity-half) bg-background text-foreground select-none"
       style={{
         paddingLeft: `${Math.max(PLAIN_LEAD_PAD, leadClearance)}px`,
         // @ts-expect-error — Electron-specific CSS extension
@@ -235,14 +237,14 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
           inherits the band's drag region, so dragging is preserved. */}
       {/* no-drag wrapper so buttons receive mouse events. The band vertically
           centers its content (items-center); the native window buttons must
-          still span the FULL band height (h-9) so their hover fill reaches the
+          still span the FULL band height so their hover fill reaches the
           band's top and bottom edges. `ml-auto` pins the cluster to the trailing
           corner directly — robust whether or not `children` are present. The
           main window passes a `flex-1` MainToolbar that eats the leading slack;
           without children, `ml-auto` still prevents the cluster from stranding
           flush-left. */}
       <div
-        className="ml-auto flex h-9 items-stretch"
+        className="ml-auto flex h-(--chrome-band-height) items-stretch"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "no-drag",
