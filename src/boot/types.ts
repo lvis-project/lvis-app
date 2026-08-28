@@ -121,6 +121,19 @@ export interface AppServices {
   /** Forgets a group's loop once its tile is gone, so the ceiling counts live tiles only. */
   releaseChatGroupLoop?: (chatGroupId: string) => void;
   /**
+   * The loop HOLDING `sessionId` right now, the primary included.
+   *
+   * A lookup, never a constructor: {@link resolveChatGroupLoop} would build
+   * the tile it was asked about, which is the opposite of what a surface
+   * asking "whose conversation is this?" means. `undefined` is a real answer —
+   * no open conversation holds that session — and callers must treat it as a
+   * mismatch rather than reaching for the primary loop.
+   *
+   * Optional for the same reason as the two above: fixtures that boot only the
+   * main loop never ask.
+   */
+  findLoopBySessionId?: (sessionId: string) => ConversationLoop | undefined;
+  /**
    * The tiled chat group this bundle is bound to. Set only on the per-group
    * bundle `chat.ts` derives for a non-primary tile; the bundle assembled at
    * boot has none and is the primary's.
