@@ -10,7 +10,7 @@ import { createHash, randomBytes as nodeRandomBytes } from "node:crypto";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
 import type { TailnetShareActorId } from "../main/tailnet-pairing-share-store.js";
 import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const SESSION_BYTES = 32;
 const DEFAULT_TTL_MS = 15 * 60 * 1_000;

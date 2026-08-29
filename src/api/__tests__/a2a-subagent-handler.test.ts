@@ -28,7 +28,7 @@ import {
   type A2AWireAuthorizer,
 } from "../a2a-subagent-handler.js";
 import { A2ATaskStore } from "../a2a-task-store.js";
-import { UUID_PATTERN } from "../../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../../shared/uuid.js";
 
 const HANDLER_ID = "profile-a";
 const TASK_ID = "sub-wire-task-1";

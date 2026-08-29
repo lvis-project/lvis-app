@@ -13,7 +13,7 @@ import {
   type AgentSendRuntime,
 } from "../agent-send.js";
 import { ToolRegistry } from "../registry.js";
-import { UUID_PATTERN } from "../../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../../shared/uuid.js";
 
 function success(parts: A2APart[], disposition: "parent" | "queued" | "mailbox" = "parent"):
 A2AAgentSendResult {

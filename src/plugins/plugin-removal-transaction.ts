@@ -12,7 +12,7 @@ import type { PluginRegistryEntry } from "./types.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import { pendingOwnedBackupPaths } from "./marketplace-update-recovery.js";
 import { isRecord } from "../shared/is-record.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const TRANSACTION_ROOT = "+transactions+";
 const REMOVAL_SUBDIR = "removals";

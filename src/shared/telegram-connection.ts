@@ -11,7 +11,7 @@
  * the open conversation is a separate, explicitly gestured owner action.
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
-import { UUID_PATTERN } from "./dlp-safe-id.js";
+import { UUID_PATTERN } from "./uuid.js";
 
 /** How long an unredeemed pairing code stays valid. */
 export const TELEGRAM_PAIRING_CODE_TTL_MS = 10 * 60 * 1_000;

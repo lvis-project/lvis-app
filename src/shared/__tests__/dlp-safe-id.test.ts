@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { maskSensitiveData } from "../dlp.js";
-import { createDlpSafeUuid, dlpSafeCandidate, isSafeStructuralId, UUID_PATTERN } from "../dlp-safe-id.js";
+import { createDlpSafeUuid, dlpSafeCandidate, isSafeStructuralId } from "../dlp-safe-id.js";
+import { UUID_PATTERN } from "../uuid.js";
 
 const SAFE_UUID = "abcdefab-cdef-4abc-8def-abcdefabcdef";
 // A valid v4 UUID whose serialized form carries a Luhn-valid 16-digit window
@@ -158,22 +159,5 @@ describe("isSafeStructuralId", () => {
   it("rejects an id the DLP scanner would mask", () => {
     expect(maskSensitiveData(UNSAFE_UUID).detections.length).toBeGreaterThan(0);
     expect(isSafeStructuralId(UNSAFE_UUID)).toBe(false);
-  });
-});
-
-describe("UUID_PATTERN", () => {
-  it("accepts every RFC 9562 version nibble, in either case", () => {
-    expect(UUID_PATTERN.test("abcdefab-cdef-4abc-8def-abcdefabcdef")).toBe(true); // v4
-    expect(UUID_PATTERN.test("018f2f7e-3b2a-7c3d-9e4f-0123456789ab")).toBe(true); // v7
-    expect(UUID_PATTERN.test("6ba7b810-9dad-11d1-80b4-00c04fd430c8")).toBe(true); // v1
-    expect(UUID_PATTERN.test("ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF")).toBe(true);
-  });
-
-  it("rejects non-hex, a version nibble outside 1-8 and a non-RFC variant", () => {
-    expect(UUID_PATTERN.test("zzzzzzzz-cdef-4abc-8def-abcdefabcdef")).toBe(false);
-    expect(UUID_PATTERN.test("abcdefab-cdef-0abc-8def-abcdefabcdef")).toBe(false);
-    expect(UUID_PATTERN.test("abcdefab-cdef-9abc-8def-abcdefabcdef")).toBe(false);
-    expect(UUID_PATTERN.test("abcdefab-cdef-4abc-cdef-abcdefabcdef")).toBe(false);
-    expect(UUID_PATTERN.test("abcdefab-cdef-4abc-8def-abcdefabcde")).toBe(false);
   });
 });

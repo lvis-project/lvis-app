@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "command-receipts.json";

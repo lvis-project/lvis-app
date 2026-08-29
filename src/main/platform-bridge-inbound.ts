@@ -18,7 +18,7 @@ import {
 import type { TailnetControllerReceiptStore } from "../api/tailnet-controller-receipt-store.js";
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
 import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 /** Mirrors the receipt store's own owner grammar so both agree on validity. */

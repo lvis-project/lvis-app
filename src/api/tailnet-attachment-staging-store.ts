@@ -15,7 +15,7 @@ import {
   subscriptionAttachmentByteLength,
   type SubscriptionPromptAttachment,
 } from "../main/subscription-attachment-input.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const DEFAULT_TTL_MS = 5 * 60_000;
 const DEFAULT_MAX_TOTAL_BYTES = MAX_SUBSCRIPTION_ATTACHMENT_BYTES * 2;

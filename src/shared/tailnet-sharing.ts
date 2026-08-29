@@ -8,7 +8,7 @@
  * never appear in a snapshot or change event.
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
-import { UUID_PATTERN } from "./dlp-safe-id.js";
+import { UUID_PATTERN } from "./uuid.js";
 
 export const TAILNET_INVITATION_DURATION_PRESETS = ["10m", "1h", "24h"] as const;
 export type TailnetInvitationDurationPreset = (typeof TAILNET_INVITATION_DURATION_PRESETS)[number];

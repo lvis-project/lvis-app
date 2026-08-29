@@ -56,7 +56,7 @@ import {
   SSE_RETRY_MS,
   sendJson as sendJsonResponse,
 } from "./http-server.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_SSE_MAX_LIFETIME_MS = 5 * 60_000;

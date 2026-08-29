@@ -28,7 +28,7 @@ import type {
   TailnetPairedShareGuard,
   TailnetPairingShareBinding,
 } from "../shared/chat-origin.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 function isPlatformBridgeActorOptions(
   value: unknown,

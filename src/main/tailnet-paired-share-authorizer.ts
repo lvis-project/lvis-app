@@ -17,7 +17,7 @@ import type {
   TailnetShareActorId,
   TailnetSharePermission,
 } from "./tailnet-pairing-share-store.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 export const TAILNET_PAIRED_SHARE_ACTOR_SECRET_NAME = "tailnet-paired-share-actor-v1.key";
 

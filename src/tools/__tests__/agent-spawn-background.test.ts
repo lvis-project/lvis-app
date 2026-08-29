@@ -9,7 +9,7 @@ import { A2A_PARENT_RECIPIENT } from "../../engine/a2a-agent-message-envelope.js
 import { A2AAgentMessageMailbox } from "../../engine/a2a-agent-message-mailbox.js";
 import { createAgentSpawnTool } from "../agent-spawn.js";
 import { createAgentSendTool } from "../agent-send.js";
-import { UUID_PATTERN } from "../../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../../shared/uuid.js";
 
 function parentContext() {
   return {

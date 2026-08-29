@@ -37,7 +37,7 @@ import {
   PARENT_ADJUDICATION_TIMEOUT_MS_MIN,
 } from "../shared/parent-adjudication-bounds.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const log = createLogger("permission-settings");
 

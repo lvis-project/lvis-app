@@ -45,7 +45,7 @@ import {
   type RationaleTicketStateRecord,
 } from "./rationale-ticket-lifecycle.js";
 import { isRecord } from "../../shared/is-record.js";
-import { UUID_PATTERN } from "../../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../../shared/uuid.js";
 
 function seal<T>(value: T, label: string): T {
   return cloneRationaleCanonicalJson(value, label) as T;

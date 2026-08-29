@@ -15,7 +15,7 @@ import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
-import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "pairing-share.json";

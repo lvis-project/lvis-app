@@ -17,7 +17,7 @@ import {
   subscriptionImageExtension,
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
-import { UUID_SOURCE } from "../shared/dlp-safe-id.js";
+import { UUID_SOURCE } from "../shared/uuid.js";
 
 const require = createRequire(import.meta.url);
 

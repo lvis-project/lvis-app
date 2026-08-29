@@ -200,7 +200,7 @@ describe("Marketplace E2E hostile-candidate containment", () => {
       actionClick,
     );
     const networkDisclosure = epAttendanceSpec.indexOf(
-      'dialog.getByTestId("plugin-install-network-access")',
+      "dialog.getByTestId(TEST_IDS.pluginInstallNetworkAccess)",
       consent,
     );
     const consentControl = epAttendanceSpec.indexOf(
