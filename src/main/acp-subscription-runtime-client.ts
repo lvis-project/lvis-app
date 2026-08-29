@@ -23,6 +23,7 @@ import {
   GROK_BUILD_REQUIRED_MINIMUM_VERSION,
   grokBuildGovernedAgentDefinitionPath,
 } from "./acp-subscription-runtime-config.js";
+import { isRecord } from "../shared/is-record.js";
 
 const PROBE_TIMEOUT_MS = 10_000;
 const ACP_REQUEST_TIMEOUT_MS = 15_000;
@@ -150,10 +151,6 @@ class AcpRpcError extends Error {
     super("acp-rpc-error");
     this.name = "AcpRpcError";
   }
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isAuthenticationError(value: unknown): boolean {

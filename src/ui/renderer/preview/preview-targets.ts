@@ -23,6 +23,7 @@ import {
 } from "../utils/tool-input-paths.js";
 import { displaySafeLabel } from "../../../shared/display-safe-text.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../../../shared/mcp-resource-bounds.js";
+import { isRecord } from "../../../shared/is-record.js";
 
 type ToolItem = Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
 
@@ -179,10 +180,6 @@ function compactDetail(path: string): string {
   const parts = normalized.split("/").filter(Boolean);
   if (parts.length <= 3) return path;
   return `${parts[0]}/.../${parts.slice(-2).join("/")}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isLikelyPath(value: string): boolean {

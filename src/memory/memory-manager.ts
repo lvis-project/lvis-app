@@ -29,6 +29,7 @@ import {
   type ToolResultTruncatedInfo,
 } from "../shared/tool-result-stub.js";
 import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-index.js";
+import { isRecord } from "../shared/is-record.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
@@ -615,10 +616,6 @@ function isValidA2AWireMetadataId(id: unknown): id is string {
   return isValidSessionId(id)
     && id.length <= MAX_A2A_WIRE_ID_CHARS
     && maskSensitiveData(id).detections.length === 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 const LEGACY_ROW_ID_MAX_ATTEMPTS = 8;

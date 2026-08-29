@@ -7,6 +7,7 @@ import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { resolveTrustedRegistryManifestPath } from "./registry-manifest-trust.js";
+import { isRecord } from "../shared/is-record.js";
 
 /**
  * Legacy registry shape — `installedBy` ("admin"|"user") and
@@ -228,10 +229,6 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     );
   }
   return registry;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 const REGISTRY_ENTRY_KEYS = new Set([

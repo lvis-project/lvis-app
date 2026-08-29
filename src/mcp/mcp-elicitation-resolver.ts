@@ -34,6 +34,7 @@ import {
   type ElicitationSchemaField,
   type ParsedElicitationSchema,
 } from "../shared/mcp-elicitation-schema.js";
+import { isRecord } from "../shared/is-record.js";
 
 /** MCP `ElicitResult` (§8). Returned verbatim into `inputResponses[id]`. */
 export interface ElicitResult {
@@ -56,10 +57,6 @@ function isElicitation(request: Record<string, unknown>): boolean {
     typeof request.message === "string" &&
     (request.mode === "form" || request.mode === "url" || request.requestedSchema !== undefined)
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function hasOwnRecordKey(value: Record<string, unknown>, key: string): boolean {

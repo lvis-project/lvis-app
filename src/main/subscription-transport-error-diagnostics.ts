@@ -11,6 +11,7 @@ import type {
   ProviderErrorDiagnostics,
   ProviderRateLimitDiagnostics,
 } from "../engine/llm/provider-error-diagnostics.js";
+import { isRecord } from "../shared/is-record.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -26,10 +27,6 @@ const RATE_LIMIT_SIGNAL = /rate[_ -]?limit|too many requests|\b429\b/iu;
 /** An error may carry this private, pre-sanitized diagnostic between main-process layers. */
 export interface SubscriptionTransportDiagnosticError extends Error {
   readonly providerError?: ProviderErrorDiagnostics;
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function ownValue(record: JsonRecord, key: string): unknown {

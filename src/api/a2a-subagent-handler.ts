@@ -44,6 +44,7 @@ import {
   type A2ATaskContinuationResult,
   type A2ATaskRecord,
 } from "./a2a-task-store.js";
+import { isRecord } from "../shared/is-record.js";
 
 const TEXT_MODE = "text/plain";
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
@@ -78,10 +79,6 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export const A2A_INPUT_REQUIRED_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS = 60_000;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => keys.has(key));

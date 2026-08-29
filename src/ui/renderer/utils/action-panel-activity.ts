@@ -11,6 +11,7 @@ import {
   extractPatchPaths,
   isGlobPattern,
 } from "./tool-input-paths.js";
+import { isRecord } from "../../../shared/is-record.js";
 
 /**
  * How many rows one activity list shows. Exported because the chat preview
@@ -48,10 +49,6 @@ export function isBrowserTool(tool: ToolEntryItem): boolean {
 
 export function isPluginTool(tool: ToolEntryItem): boolean {
   return tool.source === "plugin" || Boolean(tool.pluginId);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function looksLikeUrl(value: string): boolean {

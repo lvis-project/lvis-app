@@ -23,6 +23,7 @@ import {
   A2A_EXACT_SEND_REPLAY_ERROR_NAMESPACE,
   A2A_EXACT_SEND_REPLAY_URI,
 } from "./a2a-remote-contracts.js";
+import { isRecord } from "../shared/is-record.js";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const MAX_EXTENSION_HEADER_BYTES = 2_048;
@@ -48,10 +49,6 @@ export interface CreateA2AExactReplayHandlerOptions {
   store: A2AExactReplayStore;
   authenticator: A2ARemoteCallerAuthenticator;
   specificationDigestSha256: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function exactReplayError(kind: keyof typeof EXACT_REPLAY_ERRORS): A2AWireResponseError {

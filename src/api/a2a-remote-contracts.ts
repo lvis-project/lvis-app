@@ -6,6 +6,7 @@ import type {
 import { isIP } from "node:net";
 import { createHash } from "node:crypto";
 import { A2AJsonRpcMethod } from "../shared/a2a-wire.js";
+import { isRecord } from "../shared/is-record.js";
 
 export const A2A_EXACT_SEND_REPLAY_URI =
   "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44" as const;
@@ -318,10 +319,6 @@ export interface A2ARemoteRequestEnvelope {
   id: A2AJsonRpcId;
   method: A2ADirectJsonRpcMethod;
   params: A2AJsonObject;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {

@@ -18,6 +18,8 @@
  * and never placed in an error message.
  */
 
+import { isRecord } from "../shared/is-record.js";
+
 /** Telegram caps `getUpdates` at 100; ask for a bounded batch explicitly. */
 const DEFAULT_UPDATE_LIMIT = 25;
 /**
@@ -493,10 +495,6 @@ function composeAbort(signal: AbortSignal | undefined, timeoutMs: number): Compo
 
 function failure(reason: TelegramBotApiFailureReason): { ok: false; reason: TelegramBotApiFailureReason } {
   return Object.freeze({ ok: false as const, reason });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {

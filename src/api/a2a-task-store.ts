@@ -23,6 +23,7 @@ import {
   GUIDE_MAX_CHARS,
   GUIDE_MAX_ENTRIES,
 } from "../engine/turn/guidance-limits.js";
+import { isRecord } from "../shared/is-record.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "tasks.json";
@@ -58,10 +59,6 @@ const RECORD_KEYS = new Set([
   "updatedAt",
   "task",
 ]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => allowed.has(key));

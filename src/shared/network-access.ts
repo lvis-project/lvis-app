@@ -1,4 +1,5 @@
 import { normalizeAllowedHosts } from "../main/host-allow-list.js";
+import { isRecord } from "./is-record.js";
 
 export type NetworkAccessGrant = {
   allowedDomains?: readonly string[];
@@ -16,10 +17,6 @@ export type NetworkAccessAcknowledgement = {
   allowedDomains: string[];
   allowPrivateNetworks?: true;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];

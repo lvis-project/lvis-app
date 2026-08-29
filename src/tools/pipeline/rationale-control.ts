@@ -19,6 +19,7 @@ import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import { canonicalStringify } from "../../permissions/user-approval-store.js";
 import { normalizeRationaleApprovalDisplayText } from "../../shared/rationale-approval-display.js";
 import { assertValidToolUseId } from "../../shared/tool-use-id.js";
+import { isRecord } from "../../shared/is-record.js";
 
 export const RATIONALE_CONTROL_CONTRACT_VERSION = 1 as const;
 export const RATIONALE_RESPONSE_TOOL = "permission_rationale";
@@ -1516,10 +1517,6 @@ export function toRationaleProviderEnvelope(
   }) as RationaleProviderEnvelope;
 }
 
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 export function parseRationaleResponse(
   input: unknown,

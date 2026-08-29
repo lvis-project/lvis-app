@@ -14,6 +14,7 @@ import { basename, dirname, resolve } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
+import { isRecord } from "../shared/is-record.js";
 
 const DOCUMENT_VERSION = 1;
 const FILE_MODE = 0o600;
@@ -238,10 +239,6 @@ export class SecretEncryptionUnavailableError extends Error {
     super("Electron safeStorage encryption is unavailable for encrypted secret storage");
     this.name = "SecretEncryptionUnavailableError";
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function validateSecretKey(key: string): void {

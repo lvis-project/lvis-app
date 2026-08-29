@@ -1,4 +1,5 @@
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { isRecord } from "../../../shared/is-record.js";
 
 export type FileDiffTool = "edit_file" | "apply_patch" | "write_file";
 
@@ -96,10 +97,6 @@ function readResultField(result: string | undefined, field: string): string | nu
     /* result not JSON — caller falls back to input */
   }
   return null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function asString(value: unknown): string | null {

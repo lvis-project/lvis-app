@@ -12,6 +12,7 @@ import {
 } from "../engine/a2a-agent-message-envelope.js";
 import { GUIDE_MAX_CHARS } from "../engine/turn/guidance-limits.js";
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
+import { isRecord } from "../shared/is-record.js";
 
 export const A2A_INPUT_REQUIRED_CONTROL_KIND = "a2a-input-required" as const;
 export const A2A_INPUT_REQUIRED_CONTROL_VERSION = 1 as const;
@@ -60,10 +61,6 @@ export interface AgentSendRuntime {
 
 export interface AgentSendToolDeps {
   getRuntime: () => AgentSendRuntime | undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function validatePart(value: unknown): { ok: true; part: A2APart } | {

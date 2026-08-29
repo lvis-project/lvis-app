@@ -20,6 +20,7 @@ import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.j
 import { GUIDE_MAX_CHARS } from "./turn/guidance-limits.js";
 import { PARENT_DIRECTIVE_MAX_PENDING } from "./parent-directive.js";
 import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
+import { isRecord } from "../shared/is-record.js";
 
 const DIRECTIVE_FILE = "parent-directives.json";
 const DIRECTIVE_VERSION = 1 as const;
@@ -50,10 +51,6 @@ const ENTRY_KEYS = new Set([
 type ParentDirectiveAppendResult =
   | { ok: true; entry: ParentDirectiveEntry }
   | { ok: false; reason: "pending-cap" };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function isSafeString(value: unknown, maxLength: number): value is string {
   return typeof value === "string"
