@@ -33,20 +33,20 @@ import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { RoutinesStore } from "../main/routines-store.js";
 import type { RoutineExecution, RoutineRepeat, RoutineSchedule } from "../main/routines-store.js";
-import { MAX_ROUTINE_SOURCE_LENGTH } from "../main/routines-store.js";
+import {
+  MAX_CRON_EXPR_LENGTH,
+  MAX_FUTURE_OFFSET_MS,
+  MAX_ROUTINE_SOURCE_LENGTH,
+  MIN_INTERVAL_MS,
+  ROUTINE_PLUGIN_ID_PATTERN,
+} from "../main/routines-store.js";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_ONLY_DEFAULT_HOUR = 9;
 
-/** Maximum allowed cron expression length (prevents regex DoS on oversized inputs). */
-const MAX_CRON_EXPR_LENGTH = 256;
-
-/** Minimum interval: 1 minute (prevents sub-minute polling spam). */
-const MIN_INTERVAL_MS = 60_000;
-
-/** Maximum interval: 5 years (matches MAX_FUTURE_OFFSET_MS in routines-store). */
-const MAX_INTERVAL_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
+/** Maximum interval: the same horizon the store allows for `schedule.at`. */
+const MAX_INTERVAL_MS = MAX_FUTURE_OFFSET_MS;
 
 /**
  * Normalize a date/datetime string to a UTC ISO string.
@@ -132,7 +132,7 @@ function parseAllowedPlugins(raw: unknown): string[] | null {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) return null;
   const ids = raw.map((v) => (typeof v === "string" ? v.trim() : ""));
-  if (ids.some((v) => !v || !/^[a-z0-9][a-z0-9_.-]*$/i.test(v))) return null;
+  if (ids.some((v) => !v || !ROUTINE_PLUGIN_ID_PATTERN.test(v))) return null;
   return [...new Set(ids)];
 }
 

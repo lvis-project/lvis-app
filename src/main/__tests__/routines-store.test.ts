@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LENGTH } from "../routines-store.js";
+import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_CRON_EXPR_LENGTH, MAX_ROUTINE_SOURCE_LENGTH } from "../routines-store.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function tempStore() {
@@ -402,14 +402,14 @@ describe("RoutinesStore v2 — cron validation", () => {
     }
   });
 
-  it("rejects cron expression exceeding 256 chars", async () => {
+  it("rejects cron expression exceeding MAX_CRON_EXPR_LENGTH", async () => {
     const { store, cleanup } = tempStore();
     try {
       await expect(
         store.add({
           trigger: "schedule",
           execution: "notification-only",
-          schedule: { repeat: { kind: "cron", expression: "0 9 * * 1".padEnd(300, " x") } },
+          schedule: { repeat: { kind: "cron", expression: "0 9 * * 1".padEnd(MAX_CRON_EXPR_LENGTH + 1, " x") } },
           notificationTitle: "long-cron",
         }),
       ).rejects.toThrow(/too long/);

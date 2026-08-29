@@ -42,14 +42,23 @@ import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LE
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
 
-/** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
-const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
+/**
+ * Routine validation bounds. The store validates every routine it persists;
+ * the `routine_schedule` tool validates the same fields before it calls the
+ * store, and imports these so the two cannot disagree about a limit.
+ */
 
-/** Maximum cron expression length (prevents regex DoS). Must match routine-schedule.ts. */
-const MAX_CRON_EXPR_LENGTH = 256;
+/** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
+export const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
+
+/** Maximum cron expression length (prevents regex DoS). */
+export const MAX_CRON_EXPR_LENGTH = 256;
 
 /** Minimum interval in ms (1 minute — prevents sub-minute polling spam). */
-const MIN_INTERVAL_MS = 60_000;
+export const MIN_INTERVAL_MS = 60_000;
+
+/** Plugin ids a routine scope may name. */
+export const ROUTINE_PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9_.-]*$/i;
 
 /**
  * Validate a record loaded from disk. Rejects tampered / corrupted entries
@@ -315,7 +324,6 @@ export class RoutinesStore {
     }
     // Permission policy Layer 4 — `scope` is the canonical shape. When omitted, default
     // to deny-all so new call sites cannot accidentally expose plugins.
-    const ID_RE = /^[a-z0-9][a-z0-9_.-]*$/i;
     const inputScope = input.scope;
     let normalizedPluginIds: RoutineScope["pluginIds"] =
       inputScope?.pluginIds ?? { mode: "deny-all" };
@@ -323,7 +331,7 @@ export class RoutinesStore {
 
     if (inputScope?.pluginIds.mode === "allow") {
       const trimmed = inputScope.pluginIds.ids.map((p) => p.trim()).filter(Boolean);
-      if (trimmed.some((p) => !ID_RE.test(p))) {
+      if (trimmed.some((p) => !ROUTINE_PLUGIN_ID_PATTERN.test(p))) {
         throw new Error(
           "RoutinesStore.add: scope.pluginIds.ids entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
         );
@@ -332,7 +340,7 @@ export class RoutinesStore {
     }
     if (inputScope?.forcedPluginIds) {
       const trimmedForced = inputScope.forcedPluginIds.map((p) => p.trim()).filter(Boolean);
-      if (trimmedForced.some((p) => !ID_RE.test(p))) {
+      if (trimmedForced.some((p) => !ROUTINE_PLUGIN_ID_PATTERN.test(p))) {
         throw new Error(
           "RoutinesStore.add: scope.forcedPluginIds entries must be plugin ids using letters, digits, dot, underscore, or hyphen",
         );
