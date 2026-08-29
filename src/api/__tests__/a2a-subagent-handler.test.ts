@@ -28,11 +28,10 @@ import {
   type A2AWireAuthorizer,
 } from "../a2a-subagent-handler.js";
 import { A2ATaskStore } from "../a2a-task-store.js";
+import { UUID_PATTERN } from "../../shared/dlp-safe-id.js";
 
 const HANDLER_ID = "profile-a";
 const TASK_ID = "sub-wire-task-1";
-const UUID_V4_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function clock() {
   let tick = 0;
@@ -246,7 +245,7 @@ describe("A2ASubAgentHandler", () => {
     const ids = Array.from({ length: 64 }, () => createA2AContextId());
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) {
-      expect(id).toMatch(UUID_V4_PATTERN);
+      expect(id).toMatch(UUID_PATTERN);
       expect(maskSensitiveData(id).detections).toEqual([]);
     }
 
@@ -263,7 +262,7 @@ describe("A2ASubAgentHandler", () => {
     const task = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("default-generated-status"),
     }));
-    expect(task.status.message?.messageId).toMatch(UUID_V4_PATTERN);
+    expect(task.status.message?.messageId).toMatch(UUID_PATTERN);
     expect(maskSensitiveData(task.status.message?.messageId ?? "").detections).toEqual([]);
   });
 

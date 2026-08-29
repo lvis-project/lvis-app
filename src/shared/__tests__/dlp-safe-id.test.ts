@@ -1,10 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { maskSensitiveData } from "../dlp.js";
-import { createDlpSafeUuid, dlpSafeCandidate } from "../dlp-safe-id.js";
+import { createDlpSafeUuid, dlpSafeCandidate, UUID_PATTERN } from "../dlp-safe-id.js";
 
-const UUID_V4_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_UUID = "abcdefab-cdef-4abc-8def-abcdefabcdef";
 // A valid v4 UUID whose serialized form carries a Luhn-valid 16-digit window
 // (first two groups + version group), so the converged detector flags it.
@@ -15,18 +13,18 @@ const PREFIX_BOUNDARY_UUID = "20000004-ab12-4abc-8def-abcdefabcdef";
 const BOUNDARY_PREFIX = "sub-10000000";
 
 describe("createDlpSafeUuid", () => {
-  it("creates unique UUIDv4 values whose complete bare and prefixed forms pass DLP", () => {
+  it("creates unique UUID values whose complete bare and prefixed forms pass DLP", () => {
     const bare = Array.from({ length: 64 }, () => createDlpSafeUuid());
     const prefixed = Array.from({ length: 64 }, () => createDlpSafeUuid("sub-abcd1234"));
 
     expect(new Set([...bare, ...prefixed]).size).toBe(128);
     for (const id of bare) {
-      expect(id).toMatch(UUID_V4_PATTERN);
+      expect(id).toMatch(UUID_PATTERN);
       expect(maskSensitiveData(id).detections).toEqual([]);
     }
     for (const id of prefixed) {
       expect(id).toMatch(/^sub-abcd1234-/);
-      expect(id.slice("sub-abcd1234-".length)).toMatch(UUID_V4_PATTERN);
+      expect(id.slice("sub-abcd1234-".length)).toMatch(UUID_PATTERN);
       expect(maskSensitiveData(id).detections).toEqual([]);
     }
   });
@@ -119,5 +117,22 @@ describe("dlpSafeCandidate", () => {
   it("returns null on exhaustion, leaving the error to the caller", () => {
     expect(dlpSafeCandidate(() => UNSAFE_UUID, 3)).toBeNull();
     expect(dlpSafeCandidate(() => null, 3)).toBeNull();
+  });
+});
+
+describe("UUID_PATTERN", () => {
+  it("accepts every RFC 9562 version nibble, in either case", () => {
+    expect(UUID_PATTERN.test("abcdefab-cdef-4abc-8def-abcdefabcdef")).toBe(true); // v4
+    expect(UUID_PATTERN.test("018f2f7e-3b2a-7c3d-9e4f-0123456789ab")).toBe(true); // v7
+    expect(UUID_PATTERN.test("6ba7b810-9dad-11d1-80b4-00c04fd430c8")).toBe(true); // v1
+    expect(UUID_PATTERN.test("ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF")).toBe(true);
+  });
+
+  it("rejects non-hex, a version nibble outside 1-8 and a non-RFC variant", () => {
+    expect(UUID_PATTERN.test("zzzzzzzz-cdef-4abc-8def-abcdefabcdef")).toBe(false);
+    expect(UUID_PATTERN.test("abcdefab-cdef-0abc-8def-abcdefabcdef")).toBe(false);
+    expect(UUID_PATTERN.test("abcdefab-cdef-9abc-8def-abcdefabcdef")).toBe(false);
+    expect(UUID_PATTERN.test("abcdefab-cdef-4abc-cdef-abcdefabcdef")).toBe(false);
+    expect(UUID_PATTERN.test("abcdefab-cdef-4abc-8def-abcdefabcde")).toBe(false);
   });
 });

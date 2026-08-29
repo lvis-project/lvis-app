@@ -8,6 +8,7 @@
  * never appear in a snapshot or change event.
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
+import { UUID_PATTERN } from "./dlp-safe-id.js";
 
 export const TAILNET_INVITATION_DURATION_PRESETS = ["10m", "1h", "24h"] as const;
 export type TailnetInvitationDurationPreset = (typeof TAILNET_INVITATION_DURATION_PRESETS)[number];
@@ -128,7 +129,6 @@ export interface TailnetSharingOwnerApi {
   onChanged(handler: () => void): () => void;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACTOR_FINGERPRINT = /^[a-f0-9]{12}$/;
 const INVITATION_CODE = /^lvis-pair-v1\.[A-Za-z0-9_-]{43}$/;
 
@@ -147,7 +147,7 @@ function timestamp(value: unknown): value is number {
 }
 
 export function isTailnetSharingId(value: unknown): value is string {
-  return typeof value === "string" && UUID.test(value);
+  return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
 export function isTailnetInvitationDurationPreset(value: unknown): value is TailnetInvitationDurationPreset {

@@ -2,13 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "command-receipts.json";
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RECEIPTS = 4_096;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ReceiptState = "reserved" | "terminal";
 
@@ -35,7 +35,7 @@ export interface TailnetControllerReceiptReservation {
   intentDigest: string;
   /** SHA-256 of the private conversation ID; never the raw conversation ID. */
   conversationDigest: string;
-  /** Fresh UUID for the currently-running controller broker process. */
+  /** Fresh UUID_PATTERN for the currently-running controller broker process. */
   ownerId: string;
 }
 
@@ -83,7 +83,7 @@ function validRecord(value: unknown, ttlMs: number): value is ReceiptRecord {
   if (!hasExactKeys(value, expectedKeys)) return false;
   if (![value.keyDigest, value.intentDigest, value.conversationDigest].every((entry) => typeof entry === "string" && SHA256_HEX.test(entry))) return false;
   if (!validTimestamp(value.acceptedAt) || !validTimestamp(value.expiresAt) || value.expiresAt <= value.acceptedAt || value.expiresAt - value.acceptedAt !== ttlMs) return false;
-  return value.state !== "reserved" || (typeof value.ownerId === "string" && UUID.test(value.ownerId));
+  return value.state !== "reserved" || (typeof value.ownerId === "string" && UUID_PATTERN.test(value.ownerId));
 }
 
 function validState(value: unknown, ttlMs: number, maxReceipts: number): value is ReceiptStateFile {
@@ -128,7 +128,7 @@ export class TailnetControllerReceiptStore {
 
   /**
    * Reserve a receipt before calling the command port. Every input is already a
-   * digest or locally-generated owner UUID, so request plaintext never enters
+   * digest or locally-generated owner UUID_PATTERN, so request plaintext never enters
    * the durable state file.
    */
   reserve(input: Readonly<TailnetControllerReceiptReservation>): TailnetControllerReceiptReserveResult {
@@ -194,11 +194,11 @@ export class TailnetControllerReceiptStore {
   }
 
   private assertReservation(input: Readonly<TailnetControllerReceiptReservation>): void {
-    if (!SHA256_HEX.test(input.keyDigest) || !SHA256_HEX.test(input.intentDigest) || !SHA256_HEX.test(input.conversationDigest) || !UUID.test(input.ownerId)) throw invalidStoreError();
+    if (!SHA256_HEX.test(input.keyDigest) || !SHA256_HEX.test(input.intentDigest) || !SHA256_HEX.test(input.conversationDigest) || !UUID_PATTERN.test(input.ownerId)) throw invalidStoreError();
   }
 
   private assertKeyAndOwner(input: Readonly<Pick<TailnetControllerReceiptReservation, "keyDigest" | "ownerId">>): void {
-    if (!SHA256_HEX.test(input.keyDigest) || !UUID.test(input.ownerId)) throw invalidStoreError();
+    if (!SHA256_HEX.test(input.keyDigest) || !UUID_PATTERN.test(input.ownerId)) throw invalidStoreError();
   }
 
   private loadAndPrune(): ReceiptStateFile {

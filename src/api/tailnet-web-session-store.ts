@@ -10,6 +10,7 @@ import { createHash, randomBytes as nodeRandomBytes } from "node:crypto";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
 import type { TailnetShareActorId } from "../main/tailnet-pairing-share-store.js";
 import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
+import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
 
 const SESSION_BYTES = 32;
 const DEFAULT_TTL_MS = 15 * 60 * 1_000;
@@ -18,7 +19,6 @@ const DEFAULT_MAX_SESSIONS = 32;
 const DEFAULT_MAX_CSRF_TOKENS_PER_SESSION = 64;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const ACTOR = /^tailnet:[a-f0-9]{64}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface TailnetWebSessionAuthorization {
   readonly actorId: TailnetShareActorId;
@@ -278,7 +278,7 @@ function validBinding(value: unknown): value is TailnetPairingShareBinding {
 }
 
 function uuid(value: unknown): value is string {
-  return typeof value === "string" && UUID.test(value);
+  return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
 function epoch(value: unknown): value is number {

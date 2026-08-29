@@ -2,8 +2,21 @@ import { randomUUID } from "node:crypto";
 import { maskSensitiveData } from "./dlp.js";
 
 const DLP_SAFE_UUID_MAX_ATTEMPTS = 8;
-const UUID_V4_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/**
+ * An RFC 9562 UUID without anchors, for composing into larger patterns
+ * (a backup-directory name, a staged image file name).
+ */
+export const UUID_SOURCE =
+  "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+
+/**
+ * The one UUID check: RFC 9562, version nibble 1–8, variant 10xx, either
+ * case. `randomUUID()` mints v4, but ids that arrive from a peer, a store or
+ * a file name may legitimately be another version; the earlier per-file
+ * copies disagreed (`[1-5]` in nine files, `[1-8]` in seven, `4` in one) and
+ * so did what they accepted.
+ */
+export const UUID_PATTERN = new RegExp(`^${UUID_SOURCE}$`, "i");
 
 /**
  * Draw candidate identifiers until one survives the DLP scanner, or give up.
@@ -49,7 +62,7 @@ export function createDlpSafeUuid(
   }
   const candidate = dlpSafeCandidate(() => {
     const uuid = makeUuid();
-    if (!UUID_V4_PATTERN.test(uuid)) return null;
+    if (!UUID_PATTERN.test(uuid)) return null;
     return prefix ? `${prefix}-${uuid}` : uuid;
   }, DLP_SAFE_UUID_MAX_ATTEMPTS);
   if (candidate === null) {

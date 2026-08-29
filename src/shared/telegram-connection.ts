@@ -11,6 +11,7 @@
  * the open conversation is a separate, explicitly gestured owner action.
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
+import { UUID_PATTERN } from "./dlp-safe-id.js";
 
 /** How long an unredeemed pairing code stays valid. */
 export const TELEGRAM_PAIRING_CODE_TTL_MS = 10 * 60 * 1_000;
@@ -193,7 +194,6 @@ export interface TelegramConnectionOwnerApi {
   onChanged(handler: () => void): () => void;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACCOUNT_FINGERPRINT = /^[a-f0-9]{12}$/;
 /**
  * Deliberately not slash-prefixed. The shared ingress core rejects all leading
@@ -234,7 +234,7 @@ function counter(value: unknown): value is number {
 }
 
 export function isTelegramConnectionId(value: unknown): value is string {
-  return typeof value === "string" && UUID.test(value);
+  return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
 /**

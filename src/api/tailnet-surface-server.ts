@@ -56,6 +56,7 @@ import {
   SSE_RETRY_MS,
   sendJson as sendJsonResponse,
 } from "./http-server.js";
+import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_SSE_MAX_LIFETIME_MS = 5 * 60_000;
@@ -2592,7 +2593,7 @@ function isControllerCommandId(value: unknown): value is string {
 
 function isTailnetAttachmentId(value: unknown): value is string {
   return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    && UUID_PATTERN.test(value);
 }
 function isTailnetPublicTurnId(value: unknown): value is string {
   return typeof value === "string" && /^tailnet-turn_[A-Za-z0-9_-]{43}$/.test(value);
@@ -2844,7 +2845,7 @@ function resolveAfterCursor(
 
 function parseScope(raw: string | null): string | undefined | "invalid" {
   if (raw === null) return undefined;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)
+  return UUID_PATTERN.test(raw)
     ? raw
     : "invalid";
 }

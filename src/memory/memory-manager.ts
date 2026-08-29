@@ -31,7 +31,7 @@ import {
 import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-index.js";
 import { isRecord } from "../shared/is-record.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
-import { dlpSafeCandidate } from "../shared/dlp-safe-id.js";
+import { dlpSafeCandidate, UUID_PATTERN } from "../shared/dlp-safe-id.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
@@ -565,7 +565,6 @@ const MAX_MANAGED_MEMORY_CONTENT_CHARS = 8_000;
 const MAX_CONSOLIDATION_SOURCE_NOTES = 16;
 const MAX_PROMPT_LONG_TERM_MEMORY_OVERVIEW_TOKENS = 400;
 const MAX_PROMPT_LONG_TERM_MEMORY_OVERVIEW_SCOPE_TOKENS = 190;
-const MEMORY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MEMORY_KINDS = new Set<MemoryKind>([
   "preference", "constraint", "fact", "goal", "reference", "note",
 ]);
@@ -869,7 +868,7 @@ function decodeMemoryMetadata(encoded: string): MemoryMetadataV1 | null {
   } catch {
     return null;
   }
-  if (!isRecord(raw) || raw.v !== 1 || !MEMORY_ID_PATTERN.test(String(raw.id ?? ""))) return null;
+  if (!isRecord(raw) || raw.v !== 1 || !UUID_PATTERN.test(String(raw.id ?? ""))) return null;
   if (!MEMORY_KINDS.has(raw.kind as MemoryKind) || !MEMORY_STATES.has(raw.state as MemoryState)) return null;
   if (!MEMORY_SOURCES.has(raw.source as MemorySourceKind) || !isValidMemoryTimestamp(raw.createdAt)) return null;
   if (raw.confirmedAt !== undefined && !isValidMemoryTimestamp(raw.confirmedAt)) return null;
@@ -3689,7 +3688,7 @@ export class MemoryManager {
   }
 
   private validateManagedMemoryId(id: string, operation: string): string {
-    if (typeof id !== "string" || !MEMORY_ID_PATTERN.test(id)) {
+    if (typeof id !== "string" || !UUID_PATTERN.test(id)) {
       throw new Error(`${operation}: invalid memory id`);
     }
     return id.toLowerCase();

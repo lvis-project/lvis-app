@@ -28,6 +28,7 @@ import type {
   TailnetPairedShareGuard,
   TailnetPairingShareBinding,
 } from "../shared/chat-origin.js";
+import { UUID_PATTERN } from "../shared/dlp-safe-id.js";
 
 function isPlatformBridgeActorOptions(
   value: unknown,
@@ -474,7 +475,7 @@ function isTailnetOpaqueId(value: unknown): value is string {
   // — a gap no unit suite saw because each side was tested against a mock of
   // the other.
   return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    && UUID_PATTERN.test(value);
 }
 
 function isPositiveEpoch(value: unknown): value is number {

@@ -31,6 +31,7 @@ import type { PluginRegistryEntry } from "./types.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
+import { UUID_SOURCE } from "../shared/dlp-safe-id.js";
 
 type PendingUpdate = NonNullable<PluginRegistryEntry["pendingUpdate"]>;
 type PendingCleanup = NonNullable<PluginRegistryEntry["pendingCleanup"]>[number];
@@ -72,7 +73,7 @@ function assertOwnedBackupPath(
   const localBackupRoot = resolve(paths.pluginsRoot, ".cache", "local-install-rollback");
   const escapedPluginId = escapeRegExp(safePluginId);
   const marketplaceName = new RegExp(
-    `^\\.${escapedPluginId}\\.old-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`,
+    `^\\.${escapedPluginId}\\.old-${UUID_SOURCE}$`,
     "i",
   );
   const localName = new RegExp(`^${escapedPluginId}-[0-9]+-[0-9]+$`);
