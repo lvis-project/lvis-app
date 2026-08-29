@@ -44,6 +44,7 @@ import {
   recoverPendingPluginUpdates,
   restoreSupersededPendingPluginUpdate,
 } from "./marketplace-update-recovery.js";
+import { carryPluginDataDir, pluginPayloadCopyFilter } from "./plugin-storage-layout.js";
 import { installReceiptPath, listFilesRecursive, restoreInstallReceiptRaw, verifyInstallReceipt } from "./plugin-install-receipt.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import {
@@ -424,6 +425,21 @@ type LocalInstallRollbackSnapshot = {
   receiptRaw?: string;
   registryEntry: PluginRegistryEntry;
 };
+
+/**
+ * The directory a sideload replacement moves the plugin's data directory
+ * through while the live root is removed and the candidate promoted: the
+ * recovery backup boot recovery is told about. It is the only place a crash
+ * mid-swap can leave the state where `recoverPendingPluginUpdate` will look
+ * for it. A first install has no such backup and no predecessor state to
+ * protect; the candidate itself receives whatever the vacated root held.
+ */
+function localInstallDataCarrier(snapshot: LocalInstallRollbackSnapshot | null): string | undefined {
+  if (!snapshot) return undefined;
+  return snapshot.kind === "filesystem-snapshot"
+    ? snapshot.backupDir
+    : snapshot.registryEntry.pendingUpdate?.recoveryBackupDir;
+}
 
 type InstallReceiptValidation = {
   ok: boolean;
@@ -2870,8 +2886,15 @@ export class PluginMarketplaceService {
                   : {}),
               });
             }
+            // The live root is removed whole. Its data directory is the plugin's
+            // state, not payload: it travels through the registered recovery
+            // backup into the promoted root, so at every instant it is somewhere
+            // boot recovery knows to reunite it with whichever root survives.
+            const dataCarrier = localInstallDataCarrier(rollbackSnapshot);
+            await carryPluginDataDir(installDir, dataCarrier ?? stagingDir);
             await rm(installDir, { recursive: true, force: true });
             await rename(stagingDir, installDir);
+            if (dataCarrier) await carryPluginDataDir(dataCarrier, installDir);
             await this.artifactStore.persistPreparedInstallReceipt(pluginId, localReceiptRaw);
             await updatePluginRegistry(this.registryPath, (registry) => {
               const existing = registry.plugins.find((x) => x.id === pluginId);
@@ -3001,7 +3024,11 @@ export class PluginMarketplaceService {
     await mkdir(backupRoot, { recursive: true });
     const backupDir = resolve(backupRoot, `${pluginId}-${process.pid}-${Date.now()}`);
     await rm(backupDir, { recursive: true, force: true });
-    await cp(installDir, backupDir, { recursive: true, verbatimSymlinks: true });
+    await cp(installDir, backupDir, {
+      recursive: true,
+      verbatimSymlinks: true,
+      filter: pluginPayloadCopyFilter(installDir),
+    });
     snapshot.backupDir = backupDir;
     return snapshot;
   }
@@ -3039,12 +3066,22 @@ export class PluginMarketplaceService {
       return;
     }
     await readPluginRegistry(this.registryPath);
+    if (snapshot.backupDir) {
+      // Whichever step of the swap failed, the plugin's data directory is in
+      // exactly one of the two roots. The promoted root is about to go; the
+      // state moves into the backup that is about to come back first.
+      await carryPluginDataDir(snapshot.installDir, snapshot.backupDir);
+    }
     await rm(snapshot.installDir, { recursive: true, force: true });
     if (snapshot.backupDir) {
       const restoreStageDir = `${snapshot.installDir}.restore-${process.pid}-${Date.now()}`;
       await rm(restoreStageDir, { recursive: true, force: true });
       try {
-        await cp(snapshot.backupDir, restoreStageDir, { recursive: true, verbatimSymlinks: true });
+        await cp(snapshot.backupDir, restoreStageDir, {
+          recursive: true,
+          verbatimSymlinks: true,
+          filter: pluginPayloadCopyFilter(snapshot.backupDir),
+        });
         await retryOnTransientFsLock(() => rename(restoreStageDir, snapshot.installDir), {
           onRetry: (attempt, code) =>
             log.warn({ pluginId, attempt, code }, "retrying local rollback directory restore under fs lock"),
@@ -3053,6 +3090,7 @@ export class PluginMarketplaceService {
         await rm(restoreStageDir, { recursive: true, force: true }).catch(() => undefined);
         throw err;
       }
+      await carryPluginDataDir(snapshot.backupDir, snapshot.installDir);
     }
     const receiptPath = installReceiptPath(this.cacheRoot, pluginId);
     if (snapshot.receiptRaw !== undefined) {

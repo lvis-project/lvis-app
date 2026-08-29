@@ -16,6 +16,7 @@ import { createRemovalTransaction, stageRemovalTransaction } from "../plugin-rem
 import { readPluginRegistry, updatePluginRegistry } from "../registry.js";
 import { sweepOrphanUninstallDirs } from "../orphan-uninstall-sweeper.js";
 import type { PluginPaths } from "../plugin-paths.js";
+import { PLUGIN_DATA_FIXTURE, readPluginDataFixture, seedPluginDataFixture } from "./test-helpers.js";
 
 describe("marketplace pending-update recovery", () => {
   let root: string;
@@ -174,6 +175,68 @@ describe("marketplace pending-update recovery", () => {
     expect(await readFile(installReceiptPath(paths.cacheRoot, pluginId), "utf-8")).toBe(oldReceipt);
     expect(existsSync(backupDir)).toBe(false);
     expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingUpdate).toBeUndefined();
+  });
+
+  it("moves plugin data out of the abandoned promoted root before restoring the old directory", async () => {
+    const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    const backupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await preparePendingPluginUpdate(paths, entry, {
+      kind: "marketplace",
+      recoveryBackupDir: backupDir,
+      recoveryBackupMode: "rename",
+    });
+    await rename(join(paths.pluginsRoot, pluginId), backupDir);
+    await mkdir(join(paths.pluginsRoot, pluginId), { recursive: true });
+    await writeFile(join(paths.pluginsRoot, pluginId, "plugin.json"), JSON.stringify({ id: pluginId, version: "2.0.0" }));
+    // The crash hit after the replacement carried the data directory into the
+    // promoted root and before its receipt became durable.
+    await seedPluginDataFixture(join(paths.pluginsRoot, pluginId));
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    expect(await readFile(join(paths.pluginsRoot, pluginId, "plugin.json"), "utf-8")).toBe(oldManifest);
+    expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(backupDir)).toBe(false);
+  });
+
+  it("returns plugin data held by the backup to a live root that still matches its receipt", async () => {
+    const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    const backupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await preparePendingPluginUpdate(paths, entry, {
+      kind: "marketplace",
+      recoveryBackupDir: backupDir,
+      recoveryBackupMode: "rename",
+    });
+    // The crash hit after the replacement moved the data directory into the
+    // backup and before the live root was replaced.
+    await mkdir(backupDir);
+    await seedPluginDataFixture(backupDir);
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    expect(await readFile(join(paths.pluginsRoot, pluginId, "plugin.json"), "utf-8")).toBe(oldManifest);
+    expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(backupDir)).toBe(false);
+  });
+
+  it("restores a copy-mode backup's payload and moves the plugin data it holds into the live root", async () => {
+    const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    const backupDir = join(paths.pluginsRoot, ".cache", "local-install-rollback", `${pluginId}-1-1`);
+    await mkdir(join(backupDir, "dist"), { recursive: true });
+    await writeFile(join(backupDir, "plugin.json"), oldManifest);
+    await writeFile(join(backupDir, "dist", "index.js"), oldDist);
+    await seedPluginDataFixture(backupDir);
+    await preparePendingPluginUpdate(paths, entry, {
+      kind: "local-dev",
+      recoveryBackupDir: backupDir,
+      recoveryBackupMode: "copy",
+    });
+    await writeFile(join(paths.pluginsRoot, pluginId, "plugin.json"), JSON.stringify({ id: pluginId, version: "2.0.0" }));
+    await writeFile(installReceiptPath(paths.cacheRoot, pluginId), JSON.stringify({ pluginId, version: "2.0.0" }));
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    expect(await readFile(join(paths.pluginsRoot, pluginId, "plugin.json"), "utf-8")).toBe(oldManifest);
+    expect(await readFile(installReceiptPath(paths.cacheRoot, pluginId), "utf-8")).toBe(oldReceipt);
+    expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(backupDir)).toBe(false);
   });
 
   it("only removes a retained backup through the explicit cleanup path and keeps the row hidden", async () => {

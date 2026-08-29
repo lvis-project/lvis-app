@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { isResolvedPathWithin } from "./plugin-storage-containment.js";
+import { carryPluginDataDir, pluginPayloadCopyFilter } from "./plugin-storage-layout.js";
 
 import { retryOnTransientFsLock } from "./plugin-artifact-store.js";
 import {
@@ -222,6 +223,10 @@ export async function recoverPendingPluginUpdate(
     if (!await liveMatchesPrevious(paths, entry)) return "unresolved";
     if (pending.recoveryBackupDir) {
       const backupDir = assertRecoveryBackupPath(paths, pluginId, pending);
+      // A crash after the replacement moved the plugin's data directory into
+      // its backup but before the promotion leaves the state in the backup
+      // while the live root — the one that survives here — has none.
+      await retryOnTransientFsLock(() => carryPluginDataDir(backupDir, installDir));
       await retryOnTransientFsLock(() => rm(backupDir, { recursive: true, force: true }));
     }
     await clearPendingUpdate(paths, pluginId, pending);
@@ -234,6 +239,10 @@ export async function recoverPendingPluginUpdate(
     return "unresolved";
   }
 
+  // The promoted root is discarded. A crash after the replacement carried the
+  // plugin's data directory into it leaves the state there; it goes back into
+  // the backup that becomes the live root before anything is removed.
+  await retryOnTransientFsLock(() => carryPluginDataDir(installDir, backupDir));
   await retryOnTransientFsLock(() => rm(installDir, { recursive: true, force: true }));
   if (pending.recoveryBackupMode === "rename") {
     await retryOnTransientFsLock(() => rename(backupDir, installDir));
@@ -242,12 +251,17 @@ export async function recoverPendingPluginUpdate(
     await rm(restoreStage, { recursive: true, force: true });
     await mkdir(dirname(restoreStage), { recursive: true });
     try {
-      await cp(backupDir, restoreStage, { recursive: true, verbatimSymlinks: true });
+      await cp(backupDir, restoreStage, {
+        recursive: true,
+        verbatimSymlinks: true,
+        filter: pluginPayloadCopyFilter(backupDir),
+      });
       await retryOnTransientFsLock(() => rename(restoreStage, installDir));
     } catch (error) {
       await rm(restoreStage, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     }
+    await retryOnTransientFsLock(() => carryPluginDataDir(backupDir, installDir));
   }
   if (pending.previousReceiptRaw === null) return "unresolved";
   await restoreInstallReceiptRaw(paths.cacheRoot, pluginId, pending.previousReceiptRaw);

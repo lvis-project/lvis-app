@@ -16,6 +16,7 @@
  * Deliberately a dependency-free leaf so the receipt verifier, the permission
  * layer, and the tool executor can all agree on the same directory names.
  */
+import { lstat, rename } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 
@@ -43,6 +44,67 @@ export const PLUGIN_WORKER_RUN_DIR_NAME = "run";
  */
 export function resolvePluginWritableRoot(pluginId: string): string {
   return resolve(lvisHome(), "plugins", pluginId, PLUGIN_DATA_DIR_NAME);
+}
+
+/**
+ * Move a plugin root's own writable state (`data/`) from one root to another.
+ *
+ * WHY THIS EXISTS. Install and recovery replace a plugin ROOT as a unit — the
+ * live directory is renamed aside, a freshly extracted payload is promoted in
+ * its place, and the obsolete root is removed — because a whole-directory
+ * rename is the only atomic swap the filesystem offers. But `data/` is not
+ * payload. It is the plugin's state (index databases, recorded sessions,
+ * settings sidecars), and the receipt already says so by skipping it. A root
+ * swap that does not take the data directory along deletes the state with the
+ * root it happened to sit in, and the next load recreates an empty one, so the
+ * loss is silent.
+ *
+ * So every promotion moves the data directory into the promoted root BEFORE
+ * the transaction commits, and every step that discards a root moves the data
+ * directory into the root that survives FIRST. The move is one `rename` on the
+ * same volume: no bytes are copied, and at every instant the directory is
+ * wholly at `fromRoot` or wholly at `toRoot`, never split between them.
+ *
+ * Returns whether a directory moved. `fromRoot` holding none is an ordinary
+ * outcome (a plugin that never wrote state, or a root whose state already
+ * moved on). `toRoot` already holding one is NOT: two candidates for the same
+ * state cannot be merged here, and silently keeping either would hide exactly
+ * the duplication this helper exists to rule out — the caller's transaction is
+ * wrong, and the error says so rather than picking a side.
+ */
+export async function carryPluginDataDir(fromRoot: string, toRoot: string): Promise<boolean> {
+  const source = resolve(fromRoot, PLUGIN_DATA_DIR_NAME);
+  const target = resolve(toRoot, PLUGIN_DATA_DIR_NAME);
+  if (!await pathExists(source)) return false;
+  if (await pathExists(target)) {
+    throw new Error(
+      `[plugin-storage-layout] both roots hold a plugin data directory; refusing to `
+        + `replace ${target} with ${source}`,
+    );
+  }
+  await rename(source, target);
+  return true;
+}
+
+/**
+ * `cp` filter that copies a plugin root's payload and leaves its `data/`
+ * behind. Runtime state is carried by {@link carryPluginDataDir} — one rename,
+ * never a copy — so a root copy that included it would create the second
+ * candidate the carry refuses to reconcile.
+ */
+export function pluginPayloadCopyFilter(root: string): (source: string) => boolean {
+  const dataDir = resolve(root, PLUGIN_DATA_DIR_NAME);
+  return (source) => resolve(source) !== dataDir;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 /**

@@ -6,18 +6,24 @@
  * never at the plugin root, because the root holds the bundle the next load
  * imports into the Electron main process.
  */
-import { describe, it, expect } from "vitest";
-import { resolve, sep } from "node:path";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
 import {
   PLUGIN_DATA_DIR_NAME,
   PLUGIN_OWN_SOCKET_DIR_NAME,
   PLUGIN_WORKER_RUN_DIR_NAME,
   assertUnixSocketPathFits,
+  carryPluginDataDir,
+  pluginPayloadCopyFilter,
   resolvePluginSocketDir,
   resolvePluginWritableRoot,
 } from "../plugin-storage-layout.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import { isPathWithin, isResolvedPathWithin } from "../plugin-storage-containment.js";
+import { PLUGIN_DATA_FIXTURE, readPluginDataFixture, seedPluginDataFixture } from "./test-helpers.js";
 
 const PLUGIN_ID = "lvis-plugin-layout-fixture";
 
@@ -165,5 +171,66 @@ describe("assertUnixSocketPathFits", () => {
     const multiByte = "가".repeat(Math.ceil(limit / 3));
     expect(multiByte.length).toBeLessThanOrEqual(limit);
     expect(() => assertUnixSocketPathFits(multiByte, "probe")).toThrow(/bytes/);
+  });
+});
+
+describe("carryPluginDataDir", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "plugin-data-carry-"));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("moves the data directory between roots with every file intact", async () => {
+    const from = join(root, "old");
+    const to = join(root, "new");
+    await mkdir(from);
+    await mkdir(to);
+    await seedPluginDataFixture(from);
+
+    await expect(carryPluginDataDir(from, to)).resolves.toBe(true);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
+  });
+
+  it("reports nothing to carry when the source root holds no data directory", async () => {
+    const from = join(root, "old");
+    const to = join(root, "new");
+    await mkdir(from);
+    await mkdir(to);
+
+    await expect(carryPluginDataDir(from, to)).resolves.toBe(false);
+
+    expect(existsSync(join(to, PLUGIN_DATA_DIR_NAME))).toBe(false);
+  });
+
+  it("refuses to replace a data directory the target root already holds", async () => {
+    const from = join(root, "old");
+    const to = join(root, "new");
+    await mkdir(from);
+    await mkdir(to);
+    await seedPluginDataFixture(from);
+    await seedPluginDataFixture(to);
+
+    await expect(carryPluginDataDir(from, to)).rejects.toThrow(/both roots hold a plugin data directory/);
+
+    expect(await readPluginDataFixture(from)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+  });
+});
+
+describe("pluginPayloadCopyFilter", () => {
+  it("excludes the root's own data directory and nothing else", () => {
+    const pluginRoot = resolve(sep, "plugins", PLUGIN_ID);
+    const filter = pluginPayloadCopyFilter(pluginRoot);
+    expect(filter(resolve(pluginRoot, PLUGIN_DATA_DIR_NAME))).toBe(false);
+    expect(filter(resolve(pluginRoot, "plugin.json"))).toBe(true);
+    expect(filter(resolve(pluginRoot, "dist", PLUGIN_DATA_DIR_NAME))).toBe(true);
+    expect(filter(resolve(pluginRoot, PLUGIN_WORKER_RUN_DIR_NAME))).toBe(true);
   });
 });
