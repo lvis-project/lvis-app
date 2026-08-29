@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -39,8 +39,16 @@ describe("marketplace pending-update recovery", () => {
     ],
   })}\n`;
   const backupSuffix = "00000000-0000-4000-8000-000000000001";
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let warnings: unknown[][];
 
   beforeEach(async () => {
+    // `createLogger` delegates to `console.warn` under test, so this is the
+    // host's warn channel rather than a stand-in for it.
+    warnings = [];
+    warnSpy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      warnings.push(args);
+    });
     root = await mkdtemp(join(tmpdir(), "pending-update-recovery-"));
     paths = {
       pluginsRoot: join(root, "plugins"),
@@ -68,6 +76,7 @@ describe("marketplace pending-update recovery", () => {
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
+    warnSpy.mockRestore();
   });
 
   /**
@@ -290,6 +299,17 @@ describe("marketplace pending-update recovery", () => {
     expect(await readFile(parkedFile, "utf-8")).toBe("keep me");
     // And never routed into the swept namespace.
     expect(existsSync(join(paths.pluginsRoot, TOMBSTONE_SUBDIR))).toBe(false);
+
+    // Kept bytes nobody is told about are, to whoever wants the data back,
+    // indistinguishable from deleted ones. Nothing sweeps this namespace and no
+    // registry row points at it, so the log line is the only mention it gets.
+    const parkWarning = warnings.find(([message]) =>
+      typeof message === "string" && message.includes("could not be attributed"));
+    expect(parkWarning).toBeDefined();
+    expect(parkWarning![1]).toEqual(expect.objectContaining({
+      pluginId,
+      parked: dirname(parkedFile),
+    }));
   });
 
   /**

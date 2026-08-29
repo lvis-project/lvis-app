@@ -11,7 +11,10 @@
  *   unresolved; explicit cleanup may delete the backup metadata but leaves the
  *   row pending/hidden until a verified reinstall publishes a new row;
  * - only obsolete backups from an already-successful commit enter the existing
- *   tombstone/sweeper lifecycle.
+ *   tombstone/sweeper lifecycle;
+ * - a plugin data directory nobody can attribute is PARKED in
+ *   `+unattributed-plugin-state+`, which nothing sweeps, and the park is logged
+ *   with the plugin id and the resulting path so an operator can find it.
  */
 import { cp, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
@@ -36,8 +39,11 @@ import type { PluginRegistryEntry } from "./types.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
+import { createLogger } from "../lib/logger.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
+
+const log = createLogger("marketplace-update-recovery");
 
 type PendingUpdate = NonNullable<PluginRegistryEntry["pendingUpdate"]>;
 type PendingCleanup = NonNullable<PluginRegistryEntry["pendingCleanup"]>[number];
@@ -86,7 +92,15 @@ function recoveryDataCarry(paths: PluginPaths, pluginId: string): PluginDataCarr
     onConflict: "resolve",
     unattributedRoot: ownedInstallDir(paths, pluginId),
     moveAside: async (conflictingDataDir) => {
-      await parkUnattributedPluginState(conflictingDataDir, paths.pluginsRoot);
+      const parked = await parkUnattributedPluginState(conflictingDataDir, paths.pluginsRoot);
+      // The one place this state is ever mentioned. Nothing sweeps the parked
+      // namespace and no registry row points at it, so without this line the
+      // bytes are kept and nobody is told where — which is indistinguishable
+      // from having deleted them, for anyone trying to get the data back.
+      log.warn(
+        { pluginId, source: conflictingDataDir, parked },
+        "plugin data directory could not be attributed to the transaction; parked for operator review",
+      );
     },
   };
 }
