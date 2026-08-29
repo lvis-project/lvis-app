@@ -97,11 +97,48 @@ export function createPluginStorageAuditSink(
 }
 
 /**
+ * Resolve the pinned data root, turning an absent one into the SAME refusal the
+ * per-operation guard raises. Without this the two orderings diverged: a root
+ * that vanished after construction produced a classified `PluginStorageError`
+ * with an audit record, while a root already absent at construction produced a
+ * raw `ENOENT` from `realpathSync` — unclassified, unaudited, and carrying a
+ * message about a path rather than about a plugin.
+ */
+function canonicaliseDataRoot(
+  pluginId: string,
+  pluginDataDir: string,
+  log?: PluginStorageRejectionLog,
+): string {
+  try {
+    return realpathSync(pluginDataDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    log?.(`storage: rejected operation against an absent data root`, {
+      target: pluginDataDir,
+      root: pluginDataDir,
+    });
+    throw new PluginStorageError(
+      "plugin data root is absent — refusing to recreate it",
+      pluginId,
+      pluginDataDir,
+    );
+  }
+}
+
+/**
  * Build a sandboxed `PluginStorage` instance pinned to `pluginDataDir`.
  *
  * The root is canonicalised via `realpathSync` once at construction; all
- * subsequent path checks compare against the canonical form. Callers must
- * have created `pluginDataDir` before calling this.
+ * subsequent path checks compare against the canonical form.
+ *
+ * `pluginDataDir` NOT EXISTING is a supported outcome, not a caller error.
+ * `ensurePluginDataDir` creates it at load, and `getPluginStorage` deliberately
+ * only RESOLVES it per request — during an install swap the plugin root is
+ * renamed aside for the length of two renames, and a handle built in that
+ * window must be refused rather than served out of a directory this call
+ * invented. So an absent root raises the same classified, audited
+ * {@link PluginStorageError} the per-operation guard raises for a root that
+ * vanishes AFTER construction. Both orderings look identical to the caller.
  *
  * `log` receives every containment refusal. Production callers MUST pass
  * {@link createPluginStorageAuditSink} — omitting it silently discards the
@@ -117,7 +154,7 @@ export function createPluginStorage(
   // per plugin during boot and the result is reused on every subsequent
   // operation, so it does not contribute to the hot-path event-loop pressure
   // the per-call guard() check addresses.
-  const canonicalRoot = realpathSync(pluginDataDir);
+  const canonicalRoot = canonicaliseDataRoot(pluginId, pluginDataDir, log);
 
   /**
    * Climb up the path until we hit an existing entry, then realpath it and

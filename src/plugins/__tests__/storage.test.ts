@@ -155,6 +155,28 @@ describe("createPluginStorage — the data root is never recreated", () => {
     }
   });
 
+  it("refuses the same way whether the root went missing before or after construction", async () => {
+    const parked = `${dataDir}-parked`;
+    // AFTER construction: the handle exists, the root moves under it.
+    const built = createPluginStorage("p", dataDir);
+    renameSync(dataDir, parked);
+    try {
+      await expect(built.writeJson("state.json", { a: 1 })).rejects.toThrow(
+        /data root is absent/,
+      );
+      // BEFORE construction: `getPluginStorage` resolves rather than ensures,
+      // so it hands an absent directory here on purpose. Same classified,
+      // audited refusal — not a raw ENOENT about a path.
+      const rejections: string[] = [];
+      expect(() => createPluginStorage("p", dataDir, (message) => {
+        rejections.push(message);
+      })).toThrow(/data root is absent/);
+      expect(rejections).toEqual(["storage: rejected operation against an absent data root"]);
+    } finally {
+      renameSync(parked, dataDir);
+    }
+  });
+
   it("still names a real symlink escape a symlink escape", async () => {
     symlinkSync(outsideDir, join(dataDir, "link"), dirLinkType);
     const s = createPluginStorage("p", dataDir);

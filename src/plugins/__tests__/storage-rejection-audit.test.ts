@@ -94,7 +94,7 @@ describe("PluginRuntime.getPluginStorage — containment refusals are audited", 
     const dataDir = join(fixture.pluginsRoot, PLUGIN_ID, "data");
     await rm(dataDir, { recursive: true, force: true });
 
-    expect(() => runtime.getPluginStorage(PLUGIN_ID)).toThrow();
+    expect(() => runtime.getPluginStorage(PLUGIN_ID)).toThrow(/data root is absent/);
     expect(existsSync(dataDir)).toBe(false);
   });
 
