@@ -120,7 +120,7 @@ export interface ToolExecutionContext {
 
 /**
  * An image a tool returns for the model to SEE (e.g. `view_image`). Carried on
- * a sibling field of {@link ToolResult} so `output` stays a plain-text
+ * a sibling field of {@link ToolExecutionResult} so `output` stays a plain-text
  * placeholder for every string-only consumer (token estimation, persistence,
  * renderer replay); only the Claude message mapper reads this and emits an image
  * block. `data` is raw base64 (no `data:` URL prefix); non-Claude vendors, which
@@ -141,7 +141,7 @@ export interface ToolResultImage {
  * throwing; throws are caught by the executor and surfaced as
  * `is_error` tool results in the same way.
  */
-export interface ToolResult {
+export interface ToolExecutionResult {
   output: string;
   isError: boolean;
   metadata?: Record<string, unknown>;

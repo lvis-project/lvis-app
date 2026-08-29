@@ -25,7 +25,7 @@ import {
   type Tool,
   type ToolCategory,
   type ToolExecutionContext,
-  type ToolResult,
+  type ToolExecutionResult,
 } from "./base.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
 import { terminateChildProcess } from "./terminate-child-process.js";
@@ -373,7 +373,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof BashToolInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     // Preflight: interactive scaffolds would hang on stdin.
     const preflightError = preflightInteractiveCommand(input.command);
     if (preflightError !== null) {
@@ -1138,7 +1138,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof PowerShellToolInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const resolvedCwd = resolveHostShellWorkingDirectory(ctx.cwd, input.cwd);
     const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
     if (cwdViolation) {
@@ -1488,7 +1488,7 @@ async function spawnPowerShellWithSandbox(
   cwd: string,
   writePaths: readonly string[],
   timeoutSeconds: number,
-): Promise<ToolResult> {
+): Promise<ToolExecutionResult> {
   // Resolve before allocating the temporary profile so a missing PowerShell
   // executable cannot leave an orphaned sandbox HOME behind.
   const executable = resolvePowerShellExecutable();
@@ -1580,7 +1580,7 @@ async function spawnPowerShellWithSandbox(
   // leaks (ASRT changed nothing in process.env). Secrets stay stripped on both.
   const childEnv = buildSandboxedChildEnv(wrapped.env, { ...sandboxHome.env });
 
-  return await new Promise<ToolResult>((resolveResult) => {
+  return await new Promise<ToolExecutionResult>((resolveResult) => {
     let child: PipedChild;
     try {
       assertManagedChildProcessAdmissionOpen("tool:powershell:asrt");
@@ -1661,7 +1661,7 @@ async function spawnPowerShell(
   command: string,
   cwd: string,
   timeoutSeconds: number,
-): Promise<ToolResult> {
+): Promise<ToolExecutionResult> {
   return new Promise((resolve) => {
     const executable = resolvePowerShellExecutable();
     assertManagedChildProcessAdmissionOpen("tool:powershell");

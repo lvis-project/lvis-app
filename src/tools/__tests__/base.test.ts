@@ -16,7 +16,7 @@ import {
   createDynamicTool,
   type Tool,
   type ToolExecutionContext,
-  type ToolResult,
+  type ToolExecutionResult,
 } from "../base.js";
 
 // ─── Fixtures ─────────────────────────────────────────
@@ -31,7 +31,7 @@ class EchoTool extends ZodTool<typeof echoInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof echoInputSchema>,
     _ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     return { output: input.text, isError: false };
   }
 }
@@ -103,7 +103,7 @@ describe("ZodTool", () => {
 
 describe("createDynamicTool", () => {
   it("returns a Tool with every spec field plumbed through", () => {
-    const executeSpy = async (): Promise<ToolResult> => ({
+    const executeSpy = async (): Promise<ToolExecutionResult> => ({
       output: "ok",
       isError: false,
     });
@@ -127,7 +127,7 @@ describe("createDynamicTool", () => {
     expect(tool.toJsonSchema()).toEqual({ type: "object", properties: {} });
   });
 
-  it("execute callback receives rawInput + ctx and returns the ToolResult", async () => {
+  it("execute callback receives rawInput + ctx and returns the ToolExecutionResult", async () => {
     let seen: unknown;
     const tool = createDynamicTool({
       name: "dyn_tool_exec",
