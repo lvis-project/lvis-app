@@ -214,6 +214,13 @@ export const TELEGRAM_PAIRING_CODE = /^lvis-tg-v1\.[A-Za-z0-9_-]{43}$/;
 const BOT_USERNAME = /^[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]$/;
 /** The bot token is bounded here only to reject obvious paste errors early. */
 const BOT_TOKEN = /^[0-9]{5,20}:[A-Za-z0-9_-]{20,220}$/;
+/**
+ * The grammar main enforces before a token becomes Bot API URL path material:
+ * deliberately narrow so configuration can never change the HTTPS endpoint.
+ * Looser than {@link isTelegramBotToken}'s paste check on purpose — that one
+ * judges plausibility, this one judges URL safety.
+ */
+export const TELEGRAM_BOT_TOKEN_PATH_GRAMMAR = /^[A-Za-z0-9:_-]{1,256}$/;
 const MAX_CONVERSATION_CHARS = 4_096;
 const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 

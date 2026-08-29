@@ -20,6 +20,7 @@
 
 import { isRecord } from "../shared/is-record.js";
 import { isPositiveSafeInteger } from "../shared/safe-integer.js";
+import { TELEGRAM_BOT_TOKEN_PATH_GRAMMAR } from "../shared/telegram-connection.js";
 
 /** Telegram caps `getUpdates` at 100; ask for a bounded batch explicitly. */
 const DEFAULT_UPDATE_LIMIT = 25;
@@ -34,8 +35,6 @@ const DEFAULT_POLL_REQUEST_TIMEOUT_MS = 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 /** Hard ceiling applied to a response body BEFORE it is parsed. */
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-/** Same narrow grammar the delivery transport uses: the token is URL path material. */
-const TELEGRAM_BOT_TOKEN = /^[A-Za-z0-9:_-]{1,256}$/;
 const MAX_RETRY_AFTER_SECONDS = 3_600;
 /** Canonical positive decimal id; never a group or channel id. */
 const CANONICAL_CHAT_ID = /^[1-9][0-9]{0,15}$/;
@@ -168,7 +167,7 @@ export function createTelegramBotApiClient(
     throw new TypeError("telegram-bot-api-client-options-invalid");
   }
   const { botToken } = options;
-  if (typeof botToken !== "string" || !TELEGRAM_BOT_TOKEN.test(botToken)) {
+  if (typeof botToken !== "string" || !TELEGRAM_BOT_TOKEN_PATH_GRAMMAR.test(botToken)) {
     throw new TypeError("telegram-bot-api-client-bot-token-invalid");
   }
   const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;

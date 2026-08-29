@@ -29,6 +29,7 @@ import {
 } from "../engine/shared-conversation-projection.js";
 import { isSharedApprovalToolIdentifier } from "../shared/permission-review-status.js";
 import { isPositiveSafeInteger, requirePositiveInteger } from "../shared/safe-integer.js";
+import { TELEGRAM_BOT_TOKEN_PATH_GRAMMAR } from "../shared/telegram-connection.js";
 
 const MAX_TELEGRAM_BOT_TOKEN_CHARS = 256;
 /**
@@ -51,9 +52,6 @@ const MAX_TELEGRAM_RETRY_AFTER_MS = 30_000;
 const MAX_LOGGED_DESCRIPTION_CHARS = 120;
 /** Network errno-style codes are the only free-form error detail admitted to a log. */
 const SAFE_NETWORK_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$/;
-// Telegram bot tokens are path material in the Bot API URL. Keep the grammar
-// deliberately narrow so configuration can never change the HTTPS endpoint.
-const TELEGRAM_BOT_TOKEN = /^[A-Za-z0-9:_-]{1,256}$/;
 
 const ALLOWED_UPDATE_KEYS = new Set(["update_id", "message"]);
 const ALLOWED_CALLBACK_UPDATE_KEYS = new Set(["update_id", "callback_query"]);
@@ -602,7 +600,7 @@ function readOptionString(options: unknown, key: string): string | undefined {
 function isValidTelegramBotToken(value: string | undefined): value is string {
   return value !== undefined
     && value.length <= MAX_TELEGRAM_BOT_TOKEN_CHARS
-    && TELEGRAM_BOT_TOKEN.test(value);
+    && TELEGRAM_BOT_TOKEN_PATH_GRAMMAR.test(value);
 }
 
 function readRawBody(request: unknown): Uint8Array | undefined {
