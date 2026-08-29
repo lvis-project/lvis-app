@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { readRepoFile } from "../../src/__tests__/test-helpers.js";
 
 import {
   ACL_QUERY_SCRIPT,
@@ -33,10 +34,6 @@ import {
 } from "../../scripts/smoke-windows-nsis-installer.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-
-function readRepoFile(path: string): string {
-  return readFileSync(join(repoRoot, path), "utf8");
-}
 
 const WINDOWS_UNINSTALL_REGISTRY_PATH =
   "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";

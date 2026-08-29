@@ -256,6 +256,7 @@ import {
   makeMockApprovalGate,
   makeMockConversationLoop,
   makeMockPermissionManager,
+  untrustedEvent,
 } from "../../__tests__/test-helpers.js";
 import { agentPluginsDocument } from "./test-helpers.js";
 
@@ -344,10 +345,6 @@ describe("US-3c.1 — lvis:plugins:config:secret:list-keys IPC handler", () => {
 
   function trustedEvent() {
     return { senderFrame: { url: "file://" } };
-  }
-
-  function untrustedEvent() {
-    return { senderFrame: { url: "https://evil.example.com/" } };
   }
 
   it("returns only keys that have a stored secret", async () => {

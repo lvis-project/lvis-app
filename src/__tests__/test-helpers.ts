@@ -1,4 +1,7 @@
 import { vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type { IpcMainInvokeEvent } from "electron";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
@@ -35,6 +38,14 @@ export function hostFrameEvent(): IpcMainInvokeEvent {
 /** A synthetic event from ANY OTHER frame — a plugin shell, a remote page, an empty URL. */
 export function foreignFrameEvent(url: string): IpcMainInvokeEvent {
   return { senderFrame: { url }, sender: {} } as unknown as IpcMainInvokeEvent;
+}
+
+/**
+ * A frame from a page the host never loads — the canonical "wrong sender" for a
+ * gated channel. Every guard must refuse it.
+ */
+export function untrustedEvent(): IpcMainInvokeEvent {
+  return foreignFrameEvent("https://evil.example.com/");
 }
 
 /** A plugin-UI-shell frame — a `file:` frame that sensitive host channels must refuse. */
@@ -192,4 +203,16 @@ export function withTz<T>(zone: string, fn: () => T): T {
   }
   restore();
   return result;
+}
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/**
+ * Read a file by its repo-relative path, for source-discipline suites that
+ * assert on what is checked in (workflows, styles, scripts) rather than on
+ * behaviour. Anchored on this file's location, not `process.cwd()`, so a
+ * suite run from another working directory reads the same repo.
+ */
+export function readRepoFile(path: string): string {
+  return readFileSync(resolve(REPO_ROOT, path), "utf8");
 }

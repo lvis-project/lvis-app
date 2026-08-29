@@ -1,12 +1,9 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readRepoFile } from "./test-helpers.js";
 
 const root = process.cwd();
-
-function readRepoFile(path: string): string {
-  return readFileSync(resolve(root, path), "utf8");
-}
 
 /** The `jobs:` block of a workflow, split into `job id -> raw job body`. Inside
  *  `jobs:` the job ids are the only keys at two-space indentation; everything

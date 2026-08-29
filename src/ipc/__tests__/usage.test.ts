@@ -5,9 +5,8 @@
  * sender validation works on guarded handlers.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { IpcMainInvokeEvent } from "electron";
 import {
-  foreignFrameEvent,
+  untrustedEvent,
   hostFrameEvent,
   invokeRegisteredHandlerWithEvent,
   pluginShellFrameEvent,
@@ -52,10 +51,6 @@ const NO_OVERRIDES: readonly never[] = [];
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
   return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
-}
-
-function untrustedEvent(): IpcMainInvokeEvent {
-  return foreignFrameEvent("https://evil.example.com/");
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────

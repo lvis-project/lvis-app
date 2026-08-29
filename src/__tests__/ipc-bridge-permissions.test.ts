@@ -159,10 +159,6 @@ function invoke(channel: string, ...args: unknown[]): unknown {
   return invokeRegisteredHandler(handlers, channel, ...args);
 }
 
-function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): unknown {
-  return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
-}
-
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
 const modePayload = (mode: string) => ({ mode, intent: USER_INTENT });
 const rulePayload = (pattern: string, action: string) => ({ pattern, action, intent: USER_INTENT });
@@ -282,7 +278,7 @@ describe("lvis:mcp:servers", () => {
   it("rejects unauthorized sender frames", async () => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:mcp:servers",
       { senderFrame: { url: "https://evil.example.com/" } },
     );
@@ -295,7 +291,7 @@ describe("lvis:memory:entries:*", () => {
   it("memory list rejects unauthorized frames", async () => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:entries:list",
       { senderFrame: { url: "https://evil.example.com/" } },
     );
@@ -359,7 +355,7 @@ describe("lvis:memory:entries:*", () => {
     const services = makeServices(pm);
     registerIpcHandlers(services, () => null);
 
-    await invokeWithEvent(
+    await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:entries:delete",
       { senderFrame: { url: "file:///app/index.html" } },
       "my-memory.md",
@@ -371,7 +367,7 @@ describe("lvis:memory:entries:*", () => {
   it("memory search rejects unauthorized frames", async () => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:entries:search",
       { senderFrame: { url: "https://evil.example.com/" } },
       "query",
@@ -406,7 +402,7 @@ describe("lvis:memory:entries:*", () => {
   ])("%s rejects unauthorized frames", async (channel) => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       channel,
       { senderFrame: { url: "https://evil.example.com/" } },
     );
@@ -419,7 +415,7 @@ describe("lvis:plugins:config:*", () => {
   it("returns an explicit message for unauthorized plugin-config reads", async () => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:plugins:config:get",
       { senderFrame: { url: "https://evil.example.com/" } },
       "meeting",
@@ -435,7 +431,7 @@ describe("lvis:plugins:config:*", () => {
   it("returns an explicit message for unauthorized plugin-config writes", async () => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:plugins:config:set",
       { senderFrame: { url: "https://evil.example.com/" } },
       "meeting",
