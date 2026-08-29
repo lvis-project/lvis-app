@@ -9,6 +9,10 @@ import {
   canonicalizeAgentMessage,
   canonicalizeInboundA2ASubAgentMessage,
   wrapChildReportForParentJudgment,
+  A2A_MESSAGE_KEYS,
+  A2A_PART_KEYS,
+  hasOnlyKeys,
+  isStringArray,
 } from "../a2a-subagent-message-codec.js";
 import {
   GUIDE_MAX_CHARS,
@@ -312,5 +316,29 @@ describe("canonicalizeAgentMessage — parent-facing body", () => {
     const wrapped = wrapChildReportForParentJudgment(result.formattedText);
     expect(result.formattedText).not.toBe(wrapped);
     expect(wrapped.endsWith(result.formattedText)).toBe(true);
+  });
+});
+describe("shared wire-shape guards", () => {
+  it("publishes the Message and Part own-key allow-lists the store and handler validate against", () => {
+    expect([...A2A_MESSAGE_KEYS]).toEqual([
+      "messageId", "contextId", "taskId", "role", "parts", "metadata", "extensions", "referenceTaskIds",
+    ]);
+    expect([...A2A_PART_KEYS]).toEqual(["text", "raw", "url", "data", "metadata", "filename", "mediaType"]);
+  });
+
+  it("hasOnlyKeys is a subset check: fewer keys pass, one unknown key fails", () => {
+    expect(hasOnlyKeys({}, A2A_PART_KEYS)).toBe(true);
+    expect(hasOnlyKeys({ text: "x" }, A2A_PART_KEYS)).toBe(true);
+    expect(hasOnlyKeys({ text: "x", extra: 1 }, A2A_PART_KEYS)).toBe(false);
+  });
+
+  it("isStringArray refuses non-string members and sparse holes", () => {
+    expect(isStringArray([])).toBe(true);
+    expect(isStringArray(["a", "b"])).toBe(true);
+    expect(isStringArray(["a", 1])).toBe(false);
+    expect(isStringArray("a")).toBe(false);
+    const sparse: string[] = [];
+    sparse[1] = "b";
+    expect(isStringArray(sparse)).toBe(false);
   });
 });

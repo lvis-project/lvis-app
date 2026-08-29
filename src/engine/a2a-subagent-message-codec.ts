@@ -16,7 +16,13 @@ import { isRecord } from "../shared/is-record.js";
 import { isSafeStructuralId } from "../shared/dlp-safe-id.js";
 
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
-const MESSAGE_KEYS = new Set([
+/**
+ * Own-key allow-lists of the A2A `Message` and `Part` wire objects. The task
+ * store and the subagent handler validate the same objects off the same wire
+ * and the same persisted record, so they import these rather than restate
+ * them: one list, one answer to "is this key part of the shape".
+ */
+export const A2A_MESSAGE_KEYS: ReadonlySet<string> = new Set([
   "messageId",
   "contextId",
   "taskId",
@@ -26,7 +32,7 @@ const MESSAGE_KEYS = new Set([
   "extensions",
   "referenceTaskIds",
 ]);
-const PART_KEYS = new Set([
+export const A2A_PART_KEYS: ReadonlySet<string> = new Set([
   "text",
   "raw",
   "url",
@@ -37,15 +43,16 @@ const PART_KEYS = new Set([
 ]);
 const PART_CONTENT_KEYS = ["text", "raw", "url", "data"] as const;
 
-function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+/** Every own key of `value` is in `allowed` (a subset check, not exact). */
+export function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => allowed.has(key));
 }
 
-function hasOwn(value: object, key: PropertyKey): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-function isStringArray(value: unknown): value is string[] {
+/**
+ * An array of strings with no holes: the spread turns a sparse slot into
+ * `undefined`, which fails the element check, so `[ , "a"]` is refused.
+ */
+export function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && [...value].every((item) => typeof item === "string");
 }
 
@@ -111,7 +118,7 @@ function maskStructuredValue(
     for (const [key, item] of Object.entries(value)) {
       const maskedKey = maskSensitiveData(key);
       const maskedValue = maskStructuredValue(item, seen, depth + 1);
-      if (hasOwn(next, maskedKey.masked)) {
+      if (Object.hasOwn(next, maskedKey.masked)) {
         throw new Error("a2a structured data contains colliding masked keys");
       }
       detections += maskedKey.detections.length + maskedValue.detections;
@@ -129,8 +136,8 @@ function maskStructuredValue(
 }
 
 function validatePart(part: unknown): "invalid-message" | "unsupported-part" | null {
-  if (!isRecord(part) || !hasOnlyKeys(part, PART_KEYS)) return "invalid-message";
-  const contentKeys = PART_CONTENT_KEYS.filter((key) => hasOwn(part, key));
+  if (!isRecord(part) || !hasOnlyKeys(part, A2A_PART_KEYS)) return "invalid-message";
+  const contentKeys = PART_CONTENT_KEYS.filter((key) => Object.hasOwn(part, key));
   if (contentKeys.length !== 1) return "invalid-message";
   const contentKey = contentKeys[0]!;
   if (contentKey === "raw") return "unsupported-part";
@@ -139,9 +146,9 @@ function validatePart(part: unknown): "invalid-message" | "unsupported-part" | n
     return "invalid-message";
   }
   if (contentKey === "data" && part.data === undefined) return "invalid-message";
-  if (hasOwn(part, "metadata") && !isRecord(part.metadata)) return "invalid-message";
-  if (hasOwn(part, "filename") && typeof part.filename !== "string") return "invalid-message";
-  if (hasOwn(part, "mediaType") && typeof part.mediaType !== "string") return "invalid-message";
+  if (Object.hasOwn(part, "metadata") && !isRecord(part.metadata)) return "invalid-message";
+  if (Object.hasOwn(part, "filename") && typeof part.filename !== "string") return "invalid-message";
+  if (Object.hasOwn(part, "mediaType") && typeof part.mediaType !== "string") return "invalid-message";
   return null;
 }
 
@@ -149,7 +156,7 @@ function validateMessageEnvelope(
   message: unknown,
   address: AgentMessageAddress,
 ): "invalid-message" | "unsupported-part" | null {
-  if (!isRecord(message) || !hasOnlyKeys(message, MESSAGE_KEYS)) return "invalid-message";
+  if (!isRecord(message) || !hasOnlyKeys(message, A2A_MESSAGE_KEYS)) return "invalid-message";
   if (!isSafeStructuralId(address.parentSessionId)
     || !isSafeStructuralId(address.childSessionId)) {
     return "invalid-message";
@@ -159,11 +166,11 @@ function validateMessageEnvelope(
   if (message.contextId !== address.parentSessionId) return "invalid-message";
   if (message.taskId !== address.childSessionId) return "invalid-message";
   if (!Array.isArray(message.parts) || message.parts.length === 0) return "invalid-message";
-  if (hasOwn(message, "metadata") && !isRecord(message.metadata)) return "invalid-message";
-  if (hasOwn(message, "extensions") && !isStringArray(message.extensions)) {
+  if (Object.hasOwn(message, "metadata") && !isRecord(message.metadata)) return "invalid-message";
+  if (Object.hasOwn(message, "extensions") && !isStringArray(message.extensions)) {
     return "invalid-message";
   }
-  if (hasOwn(message, "referenceTaskIds") && !isStringArray(message.referenceTaskIds)) {
+  if (Object.hasOwn(message, "referenceTaskIds") && !isStringArray(message.referenceTaskIds)) {
     return "invalid-message";
   }
   for (const part of message.parts) {
@@ -408,14 +415,14 @@ export type CanonicalInboundA2ASubAgentMessageResult =
 function validateInboundA2ASubAgentMessage(
   message: unknown,
 ): InboundA2ASubAgentMessageFailureReason | null {
-  if (!isRecord(message) || !hasOnlyKeys(message, MESSAGE_KEYS)) return "invalid-message";
+  if (!isRecord(message) || !hasOnlyKeys(message, A2A_MESSAGE_KEYS)) return "invalid-message";
   if (!isSafeA2AMessageId(message.messageId)) return "invalid-message";
   if (typeof message.role !== "string") return "invalid-message";
   if (message.role !== A2A_ROLE_USER) return "unsupported-role";
-  if (hasOwn(message, "contextId") && !isSafeStructuralId(message.contextId)) {
+  if (Object.hasOwn(message, "contextId") && !isSafeStructuralId(message.contextId)) {
     return "invalid-message";
   }
-  if (hasOwn(message, "taskId") && !isSafeStructuralId(message.taskId)) {
+  if (Object.hasOwn(message, "taskId") && !isSafeStructuralId(message.taskId)) {
     return "invalid-message";
   }
   if (
@@ -425,17 +432,17 @@ function validateInboundA2ASubAgentMessage(
   ) {
     return "invalid-message";
   }
-  if (hasOwn(message, "metadata") && !isRecord(message.metadata)) {
+  if (Object.hasOwn(message, "metadata") && !isRecord(message.metadata)) {
     return "invalid-message";
   }
   if (
-    hasOwn(message, "extensions")
+    Object.hasOwn(message, "extensions")
     && (!isStringArray(message.extensions) || message.extensions.length > GUIDE_MAX_ENTRIES)
   ) {
     return "invalid-message";
   }
   if (
-    hasOwn(message, "referenceTaskIds")
+    Object.hasOwn(message, "referenceTaskIds")
     && (!isStringArray(message.referenceTaskIds)
       || message.referenceTaskIds.length > GUIDE_MAX_ENTRIES)
   ) {
