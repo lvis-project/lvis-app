@@ -616,7 +616,17 @@ function isValidA2AWireMetadataId(id: unknown): id is string {
     && maskSensitiveData(id).detections.length === 0;
 }
 
-const LEGACY_ROW_ID_MAX_ATTEMPTS = 8;
+/**
+ * Two separate budgets, because they fail for unrelated reasons and must not
+ * spend each other. A DLP rejection means the digest itself looks sensitive —
+ * eight in a row is a real dead end. A collision means some other row already
+ * answers to that name, which says nothing about the next candidate. Sharing
+ * one counter let a handful of collisions exhaust the DLP allowance and abort
+ * `loadSession` outright, turning a file with duplicate ids into a session that
+ * cannot be opened at all.
+ */
+const LEGACY_ROW_ID_MAX_DLP_ATTEMPTS = 8;
+const LEGACY_ROW_ID_MAX_COLLISION_ATTEMPTS = 64;
 
 /**
  * Deterministic per-row identity for a session row read off disk that has none.
@@ -638,18 +648,25 @@ const LEGACY_ROW_ID_MAX_ATTEMPTS = 8;
  * `taken` be honoured without reaching for randomness.
  */
 function legacyRowId(sessionId: string, index: number, taken: ReadonlySet<string>): string {
-  const candidate = dlpSafeCandidate((attempt) => {
-    const digest = createHash("sha256")
-      .update(`${sessionId}:${index}:${attempt}`)
-      .digest("hex")
-      .slice(0, 32);
-    const derived = `row-${digest}`;
-    return taken.has(derived) ? null : derived;
-  }, LEGACY_ROW_ID_MAX_ATTEMPTS);
-  if (candidate === null) {
-    throw new Error("[legacy-row-id] could not derive a redaction-safe row identity");
+  for (let collision = 0; collision < LEGACY_ROW_ID_MAX_COLLISION_ATTEMPTS; collision += 1) {
+    const candidate = dlpSafeCandidate((dlpAttempt) => {
+      // One flat counter across both loops, so the first candidate is still
+      // `${sessionId}:${index}:0` and an existing session keeps the ids it
+      // already derived.
+      const step = collision * LEGACY_ROW_ID_MAX_DLP_ATTEMPTS + dlpAttempt;
+      const digest = createHash("sha256")
+        .update(`${sessionId}:${index}:${step}`)
+        .digest("hex")
+        .slice(0, 32);
+      return `row-${digest}`;
+    }, LEGACY_ROW_ID_MAX_DLP_ATTEMPTS);
+    // `null` here is now unambiguous: the generator never declines, so it means
+    // the DLP scanner rejected every draw. Another collision round would only
+    // feed it more of the same.
+    if (candidate === null) break;
+    if (!taken.has(candidate)) return candidate;
   }
-  return candidate;
+  throw new Error("[legacy-row-id] could not derive a redaction-safe row identity");
 }
 
 /**
@@ -677,14 +694,28 @@ function legacyRowId(sessionId: string, index: number, taken: ReadonlySet<string
  */
 function stampLegacyRowIds(sessionId: string, messages: unknown[]): unknown[] {
   const taken = new Set<string>();
-  return messages.map((message, index) => {
-    if (!isRecord(message)) return message;
+  const keepsOwnId = new Array<boolean>(messages.length).fill(false);
+
+  // Pass 1 reserves every id the file actually carries, before a single one is
+  // derived. In one pass a derived id for an early row could claim the name a
+  // later row already had written down, and that row — the one with real
+  // evidence of its identity — would be the one re-minted. Ordering the passes
+  // this way means a stored id only ever loses to another stored id.
+  messages.forEach((message, index) => {
+    if (!isRecord(message)) return;
     const meta = isRecord(message.meta) ? message.meta : undefined;
     const existing = meta?.messageId;
-    if (typeof existing === "string" && existing.length > 0 && !taken.has(existing)) {
-      taken.add(existing);
-      return message;
-    }
+    if (typeof existing !== "string" || existing.length === 0) return;
+    // A file can still carry the same id twice; there the first occurrence keeps
+    // it and the rest are re-minted below.
+    if (taken.has(existing)) return;
+    taken.add(existing);
+    keepsOwnId[index] = true;
+  });
+
+  return messages.map((message, index) => {
+    if (!isRecord(message) || keepsOwnId[index]) return message;
+    const meta = isRecord(message.meta) ? message.meta : undefined;
     const messageId = legacyRowId(sessionId, index, taken);
     taken.add(messageId);
     return { ...message, meta: { ...(meta ?? {}), messageId } };

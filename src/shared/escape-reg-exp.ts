@@ -3,12 +3,14 @@
  *
  * Four copies of this existed — in `memory/memory-manager.ts`,
  * `shared/tool-name-aliases.ts`, `audit/dlp-filter.ts` and inline in
- * `plugins/marketplace-update-recovery.ts` — with the same character class
- * written in two different orders. Every one of them wraps attacker- or
- * user-influenced text (a project name, a tool alias, the home directory
- * path, a plugin id) into a pattern, so a character missing from one copy is
- * not a formatting difference: it is a pattern that matches more than the
- * caller asked for.
+ * `plugins/marketplace-update-recovery.ts`. All four escaped the same set of
+ * characters; two of them just wrote the set in a different order, so they were
+ * equivalent and no call site was under-escaping. What one home buys is that
+ * they cannot stop being equivalent: every one of them wraps attacker- or
+ * user-influenced text (a project name, a tool alias, the home directory path,
+ * a plugin id) into a pattern, so a character dropped from one copy later would
+ * not be a formatting difference — it would be a pattern matching more than the
+ * caller asked for, at one call site and not the others.
  *
  * It gets its own module rather than joining an existing one because its four
  * importers sit in four different domains, and `shared/` has no general string
