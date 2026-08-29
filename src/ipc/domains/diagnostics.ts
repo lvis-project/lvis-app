@@ -25,6 +25,7 @@ import {
   type CrashDumpMeta,
 } from "../../audit/diagnostics-bundle.js";
 import { redactForLLM, redactFsPath, scrubSecretsForLLM } from "../../audit/dlp-filter.js";
+import { parseIsoDate } from "./audit.js";
 import { parseLogFileDate } from "../../lib/log-file-sink.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
 import { lvisHome } from "../../shared/lvis-home.js";
@@ -123,6 +124,13 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, CHANNELS.diagnostics.export, e);
         return UNAUTHORIZED_FRAME;
       }
+      // Validated OUTSIDE the try, so a malformed day key rejects the invoke
+      // the way `lvis:audit:search` does rather than being reported as
+      // "export-failed" — and, more importantly, rather than reaching the
+      // bundle builder, which catches a throwing audit section and would hand
+      // back an ok bundle with its audit trail quietly missing.
+      const dateFrom = parseIsoDate(opts?.dateFrom, "dateFrom");
+      const dateTo = parseIsoDate(opts?.dateTo, "dateTo");
       try {
         const settings = settingsService.getAll();
         // Persisted setting is AUTHORITATIVE; the renderer arg may only NARROW,
@@ -138,8 +146,8 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
           appVersion: getLvisAppVersion(),
           crashDumpsDir: await crashDumpsDir(),
           includeCrashDumps,
-          dateFrom: opts?.dateFrom,
-          dateTo: opts?.dateTo,
+          dateFrom,
+          dateTo,
           osRelease: (await import("node:os")).release(),
         });
 
@@ -169,8 +177,8 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
           type: "diagnostics-export",
           input: JSON.stringify({
             includeCrashDumps,
-            dateFrom: opts?.dateFrom,
-            dateTo: opts?.dateTo,
+            dateFrom,
+            dateTo,
             bytes: buffer.length,
             path: redactFsPath(res.filePath),
           }),

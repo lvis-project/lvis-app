@@ -30,6 +30,7 @@ import { platform } from "node:process";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { localDateKey, localDayRange, shiftLocalDateKey } from "../shared/local-date.js";
 import {
   computeDailySeal,
   computeLineHmac,
@@ -444,6 +445,167 @@ function normalizePositiveInteger(value: number | undefined, fallback: number): 
   return value;
 }
 
+/** Length of the `YYYY-MM-DD` prefix every partition file name starts with. */
+const UTC_DATE_KEY_LENGTH = 10;
+
+/**
+ * Infix that marks a file as quarantined rows whose HMAC seal did not verify.
+ * The naming is the whole signal `_filesOverlapping` has to keep them out of
+ * reads, so both writers that quarantine a tail build their name from THIS.
+ */
+const UNVERIFIED_QUARANTINE_MARKER = "-unverified-";
+
+/**
+ * The UTC civil day `YYYY-MM-DD` that partitions entries written at `date`.
+ *
+ * Exported because the diagnostics bundle reads the SAME window twice — once as
+ * audit rows through {@link AuditLogger.search}, once as log files named by the
+ * UTC day they were written on — and the two must agree on which UTC days a
+ * host-local range touches.
+ */
+export function utcDateKey(date: Date): string {
+  return date.toISOString().slice(0, UTC_DATE_KEY_LENGTH);
+}
+
+/**
+ * The instant an audit row was written, as epoch milliseconds (`NaN` when the
+ * row carries no parseable time). Reads span every `.jsonl` partition in the
+ * audit directory, which holds two schemas: telemetry rows stamp
+ * `AuditEntry.timestamp`, the HMAC-chained permission rows stamp
+ * `AuditCommon.ts`. Both name the one instant the row was written; this reads
+ * whichever field the row's schema uses.
+ */
+function entryInstant(entry: AuditEntry): number {
+  const row = entry as { timestamp?: unknown; ts?: unknown };
+  const raw = row.timestamp ?? row.ts;
+  return typeof raw === "string" ? Date.parse(raw) : Number.NaN;
+}
+
+/**
+ * `start <= at < end` with either bound open. An unparseable instant (`NaN`)
+ * fails every comparison, so it never satisfies a bound that was set.
+ *
+ * That asymmetry is the whole contract for a row whose time cannot be read, and
+ * it is deliberate rather than incidental:
+ *   - `search({})` with NEITHER bound set returns such a row, because there is
+ *     no window for it to fall outside of. It sorts to the end of the
+ *     newest-first page (see {@link NewestFirstRows}) — an unknown time cannot
+ *     honestly claim to be recent.
+ *   - `search({ dateFrom })` — or any call that sets a bound — drops it. A row
+ *     that cannot say when it happened cannot be shown as evidence that it
+ *     happened inside the picked days.
+ *   - {@link AuditLogger.getStats} always sets a bound, so such rows are never
+ *     counted. They are deliberately NOT given an "unknown" bucket: `totalByDay`
+ *     feeds a per-day chart whose x-axis is a calendar, and a bucket with no
+ *     place on that axis would have to be drawn somewhere it does not belong.
+ *     A row with no readable time is a corrupt row, and the honest count of
+ *     rows on a given day excludes it.
+ */
+function instantWithin(at: number, start?: Date, end?: Date): boolean {
+  if (start !== undefined && !(at >= start.getTime())) return false;
+  if (end !== undefined && !(at < end.getTime())) return false;
+  return true;
+}
+
+/** A matched row plus the two keys that order it: its instant, then read order. */
+interface RankedAuditRow {
+  at: number;
+  seq: number;
+  entry: AuditEntry;
+}
+
+/** True when `a` belongs ahead of `b` on a newest-first page. */
+function ranksAhead(a: RankedAuditRow, b: RankedAuditRow): boolean {
+  if (a.at !== b.at) return a.at > b.at;
+  return a.seq < b.seq;
+}
+
+/**
+ * The newest `capacity` rows of a stream, in newest-first order.
+ *
+ * A day's audit trail is split across up to half a dozen channel files
+ * (`<day>.jsonl`, `<day>.permission-audit.jsonl`, `<day>.sandbox-gate.jsonl`, …)
+ * that are read in file-name order, so the concatenated stream is NOT in time
+ * order: it restarts at the day's first instant on every channel boundary. A
+ * page sliced out of that stream shows a Time column that walks backwards, and
+ * `offset` names a position in an ordering nobody chose. Rows are therefore
+ * ordered here, before the slice.
+ *
+ * Retention is capped rather than sorting the whole match set, because a page
+ * of 50 rows must not pull a busy day's 50,000 parsed rows into memory to
+ * produce them. The cap is `offset + limit` — everything the caller can
+ * actually see — and the heap keeps the ranked-highest that many, which is why
+ * `search` can still stream files it never fully retains.
+ *
+ * Ties break on read order, so two rows stamped the same millisecond keep the
+ * order the files gave them and the page is deterministic. A row with an
+ * unreadable instant ranks last (see {@link instantWithin} for when such a row
+ * is present at all).
+ */
+class NewestFirstRows {
+  /** Min-heap by rank: the root is the row that would be dropped first. */
+  private readonly heap: RankedAuditRow[] = [];
+  private seq = 0;
+
+  constructor(private readonly capacity: number) {}
+
+  offer(entry: AuditEntry, instant: number): void {
+    if (this.capacity <= 0) return;
+    const row: RankedAuditRow = {
+      at: Number.isNaN(instant) ? Number.NEGATIVE_INFINITY : instant,
+      seq: this.seq,
+      entry,
+    };
+    this.seq += 1;
+    if (this.heap.length < this.capacity) {
+      this.heap.push(row);
+      this.siftUp(this.heap.length - 1);
+      return;
+    }
+    if (ranksAhead(row, this.heap[0])) {
+      this.heap[0] = row;
+      this.siftDown(0);
+    }
+  }
+
+  /** The retained rows, newest first. */
+  drain(): AuditEntry[] {
+    return this.heap
+      .sort((a, b) => (a.at === b.at ? a.seq - b.seq : b.at - a.at))
+      .map((row) => row.entry);
+  }
+
+  private siftUp(from: number): void {
+    let index = from;
+    while (index > 0) {
+      const parent = (index - 1) >> 1;
+      if (!ranksAhead(this.heap[parent], this.heap[index])) break;
+      this.swap(parent, index);
+      index = parent;
+    }
+  }
+
+  private siftDown(from: number): void {
+    let index = from;
+    for (;;) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let lowest = index;
+      if (left < this.heap.length && ranksAhead(this.heap[lowest], this.heap[left])) lowest = left;
+      if (right < this.heap.length && ranksAhead(this.heap[lowest], this.heap[right])) lowest = right;
+      if (lowest === index) break;
+      this.swap(lowest, index);
+      index = lowest;
+    }
+  }
+
+  private swap(a: number, b: number): void {
+    const held = this.heap[a];
+    this.heap[a] = this.heap[b];
+    this.heap[b] = held;
+  }
+}
+
 function archiveDateStampFromFileName(fileName: string): string | undefined {
   const match = /\.jsonl\.(\d{8})(?:\d{9})?(?:\.[0-9a-f-]{36})?\.gz$/i.exec(fileName);
   return match?.[1];
@@ -504,7 +666,7 @@ export class AuditLogger {
   }
 
   private currentUtcDate(): string {
-    return this.now().toISOString().slice(0, 10);
+    return utcDateKey(this.now());
   }
 
   private telemetryPath(date = this.currentUtcDate()): string {
@@ -798,7 +960,7 @@ export class AuditLogger {
               }
               const archivePath = join(
                 this.auditDir,
-                `${this.permissionAuditDate}.permission-audit.torn-unverified-${size}-${this.now().getTime()}.jsonl`,
+                `${this.permissionAuditDate}.permission-audit.torn${UNVERIFIED_QUARANTINE_MARKER}${size}-${this.now().getTime()}.jsonl`,
               );
               publishOpenFileArchiveSync(
                 fd,
@@ -864,7 +1026,7 @@ export class AuditLogger {
             }
             const archivePath = join(
               this.auditDir,
-              `${this.permissionAuditDate}.permission-audit.legacy-unverified-${computedSeal.slice(0, 12)}.jsonl`,
+              `${this.permissionAuditDate}.permission-audit.legacy${UNVERIFIED_QUARANTINE_MARKER}${computedSeal.slice(0, 12)}.jsonl`,
             );
             // Publish the verified inode through its own descriptor and empty
             // it in place. Renaming the pathname instead would archive whatever
@@ -1213,15 +1375,33 @@ export class AuditLogger {
   /**
    * Search audit entries across JSONL files within a date range.
    * Returns a filtered, paginated slice of matching entries.
+   *
+   * `dateFrom` / `dateTo` are inclusive HOST-LOCAL civil days — what the
+   * Audit tab's picker shows. The store stays partitioned by UTC day (see
+   * `currentUtcDate`), so the local range is mapped onto the instants it
+   * covers, every UTC partition that can overlap those instants is read (one
+   * extra file on each side when the host is off UTC), and each entry is kept
+   * or dropped by its own timestamp instant — never by comparing day strings.
+   *
+   * ORDERING CONTRACT: `entries` come back NEWEST FIRST, ordered by the row's
+   * own instant and, for rows stamped the same millisecond, by the order the
+   * files gave them. `offset` indexes that ordering, so paging walks backwards
+   * through time. The order is imposed rather than inherited: the files a day
+   * spans are read by name, which restarts the clock at each channel boundary
+   * (see {@link NewestFirstRows}). `total` counts every match, not just the
+   * retained page.
    */
   async search(filter: AuditSearchFilter): Promise<{ entries: AuditEntry[]; total: number }> {
     await this.flush();
     const { dateFrom, dateTo, type, textSearch, limit = 100, offset = 0 } = filter;
 
-    // Collect JSONL file names in range
-    const files = this._filesInRange(dateFrom, dateTo);
+    const range = localDayRange(dateFrom, dateTo);
+    if (range === null) {
+      throw new TypeError("audit search dateFrom/dateTo must be YYYY-MM-DD day keys");
+    }
+    const files = this._filesOverlapping(range.start, range.end);
 
-    const entries: AuditEntry[] = [];
+    const ranked = new NewestFirstRows(offset + limit);
     let total = 0;
     const normalizedNeedle = textSearch?.toLowerCase();
 
@@ -1236,23 +1416,24 @@ export class AuditLogger {
         } catch {
           continue;
         }
+        const at = entryInstant(entry);
+        if (!instantWithin(at, range.start, range.end)) continue;
         if (type && entry.type !== type) continue;
         if (normalizedNeedle) {
           const haystack = JSON.stringify(entry).toLowerCase();
           if (!haystack.includes(normalizedNeedle)) continue;
         }
-        if (total >= offset && entries.length < limit) {
-          entries.push(entry);
-        }
+        ranked.offer(entry, at);
         total += 1;
       }
     }
 
-    return { entries, total };
+    return { entries: ranked.drain().slice(offset), total };
   }
 
   /**
-   * Return aggregate stats over the last N days.
+   * Return aggregate stats over the last N host-local days, `totalByDay`
+   * bucketed by host-local day key — the same calendar the Audit tab shows.
    */
   async getStats(lastDays: number): Promise<{
     totalByType: Record<string, number>;
@@ -1260,8 +1441,11 @@ export class AuditLogger {
     sensitiveOps: number;
   }> {
     await this.flush();
-    const dateFrom = new Date(Date.now() - lastDays * 86400_000).toISOString().slice(0, 10);
-    const files = this._filesInRange(dateFrom, undefined);
+    const range = localDayRange(shiftLocalDateKey(localDateKey(this.now()), -lastDays));
+    if (range === null) {
+      throw new TypeError("audit stats window must start on a YYYY-MM-DD day key");
+    }
+    const files = this._filesOverlapping(range.start, range.end);
 
     const totalByType: Record<string, number> = {};
     const totalByDay: Record<string, number> = {};
@@ -1280,7 +1464,9 @@ export class AuditLogger {
         } catch {
           continue;
         }
-        const day = entry.timestamp?.slice(0, 10) ?? file.replace(".jsonl", "");
+        const at = entryInstant(entry);
+        if (!instantWithin(at, range.start, range.end)) continue;
+        const day = localDateKey(new Date(at));
         totalByType[entry.type] = (totalByType[entry.type] ?? 0) + 1;
         totalByDay[day] = (totalByDay[day] ?? 0) + 1;
         if (SENSITIVE_TYPES.has(entry.type)) sensitiveOps += 1;
@@ -1290,20 +1476,39 @@ export class AuditLogger {
     return { totalByType, totalByDay, sensitiveOps };
   }
 
-  /** List all .jsonl files within [dateFrom, dateTo] inclusive. */
-  private _filesInRange(dateFrom?: string, dateTo?: string): string[] {
+  /**
+   * List every `.jsonl` file whose UTC-day partition can hold an entry inside
+   * the instant range `[start, end)`, oldest first. Partitions are named by
+   * the UTC day of the entries they hold (`YYYY-MM-DD[.<channel>].jsonl`), so
+   * the candidates run from the UTC day of `start` through the UTC day of the
+   * last instant before `end`. Callers still filter each entry by its own
+   * instant; this only bounds which files are opened.
+   *
+   * Quarantine files are excluded. When the HMAC chain fails to verify, the
+   * unverifiable rows are moved aside into a `…-unverified-…` file
+   * (`torn-unverified` for a truncated tail, `legacy-unverified` for a seal from
+   * a superseded epoch) so a fresh self-authenticated chain can start. Those
+   * rows are evidence of tampering, not evidence of what happened: mixing them
+   * back into search results or stat counts — where nothing in the returned
+   * shape can say which rows lost their seal — would let an attacker's forged
+   * or replayed row be read as an authenticated one. They stay quarantined
+   * until something is built that can present them AS quarantined.
+   */
+  private _filesOverlapping(start?: Date, end?: Date): string[] {
     let files: string[];
     try {
       files = readdirSync(this.auditDir)
-        .filter((f) => f.endsWith(".jsonl"))
+        .filter((f) => f.endsWith(".jsonl") && !f.includes(UNVERIFIED_QUARANTINE_MARKER))
         .sort();
     } catch {
       return [];
     }
+    const firstPartition = start === undefined ? undefined : utcDateKey(start);
+    const lastPartition = end === undefined ? undefined : utcDateKey(new Date(end.getTime() - 1));
     return files.filter((f) => {
-      const date = f.replace(".jsonl", "");
-      if (dateFrom && date < dateFrom) return false;
-      if (dateTo && date > dateTo) return false;
+      const partition = f.slice(0, UTC_DATE_KEY_LENGTH);
+      if (firstPartition !== undefined && partition < firstPartition) return false;
+      if (lastPartition !== undefined && partition > lastPartition) return false;
       return true;
     });
   }
