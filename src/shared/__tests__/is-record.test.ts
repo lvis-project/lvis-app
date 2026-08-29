@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { hasExactKeys, hasOnlyKeys, isRecord } from "../is-record.js";
+import { hasExactKeys, hasOnlyKeys, isRecord, isStringArray } from "../is-record.js";
 
 describe("isRecord", () => {
   it("accepts a plain keyed object", () => {
@@ -53,5 +53,19 @@ describe("hasOnlyKeys", () => {
   it("rejects any key outside the allowed set", () => {
     expect(hasOnlyKeys({ a: 1, z: 2 }, ["a", "b"])).toBe(false);
     expect(hasOnlyKeys({ z: 2 }, new Set(["a"]))).toBe(false);
+  });
+});
+
+describe("isStringArray", () => {
+  it("accepts arrays of strings, including the empty array", () => {
+    expect(isStringArray([])).toBe(true);
+    expect(isStringArray(["a", ""])).toBe(true);
+  });
+
+  it("rejects non-arrays and arrays with a non-string element", () => {
+    expect(isStringArray("a")).toBe(false);
+    expect(isStringArray(["a", 1])).toBe(false);
+    expect(isStringArray([undefined])).toBe(false);
+    expect(isStringArray(null)).toBe(false);
   });
 });

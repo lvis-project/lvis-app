@@ -7,7 +7,7 @@ import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { resolveTrustedRegistryManifestPath } from "./registry-manifest-trust.js";
-import { isRecord } from "../shared/is-record.js";
+import { isRecord, isStringArray } from "../shared/is-record.js";
 
 /**
  * Legacy registry shape — `installedBy` ("admin"|"user") and
@@ -363,10 +363,6 @@ function validatePluginAccess(value: unknown, pluginId: string): void {
   if (value.agentApprovalScopes !== undefined && !isStringArray(value.agentApprovalScopes)) {
     throw new Error(`Invalid plugin approval scopes: ${pluginId}`);
   }
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function assertOnlyKeys(value: Record<string, unknown>, allowed: Set<string>, context: string): void {

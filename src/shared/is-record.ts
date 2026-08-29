@@ -39,3 +39,12 @@ export function hasOnlyKeys(value: object, allowed: ReadonlySet<string> | readon
   const permitted = allowed instanceof Set ? allowed : new Set(allowed);
   return Object.keys(value).every((key) => permitted.has(key));
 }
+
+/**
+ * Whether `value` is an array whose every element is a string. `every`
+ * skips holes, so a sparse array passes; the inputs this guards are parsed
+ * JSON and IPC payloads, which cannot carry holes.
+ */
+export function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
