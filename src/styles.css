@@ -1797,6 +1797,14 @@
   :root {
     --shell-card-inset: var(--chrome-gap);
     --shell-card-inset-bottom: 12px;
+    /* The sidebar card's top edge. On darwin it is not a chosen number: the
+     * card's cluster strip has to share the traffic lights' centre line, so a
+     * `--chrome-control-height` strip inside a `--chrome-band-height` band
+     * starts exactly where the band would centre it. Elsewhere there are no
+     * lights to align against and the card takes a slightly deeper top so it
+     * reads as lifted off the window's top edge. */
+    --shell-card-top-darwin: calc((var(--chrome-band-height) - var(--chrome-control-height)) / 2);
+    --shell-card-top: 6px;
     /* What the content surface reserves on its leading edge while the sidebar
      * is a collapsed icon rail, and where the floating banner stack starts so
      * it clears that reserve. rem here, unlike the insets above: nothing on

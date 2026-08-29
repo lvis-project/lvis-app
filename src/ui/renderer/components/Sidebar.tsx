@@ -1498,10 +1498,11 @@ function onActiveSidebarTabChangeGuard(value: string, onActiveTabChange: (tab: S
 // "Workbench model".
 // Always rendered (both expanded + collapsed). When the surrounding card is
 // expanded it forms the card's top strip; when collapsed it stands bare in the
-// band. Each control is an h-6 w-6 icon button (24px, ~4px pad around the 16px
-// glyph) with TIGHT ~2px gaps (gap-0.5) so the hover-highlight box hugs the
-// icon and never pops out of the band; the whole strip is a single h-7
-// items-center row so every glyph centers on the lights' line.
+// band. Each control is a `--chrome-icon-button` square (~4px pad around the
+// 16px glyph) with `--chrome-gap-hair` gaps so the hover-highlight box hugs
+// the icon and never pops out of the band; the whole strip is a single
+// `--chrome-control-height` items-center row, which is what centres every
+// glyph on the lights' line.
 //
 // `leadClearance` left-pads the FIRST button past the OS traffic lights on
 // darwin by `CLUSTER_LEAD_PAD_DARWIN` — the lights' right edge plus a gap,
@@ -1687,12 +1688,14 @@ export function Sidebar({
     //      retracts (body removed) and the cluster pops OUT into the bare band
     //      with NO surface behind it. The strip's screen position is identical in
     //      both states; the only visual delta is the card surface behind it.
-    // The cluster strip must share the traffic lights' CENTRE LINE, and that
-    // line moved when the band went 44px -> 36px: the lights are now at
-    // trafficLightPosition.y:12 with a ≈12px diameter, so their centre is 18.
-    // An h-7 (28px) strip centres at inset + 14, so the inset has to be 4
-    // (top-1), not 8 — at top-2 the icons sat 4px BELOW the lights.
-    // win/linux + non-Electron have no OS lights to align against.
+    // The cluster strip must share the traffic lights' CENTRE LINE, which is
+    // also the band's. `--shell-card-top-darwin` is that constraint solved
+    // rather than a number someone picked: a `--chrome-control-height` strip
+    // centres on a `--chrome-band-height` band only at half their difference,
+    // and a hand-written inset stopped being right the moment the band went
+    // 44px -> 36px (the icons then sat 4px BELOW the lights).
+    // win/linux + non-Electron have no OS lights to align against, so they
+    // take `--shell-card-top`.
     <aside
       data-testid="primary-sidebar"
       role="navigation"
@@ -1703,7 +1706,7 @@ export function Sidebar({
         // to sit on the same lines, and the chat group's bottom edge is lined up
         // against this one.
         "absolute left-(--shell-card-inset) bottom-(--shell-card-inset-bottom) z-30 flex min-h-0 flex-col",
-        darwinTopClearance ? "top-[4px]" : "top-[6px]",
+        darwinTopClearance ? "top-(--shell-card-top-darwin)" : "top-(--shell-card-top)",
         collapsed && "pointer-events-none",
       ].join(" ")}
       // The aside overlays the Electron drag band. Mark it no-drag so its controls
