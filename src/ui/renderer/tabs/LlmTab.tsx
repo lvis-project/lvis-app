@@ -1219,7 +1219,7 @@ export function LlmTab(props: LlmTabProps) {
    * made it, and the settings tab unmounting mid-request must not leave the
    * next mount unable to ask.
    */
-  const modelListRequestsInFlight = useRef(new Set<string>());
+  const modelListRequestsInFlight = useRef<Set<string> | null>(null);
   const modelListCacheRef = useRef<LlmModelListCache>({});
   const setModelListState = useCallback((key: string, state: ModelListState) => {
     setModelLists((current) => {
@@ -1250,7 +1250,7 @@ export function LlmTab(props: LlmTabProps) {
         provider === "openai-compatible" ? options.credentialScope?.trim() ?? "" : "";
       const key = llmModelListCacheKey(provider, baseUrl, credentialScope);
       const existing = modelListsRef.current[key];
-      const inFlight = modelListRequestsInFlight.current;
+      const inFlight = modelListRequestsInFlight.current ??= new Set<string>();
       // One request in flight per key. This is the only guard `force` does not
       // lift: a second press while the first is still out would not produce a
       // newer answer, only a second spinner.
@@ -1265,6 +1265,20 @@ export function LlmTab(props: LlmTabProps) {
       // row with no key stored never shows a sync that was never made.
       modelListRefreshedThisLaunch.add(key);
       inFlight.add(key);
+      // One shape for every way this can fail, so the row says the same thing
+      // whichever step broke — and keeps the catalogue it already has.
+      const failWith = (message: string): void => {
+        const latest = modelListsRef.current[key] ?? existing;
+        setModelListState(key, {
+          status: "error",
+          error: message,
+          options: latest?.options,
+          entries: latest?.entries,
+          endpoint: latest?.endpoint,
+          fetchedAt: latest?.fetchedAt,
+          source: latest?.source,
+        });
+      };
       try {
         // A fixed-endpoint vendor reaches its own /models with a stored key, so a
         // request with nothing stored could only come back 401 — and a red "sync
@@ -1272,7 +1286,15 @@ export function LlmTab(props: LlmTabProps) {
         // wrong thing. Asked here, on the edge of actually fetching, so a
         // catalogue that is already in hand still stands.
         if (!baseUrl && STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(provider)) {
-          const hasCredential = await api.hasApiKey(provider);
+          let hasCredential: boolean;
+          try {
+            hasCredential = await api.hasApiKey(provider);
+          } catch (err) {
+            // Callers fire this with `void`, so a rejection escaping here is
+            // unhandled and the row is left saying nothing at all.
+            failWith(err instanceof Error ? err.message : String(err));
+            return;
+          }
           if (!hasCredential) {
             // Nothing was asked, so the launch owes this key a request still:
             // storing a key is a change to this row's inputs, and it gets that
@@ -1331,28 +1353,10 @@ export function LlmTab(props: LlmTabProps) {
               })
               .catch(markPersistError);
           } else {
-            const latest = modelListsRef.current[key] ?? existing;
-            setModelListState(key, {
-              status: "error",
-              error: result.message ?? result.error,
-              options: latest?.options,
-              entries: latest?.entries,
-              endpoint: latest?.endpoint,
-              fetchedAt: latest?.fetchedAt,
-              source: latest?.source,
-            });
+            failWith(result.message ?? result.error);
           }
         } catch (err) {
-          const latest = modelListsRef.current[key] ?? existing;
-          setModelListState(key, {
-            status: "error",
-            error: err instanceof Error ? err.message : String(err),
-            options: latest?.options,
-            entries: latest?.entries,
-            endpoint: latest?.endpoint,
-            fetchedAt: latest?.fetchedAt,
-            source: latest?.source,
-          });
+          failWith(err instanceof Error ? err.message : String(err));
         }
       } finally {
         inFlight.delete(key);
@@ -2459,19 +2463,19 @@ export function LlmTab(props: LlmTabProps) {
    * row with no API counterpart has one route, and its badge covers it.
    */
   const statusChip = (row: ProviderConnection) => {
-    const apiRouteOnly = row.subscription !== undefined;
-    if (apiRouteOnly && !row.apiVendorId) return null;
+    const hasSubscriptionRoute = row.subscription !== undefined;
+    if (hasSubscriptionRoute && !row.apiVendorId) return null;
     const mode = activeMode(row);
-    const live = apiRouteOnly ? mode === "api" : mode !== null;
-    const connected = apiRouteOnly ? row.apiConfigured : row.connected;
+    const live = hasSubscriptionRoute ? mode === "api" : mode !== null;
+    const connected = hasSubscriptionRoute ? row.apiConfigured : row.connected;
     const state = live
       ? t("subscriptionProvidersSection.apiChatActive")
       : connected
         ? t("subscriptionProvidersSection.statusConnected")
-        : apiRouteOnly
+        : hasSubscriptionRoute
           ? t("llmTab.apiKeyNotSet")
           : t("subscriptionProvidersSection.statusSignedOut");
-    const label = apiRouteOnly
+    const label = hasSubscriptionRoute
       ? t("subscriptionProvidersSection.routeStatus", { route: t("llmTab.modeApiKey"), status: state })
       : state;
     const tone = live
