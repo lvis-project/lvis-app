@@ -118,6 +118,9 @@ export const MOCK_DEFAULT_SETTINGS = {
   },
   routine: {},
   privacy: { piiRedactEnabled: false },
+  // Global shortcuts are off with no accelerator chosen — the persisted
+  // default in `settings-defaults.ts`.
+  shortcuts: { toggleWindow: null, enabled: false },
   // Z onboarding chain — mark the seed user as already past onboarding so
   // the first-boot probe dispatches `probe-skip` and the chain advances
   // straight to `done`. Without this, the chain stays at the new default

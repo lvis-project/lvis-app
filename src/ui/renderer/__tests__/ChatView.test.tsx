@@ -9,6 +9,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { deferred, submitChatMessage } from "../../../../test/renderer/helpers.js";
+import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import {
   __resetSuggestedRepliesStoreForTests,
@@ -317,22 +318,7 @@ describe("ChatView", () => {
     llm.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
     const { container, api } = await renderApp({
       hasApiKey: false,
-      settings: {
-        llm,
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        marketplace: {
-          backend: "real-cloud",
-          cloudBaseUrl: "https://marketplace.example.com",
-          cloudAllowPrivateNetwork: false,
-          installedProviderIds: [],
-          installedThemeBundleIds: [],
-          installedLanguagePacks: [],
-        },
-        routine: {},
-        privacy: { piiRedactEnabled: false },
-        features: { idlePreferenceRefresh: false, onboardingCompleted: true },
-      },
+      settings: { ...MOCK_DEFAULT_SETTINGS, llm },
     });
 
     await waitFor(() => {

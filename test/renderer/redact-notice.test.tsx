@@ -9,17 +9,14 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import { submitChatMessage } from "./helpers.js";
-import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
+import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
 
 
 describe("Redact notice (Phase 3 regression net)", () => {
   it("redact_notice with count renders a PII system badge", async () => {
     const { container, api, emitChatStream } = await renderApp({
       settings: {
-        llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        routine: {},
+        ...MOCK_DEFAULT_SETTINGS,
         privacy: { piiRedactEnabled: true },
       },
     });
