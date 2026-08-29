@@ -587,11 +587,17 @@ function getDefaultUserPrefs(): string {
   return t("be_memoryManager.defaultUserPrefs");
 }
 
-const MAX_SESSION_FILE_BYTES = 5_000_000;
+/**
+ * Session-file limits. This module owns the on-disk session format, so the
+ * caps it enforces when reading a session are declared here; the chat IPC
+ * layer imports them to apply the same gates to an imported file and to the
+ * project metadata a session is created with.
+ */
+export const MAX_SESSION_FILE_BYTES = 5_000_000;
 /** Max length of summaryPreamble stored in session metadata (~2000 tokens). */
 const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
-const MAX_PROJECT_ROOT_CHARS = 2_048;
-const MAX_PROJECT_NAME_CHARS = 120;
+export const MAX_PROJECT_ROOT_CHARS = 2_048;
+export const MAX_PROJECT_NAME_CHARS = 120;
 const MAX_A2A_WIRE_ID_CHARS = 256;
 const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 

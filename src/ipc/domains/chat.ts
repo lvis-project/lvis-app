@@ -28,7 +28,7 @@ import {
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { parseStagedEnvelope, isMissingStagedEnvelopeErrorMessage } from "../../shared/staged-origins.js";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
-import { isValidSessionId } from "../../memory/memory-manager.js";
+import { isValidSessionId, MAX_SESSION_FILE_BYTES } from "../../memory/memory-manager.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
@@ -92,9 +92,8 @@ function isMissingStagedEnvelopeError(error: unknown): boolean {
 // ─── Chat import — reverse of chat.export ─────────────────────────────────
 // Mirrors the export SOT shape (chat.export handler below, JSON branch):
 // `{ sessionId, exportedAt, messages: GenericMessage[] }`. Import re-uses
-// the same size guard the session-search linear scan used to enforce
+// the same size guard memory-manager enforces on a session file
 // (MAX_SESSION_FILE_BYTES) as a DoS gate on the imported file itself.
-const MAX_SESSION_FILE_BYTES = 5_000_000;
 // Symmetric ceiling to the byte cap above: a JSON file can stay under 5 MB yet
 // still carry an absurd number of tiny messages (e.g. hundreds of thousands of
 // `{"role":"user","content":""}`), each of which becomes a persisted session

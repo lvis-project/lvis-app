@@ -32,7 +32,12 @@ import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-o
 import { SESSION_LIST_MAX_LIMIT } from "../../shared/session-lookup.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
-import { isValidSessionId, type SessionKind } from "../../memory/memory-manager.js";
+import {
+  isValidSessionId,
+  MAX_PROJECT_NAME_CHARS,
+  MAX_PROJECT_ROOT_CHARS,
+  type SessionKind,
+} from "../../memory/memory-manager.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 import { isDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import {
@@ -44,8 +49,6 @@ import {
 const log = createLogger("chat");
 
 export const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routine", "all"]);
-const MAX_PROJECT_ROOT_CHARS = 2_048;
-const MAX_PROJECT_NAME_CHARS = 120;
 
 const ACKNOWLEDGING_STOP_REASON = "end_turn";
 
