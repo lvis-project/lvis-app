@@ -14,13 +14,12 @@ import {
   type PluginViewKey,
 } from "../../../shared/view-key.js";
 import { extractPluginAuthErrorCode } from "../utils/plugin-auth-error.js";
-import type { useTranslation } from "../../../i18n/react.js";
 import type { usePluginMarketplace } from "./use-plugin-marketplace.js";
 import type { usePluginAuthStatuses } from "./use-plugin-auth-status.js";
 import type { useStatusBar } from "./use-status-bar.js";
+import type { TranslateFn } from "../../../i18n/translate.js";
 
 type Api = ReturnType<typeof getApi>;
-type TFn = ReturnType<typeof useTranslation>["t"];
 type PluginMarketplace = ReturnType<typeof usePluginMarketplace>;
 type PluginViews = PluginMarketplace["pluginViews"];
 type PluginCards = PluginMarketplace["pluginCards"];
@@ -31,7 +30,7 @@ type PushToast = ReturnType<typeof useStatusBar>["pushToast"];
 
 export interface UsePluginViewRoutingDeps {
   api: Api;
-  t: TFn;
+  t: TranslateFn;
   activeView: InlineViewKey;
   setActiveView: Dispatch<SetStateAction<InlineViewKey>>;
   pluginViews: PluginViews;
