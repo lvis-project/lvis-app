@@ -39,6 +39,8 @@ import {
 } from "../../src/plugins/plugin-install-receipt.js";
 import type { PluginCardSummary } from "../../src/ui/renderer/types.js";
 import { renderApp } from "./render-app.js";
+import { sidebarViewTestId } from "../../src/ui/renderer/components/Sidebar.js";
+import { toPluginDoctorViewKey, toPluginSettingsViewKey } from "../../src/ui/renderer/utils/plugin-doctor-view.js";
 import { agentPluginsDocument } from "../../src/plugins/__tests__/test-helpers.js";
 
 const STRAY_REGISTRY_PLUGIN = "stray-registry-plugin";
@@ -185,17 +187,17 @@ describe("installed plugins boot refuses to run", () => {
     await renderApp({ pluginCards: cards });
 
     await waitFor(() =>
-      expect(screen.getByTestId(`sidebar-plugin-doctor-${STRAY_REGISTRY_PLUGIN}`)).toBeTruthy(),
+      expect(screen.getByTestId(sidebarViewTestId(toPluginDoctorViewKey(STRAY_REGISTRY_PLUGIN)))).toBeTruthy(),
     );
-    expect(screen.getByTestId(`sidebar-plugin-doctor-${CRASHING_PLUGIN}`)).toBeTruthy();
+    expect(screen.getByTestId(sidebarViewTestId(toPluginDoctorViewKey(CRASHING_PLUGIN)))).toBeTruthy();
 
     // The switched-off plugin gets a row too — but it routes to Plugin
     // Settings, not to the Doctor, and carries a neutral "off" badge rather
     // than the destructive repair badge. Presenting a deliberate choice as a
     // fault would be its own defect.
-    const inactiveRow = screen.getByTestId(`sidebar-plugin-settings-${SWITCHED_OFF_PLUGIN}`);
+    const inactiveRow = screen.getByTestId(sidebarViewTestId(toPluginSettingsViewKey(SWITCHED_OFF_PLUGIN)));
     expect(inactiveRow.getAttribute("data-viewkey")).toBe(`plugin-settings:${SWITCHED_OFF_PLUGIN}`);
-    expect(screen.queryByTestId(`sidebar-plugin-doctor-${SWITCHED_OFF_PLUGIN}`)).toBeNull();
+    expect(screen.queryByTestId(sidebarViewTestId(toPluginDoctorViewKey(SWITCHED_OFF_PLUGIN)))).toBeNull();
     expect(inactiveRow.textContent).toContain("꺼짐");
     expect(inactiveRow.textContent).not.toContain("Doctor");
   });

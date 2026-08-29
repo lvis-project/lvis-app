@@ -16,10 +16,12 @@ test('settings marketplace assets expand provider, theme, and language pickers',
     name: t('settingsContent.tabMarketplace'),
   });
 
-  await settingsPage.locator('#vendor-select').click();
-  await settingsPage.getByTestId('llm-tab:vendor-search').fill('groq');
-  await expect(settingsPage.getByRole('option', { name: /Groq/i })).toHaveCount(0);
-  await settingsPage.keyboard.press('Escape');
+  // A built-in provider is already on the page (the fixture seeds a key for
+  // every vendor, so its row is configured at boot). Anchoring on it first
+  // means the absence check below cannot pass by the tab never having
+  // rendered.
+  await expect(settingsPage.getByTestId('llm-tab:connection:claude')).toBeVisible();
+  await expect(settingsPage.getByTestId('llm-tab:connection:groq')).toHaveCount(0);
 
   await settingsPage.getByTestId('llm-tab:marketplace-providers').click();
   await expect(marketplaceTab).toHaveAttribute('data-state', 'active');
@@ -30,9 +32,9 @@ test('settings marketplace assets expand provider, theme, and language pickers',
   await expect(providerAction).toContainText(t('marketplaceTab.removeButton'));
 
   await llmTab.click();
-  await settingsPage.locator('#vendor-select').click();
-  await settingsPage.getByTestId('llm-tab:vendor-search').fill('groq');
-  await settingsPage.getByRole('option', { name: /Groq/i }).click();
+  // Installing the provider puts it in the vendor catalogue, so its seeded key
+  // is now probed and it earns a row of its own, badged as marketplace-sourced.
+  await expect(settingsPage.getByTestId('llm-tab:connection:groq')).toBeVisible();
   await expect(settingsPage.getByTestId('llm-tab:selected-provider-marketplace:groq'))
     .toBeVisible();
 

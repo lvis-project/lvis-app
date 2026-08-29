@@ -9,14 +9,11 @@ import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { WebTab } from "../WebTab.js";
 import type { LvisApi } from "../../types.js";
-import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { makeMockLvisApi, MOCK_DEFAULT_SETTINGS } from "../../../../../test/renderer/mock-lvis-api.js";
 
 const WEB_SETTINGS = {
-  llm: { provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
-  chat: { systemPrompt: "", autoCompact: true },
-  webSearch: { provider: "none" },
+  ...MOCK_DEFAULT_SETTINGS,
   webView: { preferredFlow: "in-app" },
-  features: {},
 };
 
 function installApi(settings: Record<string, unknown> = WEB_SETTINGS): LvisApi {

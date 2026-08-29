@@ -18,13 +18,14 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import { activeSettingsTab, deferred, settingsWithActiveView } from "./helpers.js";
+import { sidebarViewTestId } from "../../src/ui/renderer/components/Sidebar.js";
 
 afterEach(() => vi.restoreAllMocks());
 
 const PLUGIN_ID = "example-plugin";
 const VIEW_ID = "MainView";
 const PLUGIN_VIEW_KEY = `plugin:${PLUGIN_ID}:${VIEW_ID}`;
-const PLUGIN_NAV_TESTID = `sidebar-plugin-${PLUGIN_ID}-${VIEW_ID}`;
+const PLUGIN_NAV_TESTID = sidebarViewTestId(PLUGIN_VIEW_KEY);
 
 function sidebarView(pluginId: string, viewId: string) {
   return {

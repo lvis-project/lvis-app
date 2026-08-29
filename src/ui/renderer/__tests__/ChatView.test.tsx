@@ -9,6 +9,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { deferred, submitChatMessage } from "../../../../test/renderer/helpers.js";
+import { MOCK_DEFAULT_SESSION_ID, MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import {
   __resetSuggestedRepliesStoreForTests,
@@ -317,22 +318,7 @@ describe("ChatView", () => {
     llm.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
     const { container, api } = await renderApp({
       hasApiKey: false,
-      settings: {
-        llm,
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        marketplace: {
-          backend: "real-cloud",
-          cloudBaseUrl: "https://marketplace.example.com",
-          cloudAllowPrivateNetwork: false,
-          installedProviderIds: [],
-          installedThemeBundleIds: [],
-          installedLanguagePacks: [],
-        },
-        routine: {},
-        privacy: { piiRedactEnabled: false },
-        features: { idlePreferenceRefresh: false, onboardingCompleted: true },
-      },
+      settings: { ...MOCK_DEFAULT_SETTINGS, llm },
     });
 
     await waitFor(() => {
@@ -1773,9 +1759,9 @@ describe("ChatView", () => {
     await act(async () => {
       emitAskUserQuestion({
         id: "ask-scroll-1",
-        // The tile draws only its own conversation's cards; "sess-default" is
-        // the session the mock api hands the main tile.
-        sessionId: "sess-default",
+        // The tile draws only its own conversation's cards; the mock api
+        // hands the main tile its default session.
+        sessionId: MOCK_DEFAULT_SESSION_ID,
         createdAt: Date.now(),
         questions: [
           {
@@ -1936,12 +1922,12 @@ describe("ChatView", () => {
     try {
       const { container } = await renderApp({
         mainActiveState: {
-          mainActiveSessionId: "sess-default",
+          mainActiveSessionId: MOCK_DEFAULT_SESSION_ID,
           mainActiveMode: "resume",
           updatedAt: new Date().toISOString(),
         },
         history: {
-          sessionId: "sess-default",
+          sessionId: MOCK_DEFAULT_SESSION_ID,
           messages: [
             { index: 0, role: "user", content: "오래된 질문" },
             { index: 1, role: "assistant", content: "마지막 답변" },

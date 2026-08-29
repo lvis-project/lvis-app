@@ -4,6 +4,7 @@ import { fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import { submitChatMessage } from "./helpers.js";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
+import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
 
 const CODEX_CHAT_READY = {
   ok: true,
@@ -55,14 +56,11 @@ const SUBSCRIPTION_UNAVAILABLE = {
 describe("subscription runtime composer readiness", () => {
   it("hides fallback API usage projections until a delayed subscription settings snapshot is authoritative", async () => {
     const settings = {
+      ...MOCK_DEFAULT_SETTINGS,
       llm: {
         ...fakeLlmSettings({ provider: "openai", model: "gpt-5.4-nano" }),
         activeChatRuntime: { kind: "subscription" as const, provider: "codex" as const },
       },
-      chat: { systemPrompt: "", autoCompact: true },
-      webSearch: { provider: "none" },
-      routine: {},
-      privacy: { piiRedactEnabled: false },
     };
     let resolveSettings!: (value: typeof settings) => void;
     const delayedSettings = new Promise<typeof settings>((resolve) => {
@@ -99,14 +97,11 @@ describe("subscription runtime composer readiness", () => {
       hasApiKey: false,
       subscriptionRuntimeStatus: CODEX_CHAT_READY,
       settings: {
+        ...MOCK_DEFAULT_SETTINGS,
         llm: {
           ...fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
           activeChatRuntime: { kind: "subscription", provider: "codex" },
         },
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        routine: {},
-        privacy: { piiRedactEnabled: false },
       },
     });
 
@@ -142,14 +137,11 @@ describe("subscription runtime composer readiness", () => {
         },
       },
       settings: {
+        ...MOCK_DEFAULT_SETTINGS,
         llm: {
           ...fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
           activeChatRuntime: { kind: "subscription", provider: "codex" },
         },
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        routine: {},
-        privacy: { piiRedactEnabled: false },
       },
     });
 
@@ -176,14 +168,11 @@ describe("subscription runtime composer readiness", () => {
         },
       },
       settings: {
+        ...MOCK_DEFAULT_SETTINGS,
         llm: {
           ...fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
           activeChatRuntime: { kind: "subscription", provider: "codex" },
         },
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        routine: {},
-        privacy: { piiRedactEnabled: false },
       },
     });
 
@@ -237,14 +226,11 @@ describe("subscription runtime composer readiness", () => {
       hasApiKey: false,
       subscriptionRuntimeStatus: CODEX_CHAT_READY,
       settings: {
+        ...MOCK_DEFAULT_SETTINGS,
         llm: {
           ...fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
           activeChatRuntime: { kind: "subscription", provider: "codex" },
         },
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        routine: {},
-        privacy: { piiRedactEnabled: false },
       },
     });
 
@@ -306,14 +292,11 @@ describe("subscription runtime composer readiness", () => {
       hasApiKey: true,
       subscriptionRuntimeStatus: SUBSCRIPTION_UNAVAILABLE,
       settings: {
+        ...MOCK_DEFAULT_SETTINGS,
         llm: {
           ...fakeLlmSettings({ provider: "openai", model: "gpt-5.4-nano" }),
           activeChatRuntime: { kind: "subscription", provider: "codex" },
         },
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        routine: {},
-        privacy: { piiRedactEnabled: false },
       },
     });
 
@@ -337,14 +320,11 @@ describe("subscription runtime composer readiness", () => {
         hasApiKey: true,
         subscriptionRuntimeStatus: subscriptionChatReady(provider),
         settings: {
+          ...MOCK_DEFAULT_SETTINGS,
           llm: {
             ...fakeLlmSettings({ provider: "openai", model: "gpt-5.4-nano" }),
             activeChatRuntime: { kind: "subscription", provider },
           },
-          chat: { systemPrompt: "", autoCompact: true },
-          webSearch: { provider: "none" },
-          routine: {},
-          privacy: { piiRedactEnabled: false },
         },
       });
 
@@ -367,16 +347,13 @@ describe("subscription runtime composer readiness", () => {
         hasApiKey: true,
         subscriptionRuntimeStatus: subscriptionChatReady(provider),
         settings: {
+          ...MOCK_DEFAULT_SETTINGS,
           llm: {
             ...fakeLlmSettings({ provider: "openai", model: "gpt-5.4-nano" }),
             activeChatRuntime: model
               ? { kind: "subscription", provider, model }
               : { kind: "subscription", provider },
           },
-          chat: { systemPrompt: "", autoCompact: true },
-          webSearch: { provider: "none" },
-          routine: {},
-          privacy: { piiRedactEnabled: false },
         },
       });
 
@@ -400,14 +377,11 @@ describe("subscription runtime composer readiness", () => {
       hasApiKey: true,
       subscriptionRuntimeStatus: pendingStatus,
       settings: {
+        ...MOCK_DEFAULT_SETTINGS,
         llm: {
           ...fakeLlmSettings({ provider: "openai", model: "gpt-5.4-nano" }),
           activeChatRuntime: { kind: "subscription", provider: "codex" },
         },
-        chat: { systemPrompt: "", autoCompact: true },
-        webSearch: { provider: "none" },
-        routine: {},
-        privacy: { piiRedactEnabled: false },
       },
     });
 

@@ -25,6 +25,7 @@ import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { t } from "../../../i18n/runtime.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
+import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
 import { SESSION_LIST_MAX_LIMIT } from "../../../shared/session-lookup.js";
 
 /**
@@ -231,12 +232,8 @@ describe("App.handleAsk — /load command routing", () => {
 
 describe("App.handleAsk — vision confirm gate on a text-only model", () => {
   const textOnlySettings = {
+    ...MOCK_DEFAULT_SETTINGS,
     llm: fakeLlmSettings({ provider: "openai", model: "o1-mini" }),
-    chat: { systemPrompt: "", autoCompact: true },
-    webSearch: { provider: "none" },
-    routine: {},
-    privacy: { piiRedactEnabled: false },
-    features: { idlePreferenceRefresh: false, onboardingCompleted: true },
   };
 
   type AttachMock = {

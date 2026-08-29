@@ -10,22 +10,12 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { PricingOverridesSection } from "../PricingOverridesSection.js";
-import { installMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { installMockLvisApi, MOCK_DEFAULT_SETTINGS } from "../../../../../test/renderer/mock-lvis-api.js";
 
 
 const BASE_SETTINGS = {
-  llm: {
-    provider: "openai",
-    vendors: {},
-    streamSmoothing: "none",
-    fallbackChain: [],
-    pricingOverrides: [],
-  },
-  chat: { systemPrompt: "", autoCompact: true },
-  webSearch: { provider: "none" },
-  system: {},
-  shortcuts: { toggleWindow: null, enabled: false },
-  features: {},
+  ...MOCK_DEFAULT_SETTINGS,
+  llm: { ...MOCK_DEFAULT_SETTINGS.llm, pricingOverrides: [] },
 };
 
 function withOverrides(pricingOverrides: unknown[]) {

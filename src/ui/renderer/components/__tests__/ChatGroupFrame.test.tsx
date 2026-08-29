@@ -4,6 +4,7 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { ChatGroupFrame, ChatGroupGutter, buildChatGroupActions, chatGroupApi, useChatGroupPanelSlot, useChatGroups, type ChatGroupPanelSlot } from "../ChatGroupFrame.js";
 import { layoutBoxes, layoutGutters, leaf, resizeGutter, splitLeaf, type ChatGroupGutter as ChatGroupGutterShape } from "../chat-group-tree.js";
 import { CHAT_SESSION_DRAG_TYPE } from "../chat-group-drop.js";
+import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 import type { LvisApi } from "../../types.js";
 
 const t = ((key: string) => key) as never;
@@ -561,7 +562,7 @@ describe("ChatGroupGutter", () => {
     expect(bar.getAttribute("aria-orientation")).toBe("vertical");
     expect(bar.getAttribute("aria-valuenow")).toBe("500");
     // Both sides keep the 448px column floor.
-    expect(bar.getAttribute("aria-valuemin")).toBe("448");
+    expect(bar.getAttribute("aria-valuemin")).toBe(String(SIDE_PANEL_MIN_WIDTH));
     expect(bar.getAttribute("aria-valuemax")).toBe("552");
   });
 
