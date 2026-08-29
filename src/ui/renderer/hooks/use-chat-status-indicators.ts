@@ -1,14 +1,13 @@
 import { useEffect } from "react";
-import type { useTranslation } from "../../../i18n/react.js";
 import type { useChatState } from "./use-chat-state.js";
 import type { useStatusBar } from "./use-status-bar.js";
+import type { TranslateFn } from "../../../i18n/translate.js";
 
-type TFn = ReturnType<typeof useTranslation>["t"];
 type ChatState = ReturnType<typeof useChatState>;
 type StatusBar = ReturnType<typeof useStatusBar>;
 
 export interface UseChatStatusIndicatorsDeps {
-  t: TFn;
+  t: TranslateFn;
   isCompacting: boolean;
   compactTriggerSource: ChatState["compactTriggerSource"];
   isRecoveryExhausted: boolean;

@@ -20,12 +20,11 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
 import { useTranslation } from "../../../../i18n/react.js";
-
-export type ModeBadgeVariant = "default" | "strict" | "auto" | "allow" | "unknown";
+import { normalizeExecutionMode, type ExecutionModeDisplay } from "../../../../shared/permission-mode.js";
 
 export interface PermissionModeBadgeProps {
   /** Override mode resolution for tests/storybook. */
-  mode?: ModeBadgeVariant;
+  mode?: ExecutionModeDisplay;
   /** Override fetcher. Defaults to window.lvis.permission.getMode(). */
   fetcher?: () => Promise<{ mode: string }>;
   /** Override deferred approval fetcher for tests/storybook. */
@@ -37,10 +36,10 @@ export interface PermissionModeBadgeProps {
   /** Opens the deferred approval queue modal. Kept separate from mode settings. */
   onQueueClick?: () => void;
   /** Test hook for the change-event subscription. */
-  subscribe?: (handler: (mode: ModeBadgeVariant) => void) => () => void;
+  subscribe?: (handler: (mode: ExecutionModeDisplay) => void) => () => void;
 }
 
-const MODE_LABEL_KEYS: Record<ModeBadgeVariant, string> = {
+const MODE_LABEL_KEYS: Record<ExecutionModeDisplay, string> = {
   default: "permissionModeBadge.labelDefault",
   strict: "permissionModeBadge.labelStrict",
   auto: "permissionModeBadge.labelAuto",
@@ -48,7 +47,7 @@ const MODE_LABEL_KEYS: Record<ModeBadgeVariant, string> = {
   unknown: "permissionModeBadge.labelUnknown",
 };
 
-const MODE_DESCRIPTION_KEYS: Record<ModeBadgeVariant, string> = {
+const MODE_DESCRIPTION_KEYS: Record<ExecutionModeDisplay, string> = {
   default: "permissionModeBadge.descDefault",
   strict: "permissionModeBadge.descStrict",
   auto: "permissionModeBadge.descAuto",
@@ -56,18 +55,13 @@ const MODE_DESCRIPTION_KEYS: Record<ModeBadgeVariant, string> = {
   unknown: "permissionModeBadge.descUnknown",
 };
 
-const MODE_COLOR_CLASSES: Record<ModeBadgeVariant, string> = {
+const MODE_COLOR_CLASSES: Record<ExecutionModeDisplay, string> = {
   default: "border-info text-info",
   strict: "border-destructive text-destructive",
   auto: "border-warning text-warning",
   allow: "border-success text-success",
   unknown: "border-muted-foreground text-muted-foreground",
 };
-
-function normalizeMode(raw: string): ModeBadgeVariant {
-  if (raw === "default" || raw === "strict" || raw === "auto" || raw === "allow") return raw;
-  return "unknown";
-}
 
 export function PermissionModeBadge({
   mode: modeOverride,
@@ -79,7 +73,7 @@ export function PermissionModeBadge({
   subscribe,
 }: PermissionModeBadgeProps): ReactElement {
   const { t } = useTranslation();
-  const [mode, setMode] = useState<ModeBadgeVariant>(modeOverride ?? "unknown");
+  const [mode, setMode] = useState<ExecutionModeDisplay>(modeOverride ?? "unknown");
   const [pendingPermissions, setPendingPermissions] = useState(0);
   const [pendingError, setPendingError] = useState<string | null>(null);
 
@@ -96,7 +90,7 @@ export function PermissionModeBadge({
   const refresh = useCallback(async () => {
     try {
       const r = await apiFetch();
-      setMode(normalizeMode(r.mode));
+      setMode(normalizeExecutionMode(r.mode));
     } catch {
       setMode("unknown");
     }
@@ -210,13 +204,13 @@ export function PermissionModeBadge({
  * the badge updates without prop-drilling state through every chat
  * surface that hosts it.
  */
-function defaultModeSubscriber(handler: (mode: ModeBadgeVariant) => void): () => void {
+function defaultModeSubscriber(handler: (mode: ExecutionModeDisplay) => void): () => void {
   const unsubscribeIpc = window.lvis?.permission?.onModeChanged?.((mode) => {
-    handler(normalizeMode(mode));
+    handler(normalizeExecutionMode(mode));
   });
   const listener = (event: Event) => {
     const detail = (event as CustomEvent<{ mode: string }>).detail;
-    if (detail?.mode) handler(normalizeMode(detail.mode));
+    if (detail?.mode) handler(normalizeExecutionMode(detail.mode));
   };
   window.addEventListener("lvis:permissions:mode-changed", listener);
   return () => {

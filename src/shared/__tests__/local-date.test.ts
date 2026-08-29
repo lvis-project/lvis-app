@@ -12,6 +12,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import {
   localDateKey,
+  localDayRange,
   localDayStart,
   localMondayWeekStartKey,
   localMonthStartKey,
@@ -109,6 +110,34 @@ describe("shiftLocalDateKey", () => {
 
   it("returns a malformed key unchanged", () => {
     expect(shiftLocalDateKey("2026-6-16", 1)).toBe("2026-6-16");
+  });
+
+  it("keeps a two-digit year in its own century instead of landing in the 1900s", () => {
+    // `Date.UTC(99, …)` means 1999, so an uncorrected shift turned a year-99
+    // key into a year-1999 one — and `localDayRange` then opened a window
+    // nineteen centuries wide instead of the one day that was asked for.
+    expect(shiftLocalDateKey("0099-01-01", 1)).toBe("0099-01-02");
+    expect(shiftLocalDateKey("0099-12-31", 1)).toBe("0100-01-01");
+    expect(shiftLocalDateKey("0100-01-01", -1)).toBe("0099-12-31");
+  });
+
+  it("keeps a leap day in a leap year the placeholder cannot borrow from", () => {
+    // Year 96 is a leap year; the seeding year must not decide that for it.
+    expect(shiftLocalDateKey("0096-02-28", 1)).toBe("0096-02-29");
+    expect(shiftLocalDateKey("0097-02-28", 1)).toBe("0097-03-01");
+  });
+});
+
+describe("localDayRange", () => {
+  it("stays one day wide when the year has two digits", () => {
+    // The range is built from `shiftLocalDateKey(toKey, 1)`, so a year that
+    // slipped into the 1900s here would not just be mislabelled — it would open
+    // a window nineteen centuries wide and hand back every row ever written.
+    withTz("UTC", () => {
+      const range = localDayRange("0099-01-01", "0099-01-01");
+      expect(range).not.toBeNull();
+      expect(range!.end!.getTime() - range!.start!.getTime()).toBe(24 * 60 * 60 * 1000);
+    });
   });
 });
 

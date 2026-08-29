@@ -32,6 +32,7 @@ import { canonicalStringify } from "../../shared/canonical-json.js";
 import { stripMarkdown } from "../../shared/strip-markdown.js";
 import type { ApprovalChoice } from "../approval-gate.js";
 import type { LlmReviewerProvider } from "./risk-classifier.js";
+import type { ToolSource } from "../../shared/permission-review-status.js";
 
 const APPROVAL_SENTENCE_SELECTOR_SYSTEM_PROMPT = [
   "You are a permission approval selector.",
@@ -83,7 +84,7 @@ export interface ApprovalRequestFacts {
   /** Permission category the host classified the call as. */
   category: string;
   /** Where the tool came from. */
-  source: "builtin" | "plugin" | "mcp";
+  source: ToolSource;
   /** Host-resolved path the request is about, when it has one. */
   candidatePath?: string;
 }

@@ -4,7 +4,8 @@
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { PermissionRule, ExecutionMode } from "./permission-manager.js";
+import type { PermissionRule } from "./permission-manager.js";
+import type { ExecutionMode } from "../shared/permission-mode.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 

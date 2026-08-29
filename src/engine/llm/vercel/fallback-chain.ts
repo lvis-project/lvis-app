@@ -27,7 +27,7 @@ import { createProvider as defaultCreateProvider } from "../provider-factory.js"
 import { createLogger } from "../../../lib/logger.js";
 const log = createLogger("fallback-chain");
 
-export interface FallbackEntry {
+export interface FallbackChainEntry {
   provider: LLMVendor;
   model: string;
   baseUrl?: string;
@@ -228,7 +228,7 @@ export class FallbackProvider implements LLMProvider {
   readonly subscriptionRuntime?: SubscriptionChatRuntimeSelection;
   constructor(
     private readonly primary: LLMProvider,
-    private readonly chain: FallbackEntry[],
+    private readonly chain: FallbackChainEntry[],
     private readonly getApiKey: ApiKeyGetter,
     private readonly factory?: ProviderFactory,
   ) {
@@ -273,7 +273,7 @@ export class FallbackProvider implements LLMProvider {
 export async function* streamWithFallback(
   primary: LLMProvider,
   params: StreamTurnParams,
-  chain: FallbackEntry[],
+  chain: FallbackChainEntry[],
   getApiKey: ApiKeyGetter,
   _createProvider: ProviderFactory = defaultCreateProvider,
   callbacks?: FallbackCallbacks,

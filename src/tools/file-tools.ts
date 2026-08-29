@@ -42,11 +42,11 @@ import {
   type Tool,
   type ToolCategory,
   type ToolExecutionContext,
-  type ToolResult,
+  type ToolExecutionResult,
 } from "./base.js";
 import { sleep } from "../shared/abortable-deadline.js";
 
-type ToolErrorResult = ToolResult & { isError: true };
+type ToolErrorResult = ToolExecutionResult & { isError: true };
 type Result<T> = { ok: true; value: T } | { ok: false; error: ToolErrorResult };
 
 const DEFAULT_LINE_LIMIT = 2_000;
@@ -131,7 +131,7 @@ abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
     return isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(ctx.cwd, expanded);
   }
 
-  protected ensureAllowed(path: string, ctx: ToolExecutionContext): ToolResult | null {
+  protected ensureAllowed(path: string, ctx: ToolExecutionContext): ToolExecutionResult | null {
     const sensitive = sensitivePatternForPath(path);
     if (sensitive) {
       return toolError(`Sensitive path: ${path} matches ${sensitive}`);
@@ -177,7 +177,7 @@ export class ReadFileTool extends FileTool<typeof ReadFileInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof ReadFileInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
     const blocked = this.ensureAllowed(target, ctx);
     if (blocked) return blocked;
@@ -243,7 +243,7 @@ export const ViewImageInputSchema = FilePathSchema;
 /**
  * `view_image` — load a local image file into the model's context so it can see
  * it. Reuses the same path-scope security as read_file (resolvePath +
- * ensureAllowed). The image rides {@link ToolResult.image}; the text `output` is
+ * ensureAllowed). The image rides {@link ToolExecutionResult.image}; the text `output` is
  * a placeholder, and the message mapper turns the image into a visible block on
  * Claude (dropped to the placeholder on vendors whose tool results are text-only).
  */
@@ -263,7 +263,7 @@ export class ViewImageTool extends FileTool<typeof ViewImageInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof ViewImageInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
     const blocked = this.ensureAllowed(target, ctx);
     if (blocked) return blocked;
@@ -307,7 +307,7 @@ export class ListFilesTool extends FileTool<typeof ListFilesInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof ListFilesInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const root = this.resolvePath(input.path, ctx);
     const blocked = this.ensureAllowed(root, ctx);
     if (blocked) return blocked;
@@ -340,7 +340,7 @@ export class GlobFilesTool extends FileTool<typeof GlobFilesInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof GlobFilesInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const root = this.resolvePath(input.path ?? ".", ctx);
     const blocked = this.ensureAllowed(root, ctx);
     if (blocked) return blocked;
@@ -379,7 +379,7 @@ export class GrepFilesTool extends FileTool<typeof GrepFilesInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof GrepFilesInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const root = this.resolvePath(input.path ?? ".", ctx);
     const blocked = this.ensureAllowed(root, ctx);
     if (blocked) return blocked;
@@ -432,7 +432,7 @@ export class WriteFileTool extends FileTool<typeof WriteFileInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof WriteFileInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
     const blocked = this.ensureAllowed(target, ctx);
     if (blocked) return blocked;
@@ -517,7 +517,7 @@ export class EditFileTool extends FileTool<typeof EditFileInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof EditFileInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
     const blocked = this.ensureAllowed(target, ctx);
     if (blocked) return blocked;
@@ -572,7 +572,7 @@ export class ApplyPatchTool extends FileTool<typeof ApplyPatchInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof ApplyPatchInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
     const blocked = this.ensureAllowed(target, ctx);
     if (blocked) return blocked;
@@ -633,7 +633,7 @@ export class MoveFileTool extends FileTool<typeof MoveFileInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof MoveFileInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const source = this.resolvePath(input.sourcePath, ctx);
     const destination = this.resolvePath(input.destinationPath, ctx);
     const sourceBlocked = this.ensureAllowed(source, ctx);
@@ -679,7 +679,7 @@ export class DeleteFileTool extends FileTool<typeof DeleteFileInputSchema> {
   protected async executeTyped(
     input: z.infer<typeof DeleteFileInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const target = this.resolvePath(input.path, ctx);
     const blocked = this.ensureAllowed(target, ctx);
     if (blocked) return blocked;

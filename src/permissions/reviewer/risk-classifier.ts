@@ -51,9 +51,7 @@ import {
   type NetworkTarget,
 } from "./network-target.js";
 import { resolveToolPathForPermission } from "../../shared/tool-path-resolution.js";
-
-/** Verdict level — discrete enum. The reviewer lane never uses scalars. */
-export type RiskLevel = "low" | "medium" | "high";
+import type { RiskLevel } from "../../shared/permission-review-status.js";
 
 /** Verdict shape returned by every classifier. */
 export interface RiskVerdict {

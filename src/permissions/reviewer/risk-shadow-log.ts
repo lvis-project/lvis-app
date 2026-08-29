@@ -31,10 +31,11 @@
 import type { ToolCategory } from "../../tools/types.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { EffectSummary } from "../effect-ledger.js";
+import type { ToolSource } from "../../shared/permission-review-status.js";
 
 export interface RiskShadowRecord {
   toolName: string;
-  source: "builtin" | "plugin" | "mcp";
+  source: ToolSource;
   pluginId?: string;
   /** Category the host would enforce today (declared category). */
   declaredCategory: ToolCategory;
@@ -53,7 +54,7 @@ export interface RiskShadowRecord {
 
 export interface EffectShadowRecord {
   toolName: string;
-  source: "builtin" | "plugin" | "mcp";
+  source: ToolSource;
   pluginId?: string;
   /** Category the plugin declared for this tool (pre-removal artifact). */
   declaredCategory: ToolCategory;

@@ -5,7 +5,8 @@ import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { ToolCategory } from "../tools/types.js";
-import type { RiskLevel, RiskVerdict } from "./reviewer/risk-classifier.js";
+import type { RiskVerdict } from "./reviewer/risk-classifier.js";
+import type { RiskLevel, ToolSource } from "../shared/permission-review-status.js";
 import type {
   ParentAdjudicationEvidence,
   ParentAdjudicationOptions,
@@ -251,7 +252,7 @@ export interface ApprovalRequest {
    * part of the {@link signApprovalRequest} preimage.
    */
   approvalReasonPrefix?: string;
-  source?: "builtin" | "plugin" | "mcp";
+  source?: ToolSource;
   /** Plugin id that issued this approval request, when source === "plugin". */
   sourcePluginId?: string;
   /** Manifest-declared plugin approval scope for agent-action requests. */
@@ -947,7 +948,7 @@ interface PendingEntry {
   toolCategory?: ToolCategory;
   /** Host-derived verdict shown by the renderer and enforced for recording. */
   verdictAtApproval: RiskVerdict["level"];
-  source?: "builtin" | "plugin" | "mcp";
+  source?: ToolSource;
   sourcePluginId?: string;
   approvalScope?: string;
   /**
@@ -1000,7 +1001,7 @@ interface PendingEntry {
 export interface PendingApprovalView {
   readonly requestId: string;
   readonly toolName: string;
-  readonly source?: "builtin" | "plugin" | "mcp";
+  readonly source?: ToolSource;
   readonly category: "tool" | "agent-action";
   readonly kind?: ApprovalKind;
   readonly allowedChoices?: readonly ApprovalChoice[];
@@ -1161,7 +1162,7 @@ interface ApprovalAuditFields {
   category: "tool" | "agent-action";
   kind?: ApprovalKind;
   toolCategory?: ToolCategory;
-  source?: "builtin" | "plugin" | "mcp";
+  source?: ToolSource;
   sourcePluginId?: string;
   approvalScope?: string;
   trustOrigin?: string;
@@ -2876,7 +2877,7 @@ export class ApprovalGate {
   getRequestSnapshot(requestId: string): {
     toolName: string;
     args: unknown;
-    source: "builtin" | "plugin" | "mcp";
+    source: ToolSource;
     trustOrigin: string;
     approvalCacheKey: string | undefined;
     durableApprovalRecordAllowed: boolean;
@@ -2915,7 +2916,7 @@ export class ApprovalGate {
   getApprovalSentenceState(requestId: string): {
     toolName: string;
     toolCategory: ToolCategory | undefined;
-    source: "builtin" | "plugin" | "mcp";
+    source: ToolSource;
     candidatePath: string;
     suggestedParent: string | null;
     allowedChoices: readonly ApprovalChoice[] | undefined;

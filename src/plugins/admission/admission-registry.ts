@@ -71,7 +71,7 @@ import {
   fetchSignedDocument,
   type SignedDocSource,
 } from "../signed-doc-fetcher.js";
-import type { SignatureEnvelope } from "../types.js";
+import type { SignatureEnvelope, ResolvedSignedSnapshot } from "../types.js";
 import { parseAdmissionDocument, type AdmissionDocument, type AdmissionEntry } from "./admission-schema.js";
 import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
@@ -184,15 +184,13 @@ interface AdmissionInitOptions {
   source?: SignedDocSource;
 }
 
-interface ResolvedSnapshot {
-  doc: AdmissionDocument;
-  source: AdmissionSource;
+interface ResolvedAdmissionSnapshot extends ResolvedSignedSnapshot<AdmissionDocument, AdmissionSource> {
   /** Hex sha256 of the body bytes this snapshot was parsed from. */
   documentSha256: string;
 }
 
 class AdmissionRegistry {
-  private snapshot: ResolvedSnapshot | null = null;
+  private snapshot: ResolvedAdmissionSnapshot | null = null;
   private cache: SignedDocumentCache | null = null;
   private highestSeenIssuedAt: string | undefined;
   private cacheLoaded = false;

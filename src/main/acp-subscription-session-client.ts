@@ -49,6 +49,7 @@ import {
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
 import { isRecord } from "../shared/is-record.js";
+import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
 
 const MAX_RPC_LINE_BYTES = 1_000_000;
 /** Native image cap that always fits the ACP JSONL transport with room for text. */
@@ -73,7 +74,6 @@ const DEFAULT_PROMPT_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs;
 const DEFAULT_ABORT_GRACE_MS = TOOL_TIMEOUT_POLICY.processTreeKillMs;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
-type JsonRecord = Record<string, unknown>;
 type RpcId = string | number;
 
 type AcpSubscriptionSessionMcpServerParams = Readonly<{
@@ -244,11 +244,8 @@ export interface AcpSubscriptionPromptHandle {
   cancel(): Promise<void>;
 }
 
-interface PendingRequest {
+interface PendingRequest extends PendingJsonRpcRequest {
   readonly method: string;
-  readonly resolve: (value: unknown) => void;
-  readonly reject: (reason: Error) => void;
-  readonly timer: NodeJS.Timeout;
 }
 
 interface StartedPrompt {
@@ -623,9 +620,9 @@ export class AcpSubscriptionSessionClient {
   private promptBlocks(
     text: string,
     attachments: readonly SubscriptionPromptAttachment[] | undefined,
-  ): JsonRecord[] {
+  ): Record<string, unknown>[] {
     const validated = assertSubscriptionPromptAttachments(attachments, ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS);
-    const prompt: JsonRecord[] = [{ type: "text", text }];
+    const prompt: Record<string, unknown>[] = [{ type: "text", text }];
     for (const attachment of validated) {
       if (!this.promptCapabilities.image) {
         throw new SubscriptionAttachmentTransportError("subscription-attachment-not-supported");
@@ -645,7 +642,7 @@ export class AcpSubscriptionSessionClient {
    */
   private assertPromptFitsRpcLimit(
     sessionId: string,
-    prompt: readonly JsonRecord[],
+    prompt: readonly Record<string, unknown>[],
     hasAttachments: boolean,
   ): void {
     let serialized: string;
@@ -700,13 +697,13 @@ export class AcpSubscriptionSessionClient {
     child.once("exit", () => abort("acp-session-transport-closed"));
   }
 
-  private request(method: string, params: JsonRecord): Promise<unknown> {
+  private request(method: string, params: Record<string, unknown>): Promise<unknown> {
     return this.sendRequest(method, params, this.requestTimeoutMs).promise;
   }
 
   private sendRequest(
     method: string,
-    params: JsonRecord,
+    params: Record<string, unknown>,
     timeoutMs: number,
     onTimeout?: () => void,
   ): { id: number; promise: Promise<unknown> } {
@@ -742,7 +739,7 @@ export class AcpSubscriptionSessionClient {
     return { id, promise };
   }
 
-  private notify(method: string, params: JsonRecord): void {
+  private notify(method: string, params: Record<string, unknown>): void {
     this.write({ jsonrpc: "2.0", method, params });
   }
 
@@ -754,7 +751,7 @@ export class AcpSubscriptionSessionClient {
     });
   }
 
-  private write(payload: JsonRecord): void {
+  private write(payload: Record<string, unknown>): void {
     const child = this.child;
     if (!child?.stdin?.writable) {
       throw new AcpSubscriptionSessionError("acp-session-transport-closed");

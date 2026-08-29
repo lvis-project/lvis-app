@@ -12,17 +12,17 @@ export class ShellMismatchError extends Error {
 
 type WindowsShellFlavor = "msys" | "wsl" | "unknown";
 
-export type ResolvedShell = {
+export type ResolvedShellCommand = {
   cmd: string;
   shellArgs: (script: string) => string[];
   windowsFlavor?: WindowsShellFlavor;
 };
 
-let cachedShell: ResolvedShell | null = null;
+let cachedShell: ResolvedShellCommand | null = null;
 let cachedError: ShellMismatchError | null = null;
 const WINDOWS_SHELL_PROBE_TIMEOUT_MS = 20_000;
 
-export function resolveShell(): ResolvedShell {
+export function resolveShell(): ResolvedShellCommand {
   if (process.platform !== "win32") {
     return { cmd: "sh", shellArgs: (script: string) => ["-c", script] };
   }
@@ -58,7 +58,7 @@ export function resolveShell(): ResolvedShell {
   throw cachedError;
 }
 
-function windowsShellCandidates(): ResolvedShell[] {
+function windowsShellCandidates(): ResolvedShellCommand[] {
   return [
     // Prefer Git for Windows when installed. WSL's Windows launcher can be
     // slow under high test concurrency and uses a different path dialect.
@@ -76,7 +76,7 @@ function assertWindowsShellCandidateExists(cmd: string): void {
   execFileSync("where", [cmd], { stdio: "pipe", encoding: "utf-8" });
 }
 
-function detectWindowsShellFlavor(shell: ResolvedShell): WindowsShellFlavor {
+function detectWindowsShellFlavor(shell: ResolvedShellCommand): WindowsShellFlavor {
   if (/^[A-Za-z]:[\\/]/.test(shell.cmd) && /[\\/]Git[\\/]/i.test(shell.cmd)) {
     return "msys";
   }
@@ -98,7 +98,7 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-export function shellPathForHostPath(shell: ResolvedShell, hostPath: string): string {
+export function shellPathForHostPath(shell: ResolvedShellCommand, hostPath: string): string {
   if (process.platform !== "win32") return hostPath;
   const normalized = hostPath.replace(/\\/g, "/");
   const driveMatch = /^([A-Za-z]):\/(.*)$/.exec(normalized);
@@ -110,7 +110,7 @@ export function shellPathForHostPath(shell: ResolvedShell, hostPath: string): st
   return normalized;
 }
 
-export function shellCommandForHookPath(shell: ResolvedShell, hookPath: string): string {
+export function shellCommandForHookPath(shell: ResolvedShellCommand, hookPath: string): string {
   const shellPath = shellPathForHostPath(shell, hookPath);
   if (process.platform === "win32" && isAbsolute(hookPath)) {
     return `${shellInterpreterCommand(shell)} ${shellQuote(shellPath)}`;
@@ -118,7 +118,7 @@ export function shellCommandForHookPath(shell: ResolvedShell, hookPath: string):
   return shellQuote(shellPath);
 }
 
-export function shellEnvForChild(shell: ResolvedShell, env: Record<string, string>): Record<string, string> {
+export function shellEnvForChild(shell: ResolvedShellCommand, env: Record<string, string>): Record<string, string> {
   if (process.platform !== "win32" || shell.windowsFlavor !== "msys") return env;
   const additions = msysPathEntriesForShell(shell);
   if (additions.length === 0) return env;
@@ -131,14 +131,14 @@ export function shellEnvForChild(shell: ResolvedShell, env: Record<string, strin
   };
 }
 
-function shellInterpreterCommand(shell: ResolvedShell): string {
+function shellInterpreterCommand(shell: ResolvedShellCommand): string {
   if (process.platform !== "win32") return "sh";
   if (shell.windowsFlavor === "msys") return "/usr/bin/sh";
   if (shell.windowsFlavor === "wsl") return "/bin/sh";
   return "sh";
 }
 
-function msysPathEntriesForShell(shell: ResolvedShell): string[] {
+function msysPathEntriesForShell(shell: ResolvedShellCommand): string[] {
   if (!/^[A-Za-z]:[\\/]/.test(shell.cmd)) return [];
   const shellDir = dirname(shell.cmd);
   const lowerShellDir = shellDir.toLowerCase();

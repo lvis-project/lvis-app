@@ -18,6 +18,7 @@ import {
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
+import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
 
 const require = createRequire(import.meta.url);
 
@@ -233,10 +234,7 @@ export interface CodexConversationCallbacks {
   onDynamicToolCall?: CodexConversationDynamicToolHandler;
 }
 
-interface PendingRequest {
-  resolve: (result: unknown) => void;
-  reject: (reason: Error) => void;
-  timer: NodeJS.Timeout;
+interface PendingRequest extends PendingJsonRpcRequest {
   method: string;
 }
 

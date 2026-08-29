@@ -20,9 +20,5 @@ export {
   visibleBundlesFor,
 } from "./bundles/index.js";
 export type { ThemeBundle, BundleTokens, ThemeBundleManifest } from "./bundles/index.js";
-export type {
-  ThemeContextValue,
-  BundleId,
-  ResolvedShell,
-} from "./types.js";
+export type { ThemeContextValue } from "./types.js";
 export { VIOLET_PAIR_IDS } from "./types.js";
