@@ -23,7 +23,6 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { resolve as pathResolve } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import {
@@ -34,6 +33,7 @@ import {
 } from "./hook-config.js";
 import { defaultHooksDir, type DiscoveredHook } from "./hook-discovery.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { expandLeadingTilde } from "../shared/home-tilde.js";
 
 const log = createLogger("hook-config-trust");
 
@@ -48,15 +48,6 @@ export const HOOKS_CONFIG_FILENAME = "hooks.json";
 /** Default `hooks.json` path inside the hooks directory. */
 export function defaultHooksConfigPath(dir: string = defaultHooksDir()): string {
   return pathResolve(dir, HOOKS_CONFIG_FILENAME);
-}
-
-/** Expand a leading `~` / `~/` to the user's home directory (NO fs access). */
-function expandHome(token: string): string {
-  if (token === "~") return homedir();
-  if (token.startsWith("~/") || token.startsWith("~\\")) {
-    return homedir() + token.slice(1);
-  }
-  return token;
 }
 
 /**
@@ -74,7 +65,7 @@ export function resolveScriptAnchor(command: string[]): string | null {
       ? command[0]
       : command.slice(1).find(looksLikeLocalScriptPath);
   if (token === undefined) return null;
-  return expandHome(token);
+  return expandLeadingTilde(token);
 }
 
 export interface LoadedHookConfig {
