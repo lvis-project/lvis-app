@@ -480,8 +480,6 @@ Backlog, not permission. Each is the minority side of a rule above; fix
 opportunistically when already editing the file, and do not cite any of them as
 precedent.
 
-- `src/ui/renderer/contexts/i18n-settings-provider.tsx` exports exactly one
-  component, `I18nSettingsProvider`, under a kebab-case name.
 - `src/ui/renderer/components/permissions/PermissionDecisionCard.tsx` is
   `PascalCase` but exports a set of helpers with no `PermissionDecisionCard` in
   it. Three modules import it for those helpers.
