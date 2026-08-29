@@ -165,7 +165,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
   const suggestedReplies = useSuggestedReplies();
   const suggestedRepliesActive = hasActiveSuggestedReplies(suggestedReplies);
   const readingColumnClass = blogLayout
-    ? "mx-auto w-full max-w-[58rem] px-6 lg:px-8"
+    ? "mx-auto w-full max-w-(--reading-column-max) px-6 lg:px-8"
     : "w-full max-w-full px-4";
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
@@ -203,9 +203,9 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     !suggestedRepliesActive &&
     viewMode === null;
   const dockColumnClass = emptyComposerCentered
-    ? "mx-auto w-full max-w-[58rem] min-w-0"
+    ? "mx-auto w-full max-w-(--reading-column-max) min-w-0"
     : blogLayout
-      ? "mx-auto w-full max-w-[58rem] min-w-0"
+      ? "mx-auto w-full max-w-(--reading-column-max) min-w-0"
       : "w-full max-w-full min-w-0";
   // Empty-state composer project selector — open state is owned here (not
   // inside ComposerProjectSelector) so it can be force-closed the instant the

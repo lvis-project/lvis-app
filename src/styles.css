@@ -1815,6 +1815,20 @@
     --shell-collapsed-rail-reserve: 4rem;
     --shell-collapsed-banner-inset: 4.5rem;
   }
+  /* Content measures — how wide a column of prose gets to be, and how tall the
+   * panels that hold a scrolling body are. rem, unlike the shell geometry
+   * above: these are measured in text, so they SHOULD follow the type scale.
+   *
+   * The reading column is the one that travels furthest — the chat transcript,
+   * a routed page's shell, the approval dock that has to land centred on that
+   * transcript, a plugin view. They were four copies of 58rem, and a dock a
+   * hair wider than the column it docks to is a visible seam. */
+  :root {
+    --reading-column-max: 58rem;
+    --insights-panel-height: 22rem;
+    --preview-block-max-height: 36rem;
+    --preview-block-max-height-compact: 24rem;
+  }
   body {
     @apply bg-background text-foreground;
     /* SoT: src/shared/host-font-stack.ts (HOST_FONT_STACK) — mirrored verbatim

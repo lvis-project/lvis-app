@@ -602,8 +602,8 @@ export function StarredView({
         error={currentMonthlyUsageResult?.error ?? false}
       />
 
-      <div data-testid="insights-lists-grid" className="mt-4 grid shrink-0 gap-4 lg:h-[22rem] lg:min-h-[22rem] lg:grid-cols-2">
-        <section data-testid="insights-conversations-panel" className="flex h-[22rem] min-h-0 flex-col overflow-hidden rounded-md border bg-background lg:h-full">
+      <div data-testid="insights-lists-grid" className="mt-4 grid shrink-0 gap-4 lg:h-(--insights-panel-height) lg:min-h-(--insights-panel-height) lg:grid-cols-2">
+        <section data-testid="insights-conversations-panel" className="flex h-(--insights-panel-height) min-h-0 flex-col overflow-hidden rounded-md border bg-background lg:h-full">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("starredView.sessionsTitle")}</h3>
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
@@ -647,7 +647,7 @@ export function StarredView({
           </ScrollArea>
         </section>
 
-        <section data-testid="insights-pins-panel" className="flex h-[22rem] min-h-0 flex-col overflow-hidden rounded-md border bg-background lg:h-full">
+        <section data-testid="insights-pins-panel" className="flex h-(--insights-panel-height) min-h-0 flex-col overflow-hidden rounded-md border bg-background lg:h-full">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("starredView.starredTitle")}</h3>
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">

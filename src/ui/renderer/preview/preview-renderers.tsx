@@ -44,7 +44,7 @@ function extensionOf(descriptor: PreviewContentDescriptor): string {
 
 function TextRenderer({ descriptor }: { descriptor: PreviewContentDescriptor }) {
   return (
-    <pre className="max-h-[36rem] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/(--opacity-muted) p-3 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
+    <pre className="max-h-(--preview-block-max-height) overflow-auto whitespace-pre-wrap rounded-md border bg-muted/(--opacity-muted) p-3 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
       {descriptor.text}
     </pre>
   );
@@ -91,7 +91,7 @@ function MermaidBlock({ code }: { code: string }) {
     return (
       <div className="space-y-1" data-testid="chat-side-panel-mermaid-fallback">
         <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.diagramRenderFailed")}</div>
-        <pre className="max-h-[24rem] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/(--opacity-muted) p-3 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
+        <pre className="max-h-(--preview-block-max-height-compact) overflow-auto whitespace-pre-wrap rounded-md border bg-muted/(--opacity-muted) p-3 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
           {code}
         </pre>
       </div>
@@ -107,14 +107,14 @@ function MermaidBlock({ code }: { code: string }) {
       sandbox=""
       referrerPolicy="no-referrer"
       srcDoc={svgDoc}
-      className="block max-h-[36rem] min-h-40 w-full rounded-md border-0 bg-background"
+      className="block max-h-(--preview-block-max-height) min-h-40 w-full rounded-md border-0 bg-background"
     />
   );
 }
 
 function MarkdownRenderer({ descriptor }: { descriptor: PreviewContentDescriptor }) {
   return (
-    <div className="markdown-body max-h-[36rem] overflow-auto rounded-md border bg-background p-3 text-sm [overflow-wrap:anywhere]" data-testid="chat-side-panel-markdown">
+    <div className="markdown-body max-h-(--preview-block-max-height) overflow-auto rounded-md border bg-background p-3 text-sm [overflow-wrap:anywhere]" data-testid="chat-side-panel-markdown">
       <ReactMarkdown
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
         components={{

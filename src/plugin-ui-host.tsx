@@ -426,7 +426,7 @@ export function PluginUiHostView({
   // visible box-inside-box regression across every plugin view.
   //
   // `maxWidth="none"` hands the plugin the whole main pane. This used to be
-  // "reading" (max-w-[58rem], ~928px), a clamp added because the plugin UIs
+  // "reading" (--reading-column-max, ~928px), a clamp added because the plugin UIs
   // were authored for the ~800px detached window they opened in and stretched
   // at full pane width. That treated the symptom: the panel was pinned narrow
   // so nobody saw layouts that could not adapt, and widening the window past

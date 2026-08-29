@@ -258,8 +258,8 @@ describe("StarredView", () => {
     expect(getByTestId("insights-scroll-root").className).toContain("overflow-y-auto");
     expect(getByTestId("insights-overview-grid").className).toContain("shrink-0");
     expect(getByTestId("insights-heatmap").className).toContain("shrink-0");
-    expect(getByTestId("insights-lists-grid").className).toContain("lg:min-h-[22rem]");
-    expect(getByTestId("insights-conversations-panel").className).toContain("h-[22rem]");
+    expect(getByTestId("insights-lists-grid").className).toContain("lg:min-h-(--insights-panel-height)");
+    expect(getByTestId("insights-conversations-panel").className).toContain("h-(--insights-panel-height)");
   });
 
   it("disables calendar dates that have no activity signal", async () => {
