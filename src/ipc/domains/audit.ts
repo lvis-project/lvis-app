@@ -23,6 +23,12 @@ function invalidInput(message: string): TypeError {
   return new TypeError(`invalid audit IPC input: ${message}`);
 }
 
+/**
+ * A `YYYY-MM-DD` key naming a HOST-LOCAL civil day, as picked in the Audit
+ * tab; `AuditLogger.search` maps it onto the UTC-partitioned store. The UTC
+ * round-trip below only checks that the calendar date exists — a calendar
+ * date is real or not regardless of zone — and never shifts the day.
+ */
 function parseIsoDate(value: unknown, field: "dateFrom" | "dateTo"): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {

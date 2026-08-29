@@ -111,12 +111,16 @@ describe("AuditLogger.search()", () => {
   });
 
   it("filters by dateFrom/dateTo", async () => {
-    writeJsonl("2026-04-15.jsonl", [makeEntry({ type: "warn" })]);
-    writeJsonl("2026-04-17.jsonl", [makeEntry({ type: "turn" })]);
-    writeJsonl("2026-04-19.jsonl", [makeEntry({ type: "error" })]);
+    // Entries carry the instant their partition was named for, as the store
+    // writes them; the range is decided by that instant, not the file name.
+    // Noon UTC keeps each entry on its own civil day in every host zone.
+    writeJsonl("2026-04-14.jsonl", [makeEntry({ type: "warn", timestamp: "2026-04-14T12:00:00.000Z" })]);
+    writeJsonl("2026-04-17.jsonl", [makeEntry({ type: "turn", timestamp: "2026-04-17T12:00:00.000Z" })]);
+    writeJsonl("2026-04-20.jsonl", [makeEntry({ type: "error", timestamp: "2026-04-20T12:00:00.000Z" })]);
     const logger = new AuditLogger();
-    const { total } = await logger.search({ dateFrom: "2026-04-16", dateTo: "2026-04-18" });
+    const { entries, total } = await logger.search({ dateFrom: "2026-04-16", dateTo: "2026-04-18" });
     expect(total).toBe(1);
+    expect(entries[0].type).toBe("turn");
   });
 
   it("filters by textSearch (case-insensitive)", async () => {
@@ -197,8 +201,9 @@ describe("AuditLogger.search()", () => {
 });
 
 describe("AuditLogger.getStats()", () => {
-  // getStats(N) filters by file-name date; pin fixtures to today so the
-  // window doesn't rot as the calendar advances past a hard-coded date.
+  // getStats(N) keeps entries by timestamp instant and only opens the UTC
+  // partitions that can hold the window; pin fixtures to today's partition so
+  // the window doesn't rot as the calendar advances past a hard-coded date.
   const todayJsonl = () => `${new Date().toISOString().slice(0, 10)}.jsonl`;
 
   it("counts entries by type", async () => {
@@ -229,5 +234,165 @@ describe("AuditLogger.getStats()", () => {
     const stats = await logger.getStats(7);
     expect(stats.sensitiveOps).toBe(0);
     expect(Object.keys(stats.totalByType)).toHaveLength(0);
+  });
+});
+
+/**
+ * The picker hands `search()` HOST-LOCAL civil days while the store stays
+ * partitioned by UTC day, so an entry can live in a file named for a day the
+ * person never picked. Every case pins `TZ`; CI runs UTC, where the local and
+ * UTC days coincide and none of these boundaries exist.
+ *
+ * Seoul is UTC+9 with no DST: local day D runs [D-1 15:00Z, D 15:00Z).
+ * New York is UTC-4 in June (EDT): local day D runs [D 04:00Z, D+1 04:00Z).
+ */
+describe("AuditLogger.search() — host-local day range over UTC partitions", () => {
+  let previousTz: string | undefined;
+
+  beforeEach(() => {
+    previousTz = process.env.TZ;
+  });
+
+  afterEach(() => {
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  });
+
+  it("a Seoul host at 01:00 local sees today's entries, which live in yesterday's UTC file", async () => {
+    process.env.TZ = "Asia/Seoul";
+    writeJsonl("2026-06-15.jsonl", [
+      // 01:00 on the 16th in Seoul — picked day, previous UTC partition.
+      makeEntry({ timestamp: "2026-06-15T16:00:00.000Z", input: "after-local-midnight" }),
+      // 23:30 on the 15th in Seoul — same partition, day before the picked one.
+      makeEntry({ timestamp: "2026-06-15T14:30:00.000Z", input: "before-local-midnight" }),
+    ]);
+    writeJsonl("2026-06-16.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T10:00:00.000Z", input: "local-evening" }),
+    ]);
+    const logger = new AuditLogger();
+    const { entries, total } = await logger.search({ dateFrom: "2026-06-16", dateTo: "2026-06-16" });
+    expect(total).toBe(2);
+    expect(entries.map((e) => e.input).sort()).toEqual(["after-local-midnight", "local-evening"]);
+  });
+
+  it("a New York host at 21:00 local sees entries written after 00:00Z that belong to its local today", async () => {
+    process.env.TZ = "America/New_York";
+    writeJsonl("2026-06-16.jsonl", [
+      // 21:00 on the 15th in New York — picked day, next UTC partition.
+      makeEntry({ timestamp: "2026-06-16T01:00:00.000Z", input: "local-evening" }),
+      // 00:00 on the 16th in New York — first instant of the next local day.
+      makeEntry({ timestamp: "2026-06-16T04:00:00.000Z", input: "next-local-day" }),
+    ]);
+    writeJsonl("2026-06-15.jsonl", [
+      // 23:59:59 on the 14th in New York.
+      makeEntry({ timestamp: "2026-06-15T03:59:59.000Z", input: "previous-local-day" }),
+      makeEntry({ timestamp: "2026-06-15T12:00:00.000Z", input: "local-morning" }),
+    ]);
+    const logger = new AuditLogger();
+    const { entries, total } = await logger.search({ dateFrom: "2026-06-15", dateTo: "2026-06-15" });
+    expect(total).toBe(2);
+    expect(entries.map((e) => e.input).sort()).toEqual(["local-evening", "local-morning"]);
+  });
+
+  it("includes both boundary local days: the first instant of dateFrom and the last of dateTo", async () => {
+    process.env.TZ = "Asia/Seoul";
+    writeJsonl("2026-06-14.jsonl", [
+      makeEntry({ timestamp: "2026-06-14T14:59:59.999Z", input: "before-from" }),
+      makeEntry({ timestamp: "2026-06-14T15:00:00.000Z", input: "from-first-instant" }),
+    ]);
+    writeJsonl("2026-06-16.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T14:59:59.999Z", input: "to-last-instant" }),
+      makeEntry({ timestamp: "2026-06-16T15:00:00.000Z", input: "after-to" }),
+    ]);
+    const logger = new AuditLogger();
+    const { entries, total } = await logger.search({ dateFrom: "2026-06-15", dateTo: "2026-06-16" });
+    expect(total).toBe(2);
+    expect(entries.map((e) => e.input).sort()).toEqual(["from-first-instant", "to-last-instant"]);
+  });
+
+  it("control: under UTC the same files answer by UTC day, so the boundary set differs", async () => {
+    process.env.TZ = "UTC";
+    writeJsonl("2026-06-14.jsonl", [
+      makeEntry({ timestamp: "2026-06-14T14:59:59.999Z", input: "before-from" }),
+      makeEntry({ timestamp: "2026-06-14T15:00:00.000Z", input: "from-first-instant" }),
+    ]);
+    writeJsonl("2026-06-16.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T14:59:59.999Z", input: "to-last-instant" }),
+      makeEntry({ timestamp: "2026-06-16T15:00:00.000Z", input: "after-to" }),
+    ]);
+    const logger = new AuditLogger();
+    const { entries, total } = await logger.search({ dateFrom: "2026-06-15", dateTo: "2026-06-16" });
+    expect(total).toBe(2);
+    expect(entries.map((e) => e.input).sort()).toEqual(["after-to", "to-last-instant"]);
+  });
+
+  it("keeps HMAC-chained permission rows, which stamp `ts` rather than `timestamp`", async () => {
+    process.env.TZ = "Asia/Seoul";
+    const permissionRow = {
+      ts: "2026-06-15T16:00:00.000Z",
+      sessionId: "test-session",
+      decision: "allow",
+      tool: "read_file",
+    } as unknown as AuditEntry;
+    writeJsonl("2026-06-15.permission-audit.jsonl", [permissionRow]);
+    const logger = new AuditLogger();
+    const { total } = await logger.search({ dateFrom: "2026-06-16", dateTo: "2026-06-16" });
+    expect(total).toBe(1);
+  });
+
+  it("rejects a malformed day key instead of silently widening the range", async () => {
+    const logger = new AuditLogger();
+    await expect(logger.search({ dateFrom: "2026-6-1" })).rejects.toThrow(TypeError);
+  });
+});
+
+describe("AuditLogger.getStats() — host-local window and day buckets", () => {
+  let previousTz: string | undefined;
+
+  beforeEach(() => {
+    previousTz = process.env.TZ;
+  });
+
+  afterEach(() => {
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  });
+
+  // 01:30 on the 16th in Seoul; still the 15th in UTC.
+  const NOW = new Date("2026-06-15T16:30:00.000Z");
+
+  it("buckets totalByDay by the host's civil day, not the partition's UTC day", async () => {
+    process.env.TZ = "Asia/Seoul";
+    writeJsonl("2026-06-15.jsonl", [
+      makeEntry({ timestamp: "2026-06-15T16:00:00.000Z" }), // 01:00 local, the 16th
+      makeEntry({ timestamp: "2026-06-15T14:00:00.000Z" }), // 23:00 local, the 15th
+    ]);
+    const logger = new AuditLogger(undefined, { now: () => NOW });
+    const stats = await logger.getStats(1);
+    expect(stats.totalByDay).toEqual({ "2026-06-16": 1, "2026-06-15": 1 });
+  });
+
+  it("control: under UTC both entries fall on the partition's day", async () => {
+    process.env.TZ = "UTC";
+    writeJsonl("2026-06-15.jsonl", [
+      makeEntry({ timestamp: "2026-06-15T16:00:00.000Z" }),
+      makeEntry({ timestamp: "2026-06-15T14:00:00.000Z" }),
+    ]);
+    const logger = new AuditLogger(undefined, { now: () => NOW });
+    const stats = await logger.getStats(1);
+    expect(stats.totalByDay).toEqual({ "2026-06-15": 2 });
+  });
+
+  it("starts the window at local midnight N days back, reaching into the earlier UTC partition", async () => {
+    process.env.TZ = "Asia/Seoul";
+    // getStats(1) from the 16th local covers the 15th local onward: [2026-06-14T15:00Z, ...).
+    writeJsonl("2026-06-14.jsonl", [
+      makeEntry({ timestamp: "2026-06-14T15:00:00.000Z", type: "approval" }), // 00:00 local, the 15th
+      makeEntry({ timestamp: "2026-06-14T14:59:59.000Z", type: "kill_switch" }), // 23:59:59 local, the 14th
+    ]);
+    const logger = new AuditLogger(undefined, { now: () => NOW });
+    const stats = await logger.getStats(1);
+    expect(stats.sensitiveOps).toBe(1);
+    expect(stats.totalByType).toEqual({ approval: 1 });
   });
 });

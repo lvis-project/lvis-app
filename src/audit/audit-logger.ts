@@ -30,6 +30,7 @@ import { platform } from "node:process";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { localDateKey, localDayRange, shiftLocalDateKey } from "../shared/local-date.js";
 import {
   computeDailySeal,
   computeLineHmac,
@@ -444,6 +445,38 @@ function normalizePositiveInteger(value: number | undefined, fallback: number): 
   return value;
 }
 
+/** Length of the `YYYY-MM-DD` prefix every partition file name starts with. */
+const UTC_DATE_KEY_LENGTH = 10;
+
+/** The UTC civil day `YYYY-MM-DD` that partitions entries written at `date`. */
+function utcDateKey(date: Date): string {
+  return date.toISOString().slice(0, UTC_DATE_KEY_LENGTH);
+}
+
+/**
+ * The instant an audit row was written, as epoch milliseconds (`NaN` when the
+ * row carries no parseable time). Reads span every `.jsonl` partition in the
+ * audit directory, which holds two schemas: telemetry rows stamp
+ * `AuditEntry.timestamp`, the HMAC-chained permission rows stamp
+ * `AuditCommon.ts`. Both name the one instant the row was written; this reads
+ * whichever field the row's schema uses.
+ */
+function entryInstant(entry: AuditEntry): number {
+  const row = entry as { timestamp?: unknown; ts?: unknown };
+  const raw = row.timestamp ?? row.ts;
+  return typeof raw === "string" ? Date.parse(raw) : Number.NaN;
+}
+
+/**
+ * `start <= at < end` with either bound open. An unparseable instant (`NaN`)
+ * fails every comparison, so it never satisfies a bound that was set.
+ */
+function instantWithin(at: number, start?: Date, end?: Date): boolean {
+  if (start !== undefined && !(at >= start.getTime())) return false;
+  if (end !== undefined && !(at < end.getTime())) return false;
+  return true;
+}
+
 function archiveDateStampFromFileName(fileName: string): string | undefined {
   const match = /\.jsonl\.(\d{8})(?:\d{9})?(?:\.[0-9a-f-]{36})?\.gz$/i.exec(fileName);
   return match?.[1];
@@ -504,7 +537,7 @@ export class AuditLogger {
   }
 
   private currentUtcDate(): string {
-    return this.now().toISOString().slice(0, 10);
+    return utcDateKey(this.now());
   }
 
   private telemetryPath(date = this.currentUtcDate()): string {
@@ -1213,13 +1246,23 @@ export class AuditLogger {
   /**
    * Search audit entries across JSONL files within a date range.
    * Returns a filtered, paginated slice of matching entries.
+   *
+   * `dateFrom` / `dateTo` are inclusive HOST-LOCAL civil days — what the
+   * Audit tab's picker shows. The store stays partitioned by UTC day (see
+   * `currentUtcDate`), so the local range is mapped onto the instants it
+   * covers, every UTC partition that can overlap those instants is read (one
+   * extra file on each side when the host is off UTC), and each entry is kept
+   * or dropped by its own timestamp instant — never by comparing day strings.
    */
   async search(filter: AuditSearchFilter): Promise<{ entries: AuditEntry[]; total: number }> {
     await this.flush();
     const { dateFrom, dateTo, type, textSearch, limit = 100, offset = 0 } = filter;
 
-    // Collect JSONL file names in range
-    const files = this._filesInRange(dateFrom, dateTo);
+    const range = localDayRange(dateFrom, dateTo);
+    if (range === null) {
+      throw new TypeError("audit search dateFrom/dateTo must be YYYY-MM-DD day keys");
+    }
+    const files = this._filesOverlapping(range.start, range.end);
 
     const entries: AuditEntry[] = [];
     let total = 0;
@@ -1236,6 +1279,7 @@ export class AuditLogger {
         } catch {
           continue;
         }
+        if (!instantWithin(entryInstant(entry), range.start, range.end)) continue;
         if (type && entry.type !== type) continue;
         if (normalizedNeedle) {
           const haystack = JSON.stringify(entry).toLowerCase();
@@ -1252,7 +1296,8 @@ export class AuditLogger {
   }
 
   /**
-   * Return aggregate stats over the last N days.
+   * Return aggregate stats over the last N host-local days, `totalByDay`
+   * bucketed by host-local day key — the same calendar the Audit tab shows.
    */
   async getStats(lastDays: number): Promise<{
     totalByType: Record<string, number>;
@@ -1260,8 +1305,11 @@ export class AuditLogger {
     sensitiveOps: number;
   }> {
     await this.flush();
-    const dateFrom = new Date(Date.now() - lastDays * 86400_000).toISOString().slice(0, 10);
-    const files = this._filesInRange(dateFrom, undefined);
+    const range = localDayRange(shiftLocalDateKey(localDateKey(this.now()), -lastDays));
+    if (range === null) {
+      throw new TypeError("audit stats window must start on a YYYY-MM-DD day key");
+    }
+    const files = this._filesOverlapping(range.start, range.end);
 
     const totalByType: Record<string, number> = {};
     const totalByDay: Record<string, number> = {};
@@ -1280,7 +1328,9 @@ export class AuditLogger {
         } catch {
           continue;
         }
-        const day = entry.timestamp?.slice(0, 10) ?? file.replace(".jsonl", "");
+        const at = entryInstant(entry);
+        if (!instantWithin(at, range.start, range.end)) continue;
+        const day = localDateKey(new Date(at));
         totalByType[entry.type] = (totalByType[entry.type] ?? 0) + 1;
         totalByDay[day] = (totalByDay[day] ?? 0) + 1;
         if (SENSITIVE_TYPES.has(entry.type)) sensitiveOps += 1;
@@ -1290,8 +1340,15 @@ export class AuditLogger {
     return { totalByType, totalByDay, sensitiveOps };
   }
 
-  /** List all .jsonl files within [dateFrom, dateTo] inclusive. */
-  private _filesInRange(dateFrom?: string, dateTo?: string): string[] {
+  /**
+   * List every `.jsonl` file whose UTC-day partition can hold an entry inside
+   * the instant range `[start, end)`, oldest first. Partitions are named by
+   * the UTC day of the entries they hold (`YYYY-MM-DD[.<channel>].jsonl`), so
+   * the candidates run from the UTC day of `start` through the UTC day of the
+   * last instant before `end`. Callers still filter each entry by its own
+   * instant; this only bounds which files are opened.
+   */
+  private _filesOverlapping(start?: Date, end?: Date): string[] {
     let files: string[];
     try {
       files = readdirSync(this.auditDir)
@@ -1300,10 +1357,12 @@ export class AuditLogger {
     } catch {
       return [];
     }
+    const firstPartition = start === undefined ? undefined : utcDateKey(start);
+    const lastPartition = end === undefined ? undefined : utcDateKey(new Date(end.getTime() - 1));
     return files.filter((f) => {
-      const date = f.replace(".jsonl", "");
-      if (dateFrom && date < dateFrom) return false;
-      if (dateTo && date > dateTo) return false;
+      const partition = f.slice(0, UTC_DATE_KEY_LENGTH);
+      if (firstPartition !== undefined && partition < firstPartition) return false;
+      if (lastPartition !== undefined && partition > lastPartition) return false;
       return true;
     });
   }

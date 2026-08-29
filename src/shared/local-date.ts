@@ -86,3 +86,23 @@ export function localDayStart(dayKey: string): Date | null {
 export function localMonthStartKey(date: Date): string {
   return `${padYear(date.getFullYear())}-${pad(date.getMonth() + 1)}-01`;
 }
+
+/**
+ * The half-open instant range `[start, end)` covered by the inclusive local
+ * civil days `[fromKey, toKey]`. Either bound may be left open.
+ *
+ * `end` is the start of the day AFTER `toKey`, so a timestamp belongs to the
+ * range when `start <= t < end` and the last picked day keeps its final
+ * second — there is no "last instant of a day" to compare `<=` against once
+ * DST can shorten the day. A malformed key yields `null`; callers validated
+ * their keys upstream and treat `null` as a contract error.
+ */
+export function localDayRange(
+  fromKey?: string,
+  toKey?: string,
+): { start?: Date; end?: Date } | null {
+  const start = fromKey === undefined ? undefined : localDayStart(fromKey);
+  const end = toKey === undefined ? undefined : localDayStart(shiftLocalDateKey(toKey, 1));
+  if (start === null || end === null) return null;
+  return { start, end };
+}
