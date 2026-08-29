@@ -12,26 +12,43 @@ import {
 } from "../types.js";
 import { ALL_VENDORS, getVendorOption, type VendorOption } from "../constants.js";
 import { formatIpcError } from "../format-ipc-error.js";
-import type { FallbackEntry } from "../tabs/LlmTab.js";
+import type {
+  FallbackEntry,
+  ProviderCredentialDraft,
+  ProviderCredentialSave,
+} from "../tabs/LlmTab.js";
 import { t } from "../../../i18n/runtime.js";
 import {
   DEFAULT_LLM_VENDOR,
   getLlmVendorSettings,
   isLLMVendor,
+  llmRouteModel,
 } from "../../../shared/llm-vendor-defaults.js";
 import {
   marketplaceProviderPresetSecretId,
   type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
 
+/** A save that arrived while another was running. See `pendingSaves`. */
+type PendingSave =
+  | { kind: "tab"; tab: string }
+  | {
+    kind: "credential";
+    input: ProviderCredentialSave;
+    /** Settles the promise the card is still holding. */
+    resolve: (ok: boolean) => void;
+  };
+
 export interface SettingsOrchestrationState {
   // LLM
+  /** The provider chat runs on — `llm.provider`. Moved only by an explicit pick. */
   vendor: string;
-  setVendor: (v: string) => void;
-  keyInput: string;
-  setKeyInput: (v: string) => void;
+  providerCredentialDraft: ProviderCredentialDraft | null;
+  setProviderCredentialDraft: (next: ProviderCredentialDraft | null) => void;
+  saveProviderCredential: (input: ProviderCredentialSave) => Promise<boolean>;
   model: string;
   setModel: (v: string) => void;
+  /** Whether the ACTIVE provider has a stored key. Per-row facts are the tab's. */
   hasKey: boolean;
   setHasKey: (v: boolean) => void;
   autoCompact: boolean;
@@ -40,12 +57,8 @@ export interface SettingsOrchestrationState {
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
   setThinkingBudget: (v: number) => void;
+  /** The ACTIVE provider's endpoint. A card's endpoint field edits the draft. */
   baseUrl: string;
-  setBaseUrl: (v: string) => void;
-  vertexProject: string;
-  setVertexProject: (v: string) => void;
-  vertexLocation: string;
-  setVertexLocation: (v: string) => void;
   // Cross-vendor LLM controls (UI moved out of "Advanced")
   streamSmoothing: "none" | "word" | "char";
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
@@ -129,7 +142,8 @@ export function useSettingsOrchestration(
   // the correct persisted value. The `settingsLoaded` guard prevents any
   // save from firing before hydration completes.
   const [vendor, setVendor] = useState("");
-  const [keyInput, setKeyInput] = useState("");
+  const [providerCredentialDraft, setProviderCredentialDraft] =
+    useState<ProviderCredentialDraft | null>(null);
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [autoCompact, setAutoCompact] = useState(true);
@@ -198,7 +212,7 @@ export function useSettingsOrchestration(
       setVendor(provider);
       setMarketplaceProviderPresetId(providerPresetId);
       setMarketplaceProviderPresets(s.marketplace?.installedProviderPresets ?? []);
-      hydrateVendorBlock(block);
+      hydrateVendorBlock(block, providerPresetId);
       setStreamSmoothing(s.llm.streamSmoothing);
       setAutoCompact(s.chat.autoCompact ?? true);
       setHasKey(apiKeySet);
@@ -257,12 +271,23 @@ export function useSettingsOrchestration(
     const block = isLLMVendor(vendor)
       ? getLlmVendorSettings(settingsSnapshot?.llm.vendors, vendor)
       : null;
-    if (block) hydrateVendorBlock(block);
+    if (block) {
+      hydrateVendorBlock(
+        block,
+        vendor === "openai-compatible" ? marketplaceProviderPresetId : "",
+      );
+    }
     return () => { cancelled = true; };
-  }, [vendor, api, settingsLoaded, settingsSnapshot, activeCredentialProviderId]);
+  }, [
+    vendor, api, settingsLoaded, settingsSnapshot, activeCredentialProviderId,
+    marketplaceProviderPresetId,
+  ]);
 
-  function hydrateVendorBlock(block: AppSettings["llm"]["vendors"][string]): void {
-    setModel(block.model);
+  function hydrateVendorBlock(
+    block: AppSettings["llm"]["vendors"][string],
+    marketplaceProviderPresetIdForBlock = "",
+  ): void {
+    setModel(llmRouteModel(block, marketplaceProviderPresetIdForBlock));
     setBaseUrl(block.baseUrl ?? "");
     setVertexProject(block.vertexProject ?? "");
     setVertexLocation(block.vertexLocation ?? "");
@@ -283,7 +308,7 @@ export function useSettingsOrchestration(
     setVendor(nextVendor);
     setMarketplaceProviderPresetId(providerPresetId);
     setMarketplaceProviderPresets(next.marketplace?.installedProviderPresets ?? []);
-    hydrateVendorBlock(block);
+    hydrateVendorBlock(block, providerPresetId);
     setStreamSmoothing(next.llm.streamSmoothing);
     setFallbackChain(next.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
   }
@@ -318,7 +343,6 @@ export function useSettingsOrchestration(
     setVertexLocation(block.vertexLocation ?? "");
     setEnableThinking(block.enableThinking);
     setThinkingBudget(block.thinkingBudgetTokens);
-    setKeyInput("");
     setModel(modelId);
     void api.hasApiKey(vendorId).then((k) => setHasKey(k)).catch(() => setHasKey(false));
   }, [api, settingsSnapshot]);
@@ -331,13 +355,20 @@ export function useSettingsOrchestration(
     hydratedVendorRef.current = "openai-compatible";
     setMarketplaceProviderPresetId(preset.providerId);
     setVendor("openai-compatible");
-    setModel(preset.defaultModel);
-    setBaseUrl(preset.baseUrl);
+    // This preset's own stored model, so switching between two presets restores
+    // what each was last set to rather than resetting both to a seed.
+    setModel(
+      llmRouteModel(openaiCompatibleDefaults, preset.providerId) || preset.defaultModel,
+    );
+    // NOT `preset.baseUrl`: this field is the generic custom provider row's
+    // stored endpoint and is written back on every save, so parking the
+    // preset's address in it is how the two rows used to overwrite each other.
+    // Consumers that need the preset's address resolve it from the preset.
+    setBaseUrl(openaiCompatibleDefaults.baseUrl ?? "");
     setVertexProject("");
     setVertexLocation("");
     setEnableThinking(openaiCompatibleDefaults.enableThinking);
     setThinkingBudget(openaiCompatibleDefaults.thinkingBudgetTokens);
-    setKeyInput("");
     void api
       .hasApiKey(marketplaceProviderPresetSecretId(preset.providerId))
       .then((k) => setHasKey(k))
@@ -347,11 +378,13 @@ export function useSettingsOrchestration(
   const clearMarketplaceProviderPreset = useCallback(() => {
     setMarketplaceProviderPresetId("");
     if (vendor !== "openai-compatible") return;
-    const genericBlock = settingsSnapshot?.llm.marketplaceProviderPresetId
-      ? getLlmVendorSettings(undefined, "openai-compatible")
-      : getLlmVendorSettings(settingsSnapshot?.llm.vendors, "openai-compatible");
+    // The stored block, always. It used to be replaced with DEFAULTS whenever a
+    // preset had been persisted — the only reason being that the block then
+    // held the preset's mirrored address and had to be scrubbed. Nothing
+    // mirrors any more, so the block is the generic row's own endpoint and
+    // scrubbing it would throw away what the user saved.
+    const genericBlock = getLlmVendorSettings(settingsSnapshot?.llm.vendors, "openai-compatible");
     hydrateVendorBlock(genericBlock);
-    setKeyInput("");
     void api.hasApiKey("openai-compatible")
       .then((k) => setHasKey(k))
       .catch(() => setHasKey(false));
@@ -364,7 +397,17 @@ export function useSettingsOrchestration(
   // would flicker (the first call's `finally` clears the flag while the
   // second is still running).
   const savingRef = useRef(false);
-  const pendingSavePayload = useRef<null | { tab: string }>(null);
+  /**
+   * Saves that arrived while another was in flight, in arrival order.
+   *
+   * A tab save and a provider card's credential save contend for the same
+   * in-flight flag, so both queue here rather than one of them being dropped:
+   * a card whose Save landed a beat after a debounced `llm` save used to
+   * return false and go quiet, leaving the card looking committed when
+   * nothing had been written. A queued credential save keeps its caller's
+   * promise so the card learns what actually happened.
+   */
+  const pendingSaves = useRef<PendingSave[]>([]);
   // Latest-`save` ref: the running save closure captures values from its
   // own render. When `finally` re-fires the pending payload, it must
   // call the LATEST `save` (with the latest closures) — otherwise
@@ -373,21 +416,40 @@ export function useSettingsOrchestration(
   // `useEffect` (canonical latest-ref pattern) so a discarded concurrent
   // render does not leave a dangling closure here.
   const saveRef = useRef<(tab: string) => Promise<boolean>>(null!);
+  const saveProviderCredentialRef =
+    useRef<(input: ProviderCredentialSave) => Promise<boolean>>(null!);
+  /**
+   * Run the next queued save, if any.
+   *
+   * Called from the `finally` of whichever save just finished, so the flag it
+   * checks is already clear. Each run drains the next in its own `finally`,
+   * which is what keeps the queue moving without a second scheduler.
+   */
+  const drainPendingSaves = (): void => {
+    const next = pendingSaves.current.shift();
+    if (!next) return;
+    if (next.kind === "tab") {
+      void saveRef.current(next.tab);
+      return;
+    }
+    void saveProviderCredentialRef.current(next.input).then(next.resolve, () => next.resolve(false));
+  };
   const save = async (tab: string): Promise<boolean> => {
     if (!settingsLoaded) return false;
     if (savingRef.current) {
-      pendingSavePayload.current = { tab };
+      // One pending entry per tab: the payload is read from state at run time,
+      // so a second request for the same tab would write the same thing twice.
+      if (!pendingSaves.current.some((entry) => entry.kind === "tab" && entry.tab === tab)) {
+        pendingSaves.current.push({ kind: "tab", tab });
+      }
       return false;
     }
-    const isLlmSave = tab === "llm";
     savingRef.current = true;
     setSaving(true);
     let ok = false;
     try {
       if (tab !== "permissions") {
         const secretUpdates: Array<Promise<unknown>> = [];
-        const trimmedKeyInput = keyInput.trim();
-        const shouldPersistLlmKey = isLlmSave && trimmedKeyInput.length > 0;
         if (webKeyInput.trim()) {
           secretUpdates.push(
             api.setWebApiKey(webProvider, webKeyInput.trim()).then(() => {
@@ -405,15 +467,28 @@ export function useSettingsOrchestration(
           );
         }
         await Promise.all(secretUpdates);
-        const selectedMarketplaceProviderPreset =
-          vendor === "openai-compatible" && marketplaceProviderPresetId
-            ? marketplaceProviderPresets.find((preset) => preset.providerId === marketplaceProviderPresetId)
-            : undefined;
-        const trimmedBaseUrl = selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl.trim();
+        // The row's OWN endpoint, never the active preset's. A preset's
+        // address belongs to the preset registry; writing it here would put it
+        // in the generic custom provider's block, which is a different row.
+        const trimmedBaseUrl = baseUrl.trim();
         const trimmedVertexProject = vertexProject.trim();
         const trimmedVertexLocation = vertexLocation.trim();
-        const activeBlock: AppSettings["llm"]["vendors"][string] = {
-          model: model.trim() || vendorInfo.defaultModel,
+        // A marketplace preset's model goes in its own slot, keyed by preset,
+        // and the block's single `model` is left untouched — that one belongs
+        // to the generic custom-provider row, which is a different row reached
+        // through the same vendor. Omitting a key leaves the stored value
+        // intact, so the row not being edited keeps its model.
+        const activePresetId = vendor === "openai-compatible"
+          ? marketplaceProviderPresetId
+          : "";
+        const routeModel = model.trim() || vendorInfo.defaultModel;
+        const activeBlock: DeepPartial<AppSettings["llm"]["vendors"][string]> = {
+          // This preset's key alone. The main side merges it into the stored
+          // map (`mergeLlmPatch`), so a save here can never carry a stale copy
+          // of another preset's model back over a newer one.
+          ...(activePresetId
+            ? { presetModels: { [activePresetId]: routeModel } }
+            : { model: routeModel }),
           baseUrl: trimmedBaseUrl || undefined,
           vertexProject: trimmedVertexProject || undefined,
           vertexLocation: trimmedVertexLocation || undefined,
@@ -441,11 +516,6 @@ export function useSettingsOrchestration(
         if (isIpcErrorResult(updateResult)) {
           throw new Error(formatIpcError(updateResult.error, updateResult.message));
         }
-        if (shouldPersistLlmKey) {
-          await api.setApiKey(activeCredentialProviderId, trimmedKeyInput);
-          setKeyInput("");
-          setHasKey(true);
-        }
       }
       if (tab !== "permissions") onSaved();
       setLastSaveError(null);
@@ -461,22 +531,88 @@ export function useSettingsOrchestration(
     } finally {
       savingRef.current = false;
       setSaving(false);
-      // If a debounced save was coalesced while we were running, fire it
-      // now via the LATEST `save` closure (saveRef) so the re-fire reads
-      // the most recent state, not the stale closure of the original
-      // call. Without this the second save would silently drop any
-      // toggles that landed between the original call and the re-fire.
-      const pending = pendingSavePayload.current;
-      if (pending) {
-        pendingSavePayload.current = null;
-        void saveRef.current(pending.tab);
-      }
+      // If a save was coalesced while we were running, fire it now via the
+      // LATEST closure (the refs) so the re-fire reads the most recent state,
+      // not the stale closure of the original call. Without this the second
+      // save would silently drop any toggles that landed between the original
+      // call and the re-fire.
+      drainPendingSaves();
     }
     return ok;
   };
   useEffect(() => {
     saveRef.current = save;
   });
+
+  /**
+   * Commit ONE provider card: its own vendor block, its own secret.
+   *
+   * Deliberately not part of `save("llm")`. That call writes `llm.provider`,
+   * so routing a card's Save through it made storing a key for one provider
+   * also switch chat to it. Which provider chat runs on is a separate decision
+   * with its own control, and this call must never take it.
+   *
+   * The block is written BEFORE the secret, and a rejected write aborts: a key
+   * that lands beside an endpoint the store refused would be a credential
+   * pointing at an address nobody saved.
+   */
+  const saveProviderCredential = useCallback(async (
+    input: ProviderCredentialSave,
+  ): Promise<boolean> => {
+    if (!settingsLoaded) return false;
+    if (savingRef.current) {
+      // Queue behind the in-flight save and hand the caller the outcome of
+      // the run that actually happens, so the card stays dirty until then
+      // instead of quietly reporting a failure it cannot explain.
+      return new Promise<boolean>((resolve) => {
+        pendingSaves.current.push({ kind: "credential", input, resolve });
+      });
+    }
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      if (input.vendorBlock) {
+        const updateResult = await api.updateSettings({
+          llm: { vendors: { [input.vendorId]: input.vendorBlock } },
+        });
+        if (isIpcErrorResult(updateResult)) {
+          throw new Error(formatIpcError(updateResult.error, updateResult.message));
+        }
+        // The active provider's mirrored fields feed the model-list handshake,
+        // so editing that provider's own card has to move them here too.
+        if (input.vendorId === vendor) {
+          if (input.vendorBlock.baseUrl !== undefined) setBaseUrl(input.vendorBlock.baseUrl);
+          if (input.vendorBlock.vertexProject !== undefined) {
+            setVertexProject(input.vendorBlock.vertexProject);
+          }
+          if (input.vendorBlock.vertexLocation !== undefined) {
+            setVertexLocation(input.vendorBlock.vertexLocation);
+          }
+        }
+      }
+      const trimmedKey = input.apiKey.trim();
+      if (trimmedKey) {
+        await api.setApiKey(input.credentialProviderId, trimmedKey);
+        if (input.credentialProviderId === activeCredentialProviderId) setHasKey(true);
+      }
+      onSaved();
+      setLastSaveError(null);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error && err.message
+        ? err.message
+        : t("useSettingsOrchestration.saveFailed");
+      setLastSaveError({ tab: "llm", message });
+      return false;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+      drainPendingSaves();
+    }
+  }, [api, activeCredentialProviderId, onSaved, settingsLoaded, vendor]);
+  useEffect(() => {
+    saveProviderCredentialRef.current = saveProviderCredential;
+  }, [saveProviderCredential]);
 
   const setIdlePreferenceRefreshLive = useCallback((next: boolean) => {
     const previous = idlePreferenceRefresh;
@@ -565,17 +701,16 @@ export function useSettingsOrchestration(
     lastSaveError,
     clearLastSaveError,
     hydrateLlmFromSettings,
-    vendor, setVendor,
+    vendor,
+    providerCredentialDraft, setProviderCredentialDraft,
+    saveProviderCredential,
     selectApiVendorModel,
-    keyInput, setKeyInput,
     model, setModel,
     hasKey, setHasKey,
     autoCompact, setAutoCompact,
     enableThinking, setEnableThinking,
     thinkingBudget, setThinkingBudget,
-    baseUrl, setBaseUrl,
-    vertexProject, setVertexProject,
-    vertexLocation, setVertexLocation,
+    baseUrl,
     streamSmoothing, setStreamSmoothing,
     fallbackChain, setFallbackChain,
     fallbackOpen, setFallbackOpen,

@@ -47,7 +47,10 @@ describe("useSettings", () => {
     next.llm.provider = "openai-compatible";
     next.llm.marketplaceProviderPresetId = "local-router";
     next.llm.vendors["openai-compatible"] = {
-      model: "local/reasoner",
+      // The preset's own slot. The block's `model` belongs to the generic
+      // custom-provider row, which is a different row on the same vendor.
+      model: "",
+      presetModels: { "local-router": "local/reasoner" },
       baseUrl: "http://127.0.0.1:11434/v1",
       enableThinking: false,
       thinkingBudgetTokens: 32_000,

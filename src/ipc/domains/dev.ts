@@ -13,7 +13,7 @@ import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } fro
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
-import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
+import { activeLlmRouteModel } from "../../shared/llm-vendor-defaults.js";
 
 const log = createLogger("ipc-dev");
 
@@ -47,7 +47,7 @@ export function registerDevHandlers(deps: IpcDeps): void {
     }
     const llm = deps.settingsService.get("llm");
     const provider = llm.provider;
-    const model = getLlmVendorSettings(llm.vendors, provider).model;
+    const model = activeLlmRouteModel(llm);
     const effective = getModelPreflightThreshold(provider, model);
     return {
       ok: true,

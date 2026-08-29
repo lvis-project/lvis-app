@@ -47,6 +47,7 @@ import { redactForLLM, redactAuditPayload, scrubSecretsForLLM } from "./dlp-filt
 import { lvisHome } from "../shared/lvis-home.js";
 import { parseLogFileDate } from "../lib/log-file-sink.js";
 import type { AppSettings } from "../data/settings-store.js";
+import { activeLlmRouteModel } from "../shared/llm-vendor-defaults.js";
 import type { AuditLogger, AuditEntry } from "./audit-logger.js";
 
 /** Bundle schema version — bump on a structural change to the ZIP layout. */
@@ -121,16 +122,37 @@ export function pickRedactedSettings(settings: AppSettings): Record<string, unkn
   const llm = settings.llm;
   if (llm) {
     const vendors: Record<string, { model?: string; hasBaseUrl: boolean }> = {};
+    // A marketplace preset route's endpoint lives in the preset registry, not
+    // in its vendor block, so reading the block alone would report "no
+    // endpoint" for a provider that is configured and working — the opposite
+    // of what a bug report needs to say.
+    const presetRouteHasBaseUrl = Boolean(
+      llm.marketplaceProviderPresetId
+      && (settings.marketplace?.installedProviderPresets ?? []).some((preset) =>
+        preset.providerId === llm.marketplaceProviderPresetId
+        && typeof preset.baseUrl === "string" && preset.baseUrl.length > 0),
+    );
     for (const [vendor, v] of Object.entries(llm.vendors ?? {})) {
       const vv = v as { model?: string; baseUrl?: string };
       vendors[vendor] = {
+        // The BLOCK's own model, which for openai-compatible is the generic
+        // custom-provider row's — a preset route's model is reported as
+        // `activeModel` below, not here.
         model: typeof vv.model === "string" ? vv.model : undefined,
         // Presence flag only — the value could carry an internal hostname.
-        hasBaseUrl: typeof vv.baseUrl === "string" && vv.baseUrl.length > 0,
+        hasBaseUrl: (typeof vv.baseUrl === "string" && vv.baseUrl.length > 0)
+          || (vendor === "openai-compatible" && presetRouteHasBaseUrl),
       };
     }
     out.llm = {
       provider: llm.provider,
+      // What the active route actually runs on. Reading it off the vendor
+      // block alone reported the generic row's model — or none at all — for a
+      // marketplace preset route, which is the one a bug report is about.
+      activeModel: activeLlmRouteModel(llm),
+      // Flag only: a preset id names a provider package that may itself be
+      // private, and the bundle carries no such name.
+      hasMarketplaceProviderPreset: Boolean(llm.marketplaceProviderPresetId),
       streamSmoothing: llm.streamSmoothing,
       fallbackChain: llm.fallbackChain,
       vendors,

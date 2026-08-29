@@ -13,7 +13,7 @@ import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
 import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../lib/chat-stream-state.js";
-import { getLlmVendorSettings } from "../shared/llm-vendor-defaults.js";
+import { activeLlmRouteModel } from "../shared/llm-vendor-defaults.js";
 import type { SubscriptionUsageTelemetry } from "../shared/subscription-runtime.js";
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import type {
@@ -218,12 +218,7 @@ export class PostTurnHookChain {
       const provider = ctx.vendorProvider ?? llmSettings?.provider;
       const model =
         ctx.vendorModel ??
-        (llmSettings
-          ? getLlmVendorSettings(
-              llmSettings.vendors,
-              llmSettings.provider,
-            ).model
-          : undefined);
+        (llmSettings ? activeLlmRouteModel(llmSettings) : undefined);
       const auditTokenUsage = provider && isLLMVendor(provider)
         ? normalizeAiSdkUsageForCost(ctx.tokenUsage, provider)
         : ctx.tokenUsage;

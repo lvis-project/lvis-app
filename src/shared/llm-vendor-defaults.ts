@@ -504,6 +504,67 @@ export function isSelfHostedTrustedNetworkVendor(v: LLMVendor): boolean {
   return SELF_HOSTED_TRUSTED_NETWORK_VENDOR_IDS.has(v);
 }
 
+/**
+ * Every endpoint an LLM route could reach, as stored.
+ *
+ * A marketplace provider preset's address lives in the preset registry, not in
+ * `vendors["openai-compatible"]` — that block belongs to the generic custom
+ * provider row. So walking the vendor blocks alone no longer sees the address
+ * chat is actually talking to, and a caller that did would drop the active
+ * preset's host on the floor.
+ *
+ * Both the sandbox's network union and the change-detection signature that
+ * refreshes it read this, so the two can never disagree about which hosts are
+ * in play. Only the ACTIVE preset is included: an installed-but-unselected
+ * preset is not a route anything reaches, and adding it would widen an
+ * enforced allow-list for a provider nobody chose.
+ *
+ * Structural parameters rather than `AppSettings`: the callers hand this
+ * partial and normalized shapes, and one of them lives in the sandbox module
+ * that deliberately keeps itself free of settings imports.
+ */
+export function llmRouteBaseUrls(input: {
+  readonly vendors?: Readonly<Record<string, { readonly baseUrl?: string } | undefined>> | undefined;
+  readonly marketplaceProviderPresetId?: string | undefined;
+  readonly installedProviderPresets?:
+    | readonly { readonly providerId: string; readonly baseUrl?: string }[]
+    | undefined;
+}): string[] {
+  const seen = new Set<string>();
+  const baseUrls: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    baseUrls.push(trimmed);
+  };
+  for (const block of Object.values(input.vendors ?? {})) push(block?.baseUrl);
+  const activePresetId = input.marketplaceProviderPresetId?.trim();
+  if (activePresetId) {
+    const preset = (input.installedProviderPresets ?? [])
+      .find((candidate) => candidate.providerId === activePresetId);
+    push(preset?.baseUrl);
+  }
+  return baseUrls;
+}
+
+/**
+ * Stable signature of every endpoint an LLM route could reach.
+ *
+ * Change-detection for the ASRT sandbox network union: the union is rebuilt
+ * only when this moves. It is keyed by the SET of endpoints rather than by
+ * vendor id, because the union is a set of hosts — the same address moving
+ * between two vendor blocks does not change what a worker may reach, and a
+ * refresh for it would be noise. Sorted so vendor-key insertion order cannot
+ * fake a change.
+ */
+export function llmRouteBaseUrlSignature(
+  input: Parameters<typeof llmRouteBaseUrls>[0],
+): string {
+  return [...llmRouteBaseUrls(input)].sort().join("|");
+}
+
 export function canUseLlmVendorWithoutApiKey(
   vendor: LLMVendor,
   block: Pick<LLMVendorSettings, "baseUrl">,
@@ -545,6 +606,17 @@ export interface LLMVendorSettings {
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
+  /**
+   * The model each marketplace provider preset runs on, keyed by preset id.
+   *
+   * A preset is a provider in its own right that is merely REACHED through the
+   * `openai-compatible` vendor, so it cannot share this block's single `model`
+   * slot with the generic custom-provider row, nor with another preset: the row
+   * picked last would silently overwrite every other row's model. Only the
+   * `openai-compatible` block carries this — it is the only vendor presets are
+   * reached through. Read it through {@link llmRouteModel}, never directly.
+   */
+  presetModels?: Record<string, string>;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
 }
@@ -697,6 +769,37 @@ export const LLM_VENDOR_DEFAULTS: Readonly<Record<LLMVendor, LLMVendorSettings>>
     >,
   );
 
+/** Longest preset id / model id accepted into a persisted `presetModels` map. */
+const MAX_PRESET_MODEL_ENTRY_LENGTH = 256;
+
+/**
+ * The per-preset model map, or undefined when it holds nothing usable.
+ *
+ * Undefined rather than `{}` on purpose: an empty map has to be
+ * indistinguishable from an absent one, or a block carrying only an empty map
+ * would read as user-customized and survive pruning forever.
+ */
+function normalizeLlmPresetModels(
+  vendor: LLMVendor,
+  value: unknown,
+): Record<string, string> | undefined {
+  // Presets are reached through this vendor and no other, so a map on any
+  // other block is stale data, not configuration.
+  if (vendor !== "openai-compatible") return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const models: Record<string, string> = {};
+  for (const [presetId, model] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof model !== "string") continue;
+    const id = presetId.trim();
+    const modelId = model.trim();
+    if (!id || !modelId) continue;
+    if (id.length > MAX_PRESET_MODEL_ENTRY_LENGTH) continue;
+    if (modelId.length > MAX_PRESET_MODEL_ENTRY_LENGTH) continue;
+    models[id] = modelId;
+  }
+  return Object.keys(models).length > 0 ? models : undefined;
+}
+
 export function getLlmVendorSettings(
   vendors: LLMVendorSettingsMap | undefined,
   vendor: LLMVendor,
@@ -707,7 +810,8 @@ export function getLlmVendorSettings(
     typeof stored?.model === "string"
       ? normalizeLlmVendorModel(vendor, stored.model)
       : defaults.model;
-  return {
+  const presetModels = normalizeLlmPresetModels(vendor, stored?.presetModels);
+  const block: LLMVendorSettings = {
     ...defaults,
     ...stored,
     model,
@@ -721,7 +825,47 @@ export function getLlmVendorSettings(
         ? stored.thinkingBudgetTokens
         : defaults.thinkingBudgetTokens,
   };
+  if (presetModels) block.presetModels = presetModels;
+  else delete block.presetModels;
+  return block;
 }
+
+/**
+ * The model one route runs on: a marketplace preset's own, or the vendor
+ * block's when the route is the vendor itself.
+ *
+ * The single reader of {@link LLMVendorSettings.presetModels}. Everything that
+ * asks "what model is this route on" has to come through here, or the answer
+ * differs by caller — which is exactly how the generic custom-provider row and
+ * every preset ended up overwriting one another's model.
+ */
+export function llmRouteModel(
+  block: Pick<LLMVendorSettings, "model" | "presetModels">,
+  marketplaceProviderPresetId?: string,
+): string {
+  const presetId = marketplaceProviderPresetId?.trim();
+  if (!presetId) return block.model;
+  return block.presetModels?.[presetId] ?? "";
+}
+
+/**
+ * That same question asked of the settings as a whole.
+ *
+ * `provider` is a known vendor by the time settings reach anyone: the store
+ * coerces an unrecognized name at the file boundary (`pruneLazyLlmVendorBlocks`),
+ * so every caller reading through `SettingsService` is handed one of these.
+ */
+export function activeLlmRouteModel(llm: {
+  provider: LLMVendor;
+  vendors: LLMVendorSettingsMap;
+  marketplaceProviderPresetId?: string;
+}): string {
+  return llmRouteModel(
+    getLlmVendorSettings(llm.vendors, llm.provider),
+    llm.provider === "openai-compatible" ? llm.marketplaceProviderPresetId : undefined,
+  );
+}
+
 
 export function freshVendorBlocks(
   vendorIds: readonly LLMVendor[] = DEFAULT_VISIBLE_LLM_VENDOR_IDS,

@@ -213,22 +213,85 @@ function marketplaceProviderPresetUsesSeededModelOptions(
   return modelDiscoveryPolicyUsesSeededOptions(preset?.modelDiscoveryPolicy);
 }
 
-function bindOpenAICompatibleVendorBlockToMarketplaceProviderPreset(
-  vendors: LLMVendorSettingsMap,
-  preset: MarketplaceInstalledProviderPreset | undefined,
-): void {
-  if (!preset) return;
-  const current = getLlmVendorSettings(vendors, "openai-compatible");
+/**
+ * Drop a marketplace preset's address back out of the generic
+ * openai-compatible block.
+ *
+ * A preset's endpoint used to be MIRRORED into `vendors["openai-compatible"]`
+ * so that consumers reading the active vendor block would reach the preset's
+ * address. But the generic custom provider is a different row that persists
+ * its OWN endpoint in that same block, so the two were writing over each
+ * other: selecting a preset overwrote the generic row's endpoint, saving the
+ * generic row's endpoint was reverted by the next normalization, and clearing
+ * the preset had to scrub the block — wiping the generic row again.
+ *
+ * The preset registry (`marketplace.installedProviderPresets`) is now the only
+ * owner of a preset's address, so nothing writes one here any more. This
+ * removes the value an older install still carries.
+ *
+ * Narrow on purpose: only the address of the preset that is SELECTED right now
+ * can be a mirror, because that is the only one the old code ever wrote here.
+ * A generic block holding some other installed preset's URL is a person who
+ * typed that address into the custom-provider row themselves — rewriting it
+ * would delete a setting they made deliberately.
+ */
+export function withoutMirroredMarketplaceProviderPresetEndpoint(
+  llm: LLMSettings,
+  installedProviderPresets: readonly MarketplaceInstalledProviderPreset[] | undefined,
+): LLMSettings {
+  const block = llm.vendors["openai-compatible"];
+  const baseUrl = block?.baseUrl?.trim();
+  if (!baseUrl) return llm;
+  const selected = marketplaceProviderPresetForId(
+    llm.marketplaceProviderPresetId ?? "",
+    installedProviderPresets,
+  );
+  if (!selected || selected.baseUrl.trim() !== baseUrl) return llm;
+  const vendors: LLMVendorSettingsMap = { ...llm.vendors };
+  const { baseUrl: _mirroredBaseUrl, ...rest } = block!;
   vendors["openai-compatible"] = getLlmVendorSettings(
-    {
-      ...vendors,
-      "openai-compatible": {
-        ...current,
-        baseUrl: preset.baseUrl,
-      },
-    },
+    { ...vendors, "openai-compatible": rest },
     "openai-compatible",
   );
+  return { ...llm, vendors };
+}
+
+/**
+ * Give the selected marketplace preset its own model slot.
+ *
+ * The `openai-compatible` block's single `model` used to serve every row
+ * reached through that vendor — the generic custom provider and every
+ * marketplace preset — so whichever row was picked last overwrote the rest.
+ * Presets now keep theirs in `presetModels` (see {@link llmRouteModel}).
+ *
+ * The stored value belongs to the row that is active on this install, which is
+ * the only row the user can have chosen it for: with a preset selected it moves
+ * to that preset and the generic row starts empty, so its chooser shows the
+ * endpoint's own catalogue rather than a model borrowed from a gateway. With no
+ * preset selected the value already belongs to the generic row and stays put.
+ */
+export function withMarketplaceProviderPresetModelSlot(llm: LLMSettings): LLMSettings {
+  const presetId = llm.marketplaceProviderPresetId?.trim();
+  if (!presetId) return llm;
+  const block = llm.vendors["openai-compatible"];
+  const model = block?.model?.trim();
+  if (!block || !model) return llm;
+  if (block.presetModels?.[presetId]) return llm;
+  const vendors: LLMVendorSettingsMap = {
+    ...llm.vendors,
+    "openai-compatible": getLlmVendorSettings(
+      {
+        ...llm.vendors,
+        "openai-compatible": {
+          ...block,
+          model: "",
+          presetModels: { ...block.presetModels, [presetId]: model },
+        },
+      },
+      "openai-compatible",
+    ),
+  };
+  return { ...llm, vendors };
 }
 
 function isValidCachedModelId(value: unknown): value is string {
@@ -433,16 +496,16 @@ export function mergeLlmPatch(
       // Spread carries explicit `undefined` keys through (e.g. clearing `seed`).
       // Omitting a key from the patch leaves the previous value intact —
       // omit ≠ clear by design.
-      vendors[v] = getLlmVendorSettings(
-        {
-          ...vendors,
-          [v]: {
-            ...getLlmVendorSettings(vendors, v),
-            ...incoming,
-          },
-        },
-        v,
-      );
+      const previous = getLlmVendorSettings(vendors, v);
+      const merged: LLMVendorSettings = { ...previous, ...incoming };
+      // `presetModels` is a store keyed by preset, not a single value: a patch
+      // naming one preset's model must not delete every other preset's. A key
+      // set to an empty string still clears that one, which is what an
+      // unconfigured route means — the normalizer drops it.
+      if (incoming.presetModels) {
+        merged.presetModels = { ...previous.presetModels, ...incoming.presetModels };
+      }
+      vendors[v] = getLlmVendorSettings({ ...vendors, [v]: merged }, v);
     }
   }
   for (const vendorId of Object.keys(vendors)) {
@@ -463,35 +526,23 @@ export function mergeLlmPatch(
     partial.marketplaceProviderPresetId !== undefined
       ? partial.marketplaceProviderPresetId
       : base.marketplaceProviderPresetId;
-  const activeMarketplaceProviderPresetExplicitlyCleared =
-    provider === "openai-compatible" &&
-    partial.marketplaceProviderPresetId !== undefined &&
-    isMarketplaceProviderPresetId(base.marketplaceProviderPresetId) &&
-    !isMarketplaceProviderPresetId(partial.marketplaceProviderPresetId);
   let activeProvider = provider;
   const marketplaceProviderPresetId = normalizeActiveMarketplaceProviderPresetId(
     provider,
     requestedMarketplaceProviderPresetId,
     installedProviderPresets,
   );
-  const activeMarketplaceProviderPreset = marketplaceProviderPresetForId(
-    marketplaceProviderPresetId,
-    installedProviderPresets,
-  );
   const removedActiveMarketplaceProviderPreset =
     provider === "openai-compatible" &&
     isMarketplaceProviderPresetId(requestedMarketplaceProviderPresetId) &&
     !marketplaceProviderPresetId;
-  if (activeMarketplaceProviderPresetExplicitlyCleared || removedActiveMarketplaceProviderPreset) {
-    vendors["openai-compatible"] = getLlmVendorSettings(undefined, "openai-compatible");
-  }
   if (removedActiveMarketplaceProviderPreset) {
     activeProvider = DEFAULT_LLM_VENDOR;
   }
-  bindOpenAICompatibleVendorBlockToMarketplaceProviderPreset(
-    vendors,
-    activeMarketplaceProviderPreset,
-  );
+  // Clearing or losing a preset leaves the generic openai-compatible block
+  // exactly as the user saved it. It used to be reset to defaults here, which
+  // was only ever undoing the preset address this code had mirrored in — with
+  // the mirror gone, that reset would destroy the generic row's own endpoint.
   vendors[activeProvider] = getLlmVendorSettings(vendors, activeProvider);
   const fallbackChain = (partial.fallbackChain ?? base.fallbackChain)
     .filter((entry) =>
@@ -532,6 +583,10 @@ export function mergeLlmPatch(
 
 const LLM_VENDOR_SETTING_KEYS = [
   "model",
+  // A block whose only content is a preset's model is still configuration:
+  // without this the openai-compatible block is pruned the moment chat moves
+  // to another vendor, and every preset's model goes with it.
+  "presetModels",
   "baseUrl",
   "vertexProject",
   "vertexLocation",
@@ -591,10 +646,6 @@ export function pruneLazyLlmVendorBlocks(
     llm.marketplaceProviderPresetId,
     installedProviderPresets,
   );
-  const activeMarketplaceProviderPreset = marketplaceProviderPresetForId(
-    marketplaceProviderPresetId,
-    installedProviderPresets,
-  );
   const removedActiveMarketplaceProviderPreset =
     provider === "openai-compatible" &&
     isMarketplaceProviderPresetId(llm.marketplaceProviderPresetId) &&
@@ -632,13 +683,6 @@ export function pruneLazyLlmVendorBlocks(
     }
   }
 
-  if (removedActiveMarketplaceProviderPreset) {
-    vendors["openai-compatible"] = getLlmVendorSettings(undefined, "openai-compatible");
-  }
-  bindOpenAICompatibleVendorBlockToMarketplaceProviderPreset(
-    vendors,
-    activeMarketplaceProviderPreset,
-  );
   vendors[provider] = getLlmVendorSettings(vendors, provider);
   const prunedLlm: LLMSettings = {
     ...llm,

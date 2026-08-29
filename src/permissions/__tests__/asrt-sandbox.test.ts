@@ -528,6 +528,29 @@ describe("asrt-sandbox — computeDynamicEndpointHosts (user-configured endpoint
     ).toEqual(["my-resource.openai.azure.com"]);
   });
 
+  it("includes the active marketplace preset's host, which no vendor block holds", () => {
+    // A preset's address lives in the preset registry, not in the
+    // openai-compatible block. Reading blocks alone would leave the endpoint
+    // chat is actually talking to out of the union — hard-denied under strict
+    // enforcement while the provider looks configured and healthy.
+    expect(
+      computeDynamicEndpointHosts({
+        llm: {
+          vendors: { "openai-compatible": { baseUrl: "http://localhost:8001/v1" } },
+          marketplaceProviderPresetId: "future-router",
+        },
+        marketplace: {
+          installedProviderPresets: [
+            { providerId: "future-router", baseUrl: "https://future.example/v1" },
+            // Installed but not selected: not a route anything reaches, so it
+            // must not widen an enforced allow-list.
+            { providerId: "other-router", baseUrl: "https://other.example/v1" },
+          ],
+        },
+      }),
+    ).toEqual(["localhost", "future.example"]);
+  });
+
   it("collects hostnames across multiple configured vendors, deduped + order-stable", () => {
     expect(
       computeDynamicEndpointHosts({

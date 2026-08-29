@@ -66,10 +66,25 @@ type ResolvedModelListBaseUrl = {
   isDraftEndpoint: boolean;
 };
 
+/**
+ * The endpoint this route is configured with, as stored.
+ *
+ * A marketplace preset's address belongs to the preset registry, NOT to the
+ * `openai-compatible` vendor block — that block is the generic custom
+ * provider's own endpoint, and the two are different rows on the settings
+ * page. A scoped request is asking about the preset's address, so answering it
+ * from the vendor block would hand back another row's endpoint: the handshake
+ * would be classified as a draft and the preset's stored key withheld.
+ */
 function configuredModelListBaseUrl(
   settingsService: SettingsService,
   vendor: LLMVendor,
+  credentialScope?: string,
 ): string | null {
+  if (vendor === "openai-compatible" && isMarketplaceProviderPresetId(credentialScope)) {
+    const preset = installedProviderPresetForScope(settingsService, credentialScope);
+    return preset?.baseUrl.trim() || null;
+  }
   const llm = settingsService.get("llm");
   const block = getLlmVendorSettings(llm.vendors, vendor);
   if (block.baseUrl?.trim()) return block.baseUrl.trim();
@@ -88,8 +103,9 @@ function resolveModelListBaseUrl(
   settingsService: SettingsService,
   vendor: LLMVendor,
   requestBaseUrl: unknown,
+  credentialScope?: string,
 ): ResolvedModelListBaseUrl {
-  const configuredBaseUrl = configuredModelListBaseUrl(settingsService, vendor);
+  const configuredBaseUrl = configuredModelListBaseUrl(settingsService, vendor, credentialScope);
   if (typeof requestBaseUrl === "string" && requestBaseUrl.trim()) {
     const baseUrl = requestBaseUrl.trim();
     return {
@@ -583,7 +599,19 @@ export async function listLlmModelsFromSettings(
     settingsService,
     request.vendor,
     request.baseUrl,
+    request.credentialScope,
   );
+  // The credential-scope refusal comes first. A scope naming a provider that
+  // is not installed, or one that is not the active route, has to say exactly
+  // that: the endpoint for such a scope cannot resolve either, and reporting
+  // "this provider exposes no model list" would name the wrong problem.
+  const credentialScopeError = validateModelListCredentialScope(
+    settingsService,
+    request.vendor,
+    resolved,
+    request.credentialScope,
+  );
+  if (credentialScopeError) return credentialScopeError;
   if (!resolved.baseUrl) {
     return {
       ok: false,
@@ -601,14 +629,6 @@ export async function listLlmModelsFromSettings(
     }
     throw err;
   }
-
-  const credentialScopeError = validateModelListCredentialScope(
-    settingsService,
-    request.vendor,
-    resolved,
-    request.credentialScope,
-  );
-  if (credentialScopeError) return credentialScopeError;
 
   const apiKey = storedCredentialForModelList(
     settingsService,

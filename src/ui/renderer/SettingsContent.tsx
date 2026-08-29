@@ -560,17 +560,12 @@ export function SettingsContent({
             <LlmTab
               api={api}
               vendor={s.vendor}
-              setVendor={s.setVendor}
               baseUrl={s.baseUrl}
-              setBaseUrl={s.setBaseUrl}
-              vertexProject={s.vertexProject}
-              setVertexProject={s.setVertexProject}
-              vertexLocation={s.vertexLocation}
-              setVertexLocation={s.setVertexLocation}
               hasKey={s.hasKey}
               setHasKey={s.setHasKey}
-              keyInput={s.keyInput}
-              setKeyInput={s.setKeyInput}
+              providerCredentialDraft={s.providerCredentialDraft}
+              onProviderCredentialDraftChange={s.setProviderCredentialDraft}
+              onSaveProviderCredential={s.saveProviderCredential}
               marketplaceProviderPresetId={s.marketplaceProviderPresetId}
               marketplaceProviderPresets={s.marketplaceProviderPresets}
               onSelectMarketplaceProviderPreset={s.selectMarketplaceProviderPreset}

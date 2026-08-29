@@ -248,8 +248,8 @@ async function collectStream(iterable: AsyncIterable<unknown>,
     const settings = fakeLlmSettings({
       provider: "openai-compatible",
       model: "future/free",
+      marketplaceProviderPresetId: "future-router",
     });
-    settings.marketplaceProviderPresetId = "future-router";
     settings.vendors["openai-compatible"].baseUrl = "https://stale.example/v1";
 
     new ConversationLoop({
@@ -322,8 +322,8 @@ async function collectStream(iterable: AsyncIterable<unknown>,
     const settings = fakeLlmSettings({
       provider: "openai-compatible",
       model: "future/free",
+      marketplaceProviderPresetId: "future-router",
     });
-    settings.marketplaceProviderPresetId = "future-router";
 
     new ConversationLoop({
       settingsService: {
@@ -408,8 +408,8 @@ async function collectStream(iterable: AsyncIterable<unknown>,
     const settings = fakeLlmSettings({
       provider: "openai-compatible",
       model: "local/free",
+      marketplaceProviderPresetId: "local-router",
     });
-    settings.marketplaceProviderPresetId = "local-router";
 
     new ConversationLoop({
       settingsService: {
@@ -484,8 +484,8 @@ async function collectStream(iterable: AsyncIterable<unknown>,
     const settings = fakeLlmSettings({
       provider: "openai-compatible",
       model: "future/free",
+      marketplaceProviderPresetId: "future-router",
     });
-    settings.marketplaceProviderPresetId = "future-router";
     settings.vendors["openai-compatible"].baseUrl = "https://future.example/v1";
 
     new ConversationLoop({
@@ -531,8 +531,8 @@ async function collectStream(iterable: AsyncIterable<unknown>,
     const settings = fakeLlmSettings({
       provider: "openai-compatible",
       model: "future/free",
+      marketplaceProviderPresetId: "future-router",
     });
-    settings.marketplaceProviderPresetId = "future-router";
     settings.vendors["openai-compatible"].baseUrl = "https://future.example/v1";
     settings.fallbackChain = [
       { provider: "openai-compatible", model: "fallback/free" },

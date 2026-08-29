@@ -19,6 +19,7 @@ import type { LLMProvider } from "../../engine/llm/types.js";
 import {
   getLlmVendorSettings,
   isLLMVendor,
+  llmRouteModel,
   canUseLlmVendorWithoutApiKey,
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
@@ -113,7 +114,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     return createProvider({
       vendor: llmVendor,
       apiKey: apiKey ?? "",
-      model: block.model,
+      model: llmRouteModel(block, marketplaceProviderPreset?.providerId),
       ...(providerFetch ? { fetch: providerFetch } : {}),
       ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
       ...(marketplaceProviderPreset ? { providerMetadata: marketplaceProviderPreset } : {}),
@@ -143,7 +144,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
       ...(provider === "openai-compatible" && llm.marketplaceProviderPresetId
         ? { marketplaceProviderPresetId: llm.marketplaceProviderPresetId }
         : {}),
-      model: block.model,
+      model: llmRouteModel(block, activeMarketplaceProviderPreset?.providerId),
       ...(providerBaseUrl ? { baseUrl: providerBaseUrl } : {}),
       ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
       ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
