@@ -21,7 +21,7 @@
  * src/boot/steps/__tests__/plugin-runtime-hostapi-wiring.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,6 +73,30 @@ describe("PluginRuntime.getPluginStorage — containment refusals are audited", 
     mkdirSync(dir, { recursive: true });
     return dir;
   }
+
+  /**
+   * `getPluginStorage` runs once per webview storage IPC call. It used to
+   * ENSURE the data directory, which put a `mkdir` on a per-request path — and
+   * an install swap has the plugin root renamed aside for the length of two
+   * renames. A request landing in that window recreated an empty `data/` at the
+   * promoted root, and the carry that completes the swap then found two
+   * candidates for one state and refused: the install wedged, and in recovery
+   * `pendingUpdate` never cleared. The directory is created at LOAD; this path
+   * only resolves it.
+   */
+  it("does not create the data directory on a per-request basis", async () => {
+    const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
+    await runtime.load();
+    expect(runtime.listPluginIds()).toContain(PLUGIN_ID);
+
+    // Exactly the state the swap leaves behind: the plugin root is there, its
+    // data directory is mid-move.
+    const dataDir = join(fixture.pluginsRoot, PLUGIN_ID, "data");
+    await rm(dataDir, { recursive: true, force: true });
+
+    expect(() => runtime.getPluginStorage(PLUGIN_ID)).toThrow();
+    expect(existsSync(dataDir)).toBe(false);
+  });
 
   it("emits plugin_storage_path_rejected when a webview read escapes via a planted symlink", async () => {
     // A real escape target with real content outside the sandbox root.

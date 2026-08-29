@@ -135,6 +135,16 @@ export function createPluginStorage(
    */
   async function realpathContainmentCheck(target: string): Promise<void> {
     let probe = target;
+    // Set when the climb passes THROUGH the data root because the root itself
+    // is not on disk. It changes what the first out-of-root ancestor means: not
+    // "something inside the root points outside it" (a sandbox escape, audited
+    // as one) but "the root is gone" — which is what an install swap looks like
+    // from in here, since it renames the plugin root aside for the length of
+    // two renames before carrying `data/` back in. Reporting that as a symlink
+    // escape put a security event in the audit log for a directory that was
+    // merely mid-move, and told whoever read it to look for a planted link
+    // that does not exist.
+    let dataRootAbsent = false;
     // Stop when probe equals the lexical root or we've climbed to the
     // filesystem root (dirname returns the same path when at /).
     // Bound the loop to avoid pathological recursion.
@@ -142,6 +152,17 @@ export function createPluginStorage(
       try {
         const real = await realpath(probe);
         if (!isPathWithin(canonicalRoot, real)) {
+          if (dataRootAbsent) {
+            log?.(`storage: rejected operation against an absent data root`, {
+              target,
+              root: canonicalRoot,
+            });
+            throw new PluginStorageError(
+              "plugin data root is absent — refusing to recreate it",
+              pluginId,
+              target,
+            );
+          }
           log?.(`storage: rejected symlink escape`, { target, probe, real });
           throw new PluginStorageError("symlink escapes plugin storage root", pluginId, target);
         }
@@ -175,6 +196,7 @@ export function createPluginStorage(
             if ((lstatErr as NodeJS.ErrnoException).code !== "ENOENT") throw lstatErr;
             // probe doesn't exist at all — fall through to parent climb.
           }
+          if (probe === canonicalRoot) dataRootAbsent = true;
           const parent = dirname(probe);
           if (parent === probe) {
             // Climbed past the filesystem root without finding any existing
