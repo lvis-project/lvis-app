@@ -7,10 +7,10 @@ import {
   isLLMVendor,
   type LLMVendor,
 } from "../../../shared/llm-vendor-defaults.js";
+import { DEPTH_BUDGET } from "./ThinkingButton.js";
 
 type Depth = "low" | "medium" | "high";
 
-const DEPTH_BUDGET: Record<Depth, number> = { low: 4_000, medium: 10_000, high: 24_000 };
 const LEVEL_DEPTH: Record<1 | 2 | 3, Depth> = { 1: "low", 2: "medium", 3: "high" };
 const DEPTH_LEVEL: Record<Depth, 1 | 2 | 3> = { low: 1, medium: 2, high: 3 };
 
