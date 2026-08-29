@@ -16,10 +16,10 @@ vi.mock("node:child_process", () => ({
 }));
 
 // ─── Mock node:fs (sync) — for cache reads and directory creation ────────────
-vi.mock("node:fs", async (importOriginal) => ({
-  ...await importOriginal<typeof import("node:fs")>(),
+vi.mock("node:fs", () => ({
   closeSync: vi.fn(),
   fstatSync: vi.fn(),
+  fsyncSync: vi.fn(),
   mkdirSync: vi.fn(),
   openSync: vi.fn(),
   readFileSync: vi.fn(),
