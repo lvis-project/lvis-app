@@ -383,6 +383,7 @@ import {
   RPC_MISSING_REQUIRED_CLIENT_CAPABILITY,
   RPC_UNSUPPORTED_PROTOCOL_VERSION,
 } from "./protocol-constants.js";
+import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
 const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
 
 /** MCP Apps extension key (§8 `io.modelcontextprotocol/ui`, 2026-01-26 snapshot). */
@@ -469,11 +470,8 @@ export interface McpTransport {
   onActivity?(handler: () => void): void;
 }
 
-interface PendingRequest {
-  resolve: (value: unknown) => void;
-  reject: (reason: Error) => void;
-  /** Null for the one deliberately-unbounded request (`subscriptions/listen`). */
-  timer: NodeJS.Timeout | null;
+/** Timer is null for the one deliberately-unbounded request (`subscriptions/listen`). */
+interface PendingRequest extends PendingJsonRpcRequest<NodeJS.Timeout | null> {
   /** Per-chunk activity window — gets reset by `resetPendingTimers` when SSE
    *  data flows so a long-running streaming response isn't killed mid-flight. */
   timeoutMs: number;
