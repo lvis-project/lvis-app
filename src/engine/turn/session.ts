@@ -7,7 +7,7 @@
  * Free functions over a `self: ConversationLoop` this-shaped param.
  */
 import type { ConversationLoop } from "../conversation-loop.js";
-import type { SessionKind } from "../../memory/memory-manager.js";
+import { isValidSessionId, type SessionKind } from "../../memory/memory-manager.js";
 import type { GenericMessage } from "../llm/types.js";
 import type { WorkspaceRootRevocationOptions } from "./types.js";
 import { normalizeToolPairInvariant } from "../conversation-history.js";
@@ -21,16 +21,10 @@ import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 
 const log = createLogger("lvis");
 
-const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
-
 export interface SessionProjectContext {
   projectRoot?: string;
   projectName?: string;
   isDefault?: boolean;
-}
-
-function isSafeSessionId(sessionId: unknown): sessionId is string {
-  return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
 }
 
 function normalizeProjectString(value: unknown): string | null {
@@ -219,7 +213,7 @@ export function newConversation(
   }
 
 export function loadSession(self: ConversationLoop, sessionId: string): boolean {
-    if (!isSafeSessionId(sessionId)) {
+    if (!isValidSessionId(sessionId)) {
       log.warn({ sessionId }, "loadSession rejected unsafe sessionId");
       return false;
     }
