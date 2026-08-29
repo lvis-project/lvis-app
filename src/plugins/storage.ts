@@ -29,6 +29,7 @@ import {
   type PluginStorage,
 } from "./types.js";
 import { instrumentEffectsByPath } from "../permissions/hostapi-effect-recorder.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 // Storage-namespace permission bits (CLAUDE.md §Storage Namespace per Feature):
 // plugin data directories are 0o700 and files 0o600, so a plugin's persisted
@@ -148,8 +149,7 @@ export function createPluginStorage(
         return;
       } catch (err) {
         if (err instanceof PluginStorageError) throw err;
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === "ENOENT" || code === "ENOTDIR") {
+        if (isMissingPathError(err)) {
           // Distinguish two ENOENT shapes:
           //   1. probe doesn't exist at all  → climb to parent (safe).
           //   2. probe IS a (broken) symlink → realpath fails because its
@@ -247,7 +247,7 @@ export function createPluginStorage(
         const text = await readFile(target, "utf-8");
         return JSON.parse(text) as T;
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+        if (isMissingPathError(err)) return null;
         throw err;
       }
     },

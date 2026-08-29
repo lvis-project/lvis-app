@@ -13,6 +13,7 @@ import {
   type PlatformConversationTimeline,
   type SharedConversationProjectionEvent,
 } from "./conversation-platform-protocol.js";
+import { requirePositiveInteger } from "../shared/safe-integer.js";
 
 /**
  * Re-exported so downstream safe surfaces (bridge delivery, providers) can
@@ -108,17 +109,17 @@ export function createSharedConversationProjectionStore(
   timeline: PlatformConversationTimeline,
   options: SharedConversationProjectionStoreOptions = {},
 ): SharedConversationProjectionStore {
-  const replayLimit = positiveInteger(
+  const replayLimit = requirePositiveInteger(
     options.replayLimitPerConversation ?? DEFAULT_REPLAY_LIMIT,
-    "replayLimitPerConversation",
+    `replayLimitPerConversation must be a positive safe integer.`,
   );
-  const maxTracked = positiveInteger(
+  const maxTracked = requirePositiveInteger(
     options.maxTrackedConversations ?? DEFAULT_TRACKED_CONVERSATIONS,
-    "maxTrackedConversations",
+    `maxTrackedConversations must be a positive safe integer.`,
   );
-  const maxAssistantTextChars = positiveInteger(
+  const maxAssistantTextChars = requirePositiveInteger(
     options.maxAssistantTextChars ?? DEFAULT_ASSISTANT_TEXT_CHARS,
-    "maxAssistantTextChars",
+    `maxAssistantTextChars must be a positive safe integer.`,
   );
   const states = new Map<string, ConversationState>();
   const subscribers = new Set<Subscriber>();
@@ -329,13 +330,6 @@ function appendBounded(current: string, chunk: string, maxChars: number): string
 
 function clone<T>(value: T): T {
   return structuredClone(value);
-}
-
-function positiveInteger(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new RangeError(`${label} must be a positive safe integer.`);
-  }
-  return value;
 }
 
 function validateCursor(value: number): number {

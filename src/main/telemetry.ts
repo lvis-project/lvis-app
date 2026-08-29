@@ -7,10 +7,11 @@
  *   - Transport: HTTP POST, batched daily (or on flush()).
  *   - Endpoint configurable per-install (self-hosted friendly).
  */
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { TelemetrySettings } from "../data/settings-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { createLogger } from "../lib/logger.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("telemetry");
 
 /**
@@ -156,7 +157,7 @@ export class TelemetryService {
   private sessionDisabled = false;
 
   constructor(private readonly deps: TelemetryDeps) {
-    this.sid = createHash("sha256").update(randomUUID()).digest("hex").slice(0, 16);
+    this.sid = sha256Hex(randomUUID()).slice(0, 16);
     this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
     this.flushIntervalMs = deps.flushIntervalMs ?? DEFAULT_FLUSH_MS;
   }

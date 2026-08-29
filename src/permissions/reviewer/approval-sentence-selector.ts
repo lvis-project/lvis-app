@@ -124,9 +124,11 @@ const MAX_REASON_CHARS = 200;
 const MAX_OPTIONS = 8;
 
 const CONFIDENCES = new Set(["high", "low"]);
-const UNTRUSTED_TEXT_CONTROL_RE =
+/** C0/C1 controls and bidi overrides — the characters untrusted text must not carry into a sentence shown to a person. */
+export const UNTRUSTED_TEXT_CONTROL_RE =
   /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
-const HTML_TAG_RE = /<[^>]*>/g;
+/** Anything tag-shaped; untrusted text is flattened to words before selection. */
+export const HTML_TAG_RE = /<[^>]*>/g;
 
 /**
  * Strip anything that could restructure the prompt, then DLP-mask.

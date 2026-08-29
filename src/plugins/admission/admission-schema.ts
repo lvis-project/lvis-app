@@ -31,6 +31,8 @@
  * anything unrecognised cost nothing and keep the attacker-reachable surface
  * as small as the primitive it guards.
  */
+import { SEMVER_CORE_PATTERN } from "../../shared/semver-compare.js";
+import { isValidIsoTimestamp } from "../../shared/marketplace-package-assets.js";
 
 /** One admitted artifact. `(slug, version)` is unique within a document. */
 export interface AdmissionEntry {
@@ -84,15 +86,6 @@ const ENTRY_KEYS = new Set([
 ]);
 
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
-
-/** Loose semver core — the same check `revocation-schema.ts` applies. */
-const SEMVER_CORE_PATTERN = /^\d+\.\d+\.\d+/;
-
-/** ISO-8601 — accept the subset `Date.parse` round-trips correctly. */
-function isValidIsoTimestamp(value: unknown): value is string {
-  if (typeof value !== "string" || value.length === 0) return false;
-  return Number.isFinite(Date.parse(value));
-}
 
 function isValidSlug(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256;

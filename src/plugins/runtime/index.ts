@@ -57,6 +57,8 @@ import { runWithCeiling } from "../../tools/executor-ceiling.js";
 import { checkRuntimeAdmission } from "./runtime-admission.js";
 import type { FloatingDockErrorCode, ResolvedFloatingSurface } from "../../main/floating-dock.js";
 import type { InvocationOrigin } from "./origin-chain.js";
+import { errorMessage } from "../../shared/error-message.js";
+import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 const log = createLogger("plugin-runtime");
 
@@ -931,7 +933,7 @@ class PreparationTracker {
   }
 
   private markPreparationFailed(manifest: PluginManifest, err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     this.preparingPluginIds.delete(manifest.id);
     this.preparationStatuses.delete(manifest.id);
     this.preparationFailures.set(manifest.id, message);
@@ -1498,7 +1500,7 @@ export async function preflightPluginLoadPlan(
             dirname(plan.manifestPath),
           );
         } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
+          const detail = errorMessage(error);
           integrityResult = {
             ok: false,
             reason: `install receipt verification failed unexpectedly: ${detail}`,
@@ -2469,9 +2471,7 @@ abstract class PluginRuntimeState {
     if (!registryEntry) {
       throw new Error(`prepared artifact registry provenance missing for '${manifest.id}'`);
     }
-    const candidateManifestSha256 = createHash("sha256")
-      .update(canonicalJSON(manifestDocument))
-      .digest("hex");
+    const candidateManifestSha256 = sha256Hex(canonicalJSON(manifestDocument));
     if (
       registryEntry.manifestSha256 !== undefined
       && registryEntry.manifestSha256 !== candidateManifestSha256
@@ -2707,12 +2707,12 @@ abstract class PluginRuntimeState {
     } catch (error) {
       log.error(
         `plugin generation retirement failed after ${context} for ${pluginId}: %s`,
-        error instanceof Error ? error.message : String(error),
+        errorMessage(error),
       );
       this.auditLog?.("error", "plugin_generation_retirement_failed", {
         pluginId,
         context,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
       throw error;
     }
@@ -4323,7 +4323,7 @@ abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePublication
             if (entry.isCurrent() && this.hasTrackedPluginState(pluginId)) {
               this.markFailed(pluginId, {
                 name: this.knownPluginManifests.get(pluginId)?.name ?? pluginId,
-                description: error instanceof Error ? error.message : String(error),
+                description: errorMessage(error),
               });
             }
             this.rejectCapabilityBlockedRetry(
@@ -5182,7 +5182,7 @@ class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
     err: unknown,
   ): Promise<void> {
     const { pluginId, runtimeRoot, incarnation } = resources;
-    const reason = err instanceof Error ? err.message : String(err);
+    const reason = errorMessage(err);
     logPluginLifecycle(
       "error",
       { pluginId, phase: PluginPhase.LOAD_FAIL, err, reason: "load_crash" },
@@ -5618,7 +5618,7 @@ class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       plugin.started = false;
       plugin.deactivateHostApi?.();
       if (!isCurrent()) return BOOT_START_CANCELLED;
-      return error instanceof Error ? error.message : String(error);
+      return errorMessage(error);
     } finally {
       clearTimeout(slowTimer);
     }
@@ -5706,7 +5706,7 @@ class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
           && !this.inactivePluginIds.has(pluginId)
           && !this.disabledPluginIds.has(pluginId)
         ) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = errorMessage(error);
           this.auditLog?.("error", "plugin_dependency_retry_failed", {
             pluginId,
             reason: message,

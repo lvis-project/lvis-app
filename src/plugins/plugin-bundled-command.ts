@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { isResolvedPathWithin } from "./plugin-storage-containment.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 function looksLikePath(token: string): boolean {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(token)) return false;
@@ -47,7 +48,7 @@ export function anchorBundledCommand(
       if (!fstatSync(descriptor).isFile()) {
         throw new Error(`${label} command path is not a regular file`);
       }
-      const sha256 = createHash("sha256").update(readFileSync(descriptor)).digest("hex");
+      const sha256 = sha256Hex(readFileSync(descriptor));
       identities.push(`${index}\0${rel}\0${sha256}`);
     } finally {
       if (descriptor !== undefined) closeSync(descriptor);

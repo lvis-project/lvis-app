@@ -12,6 +12,9 @@ import {
   GROK_BUILD_GOVERNED_AGENT_PROFILE,
   type AcpSubscriptionSessionClientOptions,
   type AcpSubscriptionHostRequestObservation,
+  ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS,
+  MAX_ACP_SUBSCRIPTION_IMAGE_ATTACHMENTS,
+  MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES,
 } from "../acp-subscription-session-client.js";
 import type { AcpSubscriptionMcpServerConfig } from "../acp-subscription-runtime-config.js";
 import { MAX_SUBSCRIPTION_ATTACHMENT_BYTES } from "../subscription-attachment-input.js";
@@ -732,5 +735,16 @@ describe("AcpSubscriptionSessionClient", () => {
       code: "acp-session-aborted",
     });
     expect(agent.requests.filter((request) => request.method === "session/prompt")).toHaveLength(0);
+  });
+});
+
+describe("ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS", () => {
+  it("is the frozen composition of the three exported bounds", () => {
+    expect(ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS).toEqual({
+      maxCount: MAX_ACP_SUBSCRIPTION_IMAGE_ATTACHMENTS,
+      maxBytesPerImage: MAX_ACP_SUBSCRIPTION_IMAGE_BYTES,
+      maxTotalBytes: MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES,
+    });
+    expect(Object.isFrozen(ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS)).toBe(true);
   });
 });

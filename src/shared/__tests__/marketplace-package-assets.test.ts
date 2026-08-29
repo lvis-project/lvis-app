@@ -5,6 +5,7 @@ import {
   marketplacePackageSpecForAsset,
   marketplacePackageTypeForAsset,
   parseMarketplacePackageAsset,
+  isValidIsoTimestamp,
 } from "../marketplace-package-assets.js";
 
 describe("marketplace package assets", () => {
@@ -236,5 +237,16 @@ describe("marketplace package assets", () => {
       .toBeUndefined();
     expect(parseMarketplacePackageAsset({ type: "language-pack", locale: "en" }))
       .toBeUndefined();
+  });
+});
+
+describe("isValidIsoTimestamp", () => {
+  it("accepts instants Date.parse understands and rejects everything else", () => {
+    expect(isValidIsoTimestamp("2026-01-02T03:04:05Z")).toBe(true);
+    expect(isValidIsoTimestamp("2026-01-02T03:04:05.123+09:00")).toBe(true);
+    expect(isValidIsoTimestamp("")).toBe(false);
+    expect(isValidIsoTimestamp("not a date")).toBe(false);
+    expect(isValidIsoTimestamp(1_700_000_000_000)).toBe(false);
+    expect(isValidIsoTimestamp(undefined)).toBe(false);
   });
 });

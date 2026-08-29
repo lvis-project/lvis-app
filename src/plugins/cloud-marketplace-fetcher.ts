@@ -16,7 +16,6 @@
  * NetworkGuard redirect-hop validation and must be opted in explicitly via
  * `allowPrivateNetwork: true`.
  */
-import { createHash } from "node:crypto";
 import {
   fetchPublicHttpResponse,
   NetworkGuardError,
@@ -47,6 +46,7 @@ import {
   type MarketplaceArtifactLimitProvider,
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 /**
  * Allowlist for npm package identifiers. Matches scoped (@scope/name) and
@@ -275,7 +275,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       throw new Error(`marketplace ${res.status}: download failed`);
     }
     const zipBuffer = res.body;
-    const sha256 = createHash("sha256").update(zipBuffer).digest("hex");
+    const sha256 = sha256Hex(zipBuffer);
     return { zipBuffer, sha256 };
   }
 

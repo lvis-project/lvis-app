@@ -21,11 +21,11 @@ import type {
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
 import { isTelegramConversationId } from "../shared/telegram-connection.js";
 import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
+import { isPositiveSafeInteger } from "../shared/safe-integer.js";
+import { ACTOR_SECRET_BYTES, ACTOR_SECRET_PATTERN } from "./tailnet-paired-share-authorizer.js";
 
 export const TELEGRAM_PLATFORM_ACTOR_SECRET_NAME = "telegram-platform-bridge-actor-v1.key";
 
-const ACTOR_SECRET_BYTES = 32;
-const ACTOR_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const BOT_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
 const TELEGRAM_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 
@@ -230,7 +230,7 @@ export function createTelegramPairedPlatformRuntime(
     || typeof options !== "object"
     || !BOT_FINGERPRINT_PATTERN.test(options.botFingerprint)
     || typeof options.getCurrentConversationId !== "function"
-    || !positiveInteger(options.activationEpoch)
+    || !isPositiveSafeInteger(options.activationEpoch)
     || !isRouteAuthority(options.authority)) {
     throw new Error("telegram-paired-platform-runtime-invalid");
   }
@@ -427,11 +427,6 @@ function isRouteAuthority(value: unknown): value is TelegramPairedRouteAuthority
     && typeof (value as TelegramPairedRouteAuthority).resolveBoundConversation === "function";
 }
 
-
-
-
-
-
 function normalizeTelegramEnvelope(value: unknown): PlatformBridgeVerifiedEnvelope | null {
   const record = exactDataRecord(value, ["provider", "deliveryId", "channelId", "senderId", "text"]);
   if (record === null
@@ -564,10 +559,6 @@ function sameBinding(left: PlatformBridgeBinding, right: PlatformBridgeBinding):
     && left.routeId === right.routeId
     && left.routeEpoch === right.routeEpoch
     && left.scope === right.scope;
-}
-
-function positiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 function isSecretStore(value: unknown): value is SecretStore {

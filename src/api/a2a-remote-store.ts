@@ -1,7 +1,6 @@
 import {
   createCipheriv,
   createDecipheriv,
-  createHash,
   randomBytes,
   randomUUID,
 } from "node:crypto";
@@ -21,6 +20,7 @@ import {
   type A2ARemotePreparedAttempt,
   type A2ARemoteResolvedFields,
 } from "./a2a-remote-contracts.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const LEGACY_STORE_VERSION = 2;
 const STORE_VERSION = 3;
@@ -159,10 +159,6 @@ export type PrepareAttemptResult =
 
 export const INTENDED_CREDENTIAL_REVISION_CONFLICT = "INTENDED_CREDENTIAL_REVISION_CONFLICT" as const;
 
-function sha256(value: Uint8Array | string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function compareCodePoints(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -213,7 +209,7 @@ function isStoreStateEnvelope(value: unknown): value is StoreStateEnvelope {
 }
 
 function isLegacyExactReplayUri(value: unknown): value is string {
-  return typeof value === "string" && sha256(value) === LEGACY_EXACT_REPLAY_URI_SHA256;
+  return typeof value === "string" && sha256Hex(value) === LEGACY_EXACT_REPLAY_URI_SHA256;
 }
 
 function migrateStoreState(value: unknown): { state: StoreState; migrated: boolean } | null {
@@ -301,7 +297,7 @@ export class A2ARemoteDurableStore {
   private quarantine(kind: QuarantineEntry["kind"], reason: string, value: unknown): QuarantineEntry {
     let serialized: string;
     try { serialized = JSON.stringify(value); } catch { serialized = "[unserializable]"; }
-    return { kind, reason, digestSha256: sha256(serialized), quarantinedAt: this.now().toISOString() };
+    return { kind, reason, digestSha256: sha256Hex(serialized), quarantinedAt: this.now().toISOString() };
   }
 
   private validLineage(value: unknown): value is A2ARemoteLineage {
@@ -446,7 +442,7 @@ export class A2ARemoteDurableStore {
         : null;
       const cryptographyValid = item.state === "bound"
         ? this.payloadCryptographyValid(state, item)
-        : stagedCiphertext !== null && sha256(stagedCiphertext) === item.ciphertextSha256;
+        : stagedCiphertext !== null && sha256Hex(stagedCiphertext) === item.ciphertextSha256;
       stagedCiphertext?.fill(0);
       if (!expired && !cryptographyValid) {
         quarantine.push(this.quarantine("payload", "payload-cryptography-invalid", item));
@@ -605,7 +601,7 @@ export class A2ARemoteDurableStore {
       bodySha256: payload.bodySha256,
       lineage: source.prepared.lineage,
     });
-    if (payload.aadSha256 !== sha256(aad)) return false;
+    if (payload.aadSha256 !== sha256Hex(aad)) return false;
     const key = this.dataKey(state);
     let plaintext: Buffer | undefined;
     try {
@@ -614,13 +610,13 @@ export class A2ARemoteDurableStore {
       const authTag = decodeCanonicalBase64(payload.authTag);
       if (!ciphertext || !iv || !authTag
         || ciphertext.byteLength !== payload.size
-        || sha256(ciphertext) !== payload.ciphertextSha256) return false;
+        || sha256Hex(ciphertext) !== payload.ciphertextSha256) return false;
       const decipher = createDecipheriv("aes-256-gcm", key, iv);
       decipher.setAAD(Buffer.from(aad, "utf8"));
       decipher.setAuthTag(authTag);
       plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
       return plaintext.byteLength === payload.size
-        && sha256(plaintext) === payload.bodySha256;
+        && sha256Hex(plaintext) === payload.bodySha256;
     } catch {
       return false;
     } finally {
@@ -653,9 +649,9 @@ export class A2ARemoteDurableStore {
         ciphertext: encrypted.toString("base64"),
         iv: iv.toString("base64"),
         authTag: cipher.getAuthTag().toString("base64"),
-        aadSha256: sha256(aad),
-        ciphertextSha256: sha256(encrypted),
-        bodySha256: sha256(body),
+        aadSha256: sha256Hex(aad),
+        ciphertextSha256: sha256Hex(encrypted),
+        bodySha256: sha256Hex(body),
         size: body.byteLength,
         createdAt: new Date(now).toISOString(),
         orphanDeadline: new Date(now + this.orphanTtlMs).toISOString(),
@@ -680,7 +676,7 @@ export class A2ARemoteDurableStore {
       ownerDigestSha256: input.ownerDigestSha256,
       operationId: input.operationId,
       targetAgentId: input.targetAgentId,
-      lineageDigestSha256: sha256(JSON.stringify(Object.fromEntries(
+      lineageDigestSha256: sha256Hex(JSON.stringify(Object.fromEntries(
         Object.entries(input.lineage).sort(([a], [b]) => compareCodePoints(a, b)),
       ))),
     });
@@ -703,7 +699,7 @@ export class A2ARemoteDurableStore {
     if (!/^[A-Za-z0-9_-]{16,256}$/.test(input.handle) || input.targetLabel.length < 1 || input.targetLabel.length > 80) {
       throw new Error("a2a-remote-task-route-invalid");
     }
-    const ownerDigestSha256 = sha256(input.ownerId);
+    const ownerDigestSha256 = sha256Hex(input.ownerId);
     const aad = this.taskAad({ ...input, ownerDigestSha256 });
     const plaintext = Buffer.from(JSON.stringify(input.task), "utf8");
     if (plaintext.byteLength === 0 || plaintext.byteLength > A2A_REMOTE_MAX_REQUEST_BYTES) {
@@ -734,8 +730,8 @@ export class A2ARemoteDurableStore {
         ciphertext: encrypted.toString("base64"),
         iv: iv.toString("base64"),
         authTag: cipher.getAuthTag().toString("base64"),
-        aadSha256: sha256(aad),
-        ciphertextSha256: sha256(encrypted),
+        aadSha256: sha256Hex(aad),
+        ciphertextSha256: sha256Hex(encrypted),
         createdAt: input.createdAt ?? timestamp,
         updatedAt: timestamp,
       };
@@ -747,11 +743,11 @@ export class A2ARemoteDurableStore {
 
   private decryptTask(state: StoreState, record: EncryptedRemoteTaskRecord): A2ATask | null {
     const aad = this.taskAad(record);
-    if (record.aadSha256 !== sha256(aad)) return null;
+    if (record.aadSha256 !== sha256Hex(aad)) return null;
     const key = this.dataKey(state);
     try {
       const ciphertext = Buffer.from(record.ciphertext, "base64");
-      if (sha256(ciphertext) !== record.ciphertextSha256) return null;
+      if (sha256Hex(ciphertext) !== record.ciphertextSha256) return null;
       const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(record.iv, "base64"));
       decipher.setAAD(Buffer.from(aad, "utf8"));
       decipher.setAuthTag(Buffer.from(record.authTag, "base64"));
@@ -1119,13 +1115,13 @@ export class A2ARemoteDurableStore {
         ? state.payloads.find((item) => item.id === attempt.prepared.payloadRecordId)
         : undefined;
       if (!attempt || !payload || payload.state !== "bound") return null;
-      if (Date.parse(payload.expiresAt) <= this.now().getTime() || payload.aadSha256 !== sha256(aad)) {
+      if (Date.parse(payload.expiresAt) <= this.now().getTime() || payload.aadSha256 !== sha256Hex(aad)) {
         return null;
       }
       const key = this.dataKey(state);
       try {
         const ciphertext = Buffer.from(payload.ciphertext, "base64");
-        if (sha256(ciphertext) !== payload.ciphertextSha256) return null;
+        if (sha256Hex(ciphertext) !== payload.ciphertextSha256) return null;
         const decipher = createDecipheriv(
           "aes-256-gcm",
           key,
@@ -1218,7 +1214,7 @@ export class A2ARemoteDurableStore {
 
   async getTaskProjection(handle: string, ownerId: string): Promise<A2ARemoteTaskProjection | null> {
     return await this.withLock((state) => {
-      const value = state.tasks.find((item) => item.handle === handle && item.ownerDigestSha256 === sha256(ownerId));
+      const value = state.tasks.find((item) => item.handle === handle && item.ownerDigestSha256 === sha256Hex(ownerId));
       return value ? structuredClone({
         handle: value.handle,
         targetAgentId: value.targetAgentId,
@@ -1232,7 +1228,7 @@ export class A2ARemoteDurableStore {
 
   async getTaskRoute(handle: string, ownerId: string): Promise<A2ARemoteTaskRoute | null> {
     return await this.withLock((state) => {
-      const value = state.tasks.find((item) => item.handle === handle && item.ownerDigestSha256 === sha256(ownerId));
+      const value = state.tasks.find((item) => item.handle === handle && item.ownerDigestSha256 === sha256Hex(ownerId));
       if (!value) return null;
       const task = this.decryptTask(state, value);
       if (!task || task.status.state !== value.taskState) throw new Error("a2a-remote-task-record-corrupt");
@@ -1267,9 +1263,9 @@ export class A2ARemoteDurableStore {
       const latest = [...state.attempts].reverse().find((item) =>
         item.prepared.taskHandle === handle && item.prepared.operation === operation);
       if (!latest) return { kind: "none" };
-      if (latest.prepared.ownerDigestSha256 !== sha256(ownerId)) return { kind: "blocked", outcome: "task-owner-mismatch" };
+      if (latest.prepared.ownerDigestSha256 !== sha256Hex(ownerId)) return { kind: "blocked", outcome: "task-owner-mismatch" };
       if (latest.stage === "settled" && latest.outcomeCode === "success") {
-        const task = state.tasks.find((item) => item.handle === handle && item.ownerDigestSha256 === sha256(ownerId));
+        const task = state.tasks.find((item) => item.handle === handle && item.ownerDigestSha256 === sha256Hex(ownerId));
         if (task
           && (operation !== "cancel" || task.taskState === "TASK_STATE_CANCELED")
           && Date.parse(task.updatedAt) >= Date.parse(latest.updatedAt)) {
@@ -1311,7 +1307,7 @@ export class A2ARemoteDurableStore {
             && payload.state === "bound")
         : undefined;
       if (!initial?.prepared.messageId || !initial.prepared.targetLabel
-        || initial.prepared.ownerDigestSha256 !== sha256(ownerId)
+        || initial.prepared.ownerDigestSha256 !== sha256Hex(ownerId)
         || !sourcePayload
         || !latestResolved
         || !latest
@@ -1363,7 +1359,7 @@ export function createA2APayloadAad(input: Readonly<{
   lineage: A2ARemoteLineage;
 }>): string {
   return payloadAadFromOwnerDigest({
-    ownerDigestSha256: sha256(input.ownerId),
+    ownerDigestSha256: sha256Hex(input.ownerId),
     operationId: input.operationId,
     messageId: input.messageId,
     bodySha256: input.bodySha256,

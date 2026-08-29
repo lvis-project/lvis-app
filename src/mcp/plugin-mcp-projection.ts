@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import type { ActivePluginGeneration } from "../plugins/plugin-generation-coordinator.js";
 import type { McpServerApproval, McpServerConfig } from "./types.js";
 import { anchorBundledCommand } from "../plugins/plugin-bundled-command.js";
 import { PluginContributionTrustStore } from "../plugins/plugin-contribution-trust.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 export interface PluginMcpOwner {
   pluginId: string;
@@ -121,8 +121,7 @@ function buildProjection(
   const activationIdentity = configWithoutId.transport === "stdio"
     ? owner.activationId
     : "";
-  const identityHash = createHash("sha256")
-    .update([
+  const identityHash = sha256Hex([
       owner.pluginId,
       owner.pluginVersion,
       owner.generationId,
@@ -130,7 +129,6 @@ function buildProjection(
       owner.localId,
       owner.fingerprint,
     ].join("\0"))
-    .digest("hex")
     .slice(0, 24);
   const serverId = `plugin_${identityHash}`;
   const config = Object.freeze({ ...configWithoutId, id: serverId }) as McpServerConfig;

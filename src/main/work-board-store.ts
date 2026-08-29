@@ -37,6 +37,7 @@ import {
 import { appendActivity } from "../work-board/activity-log.js";
 import { projectRootEquals } from "../shared/project-identity.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 const log = createLogger("lvis");
 
@@ -211,7 +212,7 @@ async function readFileOrEmpty(filePath: string): Promise<BoardFile> {
       items,
     };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isMissingPathError(err)) {
       return emptyBoard();
     }
     throw err;

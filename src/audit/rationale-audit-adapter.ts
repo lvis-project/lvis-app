@@ -25,6 +25,7 @@ import {
 } from "../tools/pipeline/rationale-resume-contract.js";
 import type { RationaleTicketStoreAuditEvent } from "../tools/pipeline/rationale-ticket-store.js";
 import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
+import { hasExactKeys } from "../shared/is-record.js";
 
 export const RATIONALE_AUDIT_SCHEMA_VERSION = 1 as const;
 export const RATIONALE_AUDIT_MAX_DAILY_BYTES = 64 * 1024 * 1024;
@@ -179,12 +180,6 @@ function dateFor(at: number): string {
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) &&
     (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
-}
-
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
 function parseFingerprint(value: unknown): FileFingerprint | null {

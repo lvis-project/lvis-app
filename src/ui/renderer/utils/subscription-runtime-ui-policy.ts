@@ -4,6 +4,7 @@ import type {
   SubscriptionRuntimeCapabilities,
   SubscriptionRuntimeId,
 } from "../../../shared/subscription-runtime.js";
+import { isPositiveSafeInteger } from "../../../shared/safe-integer.js";
 
 /**
  * Renderer-safe projection of the selected subscription runtime's verified
@@ -45,10 +46,6 @@ export interface SubscriptionRuntimeUiPolicyInput {
    * or malformed response is represented by the all-false shared default.
    */
   readonly capabilities: SubscriptionRuntimeCapabilities | null;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 /**

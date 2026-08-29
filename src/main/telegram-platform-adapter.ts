@@ -28,6 +28,8 @@ import {
   type TurnFailureCategory,
 } from "../engine/shared-conversation-projection.js";
 import { isSharedApprovalToolIdentifier } from "../shared/permission-review-status.js";
+import { isPositiveSafeInteger, requirePositiveInteger } from "../shared/safe-integer.js";
+import { TELEGRAM_BOT_TOKEN_PATH_GRAMMAR } from "../shared/telegram-connection.js";
 
 const MAX_TELEGRAM_BOT_TOKEN_CHARS = 256;
 /**
@@ -50,9 +52,6 @@ const MAX_TELEGRAM_RETRY_AFTER_MS = 30_000;
 const MAX_LOGGED_DESCRIPTION_CHARS = 120;
 /** Network errno-style codes are the only free-form error detail admitted to a log. */
 const SAFE_NETWORK_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$/;
-// Telegram bot tokens are path material in the Bot API URL. Keep the grammar
-// deliberately narrow so configuration can never change the HTTPS endpoint.
-const TELEGRAM_BOT_TOKEN = /^[A-Za-z0-9:_-]{1,256}$/;
 
 const ALLOWED_UPDATE_KEYS = new Set(["update_id", "message"]);
 const ALLOWED_CALLBACK_UPDATE_KEYS = new Set(["update_id", "callback_query"]);
@@ -142,7 +141,6 @@ const TRANSIENT_STATUSES = new Set<TelegramStatusMessage["status"]>([
   "compaction-completed",
 ]);
 
-
 /**
  * Verify one Telegram Update that THIS host already fetched over its own
  * authenticated outbound `getUpdates` call.
@@ -192,7 +190,7 @@ export function coalesceTelegramDeliveryQueue(
     throw new TypeError("telegram-delivery-queue-invalid");
   }
   const maxUnits = Math.min(
-    positiveSafeInteger(maxTextChars, "telegram-delivery-queue-max-text-invalid"),
+    requirePositiveInteger(maxTextChars, "telegram-delivery-queue-max-text-invalid"),
     MAX_TELEGRAM_TEXT_UTF16_UNITS,
   );
 
@@ -448,11 +446,11 @@ export function createTelegramOutboundTransport(
   if (options?.log !== undefined && typeof options.log !== "function") {
     throw new TypeError("telegram-outbound-log-invalid");
   }
-  const minIntervalMs = positiveSafeInteger(
+  const minIntervalMs = requirePositiveInteger(
     options?.minIntervalMs ?? DEFAULT_MIN_TELEGRAM_DELIVERY_INTERVAL_MS,
     "telegram-outbound-min-interval-invalid",
   );
-  const requestTimeoutMs = positiveSafeInteger(
+  const requestTimeoutMs = requirePositiveInteger(
     options?.requestTimeoutMs ?? DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS,
     "telegram-outbound-request-timeout-invalid",
   );
@@ -599,14 +597,11 @@ function readOptionString(options: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-
 function isValidTelegramBotToken(value: string | undefined): value is string {
   return value !== undefined
     && value.length <= MAX_TELEGRAM_BOT_TOKEN_CHARS
-    && TELEGRAM_BOT_TOKEN.test(value);
+    && TELEGRAM_BOT_TOKEN_PATH_GRAMMAR.test(value);
 }
-
-
 
 function readRawBody(request: unknown): Uint8Array | undefined {
   if (!isDataRecord(request)) return undefined;
@@ -769,15 +764,6 @@ function isDataRecord(value: unknown): value is Record<string, unknown> {
 function readOwnDataValue(record: Record<string, unknown>, key: string): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(record, key);
   return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function positiveSafeInteger(value: unknown, errorCode: string): number {
-  if (!isPositiveSafeInteger(value)) throw new RangeError(errorCode);
-  return value;
 }
 
 function normalizeTelegramQueueEntry(value: unknown): TelegramDeliveryQueueEntry {

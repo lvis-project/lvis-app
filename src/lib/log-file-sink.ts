@@ -59,6 +59,7 @@ import sonicBoomDefault, {
 } from "sonic-boom";
 import { lvisHome } from "../shared/lvis-home.js";
 import { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./atomic-file.js";
 
 const SonicBoomCtor = sonicBoomDefault as unknown as {
   new (opts: SonicBoomOpts): SonicBoomInstance;
@@ -99,9 +100,6 @@ export const LOG_MAX_FILES_PER_DAY = 20;
  */
 export const LOG_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 
-const DIR_MODE = 0o700;
-const FILE_MODE = 0o600;
-
 /** `2026-07-05` — the UTC date component used in the log filename. */
 function todayDateStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -134,9 +132,9 @@ export function parseLogFileDate(fileName: string): string | null {
  * Mode bits are POSIX-only; `fs` ignores them on Windows.
  */
 function ensureLogDir(dir: string): void {
-  mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
   try {
-    chmodSync(dir, DIR_MODE);
+    chmodSync(dir, PRIVATE_DIR_MODE);
   } catch {
     /* best effort — a pre-existing dir on a chmod-forbidding host must not block boot */
   }
@@ -390,7 +388,7 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
     // writes (pino default) keep the hot path off the event loop; a final
     // destroy() flush on shutdown drains the buffer.
     //
-    // `mode: FILE_MODE` is forwarded by SonicBoom to fs.open's mode argument
+    // `mode: PRIVATE_FILE_MODE` is forwarded by SonicBoom to fs.open's mode argument
     // (verified in node_modules/sonic-boom/index.js: the `mode` opt threads
     // straight into `fs.open(file, flags, mode, …)`), so the file is created
     // with 0o600 AT OPEN. This replaces a post-construction `chmodSync`, which
@@ -399,7 +397,7 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
     // (typically 0o644). Passing the mode to the constructor is atomic and
     // deterministic. POSIX-only: Windows ignores the mode bits (file security
     // there relies on the inherited %USERPROFILE% / ~/.lvis ACL).
-    const boom = new SonicBoomCtor({ dest: filePath, mkdir: false, sync: false, mode: FILE_MODE });
+    const boom = new SonicBoomCtor({ dest: filePath, mkdir: false, sync: false, mode: PRIVATE_FILE_MODE });
     // A REQUIRED 'error' listener, not defense-in-depth: SonicBoom is an
     // EventEmitter, and its own async `fs.open`/`fs.write` failures (disk
     // full, EACCES, a removed directory racing a deferred open) are reported

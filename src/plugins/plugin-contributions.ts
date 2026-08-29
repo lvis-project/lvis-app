@@ -4,6 +4,7 @@ import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import type { PluginContributionDeclaration, PluginManifest } from "./types.js";
 import { verifyInstallReceiptRaw } from "./plugin-install-receipt.js";
 import { canonicalZipEntryPathIdentity } from "./zip-entry-path.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 /**
  * Closed on purpose, and doing security work without looking like it.
@@ -252,7 +253,7 @@ export async function materializePluginContributions(
       files.push(Object.freeze({
         path,
         content: bytes.toString("utf8"),
-        sha256: createHash("sha256").update(bytes).digest("hex"),
+        sha256: sha256Hex(bytes),
       }));
     }
     const fingerprint = createHash("sha256")

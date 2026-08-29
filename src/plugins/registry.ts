@@ -3,11 +3,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, resolve } from "node:path";
 import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { logPluginLifecycle, PluginPhase } from "./lifecycle-log.js";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { resolveTrustedRegistryManifestPath } from "./registry-manifest-trust.js";
-import { isRecord } from "../shared/is-record.js";
+import { isRecord, isStringArray } from "../shared/is-record.js";
 
 /**
  * Legacy registry shape — `installedBy` ("admin"|"user") and
@@ -147,7 +147,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     // a fresh dev or first-time install the file simply doesn't exist yet
     // — return the empty default so PluginRuntime.startAll can proceed and
     // the registry will be lazily created by the first install/uninstall.
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isMissingPathError(err)) {
       logPluginLifecycle("info", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_SKIP, reason: "first_boot_no_registry" }, "no registry — first boot");
       return { version: 1, plugins: [] };
     }
@@ -363,10 +363,6 @@ function validatePluginAccess(value: unknown, pluginId: string): void {
   if (value.agentApprovalScopes !== undefined && !isStringArray(value.agentApprovalScopes)) {
     throw new Error(`Invalid plugin approval scopes: ${pluginId}`);
   }
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function assertOnlyKeys(value: Record<string, unknown>, allowed: Set<string>, context: string): void {

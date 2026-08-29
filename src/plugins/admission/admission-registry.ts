@@ -58,7 +58,6 @@
  * `evaluate()` reads. The INSTALL PATH throws, on every decision that is not
  * `admitted`.
  */
-import { createHash } from "node:crypto";
 import { createLogger } from "../../lib/logger.js";
 import { verifyEnvelope, type PublicKeyInput } from "../envelope-verifier.js";
 import { ADMISSION_PUBLIC_KEYS } from "../marketplace-keys.js";
@@ -74,6 +73,7 @@ import {
 } from "../signed-doc-fetcher.js";
 import type { SignatureEnvelope, ResolvedSignedSnapshot } from "../types.js";
 import { parseAdmissionDocument, type AdmissionDocument, type AdmissionEntry } from "./admission-schema.js";
+import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 const log = createLogger("admission-registry");
 
@@ -500,7 +500,7 @@ class AdmissionRegistry {
     this.snapshot = {
       doc,
       source,
-      documentSha256: createHash("sha256").update(Buffer.from(body, "utf-8")).digest("hex"),
+      documentSha256: sha256Hex(Buffer.from(body, "utf-8")),
     };
     return doc;
   }

@@ -51,6 +51,7 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from "../../../shared/side-panel.js";
+import { formatRelativeTime } from "../../../shared/format-time.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -630,15 +631,12 @@ function RevealingSessionList({
 }
 
 function formatRelativeSessionTime(modifiedAt: string, t: ReturnType<typeof useTranslation>["t"]): string {
-  const ms = Date.now() - new Date(modifiedAt).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "";
-  const minutes = Math.floor(ms / 60000);
-  if (minutes < 1) return t("sidebar.justNow");
-  if (minutes < 60) return t("sidebar.minutesAgo", { count: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("sidebar.hoursAgo", { count: hours });
-  const days = Math.floor(hours / 24);
-  return t("sidebar.daysAgo", { count: days });
+  return formatRelativeTime(modifiedAt, {
+    justNow: () => t("sidebar.justNow"),
+    minutesAgo: (count) => t("sidebar.minutesAgo", { count }),
+    hoursAgo: (count) => t("sidebar.hoursAgo", { count }),
+    daysAgo: (count) => t("sidebar.daysAgo", { count }),
+  });
 }
 
 function projectTestId(root: string, fallback: string): string {

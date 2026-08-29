@@ -11,6 +11,7 @@ import {
 import {
   validateHostConsumedAllowOnceReceipt,
   type HostConsumedAllowOnceReceipt,
+  RATIONALE_TICKET_TERMINAL_STATES,
 } from "../rationale-ticket-lifecycle.js";
 import {
   InProcessRationaleTicketStore,
@@ -739,5 +740,11 @@ describe("InProcessRationaleTicketStore", () => {
     })).toBeNull();
     expect(store.activeTicketIds(control.anchor.sessionId)).toEqual([]);
     expectAuditPayloadsAreSafe(audit);
+  });
+});
+
+describe("RATIONALE_TICKET_TERMINAL_STATES", () => {
+  it("lists the states a ticket never leaves", () => {
+    expect([...RATIONALE_TICKET_TERMINAL_STATES].sort()).toEqual(["allowed_once", "cancelled", "denied", "expired", "rejected"]);
   });
 });

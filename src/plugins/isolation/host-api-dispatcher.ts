@@ -89,6 +89,7 @@ import {
   type WireAudioCaptureHandle,
 } from "./host-api-wire.js";
 import { SubscriptionLedger } from "./subscription-ledger.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 /** One inbound invocation, after the envelope has been checked. */
 export interface HostApiCall {
@@ -1845,7 +1846,7 @@ export function classifyHostApiError(error: unknown): HostApiWireError {
   return {
     code: "host-internal",
     name: error instanceof Error ? error.name : "Error",
-    message: error instanceof Error ? error.message : String(error),
+    message: errorMessage(error),
   };
 }
 

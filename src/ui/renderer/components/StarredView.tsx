@@ -11,7 +11,7 @@ import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
 import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 import { formatCost } from "../../../lib/cost-format.js";
-import { formatHhMm, formatMediumDateTime } from "../../../shared/format-time.js";
+import { formatHhMm, formatMediumDateTime, formatMonthYear } from "../../../shared/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
 
 export interface StarredItem {
@@ -227,8 +227,7 @@ export function StarredView({
   const getUsageRange = (api as Partial<LvisApi>).getUsageRange;
   const monthlyRange = useMemo(() => monthRange(calendarMonth), [calendarMonth]);
   const monthlyLabel = useMemo(
-    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "long" })
-      .format(dateFromKey(monthlyRange.dateFrom)),
+    () => formatMonthYear(dateFromKey(monthlyRange.dateFrom), locale),
     [locale, monthlyRange.dateFrom],
   );
   const currentMonthlyUsageResult = (

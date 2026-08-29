@@ -36,6 +36,7 @@ import {
   buildMcpAppAllowAttr,
   isElectronPermissionGranted,
 } from "../shared/mcp-app-permissions.js";
+import { escapeHtml } from "../shared/escape-html.js";
 
 export { MCP_APP_SCHEME };
 
@@ -223,11 +224,6 @@ export function isMcpAppPermissionGranted(
   return isElectronPermissionGranted(session.permissions, permission, mediaKinds);
 }
 
-/** Escape a host-computed attribute value. The input is a closed enum, so this is belt-and-braces. */
-function escapeAttr(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}
-
 /**
  * The sandbox-proxy document. Deliberately script-free: ALL relay logic lives in
  * the host-owned preload (`mcp-app-preload.ts`), which runs in an isolated world
@@ -240,7 +236,7 @@ function escapeAttr(value: string): string {
  */
 function proxyDocument(allow: string): string {
   const allowMeta = allow
-    ? `<meta name="${MCP_APP_ALLOW_META_NAME}" content="${escapeAttr(allow)}">`
+    ? `<meta name="${MCP_APP_ALLOW_META_NAME}" content="${escapeHtml(allow)}">`
     : "";
   return `<!doctype html>
 <html>

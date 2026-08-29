@@ -47,10 +47,12 @@ import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
+import { hasExactKeys } from "../shared/is-record.js";
+import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 const STORE_VERSION = 1;
-/** Same namespace the bridge already uses for `command-receipts.json`. */
-const TELEGRAM_BRIDGE_FEATURE = "telegram-bridge";
+/** Feature namespace shared by the connection store and the bridge server (`command-receipts.json`). */
+export const TELEGRAM_BRIDGE_FEATURE = "telegram-bridge";
 const DEFAULT_FILE_NAME = "connection.json";
 const DEFAULT_PENDING_CODE_ATTEMPTS = 5;
 const MAX_PENDING_CODE_ATTEMPTS = 16;
@@ -334,20 +336,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
-function timestamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function counter(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 function epochValue(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 }
@@ -376,10 +364,10 @@ function nextEpoch(value: number): number {
 
 function validPendingCode(value: unknown): value is StoredPendingCode {
   return record(value)
-    && exactKeys(value, ["id", "codeDigest", "expiresAt", "attemptsRemaining"])
+    && hasExactKeys(value, ["id", "codeDigest", "expiresAt", "attemptsRemaining"])
     && isTelegramConnectionId(value.id)
     && digest(value.codeDigest)
-    && timestamp(value.expiresAt)
+    && isPositiveSafeInteger(value.expiresAt)
     && typeof value.attemptsRemaining === "number"
     && Number.isSafeInteger(value.attemptsRemaining)
     // A budget of zero destroys the code, so a persisted zero is a bug, not a
@@ -390,17 +378,17 @@ function validPendingCode(value: unknown): value is StoredPendingCode {
 
 function validPairing(value: unknown): value is StoredPairing {
   return record(value)
-    && exactKeys(value, ["id", "actorDigest", "state", "epoch", "createdAt"])
+    && hasExactKeys(value, ["id", "actorDigest", "state", "epoch", "createdAt"])
     && isTelegramConnectionId(value.id)
     && digest(value.actorDigest)
     && (value.state === "active" || value.state === "revoked" || value.state === "unrecognized")
     && epochValue(value.epoch)
-    && timestamp(value.createdAt);
+    && isPositiveSafeInteger(value.createdAt);
 }
 
 function validApproval(value: unknown): value is StoredApproval {
   return record(value)
-    && exactKeys(value, [
+    && hasExactKeys(value, [
       "id", "pairingId", "pairingEpoch", "conversationId", "conversationDigest", "scope",
       "state", "epoch", "createdAt", "expiresAt",
     ])
@@ -414,8 +402,8 @@ function validApproval(value: unknown): value is StoredApproval {
     && isTelegramConnectionId(value.scope)
     && (value.state === "active" || value.state === "revoked" || value.state === "expired")
     && epochValue(value.epoch)
-    && timestamp(value.createdAt)
-    && timestamp(value.expiresAt)
+    && isPositiveSafeInteger(value.createdAt)
+    && isPositiveSafeInteger(value.expiresAt)
     && value.expiresAt > value.createdAt;
 }
 
@@ -428,7 +416,7 @@ function validApproval(value: unknown): value is StoredApproval {
 function validDocument(value: unknown): value is StoreDocument {
   if (
     !record(value)
-    || !exactKeys(value, [
+    || !hasExactKeys(value, [
       "version", "receiptOwnerId", "activationEpoch", "desiredState", "botFingerprint",
       "actorKeyDigest", "pollOffset", "pendingCode", "pairing", "approvals", "lastErrorCode",
     ])
@@ -438,7 +426,7 @@ function validDocument(value: unknown): value is StoreDocument {
     || !desiredState(value.desiredState)
     || !(value.botFingerprint === null || digest(value.botFingerprint))
     || !(value.actorKeyDigest === null || digest(value.actorKeyDigest))
-    || !(value.pollOffset === null || counter(value.pollOffset))
+    || !(value.pollOffset === null || isNonNegativeSafeInteger(value.pollOffset))
     || !(value.pendingCode === null || validPendingCode(value.pendingCode))
     || !(value.pairing === null || validPairing(value.pairing))
     || !Array.isArray(value.approvals)
@@ -613,7 +601,7 @@ export function createTelegramConnectionStore(
 
   const checkedNow = (): number => {
     const value = clock();
-    if (!timestamp(value)) throw invalid();
+    if (!isPositiveSafeInteger(value)) throw invalid();
     return value;
   };
 
@@ -812,7 +800,7 @@ export function createTelegramConnectionStore(
   }));
 
   const recordPollOffset = async (offset: number): Promise<void> => {
-    if (!counter(offset)) throw inputInvalid();
+    if (!isNonNegativeSafeInteger(offset)) throw inputInvalid();
     await mutate((current) => (
       current.pollOffset !== null && offset <= current.pollOffset
         ? { document: current, value: undefined, changed: false }

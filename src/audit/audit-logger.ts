@@ -1,7 +1,5 @@
 
 
-
-
 import { randomUUID } from "node:crypto";
 import {
   accessSync,
@@ -51,6 +49,7 @@ import {
   iterateJsonlLinesFromFd,
   withAuditSnapshotLock,
 } from "./jsonl-reader.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 const MAX_PERMISSION_AUDIT_LINE_BYTES = 1024 * 1024;
 
@@ -93,11 +92,6 @@ function copyOpenFileSync(sourceFd: number, destinationFd: number, size: number)
     }
     position += bytesRead;
   }
-}
-
-function isMissingFileError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function publishOpenFileArchiveSync(
@@ -151,7 +145,7 @@ function publishOpenFileArchiveSync(
     try {
       unlinkSync(stagedPath);
     } catch (error) {
-      if (!isMissingFileError(error)) cleanupErrors.push(error);
+      if (!isMissingPathError(error)) cleanupErrors.push(error);
     }
     if (cleanupErrors.length > 0) {
       if (operationError !== undefined) {
@@ -170,7 +164,7 @@ function readLastNonEmptyLineSync(filePath: string): string {
   try {
     fd = openSync(filePath, "r");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return GENESIS_MARKER;
+    if (isMissingPathError(err)) return GENESIS_MARKER;
     throw err;
   }
   try {
@@ -650,7 +644,6 @@ export class AuditLogger {
       mkdirSync(this.auditDir, { recursive: true, mode: 0o700 });
     }
 
-
     this.now = options.now ?? (() => new Date());
     const date = this.currentUtcDate();
     this.permissionAuditDate = date;
@@ -672,7 +665,6 @@ export class AuditLogger {
   private telemetryPath(date = this.currentUtcDate()): string {
     return join(this.auditDir, `${date}.jsonl`);
   }
-
 
   private permissionShadowPath(date = this.currentUtcDate()): string {
     return join(this.auditDir, `${date}.permission-shadow.jsonl`);

@@ -1,5 +1,6 @@
 import type { ErrorCategory } from "./error-classifier.js";
 import { isRecord } from "../../shared/is-record.js";
+import { errorMessageOrSerialized } from "../../shared/error-message.js";
 
 export interface ProviderRateLimitDiagnostics {
   kind: "tokens-per-minute" | "requests-per-minute" | "unknown";
@@ -45,7 +46,7 @@ export function extractProviderErrorDiagnostics(
   const rawMessage =
     stringValue(providerError?.message) ??
     stringValue(apiError?.message) ??
-    errorMessage(error);
+    errorMessageOrSerialized(error);
   const responseHeaders = recordValue(apiError?.responseHeaders);
   const rateLimit = parseRateLimitDiagnostics(rawMessage, responseHeaders);
   const urlParts = parseUrlParts(stringValue(apiError?.url));
@@ -81,7 +82,7 @@ export function withProviderErrorClassification(
 
 export function providerErrorMessage(error: unknown): string {
   const nested = extractNestedProviderError(error);
-  return stringValue(nested?.message) ?? errorMessage(error);
+  return stringValue(nested?.message) ?? errorMessageOrSerialized(error);
 }
 
 function asApiCallErrorLike(error: unknown): ApiCallErrorLike | null {
@@ -194,17 +195,6 @@ function sanitizeMessage(message: string): string {
     .replace(ORG_ID_RE, "org-***")
     .replace(LONG_SECRETISH_TOKEN_RE, "[redacted-token]")
     .slice(0, 500);
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  if (isRecord(error) && typeof error.message === "string") return error.message;
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
 }
 
 function stringValue(value: unknown): string | undefined {

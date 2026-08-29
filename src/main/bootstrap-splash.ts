@@ -11,6 +11,7 @@ import { t } from "../i18n/index.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "../shared/lvis-logo.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { getMainWindow } from "./app-state.js";
+import { sleep } from "../shared/abortable-deadline.js";
 
 const BOOTSTRAP_STATUS_MESSAGES = [
   t("be_main.bootstrapStatusPreparingRuntime"),
@@ -32,7 +33,7 @@ export async function waitForMinimumBootstrapSplash() {
   if (bootstrapSplashShownAt <= 0) return;
   const remaining = BOOTSTRAP_SPLASH_MIN_VISIBLE_MS - (Date.now() - bootstrapSplashShownAt);
   if (remaining > 0) {
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, remaining));
+    await sleep(remaining);
   }
 }
 
