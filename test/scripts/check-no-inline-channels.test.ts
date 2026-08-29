@@ -1,11 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { runGateScript } from "./gate-script-runner.js";
 
 const SCRIPT = resolve(process.cwd(), "scripts/check-no-inline-channels.mjs");
-const nodeCommand = process.env.LVIS_TEST_NODE_EXEC_PATH ?? process.execPath;
 const roots: string[] = [];
 
 const BASE_FILES = [
@@ -35,10 +34,7 @@ function createRoot(): string {
 }
 
 function run(root: string) {
-  return spawnSync(nodeCommand, [SCRIPT, "--root", root], {
-    cwd: process.cwd(),
-    encoding: "utf-8",
-  });
+  return runGateScript(SCRIPT, root);
 }
 
 function write(root: string, rel: string, source: string): void {
