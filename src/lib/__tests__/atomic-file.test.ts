@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  isMissingPathError,
   replaceUtf8FileAtomicSyncIf,
   writeUtf8FileAtomicSync,
 } from "../atomic-file.js";
@@ -274,5 +275,19 @@ describe("writeUtf8FileAtomicSync", () => {
     // this toward the background budget, this fails.
     expect(syncTotal).toBeLessThanOrEqual(1200);
     expect(syncTotal).toBeLessThan(asyncTotal);
+  });
+});
+
+describe("isMissingPathError", () => {
+  it("treats ENOENT and ENOTDIR as the same absence", () => {
+    expect(isMissingPathError(Object.assign(new Error("gone"), { code: "ENOENT" }))).toBe(true);
+    expect(isMissingPathError(Object.assign(new Error("parent is a file"), { code: "ENOTDIR" }))).toBe(true);
+  });
+
+  it("rejects every other error, including ones without a code", () => {
+    expect(isMissingPathError(Object.assign(new Error("denied"), { code: "EACCES" }))).toBe(false);
+    expect(isMissingPathError(Object.assign(new Error("exists"), { code: "EEXIST" }))).toBe(false);
+    expect(isMissingPathError(new Error("plain"))).toBe(false);
+    expect(isMissingPathError(undefined)).toBe(false);
   });
 });

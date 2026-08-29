@@ -11,7 +11,7 @@ import {
 import { dirname, isAbsolute } from "node:path";
 import { platform } from "node:process";
 import { computeLineHmac, type SecretStore } from "../../audit/hmac-chain.js";
-import { writeUtf8FileAtomicSync } from "../../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../../lib/atomic-file.js";
 import { withFileLock } from "../../lib/with-file-lock.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import {
@@ -51,7 +51,6 @@ const HEAD_KIND = "rationale-invocation-journal-head" as const;
 const HEAD_KEY_DOMAIN = "lvis:rationale-invocation-journal:head:v1";
 const HEAD_NAME = "rationale-invocation-journal-head-v1";
 const MAX_CHECKPOINT_BYTES = 4 * 1024;
-
 
 type AuditVersion = 0 | 1 | 2;
 
@@ -168,11 +167,6 @@ function exactKeys(
 
 function equal(left: unknown, right: unknown): boolean {
   return canonicalStringify(left) === canonicalStringify(right);
-}
-
-function isMissingPathError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function sameFileIdentity(

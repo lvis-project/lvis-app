@@ -49,6 +49,7 @@ import { lvisHome } from "../shared/lvis-home.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
 import { adoptLegacyRootFileSync, writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 export interface SkillApprovalRecord {
   /** Record key from the caller — a skill name, or `<name>#bundled`. */
@@ -110,7 +111,7 @@ async function readFileOrEmpty(filePath: string): Promise<SkillApprovalsFile> {
     }
     return { version: 2, approvedSkills: records };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isMissingPathError(err)) {
       return { version: 2, approvedSkills: [] };
     }
     throw err;

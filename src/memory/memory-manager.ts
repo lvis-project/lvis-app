@@ -1,12 +1,10 @@
 
 
-
-
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync, unlinkSync, rmSync, renameSync, watch, type FSWatcher } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
@@ -43,11 +41,6 @@ interface FileSnapshot {
   mtimeMs: number;
   size: number;
   tooLarge: boolean;
-}
-
-function isMissingPathError(err: unknown): boolean {
-  const code = (err as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function readUtf8FileIfPresent(path: string): string | null {
@@ -329,13 +322,7 @@ export interface SessionListEntry {
   branchedAt?: string;
 }
 
-
-
-
 export type CheckpointTrigger = "auto-compact" | "manual";
-
-
-
 
 export interface Checkpoint {
   /** Unique checkpoint identifier (any non-empty string; typically a UUID) */
@@ -573,7 +560,6 @@ const MEMORY_KINDS = new Set<MemoryKind>([
 const MEMORY_STATES = new Set<MemoryState>(["candidate", "active"]);
 const MEMORY_CAPTURE_TRIGGERS = new Set<MemoryCaptureTrigger>(["automatic", "explicit"]);
 const MEMORY_SOURCES = new Set<MemorySourceKind>(["user", "assistant", "import", "capture"]);
-
 
 function getDefaultAgentsMd(): string {
   return t("be_memoryManager.defaultAgentsMd");
@@ -1011,7 +997,6 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   const msgCount = r.messageCountAtTrigger;
   if (typeof msgCount !== "number" || msgCount < 0 || !Number.isInteger(msgCount)) return null;
 
-
   const compactNum =
     typeof r.compactNum === "number" && r.compactNum >= 0 && Number.isInteger(r.compactNum)
       ? r.compactNum
@@ -1266,7 +1251,6 @@ export class MemoryManager {
     return tombstone;
   }
 
-
   load(): void {
     this.agentsMd = this.readFile("AGENTS.md");
     this.memoryIndex = this.readMemoryIndex();
@@ -1313,8 +1297,6 @@ export class MemoryManager {
   closeSearchIndex(): void {
     this.searchIndex.close();
   }
-
-
 
   getAgentsMd(): string {
     return this.agentsMd;
@@ -1512,11 +1494,9 @@ export class MemoryManager {
       .filter((entry) => entry.state === "candidate" && this.matchesCandidateReviewScope(entry, options));
   }
 
-
   searchMemoryEntries(query: string, options: MemoryReadOptions = {}): NoteEntry[] {
     return this.searchEntries(this.listMemoryEntries(options), query);
   }
-
 
   /**
    * Cross-session search — SQLite FTS5-backed (#1500 / E3). Signature and
@@ -1553,14 +1533,11 @@ export class MemoryManager {
     }
   }
 
-
   getMemoryContext(options: ProjectScopedMemoryOptions = {}): string {
     return this.buildMarkdownContext(
       this.listMemoryEntries(options).filter((entry) => !this.isDerivedMemory(entry)),
     );
   }
-
-
 
   /**
    * Deterministically select active memories for one request. It is deliberately
@@ -1632,9 +1609,6 @@ export class MemoryManager {
         sessionKind: session.sessionKind,
       }));
   }
-
-
-
 
   async saveMemory(title: string, content: string, options: MemorySaveOptions = {}): Promise<NoteEntry> {
     const input = this.assertManagedMemoryInput(title, content);
@@ -2021,7 +1995,6 @@ export class MemoryManager {
       this.searchIndex.close();
     }
   }
-
 
   /**
    * Boot-time integrity check → rebuild-from-JSONL recovery path (#1500 /

@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
 import { isRecord } from "../shared/is-record.js";
@@ -60,11 +60,6 @@ export interface SecretStoreReconciliationWarning {
   reason: "atomic-directory-sync-unconfirmed" | "lock-release-failed-after-commit";
   path: string;
   error: unknown;
-}
-
-function isMissingPathError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function pathEntryExists(path: string): boolean {

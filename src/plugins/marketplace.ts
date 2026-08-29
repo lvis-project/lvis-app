@@ -73,6 +73,7 @@ import {
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { materializePluginContributions } from "./plugin-contributions.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 const log = createLogger("marketplace");
 
 import {
@@ -2041,7 +2042,7 @@ export class PluginMarketplaceService {
     try {
       raw = await readFile(manifestPath, "utf-8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      if (isMissingPathError(err)) return null;
       throw err;
     }
     const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
@@ -2251,7 +2252,7 @@ export class PluginMarketplaceService {
       } catch (err) {
         // ENOENT → stale registry entry; skip silently. Other errors
         // (permission, IO) propagate.
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+        if (isMissingPathError(err)) continue;
         throw err;
       }
       manifests.push(flattenAgentPluginsManifest(JSON.parse(raw)));
@@ -2329,7 +2330,7 @@ export class PluginMarketplaceService {
             "utf-8",
           );
         } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          if (!isMissingPathError(err)) throw err;
         }
         let receiptCommitted = false;
         let preparedReceiptRaw: string | undefined;
@@ -2988,7 +2989,7 @@ export class PluginMarketplaceService {
     try {
       snapshot.receiptRaw = await readFile(installReceiptPath(this.cacheRoot, pluginId), "utf-8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      if (!isMissingPathError(err)) throw err;
     }
     try {
       const current = await statAsync(installDir);

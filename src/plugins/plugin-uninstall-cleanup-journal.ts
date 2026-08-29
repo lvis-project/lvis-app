@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 
 export interface PluginUninstallCleanupRecord {
   pluginId: string;
@@ -157,7 +157,7 @@ export class PluginUninstallCleanupJournal {
         this.records.set(record.pluginId, freezeRecord(record));
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!isMissingPathError(error)) throw error;
     }
   }
 

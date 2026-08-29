@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { PermissionRule, ExecutionMode } from "./permission-manager.js";
 import { withFileLock } from "../lib/with-file-lock.js";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 
 
 
@@ -43,7 +43,7 @@ export async function readPermissionsFile(filePath: string): Promise<Permissions
     if (parsed.version !== 1 || !Array.isArray(parsed.rules)) return null;
     return parsed;
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (isMissingPathError(err)) return null;
     if (err instanceof SyntaxError) return null;
     throw err;
   }

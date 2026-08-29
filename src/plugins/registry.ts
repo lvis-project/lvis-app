@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, resolve } from "node:path";
 import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { logPluginLifecycle, PluginPhase } from "./lifecycle-log.js";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { resolveTrustedRegistryManifestPath } from "./registry-manifest-trust.js";
@@ -147,7 +147,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     // a fresh dev or first-time install the file simply doesn't exist yet
     // — return the empty default so PluginRuntime.startAll can proceed and
     // the registry will be lazily created by the first install/uninstall.
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isMissingPathError(err)) {
       logPluginLifecycle("info", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_SKIP, reason: "first_boot_no_registry" }, "no registry — first boot");
       return { version: 1, plugins: [] };
     }

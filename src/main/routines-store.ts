@@ -18,6 +18,7 @@ import { isValidCronExpression } from "../routines/cron-evaluator.js";
 import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 const log = createLogger("lvis");
 
 // Re-export from shared so callers that import from routines-store continue
@@ -169,7 +170,7 @@ async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
       routines: parsed.routines.filter(isCanonicalRecord),
     };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isMissingPathError(err)) {
       return { version: 2, routines: [] };
     }
     throw err;

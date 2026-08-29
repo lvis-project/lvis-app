@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { lvisHome } from "../shared/lvis-home.js";
 import * as atomicFile from "../lib/atomic-file.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 export interface LvisHomeDocUpgradeMarker {
   sourcePath: string;
@@ -212,7 +213,7 @@ function seedOne(
     try {
       existingUpgradeBuf = readFileSync(upgradeTarget);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      if (!isMissingPathError(err)) throw err;
     }
     if (existingUpgradeBuf !== null) {
       if (existingUpgradeBuf.equals(packagedBuf)) return;

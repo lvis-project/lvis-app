@@ -47,6 +47,7 @@ import type {
   UserApprovalVerdict,
 } from "../shared/permissions-events.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 const log = createLogger("user-approval-store");
 let persistentWriteQueue: Promise<void> = Promise.resolve();
@@ -169,7 +170,7 @@ async function readApprovalsFile(): Promise<ApprovalsFile> {
     }
     return parsed;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { approvals: {} };
+    if (isMissingPathError(err)) return { approvals: {} };
     throw err;
   }
 }

@@ -15,6 +15,7 @@ import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "pairing-share.json";
@@ -492,7 +493,7 @@ export class TailnetPairingShareStore {
       try {
         raw = await readFile(join(this.namespace.dir, this.fileName), "utf8");
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if (isMissingPathError(error)) {
           this.state = initialState();
           return;
         }

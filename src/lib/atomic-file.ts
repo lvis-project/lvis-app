@@ -66,8 +66,20 @@ function replaceStagedFile(
   }
 }
 
-function isMissingPathError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
+/**
+ * Whether a filesystem error says the path is simply not there.
+ *
+ * `ENOTDIR` counts: a parent component that is a regular file means the file
+ * under it can no more exist than when the directory is absent, and every
+ * reader of a `<namespace-dir>/<file>` that treats "absent" as an ordinary
+ * state (first boot, cleared feature directory) must answer the same for both
+ * codes or the two shapes drift apart between the store that writes and the
+ * store that reads. Probes that need to tell "missing" from "exists but is
+ * not a directory" (readdir, stat, realpath) must not use this — they keep
+ * their own `ENOENT` check by design.
+ */
+export function isMissingPathError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
   return code === "ENOENT" || code === "ENOTDIR";
 }
 
