@@ -12,66 +12,47 @@
  * the WorkGroup step count + TurnActionBar cost badge reflect the side loop's
  * own token / cost totals.
  *
- * The composer + New-session chrome stay bespoke (compact rail affordances). All
- * streaming is driven by `useSideChat`, which subscribes to the DEDICATED
+ * The composer is the SHARED one as well: the same `Composer` the main dock
+ * renders (`surface="side"` selects only the narrower growth cap), inside the
+ * same `ComposerFrame`, driven by the same `useMessageQueue` — so Enter queues
+ * while a turn runs, ⌘⏎ interrupts, Esc injects-or-aborts, paste chips, the
+ * inline "/" and "@" menus open, and IME composition is honoured, all by the
+ * one implementation. Only the New-session affordance is side-specific chrome.
+ * All streaming is driven by `useSideChat`, which subscribes to the DEDICATED
  * side-chat IPC channel so main-chat frames never appear here. Tool APPROVAL
  * requests surface in the app-level ApprovalDock (shared global ApprovalGate),
  * never inside this tab.
  */
-import { useLayoutEffect, useRef, useState } from "react";
-import { Send, Square, Plus } from "lucide-react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { Plus } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
-import { Textarea } from "../../../components/ui/textarea.js";
 import { TranscriptRenderer } from "./TranscriptRenderer.js";
+import { Composer, ComposerFrame, type ComposerHandle } from "./Composer.js";
+import { ComposerApiKeyChip, resolveComposerRuntimeGates } from "./ChatComposerDock.js";
+import { AttachButton, ShortcutsButton, TurnControlButton } from "./InputActionBar.js";
+import { MessageQueuePanel } from "./MessageQueuePanel.js";
 import { useSideChat } from "../hooks/use-side-chat.js";
+import { useMessageQueue } from "../hooks/use-message-queue.js";
+import { useAttachmentPicker } from "../hooks/use-attachment-picker.js";
+import { computeComposerPlaceholder } from "../utils/composer-placeholder.js";
+import { composeOutgoing } from "../utils/compose.js";
+import { ATTACH_MAX_COUNT, type Attachment } from "../types/attachments.js";
 import type { LvisApi } from "../types.js";
+import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import { useOptionalChatContext } from "../context/ChatContext.js";
+
+/** Stable empty lists: the composer's inline menu memoizes on their identity. */
+const NO_COMMAND_ACTIONS: never[] = [];
+const NO_INLINE_PLUGINS: never[] = [];
+const NOOP_SELECT_PLUGIN = () => {};
 
 export function SideChatView({ api }: { api: LvisApi }) {
   const { t } = useTranslation();
-  const { entries, turnSummaryByTurnStart, isStreaming, sessionId, send, newSession, abort } = useSideChat(api);
-  const chatContext = useOptionalChatContext();
-  const subscriptionPending = chatContext?.subscriptionRuntimePolicy
-    ? chatContext.subscriptionRuntimePolicy.chatPending
-    : chatContext?.subscriptionPendingProvider !== undefined;
-  const settingsPending = chatContext?.settingsLoaded === false;
-  const subscriptionUnavailable = chatContext?.subscriptionRuntimePolicy
-    ? chatContext.subscriptionRuntimePolicy.chatUnavailable
-    : chatContext?.subscriptionUnavailableProvider !== undefined;
-  // Side chat is a second ConversationLoop, not a second credential policy.
-  // Read the app-level readiness contract so it cannot bypass a selected
-  // subscription login that is still checking, signed out, or unsupported.
-  const missingRuntimeCredential = chatContext?.hasApiKey === false;
-  const composerBlocked = settingsPending || subscriptionPending || subscriptionUnavailable || missingRuntimeCredential;
-  const composerStatus = settingsPending || subscriptionPending
-    ? t("subscriptionProvidersSection.statusChecking")
-    : subscriptionUnavailable
-      ? t("formatIpcError.subscriptionChatUnavailable")
-      : missingRuntimeCredential
-        ? t("chatView.noApiKeyTitle")
-        : null;
-  const [draft, setDraft] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to the latest message as the transcript grows / streams.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [entries]);
-
   // If side chat is unavailable (preload without the surface), surface a stable
   // disabled state rather than a broken composer.
-  const available = !!api.sideChat;
-
-  const submit = () => {
-    const text = draft.trim();
-    if (!text || isStreaming || composerBlocked) return;
-    setDraft("");
-    void send(text);
-  };
-
-  if (!available) {
+  const sideChat = api.sideChat;
+  if (!sideChat) {
     return (
       <div
         className="p-4 text-xs text-muted-foreground"
@@ -81,6 +62,119 @@ export function SideChatView({ api }: { api: LvisApi }) {
       </div>
     );
   }
+  return <SideChatSession api={api} sideChat={sideChat} />;
+}
+
+function SideChatSession({
+  api,
+  sideChat,
+}: {
+  api: LvisApi;
+  sideChat: NonNullable<LvisApi["sideChat"]>;
+}) {
+  const { t } = useTranslation();
+  const { entries, turnSummaryByTurnStart, isStreaming, sessionId, send, newSession, abort } = useSideChat(api);
+  const chatContext = useOptionalChatContext();
+  const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const attachmentNCounter = useRef(0);
+  const composerRef = useRef<ComposerHandle | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Side chat is a second ConversationLoop, not a second credential policy.
+  // Read the app-level readiness contract so it cannot bypass a selected
+  // subscription login that is still checking, signed out, or unsupported.
+  const hasApiKey = chatContext?.hasApiKey ?? null;
+  const subscriptionRuntimePolicy = chatContext?.subscriptionRuntimePolicy;
+  const {
+    runtimeImageAttachmentProvider,
+    runtimeFileAttachmentProvider,
+    runtimeUnavailable,
+    runtimePending,
+    attachmentInputsReady,
+    imagesEnabled,
+    filesEnabled,
+    draftHasUnsupportedAttachment,
+  } = resolveComposerRuntimeGates({
+    subscriptionRuntimePolicy,
+    subscriptionImageAttachmentProvider: chatContext?.subscriptionImageAttachmentProvider,
+    subscriptionFileAttachmentProvider: chatContext?.subscriptionFileAttachmentProvider,
+    settingsLoaded: chatContext?.settingsLoaded,
+    subscriptionUnavailableProvider: chatContext?.subscriptionUnavailableProvider,
+    subscriptionPendingProvider: chatContext?.subscriptionPendingProvider,
+    attachments,
+  });
+  // The side loop runs no local slash commands, so a missing credential blocks
+  // the field outright — there is no keyless "/" path to keep open.
+  const composerInputDisabled = !attachmentInputsReady || runtimeUnavailable || hasApiKey === false;
+  const composerSendDisabled = composerInputDisabled || draftHasUnsupportedAttachment;
+  const hasDraft = draft.trim().length > 0 || attachments.length > 0;
+
+  // Auto-scroll to the latest message as the transcript grows / streams.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [entries]);
+
+  const allocateN = useCallback(() => ++attachmentNCounter.current, []);
+
+  // The queue hands a send here in three shapes: the idle Enter (the draft as
+  // typed), ⌘⏎ / Esc / a row's "send now" (an interrupt), and the end-of-turn
+  // drain (`queue-auto`). A user send composes the draft's attachments into
+  // content parts and clears the field, as the main composer does; the drain
+  // carries text only, because queued rows never held attachments.
+  const handleAsk = useCallback(
+    (
+      text: string,
+      _intent?: UserKeyboardIntentSnapshot,
+      opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
+    ) => {
+      if (opts?.inputOrigin === "queue-auto") {
+        return send(text, { injectHint: opts.injectHint, inputOrigin: "queue-auto" });
+      }
+      const composed = composeOutgoing({ raw: text, activePreset: null, attachments });
+      setDraft("");
+      setAttachments([]);
+      return send(composed.text, {
+        attachments: composed.attachments,
+        ...(opts?.injectHint ? { injectHint: opts.injectHint } : {}),
+      });
+    },
+    [send, attachments],
+  );
+
+  const {
+    messageQueueStore,
+    handleComposerSend,
+    handleMessageQueueSendNow,
+    flushQueueAsUserMessage,
+  } = useMessageQueue({
+    surface: "side",
+    subscribeStream: sideChat.onStream,
+    composerRef,
+    currentSessionId: sessionId ?? "",
+    question: draft,
+    attachments,
+    streaming: isStreaming,
+    setQuestion: setDraft,
+    setAttachments,
+    onAsk: handleAsk,
+    onAbort: abort,
+  });
+
+  const handleBottomSend = useCallback(() => {
+    handleComposerSend({ inputOrigin: "user-keyboard", token: "" });
+  }, [handleComposerSend]);
+
+  const { handleAttach } = useAttachmentPicker({
+    attachmentNCounter,
+    setAttachments,
+    setQuestion: setDraft,
+    composerRef,
+    imagesEnabled,
+    filesEnabled,
+    imageAttachmentLimits: subscriptionRuntimePolicy?.imageAttachmentLimits,
+  });
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="side-chat-view">
@@ -126,65 +220,90 @@ export function SideChatView({ api }: { api: LvisApi }) {
         )}
       </div>
 
-      <div className="shrink-0 border-t p-2">
-        {composerStatus ? (
-          <div
-            className="mb-1.5 flex items-center justify-between gap-2 rounded border border-border-subtle bg-muted/(--opacity-subtle) px-2 py-1 text-[11px] text-muted-foreground"
-            data-testid="side-chat-runtime-status"
-          >
-            <span>{composerStatus}</span>
-            {chatContext?.onOpenSettings ? (
-              <button
-                type="button"
-                className="shrink-0 text-[11px] font-medium text-primary hover:underline"
-                onClick={() => chatContext.onOpenSettings("llm")}
-              >
-                {t("chatView.openSettingsButton")}
-              </button>
-            ) : null}
+      <div className="shrink-0 border-t px-2 pb-2 pt-1.5" data-testid="side-chat-composer-dock">
+        <MessageQueuePanel
+          store={messageQueueStore}
+          onSendNow={handleMessageQueueSendNow}
+        />
+        {/* The same no-credential affordance the main dock shows, in the strip
+            above the input box. `hasApiKey` is the app's readiness verdict, so a
+            keyless-ready session never shows it and `null` (probe unresolved)
+            stays silent. */}
+        {hasApiKey === false && chatContext ? (
+          <div className="mb-1.5 flex justify-end" data-testid="side-chat-api-key-chip-slot">
+            <ComposerApiKeyChip
+              onOpenSettings={chatContext.onOpenSettings}
+              subscriptionRuntimePolicy={subscriptionRuntimePolicy}
+              subscriptionUnavailableProvider={chatContext.subscriptionUnavailableProvider}
+              subscriptionPendingProvider={chatContext.subscriptionPendingProvider}
+            />
           </div>
         ) : null}
-        <div className="flex items-end gap-1.5">
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder={t("chatPreviewRail.sideChat.placeholder")}
-            rows={2}
-            className="min-h-0 resize-none text-sm"
-            data-testid="side-chat-composer"
+        <ComposerFrame>
+          <Composer
+            ref={composerRef}
+            surface="side"
+            text={draft}
+            onTextChange={setDraft}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            allocateN={allocateN}
+            saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
+            discardClipboardImage={(filePath) => window.lvis.attach.discardClipboardImage(filePath)}
+            openExternal={(p) => window.lvis.attach.openExternal(p)}
+            imagesEnabled={imagesEnabled}
+            imageAttachmentLimits={subscriptionRuntimePolicy?.imageAttachmentLimits}
+            onSend={handleComposerSend}
+            commandActions={NO_COMMAND_ACTIONS}
+            inlinePlugins={NO_INLINE_PLUGINS}
+            onSelectPlugin={NOOP_SELECT_PLUGIN}
+            disabled={composerInputDisabled}
+            sendDisabled={composerSendDisabled}
+            onWarning={(message) => console.warn(message)}
+            placeholder={computeComposerPlaceholder({
+              hasApiKey,
+              streaming: isStreaming,
+              subscriptionUnavailable: runtimeUnavailable,
+              subscriptionPending: runtimePending,
+            })}
           />
-          {isStreaming ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className="h-8 w-8 shrink-0"
-              onClick={() => void abort()}
-              data-testid="side-chat-abort"
-              aria-label={t("chatPreviewRail.sideChat.stop")}
-            >
-              <Square className="h-3.5 w-3.5" />
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="icon"
-              className="h-8 w-8 shrink-0"
-              onClick={submit}
-              disabled={composerBlocked || draft.trim().length === 0}
-              data-testid="side-chat-send"
-              aria-label={t("chatPreviewRail.sideChat.send")}
-            >
-              <Send className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+          {/* Compact action row: the shared attach + shortcuts + turn control,
+              without the main dock's slash picker, persona, and status sub-row —
+              those act on the main loop (its commands, its persona, its context
+              budget), which the side loop does not share. */}
+          <div
+            className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pb-2 pt-1"
+            data-testid="side-chat-action-row"
+          >
+            <AttachButton
+              onAttach={handleAttach}
+              disabled={
+                attachments.length >= ATTACH_MAX_COUNT ||
+                !attachmentInputsReady ||
+                hasApiKey === false ||
+                (!imagesEnabled && !filesEnabled)
+              }
+              disabledReason={!attachmentInputsReady
+                ? "runtime-pending"
+                : (!imagesEnabled && !filesEnabled)
+                ? "subscription-unsupported"
+                : hasApiKey === false ? "no-api-key" : "limit"}
+              disabledSubscriptionProvider={
+                runtimeImageAttachmentProvider ?? runtimeFileAttachmentProvider
+              }
+            />
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <ShortcutsButton />
+              <TurnControlButton
+                isBusy={isStreaming}
+                hasDraft={hasDraft}
+                isSendDisabled={composerSendDisabled || !hasDraft}
+                onSend={handleBottomSend}
+                onCancel={flushQueueAsUserMessage}
+              />
+            </div>
+          </div>
+        </ComposerFrame>
       </div>
     </div>
   );

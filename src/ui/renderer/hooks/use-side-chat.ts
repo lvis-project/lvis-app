@@ -8,6 +8,11 @@
  * a local `entries: ChatEntry[]` list, a `send`, `newSession`, `loadSession`,
  * `listSessions`, `isStreaming`, and `abort`.
  *
+ * INPUT PARITY: `send` follows the main composer's rule for a send that lands
+ * while a turn is running — a user gesture interrupts (abort, then send); the
+ * end-of-turn queue drain does not. The queue itself, and the keys that feed it
+ * (Enter, ⌘⏎, Esc), are the shared `useMessageQueue` hook, not this one.
+ *
  * RENDER PARITY: the side channel already emits the full frame set
  * (`reasoning_delta` / `permission_review` / `tool_start` / `tool_end` /
  * `turn_summary` / `compact_notice` / `assistant_round` / `done`) via the shared
@@ -35,6 +40,7 @@ import {
   applyToolStart,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
+  markTurnAssistantInterrupted,
   setAssistantError,
   upsertPermissionReview,
   upsertStreamingAssistant,
@@ -44,6 +50,7 @@ import {
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
+import type { UserContentPart } from "../../../engine/llm/types.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import { historyToEntries } from "../utils/history.js";
 import { isTurnStartEntry } from "../utils/classify-turn-entries.js";
@@ -56,12 +63,26 @@ export interface SideChatSessionSummary {
   title: string;
 }
 
+interface SideChatSendOptions {
+  /** Vision / resource parts composed from the composer's attachments. */
+  attachments?: UserContentPart[];
+  /** Badge on the user bubble: a drained queue row, or an interrupting send. */
+  injectHint?: "queue" | "interrupt";
+  /**
+   * `queue-auto` is the end-of-turn queue drain: it follows the turn that just
+   * closed and must not stop anything. Every other send is the user's own
+   * gesture (Enter when idle, ⌘⏎, Esc-inject, a row's "send now") and, when a
+   * turn is still running, interrupts it first — the main composer's rule.
+   */
+  inputOrigin?: "queue-auto";
+}
+
 export interface UseSideChat {
   entries: ChatEntry[];
   turnSummaryByTurnStart: Map<number, TurnSummary>;
   isStreaming: boolean;
   sessionId: string | null;
-  send: (text: string) => Promise<void>;
+  send: (text: string, opts?: SideChatSendOptions) => Promise<void>;
   newSession: () => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   listSessions: () => Promise<{ current: string | null; sessions: SideChatSessionSummary[] }>;
@@ -318,21 +339,53 @@ export function useSideChat(api: LvisApi): UseSideChat {
     };
   }, [api, resetStreamState]);
 
+  const abort = useCallback(async () => {
+    if (!api.sideChat) return;
+    await api.sideChat.abort();
+    // The answer that was cut short keeps what it streamed and wears the
+    // interrupted badge, exactly as the main transcript marks a stopped turn; an
+    // answer that had not produced a byte yet is dropped rather than left as an
+    // empty bubble with a spinner.
+    setEntries((p) =>
+      markTurnAssistantInterrupted(
+        finalizeStreamingReasoning(dropPendingStreamingAssistant(p), thoughtRef.current),
+      ),
+    );
+    setIsStreaming(false);
+    resetStreamState();
+  }, [api, resetStreamState]);
+
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, opts?: SideChatSendOptions) => {
       const trimmed = text.trim();
-      if (!trimmed || isStreaming || !api.sideChat) return;
+      if (!api.sideChat) return;
+      if (!trimmed && !(opts?.attachments && opts.attachments.length > 0)) return;
+      // A user gesture while a turn is running is an interrupt: stop the running
+      // turn and wait for it to settle before the new one goes out, so its
+      // closing frames cannot land on the new turn's transcript. The side channel
+      // has no `interrupt` flag on send, so the abort is its own round trip.
+      if (isStreamingRef.current && opts?.inputOrigin !== "queue-auto") {
+        await abort();
+      }
       // Re-arm the stale-frame guard + clear accumulators: the next turn's first
       // frame adopts its freshly-allocated streamId (see activeStreamIdRef doc).
       resetStreamState();
-      setEntries((prev) => [...prev, { kind: "user", text: trimmed, createdAt: Date.now() }]);
+      setEntries((prev) => [
+        ...prev,
+        {
+          kind: "user",
+          text: trimmed,
+          createdAt: Date.now(),
+          ...(opts?.injectHint ? { injectHint: opts.injectHint } : {}),
+        },
+      ]);
       setIsStreaming(true);
       // The main-window webContents receives the stream frames; the invoke
       // resolves with the final TurnResult (unused here — the transcript is built
       // from the stream). A rejected/failed result surfaces as an error entry so
       // the transcript never hangs on a permanent spinner.
       try {
-        const result = await api.sideChat.send(trimmed);
+        const result = await api.sideChat.send(trimmed, opts?.attachments);
         if (!result.ok) {
           // Localized, not the raw code: this hook used to put the kebab-case string
           // straight in the transcript, so a Korean user tripping a bound read
@@ -365,7 +418,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
         resetStreamState();
       }
     },
-    [api, isStreaming, resetStreamState],
+    [api, abort, resetStreamState],
   );
 
   const newSession = useCallback(async () => {
@@ -399,14 +452,6 @@ export function useSideChat(api: LvisApi): UseSideChat {
     if (!api.sideChat) return { current: null, sessions: [] as SideChatSessionSummary[] };
     return api.sideChat.list();
   }, [api]);
-
-  const abort = useCallback(async () => {
-    if (!api.sideChat) return;
-    await api.sideChat.abort();
-    setEntries((p) => finalizeStreamingReasoning(dropPendingStreamingAssistant(p), thoughtRef.current));
-    setIsStreaming(false);
-    resetStreamState();
-  }, [api, resetStreamState]);
 
   // Per-turn provider-usage lookup keyed by turn-start index — same derivation
   // as ChatView so the shared TranscriptRenderer's WorkGroup step-count /

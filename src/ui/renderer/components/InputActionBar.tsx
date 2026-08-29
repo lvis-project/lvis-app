@@ -178,15 +178,6 @@ export function InputActionBar({
 }: InputActionBarProps) {
   const { t } = useTranslation();
   const assistantMenuRequestIdRef = useRef<string | null>(null);
-  const showStop = isBusy && !hasDraft;
-  const turnControlLabel = showStop
-    ? t("bottomActionRow.cancelButton")
-    : t("bottomActionRow.sendButton");
-  // Stop is always actionable; send is not whenever `isSendDisabled` says so —
-  // which covers BOTH "nothing to send" and the runtime blocks (no API key,
-  // runtime unavailable). One flag drives the `disabled` attribute and the
-  // quiet styling together, so the two can never disagree.
-  const turnControlInert = !showStop && isSendDisabled;
   const hasAssistantContext = !!activePreset && !activePreset.isDefault;
   const assistantTitle = [
     activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
@@ -263,21 +254,12 @@ export function InputActionBar({
             )}
           </Button>
 
-          {/* Single unified attach button — images, files, anything except the
-              deny-listed dangerous extensions. The chip count badge lives on
-              the inline composer chip (n/5), not here. */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void onAttach()}
+          <AttachButton
+            onAttach={onAttach}
             disabled={attachDisabled}
-            data-testid="iab-attach-button"
-            className="h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
-            title={attachButtonLabel(attachDisabled, attachDisabledReason, attachDisabledSubscriptionProvider)}
-            aria-label={attachButtonLabel(attachDisabled, attachDisabledReason, attachDisabledSubscriptionProvider)}
-          >
-            <Paperclip className="h-3.5 w-3.5" />
-          </Button>
+            disabledReason={attachDisabledReason}
+            disabledSubscriptionProvider={attachDisabledSubscriptionProvider}
+          />
         </div>
 
         {/* Trailing cluster — turn controls (? · thinking · send/stop). */}
@@ -287,49 +269,13 @@ export function InputActionBar({
         >
           <ShortcutsButton />
           {/* Reasoning control moved to the status sub-row (between model and dot). */}
-          {/* ONE turn-control button. The draft decides which verb it carries:
-              anything typed (or attached) means the user's next action is
-              "send", so it stays a send button even mid-run; an empty draft
-              during a run leaves "stop" as the only useful action. Idle with an
-              empty draft keeps the send glyph, disabled. ESC still cancels a
-              run regardless of what the button currently shows.
-              The label is the icon plus title/aria-label — the old
-              "전송 + ⏎ keycap" pair rendered the keycap as an empty box
-              (its background and its text both resolved to
-              `primary-foreground`, so the glyph disappeared into the chip). */}
-          <Button
-            type="button"
-            /* Quiet whenever it cannot act: a disabled SOLID button is a
-               near-black disc at 50% opacity, which reads as a broken grey
-               blob rather than "waiting". Inert it borrows the leading
-               cluster's outline treatment, so an idle composer shows one calm
-               row of controls; it goes solid the instant the button can
-               actually do something. */
-            variant={turnControlInert ? "outline" : "default"}
-            onClick={showStop ? onCancel : onSend}
-            disabled={turnControlInert}
-            data-testid={showStop ? "composer-cancel-button" : "composer-send-button"}
-            title={turnControlLabel}
-            aria-label={turnControlLabel}
-            className={
-              "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full p-0 transition-transform duration-(--motion-fast) ease-(--motion-ease-standard) active:scale-90 focus-visible:ring-input-bar-focus motion-reduce:transition-none motion-reduce:active:scale-100 " +
-              (turnControlInert
-                ? "border-input-bar-border bg-input-bar-subtle text-input-bar-action"
-                : "")
-            }
-          >
-            {/* Keyed so the send↔stop swap is a crossfade on the SAME button,
-                not an instant glyph substitution that reads as two buttons
-                trading places. */}
-            <span
-              key={showStop ? "stop" : "send"}
-              className="lvis-turn-control-glyph inline-flex items-center justify-center"
-            >
-              {showStop
-                ? <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
-                : <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />}
-            </span>
-          </Button>
+          <TurnControlButton
+            isBusy={isBusy}
+            hasDraft={hasDraft}
+            isSendDisabled={isSendDisabled}
+            onSend={onSend}
+            onCancel={onCancel}
+          />
         </div>
       </div>
 
@@ -346,6 +292,116 @@ export function InputActionBar({
         onToggleThinking={onToggleThinking}
       />
     </div>
+  );
+}
+
+interface TurnControlButtonProps {
+  isBusy: boolean;
+  /** See {@link InputActionBarProps.hasDraft}. */
+  hasDraft: boolean;
+  isSendDisabled: boolean;
+  onSend: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * ONE turn-control button, shared by every composer surface. The draft decides
+ * which verb it carries: anything typed (or attached) means the user's next
+ * action is "send", so it stays a send button even mid-run; an empty draft
+ * during a run leaves "stop" as the only useful action. Idle with an empty
+ * draft keeps the send glyph, disabled. ESC still cancels a run regardless of
+ * what the button currently shows.
+ *
+ * The label is the icon plus title/aria-label — the old "전송 + ⏎ keycap" pair
+ * rendered the keycap as an empty box (its background and its text both
+ * resolved to `primary-foreground`, so the glyph disappeared into the chip).
+ */
+export function TurnControlButton({
+  isBusy,
+  hasDraft,
+  isSendDisabled,
+  onSend,
+  onCancel,
+}: TurnControlButtonProps) {
+  const { t } = useTranslation();
+  const showStop = isBusy && !hasDraft;
+  const turnControlLabel = showStop
+    ? t("bottomActionRow.cancelButton")
+    : t("bottomActionRow.sendButton");
+  // Stop is always actionable; send is not whenever `isSendDisabled` says so —
+  // which covers BOTH "nothing to send" and the runtime blocks (no API key,
+  // runtime unavailable). One flag drives the `disabled` attribute and the
+  // quiet styling together, so the two can never disagree.
+  const turnControlInert = !showStop && isSendDisabled;
+  return (
+    <Button
+      type="button"
+      /* Quiet whenever it cannot act: a disabled SOLID button is a
+         near-black disc at 50% opacity, which reads as a broken grey
+         blob rather than "waiting". Inert it borrows the leading
+         cluster's outline treatment, so an idle composer shows one calm
+         row of controls; it goes solid the instant the button can
+         actually do something. */
+      variant={turnControlInert ? "outline" : "default"}
+      onClick={showStop ? onCancel : onSend}
+      disabled={turnControlInert}
+      data-testid={showStop ? "composer-cancel-button" : "composer-send-button"}
+      title={turnControlLabel}
+      aria-label={turnControlLabel}
+      className={
+        "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full p-0 transition-transform duration-(--motion-fast) ease-(--motion-ease-standard) active:scale-90 focus-visible:ring-input-bar-focus motion-reduce:transition-none motion-reduce:active:scale-100 " +
+        (turnControlInert
+          ? "border-input-bar-border bg-input-bar-subtle text-input-bar-action"
+          : "")
+      }
+    >
+      {/* Keyed so the send↔stop swap is a crossfade on the SAME button,
+          not an instant glyph substitution that reads as two buttons
+          trading places. */}
+      <span
+        key={showStop ? "stop" : "send"}
+        className="lvis-turn-control-glyph inline-flex items-center justify-center"
+      >
+        {showStop
+          ? <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
+          : <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />}
+      </span>
+    </Button>
+  );
+}
+
+interface AttachButtonProps {
+  onAttach: () => void | Promise<void>;
+  disabled: boolean;
+  disabledReason?: "limit" | "no-api-key" | "subscription-unsupported" | "runtime-pending";
+  disabledSubscriptionProvider?: string;
+}
+
+/**
+ * Single unified attach button — images, files, anything except the
+ * deny-listed dangerous extensions. The chip count badge lives on the inline
+ * composer chip (n/5), not here. Shared by every composer surface.
+ */
+export function AttachButton({
+  onAttach,
+  disabled,
+  disabledReason = "limit",
+  disabledSubscriptionProvider,
+}: AttachButtonProps) {
+  const label = attachButtonLabel(disabled, disabledReason, disabledSubscriptionProvider);
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => void onAttach()}
+      disabled={disabled}
+      data-testid="iab-attach-button"
+      className="h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
+      title={label}
+      aria-label={label}
+    >
+      <Paperclip className="h-3.5 w-3.5" />
+    </Button>
   );
 }
 
@@ -696,7 +752,7 @@ export function makeBottomActionSendHandler(
  * tooltip; click opens a tidy popover listing every composer keybinding.
  * Fixed form (h-[26px] w-[26px]) keeps the action row layout stable.
  */
-function ShortcutsButton() {
+export function ShortcutsButton() {
   const { t } = useTranslation();
   const label = t("bottomActionRow.shortcuts");
   return (

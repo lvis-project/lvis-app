@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import type React from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import {
@@ -8,10 +8,47 @@ import {
 } from "../state/message-queue-store.js";
 import type { Attachment } from "../types/attachments.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
-import type { LvisApi } from "../types.js";
+import type { StreamEvent } from "../../../lib/chat-stream-state.js";
+import type { ComposerHandle, ComposerSurface } from "../components/Composer.js";
+
+/**
+ * Mid-turn guidance: the brake-point hand-off (`tool_end` → engine round
+ * boundary) and the ⌘K shortcut. Only a loop that exposes a guide channel can
+ * offer it; a surface without one drains its queue at the end of the turn
+ * instead, and the shortcut is not registered.
+ */
+interface MessageQueueGuide {
+  inject: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onError: (message: string) => void;
+}
+
+/**
+ * Where the dev/e2e seam publishes each surface's live store. One key per
+ * surface: the side chat mounting must not shadow the main store a Playwright
+ * spec is asserting against.
+ */
+const DEV_STORE_KEY: Record<ComposerSurface, "__lvis_message_queue_store__" | "__lvis_side_chat_message_queue_store__"> = {
+  main: "__lvis_message_queue_store__",
+  side: "__lvis_side_chat_message_queue_store__",
+};
 
 export interface UseMessageQueueParams {
-  api: LvisApi;
+  /** Which composer this queue belongs to — selects the dev/e2e store seam. */
+  surface: ComposerSurface;
+  /**
+   * The stream this queue drains against: the group's `onChatStream` for a
+   * main tile, `sideChat.onStream` for the side chat. The two are isolated by
+   * wire channel, so a queue subscribed to the wrong one would drain on the
+   * other surface's `done`.
+   */
+  subscribeStream: (handler: (event: StreamEvent) => void) => () => void;
+  /**
+   * The composer whose textarea the window-level shortcuts (⌘⏎, Esc) act on.
+   * Several composers are mounted at once — one per tile, plus the side chat
+   * — and every one of them carries the same test id, so ownership is decided
+   * by element identity, not by attribute.
+   */
+  composerRef: RefObject<ComposerHandle | null>;
   currentSessionId: string;
   question: string;
   attachments: Attachment[];
@@ -23,8 +60,7 @@ export interface UseMessageQueueParams {
     intent?: UserKeyboardIntentSnapshot,
     opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
   ) => void | Promise<void>;
-  onGuide: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
-  onGuideError: (message: string) => void;
+  guide?: MessageQueueGuide;
   onAbort: () => void | Promise<void>;
   /**
    * First refusal on composer submissions. Returns true when it has consumed
@@ -45,13 +81,17 @@ export interface UseMessageQueueResult {
 
 /**
  * Owns the mid-turn message queue: the per-view store (+ dev/e2e window hook +
- * session-change clear), the stream brake-point drains (tool_end → onGuide,
+ * session-change clear), the stream brake-point drains (tool_end → guide,
  * done → queue-auto onAsk with re-entrancy guard), and the composer/streaming
  * keyboard flows (Enter morph, ESC inject-or-abort, ⌘⏎ immediate inject, ⌘K
- * guide). Keyboard/effect dependency arrays are preserved byte-identically.
+ * guide). One hook serves every composer surface — a main tile and the side
+ * chat differ only in the stream they drain against and whether the loop
+ * behind them exposes a guide channel.
  */
 export function useMessageQueue({
-  api,
+  surface,
+  subscribeStream,
+  composerRef,
   currentSessionId,
   question,
   attachments,
@@ -59,8 +99,7 @@ export function useMessageQueue({
   setQuestion,
   setAttachments,
   onAsk,
-  onGuide,
-  onGuideError,
+  guide,
   onAbort,
   interceptSubmit,
 }: UseMessageQueueParams): UseMessageQueueResult {
@@ -78,19 +117,28 @@ export function useMessageQueue({
   // dev/e2e runtime test hook — Playwright launches production-built renderer
   // assets, so this must use preload runtime env instead of build-time NODE_ENV.
   useEffect(() => {
-    const w = window as unknown as {
-      __lvis_message_queue_store__?: MessageQueueStore;
+    const key = DEV_STORE_KEY[surface];
+    const w = window as unknown as Partial<Record<typeof key, MessageQueueStore>> & {
       lvis?: { env?: { isDev?: boolean; isE2E?: boolean } };
     };
     if (w.lvis?.env?.isDev === true && w.lvis?.env?.isE2E === true) {
-      w.__lvis_message_queue_store__ = messageQueueStore;
+      w[key] = messageQueueStore;
     }
     return () => {
-      if (w.__lvis_message_queue_store__ === messageQueueStore) {
-        delete w.__lvis_message_queue_store__;
+      if (w[key] === messageQueueStore) {
+        delete w[key];
       }
     };
-  }, [messageQueueStore]);
+  }, [messageQueueStore, surface]);
+
+  /** True when the keyboard event was raised inside THIS composer's textarea. */
+  const ownsTarget = useCallback(
+    (target: EventTarget | null): boolean => {
+      const textarea = composerRef.current?.textarea();
+      return textarea !== null && textarea !== undefined && target === textarea;
+    },
+    [composerRef],
+  );
   useEffect(() => {
     messageQueueStore.clear();
     // The guide-flush refs are turn-scoped, and `done` is what normally clears
@@ -127,6 +175,7 @@ export function useMessageQueue({
    *     the `done` handler injects them as a fresh turn, so nothing is lost.
    */
   const flushQueueViaGuide = useCallback(() => {
+    if (!guide) return;
     if (guideFlushInflightRef.current || guideFlushBlockedRef.current) return;
     const pending = messageQueueStore.getPending();
     if (pending.length === 0) return;
@@ -136,7 +185,7 @@ export function useMessageQueue({
     guideFlushInflightRef.current = true;
     void (async () => {
       try {
-        const result = await onGuide(formatted);
+        const result = await guide.inject(formatted);
         if (result?.ok === true) {
           // Match by id AND text. Rows stay editable while the call is in
           // flight, so an id alone would mark a row the user rewrote after the
@@ -163,16 +212,16 @@ export function useMessageQueue({
           reason === "no-active-turn" ? t("chatView.queueFlushFailReasonNoTurn") :
           `(${reason})`;
         guideFlushBlockedRef.current = true;
-        onGuideError(t("chatView.queueFlushFailMessage", { count, reasonLabel }));
+        guide.onError(t("chatView.queueFlushFailMessage", { count, reasonLabel }));
         console.warn(`[message-queue] guide flush refused (${reason}), items kept:`, formatted.slice(0, 80));
       } finally {
         guideFlushInflightRef.current = false;
       }
     })();
-  }, [messageQueueStore, onGuide, onGuideError]);
+  }, [messageQueueStore, guide, t]);
 
   useEffect(() => {
-    const unsub = api.onChatStream((ev) => {
+    const unsub = subscribeStream((ev) => {
       if (ev.type === "tool_end") {
         // mid-turn brake-point — 엔진 round boundary 에 합류 (onGuide).
         flushQueueViaGuide();
@@ -222,7 +271,7 @@ export function useMessageQueue({
       }
     });
     return unsub;
-  }, [api, flushQueueViaGuide, messageQueueStore, onAsk]);
+  }, [subscribeStream, flushQueueViaGuide, messageQueueStore, onAsk]);
 
   // streaming false 전이 fallback 폐기 (2026-05-15 사용자 피드백):
   // AskUserQuestion 카드 깜박임 등으로 streaming 이 일시 false → true 로
@@ -323,19 +372,15 @@ export function useMessageQueue({
         messageQueueStore.clearSelection();
         return;
       }
-      const target = e.target as HTMLElement | null;
-      const inComposer =
-        target?.getAttribute?.("data-testid") === "composer-textarea";
-      if (!inComposer) return;
+      if (!ownsTarget(e.target)) return;
       e.preventDefault();
-      // 사용자 의도 (2026-05-15): ESC = LLM abort + 큐를 새 user message 로
-      // inject. 멈춤만 하는 게 아니고 큐 항목이 입력으로 보내짐. 빈 큐면
-      // 단순 abort. handleAsk 가 자체 abort 처리.
+      // ESC = LLM abort + the queue injected as a new user message — not a
+      // bare stop. An empty queue is a plain abort; onAsk aborts for itself.
       flushQueueAsUserMessage();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [streaming, messageQueueStore, onAbort]);
+  }, [streaming, messageQueueStore, ownsTarget, flushQueueAsUserMessage]);
 
   // ⌘⏎ — composer textarea 에서 즉시 주입. busy 시 = 인터럽트 (LLM abort + 새
   // turn). idle 시도 동작 (큐가 있으면 큐+입력 inject, 없으면 입력만 send).
@@ -355,19 +400,17 @@ export function useMessageQueue({
       ) {
         return;
       }
-      const target = e.target as HTMLElement | null;
-      const isComposerTextarea =
-        target?.getAttribute?.("data-testid") === "composer-textarea";
-      if (!isComposerTextarea) return;
+      if (!ownsTarget(e.target)) return;
       e.preventDefault();
       handleImmediateInject();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleImmediateInject]);
+  }, [handleImmediateInject, ownsTarget]);
 
   // ⌘K = 가이드 호출. text 비어 있으면 noop. busy 와 무관 (idle 에서도 가이드 가능).
   useEffect(() => {
+    if (!guide) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "k" && e.key !== "K") return;
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -383,7 +426,7 @@ export function useMessageQueue({
       if (text.length === 0) return;
       e.preventDefault();
       void (async () => {
-        const result = await onGuide(text);
+        const result = await guide.inject(text);
         if (result?.ok === true) {
           setQuestion("");
         } else if (result?.ok === false) {
@@ -392,13 +435,13 @@ export function useMessageQueue({
             result.error === "too-long" ? t("chatView.guideErrorTooLong") :
             result.error === "no-active-turn" ? t("chatView.guideErrorNoActiveTurn") :
             t("chatView.guideErrorFailed", { error: result.error });
-          onGuideError(message);
+          guide.onError(message);
         }
       })();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [question, onGuide, onGuideError, setQuestion]);
+  }, [question, guide, setQuestion, t]);
 
   return {
     messageQueueStore,

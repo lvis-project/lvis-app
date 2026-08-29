@@ -71,9 +71,12 @@ test.describe("side-chat tab", () => {
     await expect(page.getByTestId("side-chat-view")).toBeVisible();
     await expect(page.getByTestId("chat-side-panel-side-chat-placeholder")).toHaveCount(0);
 
-    // Its own composer + New affordance are present, and the composer is
-    // independent of the main chat's textarea.
-    await expect(page.getByTestId("side-chat-composer")).toBeVisible();
+    // The SHARED composer (same component as the main dock, at the side
+    // surface) + the New affordance are present; the field is the side chat's
+    // own instance, independent of the main chat's textarea.
+    const sideView = page.getByTestId("side-chat-view");
+    await expect(sideView.getByTestId("composer-textarea")).toBeVisible();
+    await expect(sideView.getByTestId("composer-textarea")).toHaveAttribute("data-composer-surface", "side");
     await expect(page.getByTestId("side-chat-new")).toBeVisible();
     // Idle: New is enabled (only disabled mid-stream — MAJOR 2 UI guard).
     await expect(page.getByTestId("side-chat-new")).toBeEnabled();
@@ -86,8 +89,9 @@ test.describe("side-chat tab", () => {
 
     // Start a turn so the reducer arms its stream (send resolves only when the
     // turn ends, but the transcript is driven by the DEDICATED side stream).
-    await page.getByTestId("side-chat-composer").fill("run a tool");
-    await page.getByTestId("side-chat-send").click();
+    const sideView = page.getByTestId("side-chat-view");
+    await sideView.getByTestId("composer-textarea").fill("run a tool");
+    await sideView.getByTestId("composer-send-button").click();
 
     // Inject synthetic side-chat frames onto the DEDICATED side channel via the
     // dev-only E2E seam (LVIS_DEV=1). This proves the side transcript renders
