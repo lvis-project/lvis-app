@@ -6,7 +6,7 @@ export function makeStubLocalApi(): LocalApi {
 }
 
 /** The frozen "now" the a2a remote-store suites share so persisted stamps compare exactly. */
-export const A2A_FIXED_NOW_ISO = "2026-07-16T00:00:00.000Z";
+const A2A_FIXED_NOW_ISO = "2026-07-16T00:00:00.000Z";
 
 export function fixedNow(): Date {
   return new Date(A2A_FIXED_NOW_ISO);

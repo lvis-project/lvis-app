@@ -28,7 +28,7 @@ export function tempRoutinesStore(): {
 }
 
 /** ISO stamp `offsetMs` from now. */
-export function isoFromNow(offsetMs: number): string {
+function isoFromNow(offsetMs: number): string {
   return new Date(Date.now() + offsetMs).toISOString();
 }
 
