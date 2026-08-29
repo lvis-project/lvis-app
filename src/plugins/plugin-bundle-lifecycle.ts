@@ -42,6 +42,7 @@ import {
 } from "./plugin-generation-health-journal.js";
 import { errorMessage } from "../shared/error-message.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { sleep } from "../shared/abortable-deadline.js";
 
 const log = createLogger("plugin-bundle-lifecycle");
 const MAX_RETIREMENT_ATTEMPTS = 3;
@@ -1013,7 +1014,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
           errorMessage(error),
         );
         if (attempt >= MAX_RETIREMENT_ATTEMPTS) throw error;
-        await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, attempt * 100));
+        await sleep(attempt * 100);
       }
     }
   }
@@ -1044,7 +1045,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
             );
             return;
           }
-          await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, attempt * 100));
+          await sleep(attempt * 100);
         }
       }
     })();

@@ -86,6 +86,7 @@ import {
   isCommittedPluginGenerationPublicationError,
   type CommittedPluginGenerationPublicationError,
 } from "./committed-generation-publication-error.js";
+import { sleep } from "../shared/abortable-deadline.js";
 export { assertSafeArtifactSlug } from "./plugin-id.js";
 
 /** Shared last-line defense for every marketplace artifact consumer. */
@@ -242,14 +243,14 @@ export async function retryOnTransientFsLock<T>(
 ): Promise<T> {
   const attempts = opts.attempts ?? BACKGROUND_ATTEMPTS;
   const delayMs = opts.delayMs ?? transientFsLockDelayMs;
-  const sleep = opts.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
+  const wait = opts.sleep ?? sleep;
   for (let attempt = 1; ; attempt++) {
     try {
       return await op();
     } catch (err) {
       if (attempt >= attempts || !isTransientFsLockError(err)) throw err;
       opts.onRetry?.(attempt, (err as NodeJS.ErrnoException).code);
-      await sleep(delayMs(attempt));
+      await wait(delayMs(attempt));
     }
   }
 }

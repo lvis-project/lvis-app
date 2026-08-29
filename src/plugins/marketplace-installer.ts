@@ -27,6 +27,7 @@ import {
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { sleep } from "../shared/abortable-deadline.js";
 
 /**
  * Minimal HTTP surface the installer needs. Lets callers inject either
@@ -571,27 +572,16 @@ function backoffMs(attempt: number): number {
   return Math.pow(2, attempt) * 500;
 }
 
-function sleep(ms: number, signal: AbortSignal | undefined, slug: string, version: string): Promise<void> {
-  if (signal?.aborted) {
-    return Promise.reject(new MarketplaceArtifactLimitError(
+/** `sleep` rejects only when `signal` aborts; that rejection becomes the artifact-download error. */
+async function sleepUnlessDownloadAborted(ms: number, signal: AbortSignal | undefined, slug: string, version: string): Promise<void> {
+  try {
+    await sleep(ms, signal);
+  } catch {
+    throw new MarketplaceArtifactLimitError(
       "ARTIFACT_DOWNLOAD_ABORTED",
       `marketplace artifact download aborted for ${slug}@${version}`,
-    ));
+    );
   }
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new MarketplaceArtifactLimitError(
-        "ARTIFACT_DOWNLOAD_ABORTED",
-        `marketplace artifact download aborted for ${slug}@${version}`,
-      ));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 async function sleepWithinRetryDeadline(
@@ -608,7 +598,7 @@ async function sleepWithinRetryDeadline(
       `download retry deadline exceeded for ${slug}@${version}`,
     );
   }
-  await sleep(Math.min(requestedMs, remainingMs), signal, slug, version);
+  await sleepUnlessDownloadAborted(Math.min(requestedMs, remainingMs), signal, slug, version);
   if (Date.now() >= deadlineMs) {
     throw new MarketplaceInstallerError(
       "RETRY_EXHAUSTED",

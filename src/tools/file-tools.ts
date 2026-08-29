@@ -44,6 +44,7 @@ import {
   type ToolExecutionContext,
   type ToolResult,
 } from "./base.js";
+import { sleep } from "../shared/abortable-deadline.js";
 
 type ToolErrorResult = ToolResult & { isError: true };
 type Result<T> = { ok: true; value: T } | { ok: false; error: ToolErrorResult };
@@ -939,10 +940,6 @@ function isTransientRenameError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const code = (err as { code?: unknown }).code;
   return code === "EPERM" || code === "EACCES" || code === "EBUSY";
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function toolError(output: string): ToolErrorResult {

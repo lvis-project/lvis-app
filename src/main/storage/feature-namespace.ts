@@ -32,6 +32,7 @@ import {
   BACKGROUND_ATTEMPTS,
   transientFsLockDelayMs,
 } from "../../lib/transient-fs-lock-retry.js";
+import { sleep } from "../../shared/abortable-deadline.js";
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -122,7 +123,7 @@ async function renameStagedFile(from: string, to: string): Promise<void> {
         RENAME_FILE_LOCK_CODES.has(code) &&
         attempt < BACKGROUND_ATTEMPTS;
       if (!retryable) throw err;
-      await new Promise<void>((resolve) => setTimeout(resolve, transientFsLockDelayMs(attempt)));
+      await sleep(transientFsLockDelayMs(attempt));
     }
   }
 }
