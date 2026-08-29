@@ -618,22 +618,31 @@ function isValidA2AWireMetadataId(id: unknown): id is string {
 const LEGACY_ROW_ID_MAX_ATTEMPTS = 8;
 
 /**
- * Deterministic per-row identity for a session row that has none.
+ * Deterministic per-row identity for a session row read off disk that has none.
+ *
+ * This is the OTHER of the two row-id minters, and the division between them is
+ * which row needs a name. `stampMessageId` (engine/conversation-history.ts)
+ * owns rows that exist in memory — appended live, or restored into a
+ * ConversationHistory — and mints a random `createDlpSafeUuid` because nothing
+ * else will ever have to reproduce that name. This one owns rows that predate
+ * ids in a file, and must be derived: see `stampLegacyRowIds` for why.
  *
  * Hashed rather than concatenated because the id is persisted on the next save
  * and read back: the digest is hex, so it cannot carry anything a redaction
  * pass would rewrite, and the DLP check still proves it for the same reason
  * `createDlpSafeUuid` proves its own output. The attempt counter keeps the
  * retry deterministic, so a second read of the same file lands on the same id
- * as the first.
+ * as the first — and it is also what lets `taken` be honoured without
+ * reaching for randomness.
  */
-function legacyRowId(sessionId: string, index: number): string {
+function legacyRowId(sessionId: string, index: number, taken: ReadonlySet<string>): string {
   for (let attempt = 0; attempt < LEGACY_ROW_ID_MAX_ATTEMPTS; attempt += 1) {
     const digest = createHash("sha256")
       .update(`${sessionId}:${index}:${attempt}`)
       .digest("hex")
       .slice(0, 32);
     const candidate = `row-${digest}`;
+    if (taken.has(candidate)) continue;
     if (maskSensitiveData(candidate).detections.length === 0) return candidate;
   }
   throw new Error("[legacy-row-id] could not derive a redaction-safe row identity");
@@ -651,16 +660,30 @@ function legacyRowId(sessionId: string, index: number): string {
  * Deriving from (session, position in the file just read) makes the two reads
  * agree without either of them writing anything back.
  *
- * Only rows with no usable id are touched; once a session has been written by a
- * build that mints on append, this does nothing.
+ * The counterpart is `stampMessageId` in engine/conversation-history.ts, which
+ * owns every row that already lives in memory. Only rows with no usable id are
+ * touched here; once a session has been written by a build that mints on
+ * append, this does nothing.
+ *
+ * Duplicate ids are rejected the same way `ConversationHistory.restore` rejects
+ * them, and for the same reason: two rows answering to one id is worse than a
+ * row with none, because a lookup silently takes the first. A hand-merged or
+ * tampered file can carry duplicates, and this reader must not pass them
+ * through just because it happens to be the older of the two paths.
  */
 function stampLegacyRowIds(sessionId: string, messages: unknown[]): unknown[] {
+  const taken = new Set<string>();
   return messages.map((message, index) => {
     if (!isRecord(message)) return message;
     const meta = isRecord(message.meta) ? message.meta : undefined;
     const existing = meta?.messageId;
-    if (typeof existing === "string" && existing.length > 0) return message;
-    return { ...message, meta: { ...(meta ?? {}), messageId: legacyRowId(sessionId, index) } };
+    if (typeof existing === "string" && existing.length > 0 && !taken.has(existing)) {
+      taken.add(existing);
+      return message;
+    }
+    const messageId = legacyRowId(sessionId, index, taken);
+    taken.add(messageId);
+    return { ...message, meta: { ...(meta ?? {}), messageId } };
   });
 }
 
