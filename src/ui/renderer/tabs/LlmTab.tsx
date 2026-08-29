@@ -1202,6 +1202,14 @@ export function LlmTab(props: LlmTabProps) {
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [modelLists, setModelLists] = useState<Record<string, ModelListState>>({});
   const modelListsRef = useRef<Record<string, ModelListState>>({});
+  /**
+   * Keys with a catalogue request out right now.
+   *
+   * Per instance, not per launch: a request belongs to the component that
+   * made it, and the settings tab unmounting mid-request must not leave the
+   * next mount unable to ask.
+   */
+  const modelListRequestsInFlight = useRef(new Set<string>());
   const modelListCacheRef = useRef<LlmModelListCache>({});
   const setModelListState = useCallback((key: string, state: ModelListState) => {
     setModelLists((current) => {
@@ -1232,86 +1240,103 @@ export function LlmTab(props: LlmTabProps) {
         provider === "openai-compatible" ? options.credentialScope?.trim() ?? "" : "";
       const key = llmModelListCacheKey(provider, baseUrl, credentialScope);
       const existing = modelListsRef.current[key];
+      const inFlight = modelListRequestsInFlight.current;
       // One request in flight per key. This is the only guard `force` does not
       // lift: a second press while the first is still out would not produce a
       // newer answer, only a second spinner.
-      if (existing?.status === "loading") return;
+      if (inFlight.has(key)) return;
       // See `modelListRefreshedThisLaunch` for the policy this enforces.
       if (!options.force && modelListRefreshedThisLaunch.has(key)) return;
-      // Claimed BEFORE anything is awaited. More than one caller asks for the
-      // same key — a row's card, the fallback panel, the launch pass — and a
-      // guard set only after an await is no guard at all for whoever reads it
-      // during that await.
+      // Both claimed BEFORE anything is awaited. More than one caller asks for
+      // the same key — a row's card, the fallback panel, the launch pass, a
+      // second press — and a guard set only after an await is no guard at all
+      // for whoever reads it during that await. The `loading` STATE is not
+      // that guard: it is written only once a request actually goes out, so a
+      // row with no key stored never shows a sync that was never made.
       modelListRefreshedThisLaunch.add(key);
-      // A fixed-endpoint vendor reaches its own /models with a stored key, so a
-      // request with nothing stored could only come back 401 — and a red "sync
-      // failed" on a card whose subscription is signed in and healthy says the
-      // wrong thing. Asked here, on the edge of actually fetching, so a
-      // catalogue that is already in hand still stands.
-      if (!baseUrl && STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(provider)) {
-        const hasCredential = await api.hasApiKey(provider);
-        if (!hasCredential) {
-          // Nothing was asked, so the launch owes this key a request still:
-          // storing a key is a change to this row's inputs, and it gets that
-          // request then.
-          forgetModelListLaunchRefresh(key);
-          setModelListState(key, { status: "needs-credential" });
-          return;
-        }
-      }
-      setModelListState(key, existing?.options
-        ? { ...existing, status: "loading" }
-        : { status: "loading" });
+      inFlight.add(key);
       try {
-        const result = await api.listLlmModels({
-          vendor: provider,
-          ...(baseUrl ? { baseUrl } : {}),
-          ...(credentialScope ? { credentialScope } : {}),
-          ...(options.modelDiscoveryPolicy ? { modelDiscoveryPolicy: options.modelDiscoveryPolicy } : {}),
-        });
-        if (result.ok) {
-          const nextEntry: LlmModelListCacheEntry = {
-            vendor: result.vendor,
+        // A fixed-endpoint vendor reaches its own /models with a stored key, so a
+        // request with nothing stored could only come back 401 — and a red "sync
+        // failed" on a card whose subscription is signed in and healthy says the
+        // wrong thing. Asked here, on the edge of actually fetching, so a
+        // catalogue that is already in hand still stands.
+        if (!baseUrl && STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(provider)) {
+          const hasCredential = await api.hasApiKey(provider);
+          if (!hasCredential) {
+            // Nothing was asked, so the launch owes this key a request still:
+            // storing a key is a change to this row's inputs, and it gets that
+            // request then.
+            forgetModelListLaunchRefresh(key);
+            setModelListState(key, { status: "needs-credential" });
+            return;
+          }
+        }
+        setModelListState(key, existing?.options
+          ? { ...existing, status: "loading" }
+          : { status: "loading" });
+        try {
+          const result = await api.listLlmModels({
+            vendor: provider,
             ...(baseUrl ? { baseUrl } : {}),
             ...(credentialScope ? { credentialScope } : {}),
-            endpoint: result.endpoint,
-            models: result.models,
-            ...(result.modelEntries ? { modelEntries: result.modelEntries } : {}),
-            fetchedAt: result.fetchedAt,
-          };
-          const nextCache = {
-            ...modelListCacheRef.current,
-            [key]: nextEntry,
-          };
-          modelListCacheRef.current = nextCache;
-          setModelListState(key, {
-            status: "ready",
-            options: result.models,
-            entries: result.modelEntries,
-            endpoint: result.endpoint,
-            fetchedAt: result.fetchedAt,
-            source: "network",
+            ...(options.modelDiscoveryPolicy ? { modelDiscoveryPolicy: options.modelDiscoveryPolicy } : {}),
           });
-          const markPersistError = (err: unknown): void => {
-            const latest = modelListsRef.current[key];
-            if (latest?.status !== "ready") return;
+          if (result.ok) {
+            const nextEntry: LlmModelListCacheEntry = {
+              vendor: result.vendor,
+              ...(baseUrl ? { baseUrl } : {}),
+              ...(credentialScope ? { credentialScope } : {}),
+              endpoint: result.endpoint,
+              models: result.models,
+              ...(result.modelEntries ? { modelEntries: result.modelEntries } : {}),
+              fetchedAt: result.fetchedAt,
+            };
+            const nextCache = {
+              ...modelListCacheRef.current,
+              [key]: nextEntry,
+            };
+            modelListCacheRef.current = nextCache;
             setModelListState(key, {
-              ...latest,
-              persistError: err instanceof Error ? err.message : String(err),
+              status: "ready",
+              options: result.models,
+              entries: result.modelEntries,
+              endpoint: result.endpoint,
+              fetchedAt: result.fetchedAt,
+              source: "network",
             });
-          };
-          void api.updateSettings({ llm: { modelListCache: nextCache } })
-            .then((persistResult) => {
-              if (isIpcErrorResult(persistResult)) {
-                markPersistError(persistResult.message ?? persistResult.error);
-              }
-            })
-            .catch(markPersistError);
-        } else {
+            const markPersistError = (err: unknown): void => {
+              const latest = modelListsRef.current[key];
+              if (latest?.status !== "ready") return;
+              setModelListState(key, {
+                ...latest,
+                persistError: err instanceof Error ? err.message : String(err),
+              });
+            };
+            void api.updateSettings({ llm: { modelListCache: nextCache } })
+              .then((persistResult) => {
+                if (isIpcErrorResult(persistResult)) {
+                  markPersistError(persistResult.message ?? persistResult.error);
+                }
+              })
+              .catch(markPersistError);
+          } else {
+            const latest = modelListsRef.current[key] ?? existing;
+            setModelListState(key, {
+              status: "error",
+              error: result.message ?? result.error,
+              options: latest?.options,
+              entries: latest?.entries,
+              endpoint: latest?.endpoint,
+              fetchedAt: latest?.fetchedAt,
+              source: latest?.source,
+            });
+          }
+        } catch (err) {
           const latest = modelListsRef.current[key] ?? existing;
           setModelListState(key, {
             status: "error",
-            error: result.message ?? result.error,
+            error: err instanceof Error ? err.message : String(err),
             options: latest?.options,
             entries: latest?.entries,
             endpoint: latest?.endpoint,
@@ -1319,17 +1344,8 @@ export function LlmTab(props: LlmTabProps) {
             source: latest?.source,
           });
         }
-      } catch (err) {
-        const latest = modelListsRef.current[key] ?? existing;
-        setModelListState(key, {
-          status: "error",
-          error: err instanceof Error ? err.message : String(err),
-          options: latest?.options,
-          entries: latest?.entries,
-          endpoint: latest?.endpoint,
-          fetchedAt: latest?.fetchedAt,
-          source: latest?.source,
-        });
+      } finally {
+        inFlight.delete(key);
       }
     },
     [api, setModelListState, settingsLoaded],

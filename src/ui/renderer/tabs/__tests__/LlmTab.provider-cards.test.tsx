@@ -1467,6 +1467,51 @@ describe("LlmTab model lists are cached, not re-fetched", () => {
     expect(askedCount(api)).toBe(1);
   });
 
+  it("asks a fixed-endpoint vendor once when its refresh is pressed twice in a row", async () => {
+    // Such a vendor is asked whether it holds a key before anything is
+    // fetched. A second press landing during that question is the same
+    // request, and the answer to the first is the answer to both.
+    const { api } = presetProfile({}, {
+      hasApiKey: storedKeysFor("openai"),
+      listLlmModels: answering(["gpt-from-the-endpoint"]),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-subline:openai"))
+      .toHaveAttribute("data-provider-sync-status", "ready"));
+    expect(askedCount(api)).toBe(1);
+
+    const refresh = screen.getByTestId("llm-tab:connection-refresh:openai");
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+
+    await waitFor(() => expect(askedCount(api)).toBe(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(askedCount(api)).toBe(2);
+  });
+
+  it("shows no sync on a keyless row while the credential store is still answering", async () => {
+    // The in-flight claim is taken before the credential question, but the
+    // visible "syncing" state is not: a row with nothing stored makes no
+    // request, and must not look for a moment as if it had.
+    const { api } = presetProfile({}, {
+      hasApiKey: vi.fn(() => new Promise<boolean>(() => {})),
+    });
+    installSubscription([codexView({
+      status: { runtime: "ready", connection: "connected", models: [] },
+    })]);
+    await renderTab(api, { model: "", hasKey: false });
+
+    await waitFor(() => expect(api.hasApiKey).toHaveBeenCalledWith("openai"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(askedCount(api)).toBe(0);
+    expect(document.querySelector("[data-provider-sync-status=\"loading\"]")).toBeNull();
+    expect(document.querySelector(".animate-spin")).toBeNull();
+  });
+
   it("offers a refresh only on the cards that have a list to refresh", async () => {
     const { api } = presetProfile({
       vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT }, "azure-foundry": { baseUrl: AZURE_ENDPOINT } },
