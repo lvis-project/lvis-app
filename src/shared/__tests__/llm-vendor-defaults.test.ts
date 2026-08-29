@@ -22,6 +22,7 @@ import {
   normalizeLlmVendorModel,
   DEFAULT_LLM_VENDOR,
   narrowLlmVendor,
+  COPILOT_BASE_URL,
 } from "../llm-vendor-defaults.js";
 
 describe("isLLMVendor", () => {
@@ -254,5 +255,11 @@ describe("narrowLlmVendor", () => {
     expect(narrowLlmVendor("not-a-vendor")).toBe(DEFAULT_LLM_VENDOR);
     expect(narrowLlmVendor(undefined)).toBe(DEFAULT_LLM_VENDOR);
     expect(narrowLlmVendor(42)).toBe(DEFAULT_LLM_VENDOR);
+  });
+});
+
+describe("COPILOT_BASE_URL", () => {
+  it("is the GitHub models inference endpoint both provider paths fall back to", () => {
+    expect(COPILOT_BASE_URL).toBe("https://models.github.ai/inference");
   });
 });

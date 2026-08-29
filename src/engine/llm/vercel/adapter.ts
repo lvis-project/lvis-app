@@ -35,6 +35,7 @@ import type {
 import {
   isOpenAICompatibleVendor,
   isSelfHostedVllmVendor,
+  COPILOT_BASE_URL,
 } from "../../../shared/llm-vendor-defaults.js";
 import { createLogger } from "../../../lib/logger.js";
 import { vendorCarriesToolResultImage } from "../../../shared/multimodal-token-estimate.js";
@@ -66,7 +67,6 @@ import { toGrammarSafeToolSchemas } from "../grammar-safe-tool-schema.js";
 /** Vendor slot recognised by VercelUnifiedProvider. */
 export type VercelVendor = LLMVendor;
 
-const COPILOT_BASE_URL = "https://models.github.ai/inference";
 /**
  * Provider name handed to `createOpenAICompatible({ name })`. The @ai-sdk
  * openai-compatible model derives `providerOptionsName` from this (the part

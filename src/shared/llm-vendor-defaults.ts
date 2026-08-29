@@ -404,6 +404,9 @@ export function isMarketplaceEligibleLLMVendor(
  */
 export const DEFAULT_LLM_VENDOR: LLMVendor = "openai";
 
+/** GitHub Copilot's model inference endpoint — used when the vendor block carries no `baseUrl`. */
+export const COPILOT_BASE_URL = "https://models.github.ai/inference";
+
 /**
  * Runtime type guard — narrows `unknown` to `LLMVendor`. Use at every
  * boundary that accepts vendor strings from outside the type system:
