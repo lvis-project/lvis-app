@@ -747,7 +747,7 @@ export class SystemPromptBuilder {
                 ? `${trimmed.slice(0, MAX_MCP_GUIDANCE_CHARS)}…`
                 : trimmed;
             lines.push("");
-            lines.push(`server "${escapeHtml(server.serverId)}":`);
+            lines.push(`server "${server.serverId}":`);
             // Neutralize the body against its OWN closing tag so server text
             // cannot break out of the inert fence.
             lines.push(neutralizeFenceClose(capped, "lvis-mcp-server-guidance"));
