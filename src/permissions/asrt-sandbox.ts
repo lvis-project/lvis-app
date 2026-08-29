@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
+import { llmRouteBaseUrls } from "../shared/llm-vendor-defaults.js";
 import { SENSITIVE_PATH_ENTRIES } from "./sensitive-paths.js";
 
 import type {
@@ -1361,6 +1362,18 @@ export function normalizeUnionForAsrt(
 export interface DynamicEndpointSettings {
   readonly llm?: {
     readonly vendors?: Record<string, { readonly baseUrl?: string } | undefined>;
+    /**
+     * The active marketplace provider preset. Its endpoint is NOT stored in
+     * `vendors["openai-compatible"]` — that block is the generic custom
+     * provider's own — so without this the host chat is actually talking to
+     * would be missing from the union and hard-denied.
+     */
+    readonly marketplaceProviderPresetId?: string;
+  };
+  readonly marketplace?: {
+    readonly installedProviderPresets?:
+      | readonly { readonly providerId: string; readonly baseUrl?: string }[]
+      | undefined;
   };
 }
 
@@ -1383,10 +1396,13 @@ export interface DynamicEndpointSettings {
  * source of truth that must feed the union. A user-set custom `baseUrl` on ANY
  * vendor block is treated the same way (a custom endpoint a worker would reuse).
  *
- * DYNAMIC SOURCE: every `llm.vendors[*].baseUrl` present in trusted settings.
- * This is the ONLY place the host holds a configured-endpoint URL string that a
- * worker would reach; there is no separate host-side embedding/caption endpoint
- * setting (the indexer resolves both through the same Azure resource baseUrl).
+ * DYNAMIC SOURCE: every endpoint {@link llmRouteBaseUrls} reports — each
+ * `llm.vendors[*].baseUrl` in trusted settings, PLUS the active marketplace
+ * provider preset's address, which lives in the preset registry rather than in
+ * a vendor block. These are the only places the host holds a
+ * configured-endpoint URL string that a worker would reach; there is no
+ * separate host-side embedding/caption endpoint setting (the indexer resolves
+ * both through the same Azure resource baseUrl).
  *
  * NO-FALLBACK (deny-by-default): each URL is reduced to `new URL(s).hostname`.
  * A malformed/empty/whitespace `baseUrl` (or a parse that yields no hostname)
@@ -1408,13 +1424,12 @@ export function computeDynamicEndpointHosts(
 ): string[] {
   const seen = new Set<string>();
   const hosts: string[] = [];
-  const vendors = settings?.llm?.vendors;
-  if (!vendors) return hosts;
-  for (const block of Object.values(vendors)) {
-    const raw = block?.baseUrl;
-    if (typeof raw !== "string") continue;
-    const trimmed = raw.trim();
-    if (trimmed.length === 0) continue;
+  const baseUrls = llmRouteBaseUrls({
+    vendors: settings?.llm?.vendors,
+    marketplaceProviderPresetId: settings?.llm?.marketplaceProviderPresetId,
+    installedProviderPresets: settings?.marketplace?.installedProviderPresets,
+  });
+  for (const trimmed of baseUrls) {
     let hostname: string;
     try {
       // Strip trailing dot from FQDN-style URLs (e.g. `res.openai.azure.com.`)

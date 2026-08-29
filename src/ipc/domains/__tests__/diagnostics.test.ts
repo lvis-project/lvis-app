@@ -59,7 +59,9 @@ function makeDeps(overrides?: { includeCrashDumps?: boolean }): IpcDeps {
     auditLogger,
     settingsService: {
       getAll: () => ({
-        llm: { provider: "anthropic", streamSmoothing: "none", fallbackChain: [], vendors: {} },
+        // A vendor the store recognises — SettingsService coerces an unknown
+        // provider name at the file boundary, so no handler is handed one.
+        llm: { provider: "claude", streamSmoothing: "none", fallbackChain: [], vendors: {} },
         chat: { autoCompact: true },
         telemetry: { enabled: false },
         diagnostics,

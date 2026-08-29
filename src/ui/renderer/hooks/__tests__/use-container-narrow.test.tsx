@@ -136,28 +136,33 @@ describe("useContainerNarrow", () => {
 
 describe("sidePanelLayout", () => {
   it("docks with the pixel floors when the container can hold both columns", () => {
-    // The reserve is the 448px card plus 16px of insets. The maxima are written
-    // out in absolute px: `width - MIN_DOCKED_TRANSCRIPT_WIDTH` would restate
-    // the implementation and pass however the transcript floor moved, so the
-    // literals are what actually pins it.
-    expect(sidePanelLayout(Number.POSITIVE_INFINITY, false)).toEqual({ mode: "docked", min: 464, max: Number.POSITIVE_INFINITY });
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: 464, max: DOCK_ENTER_WIDTH - 320 });
-    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: 464, max: 880 });
-    // And the floor those literals encode, named once so they read as arithmetic.
+    // `min` names the reserve it is about, so the assertion says which width it
+    // means rather than repeating a number. The maxima stay absolute px:
+    // `width - MIN_DOCKED_TRANSCRIPT_WIDTH` would restate the implementation
+    // and pass however the transcript floor moved, so the literals are what
+    // actually pins them.
+    expect(sidePanelLayout(Number.POSITIVE_INFINITY, false)).toEqual({ mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: Number.POSITIVE_INFINITY });
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: DOCK_ENTER_WIDTH - 320 });
+    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: 880 });
+    // Both constants the expectations lean on, pinned to their absolute values
+    // once. Without this the `min` assertions would be identities — the
+    // implementation returns SIDE_PANEL_MIN_RESERVE, so comparing against it
+    // holds whatever it becomes.
+    expect(SIDE_PANEL_MIN_RESERVE).toBe(464);
     expect(MIN_DOCKED_TRANSCRIPT_WIDTH).toBe(320);
   });
 
   it("floats over the transcript, keeping its own floor, when the container cannot", () => {
     // A 2×2 tile: the card keeps its floor and the transcript stays laid out beneath.
-    expect(sidePanelLayout(496, true)).toEqual({ mode: "overlay", min: 464, max: 496 });
+    expect(sidePanelLayout(496, true)).toEqual({ mode: "overlay", min: SIDE_PANEL_MIN_RESERVE, max: 496 });
     // Narrower than the reserve: the card fills the tile.
     expect(sidePanelLayout(400, true)).toEqual({ mode: "overlay", min: 400, max: 400 });
   });
 
   it("takes the mode from the hysteresis verdict, so a gutter dragged across the threshold does not flip it", () => {
     // Inside the dead-band: still narrow → still floating, its range still the container's.
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH + 30, true)).toEqual({ mode: "overlay", min: 464, max: DOCK_ENTER_WIDTH + 30 });
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH + 30, true)).toEqual({ mode: "overlay", min: SIDE_PANEL_MIN_RESERVE, max: DOCK_ENTER_WIDTH + 30 });
     // Not yet narrow at the enter width: docked, the range never below the reserve floor.
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH - 1, false)).toEqual({ mode: "docked", min: 464, max: 464 });
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH - 1, false)).toEqual({ mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: SIDE_PANEL_MIN_RESERVE });
   });
 });

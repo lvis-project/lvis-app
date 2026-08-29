@@ -15,7 +15,7 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { makeMockLvisApi } from "./mock-lvis-api.js";
+import { DEFAULT_APP_INFO, makeMockLvisApi } from "./mock-lvis-api.js";
 import { activeSettingsTab, clickSettingsTab, settingsTabTrigger } from "./helpers.js";
 
 afterEach(() => {
@@ -78,7 +78,7 @@ describe("settings navigation footer", () => {
     const { container, api } = await renderWithConsumer("content");
     const footer = container.querySelector('[data-testid="settings-nav-app-version"]');
     expect(footer).toBeTruthy();
-    await waitFor(() => expect(footer?.textContent).toBe("v0.0.0-test"));
+    await waitFor(() => expect(footer?.textContent).toBe(`v${DEFAULT_APP_INFO.version}`));
     expect(api.getAppInfo).toHaveBeenCalled();
   });
 });

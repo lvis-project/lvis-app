@@ -25,7 +25,7 @@ import {
 } from "../auto-compact.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
-import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
+import { activeLlmRouteModel } from "../../shared/llm-vendor-defaults.js";
 import { getPreflightThreshold, getUsableContext } from "../../shared/context-budget.js";
 import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 
@@ -133,7 +133,7 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
 
   const llmSettings = self.deps.settingsService.get("llm");
   const provider = llmSettings.provider;
-  const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
+  const model = activeLlmRouteModel(llmSettings);
   return {
     model,
     preflight: getModelPreflightThreshold(provider, model),

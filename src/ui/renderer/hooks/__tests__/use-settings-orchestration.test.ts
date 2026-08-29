@@ -97,30 +97,101 @@ describe("useSettingsOrchestration", () => {
     expect(result.current.vendor).toBe("openai");
   });
 
-  it("aborts LLM key persistence when settings:update returns reviewer-rewire-failed", async () => {
+  it("aborts a card's key persistence when settings:update returns reviewer-rewire-failed", async () => {
     const api = settingsOrchestrationApi({ ok: false, error: "reviewer-rewire-failed" });
     const onSaved = vi.fn();
     const { result } = renderHook(() => useSettingsOrchestration(api, onSaved));
 
     await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
-    act(() => {
-      result.current.setKeyInput("sk-new-key");
-    });
-    await waitFor(() => expect(result.current.keyInput).toBe("sk-new-key"));
 
     let saved = true;
     await act(async () => {
-      saved = await result.current.save("llm");
+      saved = await result.current.saveProviderCredential({
+        credentialProviderId: "openai-compatible",
+        vendorId: "openai-compatible",
+        apiKey: "sk-new-key",
+        vendorBlock: { baseUrl: "https://gateway.example/v1" },
+      });
     });
 
     expect(saved).toBe(false);
     expect(api.updateSettings).toHaveBeenCalled();
+    // A key must never land beside an endpoint the store refused.
     expect(api.setApiKey).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
     expect(result.current.lastSaveError).toMatchObject({
       tab: "llm",
       message: expect.stringContaining("권한 검토 모델"),
     });
+  });
+
+  it("queues a card's save behind an in-flight one instead of dropping it", async () => {
+    // A debounced llm save can be mid-flight when the user presses Save on a
+    // provider card. The credential save used to return false on the spot and
+    // say nothing, leaving the card looking committed with nothing written.
+    let releaseFirstSave: (() => void) | undefined;
+    const { api } = makeMockLvisApi({ settings: makeSettings(), hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => {
+        await new Promise<void>((resolve) => { releaseFirstSave = resolve; });
+        return { ok: true };
+      }),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+      setApiKey: vi.fn(async () => ({ ok: true })),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+
+    let queued: Promise<boolean> | undefined;
+    await act(async () => {
+      void result.current.save("llm");
+      await Promise.resolve();
+      queued = result.current.saveProviderCredential({
+        credentialProviderId: "claude",
+        vendorId: "claude",
+        apiKey: "sk-ant-queued",
+      });
+    });
+    // Still in the queue: the key has not been written yet.
+    expect(api.setApiKey).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseFirstSave?.();
+      expect(await queued).toBe(true);
+    });
+    expect(api.setApiKey).toHaveBeenCalledWith("claude", "sk-ant-queued");
+  });
+
+  it("writes a card's own block and secret without touching the active provider", async () => {
+    const { api } = makeMockLvisApi({ settings: makeSettings(), hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+      setApiKey: vi.fn(async () => ({ ok: true })),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.vendor).toBe("openai");
+
+    await act(async () => {
+      await result.current.saveProviderCredential({
+        credentialProviderId: "claude",
+        vendorId: "claude",
+        apiKey: "sk-ant-1",
+      });
+    });
+
+    expect(api.setApiKey).toHaveBeenCalledWith("claude", "sk-ant-1");
+    // No settings write at all: a fixed-endpoint vendor owns no field here,
+    // and `llm.provider` is not this call's to move.
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(result.current.vendor).toBe("openai");
   });
 
   it("persists custom marketplace provider presets through openai-compatible with a preset-scoped key", async () => {
@@ -152,12 +223,16 @@ describe("useSettingsOrchestration", () => {
 
     act(() => {
       result.current.selectMarketplaceProviderPreset(futureRouter);
-      result.current.setKeyInput("fr-secret");
     });
     await waitFor(() => expect(result.current.vendor).toBe("openai-compatible"));
 
     let saved = false;
     await act(async () => {
+      saved = await result.current.saveProviderCredential({
+        credentialProviderId: marketplaceProviderPresetSecretId("future-router"),
+        vendorId: "openai-compatible",
+        apiKey: "fr-secret",
+      });
       saved = await result.current.save("llm");
     });
 
@@ -167,13 +242,28 @@ describe("useSettingsOrchestration", () => {
         provider: "openai-compatible",
         marketplaceProviderPresetId: "future-router",
         vendors: {
+          // The preset's own slot, and NOT the block's `model` — that one is
+          // the generic custom-provider row's, and a preset writing it is how
+          // the two rows used to overwrite each other.
           "openai-compatible": expect.objectContaining({
-            baseUrl: "https://future.example/v1",
-            model: "future/free",
+            presetModels: { "future-router": "future/free" },
           }),
         },
       }),
     }));
+    const savedBlock = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => call[0] as { llm?: { vendors?: Record<string, { model?: string }> } })
+      .filter((call) => Boolean(call.llm?.vendors))
+      .at(-1)?.llm?.vendors?.["openai-compatible"];
+    expect(savedBlock).not.toHaveProperty("model");
+    // The preset's address is the registry's, never the generic row's block:
+    // writing it here is what used to revert the generic card's own endpoint.
+    const presetSave = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => call[0] as { llm?: { vendors?: Record<string, { baseUrl?: string }> } })
+      .filter((call) => Boolean(call.llm?.vendors))
+      .at(-1);
+    expect(presetSave?.llm?.vendors?.["openai-compatible"]?.baseUrl)
+      .not.toBe("https://future.example/v1");
     expect(api.setApiKey).toHaveBeenCalledWith(
       marketplaceProviderPresetSecretId("future-router"),
       "fr-secret",
@@ -181,7 +271,7 @@ describe("useSettingsOrchestration", () => {
     expect(onSaved).toHaveBeenCalled();
   });
 
-  it("restores generic OpenAI-compatible defaults when clearing a marketplace provider preset", async () => {
+  it("leaves the generic OpenAI-compatible endpoint alone across a preset selection", async () => {
     const settings = makeSettings();
     const futureRouter = {
       providerId: "future-router",
@@ -202,6 +292,12 @@ describe("useSettingsOrchestration", () => {
       hasMarketplaceApiKey: vi.fn(async () => false),
       setApiKey: vi.fn(async () => ({ ok: true })),
     });
+    settings.llm.vendors["openai-compatible"] = {
+      model: "local-model",
+      baseUrl: "http://localhost:8001/v1",
+      enableThinking: true,
+      thinkingBudgetTokens: 10_000,
+    };
     const { result } = renderHook(() =>
       useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
     );
@@ -210,12 +306,17 @@ describe("useSettingsOrchestration", () => {
     act(() => {
       result.current.selectMarketplaceProviderPreset(futureRouter);
     });
-    await waitFor(() => expect(result.current.baseUrl).toBe("https://future.example/v1"));
+    await waitFor(() => expect(result.current.vendor).toBe("openai-compatible"));
+    // Selecting a preset must not park the preset's address in the generic
+    // row's endpoint: that field is written back on every save.
+    expect(result.current.baseUrl).toBe("http://localhost:8001/v1");
 
     act(() => {
       result.current.clearMarketplaceProviderPreset();
     });
-    await waitFor(() => expect(result.current.baseUrl).not.toBe("https://future.example/v1"));
+    // And switching back restores the generic row's own endpoint rather than
+    // resetting it to defaults.
+    await waitFor(() => expect(result.current.baseUrl).toBe("http://localhost:8001/v1"));
 
     await act(async () => {
       await result.current.save("llm");
@@ -229,7 +330,7 @@ describe("useSettingsOrchestration", () => {
       },
     });
     expect(payload.llm.vendors["openai-compatible"].baseUrl)
-      .not.toBe("https://future.example/v1");
+      .toBe("http://localhost:8001/v1");
   });
 
   it("defaults idle long-term consolidation off and persists an explicit opt-in immediately", async () => {
@@ -339,4 +440,65 @@ describe("useSettingsOrchestration", () => {
 
     await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
     expect(result.current.subAgentAutonomousWake).toBe(true);
+  });
+
+  it("keeps every openai-compatible row's model to itself", async () => {
+    // Three rows are reached through one vendor — the generic custom provider
+    // and two marketplace presets — and each has its own model. They used to
+    // share the block's single `model`, so choosing on one row silently
+    // rewrote the others.
+    const alpha = {
+      providerId: "alpha-gw",
+      label: "Alpha Gateway",
+      baseUrl: "https://alpha.example/v1",
+      defaultModel: "alpha/seed",
+      modelOptions: ["alpha/seed"],
+      requiresApiKey: true,
+    };
+    const beta = { ...alpha, providerId: "beta-gw", label: "Beta Gateway", baseUrl: "https://beta.example/v1", defaultModel: "beta/seed", modelOptions: ["beta/seed"] };
+    const settings = makeSettings();
+    settings.llm.vendors["openai-compatible"] = {
+      model: "local-model",
+      baseUrl: "http://localhost:8001/v1",
+      presetModels: { "beta-gw": "beta/chosen" },
+      enableThinking: true,
+      thinkingBudgetTokens: 10_000,
+    };
+    settings.marketplace = {
+      ...settings.marketplace,
+      installedProviderPresets: [alpha, beta],
+    };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+
+    act(() => { result.current.selectMarketplaceProviderPreset(alpha); });
+    await waitFor(() => expect(result.current.marketplaceProviderPresetId).toBe("alpha-gw"));
+    act(() => { result.current.setModel("alpha/chosen"); });
+    await act(async () => { await result.current.save("llm"); });
+
+    const block = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => call[0] as { llm?: { vendors?: Record<string, {
+        model?: string; presetModels?: Record<string, string>;
+      }> } })
+      .filter((call) => Boolean(call.llm?.vendors))
+      .at(-1)?.llm?.vendors?.["openai-compatible"];
+    // Alpha's key ALONE — the stored map is merged on the main side, so this
+    // save cannot carry a stale copy of beta's model back over a newer one.
+    // The generic row's `model` is not written at all, so it survives too.
+    expect(block?.presetModels).toEqual({ "alpha-gw": "alpha/chosen" });
+    expect(block).not.toHaveProperty("model");
+
+    // Switching rows restores what each row was last set to.
+    act(() => { result.current.selectMarketplaceProviderPreset(beta); });
+    await waitFor(() => expect(result.current.model).toBe("beta/chosen"));
+    act(() => { result.current.clearMarketplaceProviderPreset(); });
+    await waitFor(() => expect(result.current.model).toBe("local-model"));
   });});

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
+import { SIDE_PANEL_MIN_WIDTH } from "../../../src/shared/side-panel.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -113,7 +114,7 @@ test.describe("workspace rail redesign", () => {
     const composer = await page.getByTestId("composer-textarea").boundingBox();
     const root = await page.getByTestId("chat-view-root").boundingBox();
     const panel = await page.getByTestId("chat-side-panel").boundingBox();
-    expect(panel?.width ?? 0).toBeGreaterThanOrEqual(Math.min(448, root?.width ?? 0));
+    expect(panel?.width ?? 0).toBeGreaterThanOrEqual(Math.min(SIDE_PANEL_MIN_WIDTH, root?.width ?? 0));
     expect(panel?.width ?? 0).toBeLessThanOrEqual(root?.width ?? 0);
     expect(composer?.width ?? 0).toBeGreaterThan((root?.width ?? 0) - (panel?.width ?? 0));
 

@@ -26,7 +26,7 @@ export default function Page() {
 
       <h2 id="queue">MessageQueuePanel</h2>
       <p>
-        When an external signal arrives (a new Outlook email, a meeting ending, an Agent Hub message, etc.), it stacks up as a card in the panel without blocking the ChatView body.
+        When an external signal arrives (a new Outlook email, a meeting ending, etc.), it stacks up as a card in the panel without blocking the ChatView body.
         Implementation: <code>src/ui/renderer/components/MessageQueuePanel.tsx</code>. Clicking a card switches the chat body to an ask-user question card or a tool call.
       </p>
 

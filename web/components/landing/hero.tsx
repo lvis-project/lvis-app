@@ -19,6 +19,7 @@ const copy = {
     ctaDocs: "사용 가이드 ",
     facts: [
       { dt: "플러그인", dd: "6+" },
+      { dt: "작업 영역", dd: "최대 4분할" },
       { dt: "실행 정책", dd: "승인 후 실행" },
       { dt: "로컬 우선", dd: "온디바이스" },
     ],
@@ -49,6 +50,7 @@ const copy = {
     ctaDocs: "User guide ",
     facts: [
       { dt: "Plugins", dd: "6+" },
+      { dt: "Workspace", dd: "Up to 4 tiles" },
       { dt: "Run policy", dd: "Approve, then run" },
       { dt: "Local-first", dd: "On-device" },
     ],

@@ -60,7 +60,7 @@ export default function Page() {
 
       <h2 id="where">어디에 저장되나요?</h2>
       <p>
-        모든 메모리는 사용자 PC 의 LVIS 영역 안에만 보관됩니다. 외부 서버 / Marketplace / Agent Hub 어디로도 전송되지 않습니다.
+        모든 메모리는 사용자 PC 의 LVIS 영역 안에만 보관됩니다. 외부 서버나 Marketplace 어디로도 전송되지 않습니다.
         한 줄짜리 텍스트 파일이라 사용자가 파일을 직접 열어 보거나 수정할 수도 있습니다.
       </p>
 

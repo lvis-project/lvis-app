@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import {
+  collectTiles,
   focusTile,
   forceOverflowingSummaries,
   splitIntoTwoTiles,
@@ -249,16 +250,8 @@ describe("overlay cards whose origin conversation leaves the screen", () => {
 
     // Restoring the split brings the origin conversation back, and with it the
     // action — which runs in that conversation, not the focused one.
-    const restore = container.querySelector<HTMLButtonElement>('[data-testid="chat-group-maximize"]')!;
-    await act(async () => {
-      fireEvent.click(restore);
-    });
-    const tiles = Array.from(
-      container.querySelectorAll<HTMLElement>('[data-testid^="chat-group-cell:"]'),
-    ).map((element) => ({
-      chatGroupId: element.getAttribute("data-testid")!.slice("chat-group-cell:".length),
-      element,
-    }));
+    await toggleTileMaximized(primary!);
+    const tiles = collectTiles(container);
     const origin = tiles.find((tile) => tile.chatGroupId === second!.chatGroupId)!;
     const confirm = await waitFor(() => {
       const button = origin.element.querySelector<HTMLButtonElement>(

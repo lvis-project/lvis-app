@@ -16,6 +16,7 @@ import { act, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "./render-app.js";
 import { clearQueueStoreHandle, deferred, getQueueStore, submitChatMessage } from "./helpers.js";
+import { MOCK_DEFAULT_SESSION_ID } from "./mock-lvis-api.js";
 
 describe("Chat edit & resend (Phase 3.2 regression net)", () => {
   it("submitting a user message appends a user entry", async () => {
@@ -280,7 +281,7 @@ describe("Chat edit & resend (Phase 3.2 regression net)", () => {
 
 describe("Return here — rewind without resending", () => {
   const answeredTurn = {
-    sessionId: "sess-default",
+    sessionId: MOCK_DEFAULT_SESSION_ID,
     messages: [
       { role: "user" as const, content: "the question I want back" },
       { role: "assistant" as const, content: "an answer to be discarded" },

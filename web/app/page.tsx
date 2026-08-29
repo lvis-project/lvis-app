@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Hero } from "@/components/landing/hero";
 import { About } from "@/components/landing/about";
 import { Workday } from "@/components/landing/workday";
+import { Workbench } from "@/components/landing/workbench";
 import { Downloads } from "@/components/landing/downloads";
 import { Architecture } from "@/components/landing/architecture";
 import { Surfaces } from "@/components/landing/surfaces";
@@ -19,6 +20,7 @@ export default function LandingPage() {
       <Hero locale="ko" />
       <About locale="ko" />
       <Workday locale="ko" />
+      <Workbench locale="ko" />
       <Downloads locale="ko" />
       <Architecture locale="ko" />
       <Surfaces locale="ko" />

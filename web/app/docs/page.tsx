@@ -7,16 +7,16 @@ import { HeroBackdrop } from "@/components/motion/hero-backdrop";
 import { Reveal } from "@/components/motion/reveal";
 
 const stats = [
-  { value: "41", label: "정적 라우트" },
-  { value: "61", label: "제품 스크린샷" },
+  { value: "40", label: "정적 라우트" },
+  { value: "46", label: "제품 스크린샷" },
   { value: "11", label: "repo 사실 검증" },
 ];
 
 const layers = [
   { tag: "Desktop Host", label: "LVIS App", note: "ChatView · MainToolbar · MessageQueuePanel · SessionTodoPanel" },
-  { tag: "Plugin Runtime", label: "6 plugins", note: "ms-graph · local-indexer · meeting · work-assistant · agent-hub · 사내 포털" },
+  { tag: "Plugin Runtime", label: "5 plugins", note: "ms-graph · local-indexer · meeting · work-assistant · 사내 포털" },
   { tag: "Storage", label: "~/.lvis", note: "0o700 dir · 0o600 file · audit/<YYYY-MM-DD>.jsonl" },
-  { tag: "Servers", label: "Marketplace · Agent Hub", note: "FastAPI · React 19 · Ed25519 · HTTPBearer + ApiKey sha256" },
+  { tag: "Server", label: "Marketplace", note: "FastAPI · React 19 · Ed25519 · ApiKey sha256" },
 ];
 
 const features = [
@@ -25,7 +25,7 @@ const features = [
   { eyebrow: "Plugins", title: "플러그인", desc: "도메인 기능은 플러그인으로 분리됩니다. 각 플러그인은 정적 manifest 에 도구를 선언하고, 호스트는 그 선언으로 도구 목록을 만듭니다.", href: "/docs/plugins", icon: Plug, span: "lg:col-span-3" },
   { eyebrow: "Architecture", title: "시스템 구조도", desc: "HostApi 컨트랙트 · ~/.lvis 스토리지 트리 · RiskLevel × Category 격자.", href: "/docs/architecture/overview", icon: Bot, span: "lg:col-span-3" },
   { eyebrow: "Trust", title: "권한 & 위험 관리", desc: "디렉토리 grant · LLM 자율 검토 4모드 · agentApproval cryptographic chain.", href: "/docs/chat/permissions/directory", icon: ShieldCheck, span: "lg:col-span-2" },
-  { eyebrow: "Servers", title: "Marketplace & Agent Hub", desc: "FastAPI + SQLAlchemy 2.0 카탈로그 · 보드 · 워크로그 · Ed25519 패키지 서명.", href: "/docs/servers/marketplace", icon: Server, span: "lg:col-span-4" },
+  { eyebrow: "Server", title: "Marketplace", desc: "FastAPI + SQLAlchemy 2.0 카탈로그 · 퍼블리셔 · 어드민 · Ed25519 패키지 서명.", href: "/docs/servers/marketplace", icon: Server, span: "lg:col-span-4" },
 ];
 
 const tour = [
@@ -49,14 +49,14 @@ export default function HomePage() {
           </Reveal>
           <Reveal delay={60}>
             <h1 className="mx-auto max-w-4xl text-[clamp(2.25rem,5vw,3.5rem)] font-semibold leading-[1.06] tracking-[-0.025em] text-ink">
-              앱·플러그인·에이전트 허브가
+              앱과 플러그인이
               <br />
               함께 움직이는 <span className="text-ink-soft">업무 AI</span>
             </h1>
           </Reveal>
           <Reveal delay={120}>
             <p className="mx-auto mt-6 max-w-xl text-[17px] leading-relaxed text-muted-foreground">
-              로그인부터 채팅 · 권한 · 루틴 · 7개 도메인 플러그인 · 두 서버까지 —
+              로그인부터 채팅 · 권한 · 루틴 · 5개 도메인 플러그인 · Marketplace 까지 —
               실제 소스에서 검증된 시그니처와 파일·라인 인용 기반의 통합 사용자 가이드.
             </p>
           </Reveal>
@@ -66,7 +66,7 @@ export default function HomePage() {
                 <Link href="/docs/getting-started/install">처음 시작하기 <ArrowRight className="h-4 w-4" /></Link>
               </Button>
               <Button asChild size="lg" variant="outline" className="text-[15px]">
-                <Link href="/docs/plugins">플러그인 6종 둘러보기</Link>
+                <Link href="/docs/plugins">플러그인 5종 둘러보기</Link>
               </Button>
             </div>
           </Reveal>

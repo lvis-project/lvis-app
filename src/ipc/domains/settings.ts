@@ -21,6 +21,7 @@ import {
 import {
   isLLMVendor,
   isMarketplaceEligibleLLMVendor,
+  llmRouteBaseUrlSignature,
 } from "../../shared/llm-vendor-defaults.js";
 import {
   MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES,
@@ -32,7 +33,11 @@ import {
 } from "../../shared/marketplace-package-assets.js";
 import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
-import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
+import type {
+  LLMSettings,
+  MarketplaceSettings,
+  ShortcutSettings,
+} from "../../data/settings-store.js";
 import type {
   CodexSubscriptionActionResult,
   CodexSubscriptionDeviceCodeResult,
@@ -257,19 +262,25 @@ async function broadcastSettingsSnapshot(
 }
 
 /**
- * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable by
- * vendor id). The ASRT shared network union includes the host-resolved DYNAMIC
- * endpoint hostnames derived from these user-configured baseUrls, so ANY
- * vendor's baseUrl change — not just the active one or Foundry — must trigger a
+ * Stable signature of every endpoint an LLM route could reach — each vendor
+ * block's configured `baseUrl` PLUS the active marketplace provider preset's
+ * address, which lives in the preset registry rather than in a vendor block.
+ * The ASRT shared network union is built from exactly these, so ANY of them
+ * changing — not just the active vendor's or Foundry's — must trigger a
  * sandbox network live-refresh. Used to detect that change across a settings
  * patch and call `refreshSandboxNetworkConfig`.
  */
-function vendorBaseUrlSignature(llm: LLMSettings): string {
-  const vendors = llm.vendors ?? {};
-  const entries = Object.keys(vendors)
-    .sort()
-    .map((id) => `${id}=${vendors[id as keyof typeof vendors]?.baseUrl ?? ""}`);
-  return entries.join("|");
+function vendorBaseUrlSignature(
+  llm: LLMSettings,
+  installedProviderPresets: MarketplaceSettings["installedProviderPresets"],
+): string {
+  return llmRouteBaseUrlSignature({
+    vendors: llm.vendors,
+    ...(llm.marketplaceProviderPresetId
+      ? { marketplaceProviderPresetId: llm.marketplaceProviderPresetId }
+      : {}),
+    installedProviderPresets,
+  });
 }
 
 /**
@@ -341,6 +352,15 @@ function refreshChatRuntimeProviders(
 async function finishProviderPresetMarketplaceMutation(
   deps: IpcDeps,
   prevLlm: LLMSettings,
+  /**
+   * The preset registry as it stood BEFORE the mutation. A preset's address
+   * lives only in that registry, so reading the post-mutation list for both
+   * sides of the comparison makes an uninstalled preset's host absent from
+   * both — the signatures match, no refresh fires, and the host it used to
+   * reach stays inside the sandbox's allow-list until something unrelated
+   * refreshes it.
+   */
+  prevInstalledProviderPresets: MarketplaceSettings["installedProviderPresets"],
 ): Promise<{ ok: false; error: string; message: string } | null> {
   const newLlm = deps.settingsService.get("llm");
   let rewireError: { ok: false; error: string; message: string } | null = null;
@@ -357,7 +377,13 @@ async function finishProviderPresetMarketplaceMutation(
   }
   refreshChatRuntimeProviders(deps);
   deps.refreshActiveLlmWildcard?.();
-  if (vendorBaseUrlSignature(prevLlm) !== vendorBaseUrlSignature(newLlm)) {
+  if (
+    vendorBaseUrlSignature(prevLlm, prevInstalledProviderPresets)
+    !== vendorBaseUrlSignature(
+      newLlm,
+      deps.settingsService.get("marketplace").installedProviderPresets,
+    )
+  ) {
     void deps.refreshSandboxNetworkConfig?.();
   }
   await broadcastSettingsSnapshot(deps);
@@ -763,7 +789,10 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // ASRT dynamic-endpoint union: capture EVERY vendor baseUrl so a change to
     // any user-configured endpoint (e.g. the indexer's Azure OpenAI resource)
     // triggers a sandbox network live-refresh, not just an active/Foundry change.
-    const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
+    const prevVendorBaseUrlSig = vendorBaseUrlSignature(
+      prevLlm,
+      settingsService.get("marketplace").installedProviderPresets,
+    );
     // The MarketplaceTab "즉시 적용" badge on the SSRF-bypass
     // toggle promised next-request activation, but the marketplace fetcher was
     // capturing the flag at boot only. Detect a change here and call the boot
@@ -871,7 +900,12 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // shared strict-union and live-swap the ASRT network config so the new
     // endpoint host is enforced/allowed (and the old one dropped) without a
     // restart. No-op inside the closure when the sandbox gate is OFF.
-    if (vendorBaseUrlSignature(newLlm) !== prevVendorBaseUrlSig) {
+    if (
+      vendorBaseUrlSignature(
+        newLlm,
+        settingsService.get("marketplace").installedProviderPresets,
+      ) !== prevVendorBaseUrlSig
+    ) {
       void deps.refreshSandboxNetworkConfig?.();
     }
     // Reconcile the OS-level global accelerator + login item to the newly
@@ -887,11 +921,14 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     const prevLlm = settingsService.get("llm");
+    const prevPresets = settingsService.get("marketplace").installedProviderPresets;
     try {
       const result = await settingsService.installMarketplaceProviderPreset(
         preset as MarketplaceInstalledProviderPreset,
       );
-      const finishError = await finishProviderPresetMarketplaceMutation(deps, prevLlm);
+      const finishError = await finishProviderPresetMarketplaceMutation(
+        deps, prevLlm, prevPresets,
+      );
       return finishError ?? result;
     } catch (err) {
       return {
@@ -915,9 +952,12 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       };
     }
     const prevLlm = settingsService.get("llm");
+    const prevPresets = settingsService.get("marketplace").installedProviderPresets;
     try {
       const result = await settingsService.uninstallMarketplaceProviderPreset(providerId);
-      const finishError = await finishProviderPresetMarketplaceMutation(deps, prevLlm);
+      const finishError = await finishProviderPresetMarketplaceMutation(
+        deps, prevLlm, prevPresets,
+      );
       return finishError ?? result;
     } catch (err) {
       return {

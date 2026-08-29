@@ -10,16 +10,12 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { StartupTab } from "../StartupTab.js";
-import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { makeMockLvisApi, MOCK_DEFAULT_SETTINGS } from "../../../../../test/renderer/mock-lvis-api.js";
 import { TOOL_TIMEOUT_POLICY } from "../../../../shared/tool-timeout-policy.js";
 
 const STARTUP_SETTINGS = {
-  llm: { provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
-  chat: { systemPrompt: "", autoCompact: true },
-  webSearch: { provider: "none" },
+  ...MOCK_DEFAULT_SETTINGS,
   system: { closeBehavior: "hide-to-tray", launchAtStartup: false, launchMinimized: false },
-  shortcuts: { toggleWindow: null, enabled: false },
-  features: {},
 };
 
 function installApi(settings: Record<string, unknown> = STARTUP_SETTINGS) {
