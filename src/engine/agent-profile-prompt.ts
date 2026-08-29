@@ -1,4 +1,4 @@
-import { escapeHtml } from "../shared/render-html-preview.js";
+import { escapeHtml } from "../shared/escape-html.js";
 
 export interface AgentProfilePromptSource {
   name: string;

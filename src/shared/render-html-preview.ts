@@ -1,4 +1,5 @@
 import { t } from "../i18n/index.js";
+import { escapeHtml } from "./escape-html.js";
 
 export const RENDER_HTML_WINDOW_MIN_WIDTH = 420;
 export const RENDER_HTML_WINDOW_MAX_WIDTH = 1600;
@@ -58,21 +59,6 @@ export function clampRenderHtmlWindowSize(
 ): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(value)));
-}
-
-/**
- * Escape a string for interpolation into host-authored HTML, as text or as a
- * double-quoted attribute value. All four entities, in both positions: the
- * superset is always safe, and one function for both contexts is what keeps
- * an attribute escaper from quietly dropping `>` — three of the eight copies
- * this replaced had.
- */
-export function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 const DEFAULT_RENDER_HTML_THEME_TOKENS: Required<RenderHtmlThemeTokens> = {

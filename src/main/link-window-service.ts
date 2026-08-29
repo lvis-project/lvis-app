@@ -44,7 +44,7 @@ import {
   buildTitlebarButtonScript,
 } from "./window-titlebar-shell.js";
 import { resolveAppIconPath } from "./app-icon.js";
-import { escapeHtml } from "../shared/render-html-preview.js";
+import { escapeHtml } from "../shared/escape-html.js";
 
 /**
  * JSON for embedding inside a `<script>` block.

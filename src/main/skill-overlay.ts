@@ -18,7 +18,7 @@
  * bodies are not ambient session context.
  */
 import type { LoadedSkill } from "./skill-store.js";
-import { escapeHtml } from "../shared/render-html-preview.js";
+import { escapeHtml } from "../shared/escape-html.js";
 
 export interface SkillOverlayEntry {
   name: string;

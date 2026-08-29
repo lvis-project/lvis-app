@@ -36,7 +36,7 @@ import {
   urlHostMatchesAllowList,
 } from "./host-allow-list.js";
 import { createLogger } from "../lib/logger.js";
-import { escapeHtml } from "../shared/render-html-preview.js";
+import { escapeHtml } from "../shared/escape-html.js";
 
 const log = createLogger("auth-window");
 

@@ -13,7 +13,7 @@ import { stagedOriginForSource } from "../shared/staged-origins.js";
 import { neutralizeFenceClose } from "../shared/fence-sanitizer.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
-import { escapeHtml } from "../shared/render-html-preview.js";
+import { escapeHtml } from "../shared/escape-html.js";
 import { formatLocalIsoWithOffset, hostTimeZone } from "../shared/format-time.js";
 
 const log = createLogger("system-prompt");

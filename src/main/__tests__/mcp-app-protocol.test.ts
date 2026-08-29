@@ -9,10 +9,10 @@ import {
   _resetMcpAppProtocolHandlers,
 } from "../mcp-app-protocol.js";
 import { buildMcpCspHeader } from "../../shared/mcp-app-csp.js";
-import { escapeHtml } from "../../shared/render-html-preview.js";
+import { escapeHtml } from "../../shared/escape-html.js";
 
-vi.mock("../../shared/render-html-preview.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../shared/render-html-preview.js")>();
+vi.mock("../../shared/escape-html.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../shared/escape-html.js")>();
   return { ...actual, escapeHtml: vi.fn(actual.escapeHtml) };
 });
 import { encodeMcpServerId } from "../../shared/mcp-app-partition.js";

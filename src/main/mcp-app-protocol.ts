@@ -36,7 +36,7 @@ import {
   buildMcpAppAllowAttr,
   isElectronPermissionGranted,
 } from "../shared/mcp-app-permissions.js";
-import { escapeHtml } from "../shared/render-html-preview.js";
+import { escapeHtml } from "../shared/escape-html.js";
 
 export { MCP_APP_SCHEME };
 
@@ -223,8 +223,6 @@ export function isMcpAppPermissionGranted(
   if (!session) return false;
   return isElectronPermissionGranted(session.permissions, permission, mediaKinds);
 }
-
-/** Escape a host-computed attribute value. The input is a closed enum, so this is belt-and-braces. */
 
 /**
  * The sandbox-proxy document. Deliberately script-free: ALL relay logic lives in
