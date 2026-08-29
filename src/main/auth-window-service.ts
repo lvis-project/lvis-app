@@ -36,6 +36,7 @@ import {
   urlHostMatchesAllowList,
 } from "./host-allow-list.js";
 import { createLogger } from "../lib/logger.js";
+import { escapeHtml } from "../shared/render-html-preview.js";
 
 const log = createLogger("auth-window");
 
@@ -448,14 +449,6 @@ function extractCompletionTarget(url: string): string {
       q === -1 ? h : h === -1 ? q : Math.min(q, h);
     return cut === -1 ? url : url.slice(0, cut);
   }
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 /**

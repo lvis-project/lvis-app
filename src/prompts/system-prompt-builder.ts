@@ -1,7 +1,5 @@
 
 
-
-
 import { hostname, platform, userInfo } from "node:os";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
@@ -15,6 +13,7 @@ import { stagedOriginForSource } from "../shared/staged-origins.js";
 import { neutralizeFenceClose } from "../shared/fence-sanitizer.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
+import { escapeHtml } from "../shared/render-html-preview.js";
 
 const log = createLogger("system-prompt");
 
@@ -197,7 +196,6 @@ export class SystemPromptBuilder {
    * Cleared by clearSummaryPreamble().
    */
   private summaryPreamble: string | null = null;
-
 
   /**
    * Routine session mode flag (default false).
@@ -469,7 +467,6 @@ export class SystemPromptBuilder {
   private initSources(deps: SystemPromptBuilderDeps): void {
     const { memoryManager, toolRegistry } = deps;
 
-
     this.sources.push({
       id: 1,
       name: "Role Definition",
@@ -486,14 +483,13 @@ export class SystemPromptBuilder {
         const rolePrompt = this.activeRolePrompt;
         if (!rolePrompt) return "";
         return [
-          `<lvis-active-role-prompt name="${escapeAttribute(rolePrompt.name)}">`,
+          `<lvis-active-role-prompt name="${escapeHtml(rolePrompt.name)}">`,
           "The user selected this role preset for the current turn. Apply it for this turn unless it conflicts with higher-priority instructions.",
           rolePrompt.systemPromptAdd,
           "</lvis-active-role-prompt>",
         ].join("\n");
       },
     });
-
 
     this.sources.push({
       id: 2,
@@ -524,7 +520,7 @@ export class SystemPromptBuilder {
         const body = found.layers.map((layer) => layer.content).join("\n\n");
         const truncated = found.layers.some((layer) => layer.truncated);
         return [
-          `<lvis-project-agents-context source="${escapeAttribute(projectName || "project")}" trust="project-provided">`,
+          `<lvis-project-agents-context source="${escapeHtml(projectName || "project")}" trust="project-provided">`,
           t("be_systemPromptBuilder.projectAgentsContextIntro"),
           t("be_systemPromptBuilder.projectAgentsContextProvenance"),
           "",
@@ -750,7 +746,7 @@ export class SystemPromptBuilder {
                 ? `${trimmed.slice(0, MAX_MCP_GUIDANCE_CHARS)}…`
                 : trimmed;
             lines.push("");
-            lines.push(`server "${escapeAttribute(server.serverId)}":`);
+            lines.push(`server "${escapeHtml(server.serverId)}":`);
             // Neutralize the body against its OWN closing tag so server text
             // cannot break out of the inert fence.
             lines.push(neutralizeFenceClose(capped, "lvis-mcp-server-guidance"));
@@ -1070,10 +1066,6 @@ export class SystemPromptBuilder {
 
     this.sources.sort((a, b) => a.id - b.id);
   }
-}
-
-function escapeAttribute(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
 function sanitizeSkillCatalogText(value: string): string {

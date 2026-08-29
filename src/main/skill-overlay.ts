@@ -18,6 +18,7 @@
  * bodies are not ambient session context.
  */
 import type { LoadedSkill } from "./skill-store.js";
+import { escapeHtml } from "../shared/render-html-preview.js";
 
 export interface SkillOverlayEntry {
   name: string;
@@ -97,7 +98,7 @@ export class SkillOverlay {
    * Empty when no skills are loaded for the current user turn.
    *
    * LOW (skill body sanitization): skill BODIES are also sanitized — pre-fix,
-   * only the `name` attribute went through `escapeAttr`. A malicious body
+   * only the `name` attribute went through `escapeHtml`. A malicious body
    * containing a literal `</lvis-skill>` could close the fence early and
    * inject pseudo-system content; a literal `<lvis-skill …>` could inject
    * a fake sibling skill entry. We neutralize those exact patterns by
@@ -109,7 +110,7 @@ export class SkillOverlay {
     if (entries.length === 0) return "";
     const lines: string[] = ["<lvis-active-skills>"];
     for (const e of entries) {
-      lines.push(`<lvis-skill name="${escapeAttr(e.name)}">`);
+      lines.push(`<lvis-skill name="${escapeHtml(e.name)}">`);
       lines.push(neutralizeSkillFence(e.body));
       if (e.resources.length > 0) {
         // Inert manifest: names only, so the model knows what it can fetch with
@@ -126,7 +127,7 @@ export class SkillOverlay {
         let manifestChars = 0;
         let omitted = 0;
         for (const resource of e.resources) {
-          // NOT escapeAttr: this is fence body text, not an attribute, and
+          // NOT escapeHtml: this is fence body text, not an attribute, and
           // escaping would rewrite a legitimate `Q&A.md` into `Q&amp;A.md` —
           // which `skill_read` then refuses as "not listed", leaving the model
           // with a name it can never fetch. `<`/`>`/control chars are already
@@ -158,13 +159,6 @@ export class SkillOverlay {
  * attribute. Skill names are already allowlisted in {@link SkillStore} but
  * we belt-and-suspenders here in case a future caller bypasses that check.
  */
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
 
 /**
  * LOW (skill fence neutralization): neutralize literal `<lvis-skill …>` and

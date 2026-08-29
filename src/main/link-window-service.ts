@@ -44,21 +44,7 @@ import {
   buildTitlebarButtonScript,
 } from "./window-titlebar-shell.js";
 import { resolveAppIconPath } from "./app-icon.js";
-
-function escapeHtmlAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function escapeHtmlText(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+import { escapeHtml } from "../shared/render-html-preview.js";
 
 /**
  * JSON for embedding inside a `<script>` block.
@@ -85,8 +71,8 @@ function buildLinkWindowShellHtml(opts: {
   const platform = opts.platform;
   const url = jsonForScriptBlock(opts.url);
   const partition = jsonForScriptBlock(opts.partition ?? "");
-  const titleAttr = escapeHtmlAttr(opts.title);
-  const titleText = escapeHtmlText(opts.title);
+  const titleAttr = escapeHtml(opts.title);
+  const titleText = escapeHtml(opts.title);
   const titleBarHtml = buildTitlebarHtml({ platform, title: opts.title });
   return `<!doctype html>
 <html lang="ko">

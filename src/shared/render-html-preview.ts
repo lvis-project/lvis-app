@@ -60,14 +60,14 @@ export function clampRenderHtmlWindowSize(
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
-function escapeMetaAttribute(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;");
-}
-
-function escapeHtmlText(value: string): string {
+/**
+ * Escape a string for interpolation into host-authored HTML, as text or as a
+ * double-quoted attribute value. All four entities, in both positions: the
+ * superset is always safe, and one function for both contexts is what keeps
+ * an attribute escaper from quietly dropping `>` — three of the eight copies
+ * this replaced had.
+ */
+export function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -147,7 +147,7 @@ export function buildRenderHtmlCspMeta(allowScripts: boolean): string {
     "form-action 'none'",
     "frame-ancestors 'none'",
   ].filter(Boolean).join("; ");
-  return `<meta http-equiv="Content-Security-Policy" content="${escapeMetaAttribute(directives)}">`;
+  return `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(directives)}">`;
 }
 
 function buildRenderHtmlInlineFrameCspMeta(allowScripts: boolean): string {
@@ -160,7 +160,7 @@ function buildRenderHtmlInlineFrameCspMeta(allowScripts: boolean): string {
     "base-uri 'none'",
     "form-action 'none'",
   ].filter(Boolean).join("; ");
-  return `<meta http-equiv="Content-Security-Policy" content="${escapeMetaAttribute(directives)}">`;
+  return `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(directives)}">`;
 }
 
 function extractTagInner(html: string, tagName: "head" | "body"): string | null {
@@ -220,7 +220,7 @@ function buildRenderHtmlPreviewShellCspMeta(): string {
     "form-action 'none'",
     "frame-ancestors 'none'",
   ].join("; ");
-  return `<meta http-equiv="Content-Security-Policy" content="${escapeMetaAttribute(directives)}">`;
+  return `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(directives)}">`;
 }
 
 function encodeUtf8Base64(value: string): string {
@@ -247,10 +247,10 @@ export function buildRenderHtmlPreviewShell({
   const shellTitle = title?.trim() || t("be_renderHtmlPreview.defaultTitle");
   const initialScriptsAllowed = allowScripts === true;
   const warningsHtml = warnings && warnings.length > 0
-    ? `<div class="lvis-warning" title="${escapeHtmlText(warnings.join(", "))}">${escapeHtmlText(t("be_renderHtmlPreview.warningsPrefix"))}${escapeHtmlText(warnings.join(", "))}</div>`
+    ? `<div class="lvis-warning" title="${escapeHtml(warnings.join(", "))}">${escapeHtml(t("be_renderHtmlPreview.warningsPrefix"))}${escapeHtml(warnings.join(", "))}</div>`
     : "";
 
-  return `<!doctype html><html><head>${buildRenderHtmlPreviewShellCspMeta()}<meta charset="utf-8"><title>${escapeHtmlText(shellTitle)}</title>${buildRenderHtmlThemeStyle(themeTokens)}<style>
+  return `<!doctype html><html><head>${buildRenderHtmlPreviewShellCspMeta()}<meta charset="utf-8"><title>${escapeHtml(shellTitle)}</title>${buildRenderHtmlThemeStyle(themeTokens)}<style>
 body{display:flex;min-height:100vh;flex-direction:column;overflow:hidden;background:hsl(var(--background));color:hsl(var(--foreground));}
 .lvis-toolbar{display:flex;min-height:48px;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid hsl(var(--border));background:hsl(var(--background) / .96);padding:0 14px;box-sizing:border-box;}
 .lvis-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;}
@@ -263,14 +263,14 @@ body{display:flex;min-height:100vh;flex-direction:column;overflow:hidden;backgro
 .lvis-frame{min-height:0;flex:1;border:0;background:hsl(var(--background));}
 </style></head><body data-script-enabled="${initialScriptsAllowed ? "true" : "false"}">
 <div class="lvis-toolbar">
-  <div class="lvis-title">${escapeHtmlText(shellTitle)}</div>
+  <div class="lvis-title">${escapeHtml(shellTitle)}</div>
   <div class="lvis-controls">
-    <span class="lvis-pill">${escapeHtmlText(t("be_renderHtmlPreview.networkBlocked"))}</span>
-    ${requiresScripts ? `<label class="lvis-switch"><span>JavaScript</span><input data-render-html-script-toggle type="checkbox" ${initialScriptsAllowed ? "checked" : ""}><strong data-render-html-script-state>${initialScriptsAllowed ? escapeHtmlText(t("be_renderHtmlPreview.jsAllowed")) : escapeHtmlText(t("be_renderHtmlPreview.jsBlocked"))}</strong></label>` : `<span class="lvis-pill">${escapeHtmlText(t("be_renderHtmlPreview.jsNone"))}</span>`}
+    <span class="lvis-pill">${escapeHtml(t("be_renderHtmlPreview.networkBlocked"))}</span>
+    ${requiresScripts ? `<label class="lvis-switch"><span>JavaScript</span><input data-render-html-script-toggle type="checkbox" ${initialScriptsAllowed ? "checked" : ""}><strong data-render-html-script-state>${initialScriptsAllowed ? escapeHtml(t("be_renderHtmlPreview.jsAllowed")) : escapeHtml(t("be_renderHtmlPreview.jsBlocked"))}</strong></label>` : `<span class="lvis-pill">${escapeHtml(t("be_renderHtmlPreview.jsNone"))}</span>`}
   </div>
 </div>
 ${warningsHtml}
-<iframe data-render-html-frame class="lvis-frame" title="${escapeHtmlText(shellTitle)}" sandbox=""></iframe>
+<iframe data-render-html-frame class="lvis-frame" title="${escapeHtml(shellTitle)}" sandbox=""></iframe>
 <script>
 (() => {
   const documents = {
@@ -293,7 +293,7 @@ ${warningsHtml}
     frame.srcdoc = decode(allowScripts ? documents.scriptsAllowed : documents.scriptsBlocked);
     document.body.dataset.scriptEnabled = allowScripts ? "true" : "false";
     if (toggle) toggle.checked = allowScripts;
-    if (state) state.textContent = allowScripts ? "${escapeHtmlText(t("be_renderHtmlPreview.jsAllowed"))}" : "${escapeHtmlText(t("be_renderHtmlPreview.jsBlocked"))}";
+    if (state) state.textContent = allowScripts ? "${escapeHtml(t("be_renderHtmlPreview.jsAllowed"))}" : "${escapeHtml(t("be_renderHtmlPreview.jsBlocked"))}";
   };
   if (toggle) toggle.addEventListener("change", (event) => render(event.currentTarget.checked));
   render(${initialScriptsAllowed ? "true" : "false"});
