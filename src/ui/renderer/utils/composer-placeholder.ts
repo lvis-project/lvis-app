@@ -14,14 +14,15 @@ export function hasActiveSuggestedReplies(suggestedReplies: SuggestedRepliesSnap
 export function computeComposerPlaceholder(opts: {
   hasApiKey: boolean | null | undefined;
   streaming: boolean;
-  suggestedReplies: SuggestedRepliesSnapshot;
+  /** Absent on a surface that has no suggested-replies feed (the side chat). */
+  suggestedReplies?: SuggestedRepliesSnapshot;
   subscriptionPending?: boolean;
   subscriptionUnavailable?: boolean;
 }): string {
   if (opts.subscriptionPending) return t("subscriptionProvidersSection.statusChecking");
   if (opts.subscriptionUnavailable) return t("formatIpcError.subscriptionChatUnavailable");
   if (opts.hasApiKey === false) return t("composerPlaceholder.apiKeyMissing");
-  if (hasActiveSuggestedReplies(opts.suggestedReplies)) {
+  if (opts.suggestedReplies && hasActiveSuggestedReplies(opts.suggestedReplies)) {
     return "";
   }
   if (opts.streaming) return t("composerPlaceholder.streamingHint");

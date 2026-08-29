@@ -487,6 +487,13 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     scrollChatToBottom,
   });
 
+  // The main loop exposes a guide channel, so its queue can hand rows to the
+  // engine at a brake point and ⌘K is live. One object, memoized: the hook
+  // registers the shortcut against its identity.
+  const messageQueueGuide = useMemo(
+    () => ({ inject: onGuide, onError: onGuideError }),
+    [onGuide, onGuideError],
+  );
   // Mid-turn message queue — per-view store + dev/e2e window hook + stream
   // brake-point drains + composer/streaming keyboard flows (Enter morph, ESC
   // inject-or-abort, ⌘⏎ immediate inject, ⌘K guide).
@@ -498,7 +505,9 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     handleMessageQueueSendNow,
     flushQueueAsUserMessage,
   } = useMessageQueue({
-    api,
+    surface: "main",
+    subscribeStream: api.onChatStream,
+    composerRef,
     currentSessionId,
     question,
     attachments,
@@ -506,8 +515,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     setQuestion,
     setAttachments,
     onAsk,
-    onGuide,
-    onGuideError,
+    guide: messageQueueGuide,
     onAbort,
     interceptSubmit: approvalSentenceInterceptSubmit,
   });
