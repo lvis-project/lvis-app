@@ -129,6 +129,9 @@ export const MOCK_DEFAULT_SETTINGS = {
   features: { idlePreferenceRefresh: false, onboardingCompleted: true },
 };
 
+/** The session id the mock hands the main tile when a test names none. */
+export const MOCK_DEFAULT_SESSION_ID = "sess-default";
+
 const DEFAULT_USAGE = {
   today: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 },
   thisWeek: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 },
@@ -140,7 +143,9 @@ const DEFAULT_USAGE = {
   generatedAt: new Date().toISOString(),
 };
 
-const DEFAULT_APP_INFO = {
+/** The app identity a mock app boots with — exported so a test asserting the
+ *  version on screen reads the same value the mock serves. */
+export const DEFAULT_APP_INFO = {
   version: "0.0.0-test",
   electronVersion: "0.0.0",
   nodeVersion: "0.0.0",
@@ -179,7 +184,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     title: session.title ?? `세션 ${session.id.slice(0, 8)}`,
     sessionKind: session.sessionKind ?? "main",
   }));
-  const currentSession = overrides.currentSession ?? "sess-default";
+  const currentSession = overrides.currentSession ?? MOCK_DEFAULT_SESSION_ID;
   let sentTurnCount = 0;
   const starred = overrides.starred ?? [];
   const history = overrides.history ?? { sessionId: currentSession, messages: [] };

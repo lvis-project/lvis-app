@@ -10,6 +10,7 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../src/components/ui/tooltip.js";
 import { ActionPanel } from "../../src/ui/renderer/components/ActionPanel.js";
 import { renderApp } from "./render-app.js";
+import { MOCK_DEFAULT_SESSION_ID } from "./mock-lvis-api.js";
 
 describe("App smoke (Phase 1 infra)", () => {
   it("renders App without crash", async () => {
@@ -410,7 +411,7 @@ afterEach(() => {
 describe("sub-agent frames per tile", () => {
   it("a tile keeps the frames of the conversation it shows and drops the others", async () => {
     const { container, emitAgentSpawnEvent } = await renderApp({
-      history: { sessionId: "sess-default", messages: [{ role: "user", content: "kept" }] },
+      history: { sessionId: MOCK_DEFAULT_SESSION_ID, messages: [{ role: "user", content: "kept" }] },
     });
     await waitFor(() => expect(container.querySelector('[data-testid="composer-textarea"]')).toBeTruthy());
 
@@ -420,7 +421,7 @@ describe("sub-agent frames per tile", () => {
     expect(container.querySelector('[data-testid="chat-side-panel-subagent-row"]')).toBeNull();
 
     await act(async () => {
-      emitAgentSpawnEvent({ spawnId: "mine", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Mine", parentSessionId: "sess-default" });
+      emitAgentSpawnEvent({ spawnId: "mine", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Mine", parentSessionId: MOCK_DEFAULT_SESSION_ID });
     });
     await waitFor(() =>
       expect(container.querySelectorAll('[data-testid="chat-side-panel-subagent-row"]')).toHaveLength(1),
