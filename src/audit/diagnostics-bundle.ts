@@ -45,10 +45,11 @@ import { join } from "node:path";
 import AdmZip from "adm-zip";
 import { redactForLLM, redactAuditPayload, scrubSecretsForLLM } from "./dlp-filter.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { localDateKey, localDayRange, shiftLocalDateKey } from "../shared/local-date.js";
 import { parseLogFileDate } from "../lib/log-file-sink.js";
 import type { AppSettings } from "../data/settings-store.js";
 import { activeLlmRouteModel } from "../shared/llm-vendor-defaults.js";
-import type { AuditLogger, AuditEntry } from "./audit-logger.js";
+import { utcDateKey, type AuditLogger, type AuditEntry } from "./audit-logger.js";
 
 /** Bundle schema version — bump on a structural change to the ZIP layout. */
 export const DIAGNOSTICS_BUNDLE_SCHEMA_VERSION = 1;
@@ -227,14 +228,37 @@ export function listCrashDumps(crashDumpsDir: string): CrashDumpMeta[] {
   return metas.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
 }
 
-/** Default inclusive date window: last 7 days → today (UTC). */
+/**
+ * Default inclusive window: the last 7 HOST-LOCAL civil days through today.
+ *
+ * Local, not UTC, because these keys are handed to `AuditLogger.search`, which
+ * reads them as the host's civil days. A UTC key east of Greenwich names a day
+ * that has not finished yet — in Seoul a bundle exported at 08:00 would ask for
+ * a window ending on the previous local day and silently drop every row written
+ * since local midnight.
+ */
 function defaultWindow(): { from: string; to: string } {
-  const to = new Date().toISOString().slice(0, 10);
-  const from = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-  return { from, to };
+  const today = localDateKey(new Date());
+  return { from: shiftLocalDateKey(today, -7), to: today };
 }
 
-/** Log files within [from,to] inclusive, oldest first. Missing dir → []. */
+/**
+ * Log files overlapping the host-local day range `[from,to]`, oldest first.
+ * Missing dir → [].
+ *
+ * The window is picked in local days, but log files are NAMED for the UTC day
+ * they were written on (`log-file-sink.ts`) — the same split the audit store
+ * has between the days a person picks and the days its partitions are named
+ * for. So the local range is resolved to the instants it covers and then to the
+ * UTC days those instants touch (one extra file on each side when the host is
+ * off UTC), exactly as `AuditLogger._filesOverlapping` bounds its partitions.
+ * Otherwise the two halves of one bundle would answer to two calendars.
+ *
+ * A log file is not row-filterable the way an audit partition is — its lines
+ * are copied whole — so an edge file contributes a few hours either side of the
+ * picked range. Including that overlap is the safe direction: a support bundle
+ * missing the hours around the reported problem is the failure that matters.
+ */
 function logFilesInWindow(logsDir: string, from: string, to: string): string[] {
   let entries: string[];
   try {
@@ -242,10 +266,14 @@ function logFilesInWindow(logsDir: string, from: string, to: string): string[] {
   } catch {
     return [];
   }
+  const range = localDayRange(from, to);
+  if (range?.start === undefined || range.end === undefined) return [];
+  const firstFileDate = utcDateKey(range.start);
+  const lastFileDate = utcDateKey(new Date(range.end.getTime() - 1));
   return entries
     .filter((f) => {
       const d = parseLogFileDate(f);
-      return d !== null && d >= from && d <= to;
+      return d !== null && d >= firstFileDate && d <= lastFileDate;
     })
     .sort();
 }
@@ -300,7 +328,13 @@ export async function buildDiagnosticsBundle(
       offset: 0,
     });
     if (entries.length > 0) {
-      const lines = entries.map((e) => JSON.stringify(redactAuditEntry(e)));
+      // `search` answers the Audit tab's paging and so returns newest first;
+      // a `.jsonl` a support engineer opens next to `logs/` reads chronologically.
+      // Reversing is exact — the whole window is in hand, not a page of it.
+      const lines = entries
+        .slice()
+        .reverse()
+        .map((e) => JSON.stringify(redactAuditEntry(e)));
       if (addEntry(`audit/${win.from}_${win.to}.jsonl`, lines.join("\n") + "\n")) {
         contents.push("audit");
       }

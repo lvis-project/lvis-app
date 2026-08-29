@@ -28,8 +28,15 @@ function invalidInput(message: string): TypeError {
  * tab; `AuditLogger.search` maps it onto the UTC-partitioned store. The UTC
  * round-trip below only checks that the calendar date exists — a calendar
  * date is real or not regardless of zone — and never shifts the day.
+ *
+ * Exported for the diagnostics domain, whose export handler hands the SAME two
+ * fields to the same `search`. `search` throws on a key it cannot read, and the
+ * bundle builder swallows a throwing audit section to stay resilient to an
+ * unreadable store — so an unvalidated key there would cost the bundle its
+ * audit trail while still reporting success. Every caller of that pair
+ * validates through this one function.
  */
-function parseIsoDate(value: unknown, field: "dateFrom" | "dateTo"): string | undefined {
+export function parseIsoDate(value: unknown, field: "dateFrom" | "dateTo"): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw invalidInput(`${field} must be an ISO date (YYYY-MM-DD)`);

@@ -34,15 +34,29 @@ function padYear(year: number): string {
   return String(year).padStart(4, "0");
 }
 
-/** Add (or subtract) whole days to a `YYYY-MM-DD` key. Malformed keys pass through. */
+/**
+ * Add (or subtract) whole days to a `YYYY-MM-DD` key. Malformed keys pass
+ * through.
+ *
+ * The month/day are seeded at a placeholder year and the real year is stamped
+ * on afterwards, because `Date.UTC` maps a year of 0-99 onto 1900+y exactly as
+ * `new Date(y, …)` does — the same trap {@link localDayStart} documents. Left
+ * uncorrected, `shiftLocalDateKey("0099-01-01", 1)` returns "1999-01-02" and
+ * {@link localDayRange} opens a range nineteen centuries wide instead of one
+ * day. The placeholder is a leap year so a Feb 29 key survives the seeding step
+ * and only then meets the real year's calendar.
+ */
 export function shiftLocalDateKey(key: string, days: number): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
   if (!match) return key;
-  const shifted = new Date(
-    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days),
-  );
+  const shifted = new Date(Date.UTC(LEAP_SEED_YEAR, Number(match[2]) - 1, Number(match[3])));
+  shifted.setUTCFullYear(Number(match[1]));
+  shifted.setUTCDate(shifted.getUTCDate() + days);
   return shifted.toISOString().slice(0, 10);
 }
+
+/** Placeholder year for seeding a civil date: in range for `Date.UTC`, and a leap year. */
+const LEAP_SEED_YEAR = 2000;
 
 /**
  * Key for the MONDAY that starts the host-civil week containing `date`.
