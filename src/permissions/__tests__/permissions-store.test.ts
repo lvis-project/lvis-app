@@ -8,7 +8,8 @@ const { atomicWriteMock, readFileMock } = vi.hoisted(() => ({
   readFileMock: vi.fn(),
 }));
 
-vi.mock("../../lib/atomic-file.js", () => ({
+vi.mock("../../lib/atomic-file.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../lib/atomic-file.js")>(),
   writeUtf8FileAtomicSync: atomicWriteMock,
 }));
 
