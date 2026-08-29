@@ -1768,8 +1768,8 @@
    * and the ~12px lights on the same y=18.
    *
    * `--chrome-gap` / `--chrome-gap-tight` are mirrored in TypeScript as
-   * `CHROME_GAP` / `CHROME_GAP_TIGHT` (shared/shell-geometry.ts) for the same
-   * geometry done in JS — the main process's window-bounds math, the chat
+   * `SHELL_GUTTER` / `CHROME_GAP_TIGHT` (shared/shell-geometry.ts) for the
+   * same geometry done in JS — the main process's window-bounds math, the chat
    * group's split arithmetic. */
   :root {
     --chrome-band-height: 36px;

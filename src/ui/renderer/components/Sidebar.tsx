@@ -151,7 +151,7 @@ export interface SidebarProps {
 // band's own centre line. The floating card is anchored at
 // `--shell-card-top-darwin` so the cluster strip's centre lands on that line;
 // the strip carries `CLUSTER_LEAD_PAD_DARWIN` of left clearance so its leftmost
-// button starts a full gap past `TRAFFIC_LIGHT_RIGHT_EDGE`, whether the strip
+// button starts a full gap past where the lights end, whether the strip
 // rides on the card surface or stands
 // out bare in the band when collapsed.
 // Returns false when the preload bridge is absent (jsdom / Storybook / SSR) —
