@@ -24,6 +24,7 @@ import {
   grokBuildGovernedAgentDefinitionPath,
 } from "./acp-subscription-runtime-config.js";
 import { isRecord } from "../shared/is-record.js";
+import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
 
 const PROBE_TIMEOUT_MS = 10_000;
 const ACP_REQUEST_TIMEOUT_MS = 15_000;
@@ -36,7 +37,6 @@ const MAX_DEVICE_CODE_LENGTH = 64;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const ANSI_ESCAPE = /\x1B(?:[@-_][0-?]*[ -/]*[@-~]|\[[0-?]*[ -/]*[@-~])/g;
 
-type JsonRecord = Record<string, unknown>;
 type SpawnAcpRuntime = (
   command: string,
   args: ReadonlyArray<string>,
@@ -133,12 +133,6 @@ interface PendingLogin {
   stderrBuffer: string;
   verificationUrl: string | null;
   deviceCode: string | null;
-}
-
-interface PendingRequest {
-  resolve: (value: unknown) => void;
-  reject: (reason: Error) => void;
-  timer: NodeJS.Timeout;
 }
 
 interface AcpAuthenticationProbeResult {
@@ -389,7 +383,7 @@ function spawnAcpSubscriptionRuntime(
 }
 
 class AcpAuthProbe {
-  private readonly pending = new Map<number, PendingRequest>();
+  private readonly pending = new Map<number, PendingJsonRpcRequest>();
   private nextId = 1;
   private decoder = new StringDecoder("utf8");
   private buffer = "";
@@ -454,7 +448,7 @@ class AcpAuthProbe {
     forceKillManagedChildProcess(this.child, "acp subscription authentication probe");
   }
 
-  private request(method: string, params: JsonRecord): Promise<unknown> {
+  private request(method: string, params: Record<string, unknown>): Promise<unknown> {
     if (this.closed || !this.child.stdin?.writable) {
       return Promise.reject(new AcpSubscriptionRuntimeError("acp-operation-failed"));
     }

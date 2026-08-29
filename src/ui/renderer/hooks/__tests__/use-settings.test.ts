@@ -3,10 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { useSettings } from "../use-settings.js";
 import type { AppSettings, LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { fakeAppSettings } from "../../../../../test/renderer/fake-app-settings.js";
 import { LLM_VENDOR_DEFAULTS } from "../../../../shared/llm-vendor-defaults.js";
 
 function makeSettings(): AppSettings {
-  return {
+  return fakeAppSettings({
     llm: {
       provider: "openai",
       vendors: {
@@ -26,7 +27,7 @@ function makeSettings(): AppSettings {
       cloudBaseUrl: "",
       cloudAllowPrivateNetwork: false,
     },
-  };
+  });
 }
 
 describe("useSettings", () => {
@@ -100,9 +101,9 @@ describe("useSettings", () => {
     );
     const next = makeSettings();
     next.llm.vendors.openai = {
-      ...next.llm.vendors.openai,
       model: "gpt-5.4",
       enableThinking: false,
+      thinkingBudgetTokens: 10_000,
     };
 
     act(() => onSettingsUpdated!(next));

@@ -41,6 +41,7 @@ import type { HookRunner } from "../../hooks/hook-runner.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { HookTrustCommandOptions } from "../../hooks/hook-trust-commands.js";
 import type { RationaleCoordinatorFactory } from "./rationale-conversation-orchestration.js";
+import type { ExecutionMode } from "../../shared/permission-mode.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -98,7 +99,7 @@ export interface TurnCallbacks {
     messageId: string;
   }) => void;
   onTurnComplete?: (fullText: string) => void;
-  onPermissionModeChanged?: (mode: "default" | "strict" | "auto" | "allow",
+  onPermissionModeChanged?: (mode: ExecutionMode,
   ) => void;
   onError?: (error: string, systemNotice?: "context-error" | "stream-error",
     /**

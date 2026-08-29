@@ -33,6 +33,7 @@ import {
 import {
   canUseLlmVendorWithoutApiKey,
   isLLMVendor,
+  type LLMVendor,
   isOpenAICompatiblePresetVendor,
   isOpenAICompatibleVendor,
   isRetiredLlmModel,
@@ -77,7 +78,7 @@ import {
 import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface FallbackEntry {
-  provider: string;
+  provider: LLMVendor;
   model: string;
 }
 
@@ -3000,6 +3001,7 @@ export function LlmTab(props: LlmTabProps) {
                     <ProviderSelect
                       value={entry.provider}
                       onValueChange={(value) => {
+                        if (!isLLMVendor(value)) return;
                         const nextVendorInfo = getVendorInfo(value);
                         const next = [...fallbackChain];
                         next[idx] = {

@@ -15,14 +15,14 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { type Locale } from "./locale.js";
 import { getLocale, setLocale as setRuntimeLocale, t as runtimeT } from "./runtime.js";
-import type { TranslationVars } from "./translate.js";
+import type { TranslateFn } from "./translate.js";
 
 export interface I18nContextValue {
   locale: Locale;
   /** Change the active language (persists + re-renders the app). */
   setLocale: (locale: Locale) => void;
   /** Translate a key against the active locale. */
-  t: (key: string, vars?: TranslationVars) => string;
+  t: TranslateFn;
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);

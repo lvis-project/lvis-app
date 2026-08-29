@@ -1,8 +1,6 @@
 import type { ReactNode } from "react";
 import { t } from "../../../../i18n/runtime.js";
-
-export type RiskLevel = "low" | "medium" | "high";
-export type PermissionDecisionCategory = "read" | "write" | "shell" | "network" | "meta";
+import type { RiskLevel, ToolCategory } from "../../../../shared/permission-review-status.js";
 
 export type ReviewBasisRow = {
   label: string;
@@ -77,14 +75,14 @@ export function reviewBoxClass(level: RiskLevel) {
   return "border-primary/(--opacity-medium) bg-primary/(--opacity-faint)";
 }
 
-export function reviewTitleForCategory(category: PermissionDecisionCategory) {
+export function reviewTitleForCategory(category: ToolCategory) {
   if (category === "read") return t("permissionDecisionCard.reviewTitleRead");
   if (category === "network") return t("permissionDecisionCard.reviewTitleNetwork");
   if (category === "shell") return t("permissionDecisionCard.reviewTitleShell");
   return t("permissionDecisionCard.reviewTitleDefault");
 }
 
-export function categoryLabel(category: PermissionDecisionCategory) {
+export function categoryLabel(category: ToolCategory) {
   if (category === "network") return t("permissionDecisionCard.categoryNetwork");
   if (category === "shell") return t("permissionDecisionCard.categoryShell");
   if (category === "write") return t("permissionDecisionCard.categoryWrite");

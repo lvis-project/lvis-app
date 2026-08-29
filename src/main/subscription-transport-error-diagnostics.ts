@@ -13,8 +13,6 @@ import type {
 } from "../engine/llm/provider-error-diagnostics.js";
 import { isRecord } from "../shared/is-record.js";
 
-type JsonRecord = Record<string, unknown>;
-
 const MAX_REMOTE_DIAGNOSTIC_TEXT_LENGTH = 8_192;
 const MAX_RATE_LIMIT_VALUE = 1_000_000_000_000;
 const SAFE_TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/u;
@@ -29,7 +27,7 @@ export interface SubscriptionTransportDiagnosticError extends Error {
   readonly providerError?: ProviderErrorDiagnostics;
 }
 
-function ownValue(record: JsonRecord, key: string): unknown {
+function ownValue(record: Record<string, unknown>, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
 }
 
@@ -54,7 +52,7 @@ function safeRateValue(value: unknown): number | undefined {
     : undefined;
 }
 
-function directRecords(root: JsonRecord): readonly JsonRecord[] {
+function directRecords(root: Record<string, unknown>): readonly Record<string, unknown>[] {
   const firstLevel = [
     root,
     ownValue(root, "error"),
@@ -72,7 +70,7 @@ function directRecords(root: JsonRecord): readonly JsonRecord[] {
   ];
 }
 
-function diagnosticText(records: readonly JsonRecord[]): readonly string[] {
+function diagnosticText(records: readonly Record<string, unknown>[]): readonly string[] {
   const values: string[] = [];
   for (const record of records) {
     for (const key of ["code", "type", "kind", "classification", "message", "reason"] as const) {
@@ -83,7 +81,7 @@ function diagnosticText(records: readonly JsonRecord[]): readonly string[] {
   return values;
 }
 
-function diagnosticStatus(records: readonly JsonRecord[]): number | undefined {
+function diagnosticStatus(records: readonly Record<string, unknown>[]): number | undefined {
   for (const record of records) {
     for (const key of ["status", "statusCode", "httpStatus", "http_status"] as const) {
       const status = safeStatusCode(ownValue(record, key));
@@ -101,7 +99,7 @@ function namedSchemaTool(texts: readonly string[]): string | undefined {
   return undefined;
 }
 
-function rateLimitRecord(records: readonly JsonRecord[]): JsonRecord | undefined {
+function rateLimitRecord(records: readonly Record<string, unknown>[]): Record<string, unknown> | undefined {
   for (const record of records) {
     for (const key of ["rateLimit", "rate_limit", "limits"] as const) {
       const candidate = ownValue(record, key);
@@ -112,7 +110,7 @@ function rateLimitRecord(records: readonly JsonRecord[]): JsonRecord | undefined
 }
 
 function rateLimitDiagnostics(
-  records: readonly JsonRecord[],
+  records: readonly Record<string, unknown>[],
   texts: readonly string[],
 ): ProviderRateLimitDiagnostics | undefined {
   const record = rateLimitRecord(records);

@@ -81,7 +81,7 @@ export interface DiscoveredMcpTool {
  * Invoke the plugin's tool over its MCP server (the loopback `tools/call`).
  * Mirrors {@link McpClient.callTool}: returns the rendered text (+ optional MCP
  * Apps UI payload) and THROWS on a tool error, which this adapter surfaces as an
- * `isError` {@link ToolResult}.
+ * `isError` {@link ToolExecutionResult}.
  *
  * `rawResult` is the boxed structured plugin return value carried back via
  * `_meta["lvisai/rawResult"]`. It is a box (`{ value }`) rather than a bare

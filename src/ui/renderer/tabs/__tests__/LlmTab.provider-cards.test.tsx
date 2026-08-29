@@ -216,7 +216,7 @@ interface TabProps {
   model?: string;
   marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
   marketplaceProviderPresetId?: string;
-  fallbackChain?: { provider: string; model: string }[];
+  fallbackChain?: import("../LlmTab.js").FallbackEntry[];
   fallbackOpen?: boolean;
 }
 

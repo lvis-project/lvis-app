@@ -158,6 +158,11 @@ export function SettingsPageHeader({ title, description }: SettingsPageHeaderPro
   );
 }
 
+/** Outcome line a settings section shows under its controls after an action. */
+export type SettingsSectionFeedback =
+  | { readonly tone: "error" | "success"; readonly text: string }
+  | null;
+
 export interface SettingsSectionProps {
   title?: ReactNode;
   description?: ReactNode;
