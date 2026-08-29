@@ -25,6 +25,7 @@ import type { LvisApi, PluginCardSummary } from "../types.js";
 import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, RoutineSchedule } from "../../../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
+import { formatMediumDateTime } from "../utils/format-time.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;
@@ -156,10 +157,15 @@ function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListIte
   );
 }
 
+/**
+ * `firedAt` is read back off disk, so an unparseable value is possible and
+ * shows raw rather than as "Invalid Date". The formatting itself is the
+ * shared one — this wrapper owns only that fallback.
+ */
 function formatSessionTime(firedAt: string): string {
   const parsed = new Date(firedAt);
   if (Number.isNaN(parsed.getTime())) return firedAt;
-  return parsed.toLocaleString("ko-KR");
+  return formatMediumDateTime(parsed.getTime());
 }
 
 // ─── Add Routine Modal ────────────────────────────────────────────────────────

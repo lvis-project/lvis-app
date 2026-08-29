@@ -11,7 +11,7 @@ import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
 import { kstDateKey } from "../../../shared/kst-date.js";
 import { formatCost } from "../../../lib/cost-format.js";
-import { formatMediumDateTime } from "../utils/format-time.js";
+import { formatHhMm, formatMediumDateTime } from "../utils/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
 
 export interface StarredItem {
@@ -105,10 +105,6 @@ function monthRange(date: Date): { monthKey: string; dateFrom: string; dateTo: s
 
 function formatTokenCount(value: number | undefined): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.max(0, value ?? 0));
-}
-
-function formatSessionTime(value: string): string {
-  return new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 function usageForDate(summary: unknown, dateKey: string): UsageTotals | null {
@@ -635,7 +631,7 @@ export function StarredView({
                       {conversation.totalTokens !== undefined ? (
                         <span className="shrink-0">{formatTokenCount(conversation.totalTokens)} {t("starredView.tokensTitle")}</span>
                       ) : conversation.modifiedAt ? (
-                        <span className="shrink-0">{formatSessionTime(conversation.modifiedAt)}</span>
+                        <span className="shrink-0">{formatHhMm(conversation.modifiedAt)}</span>
                       ) : null}
                       <span className="ml-auto shrink-0 font-mono opacity-60" title={conversation.sessionId}>
                         #{conversation.sessionId.slice(0, 8)}

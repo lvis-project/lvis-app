@@ -1,20 +1,25 @@
 /**
- * Time formatting helpers — single source of truth for time strings shown
- * inside the chat UI. All callers MUST go through these helpers so the
- * timezone, locale, and 2-digit padding stay consistent across surfaces.
+ * Time formatting helpers — single source of truth for the time strings the
+ * app shows. Every chat time label goes through one of these, so all surfaces
+ * agree on which zone an instant is rendered in.
  *
- * Why centralized: older chat time surfaces inlined `toLocaleTimeString`
- * with different `timeZone` options. A user traveling outside KST saw two
- * different hour values for the same message. (Critic R2 / Code-reviewer R2.)
+ * That zone is the HOST's: `Intl` gets `undefined` for the locale and no
+ * `timeZone` option. The chat labels used to pin `ko-KR`/`Asia/Seoul` while the
+ * settings tabs already read the host zone, so the same instant could show two
+ * different hours one screen apart, and a user outside Korea saw a clock that
+ * was not theirs anywhere in the transcript.
  */
 
-
-
-
-export function formatHhMmKst(epochMs: number | undefined): string | null {
-  if (epochMs === undefined) return null;
-  return new Date(epochMs).toLocaleTimeString("ko-KR", {
-    timeZone: "Asia/Seoul",
+/**
+ * Clock time for a chat entry: `13:26`, in the host's zone and locale.
+ *
+ * Accepts epoch milliseconds or an ISO string for the same reason
+ * `formatMediumDateTime` does — the live stream entries carry numbers, the
+ * stored session records carry ISO strings.
+ */
+export function formatHhMm(value: number | string | undefined): string | null {
+  if (value === undefined) return null;
+  return new Date(value).toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
   });

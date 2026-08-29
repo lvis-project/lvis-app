@@ -24,7 +24,7 @@ export interface PersistentItem {
 
 
   label?: string;
-  /** Variable value (right of dot) — e.g. "04:42 KST". */
+  /** Variable value (right of dot) — e.g. "04:42". */
   value?: string;
   /**
    * When true the StatusBar renders this item as a small colored circle only
