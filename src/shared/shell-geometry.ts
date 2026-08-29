@@ -89,14 +89,27 @@ export const BAND_EDGE_PAD = 12;
 export const BAND_LEAD_PAD_DARWIN = TRAFFIC_LIGHT_RIGHT_EDGE + CHROME_GAP_TIGHT;
 
 /**
+ * How far the sidebar card's own left edge sits from the window's. Equal to
+ * `SHELL_GUTTER` — the card is inset by one gutter — but a distinct fact from
+ * the gap between two things, and the arithmetic below subtracts THIS one.
+ * Mirrored in CSS as `--shell-card-inset`, which is why that token is one of
+ * the pairs `check-shell-geometry-tokens.mjs` holds together: change the
+ * card's inset on either side alone and the cluster strip stops clearing the
+ * lights.
+ */
+const CARD_LEFT_INSET = SHELL_GUTTER;
+
+/**
  * The sidebar cluster strip's leading pad on darwin, measured from the CARD's
  * left edge rather than the window's — which is the whole reason it is not the
  * same number as `BAND_LEAD_PAD_DARWIN`. The first button wants to start a
- * full gap past the lights; the card already starts one gutter in, so the pad
- * it needs is that target minus the card's own offset.
+ * full gap past the lights; the card already starts `CARD_LEFT_INSET` in, so
+ * the pad it needs is that target minus the card's own offset. The two terms
+ * cancel numerically today; they are written out because they are different
+ * facts, and a change to either one has to move this pad.
  *
  * The card surface still paints behind the lights. The OS draws them ON TOP of
  * the webview, so that is cosmetic backing, not a collision.
  */
 const CLUSTER_FIRST_BUTTON_X = TRAFFIC_LIGHT_RIGHT_EDGE + SHELL_GUTTER;
-export const CLUSTER_LEAD_PAD_DARWIN = CLUSTER_FIRST_BUTTON_X - SHELL_GUTTER;
+export const CLUSTER_LEAD_PAD_DARWIN = CLUSTER_FIRST_BUTTON_X - CARD_LEFT_INSET;
