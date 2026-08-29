@@ -150,10 +150,10 @@ jobs:
       # one runner per gate.
       #
       # What this ordering does NOT reach: `bun run build` above is one workflow
-      # step and fifteen commands, and nine of those assert rather than compile.
-      # Four of the nine — `check:import-cycles`, `check-generated-assets`,
+      # step and sixteen commands, and ten of those assert rather than compile.
+      # Four of the ten — `check:import-cycles`, `check-generated-assets`,
       # `check:i18n-catalog`, `check:i18n-barrels` — sit ahead of a later
-      # compile command inside the composite, and all nine sit ahead of the
+      # compile command inside the composite, and all ten sit ahead of the
       # suite in this job, so any of them can fail the build step and skip the
       # steps after it. That residual is deliberate and bounded: each reads
       # either the sources being compiled or the bytes the build itself just
