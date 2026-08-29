@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
@@ -8,6 +7,7 @@ import {
   PLUGIN_WORKER_RUN_DIR_NAME,
 } from "./plugin-storage-layout.js";
 import { createLogger } from "../lib/logger.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const log = createLogger("plugin-install-receipt");
 
@@ -103,7 +103,7 @@ export async function hashReceiptFiles(
     const bytes = await readFile(absPath);
     out.push({
       path: relPath,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
+      sha256: sha256Hex(bytes),
     });
   }
   return out;
@@ -299,7 +299,7 @@ export async function verifyInstallReceiptRaw(
     let actual: string;
     try {
       const bytes = await readFile(absPath);
-      actual = createHash("sha256").update(bytes).digest("hex");
+      actual = sha256Hex(bytes);
     } catch (err) {
       return { ok: false, reason: `receipt file unreadable: ${relPath}: ${(err as Error).message}` };
     }

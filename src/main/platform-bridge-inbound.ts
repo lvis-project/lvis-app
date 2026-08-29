@@ -10,7 +10,7 @@
  * false, and a disabled gateway invokes neither verifier nor authorization.
  * Its only command is a text message send through the common host-owned port.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   createPlatformBridgeActor,
   type ConversationCommandPort,
@@ -18,6 +18,7 @@ import {
 import type { TailnetControllerReceiptStore } from "../api/tailnet-controller-receipt-store.js";
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
 import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 /** Mirrors the receipt store's own owner grammar so both agree on validity. */
@@ -562,7 +563,7 @@ function receiptKeyDigest(
   envelope: PlatformBridgeVerifiedEnvelope,
   actorDigest: string,
 ): string {
-  return sha256([
+  return sha256Hex([
     "platform-bridge-receipt-v2",
     actorDigest,
     envelope.provider,
@@ -580,7 +581,7 @@ function inboundRateLimitKeyDigest(
   authorization: PlatformBridgeInboundAuthorization,
 ): string {
   const binding = authorization.bridgeBinding;
-  return sha256([
+  return sha256Hex([
     "platform-bridge-inbound-rate-v1",
     authorization.actorDigest,
     authorization.conversationDigest,
@@ -643,17 +644,13 @@ function readRateLimitTimestamp(now: () => number): number | undefined {
 }
 
 function intentDigest(envelope: PlatformBridgeVerifiedEnvelope): string {
-  return sha256(JSON.stringify({
+  return sha256Hex(JSON.stringify({
     provider: envelope.provider,
     deliveryId: envelope.deliveryId,
     channelId: envelope.channelId,
     senderId: envelope.senderId,
     text: envelope.text,
   }));
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 /**

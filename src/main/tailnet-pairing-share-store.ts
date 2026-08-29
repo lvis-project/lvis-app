@@ -6,11 +6,11 @@
  * share for one exact current conversation. The persisted state contains no
  * raw Tailnet login, invite code, or conversation id.
  */
-import { createHash, randomBytes as nodeRandomBytes, randomUUID as nodeRandomUuid } from "node:crypto";
+import { randomBytes as nodeRandomBytes, randomUUID as nodeRandomUuid } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
-import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
+import { timingSafeEqualHexDigest, sha256Hex } from "../lib/hex-digest-equal.js";
 import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
@@ -296,16 +296,12 @@ function capacity(): Error {
   return new Error("tailnet-pairing-share-store-capacity-reached");
 }
 
-function hash(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
 function inviteDigest(code: string): string {
-  return hash("tailnet-pairing-invite-v1\0" + code);
+  return sha256Hex("tailnet-pairing-invite-v1\0" + code);
 }
 
 function conversationDigest(value: string): string {
-  return hash("tailnet-share-conversation-v1\0" + value);
+  return sha256Hex("tailnet-share-conversation-v1\0" + value);
 }
 
 function permits(granted: TailnetSharePermission, required: TailnetSharePermission): boolean {

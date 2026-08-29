@@ -6,10 +6,10 @@
  * records retain domain-separated digests plus the opaque paired-share
  * authority needed for each request's reauthorization.
  */
-import { createHash, randomBytes as nodeRandomBytes } from "node:crypto";
+import { randomBytes as nodeRandomBytes } from "node:crypto";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
 import type { TailnetShareActorId } from "../main/tailnet-pairing-share-store.js";
-import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
+import { timingSafeEqualHexDigest, sha256Hex } from "../lib/hex-digest-equal.js";
 
 const SESSION_BYTES = 32;
 const DEFAULT_TTL_MS = 15 * 60 * 1_000;
@@ -237,9 +237,7 @@ function mint(randomBytes: (size: number) => Buffer): string {
 }
 
 function digest(domain: "cookie" | "csrf", value: string): string {
-  return createHash("sha256")
-    .update("lvis/tailnet-web-session/v1\0" + domain + "\0" + value, "utf8")
-    .digest("hex");
+  return sha256Hex("lvis/tailnet-web-session/v1\0" + domain + "\0" + value);
 }
 
 function hasMatchingCsrfDigest(digests: ReadonlySet<string>, candidate: string): boolean {

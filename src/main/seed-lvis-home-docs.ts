@@ -11,11 +11,11 @@ import {
   readdirSync,
   constants as fsConstants,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { join, dirname, parse as parsePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lvisHome } from "../shared/lvis-home.js";
 import * as atomicFile from "../lib/atomic-file.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 export interface LvisHomeDocUpgradeMarker {
   sourcePath: string;
@@ -192,7 +192,7 @@ function seedOne(
       ? readRegularFileNoFollow(target)
       : null;
     if (currentBuf !== null) {
-      const currentHash = sha256(currentBuf);
+      const currentHash = sha256Hex(currentBuf);
       if (
         replaceableHashes.has(currentHash) &&
         replaceKnownPackagedCopy(target, packagedBuf, currentHash)
@@ -248,10 +248,6 @@ function readReplaceableHashes(resourceName: string): Set<string> {
   }
 }
 
-function sha256(value: Buffer): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 /** Refuse symlinks and non-files before hashing a user-owned target. */
 function readRegularFileNoFollow(target: string): Buffer | null {
   let fd: number | null = null;
@@ -289,7 +285,7 @@ function replaceKnownPackagedCopy(
       packagedBuf.toString("utf8"),
       () => {
         const latest = readRegularFileNoFollow(target);
-        return latest !== null && sha256(latest) === expectedHash;
+        return latest !== null && sha256Hex(latest) === expectedHash;
       },
       0o600,
     );

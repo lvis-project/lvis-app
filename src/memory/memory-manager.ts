@@ -3,7 +3,7 @@
 
 
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync, unlinkSync, rmSync, renameSync, watch, type FSWatcher } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
@@ -32,6 +32,7 @@ import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-i
 import { isRecord } from "../shared/is-record.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
 import { dlpSafeCandidate } from "../shared/dlp-safe-id.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
@@ -654,9 +655,7 @@ function legacyRowId(sessionId: string, index: number, taken: ReadonlySet<string
       // `${sessionId}:${index}:0` and an existing session keeps the ids it
       // already derived.
       const step = collision * LEGACY_ROW_ID_MAX_DLP_ATTEMPTS + dlpAttempt;
-      const digest = createHash("sha256")
-        .update(`${sessionId}:${index}:${step}`)
-        .digest("hex")
+      const digest = sha256Hex(`${sessionId}:${index}:${step}`)
         .slice(0, 32);
       return `row-${digest}`;
     }, LEGACY_ROW_ID_MAX_DLP_ATTEMPTS);
@@ -785,11 +784,11 @@ function normalizeArtifactUnavailable(value: unknown): ToolResultArtifactUnavail
 }
 
 function sha256Text(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
+  return sha256Hex(content);
 }
 
 function toolUseArtifactKey(toolUseId: string): string {
-  return createHash("sha256").update(toolUseId, "utf8").digest("hex").slice(0, 32);
+  return sha256Hex(toolUseId).slice(0, 32);
 }
 
 /** Valid trigger values for strict narrowing. */

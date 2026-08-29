@@ -45,10 +45,10 @@
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createHash } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
 import { adoptLegacyRootFileSync, writeFileAtomicAtPath } from "./storage/feature-namespace.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 export interface SkillApprovalRecord {
   /** Record key from the caller — a skill name, or `<name>#bundled`. */
@@ -80,7 +80,7 @@ const DEFAULT_PATH = resolve(lvisHome(), FEATURE_ID, FILE_NAME);
  * which for a bundled skill is a digest pair rather than a body.
  */
 export function hashSkillMaterial(material: string): string {
-  return createHash("sha256").update(material, "utf-8").digest("hex");
+  return sha256Hex(material);
 }
 
 async function readFileOrEmpty(filePath: string): Promise<SkillApprovalsFile> {

@@ -58,6 +58,7 @@ import { checkRuntimeAdmission } from "./runtime-admission.js";
 import type { FloatingDockErrorCode, ResolvedFloatingSurface } from "../../main/floating-dock.js";
 import type { InvocationOrigin } from "./origin-chain.js";
 import { errorMessage } from "../../shared/error-message.js";
+import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 const log = createLogger("plugin-runtime");
 
@@ -2470,9 +2471,7 @@ abstract class PluginRuntimeState {
     if (!registryEntry) {
       throw new Error(`prepared artifact registry provenance missing for '${manifest.id}'`);
     }
-    const candidateManifestSha256 = createHash("sha256")
-      .update(canonicalJSON(manifestDocument))
-      .digest("hex");
+    const candidateManifestSha256 = sha256Hex(canonicalJSON(manifestDocument));
     if (
       registryEntry.manifestSha256 !== undefined
       && registryEntry.manifestSha256 !== candidateManifestSha256

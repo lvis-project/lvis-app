@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   A2AJsonRpcMethod,
@@ -36,6 +36,7 @@ import {
 import { parseA2AStrictJson } from "./a2a-strict-json.js";
 import { canonicalizeA2ARemoteTask } from "./a2a-task-store.js";
 import { isRecord } from "../shared/is-record.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const EXTENSION_ERROR_CODES = new Set([-32090, -32091, -32092, -32093, -32094]);
 const FULL_COMMIT_SHA = /^[a-f0-9]{40}$/;
@@ -132,12 +133,8 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function sha256(value: string | Uint8Array): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function semanticDigest(input: Readonly<A2ARemoteExecuteInput>): string {
-  return sha256(canonical({
+  return sha256Hex(canonical({
     method: input.request.method,
     lineage: input.lineage,
     params: input.request.params,
@@ -340,14 +337,14 @@ export class A2ARemoteClient {
   }
 
   execute(input: Readonly<A2ARemoteExecuteInput>): Promise<A2ARemoteClientResult> {
-    const fingerprint = sha256(canonical({
+    const fingerprint = sha256Hex(canonical({
       operation: input.operation, authorization: input.authorization, lineage: input.lineage,
       intendedCredentialRevisionId: input.intendedCredentialRevisionId,
       predecessorCredentialRevisionId: input.predecessorCredentialRevisionId,
       request: input.request, messageId: input.messageId,
       taskHandle: input.taskHandle,
     }));
-    const baseFingerprint = sha256(canonical({
+    const baseFingerprint = sha256Hex(canonical({
       operation: input.operation, authorization: input.authorization, lineage: input.lineage,
       predecessorCredentialRevisionId: input.predecessorCredentialRevisionId,
       request: input.request, messageId: input.messageId,
@@ -375,23 +372,23 @@ export class A2ARemoteClient {
       operationId: input.operationId,
       attemptId: input.attemptId,
       ownerToken: this.makeId(),
-      ownerDigestSha256: sha256(input.authorization.ownerId),
-      projectRootDigestSha256: sha256(input.authorization.projectRoot),
-      profileDigestSha256: sha256(input.authorization.profileId),
-      originDigestSha256: sha256(input.authorization.origin),
+      ownerDigestSha256: sha256Hex(input.authorization.ownerId),
+      projectRootDigestSha256: sha256Hex(input.authorization.projectRoot),
+      profileDigestSha256: sha256Hex(input.authorization.profileId),
+      originDigestSha256: sha256Hex(input.authorization.origin),
       operation: input.operation,
       method: input.request.method,
       lineage: structuredClone(input.lineage),
       depth: input.authorization.depth,
-      semanticRequestHash: sha256(canonical({
+      semanticRequestHash: sha256Hex(canonical({
         method: input.request.method, lineage: input.lineage, params: input.request.params,
         messageId: input.messageId, taskId: input.authorization.taskId, contextId: input.authorization.contextId,
       })),
       ...(input.messageId ? { messageId: input.messageId } : {}),
       ...(input.taskHandle ? { taskHandle: input.taskHandle } : {}),
       ...(input.targetLabel ? { targetLabel: input.targetLabel } : {}),
-      ...(input.authorization.taskId ? { taskToken: sha256(`${input.authorization.ownerId}\0${input.authorization.taskId}`) } : {}),
-      ...(input.authorization.contextId ? { contextToken: sha256(`${input.authorization.ownerId}\0${input.authorization.contextId}`) } : {}),
+      ...(input.authorization.taskId ? { taskToken: sha256Hex(`${input.authorization.ownerId}\0${input.authorization.taskId}`) } : {}),
+      ...(input.authorization.contextId ? { contextToken: sha256Hex(`${input.authorization.ownerId}\0${input.authorization.contextId}`) } : {}),
       createdAt: createdAt.toISOString(),
       attemptDeadline: new Date(createdAt.getTime() + A2A_REMOTE_RECONCILIATION_MS).toISOString(),
       intendedCredentialRevisionId: input.intendedCredentialRevisionId,
@@ -573,10 +570,10 @@ export class A2ARemoteClient {
         const record = await this.options.store.terminalizeUnrecoverableReplay({
           sourceAttemptId: source.prepared.attemptId,
           operationId: input.operationId,
-          ownerDigestSha256: sha256(input.authorization.ownerId),
-          projectRootDigestSha256: sha256(input.authorization.projectRoot),
-          profileDigestSha256: sha256(input.authorization.profileId),
-          originDigestSha256: sha256(input.authorization.origin),
+          ownerDigestSha256: sha256Hex(input.authorization.ownerId),
+          projectRootDigestSha256: sha256Hex(input.authorization.projectRoot),
+          profileDigestSha256: sha256Hex(input.authorization.profileId),
+          originDigestSha256: sha256Hex(input.authorization.origin),
           lineage: input.lineage,
           messageId: source.prepared.messageId,
           semanticRequestHash: source.prepared.semanticRequestHash,
@@ -605,10 +602,10 @@ export class A2ARemoteClient {
       operationId: input.operationId,
       attemptId: input.attemptId,
       ownerToken,
-      ownerDigestSha256: sha256(input.authorization.ownerId),
-      projectRootDigestSha256: sha256(input.authorization.projectRoot),
-      profileDigestSha256: sha256(input.authorization.profileId),
-      originDigestSha256: sha256(input.authorization.origin),
+      ownerDigestSha256: sha256Hex(input.authorization.ownerId),
+      projectRootDigestSha256: sha256Hex(input.authorization.projectRoot),
+      profileDigestSha256: sha256Hex(input.authorization.profileId),
+      originDigestSha256: sha256Hex(input.authorization.origin),
       operation: input.operation,
       method: input.request.method,
       lineage: structuredClone(input.lineage),
@@ -617,8 +614,8 @@ export class A2ARemoteClient {
       ...(input.messageId ? { messageId: input.messageId } : {}),
       ...(input.taskHandle ? { taskHandle: input.taskHandle } : {}),
       ...(input.targetLabel ? { targetLabel: input.targetLabel } : {}),
-      ...(input.authorization.taskId ? { taskToken: sha256(`${input.authorization.ownerId}\0${input.authorization.taskId}`) } : {}),
-      ...(input.authorization.contextId ? { contextToken: sha256(`${input.authorization.ownerId}\0${input.authorization.contextId}`) } : {}),
+      ...(input.authorization.taskId ? { taskToken: sha256Hex(`${input.authorization.ownerId}\0${input.authorization.taskId}`) } : {}),
+      ...(input.authorization.contextId ? { contextToken: sha256Hex(`${input.authorization.ownerId}\0${input.authorization.contextId}`) } : {}),
       ...(approvalDecisionId ? { approvalDecisionId } : {}),
       ...(approvalDecidedAt ? { approvalDecidedAt } : {}),
       createdAt: createdAt.toISOString(),
@@ -633,7 +630,7 @@ export class A2ARemoteClient {
           ownerId: input.authorization.ownerId,
           operationId: input.operationId,
           messageId: input.messageId!,
-          bodySha256: sha256(body),
+          bodySha256: sha256Hex(body),
           lineage: input.lineage,
         })
       : undefined;
@@ -703,15 +700,15 @@ export class A2ARemoteClient {
         extensionUri: A2A_EXACT_SEND_REPLAY_URI,
         lineage: structuredClone(input.lineage),
         semanticRequestHash,
-        ownerDigestSha256: sha256(input.authorization.ownerId),
-        projectRootDigestSha256: sha256(input.authorization.projectRoot),
-        profileDigestSha256: sha256(input.authorization.profileId),
-        originDigestSha256: sha256(input.authorization.origin),
+        ownerDigestSha256: sha256Hex(input.authorization.ownerId),
+        projectRootDigestSha256: sha256Hex(input.authorization.projectRoot),
+        profileDigestSha256: sha256Hex(input.authorization.profileId),
+        originDigestSha256: sha256Hex(input.authorization.origin),
         ...(approvalDecisionId ? { approvalDecisionId } : {}),
         ...(approvalDecidedAt ? { approvalDecidedAt } : {}),
         ...(input.taskHandle ? { taskHandle: input.taskHandle } : {}),
-        ...(input.authorization.taskId ? { taskToken: sha256(`${input.authorization.ownerId}\0${input.authorization.taskId}`) } : {}),
-        ...(input.authorization.contextId ? { contextToken: sha256(`${input.authorization.ownerId}\0${input.authorization.contextId}`) } : {}),
+        ...(input.authorization.taskId ? { taskToken: sha256Hex(`${input.authorization.ownerId}\0${input.authorization.taskId}`) } : {}),
+        ...(input.authorization.contextId ? { contextToken: sha256Hex(`${input.authorization.ownerId}\0${input.authorization.contextId}`) } : {}),
         ...(stored.record.prepared.payloadRecordId ? { payloadRecordId: stored.record.prepared.payloadRecordId } : {}),
         ...(stored.record.prepared.payloadCiphertextSha256 ? { payloadCiphertextSha256: stored.record.prepared.payloadCiphertextSha256 } : {}),
         ...(stored.record.prepared.payloadBodySha256 ? { payloadBodySha256: stored.record.prepared.payloadBodySha256 } : {}),

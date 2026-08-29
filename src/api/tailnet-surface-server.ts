@@ -51,6 +51,7 @@ import {
 } from "./tailnet-web-session-store.js";
 import { isRecord } from "../shared/is-record.js";
 import { errorMessage } from "../shared/error-message.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
@@ -2422,7 +2423,7 @@ function pairedAttachmentOwnerKey(authority: TailnetPairedShareAuthorization): s
 }
 
 function identityDigest(login: string): string {
-  return createHash("sha256").update(login, "utf8").digest("hex");
+  return sha256Hex(login);
 }
 
 function createTailnetRequestLimiter(
@@ -2491,7 +2492,7 @@ function commandDigest(command: TailnetControllerCommand): string {
       type: command.type,
       turnId: command.turnId,
     };
-  return createHash("sha256").update(JSON.stringify(semantic), "utf8").digest("hex");
+  return sha256Hex(JSON.stringify(semantic));
 }
 
 function publicTurnResponse(
@@ -2508,7 +2509,7 @@ function publicTurnResponse(
 }
 
 function controllerReceiptKeyDigest(actorId: string, commandId: string): string {
-  return createHash("sha256").update(`${actorId}\u0000${commandId}`, "utf8").digest("hex");
+  return sha256Hex(`${actorId}\u0000${commandId}`);
 }
 
 function tailnetPublicTurnId(actorId: string, commandId: string): string {
@@ -2516,7 +2517,7 @@ function tailnetPublicTurnId(actorId: string, commandId: string): string {
   return "tailnet-turn_" + Buffer.from(digest, "hex").toString("base64url");
 }
 function privateConversationDigest(conversationId: string): string {
-  return createHash("sha256").update(conversationId, "utf8").digest("hex");
+  return sha256Hex(conversationId);
 }
 
 function isTailnetControllerReceiptStore(value: unknown): value is TailnetControllerReceiptStore {

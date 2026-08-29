@@ -1,7 +1,6 @@
 import {
   createCipheriv,
   createDecipheriv,
-  createHash,
   createHmac,
   randomBytes,
   randomUUID,
@@ -14,6 +13,7 @@ import { A2A_EXACT_SEND_REPLAY_RETENTION_MS } from "./a2a-remote-contracts.js";
 import type { A2AOsEncryption } from "./a2a-remote-store.js";
 import { canonicalizeA2ARemoteTask } from "./a2a-task-store.js";
 import { isRecord } from "../shared/is-record.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const STORE_VERSION = 2;
 const DEFAULT_FILE = "exact-send-replay.json";
@@ -62,10 +62,6 @@ export type A2AReplayBeginResult =
   | { kind: "retention-expired" }
   | { kind: "outcome-unknown" }
   | { kind: "capacity-exhausted" };
-
-function sha256(value: string | Uint8Array): string {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 function decodeCanonicalBase64(value: string): Buffer | null {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return null;
@@ -204,7 +200,7 @@ export class A2AExactReplayStore {
         const tag = decodeCanonicalBase64(record.resultAuthTag!);
         const valid = ciphertext !== null && ciphertext.byteLength > 0
           && iv?.byteLength === 12 && tag?.byteLength === 16
-          && sha256(ciphertext) === record.resultCiphertextSha256;
+          && sha256Hex(ciphertext) === record.resultCiphertextSha256;
         ciphertext?.fill(0); iv?.fill(0); tag?.fill(0);
         if (!valid) throw new Error("a2a-replay-store-invalid");
         try { this.decryptResult(state, record); } catch { throw new Error("a2a-replay-store-invalid"); }
@@ -238,7 +234,7 @@ export class A2AExactReplayStore {
     const key = this.dataKey(state);
     try {
       const ciphertext = Buffer.from(record.resultCiphertext!, "base64");
-      if (sha256(ciphertext) !== record.resultCiphertextSha256) throw new Error("a2a-replay-result-corrupt");
+      if (sha256Hex(ciphertext) !== record.resultCiphertextSha256) throw new Error("a2a-replay-result-corrupt");
       const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(record.resultIv!, "base64"));
       decipher.setAAD(Buffer.from(`result\0${record.keyToken}\0${record.bodySha256}\0${record.intentSha256}`));
       decipher.setAuthTag(Buffer.from(record.resultAuthTag!, "base64"));
@@ -297,7 +293,7 @@ export class A2AExactReplayStore {
         record.resultCiphertext = ciphertext.toString("base64");
         record.resultIv = iv.toString("base64");
         record.resultAuthTag = cipher.getAuthTag().toString("base64");
-        record.resultCiphertextSha256 = sha256(ciphertext);
+        record.resultCiphertextSha256 = sha256Hex(ciphertext);
         await this.persist(next);
         this.state = next;
         return true;

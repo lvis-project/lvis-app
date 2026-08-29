@@ -14,7 +14,7 @@
  * so the feature-flag dispatcher can compose both paths without leaking
  * marketplace URLs into the npm install branch.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
@@ -26,6 +26,7 @@ import {
   resolveMarketplaceArtifactLimits,
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 /**
  * Minimal HTTP surface the installer needs. Lets callers inject either
@@ -245,7 +246,7 @@ export async function installFromMarketplace(
         artifactLimits.maxCompressedBytes,
         `cached marketplace artifact ${slug}@${version}`,
       );
-      const cachedSha256 = createHash("sha256").update(cached).digest("hex");
+      const cachedSha256 = sha256Hex(cached);
       if (!expectedArtifactSha256 || cachedSha256 === expectedArtifactSha256) {
         body = cached;
         fromCache = true;
@@ -279,7 +280,7 @@ export async function installFromMarketplace(
   //    no header was returned, but always compute the digest for sig verification).
   // Fire verifying event before computing the sha256 digest.
   opts.onProgress?.({ phase: "verifying" });
-  computedSha256 = createHash("sha256").update(body).digest("hex");
+  computedSha256 = sha256Hex(body);
   if (sha256Header && sha256Header.toLowerCase() !== computedSha256) {
     throw new MarketplaceInstallerError(
       "SHA256_HEADER_MISMATCH",

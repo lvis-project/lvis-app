@@ -1,6 +1,5 @@
 import { cp, mkdir, readFile, rename, rm, stat as statAsync } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { dirname, isAbsolute, posix, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
@@ -73,6 +72,7 @@ import {
 } from "../shared/network-access.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { materializePluginContributions } from "./plugin-contributions.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("marketplace");
 
 import {
@@ -265,7 +265,7 @@ export type RemoveDelistedAdminInstall = (
 ) => Promise<void>;
 
 function shaOfManifest(manifest: unknown): string {
-  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
+  return sha256Hex(canonicalJSON(manifest));
 }
 
 /**
@@ -276,7 +276,7 @@ function shaOfManifest(manifest: unknown): string {
  * the catalog between the policy decision and the artifact install (TOCTOU).
  */
 function shaOfCatalogItem(item: PluginMarketplaceItem): string {
-  return createHash("sha256").update(canonicalJSON(item)).digest("hex");
+  return sha256Hex(canonicalJSON(item));
 }
 
 function throwIfMarketplaceInstallAborted(

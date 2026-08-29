@@ -8,11 +8,11 @@
  * uses an honest plain-host plan and must be explicitly approved per invocation.
  */
 
-import { createHash } from "node:crypto";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { SandboxCapability } from "./sandbox-capability.js";
 import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
 import { isRecord } from "../shared/is-record.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 export const HOST_SHELL_EXECUTION_PLAN_VERSION = "host-shell-execution-plan/v2" as const;
 
@@ -153,7 +153,7 @@ export function getHostShellExecutionPlanCacheIdentity(
     version: projection.version,
   });
   return "host-shell-execution-plan-cache/v2:" +
-    createHash("sha256").update(canonicalProjection).digest("hex");
+    sha256Hex(canonicalProjection);
 }
 
 const NO_CONFINEMENT: Readonly<SandboxConfinement> = Object.freeze({

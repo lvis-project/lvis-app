@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   A2A_DIRECT_JSONRPC_METHODS,
@@ -26,6 +25,7 @@ import {
 import { parseA2AStrictJson } from "./a2a-strict-json.js";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import { isRecord } from "../shared/is-record.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -273,7 +273,7 @@ export function buildA2AAgentCard(
 function sendCard(req: IncomingMessage, res: ServerResponse, handler: A2ARequestHandler, advertisedOrigin?: string): void {
   const card = buildA2AAgentCard(handler, interfaceUrl(req, handler.id, advertisedOrigin));
   const payload = JSON.stringify(card);
-  const etag = '"' + createHash("sha256").update(payload).digest("hex") + '"';
+  const etag = '"' + sha256Hex(payload) + '"';
   res.writeHead(200, {
     "content-type": JSON_CONTENT_TYPE,
     "cache-control": "public, max-age=60",

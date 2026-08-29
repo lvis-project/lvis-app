@@ -41,6 +41,7 @@ import {
   type PluginGenerationHealthFault,
 } from "./plugin-generation-health-journal.js";
 import { errorMessage } from "../shared/error-message.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const log = createLogger("plugin-bundle-lifecycle");
 const MAX_RETIREMENT_ATTEMPTS = 3;
@@ -536,9 +537,9 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
           artifactGenerationId,
           generationId,
           manifestSha256:
-            createHash("sha256").update(manifestRaw).digest("hex"),
+            sha256Hex(manifestRaw),
           receiptSha256:
-            createHash("sha256").update(receiptRaw).digest("hex"),
+            sha256Hex(receiptRaw),
           contributions,
         };
         const preparationView: ActivePluginGeneration = {

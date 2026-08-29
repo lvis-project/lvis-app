@@ -33,6 +33,7 @@ import {
   type HookConfigEntry,
 } from "./hook-config.js";
 import { defaultHooksDir, type DiscoveredHook } from "./hook-discovery.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const log = createLogger("hook-config-trust");
 
@@ -164,7 +165,7 @@ export function loadHookConfig(
 }
 
 function hashBytesOnly(raw: Buffer): string {
-  return createHash("sha256").update(raw).digest("hex");
+  return sha256Hex(raw);
 }
 
 /** Sorted, de-duplicated list of resolved local-script anchors across entries. */

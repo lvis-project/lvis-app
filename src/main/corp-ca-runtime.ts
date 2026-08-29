@@ -14,12 +14,12 @@ import * as https from "node:https";
 import { join } from "node:path";
 import * as tls from "node:tls";
 import { Agent, setGlobalDispatcher } from "undici";
-import { createHash } from "node:crypto";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { countCertificates, extractCorporateCa } from "./corp-ca-extract.js";
 import { resolveCorpCaConfig, type CorpCaConfig } from "../shared/corp-ca-config.js";
 import { errorMessage } from "../shared/error-message.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const caLog = createLogger("corp-ca");
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * earlier file rather than re-extracting.
  */
 function cachePathFor(commonName: string): string {
-  const digest = createHash("sha256").update(commonName).digest("hex").slice(0, 16);
+  const digest = sha256Hex(commonName).slice(0, 16);
   return join(CACHE_DIR, `corp-ca-${digest}.pem`);
 }
 

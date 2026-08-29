@@ -4,9 +4,9 @@ import type {
   A2AJsonRpcId,
 } from "../shared/a2a-wire.js";
 import { isIP } from "node:net";
-import { createHash } from "node:crypto";
 import { A2AJsonRpcMethod } from "../shared/a2a-wire.js";
 import { isRecord } from "../shared/is-record.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 export const A2A_EXACT_SEND_REPLAY_URI =
   "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44" as const;
@@ -568,5 +568,5 @@ export function sameA2ARemoteLineage(
 }
 
 export function a2aRemoteLineageDigestSha256(lineage: Readonly<A2ARemoteLineage>): string {
-  return createHash("sha256").update(JSON.stringify({ targetAgentId: lineage.targetAgentId, interfaceUrl: lineage.interfaceUrl, agentCardDigestSha256: lineage.agentCardDigestSha256, trustKeyId: lineage.trustKeyId, credentialBindingId: lineage.credentialBindingId, callerGenerationId: lineage.callerGenerationId, routePolicyVersion: lineage.routePolicyVersion, routePolicyDigestSha256: lineage.routePolicyDigestSha256, extensionSpecDigestSha256: lineage.extensionSpecDigestSha256 })).digest("hex");
+  return sha256Hex(JSON.stringify({ targetAgentId: lineage.targetAgentId, interfaceUrl: lineage.interfaceUrl, agentCardDigestSha256: lineage.agentCardDigestSha256, trustKeyId: lineage.trustKeyId, credentialBindingId: lineage.credentialBindingId, callerGenerationId: lineage.callerGenerationId, routePolicyVersion: lineage.routePolicyVersion, routePolicyDigestSha256: lineage.routePolicyDigestSha256, extensionSpecDigestSha256: lineage.extensionSpecDigestSha256 }));
 }

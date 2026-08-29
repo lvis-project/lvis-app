@@ -8,7 +8,6 @@ import {
   openSync,
   readSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { dirname, isAbsolute } from "node:path";
 import { platform } from "node:process";
 import { computeLineHmac, type SecretStore } from "../../audit/hmac-chain.js";
@@ -31,7 +30,7 @@ import {
   type InvocationAuditSink,
 } from "./rationale-ticket-lifecycle.js";
 import type { RationaleRequiredControl } from "./rationale-control.js";
-import { timingSafeEqualHexDigest } from "../../lib/hex-digest-equal.js";
+import { timingSafeEqualHexDigest, sha256Hex } from "../../lib/hex-digest-equal.js";
 import { isRecord } from "../../shared/is-record.js";
 
 const JOURNAL_SCHEMA_VERSION = 1 as const;
@@ -732,9 +731,7 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
       const entry: InvocationJournalEntry = {
         authorized: input.authorized,
         authorizationExpiresAt: input.control.anchor.expiresAt,
-        controlDigest: createHash("sha256")
-          .update(canonicalStringify(input.control))
-          .digest("hex"),
+        controlDigest: sha256Hex(canonicalStringify(input.control)),
         sessionId: input.sessionId,
         lease,
         started: startedInvocationAudit,

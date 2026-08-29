@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { MemoryCaptureMode } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
 import { maskSensitiveData, scrubSecretsForLLM } from "../shared/dlp.js";
@@ -14,6 +13,7 @@ import type {
   NoteEntry,
   ProjectScopedMemoryOptions,
 } from "./memory-manager.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const log = createLogger("memory-capture");
 
@@ -130,7 +130,7 @@ export class MemoryCaptureService implements AutomaticMemoryCaptureSubmitter {
       return;
     }
 
-    const sourceDigest = digest(source);
+    const sourceDigest = sha256Hex(source);
     if (this.pending.some((item) =>
       item.trigger === "automatic"
       && item.sessionId === request.sessionId
@@ -168,7 +168,7 @@ export class MemoryCaptureService implements AutomaticMemoryCaptureSubmitter {
     return this.reviewAndStore({
       scope: copyProjectScope(request),
       source,
-      sourceDigest: digest(source),
+      sourceDigest: sha256Hex(source),
       trigger: "explicit",
       ...(requestedTitle ? { requestedTitle } : {}),
     });
@@ -389,8 +389,4 @@ function copyProjectScope(options: ProjectScopedMemoryOptions): ProjectScopedMem
 
 function normalizeEvidence(value: string): string {
   return value.normalize("NFKC").replace(/\s+/g, " ").trim();
-}
-
-function digest(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
