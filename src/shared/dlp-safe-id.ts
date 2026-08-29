@@ -1,3 +1,17 @@
+/**
+ * Main-process only — the minters below pull `node:crypto` for `randomUUID`,
+ * which the renderer and preload bundles do not have. Neither of those
+ * processes should import this module.
+ *
+ * `isSafeStructuralId`'s control-character class (C0/DEL plus C1
+ * U+0080–U+009F and the line separators U+2028/2029) is what actually
+ * narrowed for two existing call paths: `src/api/a2a-remote-client.ts`
+ * (~line 796, the remote task projection) and
+ * `src/api/a2a-exact-replay-store.ts` (~line 115, the replay task-shape
+ * check), both by way of `canonicalizeA2ARemoteTask` in
+ * `src/api/a2a-task-store.ts`. A remote task id carrying one of those
+ * characters now fails canonicalization instead of being accepted.
+ */
 import { randomUUID } from "node:crypto";
 import { hasControlChars } from "./display-safe-text.js";
 import { maskSensitiveData } from "./dlp.js";

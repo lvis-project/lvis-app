@@ -144,5 +144,28 @@ export const CONTENT_TITLE_INSET = SHELL_GUTTER * 2;
  * (`--shell-collapsed-rail-width` = reserve − card inset − one gutter), so the
  * rail ends a gutter before the content at every type scale rather than only
  * at the one the app ships with.
+ *
+ * On win/linux nothing external pins this reserve — there are no traffic
+ * lights to clear on those platforms — but the band still claims the same
+ * `leadClearance` there as on darwin, so one number serves the collapsed
+ * reserve on all three platforms rather than a per-platform pair.
  */
 export const COLLAPSED_RAIL_RESERVE = 64;
+
+/**
+ * The widest control the collapsed icon rail renders, in rem: Tailwind's
+ * `h-9`/`w-9` (9 × its 0.25rem step). Both the rail's own square nav buttons
+ * (`Sidebar.tsx`'s `NavItem`) and its "new chat" button size to this, so it is
+ * the control `COLLAPSED_RAIL_RESERVE` has to leave room for at the user's
+ * largest font scale — `__tests__/shell-geometry.test.ts` asserts the fit
+ * against `appearance-font.ts`'s `FONT_SIZE_SCALE_VALUES`.
+ */
+export const RAIL_CONTROL_REM = 2.25;
+
+/**
+ * The literal Tailwind class pair for `RAIL_CONTROL_REM`, imported into
+ * `Sidebar.tsx` rather than restated there — a plain `"h-9 w-9"` string
+ * so Tailwind's content scanner (`@source` in `src/styles.css` covers this
+ * `.ts` file too) still finds the class as source text.
+ */
+export const RAIL_CONTROL_SIZE_CLASS = "h-9 w-9";

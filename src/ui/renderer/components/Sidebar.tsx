@@ -39,7 +39,7 @@ import {
   type ProjectErrorReporter,
 } from "../hooks/use-add-project-folder.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
-import { CLUSTER_LEAD_PAD_DARWIN } from "../../../shared/shell-geometry.js";
+import { CLUSTER_LEAD_PAD_DARWIN, RAIL_CONTROL_SIZE_CLASS } from "../../../shared/shell-geometry.js";
 import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
@@ -253,7 +253,7 @@ function NavItem({
       data-viewkey={dataViewKey}
       data-tour-anchor={tourAnchor}
       className={[
-        "relative h-9 w-9 aspect-square flex items-center justify-center rounded-md transition-colors",
+        `relative ${RAIL_CONTROL_SIZE_CLASS} aspect-square flex items-center justify-center rounded-md transition-colors`,
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
           ? toneStyle.active
@@ -1831,7 +1831,7 @@ export function Sidebar({
               <Button
                 variant="default"
                 size="icon"
-                className="h-9 w-9 aspect-square p-0 shrink-0"
+                className={`${RAIL_CONTROL_SIZE_CLASS} aspect-square p-0 shrink-0`}
                 onClick={onNewChat}
                 disabled={streaming}
                 aria-label={t("mainToolbar.newChat")}
