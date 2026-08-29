@@ -7,6 +7,7 @@ import type { LvisApi } from "../../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../../preview/preview-targets.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
+import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
 import { ChatGroupFrame } from "../ChatGroupFrame.js";
 import { emptyActionPanelActivity } from "../../../../../test/renderer/helpers.js";
@@ -114,7 +115,7 @@ function HarnessPanel({
       onSelect={setSelectedId}
       workspaceTabs={workspaceTabs}
       subAgentSpawns={subAgentSpawns}
-      width={448}
+      width={SIDE_PANEL_MIN_WIDTH}
       onWidthChange={vi.fn()}
       onWidthCommit={vi.fn()}
       onClose={onClose}
