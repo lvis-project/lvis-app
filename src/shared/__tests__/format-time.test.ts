@@ -103,9 +103,9 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime("not a date", labels)).toBe("");
   });
 
-  it("renders nothing rather than throwing when a label throws", () => {
+  it("lets a throwing label propagate — a missing catalog entry is a defect, not an empty label", () => {
     const throwing: RelativeTimeLabels = { ...labels, minutesAgo: () => { throw new Error("no catalog"); } };
-    expect(formatRelativeTime(NOW - 5 * 60_000, throwing)).toBe("");
+    expect(() => formatRelativeTime(NOW - 5 * 60_000, throwing)).toThrow("no catalog");
   });
 });
 

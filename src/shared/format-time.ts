@@ -67,21 +67,17 @@ export interface RelativeTimeLabels {
  * between the host and whoever wrote the record) clamps to "just now".
  */
 export function formatRelativeTime(value: number | string, labels: RelativeTimeLabels): string {
-  try {
-    const instant = new Date(value).getTime();
-    if (!Number.isFinite(instant)) return "";
-    const elapsedMs = Date.now() - instant;
-    if (elapsedMs < 0) return labels.justNow();
-    const seconds = Math.floor(elapsedMs / 1000);
-    if (seconds < 60) return labels.secondsAgo ? labels.secondsAgo(seconds) : labels.justNow();
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return labels.minutesAgo(minutes);
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return labels.hoursAgo(hours);
-    return labels.daysAgo(Math.floor(hours / 24));
-  } catch {
-    return "";
-  }
+  const instant = new Date(value).getTime();
+  if (!Number.isFinite(instant)) return "";
+  const elapsedMs = Date.now() - instant;
+  if (elapsedMs < 0) return labels.justNow();
+  const seconds = Math.floor(elapsedMs / 1000);
+  if (seconds < 60) return labels.secondsAgo ? labels.secondsAgo(seconds) : labels.justNow();
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return labels.minutesAgo(minutes);
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return labels.hoursAgo(hours);
+  return labels.daysAgo(Math.floor(hours / 24));
 }
 
 /** The host's IANA time zone, the zone every label above renders in. */
