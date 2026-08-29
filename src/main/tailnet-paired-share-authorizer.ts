@@ -21,8 +21,9 @@ import { isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 export const TAILNET_PAIRED_SHARE_ACTOR_SECRET_NAME = "tailnet-paired-share-actor-v1.key";
 
-const ACTOR_SECRET_BYTES = 32;
-const ACTOR_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+/** A remote-controller actor secret: 32 random bytes, stored base64url (43 chars, no padding). */
+export const ACTOR_SECRET_BYTES = 32;
+export const ACTOR_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const ACTOR_HMAC_DOMAIN = "lvis/tailnet-paired-sharing/actor/v1\0";
 const MAX_LOGIN_CHARS = 512;
 

@@ -22,11 +22,10 @@ import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-
 import { isTelegramConversationId } from "../shared/telegram-connection.js";
 import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
 import { isPositiveSafeInteger } from "../shared/safe-integer.js";
+import { ACTOR_SECRET_BYTES, ACTOR_SECRET_PATTERN } from "./tailnet-paired-share-authorizer.js";
 
 export const TELEGRAM_PLATFORM_ACTOR_SECRET_NAME = "telegram-platform-bridge-actor-v1.key";
 
-const ACTOR_SECRET_BYTES = 32;
-const ACTOR_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const BOT_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
 const TELEGRAM_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 
