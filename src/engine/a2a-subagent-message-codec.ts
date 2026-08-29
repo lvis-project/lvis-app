@@ -12,8 +12,8 @@ import {
   GUIDE_MAX_ENTRIES,
 } from "./turn/guidance-limits.js";
 import { t } from "../i18n/index.js";
-import { hasControlChars } from "../shared/display-safe-text.js";
 import { isRecord } from "../shared/is-record.js";
+import { isSafeStructuralId } from "../shared/dlp-safe-id.js";
 
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
 const MESSAGE_KEYS = new Set([
@@ -52,14 +52,6 @@ function isStringArray(value: unknown): value is string[] {
 export function isSafeA2AMessageId(value: unknown): value is string {
   return typeof value === "string"
     && MESSAGE_ID_PATTERN.test(value)
-    && maskSensitiveData(value).detections.length === 0;
-}
-
-function isSafeStructuralId(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 256
-    && !hasControlChars(value)
     && maskSensitiveData(value).detections.length === 0;
 }
 
