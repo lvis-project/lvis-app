@@ -14,7 +14,7 @@
  * canned-text stub would silently hide a provider outage). An empty board /
  * empty period short-circuits to an `empty` envelope with NO LLM call.
  *
- * "Today" / "this week" are KST calendar boundaries (see ./schedule.ts). All
+ * "Today" / "this week" are host-local calendar boundaries (see ./schedule.ts). All
  * time inputs flow through an injectable `now()` so report windows are
  * deterministically testable.
  */
@@ -25,8 +25,8 @@ import {
 } from "./work-memory.js";
 import { readActivity, type ActivityStorage } from "./activity-log.js";
 import { workBoardProjectStorageKey } from "./project-storage.js";
-import { kstDateKey } from "../shared/kst-date.js";
-import { isoWeekFor, kstDayBounds, sundayWeekBoundsKst } from "./schedule.js";
+import { localDateKey } from "../shared/local-date.js";
+import { isoWeekFor, localDayBounds, sundayWeekBoundsLocal } from "./schedule.js";
 import type { WorkBoardStorage } from "./storage.js";
 import type {
   WorkItemListResult,
@@ -61,14 +61,14 @@ export type ReportResult =
   | { status: "empty"; kind: ReportKind; period: string; reason: string };
 
 export interface DailyReportInput {
-  /** Override the target day (`YYYY-MM-DD`, KST). Default: today KST. */
+  /** Override the target day (`YYYY-MM-DD`, host-local). Default: today. */
   date?: string;
   projectRoot?: string;
   includeUnscoped?: boolean;
 }
 
 export interface WeeklyReportInput {
-  /** Override the target ISO week (`YYYY-Www`). Default: current week KST. */
+  /** Override the target ISO week (`YYYY-Www`). Default: the current local week. */
   weekIso?: string;
   /** Sunday-week offset relative to now (0 = this week, -1 = last week). */
   weekOffset?: number;
@@ -152,8 +152,8 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
   }
 
   async function generateDaily(input?: DailyReportInput): Promise<ReportResult> {
-    const period = input?.date ?? kstDateKey(new Date(nowMs()));
-    const bounds = kstDayBounds(period);
+    const period = input?.date ?? localDateKey(new Date(nowMs()));
+    const bounds = localDayBounds(period);
     if (!bounds) {
       return { status: "empty", kind: "daily", period, reason: "invalid date — expected YYYY-MM-DD" };
     }
@@ -218,7 +218,7 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
     // Validate a caller-supplied week label BEFORE it is interpolated into the
     // report file path — a `../`-bearing weekIso would otherwise escape the
     // work-board namespace on write. (Daily's date is regex-validated by
-    // kstDayBounds; weekly needs the same guard.)
+    // localDayBounds; weekly needs the same guard.)
     if (input?.weekIso !== undefined && !/^\d{4}-W\d{2}$/.test(input.weekIso)) {
       return {
         status: "empty",
@@ -228,7 +228,7 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
       };
     }
     const ref = new Date(nowMs());
-    const { start, end } = sundayWeekBoundsKst(ref, input?.weekOffset ?? 0);
+    const { start, end } = sundayWeekBoundsLocal(ref, input?.weekOffset ?? 0);
     const period = input?.weekIso ?? isoWeekFor(start);
     const startMs = start.getTime();
     const endMs = end.getTime();

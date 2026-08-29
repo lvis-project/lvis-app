@@ -85,7 +85,7 @@ export async function handleCommand(
         const current = self.sessionId;
         const sessionListLines = sessions.slice(0, 10).map((s) => {
           const marker = s.id === current ? t("be_conversationLoop.cmdSessionMarkerCurrent") : "";
-          const date = s.modifiedAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+          const date = s.modifiedAt.toLocaleString();
           return `- ${s.id.slice(0, 8)}… (${date})${marker}`;
         }).join("\n");
         result = t("be_conversationLoop.cmdSessionsList", { max: 10, list: sessionListLines });

@@ -5,9 +5,10 @@
  * populated board calls the LLM once, persists markdown under reports/, and
  * appends a one-line memory summary; an LLM failure propagates (No-Fallback);
  * and generate(kind) dispatches correctly. Storage + store + LLM are in-memory
- * fakes; `now()` is injected so KST windows are deterministic.
+ * fakes; `now()` is injected, and the host zone is pinned, so the report
+ * windows are deterministic.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createWorkBoardReporter } from "../work-report.js";
 import { MEMORY_FILE } from "../work-memory.js";
 import { okListReader, projectMemoryPath, projectReportPath } from "./board-test-fixtures.js";
@@ -17,8 +18,22 @@ import type {
   WorkItemResolved,
 } from "../../shared/work-board-types.js";
 
-// 2026-06-16T03:00:00Z == 12:00 KST, Tue → KST day "2026-06-16".
+// 2026-06-16T03:00:00Z == 12:00 in Seoul, Tue → local day "2026-06-16".
 const NOW = Date.parse("2026-06-16T03:00:00.000Z");
+// These windows are host-local now, so the fixture instants below only mean what
+// their comments say once the host zone is pinned. Node re-reads `TZ` on
+// assignment. Asia/Seoul is chosen because the fixtures were written against
+// it, not because the code knows about it.
+let previousTz: string | undefined;
+beforeEach(() => {
+  previousTz = process.env.TZ;
+  process.env.TZ = "Asia/Seoul";
+});
+afterEach(() => {
+  if (previousTz === undefined) delete process.env.TZ;
+  else process.env.TZ = previousTz;
+});
+
 
 function item(
   p: Partial<WorkItem> & { id: number; status_resolved?: WorkItemResolved["status_resolved"] },
@@ -28,7 +43,7 @@ function item(
     title: `item ${p.id}`,
     status: "planned",
     priority: "medium",
-    created_at: "2026-06-16T01:00:00.000Z", // 10:00 KST 16th — inside today + this week
+    created_at: "2026-06-16T01:00:00.000Z", // 10:00 local 16th — inside today + this week
     updated_at: "2026-06-16T01:00:00.000Z",
     ...rest,
   };

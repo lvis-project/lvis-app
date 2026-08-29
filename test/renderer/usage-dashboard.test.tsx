@@ -132,11 +132,27 @@ describe("UsageDashboard — workspace stats section", () => {
 });
 
 describe("UsageDashboard", () => {
-  it("builds preset ranges from the KST calendar day", async () => {
+  it("builds preset ranges from the host's calendar day, not a fixed zone's", async () => {
     const { presetToDates } = await import("../../src/ui/renderer/components/UsageDashboard.js");
-    expect(presetToDates("7d", new Date("2026-07-03T16:00:00Z"))).toEqual({
-      dateFrom: "2026-06-28",
-      dateTo: "2026-07-04",
+    // 16:00Z is already the 4th in Seoul and still the 3rd in UTC, so a
+    // hardcoded date here would only assert that CI runs in one particular
+    // zone. Derive the expectation from the host's own calendar instead —
+    // this file runs under jsdom, where reassigning `TZ` mid-test does not
+    // take; the cross-zone proof lives in `shared/__tests__/local-date.test.ts`.
+    const instant = new Date("2026-07-03T16:00:00Z");
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const hostToday =
+      `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}`;
+    const sevenDaysEarlier = new Date(
+      instant.getFullYear(), instant.getMonth(), instant.getDate() - 6,
+    );
+    const hostFrom =
+      `${sevenDaysEarlier.getFullYear()}-${pad(sevenDaysEarlier.getMonth() + 1)}`
+      + `-${pad(sevenDaysEarlier.getDate())}`;
+
+    expect(presetToDates("7d", instant)).toEqual({
+      dateFrom: hostFrom,
+      dateTo: hostToday,
     });
   });
 

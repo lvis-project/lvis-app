@@ -9,7 +9,7 @@ import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
-import { kstDateKey } from "../../../shared/kst-date.js";
+import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 import { formatCost } from "../../../lib/cost-format.js";
 import { formatHhMm, formatMediumDateTime } from "../utils/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
@@ -87,13 +87,22 @@ interface HeatmapMonthLabel {
 }
 
 
+/**
+ * A `YYYY-MM-DD` key as the local `Date` the calendar and its month label read.
+ *
+ * Local, not UTC noon: the calendar reads the `Date` with local getters, and a
+ * midpoint only happens to land on the right day for offsets inside ±12h.
+ * Every key reaching here came from `localDateKey` or `monthRange`, so the
+ * throw is an assertion about that, not a case to handle.
+ */
 function dateFromKey(dateKey: string): Date {
-  const [year = "0", month = "1", day = "1"] = dateKey.split("-");
-  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+  const start = localDayStart(dateKey);
+  if (start === null) throw new Error(`[starred-view] not a date key: ${dateKey}`);
+  return start;
 }
 
 function monthRange(date: Date): { monthKey: string; dateFrom: string; dateTo: string } {
-  const monthKey = kstDateKey(date).slice(0, 7);
+  const monthKey = localDateKey(date).slice(0, 7);
   const [year = 0, month = 1] = monthKey.split("-").map(Number);
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return {
@@ -187,7 +196,7 @@ export function StarredView({
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
   const [visibleYear, setVisibleYear] = useState<number>(
-    () => Number(kstDateKey(new Date()).slice(0, 4)),
+    () => Number(localDateKey(new Date()).slice(0, 4)),
   );
   const [dailyUsageResult, setDailyUsageResult] = useState<DailyUsageResult | null>(null);
   const [monthlyUsageResult, setMonthlyUsageResult] = useState<MonthlyUsageResult | null>(null);
@@ -195,13 +204,13 @@ export function StarredView({
   const [yearlyUsageByDate, setYearlyUsageByDate] = useState<Map<string, number>>(() => new Map());
   const [llmSummary, setLlmSummary] = useState<string | null>(null);
   const [llmSummaryState, setLlmSummaryState] = useState<"idle" | "loading" | "error">("idle");
-  const selectedKey = kstDateKey(selectedDate);
-  const todayKey = kstDateKey(new Date());
+  const selectedKey = localDateKey(selectedDate);
+  const todayKey = localDateKey(new Date());
   const currentYear = Number(todayKey.slice(0, 4));
   const getUsageRange = (api as Partial<LvisApi>).getUsageRange;
   const monthlyRange = useMemo(() => monthRange(calendarMonth), [calendarMonth]);
   const monthlyLabel = useMemo(
-    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "long", timeZone: "UTC" })
+    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "long" })
       .format(dateFromKey(monthlyRange.dateFrom)),
     [locale, monthlyRange.dateFrom],
   );
@@ -223,17 +232,17 @@ export function StarredView({
     return Array.from(byId.values());
   }, [discoveredSessions, sessions]);
   const sessionsForDay = useMemo(
-    () => allSessions.filter((session) => kstDateKey(new Date(session.modifiedAt)) === selectedKey),
+    () => allSessions.filter((session) => localDateKey(new Date(session.modifiedAt)) === selectedKey),
     [allSessions, selectedKey],
   );
   const starredForDay = useMemo(
-    () => starred.filter((item) => kstDateKey(new Date(item.starredAt)) === selectedKey),
+    () => starred.filter((item) => localDateKey(new Date(item.starredAt)) === selectedKey),
     [selectedKey, starred],
   );
   const activityDateKeys = useMemo(() => {
     const keys = new Set<string>();
-    for (const session of allSessions) keys.add(kstDateKey(new Date(session.modifiedAt)));
-    for (const item of starred) keys.add(kstDateKey(new Date(item.starredAt)));
+    for (const session of allSessions) keys.add(localDateKey(new Date(session.modifiedAt)));
+    for (const item of starred) keys.add(localDateKey(new Date(item.starredAt)));
     for (const [dateKey, tokens] of yearlyUsageByDate) if (tokens > 0) keys.add(dateKey);
     return keys;
   }, [allSessions, starred, yearlyUsageByDate]);
@@ -445,21 +454,20 @@ export function StarredView({
             <LazyCalendar
               data-testid="insights-calendar"
               mode="single"
-              timeZone="Asia/Seoul"
               selected={selectedDate}
               month={calendarMonth}
               onMonthChange={(month) => {
                 setCalendarMonth(month);
-                setVisibleYear(Number(kstDateKey(month).slice(0, 4)));
+                setVisibleYear(Number(localDateKey(month).slice(0, 4)));
               }}
               onSelect={(date) => {
                 if (!date) return;
                 setSelectedDate(date);
                 setCalendarMonth(date);
-                setVisibleYear(Number(kstDateKey(date).slice(0, 4)));
+                setVisibleYear(Number(localDateKey(date).slice(0, 4)));
               }}
               disabled={(date) => {
-                const dateKey = kstDateKey(date);
+                const dateKey = localDateKey(date);
                 return dateKey > todayKey || !activityDateKeys.has(dateKey);
               }}
               modifiers={{ hasActivity: activityMatchers }}

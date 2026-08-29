@@ -10,16 +10,16 @@ import { WorkspaceStatsSection } from "./WorkspaceStatsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
 import type { SettingsTab } from "../../../shared/settings-tabs.js";
-import { kstDateKey, shiftKstDateKey } from "../../../shared/kst-date.js";
+import { localDateKey, shiftLocalDateKey } from "../../../shared/local-date.js";
 
 type Preset = "7d" | "30d" | "90d" | "all" | "custom";
 
 function todayKey(now = new Date()): string {
-  return kstDateKey(now);
+  return localDateKey(now);
 }
 
 function daysAgoKey(n: number, now = new Date()): string {
-  return shiftKstDateKey(kstDateKey(now), -n);
+  return shiftLocalDateKey(localDateKey(now), -n);
 }
 
 export function presetToDates(preset: Preset, now = new Date()): { dateFrom: string; dateTo: string } {

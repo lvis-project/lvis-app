@@ -7,7 +7,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { iterateJsonlLines, withAuditSnapshotLock } from "../audit/jsonl-reader.js";
-import { kstDateKey, kstMonthStartKey, kstMondayWeekStartKey, shiftKstDateKey } from "../shared/kst-date.js";
+import { localDateKey, localMonthStartKey, localMondayWeekStartKey, shiftLocalDateKey } from "../shared/local-date.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import {
   normalizeSubscriptionUsageTelemetry,
@@ -410,14 +410,14 @@ export async function readAuditEntries(
   days: number = 60,
   now: Date = new Date(),
 ): Promise<AuditTurnEntry[]> {
-  const cutoffDateKey = shiftKstDateKey(kstDateKey(now), -days);
-  const cutoffFileKey = shiftKstDateKey(cutoffDateKey, -1);
+  const cutoffDateKey = shiftLocalDateKey(localDateKey(now), -days);
+  const cutoffFileKey = shiftLocalDateKey(cutoffDateKey, -1);
   return readUsageAuditEntries(
     auditDir,
     (file) => file.date >= cutoffFileKey,
     (entry) => {
       const timestamp = new Date(entry.timestamp);
-      return !Number.isNaN(timestamp.getTime()) && kstDateKey(timestamp) >= cutoffDateKey;
+      return !Number.isNaN(timestamp.getTime()) && localDateKey(timestamp) >= cutoffDateKey;
     },
   );
 }
@@ -435,9 +435,9 @@ export function computeUsageSummary(
   now: Date = new Date(),
   pricingOverrides: readonly PricingOverride[] = [],
 ): UsageSummary {
-  const todayKey = kstDateKey(now);
-  const weekKey = kstMondayWeekStartKey(now);
-  const monthKey = kstMonthStartKey(now);
+  const todayKey = localDateKey(now);
+  const weekKey = localMondayWeekStartKey(now);
+  const monthKey = localMonthStartKey(now);
 
   const today = emptyTotals();
   const thisWeek = emptyTotals();
@@ -464,7 +464,7 @@ export function computeUsageSummary(
   for (const e of entries) {
     const ts = new Date(e.timestamp);
     if (Number.isNaN(ts.getTime())) continue;
-    const dKey = kstDateKey(ts);
+    const dKey = localDateKey(ts);
 
     for (const telemetry of parseSubscriptionUsageSegments(e)) {
       if (dKey === todayKey) addSubscriptionTo(subscription.today, telemetry);
@@ -694,7 +694,7 @@ function createUsageSummaryCacheKey(params: {
     version: 1,
     auditDir: params.auditDir,
     query: params.query,
-    kstDate: kstDateKey(params.now),
+    localDate: localDateKey(params.now),
     pricingOverride: pricingOverridesSignature(params.pricingOverrides),
     manifest: params.manifest,
   });
@@ -835,8 +835,8 @@ export async function getUsageRange(
   pricingOverrides: readonly PricingOverride[] = [],
 ): Promise<UsageSummary> {
   const auditDir = join(lvisHome(), "audit");
-  const fileDateFrom = shiftKstDateKey(opts.dateFrom, -1);
-  const fileDateTo = shiftKstDateKey(opts.dateTo, 1);
+  const fileDateFrom = shiftLocalDateKey(opts.dateFrom, -1);
+  const fileDateTo = shiftLocalDateKey(opts.dateTo, 1);
 
   return getCachedUsageSummary({
     auditDir,
@@ -852,7 +852,7 @@ export async function getUsageRange(
     matchesEntry: (entry) => {
       const timestamp = new Date(entry.timestamp);
       if (Number.isNaN(timestamp.getTime())) return false;
-      const date = kstDateKey(timestamp);
+      const date = localDateKey(timestamp);
       return date >= opts.dateFrom && date <= opts.dateTo;
     },
     pricingOverrides,
@@ -877,8 +877,8 @@ export async function getUsageSummary(
   pricingOverrides: readonly PricingOverride[] = [],
 ): Promise<UsageSummary> {
   const auditDir = join(lvisHome(), "audit");
-  const cutoffDateKey = shiftKstDateKey(kstDateKey(now), -days);
-  const cutoffFileKey = shiftKstDateKey(cutoffDateKey, -1);
+  const cutoffDateKey = shiftLocalDateKey(localDateKey(now), -days);
+  const cutoffFileKey = shiftLocalDateKey(cutoffDateKey, -1);
 
   return getCachedUsageSummary({
     auditDir,
@@ -887,7 +887,7 @@ export async function getUsageSummary(
     matchesFile: (file) => file.date >= cutoffFileKey,
     matchesEntry: (entry) => {
       const timestamp = new Date(entry.timestamp);
-      return !Number.isNaN(timestamp.getTime()) && kstDateKey(timestamp) >= cutoffDateKey;
+      return !Number.isNaN(timestamp.getTime()) && localDateKey(timestamp) >= cutoffDateKey;
     },
     pricingOverrides,
   });
