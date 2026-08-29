@@ -4,7 +4,8 @@ import { t } from "../i18n/index.js";
 import { isExternalOrigin, type ExternalOrigin, type TrustOrigin } from "../contract/trust-origin.js";
 import type { ApprovalGate } from "./approval-gate.js";
 import type { PermissionManager } from "./permission-manager.js";
-import type { PermissionModeCommand, SlashPermissionMode } from "./permission-slash.js";
+import type { PermissionModeCommand } from "./permission-slash.js";
+import type { ExecutionMode } from "../shared/permission-mode.js";
 
 export type PermissionModeApplyResult =
   | {
@@ -128,7 +129,7 @@ export function isExternalApprovalBypass(
  * The in-app surfaces keep `allow` — a user standing in the permission settings
  * choosing it IS the consent — but an out-of-process caller cannot reach it.
  */
-const EXTERNAL_CHANNEL_FORBIDDEN_MODES: readonly SlashPermissionMode[] = ["allow"];
+const EXTERNAL_CHANNEL_FORBIDDEN_MODES: readonly ExecutionMode[] = ["allow"];
 
 export async function applyPermissionModeCommand(
   cmd: PermissionModeCommand,

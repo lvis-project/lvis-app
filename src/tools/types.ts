@@ -12,27 +12,14 @@
  *   - Carry §6.3 Layer 1 deny rules through the registry.
  */
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
+import type { ToolCategory, ToolSource } from "../shared/permission-review-status.js";
 
-export type ToolSource = "builtin" | "plugin" | "mcp";
+// Owned by `shared/permission-review-status.ts` so renderer/lib code can name
+// them without depending on the tools domain; re-exported here for tools callers.
+export type { ToolCategory, ToolSource };
 import type { HostShellExecutionPlan } from "../permissions/host-shell-execution-plan.js";
 import type { HostShellExecutionPermit } from "../permissions/host-shell-execution-permit.js";
 export type TrustLevel = "high" | "medium" | "low";
-
-/**
- * Permission policy 5-axis tool category. Replaces the legacy `read | write | dangerous`
- * binary-ish split with category-aware policy lanes (PermissionManager
- * Layer 3 decision matrix in permission-policy-design.md):
- *
- * - `read`    — automatically allowed for builtin, scope-checked for plugin
- * - `write`   — ask (user confirmation)
- * - `shell`   — ask + Bash AST validation (subset of write where command
- *               structure must be parsed)
- * - `network` — ask + endpoint surface (HTTP/IPC writes to external hosts)
- * - `meta`    — control-flow / UI primitives (`ask_user_question`,
- *               `agent_spawn`). Decision delegated to {@link ToolDecisionOverride}
- *               so executor short-circuit paths stay explicit.
- */
-export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
 
 /**
  * Permission policy explicit decision override for `meta` category tools. When a tool's
@@ -133,7 +120,7 @@ export interface ToolExecutionContext {
 
 /**
  * An image a tool returns for the model to SEE (e.g. `view_image`). Carried on
- * a sibling field of {@link ToolResult} so `output` stays a plain-text
+ * a sibling field of {@link ToolExecutionResult} so `output` stays a plain-text
  * placeholder for every string-only consumer (token estimation, persistence,
  * renderer replay); only the Claude message mapper reads this and emits an image
  * block. `data` is raw base64 (no `data:` URL prefix); non-Claude vendors, which
@@ -154,7 +141,7 @@ export interface ToolResultImage {
  * throwing; throws are caught by the executor and surfaced as
  * `is_error` tool results in the same way.
  */
-export interface ToolResult {
+export interface ToolExecutionResult {
   output: string;
   isError: boolean;
   metadata?: Record<string, unknown>;

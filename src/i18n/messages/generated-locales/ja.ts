@@ -3117,6 +3117,7 @@ export const jaMessages: Record<string, string> = {
   "subscriptionProvidersSection.statusDeviceCodePending": "デバイス コードでのサインイン待ち",
   "subscriptionProvidersSection.statusConnected": "接続済み",
   "subscriptionProvidersSection.statusSignedOut": "サインアウト済み",
+  "subscriptionProvidersSection.routeStatus": "{route} · {status}",
   "subscriptionProvidersSection.statusReady": "サインインの準備完了",
   "subscriptionProvidersSection.refreshStatus": "{provider} の接続状態を更新",
   "subscriptionProvidersSection.errorProviderNotSupported": "このサブスクリプション プロバイダーはサポートされていません。",

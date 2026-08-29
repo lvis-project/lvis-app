@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   isHostApprovalRejectedDecision,
   isHostApprovalTimeoutDecision,
@@ -70,6 +69,7 @@ import type {
   RationaleResumeHostRuntime,
   RationaleResumeIdentityProbe,
 } from "./rationale-resume-runner.js";
+import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 export interface ConservativeRationaleActionSummary {
   readonly requestedEffects: readonly string[];
@@ -117,7 +117,7 @@ function equal(left: unknown, right: unknown): boolean {
 function compactResource(value: string): string {
   const normalized = value.trim();
   if (normalized.length <= 160) return normalized;
-  const suffix = createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+  const suffix = sha256Hex(normalized).slice(0, 16);
   return normalized.slice(0, 142) + "#" + suffix;
 }
 

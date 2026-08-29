@@ -1,8 +1,7 @@
 
 
-
-
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
+import { isStringArray } from "../shared/is-record.js";
 
 export interface TourState {
   lastSeenScenario: string | null;
@@ -19,10 +18,6 @@ export const DEFAULT_TOUR_STATE: TourState = {
 /** `~/.lvis/onboarding/` namespace — owns `tour-state.json`. */
 const ns = openFeatureNamespace("onboarding");
 const TOUR_STATE_FILE = "tour-state.json";
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
-}
 
 function normaliseState(raw: unknown): TourState {
   if (!raw || typeof raw !== "object") return DEFAULT_TOUR_STATE;
@@ -82,9 +77,6 @@ export async function markScenarioComplete(scenarioId: string): Promise<TourStat
   await writeTourState(next);
   return next;
 }
-
-
-
 
 export async function dismissScenario(scenarioId: string): Promise<TourState> {
   if (!scenarioId || typeof scenarioId !== "string") {

@@ -6,7 +6,7 @@
  * follow-up ticket-store PR will add TTL/CAS/audit persistence behind this
  * contract without changing the provider or executor surface.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../types.js";
 import type {
@@ -20,6 +20,7 @@ import { canonicalStringify } from "../../permissions/user-approval-store.js";
 import { normalizeRationaleApprovalDisplayText } from "../../shared/rationale-approval-display.js";
 import { assertValidToolUseId } from "../../shared/tool-use-id.js";
 import { isRecord } from "../../shared/is-record.js";
+import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 export const RATIONALE_CONTROL_CONTRACT_VERSION = 1 as const;
 export const RATIONALE_RESPONSE_TOOL = "permission_rationale";
@@ -519,7 +520,7 @@ export const RATIONALE_RESPONSE_SCHEMA: ToolSchema = {
 };
 
 function digest(value: unknown): string {
-  return createHash("sha256").update(canonicalStringify(value)).digest("hex");
+  return sha256Hex(canonicalStringify(value));
 }
 
 export function createCancelledSiblingProposalGuard(input: {

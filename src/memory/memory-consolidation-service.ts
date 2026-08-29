@@ -17,11 +17,11 @@ import {
 } from "./preference-refresh-service.js";
 import type { MemoryCaptureService } from "./memory-capture-service.js";
 import type { MemoryReviewerService } from "./memory-reviewer-service.js";
+import { MAX_MEMORY_SOURCE_CHARS } from "./memory-manager.js";
 
 const log = createLogger("memory-consolidation");
 const DEFAULT_IDLE_SUCCESS_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_IDLE_FAILURE_BACKOFF_MS = 60 * 1000;
-const MAX_SOURCE_CHARS = 4_000;
 const MAX_TOTAL_SOURCE_CHARS = 24_000;
 const MAX_OUTPUT_CHARS = 7_500;
 
@@ -285,7 +285,7 @@ function buildConsolidationPrompt(snapshot: MemoryConsolidationSnapshot): string
     const block = buildConsolidationSourceBlock(
       source,
       index + 1,
-      Math.min(MAX_SOURCE_CHARS, remainingSourceChars),
+      Math.min(MAX_MEMORY_SOURCE_CHARS, remainingSourceChars),
     );
     sourceBlocks.push(block.value);
     remainingSourceChars -= block.sourceChars;

@@ -19,9 +19,10 @@
  * Clock-skew guard lives in `marketplace-installer.ts` rather than here so
  * this module stays a pure crypto primitive.
  */
-import { createHash, createPublicKey, verify, type KeyObject } from "node:crypto";
+import { createPublicKey, verify, type KeyObject } from "node:crypto";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
 import { createLogger } from "../lib/logger.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("envelope-verifier");
 
 /** Public key inputs may be raw 32-byte ed25519, SPKI DER, or SPKI PEM. */
@@ -71,7 +72,7 @@ export function verifyEnvelope(
   }
 
   // 1. Integrity cross-check (envelope hash must match tarball hash).
-  const computedSha256 = createHash("sha256").update(tarball).digest("hex");
+  const computedSha256 = sha256Hex(tarball);
   if (!envelope?.artifact_sha256 || envelope.artifact_sha256.toLowerCase() !== computedSha256) {
     return { ok: false, reason: "artifact_sha256 mismatch" };
   }

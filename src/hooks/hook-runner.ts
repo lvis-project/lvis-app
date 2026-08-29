@@ -15,7 +15,7 @@ export interface HookContext {
   toolInput: Record<string, unknown>;
 }
 
-export interface HookResult {
+export interface HookRunResult {
 
   action: "allow" | "deny" | "modify";
 
@@ -36,7 +36,7 @@ export interface PostHookResult {
   feedback?: string;
 }
 
-export type PreToolUseHook = (ctx: HookContext) => Promise<HookResult> | HookResult;
+export type PreToolUseHook = (ctx: HookContext) => Promise<HookRunResult> | HookRunResult;
 export type PostToolUseHook = (ctx: PostHookContext) => Promise<PostHookResult | void> | PostHookResult | void;
 
 // ─── Runner ─────────────────────────────────────────
@@ -61,7 +61,7 @@ export class HookRunner {
 
 
 
-  async runPreHooks(ctx: HookContext): Promise<HookResult> {
+  async runPreHooks(ctx: HookContext): Promise<HookRunResult> {
     if (!areExternalTurnHooksAllowed()) {
       return {
         action: "allow",

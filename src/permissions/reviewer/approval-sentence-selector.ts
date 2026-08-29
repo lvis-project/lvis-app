@@ -32,6 +32,7 @@ import { canonicalStringify } from "../../shared/canonical-json.js";
 import { stripMarkdown } from "../../shared/strip-markdown.js";
 import type { ApprovalChoice } from "../approval-gate.js";
 import type { LlmReviewerProvider } from "./risk-classifier.js";
+import type { ToolSource } from "../../shared/permission-review-status.js";
 
 const APPROVAL_SENTENCE_SELECTOR_SYSTEM_PROMPT = [
   "You are a permission approval selector.",
@@ -83,7 +84,7 @@ export interface ApprovalRequestFacts {
   /** Permission category the host classified the call as. */
   category: string;
   /** Where the tool came from. */
-  source: "builtin" | "plugin" | "mcp";
+  source: ToolSource;
   /** Host-resolved path the request is about, when it has one. */
   candidatePath?: string;
 }
@@ -123,9 +124,11 @@ const MAX_REASON_CHARS = 200;
 const MAX_OPTIONS = 8;
 
 const CONFIDENCES = new Set(["high", "low"]);
-const UNTRUSTED_TEXT_CONTROL_RE =
+/** C0/C1 controls and bidi overrides — the characters untrusted text must not carry into a sentence shown to a person. */
+export const UNTRUSTED_TEXT_CONTROL_RE =
   /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
-const HTML_TAG_RE = /<[^>]*>/g;
+/** Anything tag-shaped; untrusted text is flattened to words before selection. */
+export const HTML_TAG_RE = /<[^>]*>/g;
 
 /**
  * Strip anything that could restructure the prompt, then DLP-mask.

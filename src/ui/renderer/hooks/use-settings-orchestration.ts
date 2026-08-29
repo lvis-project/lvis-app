@@ -23,6 +23,8 @@ import {
   getLlmVendorSettings,
   isLLMVendor,
   llmRouteModel,
+  type LLMVendor,
+  type LLMVendorSettings,
 } from "../../../shared/llm-vendor-defaults.js";
 import {
   marketplaceProviderPresetSecretId,
@@ -67,8 +69,8 @@ export interface SettingsOrchestrationState {
   fallbackOpen: boolean;
   setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
   // Web
-  webProvider: string;
-  setWebProvider: (v: string) => void;
+  webProvider: AppSettings["webSearch"]["provider"];
+  setWebProvider: (v: AppSettings["webSearch"]["provider"]) => void;
   webKeyInput: string;
   setWebKeyInput: (v: string) => void;
   hasWebKey: boolean;
@@ -141,7 +143,7 @@ export function useSettingsOrchestration(
   // flashes the wrong vendor label before the settings load effect hydrates
   // the correct persisted value. The `settingsLoaded` guard prevents any
   // save from firing before hydration completes.
-  const [vendor, setVendor] = useState("");
+  const [vendor, setVendor] = useState<LLMVendor | "">("");
   const [providerCredentialDraft, setProviderCredentialDraft] =
     useState<ProviderCredentialDraft | null>(null);
   const [model, setModel] = useState("");
@@ -156,7 +158,7 @@ export function useSettingsOrchestration(
   const [streamSmoothing, setStreamSmoothing] = useState<"none" | "word" | "char">("none");
   const [fallbackChain, setFallbackChain] = useState<FallbackEntry[]>([]);
   const [fallbackOpen, setFallbackOpen] = useState(false);
-  const [webProvider, setWebProvider] = useState("duckduckgo");
+  const [webProvider, setWebProvider] = useState<AppSettings["webSearch"]["provider"]>("duckduckgo");
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
@@ -284,7 +286,7 @@ export function useSettingsOrchestration(
   ]);
 
   function hydrateVendorBlock(
-    block: AppSettings["llm"]["vendors"][string],
+    block: LLMVendorSettings,
     marketplaceProviderPresetIdForBlock = "",
   ): void {
     setModel(llmRouteModel(block, marketplaceProviderPresetIdForBlock));
@@ -482,7 +484,7 @@ export function useSettingsOrchestration(
           ? marketplaceProviderPresetId
           : "";
         const routeModel = model.trim() || vendorInfo.defaultModel;
-        const activeBlock: DeepPartial<AppSettings["llm"]["vendors"][string]> = {
+        const activeBlock: DeepPartial<LLMVendorSettings> = {
           // This preset's key alone. The main side merges it into the stored
           // map (`mergeLlmPatch`), so a save here can never carry a stale copy
           // of another preset's model back over a newer one.
@@ -496,7 +498,7 @@ export function useSettingsOrchestration(
           thinkingBudgetTokens: thinkingBudget,
         };
         const llmPatch: DeepPartial<AppSettings["llm"]> = {
-          provider: vendor,
+          provider: vendor || undefined,
           marketplaceProviderPresetId:
             vendor === "openai-compatible" ? marketplaceProviderPresetId : "",
           streamSmoothing,

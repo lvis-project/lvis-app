@@ -29,7 +29,12 @@ import { CommittedPluginGenerationPublicationError } from "../committed-generati
 import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import { cleanupTmpDir, makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
-import { agentPluginsDocument } from "./test-helpers.js";
+import {
+  PLUGIN_DATA_FIXTURE,
+  agentPluginsDocument,
+  readPluginDataFixture,
+  seedPluginDataFixture,
+} from "./test-helpers.js";
 
 describe("PluginArtifactStore — history journal", () => {
   it("appendHistory + readHistory round-trip preserves order", async () => {
@@ -253,6 +258,82 @@ describe("PluginArtifactStore — extractZip", () => {
 
       const restored = JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8"));
       expect(restored.version).toBe("old");
+    } finally {
+      await cleanupTmpDir(tmp);
+    }
+  });
+
+  it("carries the plugin's data directory into the upgraded install byte-identical", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installRoot = resolve(tmp, "installed");
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
+      await seedPluginDataFixture(installDir);
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
+
+      await store.extractZipWithCommit("acme", zip.toBuffer(), async () => undefined);
+
+      expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8")).version).toBe("new");
+      expect(await readPluginDataFixture(installDir)).toEqual(PLUGIN_DATA_FIXTURE);
+      expect((await readdir(installRoot)).filter((name) => name.startsWith(".acme."))).toEqual([]);
+    } finally {
+      await cleanupTmpDir(tmp);
+    }
+  });
+
+  it("returns the plugin's data directory to the restored install when commit fails after promotion", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installRoot = resolve(tmp, "installed");
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
+      await seedPluginDataFixture(installDir);
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
+
+      await expect(
+        store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
+          throw new Error("config registration failed");
+        }),
+      ).rejects.toThrow(/config registration failed/);
+
+      expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8")).version).toBe("old");
+      expect(await readPluginDataFixture(installDir)).toEqual(PLUGIN_DATA_FIXTURE);
+      expect((await readdir(installRoot)).filter((name) => name.startsWith(".acme."))).toEqual([]);
+    } finally {
+      await cleanupTmpDir(tmp);
+    }
+  });
+
+  it("leaves the installed version and its data untouched when payload extraction fails", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installRoot = resolve(tmp, "installed");
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
+      await seedPluginDataFixture(installDir);
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
+      zip.addFile("link", Buffer.from("outside"));
+      const entry = zip.getEntry("link");
+      if (!entry) throw new Error("test fixture entry missing");
+      entry.attr = (0o120777 << 16) >>> 0;
+
+      await expect(
+        store.extractZipWithCommit("acme", zip.toBuffer(), async () => undefined),
+      ).rejects.toThrow(/unsupported member kind/);
+
+      expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8")).version).toBe("old");
+      expect(await readPluginDataFixture(installDir)).toEqual(PLUGIN_DATA_FIXTURE);
+      expect((await readdir(installRoot)).filter((name) => name.startsWith(".acme."))).toEqual([]);
     } finally {
       await cleanupTmpDir(tmp);
     }

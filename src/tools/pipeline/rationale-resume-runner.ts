@@ -27,6 +27,7 @@ import {
   type HostInvocationStartCas,
   type InvocationAuditRecord,
 } from "./rationale-ticket-lifecycle.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 export interface RationaleResumeIdentityProbe {
   readonly request: SealedRationaleResumeRequest;
@@ -200,7 +201,7 @@ export async function prepareRationaleResume(
   } catch (error) {
     return mismatch(
       "rationale resume current-state validation failed: " +
-        (error instanceof Error ? error.message : String(error)),
+        errorMessage(error),
     );
   }
 }
@@ -238,7 +239,7 @@ export async function authorizeRationaleResume(
   } catch (error) {
     return mismatch(
       "rationale resume authorization failed: " +
-        (error instanceof Error ? error.message : String(error)),
+        errorMessage(error),
     );
   }
 }
@@ -282,7 +283,7 @@ export async function startRationaleResume(
   } catch (error) {
     return mismatch(
       "rationale resume invocation-start failed: " +
-        (error instanceof Error ? error.message : String(error)),
+        errorMessage(error),
     );
   }
 }

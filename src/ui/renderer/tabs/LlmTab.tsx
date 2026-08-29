@@ -33,6 +33,7 @@ import {
 import {
   canUseLlmVendorWithoutApiKey,
   isLLMVendor,
+  type LLMVendor,
   isOpenAICompatiblePresetVendor,
   isOpenAICompatibleVendor,
   isRetiredLlmModel,
@@ -76,7 +77,7 @@ import {
 } from "./SubscriptionProvidersSection.js";
 
 export interface FallbackEntry {
-  provider: string;
+  provider: LLMVendor;
   model: string;
 }
 
@@ -758,15 +759,16 @@ function modelEntryPricingLabel(entry: LlmModelListEntry | undefined): string | 
 function ModelSelectItemContent({
   option,
   entry,
-  providerOverride,
+  provider,
   factsOverride,
   tone,
 }: {
   option: string;
   entry?: LlmModelListEntry;
-  /** Leading column when there is no catalogue entry to read a provider from —
-   *  a subscription model has a provider but no `LlmModelListEntry`. */
-  providerOverride?: string;
+  /** Leading column: who serves this model. The caller decides whether the
+   *  catalogue entry may name it — see `UnifiedModelOption.vendorLabel` — and
+   *  the fallback chain lists a vendor's own models without one. */
+  provider?: string;
   /** Trailing facts for the same case. */
   factsOverride?: string;
   /** The facts carry a problem, not a number — a saved model the endpoint dropped. */
@@ -776,7 +778,6 @@ function ModelSelectItemContent({
   const isFree = entry?.tags?.free === true || isOpenRouterFreeModel(option);
   const isRouter = entry?.tags?.router === true;
   const isLocal = entry?.tags?.local === true;
-  const provider = entry?.provider ?? entry?.ownedBy ?? providerOverride;
   // Provider is the leading column now, so it is NOT repeated in the trailing
   // facts — those are the numbers that differ between models.
   const facts = factsOverride ? [factsOverride] : [
@@ -839,10 +840,19 @@ interface UnifiedModelOption {
    *  providers still resolves to the right one. */
   value: string;
   providerId: string;
+  /** The name of the ROW this model is offered on — the card title. It is the
+   *  chooser's group label. */
   providerLabel: string;
+  /** Leading column: who serves THIS model.
+   *
+   *  Usually the catalogue's own word, because an aggregator's catalogue is
+   *  other companies' models and the sub-vendor is the only thing that tells
+   *  them apart. It falls back to the row name for the rows whose catalogue
+   *  cannot name itself — an OpenAI-compatible server reports everything it
+   *  serves as owned by "openai" — so a self-hosted endpoint is named by what
+   *  the user connected. See `unifiedOptions`. */
+  vendorLabel: string;
   modelId: string;
-  /** Short vendor word shown as the row's leading column. */
-  vendorTag: string;
   entry?: LlmModelListEntry;
   /** Subscription-side facts, where there is no catalogue entry to read them from. */
   facts?: string;
@@ -983,7 +993,11 @@ function UnifiedModelSelect({
         <ModelSelectItemContent
           option={option.modelId}
           {...(option.entry ? { entry: option.entry } : {})}
-          {...(option.entry ? {} : { providerOverride: option.vendorTag })}
+          /* Kept on grouped rows too, where it repeats the group header. Radix
+             mirrors the chosen row's ItemText into the collapsed trigger, and
+             the trigger has no label of its own, so dropping it here would
+             leave the closed control showing a bare model id. */
+          provider={option.vendorLabel}
           {...(option.facts ? { factsOverride: option.facts } : {})}
           {...(option.unlisted ? { tone: "destructive" as const } : {})}
         />
@@ -1199,6 +1213,14 @@ export function LlmTab(props: LlmTabProps) {
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [modelLists, setModelLists] = useState<Record<string, ModelListState>>({});
   const modelListsRef = useRef<Record<string, ModelListState>>({});
+  /**
+   * Keys with a catalogue request out right now.
+   *
+   * Per instance, not per launch: a request belongs to the component that
+   * made it, and the settings tab unmounting mid-request must not leave the
+   * next mount unable to ask.
+   */
+  const modelListRequestsInFlight = useRef<Set<string> | null>(null);
   const modelListCacheRef = useRef<LlmModelListCache>({});
   const setModelListState = useCallback((key: string, state: ModelListState) => {
     setModelLists((current) => {
@@ -1229,104 +1251,116 @@ export function LlmTab(props: LlmTabProps) {
         provider === "openai-compatible" ? options.credentialScope?.trim() ?? "" : "";
       const key = llmModelListCacheKey(provider, baseUrl, credentialScope);
       const existing = modelListsRef.current[key];
+      const inFlight = modelListRequestsInFlight.current ??= new Set<string>();
       // One request in flight per key. This is the only guard `force` does not
       // lift: a second press while the first is still out would not produce a
       // newer answer, only a second spinner.
-      if (existing?.status === "loading") return;
+      if (inFlight.has(key)) return;
       // See `modelListRefreshedThisLaunch` for the policy this enforces.
       if (!options.force && modelListRefreshedThisLaunch.has(key)) return;
-      // Claimed BEFORE anything is awaited. More than one caller asks for the
-      // same key — a row's card, the fallback panel, the launch pass — and a
-      // guard set only after an await is no guard at all for whoever reads it
-      // during that await.
+      // Both claimed BEFORE anything is awaited. More than one caller asks for
+      // the same key — a row's card, the fallback panel, the launch pass, a
+      // second press — and a guard set only after an await is no guard at all
+      // for whoever reads it during that await. The `loading` STATE is not
+      // that guard: it is written only once a request actually goes out, so a
+      // row with no key stored never shows a sync that was never made.
       modelListRefreshedThisLaunch.add(key);
-      // A fixed-endpoint vendor reaches its own /models with a stored key, so a
-      // request with nothing stored could only come back 401 — and a red "sync
-      // failed" on a card whose subscription is signed in and healthy says the
-      // wrong thing. Asked here, on the edge of actually fetching, so a
-      // catalogue that is already in hand still stands.
-      if (!baseUrl && STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(provider)) {
-        const hasCredential = await api.hasApiKey(provider);
-        if (!hasCredential) {
-          // Nothing was asked, so the launch owes this key a request still:
-          // storing a key is a change to this row's inputs, and it gets that
-          // request then.
-          forgetModelListLaunchRefresh(key);
-          setModelListState(key, { status: "needs-credential" });
-          return;
-        }
-      }
-      setModelListState(key, existing?.options
-        ? { ...existing, status: "loading" }
-        : { status: "loading" });
-      try {
-        const result = await api.listLlmModels({
-          vendor: provider,
-          ...(baseUrl ? { baseUrl } : {}),
-          ...(credentialScope ? { credentialScope } : {}),
-          ...(options.modelDiscoveryPolicy ? { modelDiscoveryPolicy: options.modelDiscoveryPolicy } : {}),
-        });
-        if (result.ok) {
-          const nextEntry: LlmModelListCacheEntry = {
-            vendor: result.vendor,
-            ...(baseUrl ? { baseUrl } : {}),
-            ...(credentialScope ? { credentialScope } : {}),
-            endpoint: result.endpoint,
-            models: result.models,
-            ...(result.modelEntries ? { modelEntries: result.modelEntries } : {}),
-            fetchedAt: result.fetchedAt,
-          };
-          const nextCache = {
-            ...modelListCacheRef.current,
-            [key]: nextEntry,
-          };
-          modelListCacheRef.current = nextCache;
-          setModelListState(key, {
-            status: "ready",
-            options: result.models,
-            entries: result.modelEntries,
-            endpoint: result.endpoint,
-            fetchedAt: result.fetchedAt,
-            source: "network",
-          });
-          const markPersistError = (err: unknown): void => {
-            const latest = modelListsRef.current[key];
-            if (latest?.status !== "ready") return;
-            setModelListState(key, {
-              ...latest,
-              persistError: err instanceof Error ? err.message : String(err),
-            });
-          };
-          void api.updateSettings({ llm: { modelListCache: nextCache } })
-            .then((persistResult) => {
-              if (isIpcErrorResult(persistResult)) {
-                markPersistError(persistResult.message ?? persistResult.error);
-              }
-            })
-            .catch(markPersistError);
-        } else {
-          const latest = modelListsRef.current[key] ?? existing;
-          setModelListState(key, {
-            status: "error",
-            error: result.message ?? result.error,
-            options: latest?.options,
-            entries: latest?.entries,
-            endpoint: latest?.endpoint,
-            fetchedAt: latest?.fetchedAt,
-            source: latest?.source,
-          });
-        }
-      } catch (err) {
+      inFlight.add(key);
+      // One shape for every way this can fail, so the row says the same thing
+      // whichever step broke — and keeps the catalogue it already has.
+      const failWith = (message: string): void => {
         const latest = modelListsRef.current[key] ?? existing;
         setModelListState(key, {
           status: "error",
-          error: err instanceof Error ? err.message : String(err),
+          error: message,
           options: latest?.options,
           entries: latest?.entries,
           endpoint: latest?.endpoint,
           fetchedAt: latest?.fetchedAt,
           source: latest?.source,
         });
+      };
+      try {
+        // A fixed-endpoint vendor reaches its own /models with a stored key, so a
+        // request with nothing stored could only come back 401 — and a red "sync
+        // failed" on a card whose subscription is signed in and healthy says the
+        // wrong thing. Asked here, on the edge of actually fetching, so a
+        // catalogue that is already in hand still stands.
+        if (!baseUrl && STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(provider)) {
+          let hasCredential: boolean;
+          try {
+            hasCredential = await api.hasApiKey(provider);
+          } catch (err) {
+            // Callers fire this with `void`, so a rejection escaping here is
+            // unhandled and the row is left saying nothing at all.
+            failWith(err instanceof Error ? err.message : String(err));
+            return;
+          }
+          if (!hasCredential) {
+            // Nothing was asked, so the launch owes this key a request still:
+            // storing a key is a change to this row's inputs, and it gets that
+            // request then.
+            forgetModelListLaunchRefresh(key);
+            setModelListState(key, { status: "needs-credential" });
+            return;
+          }
+        }
+        setModelListState(key, existing?.options
+          ? { ...existing, status: "loading" }
+          : { status: "loading" });
+        try {
+          const result = await api.listLlmModels({
+            vendor: provider,
+            ...(baseUrl ? { baseUrl } : {}),
+            ...(credentialScope ? { credentialScope } : {}),
+            ...(options.modelDiscoveryPolicy ? { modelDiscoveryPolicy: options.modelDiscoveryPolicy } : {}),
+          });
+          if (result.ok) {
+            const nextEntry: LlmModelListCacheEntry = {
+              vendor: result.vendor,
+              ...(baseUrl ? { baseUrl } : {}),
+              ...(credentialScope ? { credentialScope } : {}),
+              endpoint: result.endpoint,
+              models: result.models,
+              ...(result.modelEntries ? { modelEntries: result.modelEntries } : {}),
+              fetchedAt: result.fetchedAt,
+            };
+            const nextCache = {
+              ...modelListCacheRef.current,
+              [key]: nextEntry,
+            };
+            modelListCacheRef.current = nextCache;
+            setModelListState(key, {
+              status: "ready",
+              options: result.models,
+              entries: result.modelEntries,
+              endpoint: result.endpoint,
+              fetchedAt: result.fetchedAt,
+              source: "network",
+            });
+            const markPersistError = (err: unknown): void => {
+              const latest = modelListsRef.current[key];
+              if (latest?.status !== "ready") return;
+              setModelListState(key, {
+                ...latest,
+                persistError: err instanceof Error ? err.message : String(err),
+              });
+            };
+            void api.updateSettings({ llm: { modelListCache: nextCache } })
+              .then((persistResult) => {
+                if (isIpcErrorResult(persistResult)) {
+                  markPersistError(persistResult.message ?? persistResult.error);
+                }
+              })
+              .catch(markPersistError);
+          } else {
+            failWith(result.message ?? result.error);
+          }
+        } catch (err) {
+          failWith(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        inFlight.delete(key);
       }
     },
     [api, setModelListState, settingsLoaded],
@@ -1959,6 +1993,13 @@ export function LlmTab(props: LlmTabProps) {
       const state = row.modelListKey ? modelLists[row.modelListKey] : undefined;
       const isActiveRow = rowId === activeApiRowId;
       const entries = modelEntryMap(state?.entries);
+      // Whether the catalogue may name its own models. An OpenAI-compatible
+      // server answers `/models` with `owned_by: "openai"` for everything it
+      // serves — its word for its own software, not for who made the model —
+      // and every marketplace preset is reached through that vendor. Those
+      // rows take the card title instead. A real vendor's catalogue keeps its
+      // sub-vendor, which is the whole point of an aggregator's list.
+      const catalogueNamesItsModels = row.apiVendorId !== "openai-compatible" && !row.presetId;
       for (const modelId of rowModelIds(row)) {
         // Keyed by the ROW, not the vendor: two marketplace presets are two
         // providers reached through one vendor, and a pick has to say which.
@@ -1970,8 +2011,10 @@ export function LlmTab(props: LlmTabProps) {
           value,
           providerId: apiProviderId(rowId),
           providerLabel: row.label,
+          vendorLabel: catalogueNamesItsModels
+            ? entry?.provider ?? entry?.ownedBy ?? row.label
+            : row.label,
           modelId,
-          vendorTag: entry?.provider ?? entry?.ownedBy ?? row.apiVendorId,
           ...(entry ? { entry } : {}),
           ...(isActiveRow && modelId === unlistedModel
             ? { unlisted: true, facts: t("llmTab.modelUnlisted") }
@@ -1992,8 +2035,8 @@ export function LlmTab(props: LlmTabProps) {
           value: unifiedValue(view.descriptor.id, ""),
           providerId: view.descriptor.id,
           providerLabel: view.descriptor.label,
+          vendorLabel: view.descriptor.label,
           modelId: t("llmTab.providerDefaultModel"),
-          vendorTag: view.descriptor.id,
           facts: t("llmTab.modelFixedByProvider"),
           fixed: true,
         });
@@ -2004,8 +2047,8 @@ export function LlmTab(props: LlmTabProps) {
           value: unifiedValue(view.descriptor.id, model.id),
           providerId: view.descriptor.id,
           providerLabel: view.descriptor.label,
+          vendorLabel: view.descriptor.label,
           modelId: model.label || model.id,
-          vendorTag: view.descriptor.id,
         });
       }
     }
@@ -2408,22 +2451,37 @@ export function LlmTab(props: LlmTabProps) {
   };
 
   /**
-   * The row's state, as one dot and one word.
+   * The row's state, as one dot and one word — per ROUTE.
    *
    * Every row carries it, including the ones that are merely connected — a row
    * that only speaks up when it is the active one leaves the rest of the list
    * saying nothing about itself, which is the state this list exists to show.
+   *
+   * A subscription row already says how its sign-in stands, in the runtime's
+   * own badge. So on that row this chip speaks for the API-key route alone,
+   * and names it — "connected" beside "not set" is two routes' states, and
+   * without the names it read as one row contradicting itself. A subscription
+   * row with no API counterpart has one route, and its badge covers it.
    */
   const statusChip = (row: ProviderConnection) => {
-    const live = activeMode(row) !== null;
-    const label = live
+    const hasSubscriptionRoute = row.subscription !== undefined;
+    if (hasSubscriptionRoute && !row.apiVendorId) return null;
+    const mode = activeMode(row);
+    const live = hasSubscriptionRoute ? mode === "api" : mode !== null;
+    const connected = hasSubscriptionRoute ? row.apiConfigured : row.connected;
+    const state = live
       ? t("subscriptionProvidersSection.apiChatActive")
-      : row.connected
+      : connected
         ? t("subscriptionProvidersSection.statusConnected")
-        : t("subscriptionProvidersSection.statusSignedOut");
+        : hasSubscriptionRoute
+          ? t("llmTab.apiKeyNotSet")
+          : t("subscriptionProvidersSection.statusSignedOut");
+    const label = hasSubscriptionRoute
+      ? t("subscriptionProvidersSection.routeStatus", { route: t("llmTab.modeApiKey"), status: state })
+      : state;
     const tone = live
       ? "bg-primary"
-      : row.connected
+      : connected
         ? "bg-success"
         : "bg-muted-foreground/(--opacity-half)";
     return (
@@ -2585,6 +2643,7 @@ export function LlmTab(props: LlmTabProps) {
           key={row.id}
           provider={row.subscription}
           label={row.label}
+          {...(row.apiVendorId ? { routeName: t("llmTab.modeSubscription") } : {})}
           activeSelection={subscription.props.activeSelection}
           chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
           actions={subscription.props.actions}
@@ -2941,6 +3000,7 @@ export function LlmTab(props: LlmTabProps) {
                     <ProviderSelect
                       value={entry.provider}
                       onValueChange={(value) => {
+                        if (!isLLMVendor(value)) return;
                         const nextVendorInfo = getVendorInfo(value);
                         const next = [...fallbackChain];
                         next[idx] = {

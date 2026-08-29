@@ -40,9 +40,7 @@ import {
   riskLevelKoLabel,
   sensitivityLabel,
   type ParsedSummary,
-  type PermissionDecisionCategory,
   type ReviewBasisRow,
-  type RiskLevel,
 } from "./permissions/PermissionDecisionCard.js";
 import {
   formatEvaluationLimits,
@@ -56,6 +54,7 @@ import {
   type ElicitationFieldKind as ElicitationSchemaFieldKind,
 } from "../../../shared/mcp-elicitation-schema.js";
 import { isRecord } from "../../../shared/is-record.js";
+import type { RiskLevel, ToolCategory } from "../../../shared/permission-review-status.js";
 
 type ElicitationFieldKind = ElicitationSchemaFieldKind;
 type ElicitationFormValue = string | boolean;
@@ -1448,7 +1447,7 @@ function approvalSandboxSummary(request: ApprovalRequest): ReviewBasisRow | null
 
 function approvalReviewRows(
   request: ApprovalRequest,
-  category: PermissionDecisionCategory,
+  category: ToolCategory,
   inputSummary: string,
   originLabel: string,
   _source: string,

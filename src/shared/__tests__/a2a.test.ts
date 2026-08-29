@@ -23,6 +23,7 @@ import {
   type A2ATask,
   type A2ATaskStatus,
   type A2ATaskStatusUpdateEvent,
+  A2A_HANDLER_ID_PATTERN,
 } from "../a2a.js";
 import {
   A2AHostJsonRpcErrorDefinition,
@@ -309,5 +310,16 @@ describe("A2A v1.0 wire result types", () => {
 
     const assignability: [TaskOnly, MessageOnly, Empty, Both] = [true, true, false, false];
     expect(assignability).toEqual([true, true, false, false]);
+  });
+});
+
+describe("A2A_HANDLER_ID_PATTERN", () => {
+  it("admits lowercase hyphenated ids up to 64 characters", () => {
+    expect(A2A_HANDLER_ID_PATTERN.test("chat")).toBe(true);
+    expect(A2A_HANDLER_ID_PATTERN.test("a".repeat(64))).toBe(true);
+    expect(A2A_HANDLER_ID_PATTERN.test("a".repeat(65))).toBe(false);
+    expect(A2A_HANDLER_ID_PATTERN.test("-lead")).toBe(false);
+    expect(A2A_HANDLER_ID_PATTERN.test("Upper")).toBe(false);
+    expect(A2A_HANDLER_ID_PATTERN.test("")).toBe(false);
   });
 });

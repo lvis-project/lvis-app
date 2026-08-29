@@ -8,11 +8,10 @@ import {
   openSync,
   readSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { dirname, isAbsolute } from "node:path";
 import { platform } from "node:process";
 import { computeLineHmac, type SecretStore } from "../../audit/hmac-chain.js";
-import { writeUtf8FileAtomicSync } from "../../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../../lib/atomic-file.js";
 import { withFileLock } from "../../lib/with-file-lock.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import {
@@ -31,8 +30,8 @@ import {
   type InvocationAuditSink,
 } from "./rationale-ticket-lifecycle.js";
 import type { RationaleRequiredControl } from "./rationale-control.js";
-import { timingSafeEqualHexDigest } from "../../lib/hex-digest-equal.js";
-import { isRecord } from "../../shared/is-record.js";
+import { timingSafeEqualHexDigest, sha256Hex } from "../../lib/hex-digest-equal.js";
+import { isRecord, hasExactKeys } from "../../shared/is-record.js";
 
 const JOURNAL_SCHEMA_VERSION = 1 as const;
 const MAX_JOURNAL_BYTES = 16 * 1024 * 1024;
@@ -52,7 +51,6 @@ const HEAD_KIND = "rationale-invocation-journal-head" as const;
 const HEAD_KEY_DOMAIN = "lvis:rationale-invocation-journal:head:v1";
 const HEAD_NAME = "rationale-invocation-journal-head-v1";
 const MAX_CHECKPOINT_BYTES = 4 * 1024;
-
 
 type AuditVersion = 0 | 1 | 2;
 
@@ -154,26 +152,18 @@ export type RecoveryInvocationAuditSink = (
   record: InvocationAuditRecord,
 ) => Promise<void> | void;
 
-function exactKeys(
+function assertExactKeys(
   value: Record<string, unknown>,
   keys: readonly string[],
   label: string,
 ): void {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  if (actual.length !== expected.length ||
-      actual.some((key, index) => key !== expected[index])) {
+  if (!hasExactKeys(value, keys)) {
     throw new Error(`${label} contains unexpected or missing fields`);
   }
 }
 
 function equal(left: unknown, right: unknown): boolean {
   return canonicalStringify(left) === canonicalStringify(right);
-}
-
-function isMissingPathError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function sameFileIdentity(
@@ -264,7 +254,7 @@ function validateEntry(
   value: unknown,
 ): asserts value is InvocationJournalEntry {
   if (!isRecord(value)) throw new Error("invocation journal entry must be an object");
-  exactKeys(value, [
+  assertExactKeys(value, [
     "authorized",
     "authorizationExpiresAt",
     "controlDigest",
@@ -339,7 +329,7 @@ function validateEntry(
 
 function validateSnapshot(value: unknown): asserts value is InvocationJournalSnapshot {
   if (!isRecord(value)) throw new Error("invocation journal must be an object");
-  exactKeys(value, ["schemaVersion", "revision", "entries"], "invocation journal");
+  assertExactKeys(value, ["schemaVersion", "revision", "entries"], "invocation journal");
   if (value.schemaVersion !== JOURNAL_SCHEMA_VERSION) {
     throw new Error("unsupported invocation journal schema");
   }
@@ -395,7 +385,7 @@ function parseEnvelope(
   if (!isRecord(decoded)) {
     throw new Error("invocation journal envelope must be an object");
   }
-  exactKeys(decoded, [
+  assertExactKeys(decoded, [
     "schemaVersion",
     "kind",
     "previousMac",
@@ -461,7 +451,7 @@ function parseCheckpoint(
   if (!isRecord(decoded)) {
     throw new Error("invocation journal checkpoint must be an object");
   }
-  exactKeys(decoded, [
+  assertExactKeys(decoded, [
     "schemaVersion",
     "kind",
     "slot",
@@ -528,7 +518,7 @@ function parseHead(raw: string, secret: string): InvocationJournalHead {
   if (!isRecord(decoded)) {
     throw new Error("invocation journal head must be an object");
   }
-  exactKeys(decoded, [
+  assertExactKeys(decoded, [
     "schemaVersion",
     "kind",
     "generation",
@@ -732,9 +722,7 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
       const entry: InvocationJournalEntry = {
         authorized: input.authorized,
         authorizationExpiresAt: input.control.anchor.expiresAt,
-        controlDigest: createHash("sha256")
-          .update(canonicalStringify(input.control))
-          .digest("hex"),
+        controlDigest: sha256Hex(canonicalStringify(input.control)),
         sessionId: input.sessionId,
         lease,
         started: startedInvocationAudit,

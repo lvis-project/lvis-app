@@ -1806,18 +1806,22 @@
     --shell-card-top-darwin: calc((var(--chrome-band-height) - var(--chrome-control-height)) / 2);
     --shell-card-top: 6px;
     /* What the content surface reserves on its leading edge while the sidebar
-     * is a collapsed icon rail, and where the floating banner stack starts so
-     * it clears that reserve. rem here, unlike the insets above: nothing on
-     * this edge shares the traffic lights' line, and the rail's own width hugs
-     * its content, which does follow the type scale.
+     * is a collapsed icon rail. px, like the insets above: the title band puts
+     * its path on the content title, and on darwin that path can start no
+     * further left than the traffic lights allow, so the reserve is pinned to
+     * the lights' line. `COLLAPSED_RAIL_RESERVE` in shell-geometry.ts is the
+     * same number for the band's arithmetic; `check-shell-geometry-tokens.mjs`
+     * holds the two equal.
      *
-     * KNOWN MISMATCH: `App.tsx` carries the band's counterpart
-     * (`COLLAPSED_RAIL_LEAD_RESERVE`) as a flat 64px, because the band may not
-     * scale. At the shipped 0.875 font scale this 4rem resolves to 56px, so
-     * the band's path sits 8px right of the content it names. Pre-existing;
-     * see the note on that constant. */
-    --shell-collapsed-rail-reserve: 4rem;
-    --shell-collapsed-banner-inset: 4.5rem;
+     * The rail card's width and the floating banner stack's inset are derived
+     * from the reserve rather than declared beside it. The rail is the reserve
+     * minus its own card inset and one gutter of air before the content, so it
+     * cannot grow into the content at a larger type scale; the banner starts
+     * one gutter past the reserve — the same gutter the expanded layout leaves
+     * past `<main>`'s leading padding. */
+    --shell-collapsed-rail-reserve: 64px;
+    --shell-collapsed-rail-width: calc(var(--shell-collapsed-rail-reserve) - var(--shell-card-inset) - var(--chrome-gap));
+    --shell-collapsed-banner-inset: calc(var(--shell-collapsed-rail-reserve) + var(--chrome-gap));
   }
   /* Content measures — how wide a column of prose gets to be, and how tall the
    * panels that hold a scrolling body are. rem, unlike the shell geometry

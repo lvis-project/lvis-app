@@ -7,11 +7,12 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdtempSync } from "node:fs";
-import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import type { PluginPaths } from "../plugin-paths.js";
 import { resolvePluginPaths } from "../plugin-paths.js";
+import { PLUGIN_DATA_DIR_NAME } from "../plugin-storage-layout.js";
 import {
   PluginMarketplaceService,
   type PreparedMarketplacePluginActivation,
@@ -762,4 +763,50 @@ export function makeTestPluginMarketplaceService(
     makeTestPluginPaths({ rootDir }),
     fetcher,
   );
+}
+
+/**
+ * Plugin-written state under `<pluginRoot>/data`, shaped like what real
+ * plugins leave there: a JSON sidecar at the top and a binary blob one level
+ * down, so a test sees both a flat file and a nested one survive a root swap.
+ */
+export const PLUGIN_DATA_FIXTURE: ReadonlyMap<string, Buffer> = new Map([
+  ["state.json", Buffer.from(`${JSON.stringify({ sessions: 3, lastRun: "2026-08-01T00:00:00.000Z" })}\n`)],
+  ["index/segment-0001.bin", Buffer.from([0, 255, 127, 128, 1, 2, 3, 4, 250, 251, 252, 253])],
+]);
+
+/** Write {@link PLUGIN_DATA_FIXTURE} under `<pluginRoot>/data`. */
+export async function seedPluginDataFixture(pluginRoot: string): Promise<void> {
+  for (const [relPath, bytes] of PLUGIN_DATA_FIXTURE) {
+    const target = join(pluginRoot, PLUGIN_DATA_DIR_NAME, relPath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, bytes);
+  }
+}
+
+/**
+ * Every file under `<pluginRoot>/data` as `relative path → bytes`, so one
+ * assertion compares file set and content at once. An absent directory reads
+ * as an empty map: a swap that dropped it fails the comparison against
+ * {@link PLUGIN_DATA_FIXTURE} instead of throwing before the comparison.
+ */
+export async function readPluginDataFixture(pluginRoot: string): Promise<Map<string, Buffer>> {
+  const dataDir = join(pluginRoot, PLUGIN_DATA_DIR_NAME);
+  const out = new Map<string, Buffer>();
+  async function walk(dir: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) await walk(abs);
+      else out.set(relative(dataDir, abs).split("\\").join("/"), await readFile(abs));
+    }
+  }
+  await walk(dataDir);
+  return out;
 }

@@ -23,6 +23,7 @@ import {
   type CodexJsonRecord,
   type CodexSpawnAppServer,
 } from "./codex-conversation-runtime.js";
+import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
 
 const MAX_MODEL_COUNT = 100;
 const MAX_PLAN_TYPE_LENGTH = 80;
@@ -60,12 +61,6 @@ interface PendingLogin {
   loginId: string;
   method: CodexSubscriptionLoginMethod;
   deviceCode: string | null;
-}
-
-interface PendingRequest {
-  resolve: (result: unknown) => void;
-  reject: (reason: Error) => void;
-  timer: NodeJS.Timeout;
 }
 
 function validateRuntimeDirectory(runtimeHome: string): string {
@@ -123,7 +118,7 @@ export class CodexAppServerClient {
   private child: ChildProcess | null = null;
   private startPromise: Promise<void> | null = null;
   private nextRequestId = 1;
-  private readonly pendingRequests = new Map<number, PendingRequest>();
+  private readonly pendingRequests = new Map<number, PendingJsonRpcRequest>();
   private stdoutDecoder = new StringDecoder("utf8");
   private stdoutBuffer = "";
   private accountStatus: CodexSubscriptionStatus = blankStatus("ready");

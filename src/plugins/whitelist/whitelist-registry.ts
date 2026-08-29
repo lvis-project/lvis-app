@@ -31,7 +31,7 @@ import { createLogger } from "../../lib/logger.js";
 import { verifyEnvelope } from "../envelope-verifier.js";
 import { WHITELIST_PUBLIC_KEYS, WHITELIST_PRIMARY_KEY_ID } from "../marketplace-keys.js";
 import type { PublicKeyInput } from "../envelope-verifier.js";
-import type { SignatureEnvelope } from "../types.js";
+import type { SignatureEnvelope, ResolvedSignedSnapshot } from "../types.js";
 import {
   incrementHostSecretCounter,
   sanitizeKeyPrefix,
@@ -160,13 +160,8 @@ export interface WhitelistInitOptions {
 
 const STALE_GRACE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-interface ResolvedSnapshot {
-  doc: WhitelistDocument;
-  source: WhitelistSource;
-}
-
 class WhitelistRegistry {
-  private snapshot: ResolvedSnapshot | null = null;
+  private snapshot: ResolvedSignedSnapshot<WhitelistDocument, WhitelistSource> | null = null;
   private now: () => number = Date.now;
   private initialized = false;
   /** Set when a fetch attempt found no cache and offline → permanent deny. */

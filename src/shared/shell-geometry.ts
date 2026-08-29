@@ -113,3 +113,59 @@ const CARD_LEFT_INSET = SHELL_GUTTER;
  */
 const CLUSTER_FIRST_BUTTON_X = TRAFFIC_LIGHT_RIGHT_EDGE + SHELL_GUTTER;
 export const CLUSTER_LEAD_PAD_DARWIN = CLUSTER_FIRST_BUTTON_X - CARD_LEFT_INSET;
+
+/**
+ * Card edge -> where a content title starts.
+ *
+ * The main surface sits one gutter past the sidebar card and carries another of
+ * its own leading padding, so every view's title — a plugin's name, the chat
+ * group's conversation title — begins two gutters in. The band's path is the
+ * same label one row up, and a path that stopped at the card edge read as
+ * belonging to the sidebar rather than to the thing it names.
+ */
+export const CONTENT_TITLE_INSET = SHELL_GUTTER * 2;
+
+/**
+ * What `<main>` reserves on its leading edge while the sidebar is a collapsed
+ * icon rail — in px, like everything else on the lights' line. Mirrored in CSS
+ * as `--shell-collapsed-rail-reserve` (a pair `check-shell-geometry-tokens.mjs`
+ * holds together): the content surface pads by the token, the banner stack
+ * insets past it, and the title band reads this constant to put its path on
+ * the content title.
+ *
+ * The number is pinned by the traffic lights, not by the rail. On darwin the
+ * band's content can start no further left than `BAND_LEAD_PAD_DARWIN`, and
+ * the collapsed title sits `CONTENT_TITLE_INSET` past the reserve, so the path
+ * and the title line up only when the reserve is exactly the difference. It is
+ * written as a literal because the CSS mirror gate reads this module as source
+ * text; `__tests__/shell-geometry.test.ts` holds the identity.
+ *
+ * The rail card's own width is derived from this in CSS
+ * (`--shell-collapsed-rail-width` = reserve − card inset − one gutter), so the
+ * rail ends a gutter before the content at every type scale rather than only
+ * at the one the app ships with.
+ *
+ * On win/linux nothing external pins this reserve — there are no traffic
+ * lights to clear on those platforms — but the band still claims the same
+ * `leadClearance` there as on darwin, so one number serves the collapsed
+ * reserve on all three platforms rather than a per-platform pair.
+ */
+export const COLLAPSED_RAIL_RESERVE = 64;
+
+/**
+ * The widest control the collapsed icon rail renders, in rem: Tailwind's
+ * `h-9`/`w-9` (9 × its 0.25rem step). Both the rail's own square nav buttons
+ * (`Sidebar.tsx`'s `NavItem`) and its "new chat" button size to this, so it is
+ * the control `COLLAPSED_RAIL_RESERVE` has to leave room for at the user's
+ * largest font scale — `__tests__/shell-geometry.test.ts` asserts the fit
+ * against `appearance-font.ts`'s `FONT_SIZE_SCALE_VALUES`.
+ */
+export const RAIL_CONTROL_REM = 2.25;
+
+/**
+ * The literal Tailwind class pair for `RAIL_CONTROL_REM`, imported into
+ * `Sidebar.tsx` rather than restated there — a plain `"h-9 w-9"` string
+ * so Tailwind's content scanner (`@source` in `src/styles.css` covers this
+ * `.ts` file too) still finds the class as source text.
+ */
+export const RAIL_CONTROL_SIZE_CLASS = "h-9 w-9";

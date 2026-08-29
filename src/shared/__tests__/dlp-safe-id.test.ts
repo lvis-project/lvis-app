@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { maskSensitiveData } from "../dlp.js";
-import { createDlpSafeUuid, dlpSafeCandidate } from "../dlp-safe-id.js";
+import { createDlpSafeUuid, dlpSafeCandidate, isSafeStructuralId } from "../dlp-safe-id.js";
 
 const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -119,5 +119,46 @@ describe("dlpSafeCandidate", () => {
   it("returns null on exhaustion, leaving the error to the caller", () => {
     expect(dlpSafeCandidate(() => UNSAFE_UUID, 3)).toBeNull();
     expect(dlpSafeCandidate(() => null, 3)).toBeNull();
+  });
+});
+
+describe("isSafeStructuralId", () => {
+  it("accepts an opaque token up to the length bound", () => {
+    expect(isSafeStructuralId(SAFE_UUID)).toBe(true);
+    expect(isSafeStructuralId("a".repeat(256))).toBe(true);
+    expect(isSafeStructuralId("ctx:child/1.2-3_4")).toBe(true);
+  });
+
+  it("rejects non-strings, the empty string and anything past the bound", () => {
+    expect(isSafeStructuralId(undefined)).toBe(false);
+    expect(isSafeStructuralId(null)).toBe(false);
+    expect(isSafeStructuralId(42)).toBe(false);
+    expect(isSafeStructuralId({})).toBe(false);
+    expect(isSafeStructuralId("")).toBe(false);
+    expect(isSafeStructuralId("a".repeat(257))).toBe(false);
+  });
+
+  // The task store and A2A handler copies rejected C0 controls and DEL; the
+  // message codec copy additionally rejected C1 controls and the Unicode line
+  // separators. The one predicate keeps the union, so every string any former
+  // copy refused is still refused.
+  it("rejects C0 control characters and DEL", () => {
+    expect(isSafeStructuralId("abc\u0000def")).toBe(false);
+    expect(isSafeStructuralId("abc\u001fdef")).toBe(false);
+    expect(isSafeStructuralId("abc\ndef")).toBe(false);
+    expect(isSafeStructuralId("abc\u007fdef")).toBe(false);
+  });
+
+  it("rejects C1 control characters and the Unicode line separators", () => {
+    expect(isSafeStructuralId("abc\u0080def")).toBe(false);
+    expect(isSafeStructuralId("abc\u0085def")).toBe(false);
+    expect(isSafeStructuralId("abc\u009fdef")).toBe(false);
+    expect(isSafeStructuralId("abc\u2028def")).toBe(false);
+    expect(isSafeStructuralId("abc\u2029def")).toBe(false);
+  });
+
+  it("rejects an id the DLP scanner would mask", () => {
+    expect(maskSensitiveData(UNSAFE_UUID).detections.length).toBeGreaterThan(0);
+    expect(isSafeStructuralId(UNSAFE_UUID)).toBe(false);
   });
 });

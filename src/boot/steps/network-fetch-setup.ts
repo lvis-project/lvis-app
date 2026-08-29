@@ -8,6 +8,7 @@ import { net } from "electron";
 import { Readable } from "node:stream";
 import { createSafeLlmFetch } from "../../main/safe-llm-fetch.js";
 import type { BootContext } from "../context.js";
+import { REDIRECT_STATUSES } from "../../main/host-fetch-guard.js";
 
 export async function setupNetworkFetch(ctx: BootContext): Promise<void> {
   const electronNetFetch = net.fetch.bind(net);
@@ -26,9 +27,6 @@ export async function setupNetworkFetch(ctx: BootContext): Promise<void> {
   ctx.pluginNetworkFetch = createSingleHopFetch();
   ctx.llmFetch = llmFetch;
 }
-
-/** Statuses that name another location instead of answering. */
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
  * A fetch that takes EXACTLY ONE hop, on Chromium's stack.

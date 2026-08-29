@@ -1,10 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { A2ARemoteSettings, A2ARemoteTargetSettings } from "../data/settings-store.js";
 import { isValidRemoteA2ATargetAgentId, isValidRemoteA2ATaskHandle } from "../shared/a2a-remote-input.js";
 import { A2AJsonRpcMethod, type A2AJsonObject } from "../shared/a2a-wire.js";
 import type { A2ARemoteRuntime } from "./a2a-remote-runtime.js";
 import { maskA2AMessage } from "../engine/a2a-subagent-message-codec.js";
 import { isA2ATerminalTaskState, type A2ATaskState } from "../shared/a2a.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const MAX_INTENT_LENGTH = 8_192;
 
@@ -64,7 +65,7 @@ export function createRemoteA2AActionController(
   if (targets.size !== options.config.targets.length || targets.size === 0) throw new Error("a2a-remote-target-registry-invalid");
   let latest: RemoteA2AActionStatus = Object.freeze({ state: "idle", updatedAt: now().toISOString() });
   let pending = false;
-  const ownerId = `local-project:${createHash("sha256").update(options.projectRoot).digest("hex")}`;
+  const ownerId = `local-project:${sha256Hex(options.projectRoot)}`;
 
   const validateHandle = (handle: string) => {
     if (!isValidRemoteA2ATaskHandle(handle)) {

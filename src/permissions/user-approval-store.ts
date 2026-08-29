@@ -38,7 +38,6 @@
 import { mkdir, readFile, access, constants, stat, chmod } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
-import { createHash } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
 import { createLogger } from "../lib/logger.js";
@@ -47,6 +46,8 @@ import type {
   UserApprovalScope,
   UserApprovalVerdict,
 } from "../shared/permissions-events.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 const log = createLogger("user-approval-store");
 let persistentWriteQueue: Promise<void> = Promise.resolve();
@@ -156,7 +157,7 @@ function entryKey(
   const components = [toolName, args, source];
   if (trustOrigin) components.push(trustOrigin);
   if (approvalCacheKey) components.push(approvalCacheKey);
-  return createHash("sha256").update(components.join("\0")).digest("hex");
+  return sha256Hex(components.join("\0"));
 }
 
 async function readApprovalsFile(): Promise<ApprovalsFile> {
@@ -169,7 +170,7 @@ async function readApprovalsFile(): Promise<ApprovalsFile> {
     }
     return parsed;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { approvals: {} };
+    if (isMissingPathError(err)) return { approvals: {} };
     throw err;
   }
 }

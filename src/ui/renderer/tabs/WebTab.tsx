@@ -4,7 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { WEB_PROVIDERS } from "../constants.js";
-import type { LvisApi } from "../types.js";
+import type { AppSettings, LvisApi } from "../types.js";
 import { getApi } from "../api-client.js";
 import { useNotifySaved } from "../context/SavedToastContext.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
@@ -68,8 +68,8 @@ function useWebViewPreferredFlow(): {
 
 export interface WebTabProps {
   api: LvisApi;
-  webProvider: string;
-  setWebProvider: (v: string) => void;
+  webProvider: AppSettings["webSearch"]["provider"];
+  setWebProvider: (v: AppSettings["webSearch"]["provider"]) => void;
   hasWebKey: boolean;
   setHasWebKey: (v: boolean) => void;
   webKeyInput: string;

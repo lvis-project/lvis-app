@@ -10,7 +10,7 @@
  * false, and a disabled gateway invokes neither verifier nor authorization.
  * Its only command is a text message send through the common host-owned port.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   createPlatformBridgeActor,
   type ConversationCommandPort,
@@ -18,6 +18,8 @@ import {
 import type { TailnetControllerReceiptStore } from "../api/tailnet-controller-receipt-store.js";
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
 import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { requirePositiveInteger } from "../shared/safe-integer.js";
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 /** Mirrors the receipt store's own owner grammar so both agree on validity. */
@@ -188,26 +190,26 @@ export function createPlatformBridgeInboundGateway(
   }
 
   const enabled = options.enabled ?? false;
-  const maxRawBodyBytes = positiveInteger(
+  const maxRawBodyBytes = requirePositiveInteger(
     options.maxRawBodyBytes ?? DEFAULT_MAX_RAW_BODY_BYTES,
-    "max-raw-body-bytes",
+    `platform-bridge-inbound-max-raw-body-bytes-invalid`,
   );
-  const maxTextChars = positiveInteger(
+  const maxTextChars = requirePositiveInteger(
     options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS,
-    "max-text-chars",
+    `platform-bridge-inbound-max-text-chars-invalid`,
   );
   const ownerId = receiptOwnerId(options.receiptOwnerId);
-  const maxInboundRequestsPerWindow = positiveInteger(
+  const maxInboundRequestsPerWindow = requirePositiveInteger(
     options.maxInboundRequestsPerWindow ?? DEFAULT_MAX_INBOUND_REQUESTS_PER_WINDOW,
-    "max-inbound-requests-per-window",
+    `platform-bridge-inbound-max-inbound-requests-per-window-invalid`,
   );
-  const inboundRequestWindowMs = positiveInteger(
+  const inboundRequestWindowMs = requirePositiveInteger(
     options.inboundRequestWindowMs ?? DEFAULT_INBOUND_REQUEST_WINDOW_MS,
-    "inbound-request-window-ms",
+    `platform-bridge-inbound-inbound-request-window-ms-invalid`,
   );
-  const maxTrackedInboundAuthorizedPairs = positiveInteger(
+  const maxTrackedInboundAuthorizedPairs = requirePositiveInteger(
     options.maxTrackedInboundAuthorizedPairs ?? DEFAULT_MAX_TRACKED_INBOUND_AUTHORIZED_PAIRS,
-    "max-tracked-inbound-authorized-pairs",
+    `platform-bridge-inbound-max-tracked-inbound-authorized-pairs-invalid`,
   );
   if (options.now !== undefined && typeof options.now !== "function") {
     throw new TypeError("platform-bridge-inbound-now-invalid");
@@ -562,7 +564,7 @@ function receiptKeyDigest(
   envelope: PlatformBridgeVerifiedEnvelope,
   actorDigest: string,
 ): string {
-  return sha256([
+  return sha256Hex([
     "platform-bridge-receipt-v2",
     actorDigest,
     envelope.provider,
@@ -580,7 +582,7 @@ function inboundRateLimitKeyDigest(
   authorization: PlatformBridgeInboundAuthorization,
 ): string {
   const binding = authorization.bridgeBinding;
-  return sha256([
+  return sha256Hex([
     "platform-bridge-inbound-rate-v1",
     authorization.actorDigest,
     authorization.conversationDigest,
@@ -643,17 +645,13 @@ function readRateLimitTimestamp(now: () => number): number | undefined {
 }
 
 function intentDigest(envelope: PlatformBridgeVerifiedEnvelope): string {
-  return sha256(JSON.stringify({
+  return sha256Hex(JSON.stringify({
     provider: envelope.provider,
     deliveryId: envelope.deliveryId,
     channelId: envelope.channelId,
     senderId: envelope.senderId,
     text: envelope.text,
   }));
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 /**
@@ -665,13 +663,6 @@ function receiptOwnerId(value: string | undefined): string {
   if (value === undefined) return randomUUID();
   if (typeof value !== "string" || !RECEIPT_OWNER_ID.test(value)) {
     throw new TypeError("platform-bridge-inbound-receipt-owner-invalid");
-  }
-  return value;
-}
-
-function positiveInteger(value: number, name: string): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new RangeError(`platform-bridge-inbound-${name}-invalid`);
   }
   return value;
 }

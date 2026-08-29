@@ -303,6 +303,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       // calls onLinked only after exact origin + durable INPUT_REQUIRED checks.
       let linkedChildSessionId: string | undefined;
       const linkedPayload = () => linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {};
+      let terminalFrameEmitted = false;
       /**
        * The single place a TERMINAL renderer frame is emitted for this spawn.
        *
@@ -318,10 +319,26 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
        *
        * The helper resolves it once, to the AUTHORIZED link only, and returns
        * the projected state so callers do not re-derive it.
+       *
+       * WHO CALLS IT: the runner's completion step, through `onTerminal`, for
+       * every outcome that reaches a tracked run — which is every outcome the
+       * runner RETURNS, structural refusals included. Emitting from there and
+       * not from after `await run()` is what makes the frame land no later than
+       * the terminal state `agent_status` reads back; the two are one
+       * uninterruptible step inside `finalizeRun`.
+       *
+       * The call sites further down cover only what never reaches that step: a
+       * throw out of the runner. Such an outcome leaves no tracked terminal
+       * state for `agent_status` to observe, so it carries no ordering hazard —
+       * but it still owes the panel an end to the row `start` opened. The latch
+       * makes that a fallback for the untracked case rather than a second
+       * frame: no outcome is announced twice.
        */
       const emitTerminalFrame = (result: SubAgentTerminalOutcome) => {
         const taskState = projectSubAgentResultState(result);
         const status = subAgentRunStatusFromTaskState(taskState);
+        if (terminalFrameEmitted) return { taskState, status };
+        terminalFrameEmitted = true;
         if (status === "error") {
           emit({
             spawnId,
@@ -381,8 +398,15 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               ...linkedPayload(),
             }),
           // `onError` is diagnostic and may precede a structurally returned
-          // INPUT_REQUIRED/REJECTED result. Only the final result below may
-          // emit a terminal renderer event for this spawnId.
+          // INPUT_REQUIRED/REJECTED result. Only `onTerminal` below may emit a
+          // terminal renderer event for this spawnId.
+          //
+          // The runner fires this from the completion step that writes the
+          // run's terminal state, so the panel is told in the same step
+          // `agent_status` starts reporting `done` — never after it.
+          onTerminal: (result: SubAgentSpawnResult) => {
+            emitTerminalFrame(result);
+          },
         };
         // Resume RE-HYDRATES a frozen sub-agent; spawn starts a fresh one. The
         // resume path takes NO sourceTools/profile from the tool call — those are
@@ -441,16 +465,24 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             }
             const parentSessionId = originSessionId ?? "";
             try {
-              await runner.deliverToParent({
-                parentSessionId,
-                childSessionId: authorizedChildSessionId,
-                message: createBackgroundResultMessage(
-                  result,
+              await runner.deliverToParent(
+                {
                   parentSessionId,
-                  spawnId,
-                  authorizedChildSessionId,
-                ),
-              });
+                  childSessionId: authorizedChildSessionId,
+                  message: createBackgroundResultMessage(
+                    result,
+                    parentSessionId,
+                    spawnId,
+                    authorizedChildSessionId,
+                  ),
+                },
+                // This message carries the run's completion report — the same
+                // content `agent_status` returns once the run is terminal. The
+                // runner records which message that was, so a parent that
+                // already read the report through `agent_status` does not open
+                // its next turn with a steering row repeating it.
+                { terminalReport: true },
+              );
             } catch {
               // Delivery owns its audit path. The renderer terminal state is final.
             }
@@ -598,8 +630,18 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           isError: false,
         };      } catch (err) {
         const message = (err as Error).message ?? "agent_spawn failed";
-        const taskState = projectSubAgentRunState("error");
-        emit({ spawnId, type: "error", taskState, message, ...promptPayload, ...linkedPayload() });
+        // A throw is the one outcome the runner's completion step never sees,
+        // so the frame for it leaves from here — through the same helper, which
+        // stays a no-op if a completion step already spoke for this spawn.
+        const { taskState } = emitTerminalFrame({
+          summary: message,
+          error: message,
+          toolCallCount: 0,
+          turnCount: 0,
+          ...(linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {}),
+          entries: [],
+          ok: false,
+        });
         return {
           output: JSON.stringify({
             error: message,
@@ -627,8 +669,24 @@ export function createAgentStatusTool(deps: Pick<AgentSpawnToolDeps, "getRunner"
     // after the call, stated where the model reads before making it.
     description: t("be_agentSpawn.statusToolDescription"),
     source: "builtin",
-    category: "meta",
-    decisionOverride: "always-allow-with-audit",
+    // A read, declared as one — same as its sibling `agent_list`. It returns
+    // host-owned sub-agent bookkeeping scoped by the HOST-supplied origin
+    // session id; its single optional `id` is a lookup key, it takes no path,
+    // command, or network argument, and it mutates nothing.
+    //
+    // It used to declare `meta` + `decisionOverride: "always-allow-with-audit"`,
+    // which reads as the same permission (allow, with audit) and is not: `meta`
+    // is the host's control-flow category, and the gates downstream treat it as
+    // one. A turn carrying cross-agent provenance re-elevates every call that is
+    // not a builtin `read` to a modal (`invocation-authorization.ts`), so a
+    // parent woken by its own child's report blocked on a human for each status
+    // poll — and because the always-allow branch never consults the reviewer,
+    // the card carried no verdict and `resolveUserApprovalVerdict` labelled a
+    // verdict-less `meta` ask MEDIUM. Declaring the category truthfully is what
+    // makes every one of those gates agree; the alternative was teaching each of
+    // them a name-scoped exception.
+    category: "read",
+    isReadOnly: () => true,
     jsonSchema: {
       type: "object",
       properties: {
@@ -658,14 +716,28 @@ export function createAgentStatusTool(deps: Pick<AgentSpawnToolDeps, "getRunner"
       }
       const input = (rawInput ?? {}) as Record<string, unknown>;
       const id = typeof input.id === "string" && input.id.trim() ? input.id.trim() : "";
+      // Both reads below hand the snapshot — summary, error, transcript — to
+      // the parent LLM, which is the sub-agent's completion report in full. The
+      // flag says so, and the runner uses it to retire the queued mailbox copy
+      // of that same report rather than replay it as steering on the next turn.
+      //
+      // This does not cost the tool its `read` declaration above. What it
+      // records is bookkeeping ABOUT the read — that the parent has now been
+      // shown this report — not an effect on anything outside the host's own
+      // run tracking. The one durable write it leads to belongs to the next
+      // turn's mailbox fold, which is where that write is declared and audited.
       if (id) {
-        const run = runner.getRunStatus(id, originSessionId);
+        const run = runner.getRunStatus(id, originSessionId, {
+          deliversReportToParent: true,
+        });
         return {
           output: JSON.stringify(run ? { run } : { error: `sub-agent run not found: ${id}` }),
           isError: !run,
         };
       }
-      const runs = runner.listRunStatuses(originSessionId);
+      const runs = runner.listRunStatuses(originSessionId, {
+        deliversReportToParent: true,
+      });
       // Live runs are process-local; persisted spawns are not. After an app
       // restart this list is empty while the conversation's sub-agents are
       // still sitting on disk, and the observed reading of that empty list was

@@ -15,6 +15,7 @@ import {
   type TurnFailureSummary,
 } from "../engine/shared-conversation-projection.js";
 import { isSharedApprovalToolIdentifier } from "../shared/permission-review-status.js";
+import { requirePositiveInteger } from "../shared/safe-integer.js";
 
 const DEFAULT_MAX_CHANNELS = 128;
 const DEFAULT_MAX_PENDING_MESSAGES_PER_CHANNEL = 64;
@@ -310,23 +311,23 @@ export function createPlatformBridgeDeliveryAdapter<TChannel>(
   if (!options || typeof options !== "object" || typeof options.transport?.send !== "function") {
     throw new TypeError("platform-bridge-delivery-transport-invalid");
   }
-  const maxChannels = positiveInteger(options.maxChannels ?? DEFAULT_MAX_CHANNELS, "maxChannels");
-  const maxPendingMessages = positiveInteger(
+  const maxChannels = requirePositiveInteger(options.maxChannels ?? DEFAULT_MAX_CHANNELS, `platform-bridge-delivery-maxChannels-invalid`);
+  const maxPendingMessages = requirePositiveInteger(
     options.maxPendingMessagesPerChannel ?? DEFAULT_MAX_PENDING_MESSAGES_PER_CHANNEL,
-    "maxPendingMessagesPerChannel",
+    `platform-bridge-delivery-maxPendingMessagesPerChannel-invalid`,
   );
-  const maxTextChars = positiveInteger(options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS, "maxTextChars");
+  const maxTextChars = requirePositiveInteger(options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS, `platform-bridge-delivery-maxTextChars-invalid`);
   const maxTransientSendRetries = nonNegativeInteger(
     options.maxTransientSendRetries ?? DEFAULT_MAX_TRANSIENT_SEND_RETRIES,
     "maxTransientSendRetries",
   );
-  const retryBackoffBaseMs = positiveInteger(
+  const retryBackoffBaseMs = requirePositiveInteger(
     options.retryBackoffBaseMs ?? DEFAULT_RETRY_BACKOFF_BASE_MS,
-    "retryBackoffBaseMs",
+    `platform-bridge-delivery-retryBackoffBaseMs-invalid`,
   );
-  const maxRetryDelayMs = positiveInteger(
+  const maxRetryDelayMs = requirePositiveInteger(
     options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS,
-    "maxRetryDelayMs",
+    `platform-bridge-delivery-maxRetryDelayMs-invalid`,
   );
   if (options.wait !== undefined && typeof options.wait !== "function") {
     throw new TypeError("platform-bridge-delivery-wait-invalid");
@@ -894,13 +895,6 @@ function isUnsafeSharedTextCodePoint(codePoint: number): boolean {
 
 function validCursor(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
-}
-
-function positiveInteger(value: number, name: string): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new RangeError(`platform-bridge-delivery-${name}-invalid`);
-  }
-  return value;
 }
 
 function nonNegativeInteger(value: number, name: string): number {

@@ -9,6 +9,12 @@ import {
   _resetMcpAppProtocolHandlers,
 } from "../mcp-app-protocol.js";
 import { buildMcpCspHeader } from "../../shared/mcp-app-csp.js";
+import { escapeHtml } from "../../shared/escape-html.js";
+
+vi.mock("../../shared/escape-html.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../shared/escape-html.js")>();
+  return { ...actual, escapeHtml: vi.fn(actual.escapeHtml) };
+});
 import { encodeMcpServerId } from "../../shared/mcp-app-partition.js";
 import type { McpUiResourceCsp } from "../../mcp/types.js";
 
@@ -77,6 +83,17 @@ describe("mcp-app-protocol — the protocol.handle security callback", () => {
     const noPerms = createMcpAppProxySession("srv-noperm");
     const noBody = await handler({ url: noPerms }).text();
     expect(noBody).not.toContain("lvis-mcp-app-allow");
+  });
+
+  it("routes the `allow` meta value through the shared four-entity HTML escaper", async () => {
+    const handler = installAndCapture();
+    vi.mocked(escapeHtml).mockImplementationOnce(() => "ESCAPED-BY-SHARED-HELPER");
+    const withPerms = createMcpAppProxySession("srv-esc", undefined, { geolocation: {} });
+    const body = await handler({ url: withPerms }).text();
+    expect(escapeHtml).toHaveBeenCalledWith("geolocation");
+    expect(body).toContain('content="ESCAPED-BY-SHARED-HELPER"');
+    // The helper itself is what closes the old gap: `>` used to survive here.
+    expect(escapeHtml('a">b')).toBe("a&quot;&gt;b");
   });
 
   it("AUTHORITY/TOKEN MISMATCH → 403 (a proxy origin cannot serve another server's session)", () => {

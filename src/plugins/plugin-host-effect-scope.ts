@@ -5,6 +5,7 @@ import {
 } from "../permissions/effect-kind.js";
 import type { PluginRuntimeGenerationAccess } from "./plugin-host-generation.js";
 import { createLogger } from "../lib/logger.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("plugin-host-effect-scope");
 
@@ -210,7 +211,7 @@ export class HostApiGenerationScope {
       void wrapped(...args).catch((error: unknown) => {
         log.warn(
           `[plugin:${this.pluginId}] host listener failed: %s`,
-          error instanceof Error ? error.message : String(error),
+          errorMessage(error),
         );
       });
     };

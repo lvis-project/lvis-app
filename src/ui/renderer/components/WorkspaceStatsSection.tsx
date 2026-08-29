@@ -14,6 +14,7 @@ import { SettingsSection } from "./PageShell.js";
 import { useWorkspaceStats } from "../hooks/use-workspace-stats.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { SettingsTab } from "../../../shared/settings-tabs.js";
+import { formatClockTime } from "../../../shared/format-time.js";
 
 export interface WorkspaceStatsSectionProps {
   api: LvisApi;
@@ -70,8 +71,7 @@ export function WorkspaceStatsSection({ api, onNavigate }: WorkspaceStatsSection
 
   const lastSyncedLabel = useMemo(() => {
     if (!stats.lastSyncedAt) return t("generalTab.notYetSynced");
-    const dt = new Date(stats.lastSyncedAt);
-    return t("generalTab.lastSynced", { time: dt.toLocaleTimeString() });
+    return t("generalTab.lastSynced", { time: formatClockTime(stats.lastSyncedAt) });
   }, [stats.lastSyncedAt, locale, t]);
 
   return (

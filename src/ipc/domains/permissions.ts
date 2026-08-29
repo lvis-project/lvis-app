@@ -26,7 +26,7 @@ import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-life
 import {
   NARROWEST_DEFERRED_SCOPE,
   type DeferredGrantScope,
-} from "../../permissions/reviewer/deferred-queue.js";
+} from "../../shared/permission-review-status.js";
 import type { IpcDeps } from "../types.js";
 import type {
   PermissionDirCommand,

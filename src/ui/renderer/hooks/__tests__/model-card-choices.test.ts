@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { fakeLlmSettings } from "../../../../shared/__tests__/fake-llm-settings.js";
 import { modelCardChoices } from "../use-settings.js";
 import type { AppSettings } from "../../types.js";
+import { fakeAppSettings } from "../../../../../test/renderer/fake-app-settings.js";
 
 function llm(overrides: Partial<AppSettings["llm"]>): AppSettings["llm"] {
-  return { ...(fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }) as AppSettings["llm"]), ...overrides };
+  return { ...fakeAppSettings({ llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }) }).llm, ...overrides };
 }
 
 describe("modelCardChoices", () => {

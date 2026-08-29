@@ -4,14 +4,14 @@ import { fireEvent, render, screen, act } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { SideChatView } from "../SideChatView.js";
-import type { StreamEvent } from "../../../../lib/chat-stream-state.js";
+import type { ChatStreamEvent } from "../../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../../types.js";
 import { ChatContextProvider, type ChatContextValue } from "../../context/ChatContext.js";
 import { ApprovalSurfaceProvider } from "../../hooks/use-approval.js";
 import { approvalSurfaceStub } from "../../../../../test/renderer/helpers.js";
 
 function makeApi() {
-  let handler: ((e: StreamEvent) => void) | null = null;
+  let handler: ((e: ChatStreamEvent) => void) | null = null;
   const spies = {
     send: vi.fn(async () => ({ ok: true as const, result: {} })),
     new: vi.fn(async () => ({ ok: true as const, sessionId: "side-2" })),
@@ -22,7 +22,7 @@ function makeApi() {
       ...spies,
       load: vi.fn(),
       list: vi.fn(),
-      onStream: (h: (e: StreamEvent) => void) => {
+      onStream: (h: (e: ChatStreamEvent) => void) => {
         handler = h;
         return () => {
           handler = null;
@@ -31,7 +31,7 @@ function makeApi() {
       onFallback: () => () => {},
     },
   } as unknown as LvisApi;
-  return { api, emit: (e: StreamEvent) => act(() => handler?.(e)), spies };
+  return { api, emit: (e: ChatStreamEvent) => act(() => handler?.(e)), spies };
 }
 
 function renderView(api: LvisApi, chatContext?: Partial<ChatContextValue>) {
@@ -103,7 +103,7 @@ describe("SideChatView — New button gating during streaming", () => {
       target: { value: "hello" },
     });
     fireEvent.click(screen.getByTestId("side-chat-send"));
-    emit({ type: "assistant_round", text: "answer", stopReason: "end_turn", streamId: 1 } as StreamEvent);
+    emit({ type: "assistant_round", text: "answer", stopReason: "end_turn", streamId: 1 } as ChatStreamEvent);
     emit({
       type: "turn_summary",
       turnDurationMs: 20,
@@ -113,7 +113,7 @@ describe("SideChatView — New button gating during streaming", () => {
       freshInputTokens: 90,
       tokensOut: 10,
       streamId: 1,
-    } as StreamEvent);
+    } as ChatStreamEvent);
     emit({ type: "done", streamId: 1 });
 
     expect(screen.queryByTestId("token-cost-badge")).toBeNull();

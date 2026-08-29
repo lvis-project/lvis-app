@@ -6,6 +6,8 @@ import {
   type ApprovalOption,
   type ApprovalRequestFacts,
   type ApprovalSentenceSelection,
+  HTML_TAG_RE,
+  UNTRUSTED_TEXT_CONTROL_RE,
 } from "../approval-sentence-selector.js";
 import type { LlmReviewerProvider } from "../risk-classifier.js";
 
@@ -277,5 +279,13 @@ describe("approval-sentence-selector — the envelope is reasoning-blind", () =>
     const system = (provider.complete as unknown as { mock: { calls: [{ systemPrompt: string }][] } })
       .mock.calls[0]![0].systemPrompt;
     expect(system).toContain("no agent reasoning");
+  });
+});
+
+describe("untrusted text flattening patterns", () => {
+  it("strip tags and control/bidi characters, and are global so replace() covers every occurrence", () => {
+    expect("a <b>x</b> c".replace(HTML_TAG_RE, " ")).toBe("a  x  c");
+    expect("a\u0000b\u202ec\u2066d".replace(UNTRUSTED_TEXT_CONTROL_RE, " ")).toBe("a b c d");
+    expect(HTML_TAG_RE.global && UNTRUSTED_TEXT_CONTROL_RE.global).toBe(true);
   });
 });
