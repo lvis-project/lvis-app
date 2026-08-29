@@ -50,7 +50,7 @@ export function execModeTestId(mode: string): string {
 }
 
 /** A CSS attribute selector for a test id, for the components that locate a sibling surface by it. */
-export function testIdSelector(id: string): string {
+export function testIdSelector(id: TestId): string {
   return `[data-testid="${id}"]`;
 }
 

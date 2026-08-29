@@ -74,7 +74,7 @@ Split these into separate PRs with focused regression checks before deleting:
 - Files currently reported by Knip: dormant scripts, test fixtures,
   `src/plugin-ui-shell.js`, `src/shared/host-font-stack.ts`,
   `src/ui/renderer/components/LvisLogo.tsx`, and
-  `src/ui/renderer/hooks/use-auth-progress.ts`.
+  `src/floating-dock-window.js`.
 - 계속 경고되는 dependency 후보에는 `@ai-sdk/devtools`,
   `baseline-browser-mapping`, `caniuse-lite`, `tw-animate-css`가 있다. 제거 전
   패키징 또는 CSS 전용 사용을 확인해야 한다.

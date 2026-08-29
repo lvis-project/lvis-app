@@ -9,7 +9,7 @@ import {
 import type { Attachment } from "../types/attachments.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { LvisApi } from "../types.js";
-import { BLOCKING_SURFACE_SELECTOR } from "../../../shared/test-ids.js";
+import { BLOCKING_SURFACE_SELECTOR, TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface UseMessageQueueParams {
   api: LvisApi;
@@ -326,7 +326,7 @@ export function useMessageQueue({
       }
       const target = e.target as HTMLElement | null;
       const inComposer =
-        target?.getAttribute?.("data-testid") === "composer-textarea";
+        target?.getAttribute?.("data-testid") === TEST_IDS.composerTextarea;
       if (!inComposer) return;
       e.preventDefault();
       // 사용자 의도 (2026-05-15): ESC = LLM abort + 큐를 새 user message 로
@@ -358,7 +358,7 @@ export function useMessageQueue({
       }
       const target = e.target as HTMLElement | null;
       const isComposerTextarea =
-        target?.getAttribute?.("data-testid") === "composer-textarea";
+        target?.getAttribute?.("data-testid") === TEST_IDS.composerTextarea;
       if (!isComposerTextarea) return;
       e.preventDefault();
       handleImmediateInject();

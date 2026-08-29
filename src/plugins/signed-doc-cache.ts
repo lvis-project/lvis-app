@@ -118,14 +118,6 @@ async function safeReadTextFile(path: string): Promise<string | null> {
 }
 
 /**
- * This cache lives under `<userData>/` rather than `~/.lvis/`, but the write
- * contract is the one thing about it that is not location-specific: the copy
- * here staged to a random name and then neither locked the name with `O_EXCL`
- * nor fsynced anything, so a cached revocation document could be lost to a
- * power cut after the caller had been told it was written.
- */
-
-/**
  * Wraps the on-disk cache for one `<userData>/<subDir>/` directory.
  *
  * `docFilename` / `sigFilename` default to `document.json` / `document.json.sig`
