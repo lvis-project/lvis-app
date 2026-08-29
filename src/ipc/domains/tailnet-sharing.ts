@@ -8,7 +8,7 @@
  */
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
-import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
+import { hasUserKeyboardIntentPayload, USER_KEYBOARD_REQUIRED } from "../../shared/chat-origin.js";
 import {
   isTailnetSharingActivatePairingInput,
   isTailnetSharingCreateCurrentConversationShareInput,
@@ -23,20 +23,11 @@ import type { IpcDeps } from "../types.js";
 
 const DISABLED = Object.freeze({ ok: false as const, error: "tailnet-sharing-disabled" as const });
 const INPUT_INVALID = Object.freeze({ ok: false as const, error: "tailnet-sharing-input-invalid" as const });
-const KEYBOARD_REQUIRED = Object.freeze({ ok: false as const, error: "user-keyboard-required" as const });
 const OPERATION_REJECTED = Object.freeze({
   ok: false as const,
   error: "tailnet-sharing-operation-rejected" as const,
 });
 const UNAVAILABLE = Object.freeze({ ok: false as const, error: "tailnet-sharing-unavailable" as const });
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasIntent(payload: unknown): boolean {
-  return record(payload) && hasUserKeyboardIntent(payload.intent);
-}
 
 /**
  * Broadcast only a change hint. Each renderer must refetch its safe snapshot;
@@ -79,7 +70,7 @@ export function registerTailnetSharingHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!owner) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTailnetSharingCreateInvitationInput(payload)) return INPUT_INVALID;
     try {
       const invitation = parseTailnetSharingCreatedInvitation(
@@ -98,7 +89,7 @@ export function registerTailnetSharingHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!owner) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTailnetSharingActivatePairingInput(payload)) return INPUT_INVALID;
     try {
       return await owner.activatePairing(payload.id)
@@ -115,7 +106,7 @@ export function registerTailnetSharingHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!owner) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTailnetSharingCreateCurrentConversationShareInput(payload)) return INPUT_INVALID;
     try {
       return await owner.createCurrentConversationShare(
@@ -136,7 +127,7 @@ export function registerTailnetSharingHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!owner) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTailnetSharingRevokeInput(payload)) return INPUT_INVALID;
     try {
       return await owner.revokeShare(payload.id)
@@ -153,7 +144,7 @@ export function registerTailnetSharingHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!owner) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTailnetSharingRevokeInput(payload)) return INPUT_INVALID;
     try {
       return await owner.revokePairing(payload.id)

@@ -9,7 +9,7 @@
  */
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
-import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
+import { hasUserKeyboardIntentPayload, USER_KEYBOARD_REQUIRED } from "../../shared/chat-origin.js";
 import {
   parseTailnetObserverConfigView,
   parseTailnetObserverSnapshot,
@@ -25,7 +25,6 @@ const INPUT_INVALID = Object.freeze({
   ok: false as const,
   error: "tailnet-observer-input-invalid" as const,
 });
-const KEYBOARD_REQUIRED = Object.freeze({ ok: false as const, error: "user-keyboard-required" as const });
 const UNAVAILABLE = Object.freeze({
   ok: false as const,
   error: "tailnet-observer-unavailable" as const,
@@ -33,10 +32,6 @@ const UNAVAILABLE = Object.freeze({
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasIntent(payload: unknown): boolean {
-  return record(payload) && hasUserKeyboardIntent(payload.intent);
 }
 
 /**
@@ -78,7 +73,7 @@ export function registerTailnetObserverHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     const config = record(payload) ? parseTailnetObserverConfigView(payload.config) : null;
     if (config === null) return INPUT_INVALID;
     try {
