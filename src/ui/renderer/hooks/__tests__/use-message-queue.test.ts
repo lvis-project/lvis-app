@@ -29,13 +29,19 @@ import type { LvisApi } from "../../types.js";
  * the transcript and the queue both listen, and the single-slot double the
  * transcript's own suite uses would let the second overwrite the first.
  */
-function makeApi() {
+function makeApi(options: { reverseDispatch?: boolean } = {}) {
   const handlers = new Set<(e: StreamEvent) => void>();
   const dispatch = (e: StreamEvent) => {
     // Each subscriber gets its OWN copy of the frame: the context bridge builds
     // a fresh object per listener, so a verdict cached by frame identity would
     // not survive the crossing.
-    for (const h of [...handlers]) h({ ...e });
+    //
+    // The ORDER is a parameter because nothing in the contract fixes it. Today
+    // the transcript subscribes first because its hook is called first, and
+    // that must not be what makes the drain correct.
+    const ordered = [...handlers];
+    if (options.reverseDispatch) ordered.reverse();
+    for (const h of ordered) h({ ...e });
   };
   /** Frames the host emits while the abort round trip is still in flight. */
   let framesDuringAbort: StreamEvent[] = [];
@@ -201,6 +207,34 @@ describe("useMessageQueue end-of-turn drain (side chat)", () => {
 
     expect(spies.send).toHaveBeenCalledTimes(1);
     expect(result.current.queue.messageQueueStore.getPending()).toHaveLength(1);
+  });
+
+  // The drain's send re-arms the surface's stale-frame guard synchronously. If
+  // it ran inside the dispatch, a subscriber that had not judged the frame yet
+  // would read it as superseded — and the transcript, judging last, would drop
+  // its own `done` and leave the answer streaming forever.
+  it("drains and closes the answer whichever subscriber judges the frame first", async () => {
+    const { api, emit, spies } = makeApi({ reverseDispatch: true });
+    const { result } = renderHook(() => useSideSurface(api));
+
+    await act(async () => {
+      await result.current.side.send("first");
+    });
+    await emit({ type: "text_delta", text: "hello", streamId: 1 });
+    await typeAndSubmit(result, "later");
+
+    await emit({ type: "done", streamId: 1 });
+    // The drain is deferred by a microtask; let it run.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const stuck = result.current.side.entries.filter(
+      (e) => e.kind === "assistant" && e.streaming === true,
+    );
+    expect(stuck).toHaveLength(0);
+    expect(spies.send).toHaveBeenCalledTimes(2);
+    expect(result.current.queue.messageQueueStore.getPending()).toHaveLength(0);
   });
 
   it("gives every subscriber the same verdict for one frame", async () => {

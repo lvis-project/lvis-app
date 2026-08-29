@@ -288,13 +288,26 @@ export function useMessageQueue({
         for (const item of taken) messageQueueStore.remove(item.id);
         queueAutoInflightRef.current = true;
         const formatted = formatQueueInject(taken);
-        void (async () => {
-          try {
-            await onAsk(formatted, undefined, { injectHint: "queue", inputOrigin: "queue-auto" });
-          } finally {
-            queueAutoInflightRef.current = false;
-          }
-        })();
+        // Deferred OUT of this dispatch. The send that follows re-arms the
+        // surface's stale-frame guard synchronously, and a subscriber that has
+        // not judged this frame yet would then read it as belonging to a
+        // superseded turn — the transcript would drop its own `done` and leave
+        // the answer stuck mid-stream. A microtask runs after every subscriber
+        // on the channel has been called and long before the user can act, so
+        // the drain no longer depends on this hook subscribing last.
+        //
+        // The rows are removed and the re-entrancy flag is set ABOVE, still
+        // inside the dispatch: a second `done` arriving before the microtask
+        // runs must find the queue already taken.
+        queueMicrotask(() => {
+          void (async () => {
+            try {
+              await onAsk(formatted, undefined, { injectHint: "queue", inputOrigin: "queue-auto" });
+            } finally {
+              queueAutoInflightRef.current = false;
+            }
+          })();
+        });
       }
     });
     return unsub;

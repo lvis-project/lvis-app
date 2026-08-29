@@ -73,6 +73,11 @@ function SideChatSession({
   sideChat: NonNullable<LvisApi["sideChat"]>;
 }) {
   const { t } = useTranslation();
+  // Called BEFORE `useMessageQueue` below, so the transcript's stream listener
+  // is registered first and judges each frame first. That ordering is no longer
+  // load-bearing — the shared verdict is a pure read and the queue's drain is
+  // deferred out of the dispatch — and `use-message-queue.test.ts` pins the
+  // reversed order to keep it that way.
   const {
     entries,
     turnSummaryByTurnStart,
