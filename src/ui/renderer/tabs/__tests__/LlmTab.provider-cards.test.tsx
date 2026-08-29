@@ -1,6 +1,7 @@
 import "../../../../../test/renderer/setup.js";
+import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { installMockLvisApi, type MockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import type { LlmModelListResult } from "../../../../shared/llm-model-list.js";
@@ -14,14 +15,18 @@ vi.mock("../SubscriptionProvidersController.js", () => ({
 }));
 
 const { LlmTab } = await import("../LlmTab.js");
+type ProviderCredentialDraft =
+  import("../LlmTab.js").ProviderCredentialDraft;
+type ProviderCredentialSave =
+  import("../LlmTab.js").ProviderCredentialSave;
 
 type MockApi = MockLvisApi;
 
 /** Stable identity: LlmTab's settings effect keys off this array. */
 const NO_PRESETS: readonly MarketplaceInstalledProviderPreset[] = [];
 
-/** The endpoint the live custom provider is configured with. */
-const CUSTOM_ENDPOINT = "http://10.232.178.100:30000/v1";
+/** The endpoint the custom provider is configured with. */
+const CUSTOM_ENDPOINT = "http://localhost:30000/v1";
 
 function preset(
   providerId: string,
@@ -105,10 +110,10 @@ function settingsWithCache(cache: Record<string, unknown>) {
   });
 }
 
-/** `getSettings` with a stored block for one vendor, for the dirty signal. */
-function settingsWithVendorBlock(vendor: string, block: Record<string, string>) {
+/** `getSettings` with stored blocks, for the per-row endpoint and dirty signal. */
+function settingsWithVendorBlocks(vendors: Record<string, Record<string, string>>) {
   return vi.fn().mockResolvedValue({
-    llm: { pinnedModels: [], modelListCache: {}, vendors: { [vendor]: block } },
+    llm: { pinnedModels: [], modelListCache: {}, vendors },
     marketplace: { installedProviderIds: [] },
   });
 }
@@ -116,7 +121,8 @@ function settingsWithVendorBlock(vendor: string, block: Record<string, string>) 
 interface TabProps {
   vendor?: string;
   baseUrl?: string;
-  keyInput?: string;
+  /** Seeds the parent-held credential draft, as a half-typed card would. */
+  draft?: ProviderCredentialDraft | null;
   hasKey?: boolean;
   model?: string;
   marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
@@ -125,7 +131,52 @@ interface TabProps {
   fallbackOpen?: boolean;
 }
 
-function tabTree(api: MockApi, props: TabProps) {
+/** A draft for a row whose only content is a typed key. */
+function keyDraft(rowId: string, vendorId: string, keyInput: string): ProviderCredentialDraft {
+  return {
+    rowId,
+    vendorId,
+    presetId: "",
+    keyInput,
+    baseUrl: "",
+    vertexProject: "",
+    vertexLocation: "",
+  };
+}
+
+interface TabHooks {
+  selectApiVendorModel: Mock<(vendorId: string, modelId: string) => void>;
+  onSelectMarketplaceProviderPreset: Mock<(preset: MarketplaceInstalledProviderPreset) => void>;
+  onClearMarketplaceProviderPreset: Mock<() => void>;
+  onImmediateChange: Mock<() => void>;
+  onSaveProviderCredential: Mock<(input: ProviderCredentialSave) => Promise<boolean>>;
+}
+
+function makeHooks(): TabHooks {
+  return {
+    selectApiVendorModel: vi.fn(),
+    onSelectMarketplaceProviderPreset: vi.fn(),
+    onClearMarketplaceProviderPreset: vi.fn(),
+    onImmediateChange: vi.fn(),
+    onSaveProviderCredential: vi.fn(async () => true),
+  };
+}
+
+/**
+ * The tab under its real parent contract: the credential draft is owned above
+ * it, so the harness holds it in state and hands the setter down. A `vi.fn()`
+ * here would make every card look permanently empty.
+ */
+function TabHarness({
+  api,
+  props,
+  hooks,
+}: {
+  api: MockApi;
+  props: TabProps;
+  hooks: TabHooks;
+}) {
+  const [draft, setDraft] = useState<ProviderCredentialDraft | null>(props.draft ?? null);
   return (
     <TooltipProvider>
       <LlmTab
@@ -133,20 +184,17 @@ function tabTree(api: MockApi, props: TabProps) {
         marketplaceProviderPresets={props.marketplaceProviderPresets ?? NO_PRESETS}
         marketplaceProviderPresetId={props.marketplaceProviderPresetId ?? ""}
         vendor={props.vendor ?? "openai"}
-        setVendor={vi.fn()}
         baseUrl={props.baseUrl ?? ""}
-        setBaseUrl={vi.fn()}
-        vertexProject=""
-        setVertexProject={vi.fn()}
-        vertexLocation=""
-        setVertexLocation={vi.fn()}
         hasKey={props.hasKey ?? true}
         setHasKey={vi.fn()}
-        keyInput={props.keyInput ?? ""}
-        setKeyInput={vi.fn()}
+        providerCredentialDraft={draft}
+        onProviderCredentialDraftChange={setDraft}
+        onSaveProviderCredential={hooks.onSaveProviderCredential}
+        onSelectMarketplaceProviderPreset={hooks.onSelectMarketplaceProviderPreset}
+        onClearMarketplaceProviderPreset={hooks.onClearMarketplaceProviderPreset}
         model={props.model ?? "gpt-5.4"}
         setModel={vi.fn()}
-        selectApiVendorModel={vi.fn()}
+        selectApiVendorModel={hooks.selectApiVendorModel}
         enableThinking={false}
         setEnableThinking={vi.fn()}
         thinkingBudget={10_000}
@@ -157,6 +205,7 @@ function tabTree(api: MockApi, props: TabProps) {
         setFallbackOpen={vi.fn()}
         onSaved={vi.fn()}
         onSave={vi.fn()}
+        onImmediateChange={hooks.onImmediateChange}
         settingsLoaded={true}
       />
     </TooltipProvider>
@@ -164,7 +213,8 @@ function tabTree(api: MockApi, props: TabProps) {
 }
 
 async function renderTab(api: MockApi, props: TabProps = {}) {
-  const result = render(tabTree(api, props));
+  const hooks = makeHooks();
+  const result = render(<TabHarness api={api} props={props} hooks={hooks} />);
   // The tab syncs the active vendor's catalogue on a debounce after mount.
   await act(async () => {
     await Promise.resolve();
@@ -172,11 +222,12 @@ async function renderTab(api: MockApi, props: TabProps = {}) {
   let current = props;
   return {
     ...result,
-    /** Move the props the parent owns — the vendor above all — as a click on
-     *  another provider's card really does. */
+    hooks,
+    /** Move the props the parent owns — the ACTIVE provider above all — as an
+     *  explicit switch really does. */
     rerender: async (next: TabProps) => {
       current = { ...current, ...next };
-      result.rerender(tabTree(api, current));
+      result.rerender(<TabHarness api={api} props={current} hooks={hooks} />);
       await act(async () => {
         await Promise.resolve();
       });
@@ -203,7 +254,7 @@ beforeEach(() => {
 
 describe("LlmTab provider cards", () => {
   it("puts Save inside the card being edited, not on the page", async () => {
-    await renderTab(makeApi(), { keyInput: "sk-typed" });
+    await renderTab(makeApi(), { draft: keyDraft("openai", "openai", "sk-typed") });
 
     expect(screen.queryByTestId("llm-tab:save-providers")).not.toBeInTheDocument();
 
@@ -215,7 +266,7 @@ describe("LlmTab provider cards", () => {
 
   it("hides the API key field until the API-key route is chosen", async () => {
     installSubscription([codexView()]);
-    await renderTab(makeApi());
+    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }));
 
     expect(screen.queryByTestId("llm-api-key-input")).not.toBeInTheDocument();
 
@@ -254,11 +305,10 @@ describe("LlmTab provider cards", () => {
   });
 
   it("asks for an endpoint on a self-hosted vendor whose address is per install", async () => {
-    await renderTab(makeApi(), {
-      vendor: "ollama",
-      baseUrl: "http://127.0.0.1:11434/v1",
-      model: "llama3",
+    const api = makeApi({
+      getSettings: settingsWithVendorBlocks({ ollama: { baseUrl: "http://127.0.0.1:11434/v1" } }),
     });
+    await renderTab(api, { vendor: "ollama", model: "llama3" });
     fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:ollama"));
     expect(screen.getByTestId("llm-base-url-input")).toHaveValue("http://127.0.0.1:11434/v1");
   });
@@ -275,6 +325,138 @@ describe("LlmTab provider cards", () => {
     const rows = rowOrder();
     expect(rows[rows.length - 1]).toBe("claude");
     expect(rows.length).toBeGreaterThan(1);
+  });
+});
+
+describe("LlmTab provider activation", () => {
+  it("opens an added provider's card without switching what chat runs on", async () => {
+    // The live regression: picking a vendor from the add menu persisted
+    // `llm.provider`, so chat moved to a provider with no credential at all.
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
+
+    // The card is open and editable...
+    expect(screen.getByTestId("llm-tab:connection:claude"))
+      .toContainElement(screen.getByTestId("llm-tab:manual-section"));
+    // ...and nothing was persisted by opening it.
+    expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
+    expect(hooks.onSelectMarketplaceProviderPreset).not.toHaveBeenCalled();
+    expect(hooks.onImmediateChange).not.toHaveBeenCalled();
+    expect(api.updateSettings).not.toHaveBeenCalledWith(
+      expect.objectContaining({ llm: expect.objectContaining({ provider: expect.anything() }) }),
+    );
+    // The badge is still on the provider chat is actually using.
+    expect(screen.getByTestId("llm-tab:connection-mode:openai")).toBeInTheDocument();
+    expect(screen.queryByTestId("llm-tab:connection-mode:claude")).toBeNull();
+  });
+
+  it("writes only the row's own secret when its key is saved", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
+    fireEvent.change(screen.getByTestId("llm-api-key-input"), {
+      target: { value: "sk-ant-new" },
+    });
+    await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("llm-tab:save-providers"));
+
+    await waitFor(() => expect(hooks.onSaveProviderCredential).toHaveBeenCalledWith({
+      credentialProviderId: "claude",
+      vendorId: "claude",
+      apiKey: "sk-ant-new",
+    }));
+    // A fixed-endpoint vendor owns no persisted field here, so no block is
+    // written — and the active provider is nobody's business but the switch's.
+    expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
+    expect(screen.getByTestId("llm-tab:connection-mode:openai")).toBeInTheDocument();
+    // The card stays open on what it committed, with the key field emptied.
+    await waitFor(() => expect(screen.getByTestId("llm-api-key-input")).toHaveValue(""));
+    expect(screen.getByTestId("llm-tab:connection:claude"))
+      .toContainElement(screen.getByTestId("llm-tab:manual-section"));
+  });
+
+  it("switches the active provider only on the explicit action", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai", "claude") });
+    const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
+
+    const useClaude = await screen.findByTestId("llm-tab:connection-use:claude");
+    await waitFor(() => expect(useClaude).toBeEnabled());
+    fireEvent.click(useClaude);
+
+    expect(hooks.selectApiVendorModel).toHaveBeenCalledWith("claude", expect.any(String));
+    // Persisted at once, the way a model pick is.
+    expect(hooks.onImmediateChange).toHaveBeenCalled();
+  });
+
+  it("refuses the switch toward a provider with no stored credential", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
+
+    const useClaude = screen.getByTestId("llm-tab:connection-use:claude");
+    expect(useClaude).toBeDisabled();
+    expect(useClaude).toHaveAttribute("title", expect.stringMatching(/API/));
+    fireEvent.click(useClaude);
+    expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
+  });
+
+  it("edits each row's own endpoint while a third provider is the active one", async () => {
+    const generic = "http://localhost:8001/v1";
+    const selfHosted = "http://127.0.0.1:11434/v1";
+    const api = makeApi({
+      hasApiKey: storedKeysFor("openai", "openai-compatible", "ollama"),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: {
+          pinnedModels: [],
+          modelListCache: {},
+          vendors: {
+            "openai-compatible": { baseUrl: generic },
+            ollama: { baseUrl: selfHosted },
+          },
+        },
+        marketplace: { installedProviderIds: ["ollama"], installedProviderPresets: [] },
+      }),
+    });
+    await renderTab(api, { vendor: "openai", model: "" });
+
+    await screen.findByTestId("llm-tab:connection:openai-compatible");
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    expect(screen.getByTestId("llm-base-url-input")).toHaveValue(generic);
+
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:ollama"));
+    expect(screen.getByTestId("llm-base-url-input")).toHaveValue(selfHosted);
+    // Neither card is the one chat is on, and neither claims to be.
+    expect(screen.getByTestId("llm-tab:connection-mode:openai")).toBeInTheDocument();
+  });
+
+  it("offers no chat switch on a signed-out subscription runtime", async () => {
+    installSubscription([codexView()]);
+    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), { vendor: "openai", model: "" });
+
+    // The runtime's own action is the single source for that route, and it is
+    // simply not on offer until the user is signed in.
+    expect(screen.queryByTestId("subscription-provider:codex:use-for-chat")).toBeNull();
+  });
+
+  it("names the active provider on its own card, not the open one", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai", "claude") });
+    await renderTab(api, { vendor: "openai", model: "" });
+
+    await screen.findByTestId("llm-tab:connection:claude");
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
+
+    expect(screen.getByTestId("llm-tab:connection-use:openai"))
+      .toBeDisabled();
+    expect(screen.getByTestId("llm-tab:connection-status:openai"))
+      .toHaveTextContent(/API|사용/);
+    expect(screen.queryByTestId("llm-tab:connection-mode:claude")).toBeNull();
   });
 });
 
@@ -351,19 +533,17 @@ describe("LlmTab marketplace preset rows", () => {
 describe("LlmTab unsaved provider input", () => {
   it("keeps Save unavailable until a field actually changes", async () => {
     const saved = { baseUrl: "http://localhost:8001/v1" };
-    const { unmount } = await renderTab(
-      makeApi({ getSettings: settingsWithVendorBlock("openai-compatible", saved) }),
-      { vendor: "openai-compatible", baseUrl: saved.baseUrl, model: "local-model" },
-    );
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
-    await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeDisabled());
-    unmount();
-
     await renderTab(
-      makeApi({ getSettings: settingsWithVendorBlock("openai-compatible", saved) }),
-      { vendor: "openai-compatible", baseUrl: "http://localhost:9999/v1", model: "local-model" },
+      makeApi({ getSettings: settingsWithVendorBlocks({ "openai-compatible": saved }) }),
+      { vendor: "openai-compatible", model: "local-model" },
     );
     fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    // Opened on the stored endpoint, so there is nothing to commit yet.
+    await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeDisabled());
+
+    fireEvent.change(screen.getByTestId("llm-base-url-input"), {
+      target: { value: "http://localhost:9999/v1" },
+    });
     await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled());
   });
 
@@ -373,7 +553,7 @@ describe("LlmTab unsaved provider input", () => {
     await renderTab(makeApi(), {
       vendor: "claude",
       hasKey: false,
-      keyInput: "sk-ant-typed",
+      draft: keyDraft("claude", "claude", "sk-ant-typed"),
       model: "",
     });
 
@@ -503,15 +683,15 @@ describe("LlmTab OpenAI model catalogue", () => {
   });
 
   it("gives a generic openai-compatible row its own endpoint field with the saved value", async () => {
-    // The live shape: the persisted provider is OpenAI, so the form starts
-    // there, and the openai-compatible provider is configured with a custom
-    // endpoint of its own. Clicking its card must show THAT endpoint.
+    // The live shape: the active provider is OpenAI, and the openai-compatible
+    // provider is configured with a custom endpoint of its own. Clicking its
+    // card must show THAT endpoint, without the active provider moving.
     const api = makeApi({
       hasApiKey: storedKeysFor("openai", "openai-compatible"),
       getSettings: vi.fn().mockResolvedValue({
         llm: {
           pinnedModels: [],
-          vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT, model: "qwen3.8-27b-gguf" } },
+          vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT, model: "local-27b" } },
           modelListCache: {
             [["openai-compatible", CUSTOM_ENDPOINT, ""].join("\n")]: {
               vendor: "openai-compatible",
@@ -526,29 +706,30 @@ describe("LlmTab OpenAI model catalogue", () => {
       }),
     });
     installSubscription([codexView()]);
-    // `vendor` is what the parent moves on a click; the harness mirrors that.
-    const { rerender } = await renderTab(api, { vendor: "openai", model: "", hasKey: true });
+    const { hooks } = await renderTab(api, { vendor: "openai", model: "", hasKey: true });
     await waitFor(() =>
       expect(screen.getByTestId("llm-tab:connection:openai-compatible")).toBeInTheDocument());
 
     fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
-    // Mid-move the form belongs to nobody: it must NOT hang under the row the
-    // ambient vendor still matches, which is how the OpenAI key field used to
-    // appear beside a card the user never opened.
-    expect(screen.queryByTestId("llm-tab:manual-section")).toBeNull();
-
-    await rerender({ vendor: "openai-compatible", baseUrl: CUSTOM_ENDPOINT, model: "qwen3.8-27b-gguf", hasKey: true });
     const card = screen.getByTestId("llm-tab:connection:openai-compatible");
     expect(card).toContainElement(screen.getByTestId("llm-tab:manual-section"));
+    // Row X's field, while the active provider is still Y.
     expect(screen.getByTestId("llm-base-url-input")).toHaveValue(CUSTOM_ENDPOINT);
+    expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
+    expect(hooks.onImmediateChange).not.toHaveBeenCalled();
+    // And the badge stays where chat actually is.
+    expect(screen.getByTestId("llm-tab:connection-mode:codex")).toBeInTheDocument();
+    expect(screen.queryByTestId("llm-tab:connection-mode:openai-compatible")).toBeNull();
   });
 
   it("locks the endpoint on a preset row and not on the generic one beside it", async () => {
     const presets = [preset("acme-gw", "Acme Gateway", "https://acme.example/v1")];
-    const api = makeApi({ hasApiKey: storedKeysFor("openai-compatible") });
+    const api = makeApi({
+      hasApiKey: storedKeysFor("openai-compatible"),
+      getSettings: settingsWithVendorBlocks({ "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } }),
+    });
     await renderTab(api, {
       vendor: "openai-compatible",
-      baseUrl: CUSTOM_ENDPOINT,
       model: "local-model",
       marketplaceProviderPresets: presets,
     });
@@ -561,10 +742,12 @@ describe("LlmTab OpenAI model catalogue", () => {
   it("keeps the generic endpoint field through an unrelated settings broadcast", async () => {
     // A model-list sync persists its cache, which broadcasts settings. That
     // broadcast must not rewrite which provider the form is editing.
-    const api = makeApi({ hasApiKey: storedKeysFor("openai-compatible") });
+    const api = makeApi({
+      hasApiKey: storedKeysFor("openai-compatible"),
+      getSettings: settingsWithVendorBlocks({ "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } }),
+    });
     await renderTab(api, {
       vendor: "openai-compatible",
-      baseUrl: CUSTOM_ENDPOINT,
       model: "local-model",
       marketplaceProviderPresets: [preset("acme-gw", "Acme Gateway", "https://acme.example/v1")],
     });
@@ -597,7 +780,7 @@ describe("LlmTab OpenAI model catalogue", () => {
         marketplace: { installedProviderIds: ["ollama"], installedProviderPresets: [] },
       }),
     });
-    const { rerender } = await renderTab(api, { vendor: "claude", hasKey: false, model: "" });
+    await renderTab(api, { vendor: "claude", hasKey: false, model: "" });
 
     // Radix opens the menu on pointerdown; a bare click never renders items.
     fireEvent.click(screen.getByTestId("llm-tab:add-provider"));
@@ -610,12 +793,10 @@ describe("LlmTab OpenAI model catalogue", () => {
     const rows = rowOrder();
     expect(rows[rows.length - 1]).toBe("ollama");
 
-    // And once the parent moves the vendor, the card offers its endpoint and
-    // the caret is in it.
-    await rerender({ vendor: "ollama", baseUrl: "http://127.0.0.1:11434/v1", model: "llama3" });
-    const field = screen.getByTestId("llm-base-url-input");
+    // The card offers its endpoint straight away and the caret is in it.
+    const field = await screen.findByTestId("llm-base-url-input");
     expect(screen.getByTestId("llm-tab:connection:ollama")).toContainElement(field);
-    expect(field).toHaveFocus();
+    await waitFor(() => expect(field).toHaveFocus());
   });
 
   it("draws no configured row from a handshake that only started", async () => {

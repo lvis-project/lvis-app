@@ -97,30 +97,61 @@ describe("useSettingsOrchestration", () => {
     expect(result.current.vendor).toBe("openai");
   });
 
-  it("aborts LLM key persistence when settings:update returns reviewer-rewire-failed", async () => {
+  it("aborts a card's key persistence when settings:update returns reviewer-rewire-failed", async () => {
     const api = settingsOrchestrationApi({ ok: false, error: "reviewer-rewire-failed" });
     const onSaved = vi.fn();
     const { result } = renderHook(() => useSettingsOrchestration(api, onSaved));
 
     await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
-    act(() => {
-      result.current.setKeyInput("sk-new-key");
-    });
-    await waitFor(() => expect(result.current.keyInput).toBe("sk-new-key"));
 
     let saved = true;
     await act(async () => {
-      saved = await result.current.save("llm");
+      saved = await result.current.saveProviderCredential({
+        credentialProviderId: "openai-compatible",
+        vendorId: "openai-compatible",
+        apiKey: "sk-new-key",
+        vendorBlock: { baseUrl: "https://gateway.example/v1" },
+      });
     });
 
     expect(saved).toBe(false);
     expect(api.updateSettings).toHaveBeenCalled();
+    // A key must never land beside an endpoint the store refused.
     expect(api.setApiKey).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
     expect(result.current.lastSaveError).toMatchObject({
       tab: "llm",
       message: expect.stringContaining("권한 검토 모델"),
     });
+  });
+
+  it("writes a card's own block and secret without touching the active provider", async () => {
+    const { api } = makeMockLvisApi({ settings: makeSettings(), hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+      setApiKey: vi.fn(async () => ({ ok: true })),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.vendor).toBe("openai");
+
+    await act(async () => {
+      await result.current.saveProviderCredential({
+        credentialProviderId: "claude",
+        vendorId: "claude",
+        apiKey: "sk-ant-1",
+      });
+    });
+
+    expect(api.setApiKey).toHaveBeenCalledWith("claude", "sk-ant-1");
+    // No settings write at all: a fixed-endpoint vendor owns no field here,
+    // and `llm.provider` is not this call's to move.
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(result.current.vendor).toBe("openai");
   });
 
   it("persists custom marketplace provider presets through openai-compatible with a preset-scoped key", async () => {
@@ -152,12 +183,16 @@ describe("useSettingsOrchestration", () => {
 
     act(() => {
       result.current.selectMarketplaceProviderPreset(futureRouter);
-      result.current.setKeyInput("fr-secret");
     });
     await waitFor(() => expect(result.current.vendor).toBe("openai-compatible"));
 
     let saved = false;
     await act(async () => {
+      saved = await result.current.saveProviderCredential({
+        credentialProviderId: marketplaceProviderPresetSecretId("future-router"),
+        vendorId: "openai-compatible",
+        apiKey: "fr-secret",
+      });
       saved = await result.current.save("llm");
     });
 

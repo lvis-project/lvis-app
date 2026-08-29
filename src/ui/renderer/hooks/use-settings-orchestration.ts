@@ -12,7 +12,11 @@ import {
 } from "../types.js";
 import { ALL_VENDORS, getVendorOption, type VendorOption } from "../constants.js";
 import { formatIpcError } from "../format-ipc-error.js";
-import type { FallbackEntry } from "../tabs/LlmTab.js";
+import type {
+  FallbackEntry,
+  ProviderCredentialDraft,
+  ProviderCredentialSave,
+} from "../tabs/LlmTab.js";
 import { t } from "../../../i18n/runtime.js";
 import {
   DEFAULT_LLM_VENDOR,
@@ -26,12 +30,14 @@ import {
 
 export interface SettingsOrchestrationState {
   // LLM
+  /** The provider chat runs on — `llm.provider`. Moved only by an explicit pick. */
   vendor: string;
-  setVendor: (v: string) => void;
-  keyInput: string;
-  setKeyInput: (v: string) => void;
+  providerCredentialDraft: ProviderCredentialDraft | null;
+  setProviderCredentialDraft: (next: ProviderCredentialDraft | null) => void;
+  saveProviderCredential: (input: ProviderCredentialSave) => Promise<boolean>;
   model: string;
   setModel: (v: string) => void;
+  /** Whether the ACTIVE provider has a stored key. Per-row facts are the tab's. */
   hasKey: boolean;
   setHasKey: (v: boolean) => void;
   autoCompact: boolean;
@@ -40,12 +46,8 @@ export interface SettingsOrchestrationState {
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
   setThinkingBudget: (v: number) => void;
+  /** The ACTIVE provider's endpoint. A card's endpoint field edits the draft. */
   baseUrl: string;
-  setBaseUrl: (v: string) => void;
-  vertexProject: string;
-  setVertexProject: (v: string) => void;
-  vertexLocation: string;
-  setVertexLocation: (v: string) => void;
   // Cross-vendor LLM controls (UI moved out of "Advanced")
   streamSmoothing: "none" | "word" | "char";
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
@@ -129,7 +131,8 @@ export function useSettingsOrchestration(
   // the correct persisted value. The `settingsLoaded` guard prevents any
   // save from firing before hydration completes.
   const [vendor, setVendor] = useState("");
-  const [keyInput, setKeyInput] = useState("");
+  const [providerCredentialDraft, setProviderCredentialDraft] =
+    useState<ProviderCredentialDraft | null>(null);
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [autoCompact, setAutoCompact] = useState(true);
@@ -318,7 +321,6 @@ export function useSettingsOrchestration(
     setVertexLocation(block.vertexLocation ?? "");
     setEnableThinking(block.enableThinking);
     setThinkingBudget(block.thinkingBudgetTokens);
-    setKeyInput("");
     setModel(modelId);
     void api.hasApiKey(vendorId).then((k) => setHasKey(k)).catch(() => setHasKey(false));
   }, [api, settingsSnapshot]);
@@ -337,7 +339,6 @@ export function useSettingsOrchestration(
     setVertexLocation("");
     setEnableThinking(openaiCompatibleDefaults.enableThinking);
     setThinkingBudget(openaiCompatibleDefaults.thinkingBudgetTokens);
-    setKeyInput("");
     void api
       .hasApiKey(marketplaceProviderPresetSecretId(preset.providerId))
       .then((k) => setHasKey(k))
@@ -351,7 +352,6 @@ export function useSettingsOrchestration(
       ? getLlmVendorSettings(undefined, "openai-compatible")
       : getLlmVendorSettings(settingsSnapshot?.llm.vendors, "openai-compatible");
     hydrateVendorBlock(genericBlock);
-    setKeyInput("");
     void api.hasApiKey("openai-compatible")
       .then((k) => setHasKey(k))
       .catch(() => setHasKey(false));
@@ -379,15 +379,12 @@ export function useSettingsOrchestration(
       pendingSavePayload.current = { tab };
       return false;
     }
-    const isLlmSave = tab === "llm";
     savingRef.current = true;
     setSaving(true);
     let ok = false;
     try {
       if (tab !== "permissions") {
         const secretUpdates: Array<Promise<unknown>> = [];
-        const trimmedKeyInput = keyInput.trim();
-        const shouldPersistLlmKey = isLlmSave && trimmedKeyInput.length > 0;
         if (webKeyInput.trim()) {
           secretUpdates.push(
             api.setWebApiKey(webProvider, webKeyInput.trim()).then(() => {
@@ -441,11 +438,6 @@ export function useSettingsOrchestration(
         if (isIpcErrorResult(updateResult)) {
           throw new Error(formatIpcError(updateResult.error, updateResult.message));
         }
-        if (shouldPersistLlmKey) {
-          await api.setApiKey(activeCredentialProviderId, trimmedKeyInput);
-          setKeyInput("");
-          setHasKey(true);
-        }
       }
       if (tab !== "permissions") onSaved();
       setLastSaveError(null);
@@ -477,6 +469,64 @@ export function useSettingsOrchestration(
   useEffect(() => {
     saveRef.current = save;
   });
+
+  /**
+   * Commit ONE provider card: its own vendor block, its own secret.
+   *
+   * Deliberately not part of `save("llm")`. That call writes `llm.provider`,
+   * so routing a card's Save through it made storing a key for one provider
+   * also switch chat to it. Which provider chat runs on is a separate decision
+   * with its own control, and this call must never take it.
+   *
+   * The block is written BEFORE the secret, and a rejected write aborts: a key
+   * that lands beside an endpoint the store refused would be a credential
+   * pointing at an address nobody saved.
+   */
+  const saveProviderCredential = useCallback(async (
+    input: ProviderCredentialSave,
+  ): Promise<boolean> => {
+    if (!settingsLoaded || savingRef.current) return false;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      if (input.vendorBlock) {
+        const updateResult = await api.updateSettings({
+          llm: { vendors: { [input.vendorId]: input.vendorBlock } },
+        });
+        if (isIpcErrorResult(updateResult)) {
+          throw new Error(formatIpcError(updateResult.error, updateResult.message));
+        }
+        // The active provider's mirrored fields feed the model-list handshake,
+        // so editing that provider's own card has to move them here too.
+        if (input.vendorId === vendor) {
+          if (input.vendorBlock.baseUrl !== undefined) setBaseUrl(input.vendorBlock.baseUrl);
+          if (input.vendorBlock.vertexProject !== undefined) {
+            setVertexProject(input.vendorBlock.vertexProject);
+          }
+          if (input.vendorBlock.vertexLocation !== undefined) {
+            setVertexLocation(input.vendorBlock.vertexLocation);
+          }
+        }
+      }
+      const trimmedKey = input.apiKey.trim();
+      if (trimmedKey) {
+        await api.setApiKey(input.credentialProviderId, trimmedKey);
+        if (input.credentialProviderId === activeCredentialProviderId) setHasKey(true);
+      }
+      onSaved();
+      setLastSaveError(null);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error && err.message
+        ? err.message
+        : t("useSettingsOrchestration.saveFailed");
+      setLastSaveError({ tab: "llm", message });
+      return false;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [api, activeCredentialProviderId, onSaved, settingsLoaded, vendor]);
 
   const setIdlePreferenceRefreshLive = useCallback((next: boolean) => {
     const previous = idlePreferenceRefresh;
@@ -565,17 +615,16 @@ export function useSettingsOrchestration(
     lastSaveError,
     clearLastSaveError,
     hydrateLlmFromSettings,
-    vendor, setVendor,
+    vendor,
+    providerCredentialDraft, setProviderCredentialDraft,
+    saveProviderCredential,
     selectApiVendorModel,
-    keyInput, setKeyInput,
     model, setModel,
     hasKey, setHasKey,
     autoCompact, setAutoCompact,
     enableThinking, setEnableThinking,
     thinkingBudget, setThinkingBudget,
-    baseUrl, setBaseUrl,
-    vertexProject, setVertexProject,
-    vertexLocation, setVertexLocation,
+    baseUrl,
     streamSmoothing, setStreamSmoothing,
     fallbackChain, setFallbackChain,
     fallbackOpen, setFallbackOpen,

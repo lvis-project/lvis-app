@@ -77,6 +77,51 @@ export interface FallbackEntry {
   model: string;
 }
 
+/**
+ * The provider card whose credential form is open, and what has been typed
+ * into it.
+ *
+ * Kept apart from the active provider on purpose: `LlmTabProps.vendor` is what
+ * chat runs on, and opening a card must not move it. The draft therefore
+ * carries its OWN vendor / preset — the row it belongs to — so the fields edit
+ * that row's `llm.vendors` block and that row's secret whatever chat is using.
+ *
+ * It is held by the settings orchestration rather than by this tab because the
+ * settings tabs unmount when the user leaves them, and a half-typed key has to
+ * survive that.
+ */
+export interface ProviderCredentialDraft {
+  /** The provider card this draft belongs to. */
+  readonly rowId: string;
+  /** The `llm.vendors` block the fields edit. */
+  readonly vendorId: string;
+  /** The marketplace preset the row is reached through, or "". */
+  readonly presetId: string;
+  readonly keyInput: string;
+  readonly baseUrl: string;
+  readonly vertexProject: string;
+  readonly vertexLocation: string;
+}
+
+/** What one provider card commits — its own block and its own secret, no more. */
+export interface ProviderCredentialSave {
+  /** The id the secret is stored under: a preset's scoped id, or the vendor. */
+  credentialProviderId: string;
+  vendorId: string;
+  /** Empty leaves the stored key alone. */
+  apiKey: string;
+  /**
+   * Omitted where the row owns no persisted field — a vendor whose endpoint is
+   * fixed, or a preset that carries its own. Writing a block for those would
+   * overwrite an endpoint that belongs to another row.
+   */
+  vendorBlock?: {
+    baseUrl?: string | undefined;
+    vertexProject?: string | undefined;
+    vertexLocation?: string | undefined;
+  };
+}
+
 
 
 
@@ -262,18 +307,22 @@ function ProviderSelect({
 
 export interface LlmTabProps {
   api: LvisApi;
+  /**
+   * The provider chat runs on. Read-only here: a card is opened by this tab,
+   * but WHICH provider serves chat moves only through the explicit switch,
+   * `selectApiVendorModel`, or a subscription runtime's own action.
+   */
   vendor: string;
-  setVendor: (v: string) => void;
+  /** The active provider's endpoint — what its model-list handshake reaches. */
   baseUrl: string;
-  setBaseUrl: (v: string) => void;
-  vertexProject: string;
-  setVertexProject: (v: string) => void;
-  vertexLocation: string;
-  setVertexLocation: (v: string) => void;
+  /** Whether the ACTIVE provider has a stored key. Rows read their own. */
   hasKey: boolean;
   setHasKey: (v: boolean) => void;
-  keyInput: string;
-  setKeyInput: (v: string) => void;
+  /** The card being edited, and what has been typed into it. */
+  providerCredentialDraft?: ProviderCredentialDraft | null;
+  onProviderCredentialDraftChange?: (next: ProviderCredentialDraft | null) => void;
+  /** Commits one card: that row's vendor block and that row's secret only. */
+  onSaveProviderCredential?: (input: ProviderCredentialSave) => Promise<boolean>;
   marketplaceProviderPresetId?: string;
   marketplaceProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
   onSelectMarketplaceProviderPreset?: (preset: MarketplaceInstalledProviderPreset) => void;
@@ -910,17 +959,12 @@ export function LlmTab(props: LlmTabProps) {
   const {
     api,
     vendor,
-    setVendor,
     baseUrl,
-    setBaseUrl,
-    vertexProject,
-    setVertexProject,
-    vertexLocation,
-    setVertexLocation,
     hasKey,
     setHasKey,
-    keyInput,
-    setKeyInput,
+    providerCredentialDraft = null,
+    onProviderCredentialDraftChange,
+    onSaveProviderCredential,
     marketplaceProviderPresetId = "",
     marketplaceProviderPresets = [],
     onSelectMarketplaceProviderPreset,
@@ -951,18 +995,7 @@ export function LlmTab(props: LlmTabProps) {
     ? providerOptionFromPreset(selectedMarketplaceProviderPreset)
     : undefined;
   const vendorInfo = selectedMarketplaceProviderOption ?? getVendorInfo(vendor);
-  const activeCredentialProviderId = selectedMarketplaceProviderPreset
-    ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
-    : vendor;
   const activeModelListCredentialScope = selectedMarketplaceProviderPreset?.providerId ?? "";
-  const endpointLockedToMarketplacePreset = Boolean(selectedMarketplaceProviderPreset);
-  // (B) Pre-hydration the parent initializes `vendor` to "" so the dropdown
-  // never flashes the wrong vendor. `getVendorInfo("")` still falls back to
-  // VENDORS[0], so reading `vendorInfo.label` directly would leak that stale
-  // first-vendor name into the API-key heading before settings load. Render
-  // the label only once a real vendor is hydrated; until then show nothing.
-  const vendorLabelReady = vendor !== "" && settingsLoaded;
-  const vendorLabel = vendorLabelReady ? vendorInfo.label : "";
   const hasOnSave = typeof onSave === "function";
   const trimmedModel = model.trim();
   const activeModelValue = trimmedModel && !isRetiredLlmModel(trimmedModel)
@@ -972,7 +1005,12 @@ export function LlmTab(props: LlmTabProps) {
   /** What is actually stored for each vendor, mirrored so the typed fields can
    *  say whether they still hold something uncommitted. */
   const [savedVendorBlocks, setSavedVendorBlocks] = useState<
-    Readonly<Record<string, { baseUrl?: string; vertexProject?: string; vertexLocation?: string }>>
+    Readonly<Record<string, {
+      model?: string;
+      baseUrl?: string;
+      vertexProject?: string;
+      vertexLocation?: string;
+    }>>
   >({});
   /**
    * Which providers actually have a key in the store.
@@ -1293,6 +1331,8 @@ export function LlmTab(props: LlmTabProps) {
   const [addedRowIds, setAddedRowIds] = useState<readonly string[]>([]);
   /** The row a click just revealed, until it has been scrolled to and focused. */
   const [rowToReveal, setRowToReveal] = useState<string | null>(null);
+  /** The row the add menu revealed, until the menu has let go of the caret. */
+  const menuRevealedRowRef = useRef<string | null>(null);
   const connectionsRef = useRef<HTMLDivElement | null>(null);
   // A vendor with no usable credential has not answered the checklist yet.
   const apiPathConfigured = hasKey || !activeProviderRequiresApiKey;
@@ -1419,28 +1459,6 @@ export function LlmTab(props: LlmTabProps) {
     ]),
     [marketplaceProviderIds, marketplaceProviderPresets],
   );
-  const handleVendorChange = useCallback(
-    (v: string) => {
-      const preset = marketplaceProviderPresets.find(
-        (entry) => marketplaceProviderPresetSecretId(entry.providerId) === v,
-      );
-      if (preset) {
-        onSelectMarketplaceProviderPreset?.(preset);
-        onImmediateChange?.();
-        return;
-      }
-      onClearMarketplaceProviderPreset?.();
-      setVendor(v);
-      onImmediateChange?.();
-    },
-    [
-      marketplaceProviderPresets,
-      onClearMarketplaceProviderPreset,
-      onImmediateChange,
-      onSelectMarketplaceProviderPreset,
-      setVendor,
-    ],
-  );
   // ─── Connections ────────────────────────────────────────────────────────
   // ONE list. A provider a user recognises as one company is one row, whether
   // it is reached with an API key, by signing in to its subscription runtime,
@@ -1521,43 +1539,54 @@ export function LlmTab(props: LlmTabProps) {
     [configuredApiRoutes],
   );
 
+  /** The provider option a draft's fields describe — preset first, else vendor. */
+  const draftProviderOption = useMemo<ProviderOption | VendorOption | null>(() => {
+    if (!providerCredentialDraft) return null;
+    const preset = providerCredentialDraft.presetId
+      ? installedPresetById.get(providerCredentialDraft.presetId)
+      : undefined;
+    return preset
+      ? providerOptionFromPreset(preset)
+      : getVendorInfo(providerCredentialDraft.vendorId);
+  }, [installedPresetById, providerCredentialDraft]);
+
   /**
-   * Whether the typed fields still hold something the store has not been told.
+   * Whether the open card still holds something the store has not been told.
    *
-   * Compared against the mirrored settings rather than a snapshot taken when
-   * the card opened: a save clears `keyInput` and rewrites the block, and the
-   * broadcast that follows is what makes this go quiet again.
+   * Read off the DRAFT's own vendor, not the active one: the card being edited
+   * and the provider chat runs on are different questions, and comparing one
+   * row's typed endpoint against another row's saved block reported both a
+   * dirty card that was clean and a clean card that was dirty.
    */
   const credentialDirty = useMemo(() => {
-    if (keyInput.trim()) return true;
-    const saved = savedVendorBlocks[vendor];
-    if (endpointIsUserSupplied(vendor, vendorInfo, endpointLockedToMarketplacePreset)
-      && baseUrl.trim() !== (saved?.baseUrl ?? "").trim()) {
-      return true;
+    const draft = providerCredentialDraft;
+    if (!draft || !draftProviderOption) return false;
+    if (draft.keyInput.trim()) return true;
+    const saved = savedVendorBlocks[draft.vendorId];
+    if (draft.vendorId === "vertex-ai") {
+      return draft.vertexProject.trim() !== (saved?.vertexProject ?? "").trim()
+        || draft.vertexLocation.trim() !== (saved?.vertexLocation ?? "").trim();
     }
-    if (vendor !== "vertex-ai") return false;
-    return vertexProject.trim() !== (saved?.vertexProject ?? "").trim()
-      || vertexLocation.trim() !== (saved?.vertexLocation ?? "").trim();
-  }, [
-    keyInput, savedVendorBlocks, vendor, vendorInfo, endpointLockedToMarketplacePreset,
-    baseUrl, vertexProject, vertexLocation,
-  ]);
+    return endpointIsUserSupplied(draft.vendorId, draftProviderOption, Boolean(draft.presetId))
+      && draft.baseUrl.trim() !== (saved?.baseUrl ?? "").trim();
+  }, [draftProviderOption, providerCredentialDraft, savedVendorBlocks]);
 
-  /** The row the credential form currently belongs to. */
-  const activeFormRowId = marketplaceProviderPresetId
+  /** The row the ACTIVE API provider is drawn on. */
+  const activeApiRowId = marketplaceProviderPresetId
     ? marketplaceProviderPresetSecretId(marketplaceProviderPresetId)
     : vendor;
 
   // Rows that must stay on screen although nothing is connected on them yet:
-  // the ones the user added, plus whichever provider holds uncommitted input.
+  // the ones the user added, plus whichever card holds uncommitted input.
   // That draft lives in the parent and outlives this component, so the row that
   // owns it is DERIVED from the draft — otherwise a tab switch takes the card
   // away while the half-typed key it belongs to is still there.
+  const draftRowId = credentialDirty ? providerCredentialDraft?.rowId ?? null : null;
   const pinnedRowIds = useMemo<readonly string[]>(
-    () => (credentialDirty && activeFormRowId && !addedRowIds.includes(activeFormRowId)
-      ? [...addedRowIds, activeFormRowId]
+    () => (draftRowId && !addedRowIds.includes(draftRowId)
+      ? [...addedRowIds, draftRowId]
       : addedRowIds),
-    [addedRowIds, credentialDirty, activeFormRowId],
+    [addedRowIds, draftRowId],
   );
 
   // A provider we hold a key for gets a row, and a row has to be able to say
@@ -1568,7 +1597,7 @@ export function LlmTab(props: LlmTabProps) {
   useEffect(() => {
     if (!settingsLoaded) return;
     for (const providerId of credentialedProviderIds) {
-      if (providerId === activeFormRowId) continue;
+      if (providerId === activeApiRowId) continue;
       const presetId = marketplaceProviderPresetIdFromSecretId(providerId);
       const preset = presetId ? installedPresetById.get(presetId) : undefined;
       if (presetId && !preset) continue;
@@ -1580,7 +1609,7 @@ export function LlmTab(props: LlmTabProps) {
       });
     }
   }, [
-    activeFormRowId, credentialedProviderIds, installedPresetById,
+    activeApiRowId, credentialedProviderIds, installedPresetById,
     requestModelList, settingsLoaded,
   ]);
 
@@ -1693,8 +1722,15 @@ export function LlmTab(props: LlmTabProps) {
     [providerSelectOptions, configuredRowIds, connections, pinnedRowIds],
   );
 
-  /** Whether the credential form currently belongs to this row. */
-  const formTargetsRow = useCallback(
+  /**
+   * Whether this row is the API provider chat is running on.
+   *
+   * This is the row's own question about the ACTIVE provider, and it is no
+   * longer the same question as "is this row's form open" — opening a card used
+   * to move the active provider, so one predicate answered both and every
+   * opened card claimed to be live.
+   */
+  const rowIsActiveApiProvider = useCallback(
     (row: ProviderConnection): boolean =>
       Boolean(row.apiVendorId)
       && row.apiVendorId === vendor
@@ -1702,32 +1738,69 @@ export function LlmTab(props: LlmTabProps) {
     [vendor, marketplaceProviderPresetId],
   );
 
-  /** What `handleVendorChange` has to be handed to point the form at this row. */
-  const rowConfigTargetId = (row: ProviderConnection): string =>
+  /** The id this row's secret is stored under. */
+  const rowCredentialId = (row: ProviderConnection): string =>
     row.presetId ? marketplaceProviderPresetSecretId(row.presetId) : row.apiVendorId!;
+
+  /** Whether this row needs a stored key before it could answer a chat turn. */
+  const rowRequiresApiKey = useCallback((row: ProviderConnection): boolean => {
+    const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
+    if (preset) return preset.requiresApiKey !== false;
+    const vendorId = row.apiVendorId ?? "";
+    return !(isLLMVendor(vendorId) && canUseLlmVendorWithoutApiKey(vendorId, {
+      baseUrl: savedVendorBlocks[vendorId]?.baseUrl ?? "",
+    }));
+  }, [installedPresetById, savedVendorBlocks]);
 
   const revealRow = useCallback((rowId: string) => {
     setAddedRowIds((current) => current.includes(rowId) ? current : [...current, rowId]);
+    menuRevealedRowRef.current = rowId;
     setRowToReveal(rowId);
   }, []);
 
-  const openApiConfig = useCallback((rowId: string, vendorId: string) => {
-    if (vendorId !== vendor) handleVendorChange(vendorId);
-    setOpenRowId(rowId);
-  }, [handleVendorChange, vendor]);
-
   /**
-   * Whether this row is showing its credential form.
+   * Show one card's credential form.
    *
-   * Both halves are required. `openRowId` is the row the user asked for;
-   * `formTargetsRow` is whether the fields BELOW — the key, the base URL, the
-   * saved-block comparison — have actually caught up to it. While the vendor is
-   * still moving, no row claims the form, which is the honest state: it belongs
-   * to a provider that is not on screen yet.
+   * Opening is not choosing: this touches no setting. It names the row and
+   * starts a draft seeded from what that row already has stored, so the fields
+   * below describe the card the user clicked whatever chat is running on.
    */
+  const openRowCredentialForm = useCallback((target: {
+    rowId: string;
+    vendorId: string;
+    presetId: string;
+  }) => {
+    setOpenRowId(target.rowId);
+    if (providerCredentialDraft?.rowId === target.rowId) return;
+    const preset = target.presetId ? installedPresetById.get(target.presetId) : undefined;
+    const saved = savedVendorBlocks[target.vendorId];
+    onProviderCredentialDraftChange?.({
+      rowId: target.rowId,
+      vendorId: target.vendorId,
+      presetId: target.presetId,
+      keyInput: "",
+      // A preset ships the one address it serves from; every other row's
+      // endpoint is whatever that vendor has stored.
+      baseUrl: preset ? preset.baseUrl : saved?.baseUrl ?? "",
+      vertexProject: saved?.vertexProject ?? "",
+      vertexLocation: saved?.vertexLocation ?? "",
+    });
+  }, [
+    installedPresetById, onProviderCredentialDraftChange, providerCredentialDraft,
+    savedVendorBlocks,
+  ]);
+
+  /** What `openRowCredentialForm` has to be handed to open this row. */
+  const rowFormTarget = (row: ProviderConnection) => ({
+    rowId: row.id,
+    vendorId: row.apiVendorId!,
+    presetId: row.presetId ?? "",
+  });
+
+  /** Whether this row is showing its credential form. */
   const rowFormOpen = useCallback(
-    (row: ProviderConnection): boolean => openRowId === row.id && formTargetsRow(row),
-    [openRowId, formTargetsRow],
+    (row: ProviderConnection): boolean => openRowId === row.id,
+    [openRowId],
   );
 
   /** Which row is actually showing a form right now — the signal the reveal
@@ -1743,11 +1816,11 @@ export function LlmTab(props: LlmTabProps) {
       `[data-provider-row="${rowToReveal}"]`,
     );
     if (!node) return;
-    // The row appears before its form does: opening one moves the vendor
-    // through the parent, and the fields arrive a render later. Consuming the
-    // reveal on the bare row would put the caret on the disclosure button and
-    // leave nothing to move when the endpoint field finally lands, so wait for
-    // the form the reveal was actually asking for.
+    // A row added from the menu can be on screen a render before its form is —
+    // the draft it needs is the parent's to hold. Consuming the reveal on the
+    // bare row would put the caret on the disclosure button and leave nothing
+    // to move when the endpoint field finally lands, so wait for the form the
+    // reveal was actually asking for.
     const form = node.querySelector<HTMLElement>(`#${CREDENTIAL_FORM_ID}`);
     if (openRowId === rowToReveal && !form) return;
     setRowToReveal(null);
@@ -1759,38 +1832,80 @@ export function LlmTab(props: LlmTabProps) {
   }, [openFormRowId, openRowId, rowToReveal, visibleRowKey]);
 
   /**
-   * The credential form for one provider row. One form, because one provider is
-   * edited at a time — but WHICH one is the row's to say.
+   * Persist ONE card. Only what this row owns is written: its secret, and the
+   * fields the row itself is asked for. A vendor whose endpoint is fixed and a
+   * preset that ships its own both write no block at all — sending one would
+   * overwrite an address that belongs to the generic provider's card.
+   */
+  const saveRowCredential = async (row: ProviderConnection) => {
+    const draft = providerCredentialDraft;
+    if (!draft || draft.rowId !== row.id || !onSaveProviderCredential) return;
+    const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
+    const rowInfo = preset ? providerOptionFromPreset(preset) : getVendorInfo(draft.vendorId);
+    const vendorBlock = draft.vendorId === "vertex-ai"
+      ? {
+        vertexProject: draft.vertexProject.trim() || undefined,
+        vertexLocation: draft.vertexLocation.trim() || undefined,
+      }
+      : endpointIsUserSupplied(draft.vendorId, rowInfo, Boolean(row.presetId))
+        ? { baseUrl: draft.baseUrl.trim() || undefined }
+        : undefined;
+    const saved = await onSaveProviderCredential({
+      credentialProviderId: rowCredentialId(row),
+      vendorId: draft.vendorId,
+      apiKey: draft.keyInput,
+      ...(vendorBlock ? { vendorBlock } : {}),
+    });
+    if (!saved) return;
+    // Storing a key is not a settings write on every path, so re-ask the
+    // credential store directly rather than waiting on a broadcast that a
+    // secret-only save never sends.
+    setSettingsRevision((current) => current + 1);
+    // The card stays open on what it just committed, minus the key it no
+    // longer holds. Dropping the draft here would collapse the form under a
+    // header still drawn as expanded.
+    onProviderCredentialDraftChange?.({ ...draft, keyInput: "" });
+  };
+
+  /**
+   * The credential form for one provider row.
    *
-   * Whether the endpoint is locked is read off `row.presetId`, not off the
-   * ambient preset id: a generic provider row has no preset, so it can never be
-   * locked by a preset selection that belongs to some other row.
+   * Every field here is the ROW's: its stored endpoint, its secret, its
+   * "requires a key" answer. Nothing is read off the active provider, so the
+   * form for one card is the same form whichever provider chat is running on.
    */
   const credentialFormFor = (row: ProviderConnection) => {
+    const draft = providerCredentialDraft;
+    if (!draft || draft.rowId !== row.id) return null;
     const rowPreset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
-    const rowInfo = rowPreset ? providerOptionFromPreset(rowPreset) : getVendorInfo(vendor);
+    const rowVendorId = draft.vendorId;
+    const rowInfo = rowPreset ? providerOptionFromPreset(rowPreset) : getVendorInfo(rowVendorId);
     const rowEndpointLocked = Boolean(row.presetId);
+    const rowHasKey = credentialedProviderIds.has(rowCredentialId(row));
+    const rowNeedsApiKey = rowRequiresApiKey(row);
+    const patchDraft = (next: Partial<ProviderCredentialDraft>) =>
+      onProviderCredentialDraftChange?.({ ...draft, ...next });
     return (
       <div
         className="space-y-3"
         id={CREDENTIAL_FORM_ID}
         data-testid="llm-tab:manual-section"
       >
-        {vendor !== "vertex-ai" && endpointIsUserSupplied(vendor, rowInfo, rowEndpointLocked) && (
+        {rowVendorId !== "vertex-ai" && endpointIsUserSupplied(rowVendorId, rowInfo, rowEndpointLocked) && (
           <div className="space-y-2">
             <Label className="text-sm font-medium">
               {t("llmTab.endpointBaseUrlLabel")} *
             </Label>
             <Input
               data-testid="llm-base-url-input"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
+              value={draft.baseUrl}
+              onChange={(e) => patchDraft({ baseUrl: e.target.value })}
               placeholder={rowInfo.baseUrlPlaceholder ?? "https://..."}
             />
             <p className="text-[11px] text-muted-foreground">
               {t("llmTab.baseUrlDiscardWarning")}
             </p>
-            {vendor === "azure-foundry" && (
+            {rowVendorId === "azure-foundry" && (
               <p className="text-[11px] text-muted-foreground">
                 {t("llmTab.azureEndpointFormat")}
                 {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
@@ -1799,7 +1914,7 @@ export function LlmTab(props: LlmTabProps) {
             )}
           </div>
         )}
-        {vendor === "vertex-ai" && (
+        {rowVendorId === "vertex-ai" && (
           <div className="space-y-2 rounded-md border p-3">
             <p className="text-sm font-medium">{t("llmTab.vertexTitle")}</p>
             <p className="text-[11px] text-muted-foreground">
@@ -1809,8 +1924,8 @@ export function LlmTab(props: LlmTabProps) {
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">{t("llmTab.gcpProjectIdLabel")}</Label>
               <Input
-                value={vertexProject}
-                onChange={(e) => setVertexProject(e.target.value)}
+                value={draft.vertexProject}
+                onChange={(e) => patchDraft({ vertexProject: e.target.value })}
                 placeholder="my-gcp-project"
               />
             </div>
@@ -1819,37 +1934,41 @@ export function LlmTab(props: LlmTabProps) {
                 {t("llmTab.vertexLocationLabel", { optional: t("llmTab.optional") })}
               </Label>
               <Input
-                value={vertexLocation}
-                onChange={(e) => setVertexLocation(e.target.value)}
+                value={draft.vertexLocation}
+                onChange={(e) => patchDraft({ vertexLocation: e.target.value })}
                 placeholder={t("llmTab.vertexLocationPlaceholder")}
               />
             </div>
           </div>
         )}
-        {vendor !== "vertex-ai" && (
+        {rowVendorId !== "vertex-ai" && (
           <div
             className="min-w-0 space-y-2"
             data-testid="llm-tab:api-key-section"
-            data-api-key-required={activeProviderRequiresApiKey ? "true" : "false"}
+            data-api-key-required={rowNeedsApiKey ? "true" : "false"}
           >
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <Label className="min-w-0 text-sm font-medium" data-testid="llm-tab:api-key-label">
-              {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
-              {!activeProviderRequiresApiKey ? ` (${t("llmTab.optional")})` : ""}
+              {row.label} {t("llmTab.apiKey")}
+              {!rowNeedsApiKey ? ` (${t("llmTab.optional")})` : ""}
             </Label>
-              {hasKey ? (
+              {rowHasKey ? (
                 <Badge variant="default" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">{t("llmTab.apiKeySet")}</Badge>
               ) : (
                 <Badge variant="secondary" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
-                  {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
+                  {rowNeedsApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
                 </Badge>
               )}
-              {hasKey && (
+              {rowHasKey && (
                 <Button
                   size="sm"
                   variant="ghost"
                   className="h-7 text-xs text-destructive"
-                  onClick={() => void api.deleteApiKey(activeCredentialProviderId).then(() => { setHasKey(false); onSaved(); })}
+                  onClick={() => void api.deleteApiKey(rowCredentialId(row)).then(() => {
+                    if (rowIsActiveApiProvider(row)) setHasKey(false);
+                    setSettingsRevision((current) => current + 1);
+                    onSaved();
+                  })}
                 >
                   {t("llmTab.delete")}
                 </Button>
@@ -1858,9 +1977,9 @@ export function LlmTab(props: LlmTabProps) {
             <Input
               data-testid="llm-api-key-input"
               type="password"
-              placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder}
-              value={keyInput}
-              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder={rowHasKey ? t("llmTab.replaceKey") : rowInfo.placeholder}
+              value={draft.keyInput}
+              onChange={(e) => patchDraft({ keyInput: e.target.value })}
             />
           </div>
         )}
@@ -1868,9 +1987,9 @@ export function LlmTab(props: LlmTabProps) {
             button sat below every provider and the "add provider" control, so
             the one thing a half-filled new card needed was the one control
             furthest from it — and it read as committing the whole page. */}
-        {hasOnSave && (
+        {onSaveProviderCredential && (
           <SectionSaveBar
-            onSave={onSave!}
+            onSave={() => void saveRowCredential(row)}
             saving={saving}
             settingsLoaded={settingsLoaded}
             dirty={credentialDirty}
@@ -1887,7 +2006,61 @@ export function LlmTab(props: LlmTabProps) {
   const activeMode = (row: ProviderConnection): "subscription" | "api" | null =>
     subscription.activeRuntime.kind === "subscription"
       ? (subscription.activeRuntime.provider === row.id ? "subscription" : null)
-      : (formTargetsRow(row) ? "api" : null);
+      : (rowIsActiveApiProvider(row) ? "api" : null);
+
+  /**
+   * Move chat onto this row's API route.
+   *
+   * The one place the API-side active provider changes from this list, and it
+   * persists at once the way a model pick does. Opening a card deliberately
+   * does none of this.
+   */
+  const activateApiProvider = (row: ProviderConnection) => {
+    const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
+    if (preset) {
+      onSelectMarketplaceProviderPreset?.(preset);
+    } else if (row.apiVendorId === "openai-compatible" && marketplaceProviderPresetId) {
+      // The generic custom provider IS this vendor without a preset, so
+      // dropping the preset is the whole move.
+      onClearMarketplaceProviderPreset?.();
+    } else {
+      const vendorId = row.apiVendorId!;
+      selectApiVendorModel(
+        vendorId,
+        savedVendorBlocks[vendorId]?.model ?? getVendorInfo(vendorId).defaultModel,
+      );
+    }
+    onImmediateChange?.();
+    if (subscription.activeRuntime.kind !== "api") {
+      void subscription.props.actions.useApiForChat?.();
+    }
+  };
+
+  /**
+   * The explicit switch, on the card it names.
+   *
+   * A provider that cannot answer a turn must not be choosable: a vendor that
+   * needs a key and has none would take chat somewhere that can only fail, and
+   * the failure would surface a whole turn later than the click.
+   */
+  const useProviderAction = (row: ProviderConnection) => {
+    if (!row.apiVendorId) return null;
+    const isActive = activeMode(row) === "api";
+    const usable = !rowRequiresApiKey(row) || credentialedProviderIds.has(rowCredentialId(row));
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant={isActive ? "secondary" : "outline"}
+        disabled={isActive || !usable || !settingsLoaded}
+        {...(usable ? {} : { title: t("llmTab.useProviderNeedsCredential") })}
+        onClick={() => activateApiProvider(row)}
+        data-testid={`llm-tab:connection-use:${row.id}`}
+      >
+        {isActive ? t("llmTab.useProviderActive") : t("llmTab.useProvider")}
+      </Button>
+    );
+  };
 
   const modeBadge = (row: ProviderConnection) => {
     const active = activeMode(row);
@@ -1976,7 +2149,7 @@ export function LlmTab(props: LlmTabProps) {
             setOpenRowId(null);
             return;
           }
-          openApiConfig(row.id, rowConfigTargetId(row));
+          openRowCredentialForm(rowFormTarget(row));
           // Revealing a form and leaving the caret outside it makes the button
           // look like it did nothing; the reveal effect moves focus in.
           setRowToReveal(row.id);
@@ -1997,7 +2170,7 @@ export function LlmTab(props: LlmTabProps) {
    * brings Save back.
    */
   const unsavedBadge = (row: ProviderConnection) => {
-    if (!credentialDirty || !formTargetsRow(row)) return null;
+    if (!credentialDirty || providerCredentialDraft?.rowId !== row.id) return null;
     if (rowFormOpen(row)) return null;
     return (
       <Badge
@@ -2039,7 +2212,7 @@ export function LlmTab(props: LlmTabProps) {
           actions={subscription.props.actions}
           leading={<>{statusChip(row)}{modeBadge(row)}{unsavedBadge(row)}</>}
           subline={connectionSubline(row)}
-          authAction={apiKeyChip(row)}
+          authAction={<>{apiKeyChip(row)}{useProviderAction(row)}</>}
           {...(rowFormOpen(row) ? { trailing: credentialFormFor(row) } : {})}
         />
       ) : (
@@ -2061,7 +2234,7 @@ export function LlmTab(props: LlmTabProps) {
                 setOpenRowId(null);
                 return;
               }
-              openApiConfig(row.id, rowConfigTargetId(row));
+              openRowCredentialForm(rowFormTarget(row));
               setRowToReveal(row.id);
             }}
             data-testid={`llm-tab:connection-toggle:${row.id}`}
@@ -2090,6 +2263,7 @@ export function LlmTab(props: LlmTabProps) {
               aria-hidden={true}
             />
           </button>
+          <div className="flex flex-wrap gap-2">{useProviderAction(row)}</div>
           {rowFormOpen(row) ? credentialFormFor(row) : null}
         </div>
       ))}
@@ -2101,14 +2275,30 @@ export function LlmTab(props: LlmTabProps) {
               {t("llmTab.addProvider")}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
+          <DropdownMenuContent
+            align="start"
+            className="max-h-80 w-64 overflow-y-auto"
+            /* Every item here reveals a card and moves the caret into it. That
+               move cannot land while this menu's focus scope is still up, and
+               the menu's own restore would put the caret back on the trigger
+               afterwards — so decline the restore and re-arm the reveal for
+               once the menu is gone. Closing without picking anything leaves
+               the default restore alone. */
+            onCloseAutoFocus={(event) => {
+              const revealed = menuRevealedRowRef.current;
+              menuRevealedRowRef.current = null;
+              if (!revealed) return;
+              event.preventDefault();
+              setRowToReveal(revealed);
+            }}
+          >
             {addableRows.map((row) => (
               <DropdownMenuItem
                 key={row.id}
                 data-testid={`llm-tab:add-provider-item:${row.id}`}
                 onClick={() => {
                   revealRow(row.id);
-                  if (row.apiVendorId) openApiConfig(row.id, rowConfigTargetId(row));
+                  if (row.apiVendorId) openRowCredentialForm(rowFormTarget(row));
                 }}
               >
                 {row.label}
@@ -2120,7 +2310,12 @@ export function LlmTab(props: LlmTabProps) {
                 data-testid={`llm-tab:add-provider-item:${option.id}`}
                 onClick={() => {
                   revealRow(option.id);
-                  openApiConfig(option.id, option.id);
+                  const presetId = marketplaceProviderPresetIdFromSecretId(option.id) ?? "";
+                  openRowCredentialForm({
+                    rowId: option.id,
+                    vendorId: presetId ? "openai-compatible" : option.id,
+                    presetId,
+                  });
                 }}
               >
                 {option.label}
