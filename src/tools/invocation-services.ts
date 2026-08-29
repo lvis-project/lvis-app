@@ -5,7 +5,7 @@ import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js
 import type { PermissionDirectoryLifecycle } from "../permissions/permission-slash.js";
 import type { PermissionManager } from "../permissions/permission-manager.js";
 import type { HookDispatchResult, ScriptHookManager } from "../hooks/script-hook-manager.js";
-import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
+import type { HookTrustOrigin, ScriptHookType } from "../hooks/script-hook-types.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { ToolPermissionContext } from "./executor-contract.js";
@@ -76,7 +76,7 @@ export function resolveEnforcedCategory(
 
 export async function runScriptHook(
   scriptHookManager: ScriptHookManager | undefined,
-  hookType: "pre" | "post" | "perm",
+  hookType: ScriptHookType,
   toolName: string,
   source: ToolSource,
   category: ToolCategory,

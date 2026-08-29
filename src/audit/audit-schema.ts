@@ -18,7 +18,7 @@
  */
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { ExecutionMode } from "../shared/permission-mode.js";
-import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
+import type { HookTrustOrigin, ScriptHookType } from "../hooks/script-hook-types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import type { DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
 
@@ -50,7 +50,7 @@ export interface HookResult {
    * Narrow pre|post|perm projection — derived alias of {@link event}. Kept
    * required so back-compat readers that key on `hookType` never see `undefined`.
    */
-  hookType: "pre" | "post" | "perm";
+  hookType: ScriptHookType;
   action: "allow" | "deny";
   reason: string;
   durationMs: number;
@@ -58,7 +58,7 @@ export interface HookResult {
    * Closed-set lifecycle event (design §5). Today equals `hookType`; widens to
    * the full event surface (Stop / UserPromptSubmit / …) in later milestones.
    */
-  event?: "pre" | "post" | "perm";
+  event?: ScriptHookType;
   /** The configured glob matcher that selected this hook (absent ⇒ match-all). */
   matcher?: string;
   /** Handler type — `"command"` today; http/mcp/prompt/agent in later phases. */
