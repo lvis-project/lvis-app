@@ -14,17 +14,14 @@ import type {
   ProjectScopedMemoryOptions,
 } from "./memory-manager.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { MAX_MEMORY_SOURCE_CHARS, MEMORY_KINDS } from "./memory-manager.js";
 
 const log = createLogger("memory-capture");
 
 const MAX_PENDING_CAPTURES = 24;
-const MAX_SOURCE_CHARS = 4_000;
 const MAX_TITLE_CHARS = 120;
 const MAX_CONTENT_CHARS = 1_200;
 const MAX_EVIDENCE_CHARS = 320;
-const MEMORY_KINDS = new Set<MemoryKind>([
-  "preference", "constraint", "fact", "goal", "reference", "note",
-]);
 
 /** Reasons that make a turn ineligible as an automatic long-term-memory source. */
 export type MemoryCaptureTaintReason =
@@ -297,7 +294,7 @@ function automaticCaptureIneligibility(
   if (request.stopReason !== "end_turn") return "incomplete-turn";
   if (request.taintReasons && request.taintReasons.length > 0) return request.taintReasons[0] ?? "tainted";
   if (!source) return "empty-input";
-  if (source.length > MAX_SOURCE_CHARS) return "input-too-large";
+  if (source.length > MAX_MEMORY_SOURCE_CHARS) return "input-too-large";
   return null;
 }
 
@@ -306,7 +303,7 @@ function explicitCaptureIneligibility(
   requestedTitle: string | undefined | null,
 ): string | null {
   if (!source) return "empty-input";
-  if (source.length > MAX_SOURCE_CHARS) return "input-too-large";
+  if (source.length > MAX_MEMORY_SOURCE_CHARS) return "input-too-large";
   if (requestedTitle === null) return "invalid-title";
   return null;
 }

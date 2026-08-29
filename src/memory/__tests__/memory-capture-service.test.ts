@@ -4,6 +4,7 @@ import {
   type MemoryCaptureReviewer,
 } from "../memory-capture-service.js";
 import type { MemoryManager, NoteEntry } from "../memory-manager.js";
+import { MAX_MEMORY_SOURCE_CHARS, MEMORY_KINDS } from "../memory-manager.js";
 
 const SOURCE = "I prefer concise status updates in Korean.";
 
@@ -238,5 +239,12 @@ describe("MemoryCaptureService", () => {
     expect(result).toEqual({ status: "skipped", reason: "sensitive-input" });
     expect(review).not.toHaveBeenCalled();
     expect(saveMemory).not.toHaveBeenCalled();
+  });
+});
+
+describe("memory domain constants", () => {
+  it("expose the six memory kinds and the source-text bound the capture and consolidation services share", () => {
+    expect([...MEMORY_KINDS].sort()).toEqual(["constraint", "fact", "goal", "note", "preference", "reference"]);
+    expect(MAX_MEMORY_SOURCE_CHARS).toBe(4_000);
   });
 });

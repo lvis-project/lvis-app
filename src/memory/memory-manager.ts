@@ -554,9 +554,11 @@ const MAX_CONSOLIDATION_SOURCE_NOTES = 16;
 const MAX_PROMPT_LONG_TERM_MEMORY_OVERVIEW_TOKENS = 400;
 const MAX_PROMPT_LONG_TERM_MEMORY_OVERVIEW_SCOPE_TOKENS = 190;
 const MEMORY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MEMORY_KINDS = new Set<MemoryKind>([
+export const MEMORY_KINDS: ReadonlySet<MemoryKind> = new Set<MemoryKind>([
   "preference", "constraint", "fact", "goal", "reference", "note",
 ]);
+/** Longest source text (a turn, a note) a memory capture or consolidation reads from. */
+export const MAX_MEMORY_SOURCE_CHARS = 4_000;
 const MEMORY_STATES = new Set<MemoryState>(["candidate", "active"]);
 const MEMORY_CAPTURE_TRIGGERS = new Set<MemoryCaptureTrigger>(["automatic", "explicit"]);
 const MEMORY_SOURCES = new Set<MemorySourceKind>(["user", "assistant", "import", "capture"]);
