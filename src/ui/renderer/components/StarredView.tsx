@@ -11,6 +11,7 @@ import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
 import { kstDateKey } from "../../../shared/kst-date.js";
 import { formatCost } from "../../../lib/cost-format.js";
+import { formatMediumDateTime } from "../utils/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
 
 export interface StarredItem {
@@ -663,7 +664,7 @@ export function StarredView({
                   <div key={s.id} className="rounded-md border bg-muted/(--opacity-light) transition-colors hover:border-border">
                     <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
                       <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
-                      <span>{new Date(s.starredAt).toLocaleString("ko-KR")}</span>
+                      <span>{formatMediumDateTime(s.starredAt)}</span>
                       <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
                       <Button variant="ghost" size="icon-xs" className="ml-auto hover:bg-muted" title={t("starredView.unstar")} onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
                         <XIcon className="h-3 w-3" />

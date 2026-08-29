@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import type { AwayAuthorityStatus } from "../../../shared/away-authority-arm.js";
 import { AwayAuthorityArmDialog } from "../components/AwayAuthorityArmDialog.js";
 import { formatIpcError } from "../format-ipc-error.js";
+import { formatMediumDateTime } from "../utils/format-time.js";
 import type { LvisApi } from "../types.js";
 
 export interface AwayAuthorityContentProps {
@@ -21,11 +22,6 @@ export interface AwayAuthorityContentProps {
    * produce a grant that can only ever refuse.
    */
   shareIsLive: boolean;
-}
-
-function formattedTime(value: number): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
-    .format(new Date(value));
 }
 
 /**
@@ -122,7 +118,7 @@ export function AwayAuthorityContent({ api, chatGroupId, shareIsLive }: AwayAuth
           <p className="mt-1 text-[11px] text-muted-foreground">
             {t("awayAuthority.armedDetail", {
               count: status.remaining,
-              time: formattedTime(status.expiresAt),
+              time: formatMediumDateTime(status.expiresAt),
             })}
           </p>
           <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">

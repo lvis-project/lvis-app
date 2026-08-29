@@ -18,6 +18,7 @@ import {
 } from "../../../shared/tailnet-sharing.js";
 import { SettingsSection } from "../components/PageShell.js";
 import { TailnetObserverSection } from "./TailnetObserverSection.js";
+import { formatMediumDateTime } from "../utils/format-time.js";
 import type { LvisApi } from "../types.js";
 
 export interface TailnetAccessContentProps {
@@ -27,13 +28,6 @@ export interface TailnetAccessContentProps {
 type Feedback =
   | { readonly tone: "error" | "success"; readonly text: string }
   | null;
-
-function formattedExpiry(value: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
 
 function durationLabel(
   value: TailnetInvitationDurationPreset | TailnetShareDurationPreset,
@@ -251,7 +245,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
                   </Button>
                 </div>
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  {t("tailnetAccessTab.expiresAt", { time: formattedExpiry(issuedInvitation.expiresAt) })}
+                  {t("tailnetAccessTab.expiresAt", { time: formatMediumDateTime(issuedInvitation.expiresAt) })}
                 </p>
               </div>
             ) : null}
@@ -272,7 +266,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
                       <p className="font-mono text-xs">Tailnet · {pairing.actorFingerprint}</p>
                       <p className="mt-0.5 text-[11px] text-muted-foreground">
                         {pairing.state === "pending" ? t("tailnetAccessTab.pending") : t("tailnetAccessTab.active")}
-                        {pairing.expiresAt === null ? "" : ` · ${t("tailnetAccessTab.expiresAt", { time: formattedExpiry(pairing.expiresAt) })}`}
+                        {pairing.expiresAt === null ? "" : ` · ${t("tailnetAccessTab.expiresAt", { time: formatMediumDateTime(pairing.expiresAt) })}`}
                       </p>
                     </div>
                     {pairing.state === "pending" ? (
@@ -350,7 +344,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
                         <p className="font-mono text-xs">Tailnet · {share.actorFingerprint}</p>
                         <p className="mt-0.5 text-[11px] text-muted-foreground">
                           {share.permission === "observe" ? t("tailnetAccessTab.observe") : t("tailnetAccessTab.control")}
-                          {` · ${t("tailnetAccessTab.expiresAt", { time: formattedExpiry(share.expiresAt) })}`}
+                          {` · ${t("tailnetAccessTab.expiresAt", { time: formatMediumDateTime(share.expiresAt) })}`}
                         </p>
                       </div>
                       <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void runMutation(`revoke-share:${share.id}`, () => api.tailnetSharing.revokeShare(share.id))}>
