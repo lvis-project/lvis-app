@@ -1429,11 +1429,6 @@
     },
     {
       "type": "types",
-      "file": "src/audit/audit-schema.ts",
-      "name": "TrustOrigin"
-    },
-    {
-      "type": "types",
       "file": "src/audit/diagnostics-bundle.ts",
       "name": "DiagnosticsBundleManifest"
     },
@@ -2061,11 +2056,6 @@
       "type": "types",
       "file": "src/mcp/types.ts",
       "name": "McpOAuthConfig"
-    },
-    {
-      "type": "types",
-      "file": "src/mcp/types.ts",
-      "name": "McpTransport"
     },
     {
       "type": "types",
@@ -2850,17 +2840,7 @@
     {
       "type": "types",
       "file": "src/ui/renderer/theme/index.ts",
-      "name": "BundleId"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/theme/index.ts",
       "name": "BundleTokens"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/theme/index.ts",
-      "name": "ResolvedShell"
     },
     {
       "type": "types",

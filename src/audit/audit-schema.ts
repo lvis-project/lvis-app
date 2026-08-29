@@ -22,7 +22,6 @@ import type { HookTrustOrigin, ScriptHookType } from "../hooks/script-hook-types
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import type { DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
 
-export type TrustOrigin = HookTrustOrigin;
 
 /**
  * Layer 5 reviewer agent verdict — kept structurally compatible with
@@ -128,7 +127,7 @@ export interface AuditCommon {
   };
 
   /** Trust origin propagated through the eval pipeline. */
-  trustOrigin: TrustOrigin;
+  trustOrigin: HookTrustOrigin;
   /**
    * Hex-encoded HMAC over the previous line's serialized form.
    * For the first entry of the file this is HMAC(secret, "genesis").
