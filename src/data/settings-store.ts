@@ -75,6 +75,7 @@ import {
   normalizeProjectRootList,
   normalizeProjectLabels,
   pruneLazyLlmVendorBlocks,
+  withoutMirroredMarketplaceProviderPresetEndpoint,
   SIDE_PANEL_SPLIT_KEYS,
   normalizeSystem,
   isWebViewPreferredFlow,
@@ -100,6 +101,13 @@ const log = createLogger("settings");
  * `loadSettings`. Delete together with that block — target 2026-10.
  */
 const SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION = "subagent-autonomous-wake-default-flip";
+/**
+ * One-time cleanup for installs written while a marketplace provider preset's
+ * endpoint was mirrored into the generic openai-compatible vendor block. See
+ * {@link withoutMirroredMarketplaceProviderPresetEndpoint}.
+ */
+const PROVIDER_PRESET_ENDPOINT_UNMIRROR_MIGRATION =
+  "marketplace-provider-preset-endpoint-unmirror";
 
 /**
  * Every one-time migration this build knows. Fresh-install and
@@ -108,7 +116,10 @@ const SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION = "subagent-autonomous-wake-default-f
  * the markers closes the window where a user's first-session opt-out would
  * be silently reverted by a migration re-run on the next boot.
  */
-const KNOWN_MIGRATIONS: readonly string[] = [SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION];
+const KNOWN_MIGRATIONS: readonly string[] = [
+  SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION,
+  PROVIDER_PRESET_ENDPOINT_UNMIRROR_MIGRATION,
+];
 
 export type { LLMVendor, LLMVendorSettings };
 export { LLM_VENDORS };
@@ -1468,6 +1479,19 @@ export class SettingsService {
           delete normalizedFeatures.subAgentAutonomousWake;
         }
         appliedMigrations.push(SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION);
+        migrationWriteBack = true;
+      }
+
+      // One-time cleanup: the generic openai-compatible row's endpoint used to
+      // be overwritten with the active marketplace preset's address. Nothing
+      // writes that any more, but an install from before the change still
+      // carries it, and it would read as the generic row's own saved endpoint.
+      if (!appliedMigrations.includes(PROVIDER_PRESET_ENDPOINT_UNMIRROR_MIGRATION)) {
+        llm = withoutMirroredMarketplaceProviderPresetEndpoint(
+          llm,
+          marketplace.installedProviderPresets,
+        );
+        appliedMigrations.push(PROVIDER_PRESET_ENDPOINT_UNMIRROR_MIGRATION);
         migrationWriteBack = true;
       }
 

@@ -865,9 +865,15 @@ describe("LLM model list sync", () => {
       getSecret: vi.fn(() => "should-not-be-used"),
     };
 
+    // An explicit endpoint that is not the preset's: the preset's stored
+    // secret must never be offered to it.
     const result = await listLlmModelsFromSettings(
       settingsService as never,
-      { vendor: "openai-compatible", credentialScope: "future-router" },
+      {
+        vendor: "openai-compatible",
+        credentialScope: "future-router",
+        baseUrl: "https://other.example/v1",
+      },
       guardedFetchOptions(fetchImpl),
     );
 
@@ -877,6 +883,56 @@ describe("LLM model list sync", () => {
     });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(settingsService.getSecret).not.toHaveBeenCalled();
+  });
+
+  it("resolves a scoped request to the preset's endpoint, not the vendor block's", async () => {
+    // The vendor block belongs to the GENERIC custom-provider row and is no
+    // longer a copy of the preset's address, so a scoped request has to read
+    // the preset registry. Reading the block would send the preset's secret
+    // to whatever another row happens to be pointed at.
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "future/free" }] }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") {
+          return {
+            provider: "openai-compatible",
+            marketplaceProviderPresetId: "future-router",
+            vendors: {
+              "openai-compatible": { model: "other/free", baseUrl: "https://other.example/v1" },
+            },
+            streamSmoothing: "none",
+            fallbackChain: [],
+            modelListCache: {},
+          };
+        }
+        if (key === "marketplace") {
+          return {
+            installedProviderPresets: [{
+              providerId: "future-router",
+              label: "Future Router",
+              baseUrl: "https://future.example/v1",
+              defaultModel: "future/free",
+              modelOptions: ["future/free"],
+              requiresApiKey: true,
+            }],
+          };
+        }
+        throw new Error(`unexpected settings key: ${key}`);
+      }),
+      getSecret: vi.fn(() => "fr-secret"),
+    };
+
+    const result = await listLlmModelsFromSettings(
+      settingsService as never,
+      { vendor: "openai-compatible", credentialScope: "future-router" },
+      guardedFetchOptions(fetchImpl),
+    );
+
+    expect(result).toMatchObject({ ok: true, endpoint: "https://future.example/v1/models" });
+    expect(String((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]))
+      .toBe("https://future.example/v1/models");
   });
 
   it("rejects an uninstalled marketplace provider preset scope before fetching", async () => {

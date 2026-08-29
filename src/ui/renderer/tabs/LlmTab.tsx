@@ -141,6 +141,18 @@ const CREDENTIAL_FORM_ID = "llm-provider-credential-form";
  * popup readable and the height is capped at whichever is smaller — a list a
  * person can scan, or the room Radix reports.
  */
+/**
+ * Why a row's API route cannot serve chat yet, by cause. Kept as a map so the
+ * key strings stay greppable from the catalogue, the way `ERROR_MESSAGE_KEYS`
+ * does for the subscription runtimes' failures.
+ */
+const CHAT_BLOCKER_MESSAGE_KEYS = {
+  "needs-api-key": "llmTab.useProviderNeedsCredential",
+  "needs-gcp-project": "llmTab.useProviderNeedsProject",
+} as const;
+
+type ChatBlocker = keyof typeof CHAT_BLOCKER_MESSAGE_KEYS;
+
 const SELECT_POPUP_LAYOUT =
   "min-w-64 max-h-[min(386px,var(--radix-select-content-available-height))]";
 
@@ -1482,9 +1494,10 @@ export function LlmTab(props: LlmTabProps) {
       const rowId = apiRouteRowId(route);
       if (!routes.has(rowId)) routes.set(rowId, route);
     };
-    // The route the form points at goes first: its credential is known here
-    // directly, so a key that was just entered counts before any fetch lands,
-    // and its key is the current configuration rather than a stale cache entry.
+    // The ACTIVE route goes first: its credential is known here directly, so it
+    // counts before any fetch lands, and its key is the current configuration
+    // rather than a stale cache entry. (It is the active route, not the one
+    // whose card happens to be open — opening a card moves nothing.)
     if (apiPathConfigured) {
       add({
         vendorId: vendor,
@@ -1742,7 +1755,7 @@ export function LlmTab(props: LlmTabProps) {
   const rowCredentialId = (row: ProviderConnection): string =>
     row.presetId ? marketplaceProviderPresetSecretId(row.presetId) : row.apiVendorId!;
 
-  /** Whether this row needs a stored key before it could answer a chat turn. */
+  /** Whether this row's credential form has to ask for a key at all. */
   const rowRequiresApiKey = useCallback((row: ProviderConnection): boolean => {
     const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
     if (preset) return preset.requiresApiKey !== false;
@@ -1752,11 +1765,38 @@ export function LlmTab(props: LlmTabProps) {
     }));
   }, [installedPresetById, savedVendorBlocks]);
 
+  /**
+   * What stops this row's API route from answering a chat turn, or null.
+   *
+   * "Configured" is not one uniform question. An API-key vendor needs a stored
+   * key; Vertex authenticates out of band, so what it needs saved is a project
+   * id and it stores no key at all. Asking only the key question left the
+   * Vertex card permanently unusable — it could never look ready, because the
+   * thing it was being asked for is not the thing it uses.
+   */
+  const rowChatBlocker = useCallback((row: ProviderConnection): ChatBlocker | null => {
+    const vendorId = row.apiVendorId ?? "";
+    if (vendorId === "vertex-ai") {
+      return savedVendorBlocks[vendorId]?.vertexProject?.trim()
+        ? null
+        : "needs-gcp-project";
+    }
+    if (!rowRequiresApiKey(row)) return null;
+    return credentialedProviderIds.has(rowCredentialId(row))
+      ? null
+      : "needs-api-key";
+  }, [credentialedProviderIds, rowRequiresApiKey, savedVendorBlocks]);
+
   const revealRow = useCallback((rowId: string) => {
     setAddedRowIds((current) => current.includes(rowId) ? current : [...current, rowId]);
-    menuRevealedRowRef.current = rowId;
     setRowToReveal(rowId);
   }, []);
+
+  /** Reveal a row picked from the add menu — see the menu's close handler. */
+  const revealRowFromAddMenu = useCallback((rowId: string) => {
+    menuRevealedRowRef.current = rowId;
+    revealRow(rowId);
+  }, [revealRow]);
 
   /**
    * Show one card's credential form.
@@ -1966,6 +2006,12 @@ export function LlmTab(props: LlmTabProps) {
                   className="h-7 text-xs text-destructive"
                   onClick={() => void api.deleteApiKey(rowCredentialId(row)).then(() => {
                     if (rowIsActiveApiProvider(row)) setHasKey(false);
+                    // A row that existed only because of the key it held would
+                    // otherwise disappear the moment the key does — taking the
+                    // open card, and the field for entering a replacement,
+                    // with it. Pin it so removing a key leaves somewhere to
+                    // put the next one.
+                    revealRow(row.id);
                     setSettingsRevision((current) => current + 1);
                     onSaved();
                   })}
@@ -2042,23 +2088,49 @@ export function LlmTab(props: LlmTabProps) {
    * A provider that cannot answer a turn must not be choosable: a vendor that
    * needs a key and has none would take chat somewhere that can only fail, and
    * the failure would surface a whole turn later than the click.
+   *
+   * The reason rides BESIDE the control as text, not in its `title`. A `title`
+   * on a `disabled` button is unreachable twice over — `disabled` removes the
+   * element from the tab order, and this button's own styling turns pointer
+   * events off, so neither hover nor keyboard could ever surface it. The
+   * button therefore stays focusable and announces itself with `aria-disabled`
+   * while the click is ignored, which is also how a screen reader gets told
+   * both that it cannot be used and why.
+   *
+   * The label names the PATH, not just the provider: a merged row offers this
+   * beside the subscription runtime's own "use for chat", and two unqualified
+   * buttons on one card would not say which way in they take.
    */
   const useProviderAction = (row: ProviderConnection) => {
     if (!row.apiVendorId) return null;
     const isActive = activeMode(row) === "api";
-    const usable = !rowRequiresApiKey(row) || credentialedProviderIds.has(rowCredentialId(row));
+    const blocker = rowChatBlocker(row);
+    const inert = isActive || blocker !== null || !settingsLoaded;
     return (
-      <Button
-        type="button"
-        size="sm"
-        variant={isActive ? "secondary" : "outline"}
-        disabled={isActive || !usable || !settingsLoaded}
-        {...(usable ? {} : { title: t("llmTab.useProviderNeedsCredential") })}
-        onClick={() => activateApiProvider(row)}
-        data-testid={`llm-tab:connection-use:${row.id}`}
-      >
-        {isActive ? t("llmTab.useProviderActive") : t("llmTab.useProvider")}
-      </Button>
+      <span className="flex min-w-0 flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={isActive ? "secondary" : "outline"}
+          aria-disabled={inert}
+          className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+          onClick={() => {
+            if (inert) return;
+            activateApiProvider(row);
+          }}
+          data-testid={`llm-tab:connection-use:${row.id}`}
+        >
+          {isActive ? t("llmTab.useProviderActive") : t("llmTab.useProvider")}
+        </Button>
+        {blocker && (
+          <span
+            className="min-w-0 text-[11px] text-muted-foreground"
+            data-testid={`llm-tab:connection-use-blocked:${row.id}`}
+          >
+            {t(CHAT_BLOCKER_MESSAGE_KEYS[blocker])}
+          </span>
+        )}
+      </span>
     );
   };
 
@@ -2297,7 +2369,7 @@ export function LlmTab(props: LlmTabProps) {
                 key={row.id}
                 data-testid={`llm-tab:add-provider-item:${row.id}`}
                 onClick={() => {
-                  revealRow(row.id);
+                  revealRowFromAddMenu(row.id);
                   if (row.apiVendorId) openRowCredentialForm(rowFormTarget(row));
                 }}
               >
@@ -2309,7 +2381,7 @@ export function LlmTab(props: LlmTabProps) {
                 key={option.id}
                 data-testid={`llm-tab:add-provider-item:${option.id}`}
                 onClick={() => {
-                  revealRow(option.id);
+                  revealRowFromAddMenu(option.id);
                   const presetId = marketplaceProviderPresetIdFromSecretId(option.id) ?? "";
                   openRowCredentialForm({
                     rowId: option.id,

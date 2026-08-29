@@ -125,6 +125,46 @@ describe("useSettingsOrchestration", () => {
     });
   });
 
+  it("queues a card's save behind an in-flight one instead of dropping it", async () => {
+    // A debounced llm save can be mid-flight when the user presses Save on a
+    // provider card. The credential save used to return false on the spot and
+    // say nothing, leaving the card looking committed with nothing written.
+    let releaseFirstSave: (() => void) | undefined;
+    const { api } = makeMockLvisApi({ settings: makeSettings(), hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => {
+        await new Promise<void>((resolve) => { releaseFirstSave = resolve; });
+        return { ok: true };
+      }),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+      setApiKey: vi.fn(async () => ({ ok: true })),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+
+    let queued: Promise<boolean> | undefined;
+    await act(async () => {
+      void result.current.save("llm");
+      await Promise.resolve();
+      queued = result.current.saveProviderCredential({
+        credentialProviderId: "claude",
+        vendorId: "claude",
+        apiKey: "sk-ant-queued",
+      });
+    });
+    // Still in the queue: the key has not been written yet.
+    expect(api.setApiKey).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseFirstSave?.();
+      expect(await queued).toBe(true);
+    });
+    expect(api.setApiKey).toHaveBeenCalledWith("claude", "sk-ant-queued");
+  });
+
   it("writes a card's own block and secret without touching the active provider", async () => {
     const { api } = makeMockLvisApi({ settings: makeSettings(), hasApiKey: false });
     Object.assign(api, {
@@ -202,13 +242,18 @@ describe("useSettingsOrchestration", () => {
         provider: "openai-compatible",
         marketplaceProviderPresetId: "future-router",
         vendors: {
-          "openai-compatible": expect.objectContaining({
-            baseUrl: "https://future.example/v1",
-            model: "future/free",
-          }),
+          "openai-compatible": expect.objectContaining({ model: "future/free" }),
         },
       }),
     }));
+    // The preset's address is the registry's, never the generic row's block:
+    // writing it here is what used to revert the generic card's own endpoint.
+    const presetSave = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => call[0] as { llm?: { vendors?: Record<string, { baseUrl?: string }> } })
+      .filter((call) => Boolean(call.llm?.vendors))
+      .at(-1);
+    expect(presetSave?.llm?.vendors?.["openai-compatible"]?.baseUrl)
+      .not.toBe("https://future.example/v1");
     expect(api.setApiKey).toHaveBeenCalledWith(
       marketplaceProviderPresetSecretId("future-router"),
       "fr-secret",
@@ -216,7 +261,7 @@ describe("useSettingsOrchestration", () => {
     expect(onSaved).toHaveBeenCalled();
   });
 
-  it("restores generic OpenAI-compatible defaults when clearing a marketplace provider preset", async () => {
+  it("leaves the generic OpenAI-compatible endpoint alone across a preset selection", async () => {
     const settings = makeSettings();
     const futureRouter = {
       providerId: "future-router",
@@ -237,6 +282,12 @@ describe("useSettingsOrchestration", () => {
       hasMarketplaceApiKey: vi.fn(async () => false),
       setApiKey: vi.fn(async () => ({ ok: true })),
     });
+    settings.llm.vendors["openai-compatible"] = {
+      model: "local-model",
+      baseUrl: "http://localhost:8001/v1",
+      enableThinking: true,
+      thinkingBudgetTokens: 10_000,
+    };
     const { result } = renderHook(() =>
       useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
     );
@@ -245,12 +296,17 @@ describe("useSettingsOrchestration", () => {
     act(() => {
       result.current.selectMarketplaceProviderPreset(futureRouter);
     });
-    await waitFor(() => expect(result.current.baseUrl).toBe("https://future.example/v1"));
+    await waitFor(() => expect(result.current.vendor).toBe("openai-compatible"));
+    // Selecting a preset must not park the preset's address in the generic
+    // row's endpoint: that field is written back on every save.
+    expect(result.current.baseUrl).toBe("http://localhost:8001/v1");
 
     act(() => {
       result.current.clearMarketplaceProviderPreset();
     });
-    await waitFor(() => expect(result.current.baseUrl).not.toBe("https://future.example/v1"));
+    // And switching back restores the generic row's own endpoint rather than
+    // resetting it to defaults.
+    await waitFor(() => expect(result.current.baseUrl).toBe("http://localhost:8001/v1"));
 
     await act(async () => {
       await result.current.save("llm");
@@ -264,7 +320,7 @@ describe("useSettingsOrchestration", () => {
       },
     });
     expect(payload.llm.vendors["openai-compatible"].baseUrl)
-      .not.toBe("https://future.example/v1");
+      .toBe("http://localhost:8001/v1");
   });
 
   it("defaults idle long-term consolidation off and persists an explicit opt-in immediately", async () => {

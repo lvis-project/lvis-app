@@ -121,12 +121,23 @@ export function pickRedactedSettings(settings: AppSettings): Record<string, unkn
   const llm = settings.llm;
   if (llm) {
     const vendors: Record<string, { model?: string; hasBaseUrl: boolean }> = {};
+    // A marketplace preset route's endpoint lives in the preset registry, not
+    // in its vendor block, so reading the block alone would report "no
+    // endpoint" for a provider that is configured and working — the opposite
+    // of what a bug report needs to say.
+    const presetRouteHasBaseUrl = Boolean(
+      llm.marketplaceProviderPresetId
+      && (settings.marketplace?.installedProviderPresets ?? []).some((preset) =>
+        preset.providerId === llm.marketplaceProviderPresetId
+        && typeof preset.baseUrl === "string" && preset.baseUrl.length > 0),
+    );
     for (const [vendor, v] of Object.entries(llm.vendors ?? {})) {
       const vv = v as { model?: string; baseUrl?: string };
       vendors[vendor] = {
         model: typeof vv.model === "string" ? vv.model : undefined,
         // Presence flag only — the value could carry an internal hostname.
-        hasBaseUrl: typeof vv.baseUrl === "string" && vv.baseUrl.length > 0,
+        hasBaseUrl: (typeof vv.baseUrl === "string" && vv.baseUrl.length > 0)
+          || (vendor === "openai-compatible" && presetRouteHasBaseUrl),
       };
     }
     out.llm = {

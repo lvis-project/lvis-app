@@ -67,7 +67,10 @@ function codexView(
   } as SubscriptionProviderView;
 }
 
-function installSubscription(providers: readonly SubscriptionProviderView[]) {
+function installSubscription(
+  providers: readonly SubscriptionProviderView[],
+  actions: Record<string, unknown> = {},
+) {
   useSubscriptionProvidersMock.mockReturnValue({
     providers,
     activeRuntime: { kind: "api" as const },
@@ -78,7 +81,7 @@ function installSubscription(providers: readonly SubscriptionProviderView[]) {
       apiChatBusy: false,
       chatSelectionBusy: false,
       apiChatError: null,
-      actions: {},
+      actions,
     },
   });
 }
@@ -385,7 +388,8 @@ describe("LlmTab provider activation", () => {
     const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
 
     const useClaude = await screen.findByTestId("llm-tab:connection-use:claude");
-    await waitFor(() => expect(useClaude).toBeEnabled());
+    await waitFor(() =>
+      expect(useClaude).toHaveAttribute("aria-disabled", "false"));
     fireEvent.click(useClaude);
 
     expect(hooks.selectApiVendorModel).toHaveBeenCalledWith("claude", expect.any(String));
@@ -401,8 +405,12 @@ describe("LlmTab provider activation", () => {
     fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
 
     const useClaude = screen.getByTestId("llm-tab:connection-use:claude");
-    expect(useClaude).toBeDisabled();
-    expect(useClaude).toHaveAttribute("title", expect.stringMatching(/API/));
+    // Reachable: `disabled` would take the control out of the tab order and
+    // kill the pointer events its own reason would need to be read through.
+    expect(useClaude).toHaveAttribute("aria-disabled", "true");
+    expect(useClaude).not.toBeDisabled();
+    expect(screen.getByTestId("llm-tab:connection-use-blocked:claude"))
+      .toHaveTextContent(/API/);
     fireEvent.click(useClaude);
     expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
   });
@@ -453,10 +461,177 @@ describe("LlmTab provider activation", () => {
     fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
 
     expect(screen.getByTestId("llm-tab:connection-use:openai"))
-      .toBeDisabled();
+      .toHaveAttribute("aria-disabled", "true");
+    // Already the active route, so there is nothing blocking it to explain.
+    expect(screen.queryByTestId("llm-tab:connection-use-blocked:openai")).toBeNull();
     expect(screen.getByTestId("llm-tab:connection-status:openai"))
       .toHaveTextContent(/API|사용/);
     expect(screen.queryByTestId("llm-tab:connection-mode:claude")).toBeNull();
+  });
+});
+
+describe("LlmTab preset and generic custom provider are separate rows", () => {
+  const acme = preset("acme-gw", "Acme Gateway", "https://acme.example/v1");
+  const GENERIC_ENDPOINT = "http://localhost:8001/v1";
+
+  /** A preset is the active route; the generic row has its own saved endpoint. */
+  function bothRows() {
+    return makeApi({
+      hasApiKey: storedKeysFor("marketplace-provider:acme-gw", "openai-compatible"),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: {
+          pinnedModels: [],
+          modelListCache: {},
+          vendors: { "openai-compatible": { baseUrl: GENERIC_ENDPOINT, model: "local-model" } },
+        },
+        marketplace: { installedProviderIds: [], installedProviderPresets: [acme] },
+      }),
+    });
+  }
+
+  const activePreset = {
+    vendor: "openai-compatible",
+    marketplaceProviderPresetId: "acme-gw",
+    marketplaceProviderPresets: [acme],
+    model: "acme-gw-default",
+  } as const;
+
+  it("opens the generic card on the generic endpoint, not the active preset's", async () => {
+    await renderTab(bothRows(), activePreset);
+
+    await screen.findByTestId("llm-tab:connection:openai-compatible");
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+
+    const field = screen.getByTestId("llm-base-url-input");
+    expect(field).toHaveValue(GENERIC_ENDPOINT);
+    expect(field).not.toHaveValue(acme.baseUrl);
+  });
+
+  it("switches to a preset row through the preset, and moves the badge", async () => {
+    const { hooks, rerender } = await renderTab(bothRows(), {
+      vendor: "openai-compatible",
+      marketplaceProviderPresets: [acme],
+      model: "local-model",
+    });
+
+    const usePreset = await screen.findByTestId(
+      "llm-tab:connection-use:marketplace-provider:acme-gw",
+    );
+    await waitFor(() => expect(usePreset).toHaveAttribute("aria-disabled", "false"));
+    fireEvent.click(usePreset);
+
+    expect(hooks.onSelectMarketplaceProviderPreset).toHaveBeenCalledWith(acme);
+    expect(hooks.onImmediateChange).toHaveBeenCalled();
+
+    // The parent moves the active route; the badge follows it, not the form.
+    await rerender(activePreset);
+    expect(screen.getByTestId("llm-tab:connection-mode:marketplace-provider:acme-gw"))
+      .toBeInTheDocument();
+    expect(screen.queryByTestId("llm-tab:connection-mode:openai-compatible")).toBeNull();
+  });
+
+  it("switches back to the generic row by dropping the preset, endpoint intact", async () => {
+    const { hooks, rerender } = await renderTab(bothRows(), activePreset);
+
+    const useGeneric = await screen.findByTestId("llm-tab:connection-use:openai-compatible");
+    await waitFor(() => expect(useGeneric).toHaveAttribute("aria-disabled", "false"));
+    fireEvent.click(useGeneric);
+
+    // The generic custom provider IS this vendor without a preset.
+    expect(hooks.onClearMarketplaceProviderPreset).toHaveBeenCalled();
+    expect(hooks.onImmediateChange).toHaveBeenCalled();
+
+    await rerender({
+      vendor: "openai-compatible",
+      marketplaceProviderPresetId: "",
+      model: "local-model",
+    });
+    expect(screen.getByTestId("llm-tab:connection-mode:openai-compatible")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    // The endpoint the user saved is still the generic row's own.
+    expect(screen.getByTestId("llm-base-url-input")).toHaveValue(GENERIC_ENDPOINT);
+  });
+});
+
+describe("LlmTab chat-route availability", () => {
+  it("asks Vertex for a project rather than a key it never stores", async () => {
+    // Vertex authenticates out of band, so the key question can never be
+    // satisfied on this card — it used to leave the switch permanently off.
+    const withoutProject = makeApi({
+      getSettings: vi.fn().mockResolvedValue({
+        llm: { pinnedModels: [], modelListCache: {}, vendors: {} },
+        marketplace: { installedProviderIds: ["vertex-ai"], installedProviderPresets: [] },
+      }),
+    });
+    const { unmount } = await renderTab(withoutProject, { vendor: "openai", model: "" });
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:vertex-ai"));
+
+    // The card asks for the project, and says that is what is missing.
+    expect(screen.getByTestId("llm-tab:manual-section")).toBeInTheDocument();
+    expect(screen.queryByTestId("llm-api-key-input")).toBeNull();
+    expect(screen.getByTestId("llm-tab:connection-use:vertex-ai"))
+      .toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByTestId("llm-tab:connection-use-blocked:vertex-ai"))
+      .toHaveTextContent(/GCP|프로젝트|project|Projekt|proyecto|projet|プロジェクト|项目/i);
+    unmount();
+
+    const withProject = makeApi({
+      getSettings: vi.fn().mockResolvedValue({
+        llm: {
+          pinnedModels: [],
+          modelListCache: {},
+          vendors: { "vertex-ai": { vertexProject: "my-gcp-project" } },
+        },
+        marketplace: { installedProviderIds: ["vertex-ai"], installedProviderPresets: [] },
+      }),
+    });
+    await renderTab(withProject, { vendor: "openai", model: "" });
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:vertex-ai"));
+
+    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-use:vertex-ai"))
+      .toHaveAttribute("aria-disabled", "false"));
+    expect(screen.queryByTestId("llm-tab:connection-use-blocked:vertex-ai")).toBeNull();
+  });
+
+  it("names the path on each action where a provider offers two", async () => {
+    installSubscription(
+      [codexView({
+        status: { runtime: "ready", connection: "connected", models: [], capabilities: { chat: true } },
+      } as Partial<SubscriptionProviderView>)],
+      { useForChat: vi.fn(), useApiForChat: vi.fn() },
+    );
+    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), {
+      vendor: "claude",
+      hasKey: false,
+      model: "",
+    });
+
+    const subscriptionAction = await screen.findByTestId(
+      "subscription-provider:codex:use-for-chat",
+    );
+    const apiAction = screen.getByTestId("llm-tab:connection-use:codex");
+    // Both ways in are on one card, so neither may be an unqualified
+    // "use for chat" — the label has to say which route it takes.
+    expect(apiAction.textContent?.trim()).not.toBe(subscriptionAction.textContent?.trim());
+    expect(apiAction).toHaveTextContent(/API/);
+  });
+
+  it("keeps the card on screen after its only credential is deleted", async () => {
+    // This row exists because of the stored key and nothing else, so removing
+    // the key used to remove the place a replacement could be entered.
+    const api = makeApi({ hasApiKey: storedKeysFor("claude") });
+    await renderTab(api, { vendor: "openai", model: "" });
+
+    await screen.findByTestId("llm-tab:connection:claude");
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
+    api.hasApiKey = vi.fn(async () => false);
+    fireEvent.click(screen.getByText(/^(삭제|Delete|Remove)$/));
+
+    await waitFor(() => expect(api.deleteApiKey).toHaveBeenCalledWith("claude"));
+    expect(screen.getByTestId("llm-tab:connection:claude")).toBeInTheDocument();
+    expect(screen.getByTestId("llm-api-key-input")).toBeInTheDocument();
   });
 });
 

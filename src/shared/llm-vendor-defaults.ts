@@ -504,6 +504,67 @@ export function isSelfHostedTrustedNetworkVendor(v: LLMVendor): boolean {
   return SELF_HOSTED_TRUSTED_NETWORK_VENDOR_IDS.has(v);
 }
 
+/**
+ * Every endpoint an LLM route could reach, as stored.
+ *
+ * A marketplace provider preset's address lives in the preset registry, not in
+ * `vendors["openai-compatible"]` — that block belongs to the generic custom
+ * provider row. So walking the vendor blocks alone no longer sees the address
+ * chat is actually talking to, and a caller that did would drop the active
+ * preset's host on the floor.
+ *
+ * Both the sandbox's network union and the change-detection signature that
+ * refreshes it read this, so the two can never disagree about which hosts are
+ * in play. Only the ACTIVE preset is included: an installed-but-unselected
+ * preset is not a route anything reaches, and adding it would widen an
+ * enforced allow-list for a provider nobody chose.
+ *
+ * Structural parameters rather than `AppSettings`: the callers hand this
+ * partial and normalized shapes, and one of them lives in the sandbox module
+ * that deliberately keeps itself free of settings imports.
+ */
+export function llmRouteBaseUrls(input: {
+  readonly vendors?: Readonly<Record<string, { readonly baseUrl?: string } | undefined>> | undefined;
+  readonly marketplaceProviderPresetId?: string | undefined;
+  readonly installedProviderPresets?:
+    | readonly { readonly providerId: string; readonly baseUrl?: string }[]
+    | undefined;
+}): string[] {
+  const seen = new Set<string>();
+  const baseUrls: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    baseUrls.push(trimmed);
+  };
+  for (const block of Object.values(input.vendors ?? {})) push(block?.baseUrl);
+  const activePresetId = input.marketplaceProviderPresetId?.trim();
+  if (activePresetId) {
+    const preset = (input.installedProviderPresets ?? [])
+      .find((candidate) => candidate.providerId === activePresetId);
+    push(preset?.baseUrl);
+  }
+  return baseUrls;
+}
+
+/**
+ * Stable signature of every endpoint an LLM route could reach.
+ *
+ * Change-detection for the ASRT sandbox network union: the union is rebuilt
+ * only when this moves. It is keyed by the SET of endpoints rather than by
+ * vendor id, because the union is a set of hosts — the same address moving
+ * between two vendor blocks does not change what a worker may reach, and a
+ * refresh for it would be noise. Sorted so vendor-key insertion order cannot
+ * fake a change.
+ */
+export function llmRouteBaseUrlSignature(
+  input: Parameters<typeof llmRouteBaseUrls>[0],
+): string {
+  return [...llmRouteBaseUrls(input)].sort().join("|");
+}
+
 export function canUseLlmVendorWithoutApiKey(
   vendor: LLMVendor,
   block: Pick<LLMVendorSettings, "baseUrl">,

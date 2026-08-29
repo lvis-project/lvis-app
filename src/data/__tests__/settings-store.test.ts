@@ -236,7 +236,9 @@ describe("SettingsService marketplace defaults", () => {
         vendors: {
           "openai-compatible": {
             model: "future/free",
-            baseUrl: "https://future.example/v1",
+            // The GENERIC custom-provider row's own endpoint — a different row
+            // from the preset, and no longer overwritten by it.
+            baseUrl: "https://generic.example/v1",
           },
         },
         modelListCache: {
@@ -273,9 +275,10 @@ describe("SettingsService marketplace defaults", () => {
     const llm = service.get("llm");
     expect(llm.provider).toBe(DEFAULT_LLM_VENDOR);
     expect(llm.marketplaceProviderPresetId).toBeUndefined();
-    expect(getLlmVendorSettings(llm.vendors, "openai-compatible")).toEqual(
-      getLlmVendorSettings(undefined, "openai-compatible"),
-    );
+    // The generic row keeps what the user saved: it was never the preset's
+    // block to scrub, and scrubbing it threw away another row's endpoint.
+    expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
+      .toBe("https://generic.example/v1");
     expect(Object.values(llm.modelListCache)).not.toContainEqual(
       expect.objectContaining({ credentialScope: "future-router" }),
     );
@@ -283,7 +286,7 @@ describe("SettingsService marketplace defaults", () => {
       .toBeNull();
   });
 
-  it("normalizes active custom provider endpoint to the installed preset baseUrl", async () => {
+  it("keeps a generic custom-provider endpoint patch while a preset is active", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({
       marketplace: {
@@ -313,7 +316,14 @@ describe("SettingsService marketplace defaults", () => {
 
     const llm = service.get("llm");
     expect(llm.marketplaceProviderPresetId).toBe("future-router");
+    // The generic custom-provider row's endpoint is its own and is persisted
+    // as written. It used to be overwritten with the active preset's address,
+    // which silently reverted every save from that card.
     expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
+      .toBe("https://stale.example/v1");
+    // And the preset route still resolves from the registry, so the patch
+    // cannot move where the active preset actually points.
+    expect(service.get("marketplace").installedProviderPresets?.[0]?.baseUrl)
       .toBe("https://future.example/v1");
   });
 
@@ -363,10 +373,10 @@ describe("SettingsService marketplace defaults", () => {
     });
 
     const marketplace = service.get("marketplace");
+    // The preset registry owns the route's address, so refusing the mutation
+    // HERE is what keeps the active route on the installed endpoint.
     expect(marketplace.installedProviderPresets).toEqual([preset]);
     const llm = service.get("llm");
-    expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
-      .toBe("https://future.example/v1");
     expect(llm.fallbackChain).toEqual([]);
   });
 
@@ -415,8 +425,6 @@ describe("SettingsService marketplace defaults", () => {
       modelOptions: ["future/v2", "future/free"],
       requiresApiKey: false,
     }]);
-    expect(getLlmVendorSettings(service.get("llm").vendors, "openai-compatible").baseUrl)
-      .toBe("https://future-v2.example/v1");
     expect(service.getSecret(marketplaceProviderPresetSecretKey("future-router")))
       .toBeNull();
   });
@@ -501,6 +509,73 @@ describe("SettingsService marketplace defaults", () => {
     // Legacy keys are not carried forward.
     expect(mk.realCloudBaseUrl).toBeUndefined();
     expect(mk.realCloudAllowPrivateNetwork).toBeUndefined();
+  });
+
+  it("unmirrors a preset endpoint that an older install left in the generic block", () => {
+    // Before the preset registry became the only owner of a preset's address,
+    // that address was copied into the generic openai-compatible block. On this
+    // install it would now read as the generic custom-provider row's OWN saved
+    // endpoint, and saving that card would write it back as if typed.
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai-compatible",
+          marketplaceProviderPresetId: "future-router",
+          vendors: {
+            "openai-compatible": { model: "future/free", baseUrl: "https://future.example/v1" },
+          },
+        },
+        marketplace: {
+          installedProviderPresets: [{
+            providerId: "future-router",
+            label: "Future Router",
+            baseUrl: "https://future.example/v1",
+            defaultModel: "future/free",
+            modelOptions: ["future/free"],
+            requiresApiKey: true,
+          }],
+        },
+      }),
+      "utf-8",
+    );
+
+    const llm = new SettingsService({ userDataPath }).get("llm");
+
+    expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
+      .toBeUndefined();
+    // The route itself is untouched — the preset still owns its address.
+    expect(llm.marketplaceProviderPresetId).toBe("future-router");
+  });
+
+  it("leaves a generic endpoint that matches no installed preset alone", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai-compatible",
+          vendors: {
+            "openai-compatible": { model: "local", baseUrl: "http://localhost:8001/v1" },
+          },
+        },
+        marketplace: {
+          installedProviderPresets: [{
+            providerId: "future-router",
+            label: "Future Router",
+            baseUrl: "https://future.example/v1",
+            defaultModel: "future/free",
+            modelOptions: ["future/free"],
+            requiresApiKey: true,
+          }],
+        },
+      }),
+      "utf-8",
+    );
+
+    const llm = new SettingsService({ userDataPath }).get("llm");
+
+    expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
+      .toBe("http://localhost:8001/v1");
   });
 
   it("drops a whitespace-only legacy realCloudBaseUrl and falls back to the default", () => {

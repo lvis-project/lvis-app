@@ -28,6 +28,16 @@ import {
   type MarketplaceInstalledProviderPreset,
 } from "../../../shared/marketplace-package-assets.js";
 
+/** A save that arrived while another was running. See `pendingSaves`. */
+type PendingSave =
+  | { kind: "tab"; tab: string }
+  | {
+    kind: "credential";
+    input: ProviderCredentialSave;
+    /** Settles the promise the card is still holding. */
+    resolve: (ok: boolean) => void;
+  };
+
 export interface SettingsOrchestrationState {
   // LLM
   /** The provider chat runs on — `llm.provider`. Moved only by an explicit pick. */
@@ -334,7 +344,11 @@ export function useSettingsOrchestration(
     setMarketplaceProviderPresetId(preset.providerId);
     setVendor("openai-compatible");
     setModel(preset.defaultModel);
-    setBaseUrl(preset.baseUrl);
+    // NOT `preset.baseUrl`: this field is the generic custom provider row's
+    // stored endpoint and is written back on every save, so parking the
+    // preset's address in it is how the two rows used to overwrite each other.
+    // Consumers that need the preset's address resolve it from the preset.
+    setBaseUrl(openaiCompatibleDefaults.baseUrl ?? "");
     setVertexProject("");
     setVertexLocation("");
     setEnableThinking(openaiCompatibleDefaults.enableThinking);
@@ -348,9 +362,12 @@ export function useSettingsOrchestration(
   const clearMarketplaceProviderPreset = useCallback(() => {
     setMarketplaceProviderPresetId("");
     if (vendor !== "openai-compatible") return;
-    const genericBlock = settingsSnapshot?.llm.marketplaceProviderPresetId
-      ? getLlmVendorSettings(undefined, "openai-compatible")
-      : getLlmVendorSettings(settingsSnapshot?.llm.vendors, "openai-compatible");
+    // The stored block, always. It used to be replaced with DEFAULTS whenever a
+    // preset had been persisted — the only reason being that the block then
+    // held the preset's mirrored address and had to be scrubbed. Nothing
+    // mirrors any more, so the block is the generic row's own endpoint and
+    // scrubbing it would throw away what the user saved.
+    const genericBlock = getLlmVendorSettings(settingsSnapshot?.llm.vendors, "openai-compatible");
     hydrateVendorBlock(genericBlock);
     void api.hasApiKey("openai-compatible")
       .then((k) => setHasKey(k))
@@ -364,7 +381,17 @@ export function useSettingsOrchestration(
   // would flicker (the first call's `finally` clears the flag while the
   // second is still running).
   const savingRef = useRef(false);
-  const pendingSavePayload = useRef<null | { tab: string }>(null);
+  /**
+   * Saves that arrived while another was in flight, in arrival order.
+   *
+   * A tab save and a provider card's credential save contend for the same
+   * in-flight flag, so both queue here rather than one of them being dropped:
+   * a card whose Save landed a beat after a debounced `llm` save used to
+   * return false and go quiet, leaving the card looking committed when
+   * nothing had been written. A queued credential save keeps its caller's
+   * promise so the card learns what actually happened.
+   */
+  const pendingSaves = useRef<PendingSave[]>([]);
   // Latest-`save` ref: the running save closure captures values from its
   // own render. When `finally` re-fires the pending payload, it must
   // call the LATEST `save` (with the latest closures) — otherwise
@@ -373,10 +400,32 @@ export function useSettingsOrchestration(
   // `useEffect` (canonical latest-ref pattern) so a discarded concurrent
   // render does not leave a dangling closure here.
   const saveRef = useRef<(tab: string) => Promise<boolean>>(null!);
+  const saveProviderCredentialRef =
+    useRef<(input: ProviderCredentialSave) => Promise<boolean>>(null!);
+  /**
+   * Run the next queued save, if any.
+   *
+   * Called from the `finally` of whichever save just finished, so the flag it
+   * checks is already clear. Each run drains the next in its own `finally`,
+   * which is what keeps the queue moving without a second scheduler.
+   */
+  const drainPendingSaves = (): void => {
+    const next = pendingSaves.current.shift();
+    if (!next) return;
+    if (next.kind === "tab") {
+      void saveRef.current(next.tab);
+      return;
+    }
+    void saveProviderCredentialRef.current(next.input).then(next.resolve, () => next.resolve(false));
+  };
   const save = async (tab: string): Promise<boolean> => {
     if (!settingsLoaded) return false;
     if (savingRef.current) {
-      pendingSavePayload.current = { tab };
+      // One pending entry per tab: the payload is read from state at run time,
+      // so a second request for the same tab would write the same thing twice.
+      if (!pendingSaves.current.some((entry) => entry.kind === "tab" && entry.tab === tab)) {
+        pendingSaves.current.push({ kind: "tab", tab });
+      }
       return false;
     }
     savingRef.current = true;
@@ -402,11 +451,10 @@ export function useSettingsOrchestration(
           );
         }
         await Promise.all(secretUpdates);
-        const selectedMarketplaceProviderPreset =
-          vendor === "openai-compatible" && marketplaceProviderPresetId
-            ? marketplaceProviderPresets.find((preset) => preset.providerId === marketplaceProviderPresetId)
-            : undefined;
-        const trimmedBaseUrl = selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl.trim();
+        // The row's OWN endpoint, never the active preset's. A preset's
+        // address belongs to the preset registry; writing it here would put it
+        // in the generic custom provider's block, which is a different row.
+        const trimmedBaseUrl = baseUrl.trim();
         const trimmedVertexProject = vertexProject.trim();
         const trimmedVertexLocation = vertexLocation.trim();
         const activeBlock: AppSettings["llm"]["vendors"][string] = {
@@ -453,16 +501,12 @@ export function useSettingsOrchestration(
     } finally {
       savingRef.current = false;
       setSaving(false);
-      // If a debounced save was coalesced while we were running, fire it
-      // now via the LATEST `save` closure (saveRef) so the re-fire reads
-      // the most recent state, not the stale closure of the original
-      // call. Without this the second save would silently drop any
-      // toggles that landed between the original call and the re-fire.
-      const pending = pendingSavePayload.current;
-      if (pending) {
-        pendingSavePayload.current = null;
-        void saveRef.current(pending.tab);
-      }
+      // If a save was coalesced while we were running, fire it now via the
+      // LATEST closure (the refs) so the re-fire reads the most recent state,
+      // not the stale closure of the original call. Without this the second
+      // save would silently drop any toggles that landed between the original
+      // call and the re-fire.
+      drainPendingSaves();
     }
     return ok;
   };
@@ -485,7 +529,15 @@ export function useSettingsOrchestration(
   const saveProviderCredential = useCallback(async (
     input: ProviderCredentialSave,
   ): Promise<boolean> => {
-    if (!settingsLoaded || savingRef.current) return false;
+    if (!settingsLoaded) return false;
+    if (savingRef.current) {
+      // Queue behind the in-flight save and hand the caller the outcome of
+      // the run that actually happens, so the card stays dirty until then
+      // instead of quietly reporting a failure it cannot explain.
+      return new Promise<boolean>((resolve) => {
+        pendingSaves.current.push({ kind: "credential", input, resolve });
+      });
+    }
     savingRef.current = true;
     setSaving(true);
     try {
@@ -525,8 +577,12 @@ export function useSettingsOrchestration(
     } finally {
       savingRef.current = false;
       setSaving(false);
+      drainPendingSaves();
     }
   }, [api, activeCredentialProviderId, onSaved, settingsLoaded, vendor]);
+  useEffect(() => {
+    saveProviderCredentialRef.current = saveProviderCredential;
+  }, [saveProviderCredential]);
 
   const setIdlePreferenceRefreshLive = useCallback((next: boolean) => {
     const previous = idlePreferenceRefresh;

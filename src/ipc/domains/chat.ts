@@ -44,8 +44,11 @@ import {
 import { createLogger } from "../../lib/logger.js";
 import { readDiffSidecar, isSafeId } from "../../tools/write-diff-cache.js";
 import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
-import type { LLMSettings } from "../../data/settings-store.js";
-import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
+import type { LLMSettings, MarketplaceSettings } from "../../data/settings-store.js";
+import {
+  getLlmVendorSettings,
+  llmRouteBaseUrlSignature,
+} from "../../shared/llm-vendor-defaults.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
@@ -485,16 +488,23 @@ function candidateMemoryActionFailure(error: unknown): { ok: false; error: "inva
 
 /**
  * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable
- * by vendor id). Mirrors the helper in settings.ts; kept local to avoid a
- * cross-domain import dependency. Used to guard ASRT sandbox live-refresh calls
- * so the refresh fires only when an endpoint actually changed.
+ * ). Reads the same shared helper settings.ts does, so the two domains cannot
+ * disagree about which endpoints count — a local copy already drifted once,
+ * missing the marketplace preset address that no vendor block holds. Used to
+ * guard ASRT sandbox live-refresh calls so the refresh fires only when an
+ * endpoint actually changed.
  */
-function vendorBaseUrlSignature(llm: LLMSettings): string {
-  const vendors = llm.vendors ?? {};
-  return Object.keys(vendors)
-    .sort()
-    .map((id) => `${id}=${vendors[id as keyof typeof vendors]?.baseUrl ?? ""}`)
-    .join("|");
+function vendorBaseUrlSignature(
+  llm: LLMSettings,
+  installedProviderPresets: MarketplaceSettings["installedProviderPresets"],
+): string {
+  return llmRouteBaseUrlSignature({
+    vendors: llm.vendors,
+    ...(llm.marketplaceProviderPresetId
+      ? { marketplaceProviderPresetId: llm.marketplaceProviderPresetId }
+      : {}),
+    installedProviderPresets,
+  });
 }
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
@@ -1429,7 +1439,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const prevLlm = settingsService.get("llm");
       const provider = prevLlm.provider;
       const prevBlock = getLlmVendorSettings(prevLlm.vendors, provider);
-      const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
+      const prevVendorBaseUrlSig = vendorBaseUrlSignature(
+        prevLlm,
+        settingsService.get("marketplace").installedProviderPresets,
+      );
       await settingsService.patch({
         llm: {
           vendors: {
@@ -1444,7 +1457,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // ASRT choke-point: the spread includes prevBlock.baseUrl if set, so if
       // a baseUrl was present it remains unchanged and the guard is a no-op.
       // Included for completeness in case future patches extend this handler.
-      if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
+      if (vendorBaseUrlSignature(
+        settingsService.get("llm"),
+        settingsService.get("marketplace").installedProviderPresets,
+      ) !== prevVendorBaseUrlSig) {
         void deps.refreshSandboxNetworkConfig?.();
       }
       group.loop.refreshProvider();
@@ -1460,7 +1476,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
         // Restore path: if the forward patch triggered a sandbox refresh but
         // the restore brings baseUrl back to the same value, the guard here is
         // also a no-op (prevBlock was the original, sig matches original).
-        if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
+        if (vendorBaseUrlSignature(
+        settingsService.get("llm"),
+        settingsService.get("marketplace").installedProviderPresets,
+      ) !== prevVendorBaseUrlSig) {
           void deps.refreshSandboxNetworkConfig?.();
         }
         group.loop.refreshProvider();
