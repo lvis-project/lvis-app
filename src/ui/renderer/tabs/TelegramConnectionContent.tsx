@@ -13,7 +13,7 @@ import {
   type TelegramConnectionSnapshot,
   type TelegramCreatedPairingCode,
 } from "../../../shared/telegram-connection.js";
-import { SettingsSection } from "../components/PageShell.js";
+import { SettingsSection, type SettingsSectionFeedback } from "../components/PageShell.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
 import { AwayAuthorityContent } from "./AwayAuthorityContent.js";
@@ -28,8 +28,6 @@ export interface TelegramConnectionContentProps {
    */
   chatGroupId: string;
 }
-
-type Feedback = { readonly tone: "error" | "success"; readonly text: string } | null;
 
 function durationLabel(
   value: TelegramApprovalDurationPreset,
@@ -87,7 +85,7 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TelegramConnectionSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [feedback, setFeedback] = useState<SettingsSectionFeedback>(null);
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [botToken, setBotToken] = useState("");
