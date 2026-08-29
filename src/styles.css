@@ -1809,9 +1809,13 @@
      * is a collapsed icon rail, and where the floating banner stack starts so
      * it clears that reserve. rem here, unlike the insets above: nothing on
      * this edge shares the traffic lights' line, and the rail's own width hugs
-     * its content, which does follow the type scale. `App.tsx` carries the
-     * band's px counterpart (`COLLAPSED_RAIL_LEAD_RESERVE`) — the band is not
-     * allowed to scale, so the two agree only at a 1.0 font scale. */
+     * its content, which does follow the type scale.
+     *
+     * KNOWN MISMATCH: `App.tsx` carries the band's counterpart
+     * (`COLLAPSED_RAIL_LEAD_RESERVE`) as a flat 64px, because the band may not
+     * scale. At the shipped 0.875 font scale this 4rem resolves to 56px, so
+     * the band's path sits 8px right of the content it names. Pre-existing;
+     * see the note on that constant. */
     --shell-collapsed-rail-reserve: 4rem;
     --shell-collapsed-banner-inset: 4.5rem;
   }

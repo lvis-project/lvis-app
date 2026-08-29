@@ -1777,9 +1777,10 @@ export function Sidebar({
           />
         ) : null}
         {/* ── Cluster strip — [펼침/닫힘 toggle] → [검색] → [즐겨찾기] → [내보내기],
-            ~8px gaps, each h-7 w-7. Sits on the traffic-light line. When the card
-            is expanded this is the card's top strip; when collapsed it stands bare
-            in the band. Always rendered — never hidden in either state. */}
+            `--chrome-gap-hair` gaps, each button a `--chrome-icon-button` square.
+            Sits on the traffic-light line. When the card is expanded this is the
+            card's top strip; when collapsed it stands bare in the band. Always
+            rendered — never hidden in either state. */}
         <ClusterStrip
           collapsed={collapsed}
           leadClearance={darwinTopClearance}
@@ -1796,12 +1797,13 @@ export function Sidebar({
         className={
           collapsed
             ? // Collapsed: a compact icon-rail card BELOW the bare cluster,
-              // pinned to the aside's left edge (left-2 ≈ 8px) so it stays within
-              // the main content's collapsed left padding (pl-20 ≈ 80px). The
-              // cluster strip above keeps its own lead clearance to clear the OS
-              // lights; the rail does NOT inherit that clearance. `mt-2.5`
-              // (≈10px) gives the rail card adequate top margin below the band so
-              // it is not flush against the cluster strip in chat mode.
+              // pinned to the aside's left edge (`--shell-card-inset`) so it stays
+              // within the main content's collapsed left padding
+              // (`--shell-collapsed-rail-reserve`). The cluster strip above keeps
+              // its own lead clearance to clear the OS lights; the rail does NOT
+              // inherit that clearance. `mt-2.5` gives the rail card top margin
+              // below the band so it is not flush against the cluster strip in
+              // chat mode.
               "lvis-surface-raised mt-2.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-card"
             : "flex min-h-0 flex-1 flex-col overflow-hidden"
         }

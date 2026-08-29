@@ -52,8 +52,11 @@ export const CHROME_GAP_TIGHT = 4;
 export const SHELL_GUTTER = 8;
 
 /**
- * The band's own edge gutter: its trailing pad on every platform, and its
- * leading pad where there are no traffic lights to clear.
+ * The band's own edge gutter: its leading pad where there are no traffic
+ * lights to clear, and its trailing pad on the two platforms whose bands carry
+ * one. The win/linux band sets no trailing pad — its minimise / maximise /
+ * close cluster runs flush to the window's corner, so a gutter there would
+ * float the controls off the edge they belong to.
  */
 export const BAND_EDGE_PAD = 12;
 

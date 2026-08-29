@@ -309,7 +309,7 @@ the bundle missing and the key captures nothing. The six `chat-*` and six
 
 The four `meeting-*` captures also run at a 1120px viewport rather than the
 default 1600px, and that is load-bearing rather than cosmetic. The page shell
-caps a plugin view at its 58rem reading column, and this guest reserves a fixed
+caps a plugin view at its `--reading-column-max` reading column, and this guest reserves a fixed
 left gutter inside its own viewport: measured at a 1600px window the `<webview>`
 is 912px, the guest starts its card 481px in and lays it out 477px wide, so the
 last 46px — the right edge of every card and control — falls off the element. At

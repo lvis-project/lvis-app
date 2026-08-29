@@ -109,12 +109,20 @@ import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
 const CONTENT_TITLE_INSET = SHELL_GUTTER * 2;
 
 /**
- * What `<main>` reserves on its leading edge for the COLLAPSED icon rail, in
- * the band's device px rather than the rem the content surface uses
- * (`--shell-collapsed-rail-reserve`). The band may not follow the type scale —
- * it shares the traffic lights' line — so the two are deliberately the same
- * reserve expressed in the unit each surface is allowed to use, and they
- * coincide only at a 1.0 font scale.
+ * What the BAND assumes `<main>` reserves on its leading edge for the collapsed
+ * icon rail. The content surface's own reserve is
+ * `--shell-collapsed-rail-reserve` (4rem), and the two do not agree: the app
+ * ships at a 0.875 font scale (`FONT_SIZE_SCALE_DEFAULT`), so 4rem resolves to
+ * 56px while this reads 64. The band's path therefore starts 8px to the right
+ * of the content it names whenever the sidebar is collapsed.
+ *
+ * That gap predates this constant being named — it was a bare 64 against a
+ * bare `pl-[4rem]`, which is why nobody had noticed the units differ. It is
+ * left as-is here rather than silently "fixed", because closing it is a visual
+ * change and this pass is behaviour-preserving. The band genuinely may not
+ * follow the type scale (it shares the traffic lights' line, drawn in device
+ * px), so the fix is to decide which number is right and make the content
+ * surface px too — tracked as follow-up, not done here.
  */
 const COLLAPSED_RAIL_LEAD_RESERVE = 64;
 
