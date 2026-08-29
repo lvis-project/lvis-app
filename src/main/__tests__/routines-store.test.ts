@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { withTz } from "../../__tests__/test-helpers.js";
-import { statSync, writeFileSync } from "node:fs";
+import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { platform } from "node:os";
 import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LENGTH } from "../routines-store.js";
@@ -841,6 +841,28 @@ describe("RoutinesStore workspace scope revocation", () => {
         routinesUpdated: 0,
         directoriesRemoved: 0,
       });
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe("RoutinesStore v2 — corrupt routines.json recovery", () => {
+  it("backs up corrupt JSON as .corrupt-<ts>.bak and starts empty", async () => {
+    const { store, dir, cleanup } = tempRoutinesStore();
+    try {
+      writeFileSync(join(dir, "routines.json"), "{ this is not json", "utf-8");
+
+      const added = await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: futureIso() },
+        notificationTitle: "recovered",
+      });
+      expect(store.listActive().map((r) => r.id)).toEqual([added.id]);
+
+      const backups = readdirSync(dir).filter((f) => /^routines\.json\.corrupt-\d+\.bak$/.test(f));
+      expect(backups).toHaveLength(1);
     } finally {
       await cleanup();
     }

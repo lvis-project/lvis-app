@@ -67,6 +67,48 @@ export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T>
 }
 
 /**
+ * Read + JSON-parse `filePath` for a store that validates its own records.
+ *
+ * Unlike {@link readJsonFile}, the failure modes are kept apart because they
+ * mean different things to a store:
+ *
+ *   - missing file (ENOENT): the store has never been written — `empty()`.
+ *   - unparseable JSON: the file is damaged. It is moved aside as
+ *     `<file>.corrupt-<timestamp>.bak` and `empty()` is returned, so the
+ *     store keeps working and the bytes are kept for inspection. Silently
+ *     treating a damaged file as empty would overwrite the evidence on the
+ *     next write; throwing would take the whole feature down with it.
+ *   - any other read error (EACCES, EISDIR, …): propagated. A permission
+ *     problem must not masquerade as an empty store.
+ *
+ * `hydrate` receives the parsed value as `unknown` and owns the shape check
+ * — dropping tampered records, repairing counters — since that is per store.
+ */
+export async function readJsonFileOrEmpty<T>(
+  filePath: string,
+  empty: () => T,
+  hydrate: (parsed: unknown) => T,
+): Promise<T> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return empty();
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const backup = `${filePath}.corrupt-${Date.now()}.bak`;
+    log.warn(`corrupt JSON in ${filePath}; moved to ${backup}, starting empty`);
+    await fs.rename(filePath, backup);
+    return empty();
+  }
+  return hydrate(parsed);
+}
+
+/**
  * fsync the directory that now holds the renamed entry.
  *
  * `rename` orders the replacement but does not make the new directory entry
