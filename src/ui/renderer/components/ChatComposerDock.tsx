@@ -338,6 +338,12 @@ export function ChatComposerDock({
         centeredMarginClass,
       ].join(" ")}
       data-composer-placement={centered ? "center" : "bottom"}
+      // Which surface this whole dock subtree serves. The Composer's textarea
+      // carries the same attribute for the field itself; here it covers the
+      // queue panel and action bar too, so a test (or a stylesheet) can address
+      // "the main dock's send button" without matching the side chat's, which
+      // renders the very same test ids.
+      data-composer-surface="main"
     >
       <div className={dockColumnClass} data-testid="session-todo-dock">
         <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
