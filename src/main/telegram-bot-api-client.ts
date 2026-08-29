@@ -19,6 +19,7 @@
  */
 
 import { isRecord } from "../shared/is-record.js";
+import { isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 /** Telegram caps `getUpdates` at 100; ask for a bounded batch explicitly. */
 const DEFAULT_UPDATE_LIMIT = 25;
@@ -495,10 +496,6 @@ function composeAbort(signal: AbortSignal | undefined, timeoutMs: number): Compo
 
 function failure(reason: TelegramBotApiFailureReason): { ok: false; reason: TelegramBotApiFailureReason } {
   return Object.freeze({ ok: false as const, reason });
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 function isPollOffset(value: unknown): value is number {

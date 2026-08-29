@@ -9,6 +9,7 @@
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
 import { hasExactKeys } from "./is-record.js";
+import { isNonNegativeSafeInteger } from "./safe-integer.js";
 
 export const TAILNET_INVITATION_DURATION_PRESETS = ["10m", "1h", "24h"] as const;
 export type TailnetInvitationDurationPreset = (typeof TAILNET_INVITATION_DURATION_PRESETS)[number];
@@ -137,10 +138,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function timestamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 export function isTailnetSharingId(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
 }
@@ -202,7 +199,7 @@ export function isTailnetSharingRevokeInput(value: unknown): value is TailnetSha
 
 function parseInvitationSummary(value: unknown): TailnetSharingInvitationSummary | null {
   if (!record(value) || !hasExactKeys(value, ["expiresAt", "id"])
-    || !isTailnetSharingId(value.id) || !timestamp(value.expiresAt)) {
+    || !isTailnetSharingId(value.id) || !isNonNegativeSafeInteger(value.expiresAt)) {
     return null;
   }
   return Object.freeze({ id: value.id, expiresAt: value.expiresAt });
@@ -214,7 +211,7 @@ function parsePairingSummary(value: unknown): TailnetSharingPairingSummary | nul
     || typeof value.actorFingerprint !== "string"
     || !ACTOR_FINGERPRINT.test(value.actorFingerprint)
     || (value.state !== "pending" && value.state !== "active")
-    || !(value.expiresAt === null || timestamp(value.expiresAt))) {
+    || !(value.expiresAt === null || isNonNegativeSafeInteger(value.expiresAt))) {
     return null;
   }
   return Object.freeze({
@@ -232,7 +229,7 @@ function parseShareSummary(value: unknown): TailnetSharingShareSummary | null {
     || typeof value.actorFingerprint !== "string"
     || !ACTOR_FINGERPRINT.test(value.actorFingerprint)
     || !isTailnetSharePermission(value.permission)
-    || !timestamp(value.expiresAt)) {
+    || !isNonNegativeSafeInteger(value.expiresAt)) {
     return null;
   }
   return Object.freeze({
@@ -278,7 +275,7 @@ export function parseTailnetSharingCreatedInvitation(
     || !isTailnetSharingId(value.id)
     || typeof value.code !== "string"
     || !INVITATION_CODE.test(value.code)
-    || !timestamp(value.expiresAt)) {
+    || !isNonNegativeSafeInteger(value.expiresAt)) {
     return null;
   }
   return Object.freeze({ id: value.id, code: value.code, expiresAt: value.expiresAt });

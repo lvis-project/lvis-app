@@ -17,6 +17,7 @@ import type {
   TailnetShareActorId,
   TailnetSharePermission,
 } from "./tailnet-pairing-share-store.js";
+import { isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 export const TAILNET_PAIRED_SHARE_ACTOR_SECRET_NAME = "tailnet-paired-share-actor-v1.key";
 
@@ -177,9 +178,9 @@ function validBinding(value: unknown): value is TailnetPairingShareBinding {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const candidate = value as Partial<TailnetPairingShareBinding>;
   return uuid(candidate.pairingId)
-    && positiveInteger(candidate.pairingEpoch)
+    && isPositiveSafeInteger(candidate.pairingEpoch)
     && uuid(candidate.shareId)
-    && positiveInteger(candidate.shareEpoch)
+    && isPositiveSafeInteger(candidate.shareEpoch)
     && uuid(candidate.scope);
 }
 
@@ -198,10 +199,6 @@ function sameActor(left: TailnetShareActorId, right: TailnetShareActorId): boole
 function uuid(value: unknown): value is string {
   return typeof value === "string"
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function positiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 function isPairedShareStore(value: unknown): value is TailnetPairedShareStore {

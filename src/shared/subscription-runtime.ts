@@ -6,6 +6,7 @@
  * so treating one as an API vendor would leak the wrong settings, fallback,
  * pricing, and tool-execution assumptions into the application.
  */
+import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "./safe-integer.js";
 
 const SUBSCRIPTION_RUNTIME_IDS = ["codex", "kimi-code", "grok-build"] as const;
 
@@ -60,14 +61,6 @@ const SUBSCRIPTION_USAGE_TELEMETRY_KEYS = new Set([
   "contextWindow",
 ]);
 
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
 /**
  * Validates and copies telemetry arriving from transport, persisted history,
  * or IPC. Unknown fields are rejected so raw provider payloads cannot leak
@@ -121,7 +114,6 @@ export function normalizeSubscriptionUsageTelemetry(
     return undefined;
   }
 }
-
 
 export function isSubscriptionRuntimeId(value: unknown): value is SubscriptionRuntimeId {
   return typeof value === "string"

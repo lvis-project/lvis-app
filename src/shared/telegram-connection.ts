@@ -12,6 +12,7 @@
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
 import { hasExactKeys } from "./is-record.js";
+import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "./safe-integer.js";
 
 /** How long an unredeemed pairing code stays valid. */
 export const TELEGRAM_PAIRING_CODE_TTL_MS = 10 * 60 * 1_000;
@@ -220,14 +221,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function timestamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function counter(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 export function isTelegramConnectionId(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
 }
@@ -321,7 +314,7 @@ function parsePairingSummary(value: unknown): TelegramPairingSummary | null {
 function parseApprovalSummary(value: unknown): TelegramApprovalSummary | null {
   if (!record(value) || !hasExactKeys(value, ["expiresAt", "id", "matchesCurrentConversation"])
     || !isTelegramConnectionId(value.id)
-    || !timestamp(value.expiresAt)
+    || !isPositiveSafeInteger(value.expiresAt)
     || typeof value.matchesCurrentConversation !== "boolean") {
     return null;
   }
@@ -335,8 +328,8 @@ function parseApprovalSummary(value: unknown): TelegramApprovalSummary | null {
 function parsePendingCodeSummary(value: unknown): TelegramPendingCodeSummary | null {
   if (!record(value) || !hasExactKeys(value, ["attemptsRemaining", "expiresAt", "id"])
     || !isTelegramConnectionId(value.id)
-    || !timestamp(value.expiresAt)
-    || !counter(value.attemptsRemaining)) {
+    || !isPositiveSafeInteger(value.expiresAt)
+    || !isNonNegativeSafeInteger(value.attemptsRemaining)) {
     return null;
   }
   return Object.freeze({
@@ -386,7 +379,7 @@ export function parseTelegramCreatedPairingCode(
     || !isTelegramConnectionId(value.id)
     || !isTelegramPairingCode(value.code)
     || !isTelegramBotUsername(value.botUsername)
-    || !timestamp(value.expiresAt)) {
+    || !isPositiveSafeInteger(value.expiresAt)) {
     return null;
   }
   return Object.freeze({

@@ -7,6 +7,7 @@ import { isIP } from "node:net";
 import { A2AJsonRpcMethod } from "../shared/a2a-wire.js";
 import { isRecord, hasExactKeys } from "../shared/is-record.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 export const A2A_EXACT_SEND_REPLAY_URI =
   "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44" as const;
@@ -333,10 +334,6 @@ function timestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
-function positiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
 export function parseA2ARouteSnapshot(
   response: Readonly<A2ARouteResolveHttpResponse>,
   expected: Readonly<A2ARouteResolveRequest>,
@@ -387,7 +384,7 @@ export function parseA2ARouteSnapshot(
     ...(expected.predecessorCredentialRevisionId === undefined
       ? [] : [value.predecessor_credential_revision_id]),
   ];
-  if (!numericIds.every(positiveSafeInteger)) {
+  if (!numericIds.every(isPositiveSafeInteger)) {
     throw new Error("a2a-route-snapshot-version-invalid");
   }
   if (

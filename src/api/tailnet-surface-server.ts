@@ -52,6 +52,7 @@ import {
 import { isRecord } from "../shared/is-record.js";
 import { errorMessage } from "../shared/error-message.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { requirePositiveInteger } from "../shared/safe-integer.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
@@ -365,19 +366,19 @@ export function startTailnetSurfaceServer(
         sessions: options.web.sessions ?? createTailnetWebSessionStore(),
       });
 
-  const maxConnections = positiveInteger(options.maxConnections ?? DEFAULT_MAX_CONNECTIONS, "maxConnections");
-  const maxStreamLifetimeMs = positiveInteger(
+  const maxConnections = requirePositiveInteger(options.maxConnections ?? DEFAULT_MAX_CONNECTIONS, `maxConnections must be a positive safe integer.`);
+  const maxStreamLifetimeMs = requirePositiveInteger(
     options.maxStreamLifetimeMs ?? DEFAULT_SSE_MAX_LIFETIME_MS,
-    "maxStreamLifetimeMs",
+    `maxStreamLifetimeMs must be a positive safe integer.`,
   );
-  const maxRequestsPerWindow = positiveInteger(
+  const maxRequestsPerWindow = requirePositiveInteger(
     options.maxRequestsPerWindow ?? DEFAULT_MAX_REQUESTS_PER_WINDOW,
-    "maxRequestsPerWindow",
+    `maxRequestsPerWindow must be a positive safe integer.`,
   );
-  const requestWindowMs = positiveInteger(options.requestWindowMs ?? DEFAULT_REQUEST_WINDOW_MS, "requestWindowMs");
-  const maxWebReadRequestsPerWindow = positiveInteger(
+  const requestWindowMs = requirePositiveInteger(options.requestWindowMs ?? DEFAULT_REQUEST_WINDOW_MS, `requestWindowMs must be a positive safe integer.`);
+  const maxWebReadRequestsPerWindow = requirePositiveInteger(
     options.maxWebReadRequestsPerWindow ?? DEFAULT_MAX_WEB_READ_REQUESTS_PER_WINDOW,
-    "maxWebReadRequestsPerWindow",
+    `maxWebReadRequestsPerWindow must be a positive safe integer.`,
   );
   const webReadRequestLimiter = createTailnetRequestLimiter(maxWebReadRequestsPerWindow, requestWindowMs);
   const requestLimiter = createTailnetRequestLimiter(maxRequestsPerWindow, requestWindowMs);
@@ -2894,11 +2895,4 @@ function isCapabilityKey(value: string): boolean {
     // A capability key is a token spliced into grant strings, so a SPACE in one
     // would split it in two. Stricter than the shared class on purpose.
     && !value.includes(" ");
-}
-
-function positiveInteger(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new RangeError(`${label} must be a positive safe integer.`);
-  }
-  return value;
 }

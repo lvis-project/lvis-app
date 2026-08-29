@@ -17,6 +17,7 @@ import {
   subscriptionImageExtension,
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
+import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 const require = createRequire(import.meta.url);
 
@@ -648,14 +649,6 @@ export function isCodexAppServerRequestId(value: unknown): value is CodexAppServ
 function projectTurnStatus(value: unknown): CodexConversationTurnStatus {
   if (value === "completed" || value === "interrupted" || value === "failed") return value;
   return "failed";
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 /**

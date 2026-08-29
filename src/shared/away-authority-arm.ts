@@ -21,6 +21,7 @@
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
 import { hasExactKeys } from "./is-record.js";
+import { isNonNegativeSafeInteger } from "./safe-integer.js";
 
 /**
  * Offered lifetimes. The longest is the ceiling `parseAwayAuthorityGrant`
@@ -144,10 +145,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function timestamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 function isAwayAuthorityMode(value: unknown): value is AwayAuthorityMode {
   return typeof value === "string" && (AWAY_AUTHORITY_MODES as readonly string[]).includes(value);
 }
@@ -208,7 +205,7 @@ export function parseAwayAuthorityStatus(value: unknown): AwayAuthorityStatus | 
     || !Array.isArray(value.directories)
     || value.directories.length > AWAY_AUTHORITY_MAX_DIRECTORIES
     || !value.directories.every((entry) => typeof entry === "string" && entry.length > 0)
-    || !timestamp(value.expiresAt)
+    || !isNonNegativeSafeInteger(value.expiresAt)
     || typeof value.remaining !== "number"
     || !Number.isSafeInteger(value.remaining)
     || value.remaining <= 0) {

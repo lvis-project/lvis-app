@@ -10,6 +10,7 @@ import { randomBytes as nodeRandomBytes } from "node:crypto";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
 import type { TailnetShareActorId } from "../main/tailnet-pairing-share-store.js";
 import { timingSafeEqualHexDigest, sha256Hex } from "../lib/hex-digest-equal.js";
+import { isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 const SESSION_BYTES = 32;
 const DEFAULT_TTL_MS = 15 * 60 * 1_000;
@@ -104,7 +105,6 @@ export function createTailnetWebSessionStore(
     }
   };
 
-
   const checkedNow = (): number => {
     const value = now();
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -185,7 +185,6 @@ export function createTailnetWebSessionStore(
       });
     },
 
-
     resolve,
 
     resolveMutation(cookieToken: string, csrfToken: string): TailnetWebSessionAuthorization | null {
@@ -256,7 +255,6 @@ function sameBinding(left: TailnetPairingShareBinding, right: TailnetPairingShar
     && left.scope === right.scope;
 }
 
-
 function validDuration(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= MAX_TTL_MS;
 }
@@ -269,16 +267,12 @@ function validBinding(value: unknown): value is TailnetPairingShareBinding {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<TailnetPairingShareBinding>;
   return uuid(candidate.pairingId)
-    && epoch(candidate.pairingEpoch)
+    && isPositiveSafeInteger(candidate.pairingEpoch)
     && uuid(candidate.shareId)
-    && epoch(candidate.shareEpoch)
+    && isPositiveSafeInteger(candidate.shareEpoch)
     && uuid(candidate.scope);
 }
 
 function uuid(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
-}
-
-function epoch(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }

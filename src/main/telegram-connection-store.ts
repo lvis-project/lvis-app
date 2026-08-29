@@ -48,6 +48,7 @@ import {
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
 import { hasExactKeys } from "../shared/is-record.js";
+import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 const STORE_VERSION = 1;
 /** Same namespace the bridge already uses for `command-receipts.json`. */
@@ -335,14 +336,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function timestamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function counter(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 function epochValue(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 }
@@ -374,7 +367,7 @@ function validPendingCode(value: unknown): value is StoredPendingCode {
     && hasExactKeys(value, ["id", "codeDigest", "expiresAt", "attemptsRemaining"])
     && isTelegramConnectionId(value.id)
     && digest(value.codeDigest)
-    && timestamp(value.expiresAt)
+    && isPositiveSafeInteger(value.expiresAt)
     && typeof value.attemptsRemaining === "number"
     && Number.isSafeInteger(value.attemptsRemaining)
     // A budget of zero destroys the code, so a persisted zero is a bug, not a
@@ -390,7 +383,7 @@ function validPairing(value: unknown): value is StoredPairing {
     && digest(value.actorDigest)
     && (value.state === "active" || value.state === "revoked" || value.state === "unrecognized")
     && epochValue(value.epoch)
-    && timestamp(value.createdAt);
+    && isPositiveSafeInteger(value.createdAt);
 }
 
 function validApproval(value: unknown): value is StoredApproval {
@@ -409,8 +402,8 @@ function validApproval(value: unknown): value is StoredApproval {
     && isTelegramConnectionId(value.scope)
     && (value.state === "active" || value.state === "revoked" || value.state === "expired")
     && epochValue(value.epoch)
-    && timestamp(value.createdAt)
-    && timestamp(value.expiresAt)
+    && isPositiveSafeInteger(value.createdAt)
+    && isPositiveSafeInteger(value.expiresAt)
     && value.expiresAt > value.createdAt;
 }
 
@@ -433,7 +426,7 @@ function validDocument(value: unknown): value is StoreDocument {
     || !desiredState(value.desiredState)
     || !(value.botFingerprint === null || digest(value.botFingerprint))
     || !(value.actorKeyDigest === null || digest(value.actorKeyDigest))
-    || !(value.pollOffset === null || counter(value.pollOffset))
+    || !(value.pollOffset === null || isNonNegativeSafeInteger(value.pollOffset))
     || !(value.pendingCode === null || validPendingCode(value.pendingCode))
     || !(value.pairing === null || validPairing(value.pairing))
     || !Array.isArray(value.approvals)
@@ -608,7 +601,7 @@ export function createTelegramConnectionStore(
 
   const checkedNow = (): number => {
     const value = clock();
-    if (!timestamp(value)) throw invalid();
+    if (!isPositiveSafeInteger(value)) throw invalid();
     return value;
   };
 
@@ -807,7 +800,7 @@ export function createTelegramConnectionStore(
   }));
 
   const recordPollOffset = async (offset: number): Promise<void> => {
-    if (!counter(offset)) throw inputInvalid();
+    if (!isNonNegativeSafeInteger(offset)) throw inputInvalid();
     await mutate((current) => (
       current.pollOffset !== null && offset <= current.pollOffset
         ? { document: current, value: undefined, changed: false }
