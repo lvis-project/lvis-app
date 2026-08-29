@@ -2408,22 +2408,37 @@ export function LlmTab(props: LlmTabProps) {
   };
 
   /**
-   * The row's state, as one dot and one word.
+   * The row's state, as one dot and one word — per ROUTE.
    *
    * Every row carries it, including the ones that are merely connected — a row
    * that only speaks up when it is the active one leaves the rest of the list
    * saying nothing about itself, which is the state this list exists to show.
+   *
+   * A subscription row already says how its sign-in stands, in the runtime's
+   * own badge. So on that row this chip speaks for the API-key route alone,
+   * and names it — "connected" beside "not set" is two routes' states, and
+   * without the names it read as one row contradicting itself. A subscription
+   * row with no API counterpart has one route, and its badge covers it.
    */
   const statusChip = (row: ProviderConnection) => {
-    const live = activeMode(row) !== null;
-    const label = live
+    const apiRouteOnly = row.subscription !== undefined;
+    if (apiRouteOnly && !row.apiVendorId) return null;
+    const mode = activeMode(row);
+    const live = apiRouteOnly ? mode === "api" : mode !== null;
+    const connected = apiRouteOnly ? row.apiConfigured : row.connected;
+    const state = live
       ? t("subscriptionProvidersSection.apiChatActive")
-      : row.connected
+      : connected
         ? t("subscriptionProvidersSection.statusConnected")
-        : t("subscriptionProvidersSection.statusSignedOut");
+        : apiRouteOnly
+          ? t("llmTab.apiKeyNotSet")
+          : t("subscriptionProvidersSection.statusSignedOut");
+    const label = apiRouteOnly
+      ? t("subscriptionProvidersSection.routeStatus", { route: t("llmTab.modeApiKey"), status: state })
+      : state;
     const tone = live
       ? "bg-primary"
-      : row.connected
+      : connected
         ? "bg-success"
         : "bg-muted-foreground/(--opacity-half)";
     return (
@@ -2585,6 +2600,7 @@ export function LlmTab(props: LlmTabProps) {
           key={row.id}
           provider={row.subscription}
           label={row.label}
+          {...(row.apiVendorId ? { routeName: t("llmTab.modeSubscription") } : {})}
           activeSelection={subscription.props.activeSelection}
           chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
           actions={subscription.props.actions}

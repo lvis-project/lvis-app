@@ -689,6 +689,48 @@ describe("LlmTab model chooser is the whole switch", () => {
   });
 });
 
+describe("LlmTab names each route's state on a row that has two", () => {
+  const SIGNED_IN = { runtime: "ready", connection: "connected", models: [] } as const;
+  const SUBSCRIPTION = /구독|Subscription/;
+  const API_KEY = /API/;
+  const CONNECTED = /연결됨|Connected/;
+  const SIGNED_OUT = /로그아웃됨|Signed out/;
+  const NOT_SET = /미설정|Not set/;
+
+  it("says the API key is not set beside a signed-in subscription, not that the row is signed out", async () => {
+    // The row is one provider reached two ways. Its sign-in is healthy and it
+    // holds no key; "connected" and "signed out" side by side described those
+    // two routes without saying so, and read as a contradiction.
+    installSubscription([codexView({ status: SIGNED_IN })]);
+    await renderTab(makeApi(), { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    const card = await screen.findByTestId("subscription-provider:codex");
+    const signIn = within(card).getByTestId("subscription-provider:codex:connection");
+    expect(signIn).toHaveTextContent(SUBSCRIPTION);
+    expect(signIn).toHaveTextContent(CONNECTED);
+    const apiRoute = within(card).getByTestId("llm-tab:connection-status:codex");
+    expect(apiRoute).toHaveTextContent(API_KEY);
+    expect(apiRoute).toHaveTextContent(NOT_SET);
+    expect(within(card).queryByText(SIGNED_OUT)).toBeNull();
+  });
+
+  it("says the API key is connected beside a signed-out subscription", async () => {
+    installSubscription([codexView()]);
+    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), {
+      vendor: "claude",
+      model: "claude-sonnet-4-6",
+    });
+
+    const card = await screen.findByTestId("subscription-provider:codex");
+    await waitFor(() => expect(within(card).getByTestId("llm-tab:connection-status:codex"))
+      .toHaveTextContent(CONNECTED));
+    expect(within(card).getByTestId("llm-tab:connection-status:codex")).toHaveTextContent(API_KEY);
+    const signIn = within(card).getByTestId("subscription-provider:codex:connection");
+    expect(signIn).toHaveTextContent(SUBSCRIPTION);
+    expect(signIn).toHaveTextContent(SIGNED_OUT);
+  });
+});
+
 describe("LlmTab preset and generic custom provider are separate rows", () => {
   // A preset that ships its own model list, so the row has something to offer
   // before any endpoint has answered.

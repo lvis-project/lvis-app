@@ -3114,6 +3114,7 @@ export const zhMessages: Record<string, string> = {
   "subscriptionProvidersSection.statusDeviceCodePending": "设备代码登录待完成",
   "subscriptionProvidersSection.statusConnected": "已连接",
   "subscriptionProvidersSection.statusSignedOut": "已退出登录",
+  "subscriptionProvidersSection.routeStatus": "{route} · {status}",
   "subscriptionProvidersSection.statusReady": "已准备好登录",
   "subscriptionProvidersSection.refreshStatus": "刷新 {provider} 连接状态",
   "subscriptionProvidersSection.errorProviderNotSupported": "不支持此订阅提供商。",
