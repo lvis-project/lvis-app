@@ -848,7 +848,7 @@ describe("RoutinesStore workspace scope revocation", () => {
 });
 
 describe("RoutinesStore v2 — corrupt routines.json recovery", () => {
-  it("backs up corrupt JSON as .corrupt-<ts>.bak and starts empty", async () => {
+  it("backs up corrupt JSON as .corrupt-<ts>-<random>.bak and starts empty", async () => {
     const { store, dir, cleanup } = tempRoutinesStore();
     try {
       writeFileSync(join(dir, "routines.json"), "{ this is not json", "utf-8");
@@ -861,7 +861,7 @@ describe("RoutinesStore v2 — corrupt routines.json recovery", () => {
       });
       expect(store.listActive().map((r) => r.id)).toEqual([added.id]);
 
-      const backups = readdirSync(dir).filter((f) => /^routines\.json\.corrupt-\d+\.bak$/.test(f));
+      const backups = readdirSync(dir).filter((f) => /^routines\.json\.corrupt-\d+-[0-9a-f]{8}\.bak$/.test(f));
       expect(backups).toHaveLength(1);
     } finally {
       await cleanup();

@@ -167,7 +167,7 @@ describe("SkillApprovalsStore — atomic-write convergence (feature-namespace au
 });
 
 describe("SkillApprovalsStore — corrupt file recovery", () => {
-  it("backs up corrupt JSON as .corrupt-<ts>.bak and starts empty", async () => {
+  it("backs up corrupt JSON as .corrupt-<ts>-<random>.bak and starts empty", async () => {
     const file = tmpFile();
     writeFileSync(file, "{ this is not json", "utf-8");
     const store = new SkillApprovalsStore(file);
@@ -176,7 +176,7 @@ describe("SkillApprovalsStore — corrupt file recovery", () => {
     await store.approve("report-writing", "body-v1");
     expect(await store.isApproved("report-writing", "body-v1")).toBe(true);
 
-    const backups = readdirSync(dirname(file)).filter((f) => /\.corrupt-\d+\.bak$/.test(f));
+    const backups = readdirSync(dirname(file)).filter((f) => /\.corrupt-\d+-[0-9a-f]{8}\.bak$/.test(f));
     expect(backups).toHaveLength(1);
   });
 });

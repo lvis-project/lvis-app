@@ -298,8 +298,8 @@ describe("WorkBoardStore — corrupt board.json recovery", () => {
       if (listed.status !== "ok") throw new Error("unreachable");
       expect(listed.items).toHaveLength(0);
 
-      // The corrupt original is preserved under a .corrupt-*.bak sibling.
-      const backups = readdirSync(dir).filter((f) => /\.corrupt-\d+\.bak$/.test(f));
+      // The corrupt original is preserved under a .corrupt-*-*.bak sibling.
+      const backups = readdirSync(dir).filter((f) => /\.corrupt-\d+-[0-9a-f]{8}\.bak$/.test(f));
       expect(backups).toHaveLength(1);
 
       // The store now functions normally — a create succeeds with id 1.
