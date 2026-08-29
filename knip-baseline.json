@@ -1724,11 +1724,6 @@
     },
     {
       "type": "types",
-      "file": "src/engine/usage-stats.ts",
-      "name": "UsageTotals"
-    },
-    {
-      "type": "types",
       "file": "src/hooks/hook-discovery.ts",
       "name": "LockfileEntry"
     },
@@ -1986,11 +1981,6 @@
       "type": "types",
       "file": "src/main/python-runtime.ts",
       "name": "BootstrapPhase"
-    },
-    {
-      "type": "types",
-      "file": "src/main/remote-a2a-action-controller.ts",
-      "name": "RemoteA2AActionStatus"
     },
     {
       "type": "types",
@@ -3010,22 +3000,7 @@
     {
       "type": "types",
       "file": "src/ui/renderer/types.ts",
-      "name": "UsageDailySummaryInput"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
-      "name": "UsageDailySummaryResult"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
       "name": "UsagePerX"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
-      "name": "UsageTotals"
     },
     {
       "type": "types",

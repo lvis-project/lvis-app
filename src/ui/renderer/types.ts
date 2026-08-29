@@ -83,6 +83,21 @@ export type { ExecutionMode } from "../../shared/permission-mode.js";
 
 // Re-export checkpoint types for renderer-side consumers (type-only, no main-process runtime).
 export type { CheckpointTrigger, Checkpoint } from "../../memory/memory-manager.js";
+// Remote A2A action status is the controller's own status record.
+import type { RemoteA2AActionStatus } from "../../main/remote-a2a-action-controller.js";
+export type { RemoteA2AActionStatus };
+
+// Plugin / hook trust rows and perf stats are the host row types.
+import type { PluginPerfStats } from "../../plugins/runtime/index.js";
+import type { PluginContributionTrustRow } from "../../plugins/plugin-bundle-lifecycle.js";
+import type { HookTrustRow } from "../../hooks/hook-trust-commands.js";
+export type { PluginPerfStats, PluginContributionTrustRow, HookTrustRow };
+
+// Usage aggregates come from the engine/IPC owners; only the renderer-side
+// derived shapes (UsagePerX, UsageTrendPt, UsageConv) are declared here.
+import type { UsageTotals } from "../../engine/usage-stats.js";
+import type { UsageDailySummaryInput, UsageDailySummaryResult } from "../../ipc/handlers/usage.js";
+
 // Settings: the renderer sees the host AppSettings minus the main-only
 // `a2aRemote` block, expressed once by the IPC projection type.
 import type { RendererSettingsSnapshot as AppSettings } from "../../ipc/domains/settings.js";
@@ -221,16 +236,6 @@ interface RestoredSubAgentPayload {
   toolUseId?: string;
 }
 
-export interface PluginContributionTrustRow {
-  kind: "hook" | "mcpServer";
-  pluginId: string;
-  pluginVersion: string;
-  generationId: string;
-  localId: string;
-  fingerprint: string;
-  status: "approved" | "approval_required";
-}
-
 /**
  * Mirror of host-side `PluginAuthSpec` for renderer consumption — kept as a
  * separate name to make the renderer/host boundary explicit. Field shape
@@ -274,25 +279,6 @@ export function isIpcErrorResult(value: unknown): value is IpcErrorResult {
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
 
-// ─── Plugin Performance types (Observability) ──────
-export type PluginPerfStats = {
-  startupMs: number;
-  toolCallCount: number;
-  errorCount: number;
-  totalExecMs: number;
-  lastCallAt: number | null;
-};
-
-// ─── Usage types ────────────────────────────────────
-export type UsageTotals = {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  totalTokens: number;
-  cost: number;
-  unknownCostTurns?: number;
-};
 export type UsagePerX = UsageTotals & { vendor: string; model: string };
 export type UsageTrendPt = UsageTotals & { date: string };
 export type UsageConv = UsageTotals & { sessionId: string; turns: number; firstInput?: string };
@@ -333,46 +319,6 @@ export type UsageSummaryShape = {
   /** Kept separate from API-key usage and all cost calculations. */
   subscription?: SubscriptionUsageSummaryShape;
   generatedAt: string;
-};
-
-export type UsageDailySummaryInput = {
-  date: string;
-  locale?: string;
-  sessions?: Array<{
-    title?: string;
-    preview?: string;
-    projectName?: string;
-  }>;
-  starred?: Array<{
-    role?: string;
-    text?: string;
-  }>;
-  usage?: Partial<UsageTotals> | null;
-};
-
-export type UsageDailySummaryResult =
-  | { ok: true; summary: string; generatedAt: string }
-  | { ok: false; error: string };
-
-export type RemoteA2AActionStatus = {
-  state: "idle" | "awaiting-approval" | "sent" | "failed";
-  operationId?: string;
-  taskHandle?: string;
-  recoveryEligible?: boolean;
-  taskAvailable?: boolean;
-  taskState?:
-    | "TASK_STATE_SUBMITTED"
-    | "TASK_STATE_WORKING"
-    | "TASK_STATE_COMPLETED"
-    | "TASK_STATE_FAILED"
-    | "TASK_STATE_CANCELED"
-    | "TASK_STATE_INPUT_REQUIRED"
-    | "TASK_STATE_REJECTED"
-    | "TASK_STATE_AUTH_REQUIRED";
-  targetAgentId?: number;
-  targetLabel?: string;
-  outcome?: string;
-  updatedAt: string;
 };
 
 type RemoteA2AStatusResult =
@@ -1370,23 +1316,6 @@ export interface DeferredQueueEntry {
   resolvedAt?: string;
   resolvedScope?: DeferredGrantScope;
   resolutionReason?: string;
-}
-
-export interface HookTrustRow {
-  fileName: string;
-  hookType: "pre" | "post" | "perm";
-  sha256: string;
-  state: "trusted" | "new" | "changed" | "removed" | "disabled";
-  previousSha256?: string;
-  /**
-   * #811 command-hooks — additive trust-review fields. Present on the
-   * `hooks.json` config trust-unit row so the trust list can surface its
-   * declared command/event/matcher entries. Absent on legacy `.sh` rows.
-   * Mirrors `src/hooks/hook-trust-commands.ts::HookTrustRow` (additive).
-   */
-  source?: "sh" | "config";
-  entryCount?: number;
-  entries?: Array<{ event: "pre" | "post" | "perm"; matcher?: string; command: string }>;
 }
 
 export type PermissionReviewerMode = "disabled" | "rule" | "llm" | "strict";
