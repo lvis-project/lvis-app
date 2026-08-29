@@ -12,7 +12,7 @@ import {
   GUIDE_MAX_ENTRIES,
 } from "./turn/guidance-limits.js";
 import { t } from "../i18n/index.js";
-import { isRecord } from "../shared/is-record.js";
+import { hasOnlyKeys, isRecord, isStringArray } from "../shared/is-record.js";
 import { isSafeStructuralId } from "../shared/dlp-safe-id.js";
 
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
@@ -42,19 +42,6 @@ export const A2A_PART_KEYS: ReadonlySet<string> = new Set([
   "mediaType",
 ]);
 const PART_CONTENT_KEYS = ["text", "raw", "url", "data"] as const;
-
-/** Every own key of `value` is in `allowed` (a subset check, not exact). */
-export function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
-  return Object.keys(value).every((key) => allowed.has(key));
-}
-
-/**
- * An array of strings with no holes: the spread turns a sparse slot into
- * `undefined`, which fails the element check, so `[ , "a"]` is refused.
- */
-export function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && [...value].every((item) => typeof item === "string");
-}
 
 export function isSafeA2AMessageId(value: unknown): value is string {
   return typeof value === "string"

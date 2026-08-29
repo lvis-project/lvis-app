@@ -11,8 +11,6 @@ import {
   wrapChildReportForParentJudgment,
   A2A_MESSAGE_KEYS,
   A2A_PART_KEYS,
-  hasOnlyKeys,
-  isStringArray,
 } from "../a2a-subagent-message-codec.js";
 import {
   GUIDE_MAX_CHARS,
@@ -324,21 +322,5 @@ describe("shared wire-shape guards", () => {
       "messageId", "contextId", "taskId", "role", "parts", "metadata", "extensions", "referenceTaskIds",
     ]);
     expect([...A2A_PART_KEYS]).toEqual(["text", "raw", "url", "data", "metadata", "filename", "mediaType"]);
-  });
-
-  it("hasOnlyKeys is a subset check: fewer keys pass, one unknown key fails", () => {
-    expect(hasOnlyKeys({}, A2A_PART_KEYS)).toBe(true);
-    expect(hasOnlyKeys({ text: "x" }, A2A_PART_KEYS)).toBe(true);
-    expect(hasOnlyKeys({ text: "x", extra: 1 }, A2A_PART_KEYS)).toBe(false);
-  });
-
-  it("isStringArray refuses non-string members and sparse holes", () => {
-    expect(isStringArray([])).toBe(true);
-    expect(isStringArray(["a", "b"])).toBe(true);
-    expect(isStringArray(["a", 1])).toBe(false);
-    expect(isStringArray("a")).toBe(false);
-    const sparse: string[] = [];
-    sparse[1] = "b";
-    expect(isStringArray(sparse)).toBe(false);
   });
 });

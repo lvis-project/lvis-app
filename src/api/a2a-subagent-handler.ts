@@ -22,7 +22,6 @@ import {
 } from "../shared/a2a-wire.js";
 import {
   canonicalizeInboundA2ASubAgentMessage,
-  hasOnlyKeys,
   isSafeA2AMessageId,
 } from "../engine/a2a-subagent-message-codec.js";
 import {
@@ -46,7 +45,7 @@ import {
   type A2ATaskContinuationResult,
   type A2ATaskRecord,
 } from "./a2a-task-store.js";
-import { isRecord } from "../shared/is-record.js";
+import { hasOnlyKeys, isRecord } from "../shared/is-record.js";
 import { MAX_TIMER_DELAY_MS } from "../shared/tool-timeout-policy.js";
 
 const TEXT_MODE = "text/plain";

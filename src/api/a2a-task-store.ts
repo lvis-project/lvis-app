@@ -19,16 +19,14 @@ import {
   A2A_MESSAGE_KEYS,
   A2A_PART_KEYS,
   canonicalizeInboundA2ASubAgentMessage,
-  hasOnlyKeys,
   isSafeA2AMessageId,
-  isStringArray,
   maskA2AMessage,
 } from "../engine/a2a-subagent-message-codec.js";
 import {
   GUIDE_MAX_CHARS,
   GUIDE_MAX_ENTRIES,
 } from "../engine/turn/guidance-limits.js";
-import { isRecord } from "../shared/is-record.js";
+import { hasOnlyKeys, isRecord, isStringArray } from "../shared/is-record.js";
 import { isSafeStructuralId } from "../shared/dlp-safe-id.js";
 
 const STORE_VERSION = 1;
