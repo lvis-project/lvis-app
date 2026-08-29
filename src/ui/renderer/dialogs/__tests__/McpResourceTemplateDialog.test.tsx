@@ -15,7 +15,7 @@ import { McpResourceTemplateDialog } from "../McpResourceTemplateDialog.js";
 import type { PendingResourceTemplate } from "../../hooks/use-resource-mention.js";
 import { MCP_RESOURCE_TEMPLATE_MAX_VARIABLES } from "../../../../shared/mcp-resource-template-bounds.js";
 
-// Renderer suite runs under the `ko` locale (vitest-locale-ko setup).
+// Renderer suite runs under the `ko` locale (vitest-ambient-intl setup).
 function pending(over: Partial<PendingResourceTemplate> = {}): PendingResourceTemplate {
   return {
     serverId: "hr-mcp",

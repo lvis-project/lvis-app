@@ -67,6 +67,28 @@ function summaryWithInput(inputTokens = 100): ReturnType<typeof computeUsageSumm
   ], new Date("2026-07-04T12:00:00Z"));
 }
 
+/**
+ * Every bucket boundary in this file is the HOST's midnight, so the fixture
+ * instants only mean what their comments say once the zone is pinned — and the
+ * pin has to be at MODULE scope, not inside one `describe`. It was inside
+ * `describe("usage-stats")` first, which left `UsageSummaryCache`,
+ * `getUsageRange` and `usage summary cache wiring` running on the ambient zone:
+ * green on a KST laptop, 8 failures under `America/New_York`.
+ *
+ * Seoul is simply what these fixtures were written against; nothing in the code
+ * knows the name. Node re-reads `TZ` on assignment, for both `Date` and the
+ * `Intl` default.
+ */
+let previousTz: string | undefined;
+beforeEach(() => {
+  previousTz = process.env.TZ;
+  process.env.TZ = "Asia/Seoul";
+});
+afterEach(() => {
+  if (previousTz === undefined) delete process.env.TZ;
+  else process.env.TZ = previousTz;
+});
+
 describe("UsageSummaryCache", () => {
   it("reuses a stable revision and returns isolated summaries", async () => {
     const cache = createUsageSummaryCache({ maxEntries: 2 });
@@ -146,20 +168,6 @@ describe("UsageSummaryCache", () => {
 });
 
 describe("usage-stats", () => {
-  // Every bucket boundary below is the HOST's midnight now, so the fixture
-  // instants only mean what their comments say once the zone is pinned. Node
-  // re-reads `TZ` on assignment. Seoul is what these fixtures were written
-  // against; nothing in the code knows the name.
-  let previousTz: string | undefined;
-  beforeEach(() => {
-    previousTz = process.env.TZ;
-    process.env.TZ = "Asia/Seoul";
-  });
-  afterEach(() => {
-    if (previousTz === undefined) delete process.env.TZ;
-    else process.env.TZ = previousTz;
-  });
-
   it("aggregates today/week/month totals from turn entries", () => {
     const now = new Date("2026-04-18T12:00:00Z"); // Saturday
     const entries: AuditTurnEntry[] = [

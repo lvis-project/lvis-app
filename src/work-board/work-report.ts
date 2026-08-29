@@ -110,7 +110,11 @@ export interface WorkBoardReporter {
 }
 
 function lineFor(item: WorkItemResolved): string {
-  const due = item.due_at ? ` (due ${item.due_at.slice(0, 10)})` : "";
+  // `due_at` is an absolute instant, so its first ten characters are the UTC
+  // day, not the day the user picked. Those differ for most of the day in any
+  // zone ahead of UTC: an item due on the 16th is stored as 15T15:00Z in Seoul
+  // and this line called it the 15th.
+  const due = item.due_at ? ` (due ${localDateKey(new Date(item.due_at))})` : "";
   return `- [${item.priority}] #${item.id} ${item.title}${due}`;
 }
 
@@ -255,7 +259,10 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
     const workContext = await renderWorkContext(memory, 40, projectOptions);
     const prompt =
       [
-        `# ${period} Weekly Report Input (${start.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)})`,
+        // Same reason as `lineFor`: these bounds are local midnights, so their UTC
+        // prefix names the wrong day. `end` is the exclusive next-week midnight,
+        // so the last day IN the week is one millisecond before it.
+        `# ${period} Weekly Report Input (${localDateKey(start)} ~ ${localDateKey(new Date(end.getTime() - 1))})`,
         workContext,
         bucket("Completed This Week", completedThisWeek),
         bucket("Created This Week", createdThisWeek),

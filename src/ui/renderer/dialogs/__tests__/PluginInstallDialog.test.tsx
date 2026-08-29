@@ -5,7 +5,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { PluginInstallDialog } from "../PluginInstallDialog.js";
 import type { MarketplaceItem } from "../../types.js";
 
-// Renderer suite runs under the `ko` locale (vitest-locale-ko setup), so the
+// Renderer suite runs under the `ko` locale (vitest-ambient-intl setup), so the
 // admin-consent strings assert against the Korean catalog values.
 function item(over: Partial<MarketplaceItem> = {}): MarketplaceItem {
   return {

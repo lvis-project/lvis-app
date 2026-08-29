@@ -69,7 +69,7 @@ export function buildE2eBaseSettings(onboardingCompleted = true, locale: "ko" | 
     },
     // Pin the UI locale for e2e. Defaults to Korean: after #1200 the production
     // default is English (DEFAULT_LOCALE), but the specs assert the Korean
-    // catalog (mirroring src/i18n/testing/vitest-locale-ko.ts, which pins the
+    // catalog (mirroring src/i18n/testing/vitest-ambient-intl.ts, which pins the
     // renderer unit suite to ko for the same reason). The English boot path is
     // covered by the english-default-smoke spec, which passes locale:"en".
     // schemaVersion:2 is REQUIRED — settings-store normalizeAppearance only

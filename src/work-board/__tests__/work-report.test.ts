@@ -215,3 +215,53 @@ describe("work-report — dispatch", () => {
     expect(r.kind).toBe("daily");
   });
 });
+
+describe("work-report — day labels follow the host calendar", () => {
+  /**
+   * `due_at` is an absolute instant. Both labels used to take its UTC prefix,
+   * which names the day the user picked only when the host is at or behind
+   * UTC. These run the SAME stored instant through two hosts on opposite sides
+   * of UTC and demand the picked day back both times.
+   */
+  function runInZone(zone: string, dueAt: string): Promise<string> {
+    process.env.TZ = zone;
+    const { callLlm, calls } = llmRecorder();
+    const reporter = createWorkBoardReporter({
+      store: okListReader([item({ id: 1, due_at: dueAt })]),
+      storage: memStorage(),
+      callLlm,
+      now: () => NOW,
+    });
+    return reporter.generateDaily().then(() => calls[0]?.prompt ?? "");
+  }
+
+  it("prints the picked day in the (due …) label, east and west of UTC", async () => {
+    // Local midnight on the 16th in Seoul, i.e. what the picker stamps there.
+    // Its UTC prefix is the 15th, which is what the old label printed.
+    expect(await runInZone("Asia/Seoul", "2026-06-15T15:00:00.000Z"))
+      .toContain("(due 2026-06-16)");
+
+    // Local midnight on the 16th in Los Angeles. Here the UTC prefix happens to
+    // agree, so this half would pass either way — it is the control that shows
+    // the Seoul assertion is about the projection and not about the fixture.
+    expect(await runInZone("America/Los_Angeles", "2026-06-16T07:00:00.000Z"))
+      .toContain("(due 2026-06-16)");
+  });
+
+  it("prints the weekly header from the local week bounds, not their UTC prefix", async () => {
+    process.env.TZ = "Asia/Seoul";
+    const { callLlm, calls } = llmRecorder();
+    const reporter = createWorkBoardReporter({
+      store: okListReader([item({ id: 1 })]),
+      storage: memStorage(),
+      callLlm,
+      now: () => NOW,
+    });
+    await reporter.generateWeekly();
+
+    // Tue 2026-06-16 in Seoul sits in the Sunday-anchored week 14th-20th. The
+    // bounds are local midnights, so their UTC prefixes are the 13th and the
+    // 20th — a week that starts a day early and ends a day late.
+    expect(calls[0]?.prompt).toContain("(2026-06-14 ~ 2026-06-20)");
+  });
+});

@@ -2,7 +2,7 @@
  * The three `lvis://` uninstall refusals must reach the user as localized copy.
  *
  * Renderer tests run with the i18n runtime pinned to Korean (see
- * `src/i18n/testing/vitest-locale-ko.ts`), which is exactly the condition the
+ * `src/i18n/testing/vitest-ambient-intl.ts`), which is exactly the condition the
  * bug was reported under: `formatIpcError` had no entry for these codes and no
  * `message` half to fall back on, so the toast printed the producer's English
  * sentence verbatim next to Korean chrome.
