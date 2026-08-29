@@ -317,6 +317,14 @@ export interface SubAgentSpawnCallbacks {
    * `agent_status` reports a terminal run that the renderer has not been told
    * about: the state write and this notification are one uninterruptible step.
    *
+   * Two paths publish a terminal task state WITHOUT firing this, on purpose:
+   * `interruptRun` and `cancelActiveWireChildForWorkspaceRoot`. Both record an
+   * abort REQUEST, not an outcome — the run is still in flight, its result has
+   * not been produced, and the caller that asked for the interrupt is handed
+   * the snapshot synchronously. The child then unwinds and reaches
+   * `finalizeRun`, which fires this with the actual outcome, so the renderer
+   * still gets exactly one terminal frame and it carries a real result.
+   *
    * Fires at most once per tracked run; the runner drops the reference after
    * calling it, so a second finalize on the same run cannot double-report.
    */
@@ -540,10 +548,12 @@ export interface SubAgentRunSnapshot {
  * mark that copy spent. Defaulting to a plain read keeps a new call site from
  * silently swallowing a report nobody read.
  *
- * `agent_list` is deliberately NOT such a call site. It answers "which
- * sub-agents does this conversation have", listing title, resume id, and task
- * state from persisted rows — it never carries a report body. Retiring the
- * mailbox on it would drop content the parent was never shown.
+ * `agent_list` is deliberately NOT such a call site, and this is a considered
+ * departure from the wording of issue #2325, which named it alongside
+ * `agent_status`. It answers "which sub-agents does this conversation have",
+ * listing title, resume id, and task state from persisted rows — it never
+ * carries a report body. Retiring the mailbox on it would drop content the
+ * parent was never shown, trading a duplicated report for a lost one.
  */
 export interface SubAgentRunReadOptions {
   deliversReportToParent?: boolean;
@@ -595,7 +605,23 @@ interface TrackedSubAgentRun {
    */
   terminalReport?: { messageId: string };
   /**
-   * The parent has already read this run's terminal state — and with it the
+   * The completion step's result actually LANDED on this run — the summary,
+   * error, and transcript a reader gets back are the ones the report carries.
+   *
+   * Not the same as "the task state is terminal". `interruptRun` and the
+   * workspace-revocation cancel publish CANCELED the instant an abort is
+   * requested, and `persistFinalResult` claims the terminal commit before its
+   * awaits, so a run can read as terminal while its result is still missing.
+   * Worse, once CANCELED is written the A2A state machine refuses
+   * CANCELED -> COMPLETED, so a child that finished while the interrupt was in
+   * flight NEVER puts its summary into the snapshot. Marking such a snapshot
+   * "read" would retire the mailbox copy and lose the child's answer outright.
+   * `updateRun` is the arbiter: this flips only when the patch it was handed
+   * survived that check.
+   */
+  terminalReportPublished?: boolean;
+  /**
+   * The parent has already read this run's published result — and with it the
    * summary, error, and transcript the completion report carries — through
    * `agent_status`. The queued mailbox copy of that same report is therefore
    * spent, and {@link SubAgentRunner.peekParentMailbox} consumes it instead of
@@ -1411,21 +1437,27 @@ export class SubAgentRunner {
       (entry) => this.isTerminalReportAlreadyRead(parentSessionId, entry),
     );
     if (alreadyRead.length === 0) return entries;
+    const consumedIds = new Set(alreadyRead.map((entry) => entry.id));
     try {
-      await bus.acknowledgeParentMailbox(
-        parentSessionId,
-        alreadyRead.map((entry) => entry.id),
-      );
+      await bus.acknowledgeParentMailbox(parentSessionId, [...consumedIds]);
     } catch (err) {
-      // The entry stays durable, and stays marked as read, so the next peek
-      // retries the acknowledgement. What must not happen either way is the
-      // second delivery, so it is withheld regardless of this failure.
+      // Withholding the second delivery is unconditional — that decision is
+      // already made above and this failure does not revisit it. What the
+      // failure costs is DURABILITY of that decision: the read mark lives on
+      // the tracked run, which is process-local and evictable by
+      // `pruneTrackedRuns`, while the entry it retires is on disk. So the
+      // retry on the next peek is the only thing standing between a failed
+      // acknowledgement and the report reappearing after a restart. Persisting
+      // the mark onto the entry instead was considered and rejected: it is the
+      // same mailbox write that just failed, so it buys no durability the
+      // retry does not, and it would leave a second definition of "consumed"
+      // to keep in step with the first.
       log.warn(
         { parentSessionId, errorName: err instanceof Error ? err.name : "UnknownError" },
         "sub-agent completion mailbox acknowledgement failed for an already-read report",
       );
     }
-    return entries.filter((entry) => !alreadyRead.includes(entry));
+    return entries.filter((entry) => !consumedIds.has(entry.id));
   }
 
   private isTerminalReportAlreadyRead(
@@ -2148,14 +2180,18 @@ export class SubAgentRunner {
    * {@link peekParentMailbox} consume the queued copy rather than open the
    * parent's next turn with a steering row repeating work it already answered.
    *
-   * Gated on `terminalCommitClaimed` on purpose: `interruptRun` writes a
-   * terminal task state the instant the abort is requested, long before the
-   * completion step produces the report. Treating that snapshot as a read
-   * report would swallow the real one.
+   * Gated on `terminalReportPublished`, NOT on the task state reading terminal.
+   * A run can read terminal with no result attached — an interrupt writes
+   * CANCELED immediately, and the state machine then refuses the completed
+   * result that arrives behind it — and a snapshot with no summary in it has
+   * told the parent nothing. Only a landed result may retire the mailbox copy.
+   *
+   * Order between this and the delivery does not matter: the parent may poll
+   * the finished run before the report is even enqueued (that is the reported
+   * race). The two facts are recorded separately and combined only at peek.
    */
   private markTerminalReportRead(run: TrackedSubAgentRun): void {
-    if (run.terminalCommitClaimed !== true) return;
-    if (!isA2ATerminalTaskState(run.taskState)) return;
+    if (run.terminalReportPublished !== true) return;
     run.terminalReportObserved = true;
   }
 
@@ -2376,20 +2412,36 @@ export class SubAgentRunner {
     delete run.abort;
     this.updateRun(run, patch);
     run.terminalCommitClaimed = isA2ATerminalTaskState(run.taskState);
+    // Ask `updateRun` whether it took the patch. It refuses a transition the
+    // A2A state machine rejects — an interrupt that already wrote CANCELED
+    // blocks the COMPLETED result racing in behind it — and on refusal the
+    // summary, error, and transcript above never reached the run either. Only
+    // a landed result is a report a reader can be told it has already seen.
+    if (run.taskState === taskState) run.terminalReportPublished = true;
     // The renderer frame leaves from HERE, inside the step that publishes the
     // terminal state, and never from the caller that later awaits the run.
     // Between those two points a parent polling `agent_status` used to be able
     // to read `done` and answer from it while the sub-agent panel still showed
     // the run as live. Emitting synchronously after the state write closes that
     // window: no other code can observe the run between the two lines.
+    //
+    // Fired even when the patch was refused: the frame reports the outcome the
+    // runner is returning to its caller, and a run whose result the state
+    // machine turned away still has to stop drawing as live.
     const onTerminal = run.onTerminal;
     if (onTerminal === undefined) return;
     delete run.onTerminal;
     try {
       onTerminal(result);
-    } catch {
+    } catch (err) {
       // A renderer sink that throws must not leave the run half-committed.
-      log.warn("sub-agent completion observer failed");
+      log.warn(
+        {
+          childSessionId: run.childSessionId,
+          errorName: err instanceof Error ? err.name : "UnknownError",
+        },
+        "sub-agent completion observer failed",
+      );
     }
   }
 

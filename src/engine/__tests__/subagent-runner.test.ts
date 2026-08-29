@@ -2731,7 +2731,7 @@ describe("SubAgentRunner completion mailbox single-shot", () => {
         supportsA2AParentDelivery: true,
       },
     };
-    return { runner, spawnTool, statusTool, parentContext };
+    return { runner, bus, spawnTool, statusTool, parentContext };
   }
 
   async function spawnUntilReportQueued(
@@ -2775,6 +2775,12 @@ describe("SubAgentRunner completion mailbox single-shot", () => {
     await expect(
       fixture.runner.peekParentMailbox(parentSessionId),
     ).resolves.toEqual([]);
+    // And it is gone from the DURABLE mailbox, not merely hidden by the
+    // runner's filter: the read mark is process-local, so an entry the
+    // acknowledgement left behind would come back after a restart.
+    await expect(
+      fixture.bus.peekParentMailbox(parentSessionId),
+    ).resolves.toEqual([]);
   });
 
   it("retires the queued report through the listing form of agent_status too", async () => {
@@ -2788,6 +2794,102 @@ describe("SubAgentRunner completion mailbox single-shot", () => {
     await expect(
       fixture.runner.peekParentMailbox(parentSessionId),
     ).resolves.toEqual([]);
+    await expect(
+      fixture.bus.peekParentMailbox(parentSessionId),
+    ).resolves.toEqual([]);
+  });
+
+  it("does not count a snapshot whose result the state machine refused as a read report", async () => {
+    // An abort request publishes CANCELED with no result attached, and the A2A
+    // state machine then refuses CANCELED -> COMPLETED — so a child that
+    // finished behind the interrupt never gets its summary into the snapshot,
+    // while the mailbox copy carries it in full. Reading a snapshot in that
+    // shape must not retire the mailbox copy, or the parent loses the child's
+    // answer outright.
+    //
+    // Reading terminal is not the test the guard can use: `interruptRun` and
+    // `persistFinalResult` both publish terminal facts before any result
+    // exists. The guard asks the narrower question — did the completion step's
+    // patch actually land — and this drives exactly that refusal.
+    const fixture = completionMailboxFixture();
+    let releaseTurn: () => void = () => {};
+    const turnParked = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    let sawTurn: () => void = () => {};
+    const turnStarted = new Promise<void>((resolve) => {
+      sawTurn = resolve;
+    });
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation((async () => {
+        sawTurn();
+        await turnParked;
+        return { text: "unused", stopReason: "end_turn" };
+      }) as never);
+    restore.push(() => runTurnSpy.mockRestore());
+    restore.push(() => releaseTurn());
+
+    const handleResult = await fixture.spawnTool.execute(
+      { title: "refused result", instructions: "do" },
+      fixture.parentContext,
+    );
+    expect(handleResult.isError).toBe(false);
+    const handle = JSON.parse(handleResult.output) as { spawnId: string };
+    await turnStarted;
+    expect(
+      fixture.runner.interruptRun(handle.spawnId, parentSessionId),
+    ).toMatchObject({ ok: true });
+
+    const run = (
+      fixture.runner as unknown as {
+        trackedRuns: Map<string, { childSessionId: string; taskState: string }>;
+      }
+    ).trackedRuns.get(handle.spawnId);
+    expect(run?.taskState).toBe(A2ATaskState.CANCELED);
+    const childSessionId = run!.childSessionId;
+
+    // The child's completed answer arrives behind the interrupt.
+    (fixture.runner as unknown as {
+      finalizeRun: (run: unknown, result: SubAgentSpawnResult) => void;
+    }).finalizeRun(run, {
+      summary: "the child's answer",
+      toolCallCount: 0,
+      turnCount: 1,
+      childSessionId,
+      entries: [],
+      ok: true,
+      stopReason: "end_turn",
+    });
+
+    // Refused: nothing of that result is readable through agent_status.
+    const snapshot = fixture.runner.getRunStatus(handle.spawnId, parentSessionId, {
+      deliversReportToParent: true,
+    });
+    expect(snapshot?.taskState).toBe(A2ATaskState.CANCELED);
+    expect(snapshot?.summary).toBeUndefined();
+    expect(snapshot?.error).toBeUndefined();
+
+    // The mailbox copy, which does carry the answer, is therefore still owed.
+    await expect(fixture.runner.deliverToParent(
+      {
+        parentSessionId,
+        childSessionId,
+        message: {
+          messageId: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+          contextId: parentSessionId,
+          taskId: childSessionId,
+          role: A2A_ROLE_AGENT,
+          parts: [{ text: "the child's answer" }],
+          metadata: { taskState: A2ATaskState.COMPLETED },
+        } satisfies A2AMessage,
+      },
+      { terminalReport: true },
+    )).resolves.toMatchObject({ ok: true });
+
+    const owed = await fixture.runner.peekParentMailbox(parentSessionId);
+    expect(owed).toHaveLength(1);
+    expect(owed[0]?.formattedText).toContain("the child's answer");
   });
 
   it("delivers a report the parent never read exactly once across two turns", async () => {

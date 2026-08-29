@@ -59,6 +59,14 @@ export interface ParentMailboxTurn {
 }
 
 interface ParentMailboxRunner {
+  /**
+   * Not a pure read. Alongside returning what the parent is still owed, this
+   * WRITES to the durable mailbox: a completion report the parent already
+   * consumed through `agent_status` is acknowledged and dropped here rather
+   * than handed back to be injected as steering a second time. Callers must
+   * therefore treat a peek as a consuming operation on those entries, and must
+   * not peek speculatively on a path that will not run the turn.
+   */
   peekParentMailbox(parentSessionId: string): Promise<ParentMailboxEntry[]>;
   acknowledgeParentMailbox(parentSessionId: string, entryIds: readonly string[]): Promise<unknown>;
 }
