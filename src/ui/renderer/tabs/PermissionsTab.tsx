@@ -48,6 +48,7 @@ import { getApi } from "../api-client.js";
 import { isIpcErrorResult } from "../types.js";
 import { canonicalStringify } from "../../../shared/canonical-json.js";
 import type { ExactDenyDraft } from "../exact-permission-decision.js";
+import { formatDateTime } from "../../../shared/format-time.js";
 
 const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   mode: "disabled",
@@ -1652,7 +1653,7 @@ export function PermissionsTab({
                       </td>
                       <td className="whitespace-nowrap px-3 py-2">{a.verdictAtApproval.toUpperCase()}{a.verdictAtApproval === "high" ? t("permissionsTab.verdictHighFixed") : ""}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                        {new Date(a.approvedAt).toLocaleString()}
+                        {formatDateTime(a.approvedAt)}
                       </td>
                       <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground"
                           title={a.nlJustification ?? undefined}>

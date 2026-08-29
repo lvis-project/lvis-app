@@ -14,6 +14,7 @@ import { neutralizeFenceClose } from "../shared/fence-sanitizer.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
 import { escapeHtml } from "../shared/render-html-preview.js";
+import { formatLocalIsoWithOffset, hostTimeZone } from "../shared/format-time.js";
 
 const log = createLogger("system-prompt");
 
@@ -991,13 +992,8 @@ export class SystemPromptBuilder {
         // a tool call for an instant that was not their 9am. The offset is
         // computed from the same instant rather than named, so the string stays
         // self-describing across DST.
-        const pad = (value: number) => String(value).padStart(2, "0");
-        const offsetMinutes = -now.getTimezoneOffset();
-        const offsetSign = offsetMinutes < 0 ? "-" : "+";
-        const offset = `${offsetSign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
-        const localIso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-          + `T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}${offset}`;
-        const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const localIso = formatLocalIsoWithOffset(now);
+        const zone = hostTimeZone();
         return [
           "<environment>",
           `OS: ${platform()}`,
