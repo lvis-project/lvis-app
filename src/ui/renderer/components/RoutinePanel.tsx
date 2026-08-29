@@ -56,7 +56,7 @@ function describeSchedule(routine: RoutineRecord): string {
   const s = routine.schedule;
   if (!s) return routine.trigger === "shutdown" ? t("routinePanel.onShutdown") : t("routinePanel.noSchedule");
   const repeatKind = s.repeat?.kind;
-  const atStr = s.at ? new Date(s.at).toLocaleString("ko-KR") : "";
+  const atStr = s.at ? formatMediumDateTime(s.at) : "";
   if (repeatKind === "cron") {
     const expr = (s.repeat as { kind: "cron"; expression: string }).expression;
     return t("routinePanel.cronSchedule", { expr });
