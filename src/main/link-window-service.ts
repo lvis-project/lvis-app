@@ -62,7 +62,15 @@ export function jsonForScriptBlock(value: string): string {
   return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
 }
 
-function buildLinkWindowShellHtml(opts: {
+/**
+ * The shell document. The title crosses two different sinks and is encoded
+ * once per sink: HTML-escaped where the markup parser reads it (`<title>`),
+ * and JSON-encoded where a script assigns it (`document.title`,
+ * `textContent`) — those sinks take the string literally and would show
+ * `&quot;` for a `"` that had been HTML-escaped first.
+ */
+// Exported for direct testing of the two title sinks.
+export function buildLinkWindowShellHtml(opts: {
   url: string;
   title: string;
   partition?: string;
@@ -71,8 +79,7 @@ function buildLinkWindowShellHtml(opts: {
   const platform = opts.platform;
   const url = jsonForScriptBlock(opts.url);
   const partition = jsonForScriptBlock(opts.partition ?? "");
-  const titleAttr = escapeHtml(opts.title);
-  const titleText = escapeHtml(opts.title);
+  const titleLiteral = jsonForScriptBlock(opts.title);
   const titleBarHtml = buildTitlebarHtml({ platform, title: opts.title });
   return `<!doctype html>
 <html lang="ko">
@@ -80,7 +87,7 @@ function buildLinkWindowShellHtml(opts: {
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-src http: https:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${titleAttr}</title>
+  <title>${escapeHtml(opts.title)}</title>
   <style>${buildTitlebarCss()}</style>
 </head>
 <body>
@@ -89,9 +96,9 @@ function buildLinkWindowShellHtml(opts: {
   <script>
     const url = ${url};
     const partition = ${partition};
-    document.title = ${JSON.stringify(titleText)};
+    document.title = ${titleLiteral};
     const titleEl = document.getElementById("title");
-    if (titleEl) titleEl.textContent = ${JSON.stringify(titleText)};
+    if (titleEl) titleEl.textContent = ${titleLiteral};
     const view = document.getElementById("link-view");
     if (partition) view.setAttribute("partition", partition);
     view.setAttribute("src", url);
