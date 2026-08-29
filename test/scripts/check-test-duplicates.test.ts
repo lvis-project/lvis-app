@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   analyzeDuplicateHelpers,
   collectDuplicateBodies,
@@ -10,6 +11,8 @@ import {
   normalizeRepoPath,
   runDuplicateCli,
 } from "../../scripts/check-test-duplicates.mjs";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 describe("check-test-duplicates", () => {
   it("scans test specs and shared helper modules", () => {
@@ -209,4 +212,77 @@ describe("check-test-duplicates", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("reports two short identical helpers in two files regardless of length", () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-duplicate-short-cross-file-"));
+    try {
+      // 40 characters of body, plain names — below the old floor, no prefix.
+      const body = "{ tracked.add(dir); return dir; }";
+      expect(body.length).toBeLessThan(80);
+      writeFileSync(join(root, "one.test.ts"), `const tracked = new Set<string>();\nfunction trackDir(dir: string) ${body}\n`);
+      writeFileSync(join(root, "two.test.ts"), `const tracked = new Set<string>();\nfunction keepDir(dir: string) ${body}\n`);
+
+      const result = analyzeDuplicateHelpers(root);
+
+      expect(result.duplicateBodies).toHaveLength(1);
+      expect([...result.duplicateBodies[0].uniqueNames].sort()).toEqual(["keepDir", "trackDir"]);
+      expect(result.duplicateBodies[0].uniqueLocations.size).toBe(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a short same-file pair that differs only in defaults", () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-duplicate-short-same-file-"));
+    try {
+      writeFileSync(
+        join(root, "one.test.ts"),
+        [
+          "function isoFromNow(offsetMs: number) { return new Date(Date.now() + offsetMs).toISOString(); }",
+          "function futureIso(offsetMs = 60_000) { return isoFromNow(offsetMs); }",
+          "function pastIso(offsetMs = -1000) { return isoFromNow(offsetMs); }",
+          "",
+        ].join("\n"),
+      );
+
+      expect(analyzeDuplicateHelpers(root).duplicateBodies).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores closures nested in a helper or a test body, and placeholder bodies", () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-duplicate-nested-"));
+    try {
+      const nested = [
+        'import { it } from "vitest";',
+        "function wait(): Promise<void> {",
+        "  return new Promise((resolve) => { const release = () => { resolve(); }; setTimeout(release, 1); });",
+        "}",
+        'it("x", () => { const local = () => { return [1, 2, 3].length; }; local(); });',
+        "function noop() {}",
+        "const nothing = () => undefined;",
+        "",
+      ].join("\n");
+      writeFileSync(join(root, "one.test.ts"), nested);
+      writeFileSync(join(root, "two.test.ts"), nested.replace("function wait", "function pause"));
+
+      // wait/pause share a body and ARE reported; the nested release, the
+      // test-local `local`, and the empty noop/nothing are not.
+      const groups = analyzeDuplicateHelpers(root).duplicateBodies;
+      expect(groups).toHaveLength(1);
+      expect([...groups[0].uniqueNames].sort()).toEqual(["pause", "wait"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("finds no duplicate helper bodies in the repository's own suites", () => {
+    const result = analyzeDuplicateHelpers(REPO_ROOT);
+    expect(result.files.length).toBeGreaterThan(1000);
+    const report = result.duplicateBodies.map(
+      (group) => `${[...group.uniqueNames].join("/")}: ${[...group.uniqueLocations].join(", ")}`,
+    );
+    expect(report).toEqual([]);
+  }, 120_000);
 });
