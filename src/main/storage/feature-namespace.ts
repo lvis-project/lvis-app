@@ -35,6 +35,8 @@ import {
 import { sleep } from "../../shared/abortable-deadline.js";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "../../lib/atomic-file.js";
 
+const log = createLogger("feature-namespace");
+
 /**
  * Create `dir` with 0o700 and best-effort `chmod` it back to 0o700 in case
  * it pre-existed with a wider mode (e.g. created under a permissive umask).
@@ -73,10 +75,11 @@ export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T>
  *
  *   - missing file (ENOENT): the store has never been written — `empty()`.
  *   - unparseable JSON: the file is damaged. It is moved aside as
- *     `<file>.corrupt-<timestamp>.bak` and `empty()` is returned, so the
- *     store keeps working and the bytes are kept for inspection. Silently
+ *     `<file>.corrupt-<timestamp>-<random>.bak` and `empty()` is returned, so
+ *     the store keeps working and the bytes are kept for inspection. Silently
  *     treating a damaged file as empty would overwrite the evidence on the
- *     next write; throwing would take the whole feature down with it.
+ *     next write; throwing would take the whole feature down with it — so a
+ *     failed move-aside is logged and the store still starts empty.
  *   - any other read error (EACCES, EISDIR, …): propagated. A permission
  *     problem must not masquerade as an empty store.
  *
@@ -99,9 +102,13 @@ export async function readJsonFileOrEmpty<T>(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    const backup = `${filePath}.corrupt-${Date.now()}.bak`;
-    log.warn(`corrupt JSON in ${filePath}; moved to ${backup}, starting empty`);
-    await fs.rename(filePath, backup);
+    const backup = `${filePath}.corrupt-${Date.now()}-${randomBytes(4).toString("hex")}.bak`;
+    try {
+      await fs.rename(filePath, backup);
+      log.warn(`corrupt JSON in ${filePath}; moved to ${backup}, starting empty`);
+    } catch (err) {
+      log.warn(`corrupt JSON in ${filePath}; could not move it to ${backup} (${(err as Error).message}), starting empty`);
+    }
     return empty();
   }
   return hydrate(parsed);
@@ -279,8 +286,6 @@ export function openFeatureNamespace(featureId: string): FeatureNamespaceHandle 
     },
   };
 }
-
-const log = createLogger("feature-namespace");
 
 /**
  * Adopt a file that predates the per-feature rule, moving it from the
