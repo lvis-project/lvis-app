@@ -755,21 +755,10 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     if (ctx.source !== "builtin" || ctx.toolName !== "agent_spawn") return null;
     return { level: "low", reason: "agent spawn (child tool effects gated separately)" };
   },
-  // `agent_status` is a pure read of host-owned sub-agent bookkeeping. It has no
-  // path, network, or command argument: its single optional `id` is a lookup key,
-  // and the run set it may read is scoped by the HOST-supplied origin session id
-  // (`ctx.metadata.sessionId`), not by anything the model passes. It mutates
-  // nothing and confers no authority. Without this it fell to the fail-safe
-  // MEDIUM at the bottom of `classify()` — a rule GAP identical in shape to the
-  // pre-existing `agent_spawn` one — so every status poll raised a modal, which
-  // is why a restarted session's operator saw approvals for reading state.
-  // Name-scoped for the same reason as the rule above: a blanket `meta` LOW would
-  // cover mutating meta tools such as `agent_interrupt`.
-  (ctx) => {
-    if (ctx.category !== "meta") return null;
-    if (ctx.source !== "builtin" || ctx.toolName !== "agent_status") return null;
-    return { level: "low", reason: "agent status (host-scoped read of run state)" };
-  },
+  // `agent_status` used to need a third rule here, name-scoped to `meta`. It no
+  // longer does: it declares `read`, which is what it is, so the read rules
+  // below grade it — and every OTHER gate that keys on the category grades it
+  // the same way, which a rule sitting only in this chain could never make true.
 
   // ── read rules (2) — read shouldn't usually reach reviewer ──
   (ctx) => {
@@ -995,7 +984,7 @@ function isTransientReviewerError(err: unknown): boolean {
  *
  *   - `agent_spawn` (meta) — the child's every effectful tool call re-enters
  *     PermissionManager, so spawning confers no new authority.
- *   - `agent_status` (meta) — reads host-owned run bookkeeping scoped by the
+ *   - `agent_status` (read) — reads host-owned run bookkeeping scoped by the
  *     host-supplied origin session id; no argument reaches an effect.
  *   - `agent_list` (read) — returns agent profile definitions plus this
  *     conversation's own persisted sub-agent entries; it takes NO input at all
@@ -1006,14 +995,15 @@ function isTransientReviewerError(err: unknown): boolean {
  * `max(rule, llm)` let that guess override the host's LOW — turning a status
  * poll after a restart into an approval modal.
  *
- * The value is the EXPECTED category rather than a single hard-coded one: these
- * tools honestly declare different categories (`agent_list` is `read` because it
- * reads, `agent_status` is `meta`), and pinning each tool to its own declared
- * category preserves the co-scoping invariant below per-tool.
+ * The value is the EXPECTED category rather than a single hard-coded one: the
+ * readers declare `read` and `agent_spawn` declares `meta`, and pinning each
+ * tool to its own declared category preserves the co-scoping invariant below
+ * per-tool. A tool that drifts off its declared category loses the bypass and
+ * takes the full composed path, which is the safe direction.
  */
 const HOST_DETERMINED_RISK_TOOLS: ReadonlyMap<string, ToolCategory> = new Map([
   ["agent_spawn", "meta"],
-  ["agent_status", "meta"],
+  ["agent_status", "read"],
   ["agent_list", "read"],
 ]);
 

@@ -1096,6 +1096,19 @@ export async function authorizeToolInvocation(
     // call and every remote one-shot stays force-modal, and
     // deriveApprovalIsReadOnly stays pinned false so an ask from this lane
     // still cannot take the §S4 read shortcut.
+    //
+    // The exception is keyed on the DECLARED category, so a tool that reads but
+    // says `meta` is asked about here (issue #2323: `agent_status`, the parent's
+    // own poll of its children, blocked each woken turn on a human until it was
+    // declared `read`). The remedy for the next one is the same — declare what it
+    // is — not a name-scoped exception at this line.
+    //
+    // `agent_spawn` DOES stay force-modal here, deliberately, and that is not in
+    // tension with its LOW rule: LOW is what makes it auto-approve in an ordinary
+    // turn, where the user's own text asked for the fan-out. In THIS turn the
+    // request originates in another agent's message, and starting a new agent
+    // from untrusted text is an effect no later gate re-asks about — the child's
+    // tool calls are gated, its existence is not. One approval per spawn.
     if ((approvalReasonPrefix || requiresRemoteLocalOneShot) && permissionResult.decision !== "deny") {
       const reviewerLaneEligible =
         !requiresRemoteLocalOneShot &&
