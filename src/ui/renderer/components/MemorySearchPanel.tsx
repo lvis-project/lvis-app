@@ -8,17 +8,14 @@ import type { LvisApi } from "../types.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
+import { formatRelativeTime, type RelativeTimeLabels } from "../../../shared/format-time.js";
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return t("memorySearchPanel.justNow");
-  if (minutes < 60) return t("memorySearchPanel.minutesAgo", { minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("memorySearchPanel.hoursAgo", { hours });
-  const days = Math.floor(hours / 24);
-  return t("memorySearchPanel.daysAgo", { days });
-}
+const RELATIVE_TIME_LABELS: RelativeTimeLabels = {
+  justNow: () => t("memorySearchPanel.justNow"),
+  minutesAgo: (minutes) => t("memorySearchPanel.minutesAgo", { minutes }),
+  hoursAgo: (hours) => t("memorySearchPanel.hoursAgo", { hours }),
+  daysAgo: (days) => t("memorySearchPanel.daysAgo", { days }),
+};
 
 function NoteRow({ note }: { note: NoteResult }) {
   const [expanded, setExpanded] = useState(false);
@@ -31,7 +28,7 @@ function NoteRow({ note }: { note: NoteResult }) {
       <div className="flex min-w-0 items-baseline justify-between gap-2">
         <span className="min-w-0 flex-1 line-clamp-1 text-sm font-semibold leading-snug text-foreground">{note.title}</span>
         {note.updatedAt ? (
-          <span className="shrink-0 text-[10px] text-muted-foreground">{relativeTime(note.updatedAt)}</span>
+          <span className="shrink-0 text-[10px] text-muted-foreground">{formatRelativeTime(note.updatedAt, RELATIVE_TIME_LABELS)}</span>
         ) : null}
       </div>
       <p className={`mt-1 text-xs text-muted-foreground ${expanded ? "whitespace-pre-wrap break-words" : "line-clamp-1"}`}>
@@ -85,7 +82,7 @@ function SessionRow({
         <span className="min-w-0 flex-1 line-clamp-1 text-sm font-semibold leading-snug text-foreground">
           {session.title || t("memorySearchPanel.sessionFallbackTitle", { id: session.sessionId.slice(0, 8) })}
         </span>
-        <span className="shrink-0 text-[10px] text-muted-foreground">{relativeTime(session.timestamp)}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">{formatRelativeTime(session.timestamp, RELATIVE_TIME_LABELS)}</span>
       </div>
       <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
         <span className="min-w-0 line-clamp-1 font-mono text-[10px] text-muted-foreground">
@@ -144,7 +141,7 @@ function CandidateRow({
       >
         <div className="flex min-w-0 items-baseline justify-between gap-2">
           <span className="min-w-0 flex-1 line-clamp-1 text-sm font-semibold leading-snug text-foreground">{candidate.title}</span>
-          {timestamp ? <span className="shrink-0 text-[10px] text-muted-foreground">{relativeTime(timestamp)}</span> : null}
+          {timestamp ? <span className="shrink-0 text-[10px] text-muted-foreground">{formatRelativeTime(timestamp, RELATIVE_TIME_LABELS)}</span> : null}
         </div>
         <p className={`mt-1 text-xs text-muted-foreground ${expanded ? "whitespace-pre-wrap break-words" : "line-clamp-1"}`}>
           {candidate.excerpt}
