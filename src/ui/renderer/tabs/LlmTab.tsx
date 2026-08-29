@@ -130,6 +130,41 @@ export interface ProviderCredentialSave {
 
 
 /**
+ * Every field a model-list state carries besides the status itself.
+ *
+ * A `Record` of the whole union rather than a hand-kept array: adding a field
+ * to any variant leaves a required property missing here and fails to compile,
+ * where a list would have gone on comparing the old fields and reported an
+ * updated state as unchanged — which is invisible, because an unchanged state
+ * is deliberately not re-rendered.
+ */
+type ModelListStateField = ModelListState extends infer Variant
+  ? Variant extends ModelListState ? Exclude<keyof Variant, "status"> : never
+  : never;
+
+const COMPARED_MODEL_LIST_FIELDS: Record<ModelListStateField, true> = {
+  error: true,
+  endpoint: true,
+  fetchedAt: true,
+  source: true,
+  persistError: true,
+  options: true,
+  entries: true,
+};
+
+/** Whether two model-list states say the same thing about the same row. */
+function sameModelListState(
+  a: ModelListState | undefined,
+  b: ModelListState,
+): boolean {
+  if (!a || a.status !== b.status) return false;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  return Object.keys(COMPARED_MODEL_LIST_FIELDS)
+    .every((field) => left[field] === right[field]);
+}
+
+/**
  * When a provider's model list is fetched — the whole policy, in one place.
  *
  * A model list is a catalogue, not live data: it changes on the provider's
@@ -158,18 +193,6 @@ export interface ProviderCredentialSave {
  * exactly as long as its window, which is the launch boundary this policy
  * means.
  */
-/** Whether two model-list states say the same thing about the same row. */
-function sameModelListState(
-  a: ModelListState | undefined,
-  b: ModelListState,
-): boolean {
-  if (!a || a.status !== b.status) return false;
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  return (["error", "endpoint", "fetchedAt", "source", "persistError", "options", "entries"] as const)
-    .every((field) => left[field] === right[field]);
-}
-
 const modelListRefreshedThisLaunch = new Set<string>();
 
 /**
@@ -1212,6 +1235,11 @@ export function LlmTab(props: LlmTabProps) {
       if (existing?.status === "loading") return;
       // See `modelListRefreshedThisLaunch` for the policy this enforces.
       if (!options.force && modelListRefreshedThisLaunch.has(key)) return;
+      // Claimed BEFORE anything is awaited. More than one caller asks for the
+      // same key — a row's card, the fallback panel, the launch pass — and a
+      // guard set only after an await is no guard at all for whoever reads it
+      // during that await.
+      modelListRefreshedThisLaunch.add(key);
       // A fixed-endpoint vendor reaches its own /models with a stored key, so a
       // request with nothing stored could only come back 401 — and a red "sync
       // failed" on a card whose subscription is signed in and healthy says the
@@ -1220,13 +1248,14 @@ export function LlmTab(props: LlmTabProps) {
       if (!baseUrl && STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(provider)) {
         const hasCredential = await api.hasApiKey(provider);
         if (!hasCredential) {
-          // Deliberately NOT marked as asked: nothing was. Storing a key later
-          // is a change to this row's inputs, and it gets its one request then.
+          // Nothing was asked, so the launch owes this key a request still:
+          // storing a key is a change to this row's inputs, and it gets that
+          // request then.
+          forgetModelListLaunchRefresh(key);
           setModelListState(key, { status: "needs-credential" });
           return;
         }
       }
-      modelListRefreshedThisLaunch.add(key);
       setModelListState(key, existing?.options
         ? { ...existing, status: "loading" }
         : { status: "loading" });
@@ -2156,6 +2185,14 @@ export function LlmTab(props: LlmTabProps) {
     // ...and let this row ask its endpoint again with the credential it now
     // holds, whether the last answer was a failure or nothing at all.
     if (row.modelListKey) forgetModelListLaunchRefresh(row.modelListKey);
+    // The same submit may also MOVE the row: the address it just wrote is the
+    // one the row will read from next, and typing back an address that failed
+    // earlier this launch must still earn a fresh request.
+    if (vendorBlock && "baseUrl" in vendorBlock) {
+      forgetModelListLaunchRefresh(
+        llmModelListCacheKey(draft.vendorId, draft.baseUrl.trim(), row.presetId ?? ""),
+      );
+    }
     // The card stays open on what it just committed, minus the key it no
     // longer holds. Dropping the draft here would collapse the form under a
     // header still drawn as expanded.
@@ -2568,46 +2605,46 @@ export function LlmTab(props: LlmTabProps) {
               The refresh sits BESIDE it, never inside — a button nested in a
               button is not a control the browser can give anyone. */}
           <div className="flex min-w-0 items-center gap-2">
-          <button
-            type="button"
-            className="flex w-full min-w-0 items-center gap-2 text-left"
-            aria-expanded={rowFormOpen(row)}
-            {...(rowFormOpen(row) ? { "aria-controls": CREDENTIAL_FORM_ID } : {})}
-            onClick={() => {
-              if (rowFormOpen(row)) {
-                setOpenRowId(null);
-                return;
-              }
-              openRowCredentialForm(rowFormTarget(row));
-              setRowToReveal(row.id);
-            }}
-            data-testid={`llm-tab:connection-toggle:${row.id}`}
-          >
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="truncate text-sm font-medium">{row.label}</span>
-                {modeBadge(row)}
-                {unsavedBadge(row)}
-                {row.apiVendorId && marketplaceVendorIds.has(row.apiVendorId) ? (
-                  <span
-                    className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
-                    data-testid={`llm-tab:selected-provider-marketplace:${row.apiVendorId}`}
-                  >
-                    {t("llmTab.marketplaceInstalledBadge")}
-                  </span>
-                ) : null}
+            <button
+              type="button"
+              className="flex w-full min-w-0 items-center gap-2 text-left"
+              aria-expanded={rowFormOpen(row)}
+              {...(rowFormOpen(row) ? { "aria-controls": CREDENTIAL_FORM_ID } : {})}
+              onClick={() => {
+                if (rowFormOpen(row)) {
+                  setOpenRowId(null);
+                  return;
+                }
+                openRowCredentialForm(rowFormTarget(row));
+                setRowToReveal(row.id);
+              }}
+              data-testid={`llm-tab:connection-toggle:${row.id}`}
+            >
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-medium">{row.label}</span>
+                  {modeBadge(row)}
+                  {unsavedBadge(row)}
+                  {row.apiVendorId && marketplaceVendorIds.has(row.apiVendorId) ? (
+                    <span
+                      className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
+                      data-testid={`llm-tab:selected-provider-marketplace:${row.apiVendorId}`}
+                    >
+                      {t("llmTab.marketplaceInstalledBadge")}
+                    </span>
+                  ) : null}
+                </span>
+                {connectionSubline(row)}
               </span>
-              {connectionSubline(row)}
-            </span>
-            {statusChip(row)}
-            <ChevronRight
-              className={`size-4 shrink-0 text-muted-foreground transition-transform ${
-                rowFormOpen(row) ? "rotate-90" : ""
-              }`}
-              aria-hidden={true}
-            />
-          </button>
-          {rowRefreshControl(row)}
+              {statusChip(row)}
+              <ChevronRight
+                className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+                  rowFormOpen(row) ? "rotate-90" : ""
+                }`}
+                aria-hidden={true}
+              />
+            </button>
+            {rowRefreshControl(row)}
           </div>
           {chatAvailabilityNote(row)}
           {pickModelGuidance(row)}

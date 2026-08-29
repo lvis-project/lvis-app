@@ -1364,6 +1364,37 @@ describe("LlmTab model lists are cached, not re-fetched", () => {
     expect(await chooserModelIds()).toContain("and-a-new-one");
   });
 
+  it("asks a fixed-endpoint vendor once when its card and the fallback chain both want it", async () => {
+    // A vendor with no endpoint of its own is asked whether it holds a key
+    // before anything is fetched, and its card and the fallback chain want the
+    // same catalogue. One list, one request, however many callers want it.
+    const { api } = presetProfile({}, {
+      hasApiKey: storedKeysFor("openai"),
+      listLlmModels: answering(["gpt-from-the-endpoint"]),
+    });
+    // The credential store answers before the settings read does, which is the
+    // interleaving that puts both callers in one commit: the row is already
+    // known to hold a key when `settingsLoaded` flips, so the card's refresh
+    // and the fallback panel's both run off that same flush.
+    const readSettings = api.getSettings as Mock;
+    api.getSettings = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return readSettings();
+    });
+    await renderTab(api, {
+      vendor: "claude",
+      model: "claude-sonnet-4-6",
+      fallbackOpen: true,
+      fallbackChain: [{ provider: "openai", model: "gpt-from-the-endpoint" }],
+    });
+
+    await waitFor(() => expect(askedCount(api)).toBeGreaterThan(0));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(askedCount(api)).toBe(1);
+  });
+
   it("offers a refresh only on the cards that have a list to refresh", async () => {
     const { api } = presetProfile({
       vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT }, "azure-foundry": { baseUrl: AZURE_ENDPOINT } },
