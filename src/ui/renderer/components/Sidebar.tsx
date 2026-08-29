@@ -368,7 +368,7 @@ function FailedPluginNavItem({
           isActive={false}
           onClick={() => onSelect(viewKey)}
           collapsed={collapsed}
-          data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+          data-testid={sidebarViewTestId(viewKey)}
           data-viewkey={viewKey}
           title={title}
           tooltipLabel={title}
@@ -383,7 +383,7 @@ function FailedPluginNavItem({
         isActive={false}
         onClick={() => onSelect(viewKey)}
         collapsed={collapsed}
-        data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+        data-testid={sidebarViewTestId(viewKey)}
         data-viewkey={viewKey}
         title={title}
         tooltipLabel={title}
@@ -444,7 +444,7 @@ function InactivePluginNavItem({
           isActive={false}
           onClick={() => onSelect(viewKey)}
           collapsed={collapsed}
-          data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+          data-testid={sidebarViewTestId(viewKey)}
           data-viewkey={viewKey}
           title={title}
           tooltipLabel={title}
@@ -466,7 +466,7 @@ function InactivePluginNavItem({
         isActive={false}
         onClick={() => onSelect(viewKey)}
         collapsed={collapsed}
-        data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+        data-testid={sidebarViewTestId(viewKey)}
         data-viewkey={viewKey}
         title={title}
         tooltipLabel={title}
@@ -516,7 +516,7 @@ function PluginNavItem({
           isActive={isActive}
           onClick={() => onSelect(viewKey)}
           collapsed={collapsed}
-          data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+          data-testid={sidebarViewTestId(viewKey)}
           data-viewkey={viewKey}
         />
       }
@@ -528,7 +528,7 @@ function PluginNavItem({
         isActive={isActive}
         onClick={() => onSelect(viewKey)}
         collapsed={collapsed}
-        data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+        data-testid={sidebarViewTestId(viewKey)}
         data-viewkey={viewKey}
         trailingSlot={trailingSlot}
       />
