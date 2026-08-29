@@ -11,11 +11,20 @@
  *   unresolved; explicit cleanup may delete the backup metadata but leaves the
  *   row pending/hidden until a verified reinstall publishes a new row;
  * - only obsolete backups from an already-successful commit enter the existing
- *   tombstone/sweeper lifecycle.
+ *   tombstone/sweeper lifecycle;
+ * - a plugin data directory nobody can attribute is PARKED in
+ *   `+unattributed-plugin-state+`, which nothing sweeps, and the park is logged
+ *   with the plugin id and the resulting path so an operator can find it.
  */
 import { cp, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { isResolvedPathWithin } from "./plugin-storage-containment.js";
+import {
+  type PluginDataCarryPolicy,
+  carryPluginDataDir,
+  pluginPayloadCopyFilter,
+} from "./plugin-storage-layout.js";
+import { parkUnattributedPluginState } from "./installed-entry-fs.js";
 
 import { retryOnTransientFsLock } from "./plugin-artifact-store.js";
 import {
@@ -30,8 +39,11 @@ import type { PluginRegistryEntry } from "./types.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
+import { createLogger } from "../lib/logger.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
+
+const log = createLogger("marketplace-update-recovery");
 
 type PendingUpdate = NonNullable<PluginRegistryEntry["pendingUpdate"]>;
 type PendingCleanup = NonNullable<PluginRegistryEntry["pendingCleanup"]>[number];
@@ -52,6 +64,70 @@ function ownedInstallDir(paths: PluginPaths, pluginId: string): string {
 function ownedManifestPath(paths: PluginPaths, pluginId: string): string {
   return resolve(ownedInstallDir(paths, pluginId), "plugin.json");
 }
+
+/**
+ * The carry policy recovery uses, everywhere it carries.
+ *
+ * Recovery has no rollback. Every path below ends by either clearing
+ * `pendingUpdate` or reporting "unresolved" for a LATER boot to retry, and a
+ * throw out of a carry is neither: the row stays pending, the plugin stays
+ * unloadable, and the next boot arrives at the identical state and throws
+ * again. So a conflicting data directory is resolved here rather than
+ * reported — see {@link PluginDataCarryPolicy} for the rules.
+ *
+ * `unattributedRoot` is the live install directory because that is the only
+ * path a stray write can reach: `getPluginStorage` and every `hostApi.storage`
+ * handle resolve `<pluginsRoot>/<id>/data`, and no recovery backup path is ever
+ * a storage target. So when a carry finds state on both sides, the backup's is
+ * the one a transaction deliberately put there and the live one is the stray.
+ *
+ * `moveAside` PARKS. It does not use `tombstoneAndDeferredRemove`, which reads
+ * like the right helper and is not one: that is a removal lifecycle — it
+ * schedules an `rm` of what it renames, and `sweepOrphanUninstallDirs` finishes
+ * off anything that survives on the next boot. Handing unattributable state to
+ * it would delete the very bytes this branch exists to keep.
+ */
+function recoveryDataCarry(paths: PluginPaths, pluginId: string): PluginDataCarryPolicy {
+  return {
+    onConflict: "resolve",
+    unattributedRoot: ownedInstallDir(paths, pluginId),
+    moveAside: async (conflictingDataDir) => {
+      const parked = await parkUnattributedPluginState(conflictingDataDir, paths.pluginsRoot);
+      // The one place this state is ever mentioned. Nothing sweeps the parked
+      // namespace and no registry row points at it, so without this line the
+      // bytes are kept and nobody is told where — which is indistinguishable
+      // from having deleted them, for anyone trying to get the data back.
+      log.warn(
+        { pluginId, source: conflictingDataDir, parked },
+        "plugin data directory could not be attributed to the transaction; parked for operator review",
+      );
+    },
+  };
+}
+
+/**
+ * Remove a plugin ROOT recovery has finished with, after moving whatever state
+ * it still holds into the root that survives.
+ *
+ * Every directory recovery removes here is a plugin root — a set-aside live
+ * root, a rollback backup, a superseded retry backup — and a plugin root can
+ * hold the only copy of `data/`. Which one holds it depends on how far the
+ * interrupted transaction got, which is exactly what recovery cannot know; so
+ * the carry runs before every removal rather than at the points where the
+ * state was expected to be. A root with no data directory makes the carry a
+ * no-op, which is the common case and costs one `lstat`.
+ */
+async function discardOwnedPluginRoot(
+  paths: PluginPaths,
+  pluginId: string,
+  rootDir: string,
+): Promise<void> {
+  await retryOnTransientFsLock(
+    () => carryPluginDataDir(rootDir, ownedInstallDir(paths, pluginId), recoveryDataCarry(paths, pluginId)),
+  );
+  await retryOnTransientFsLock(() => rm(rootDir, { recursive: true, force: true }));
+}
+
 
 function assertOwnedBackupPath(
   paths: PluginPaths,
@@ -218,7 +294,10 @@ export async function recoverPendingPluginUpdate(
     if (!await liveMatchesPrevious(paths, entry)) return "unresolved";
     if (pending.recoveryBackupDir) {
       const backupDir = assertRecoveryBackupPath(paths, pluginId, pending);
-      await retryOnTransientFsLock(() => rm(backupDir, { recursive: true, force: true }));
+      // A crash after the replacement moved the plugin's data directory into
+      // its backup but before the promotion leaves the state in the backup
+      // while the live root — the one that survives here — has none.
+      await discardOwnedPluginRoot(paths, pluginId, backupDir);
     }
     await clearPendingUpdate(paths, pluginId, pending);
     return "recovered";
@@ -230,6 +309,10 @@ export async function recoverPendingPluginUpdate(
     return "unresolved";
   }
 
+  // The promoted root is discarded. A crash after the replacement carried the
+  // plugin's data directory into it leaves the state there; it goes back into
+  // the backup that becomes the live root before anything is removed.
+  await retryOnTransientFsLock(() => carryPluginDataDir(installDir, backupDir, recoveryDataCarry(paths, pluginId)));
   await retryOnTransientFsLock(() => rm(installDir, { recursive: true, force: true }));
   if (pending.recoveryBackupMode === "rename") {
     await retryOnTransientFsLock(() => rename(backupDir, installDir));
@@ -238,18 +321,23 @@ export async function recoverPendingPluginUpdate(
     await rm(restoreStage, { recursive: true, force: true });
     await mkdir(dirname(restoreStage), { recursive: true });
     try {
-      await cp(backupDir, restoreStage, { recursive: true, verbatimSymlinks: true });
+      await cp(backupDir, restoreStage, {
+        recursive: true,
+        verbatimSymlinks: true,
+        filter: pluginPayloadCopyFilter(backupDir),
+      });
       await retryOnTransientFsLock(() => rename(restoreStage, installDir));
     } catch (error) {
       await rm(restoreStage, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     }
+    await retryOnTransientFsLock(() => carryPluginDataDir(backupDir, installDir, recoveryDataCarry(paths, pluginId)));
   }
   if (pending.previousReceiptRaw === null) return "unresolved";
   await restoreInstallReceiptRaw(paths.cacheRoot, pluginId, pending.previousReceiptRaw);
   if (!await liveMatchesPrevious(paths, entry)) return "unresolved";
   if (pending.recoveryBackupMode === "copy") {
-    await retryOnTransientFsLock(() => rm(backupDir, { recursive: true, force: true }));
+    await discardOwnedPluginRoot(paths, pluginId, backupDir);
   }
   await clearPendingUpdate(paths, pluginId, pending);
   return "recovered";
@@ -296,7 +384,7 @@ export async function cleanupObsoletePluginBackup(paths: PluginPaths, pluginId: 
     const expected = entry?.pendingCleanup?.[0];
     if (!entry || !expected) return cleaned;
     const expectedPath = assertPendingCleanupPath(paths, pluginId, expected);
-    await retryOnTransientFsLock(() => rm(expectedPath, { recursive: true, force: true }));
+    await discardOwnedPluginRoot(paths, pluginId, expectedPath);
     await clearObsoletePluginBackupOwnership(paths, pluginId, expectedPath);
     cleaned = true;
   }
@@ -313,7 +401,7 @@ export async function cleanupObsoletePluginBackupPath(
   const target = entry?.pendingCleanup?.find((item) => resolve(item.path) === resolve(obsoleteDir));
   if (!target) return false;
   const targetPath = assertPendingCleanupPath(paths, pluginId, target);
-  await retryOnTransientFsLock(() => rm(targetPath, { recursive: true, force: true }));
+  await discardOwnedPluginRoot(paths, pluginId, targetPath);
   await clearObsoletePluginBackupOwnership(paths, pluginId, targetPath);
   return true;
 }
@@ -360,7 +448,12 @@ export async function cleanupPendingPluginUpdateBackup(paths: PluginPaths, plugi
   const pending = entry?.pendingUpdate;
   if (!pending?.recoveryBackupDir) return false;
   const backupDir = assertRecoveryBackupPath(paths, pluginId, pending);
-  await retryOnTransientFsLock(() => rm(backupDir, { recursive: true, force: true }));
+  // The backup may hold the plugin's only data directory: a crash between the
+  // replacement's carry into the backup and its promotion leaves the state
+  // there, and this function is how an operator-driven retry drops that backup.
+  // Dropping it without the carry is the same silent loss the whole carry
+  // exists to prevent, only reached through the cleanup door instead.
+  await discardOwnedPluginRoot(paths, pluginId, backupDir);
   await updatePluginRegistry(paths.registryPath, (fresh) => {
     const current = fresh.plugins.find((candidate) => candidate.id === pluginId);
     if (!current?.pendingUpdate) return;

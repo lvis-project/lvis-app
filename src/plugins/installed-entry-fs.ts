@@ -37,6 +37,28 @@ import { join } from "node:path";
  */
 export const TOMBSTONE_SUBDIR = "+tombstones+";
 
+/**
+ * Subdirectory under `pluginsRoot` where state nobody can attribute is PARKED.
+ *
+ * Deliberately NOT {@link TOMBSTONE_SUBDIR}. That namespace is a REMOVAL
+ * lifecycle: `tombstoneAndDeferredRemove` schedules an `rm` of what it renames,
+ * and anything that survives that `rm` is finished off by
+ * `sweepOrphanUninstallDirs` on the next boot. A caller that wants to KEEP
+ * bytes cannot express that by renaming them there — it only chooses whether
+ * they are deleted now or at the next boot.
+ *
+ * Recovery needs to keep them. When two non-empty plugin data directories
+ * arrive at one carry, one of them is state no transaction accounts for, and
+ * recovery cannot tell which side a human would want. Deleting the loser makes
+ * the carry's "never deletes state" rule untrue; leaving it in place wedges the
+ * recovery. So it moves here and STAYS here: nothing sweeps this directory, and
+ * it exists precisely so an operator can look at what could not be attributed.
+ * The `+` separator is the same structural defence tombstones use — plugin ids
+ * match `^[a-zA-Z0-9._-]+$`, so this can never collide with a plugin directory
+ * or be mistaken for one.
+ */
+export const PARKED_PLUGIN_STATE_SUBDIR = "+unattributed-plugin-state+";
+
 const RECURSIVE_REMOVE_OPTIONS = {
   recursive: true,
   force: true,
@@ -86,26 +108,71 @@ export async function tombstoneAndDeferredRemove(
     deferRemoval?: boolean;
   } = {},
 ): Promise<string | null> {
+  const tombstone = await renameAsideUnder(
+    installedManifestDir,
+    pluginsRoot,
+    TOMBSTONE_SUBDIR,
+    options,
+  );
+  if (tombstone !== null && options.deferRemoval !== false) {
+    deferTombstoneRemoval(tombstone, options.onDeferredRmError);
+  }
+  return tombstone;
+}
+
+/**
+ * Move a directory into {@link PARKED_PLUGIN_STATE_SUBDIR} and LEAVE IT THERE.
+ *
+ * The rename mechanics are the ones {@link tombstoneAndDeferredRemove} uses —
+ * one atomic move into a namespace no plugin id can reach, with a timestamp and
+ * a random suffix so concurrent parks cannot collide. What differs is the whole
+ * point of the call: nothing is scheduled to delete this, and no sweeper looks
+ * here. See {@link PARKED_PLUGIN_STATE_SUBDIR} for why that namespace is not
+ * the tombstone one.
+ *
+ * Returns the parked path, or null if the directory was already gone.
+ */
+export async function parkUnattributedPluginState(
+  dir: string,
+  pluginsRoot: string,
+  options: {
+    /** Override clock — tests pass a fixed value for deterministic naming. */
+    now?: () => number;
+    /** Override random suffix — tests pass a fixed value for assertions. */
+    randomSuffix?: () => string;
+  } = {},
+): Promise<string | null> {
+  return renameAsideUnder(dir, pluginsRoot, PARKED_PLUGIN_STATE_SUBDIR, options);
+}
+
+/**
+ * The move both namespaces share: one rename into `<pluginsRoot>/<subdir>/`
+ * under a name that cannot collide. ENOENT means someone else already moved it,
+ * which is an outcome rather than a failure for both callers.
+ */
+async function renameAsideUnder(
+  dir: string,
+  pluginsRoot: string,
+  subdir: string,
+  options: { now?: () => number; randomSuffix?: () => string },
+): Promise<string | null> {
   const now = options.now ?? Date.now;
   const randomSuffix =
     options.randomSuffix ?? (() => randomBytes(4).toString("hex"));
 
-  const tombstoneDir = join(pluginsRoot, TOMBSTONE_SUBDIR);
-  // Ensure the tombstone subdir exists. mkdir recursive is idempotent —
-  // safe across concurrent uninstalls. Fails only on permission/disk-full
-  // errors, which would also fail the rename below; let those surface.
-  await mkdir(tombstoneDir, { recursive: true });
+  const parent = join(pluginsRoot, subdir);
+  // mkdir recursive is idempotent — safe across concurrent uninstalls. Fails
+  // only on permission/disk-full errors, which would also fail the rename
+  // below; let those surface.
+  await mkdir(parent, { recursive: true });
 
-  const basename = installedManifestDir.split(/[\\/]/).pop() ?? "plugin";
-  const tombstone = join(tombstoneDir, `${basename}-${now()}-${randomSuffix()}`);
+  const basename = dir.split(/[\\/]/).pop() ?? "plugin";
+  const moved = join(parent, `${basename}-${now()}-${randomSuffix()}`);
   try {
-    await rename(installedManifestDir, tombstone);
+    await rename(dir, moved);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
-  if (options.deferRemoval !== false) {
-    deferTombstoneRemoval(tombstone, options.onDeferredRmError);
-  }
-  return tombstone;
+  return moved;
 }

@@ -47,7 +47,7 @@ import { getLvisAppVersion } from "../../shared/app-version.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { revocationRegistry } from "../revocation/revocation-registry.js";
 import { isPluginRuntimeDetachedOperationError, PluginRuntimeDetachedOperationError } from "./detached-operation.js";
-import { ensurePluginDataDir, resolveEntryPath, buildPluginContext, resolveRealEntryPath } from "./sandbox.js";
+import { ensurePluginDataDir, resolvePluginDataDir, resolveEntryPath, buildPluginContext, resolveRealEntryPath } from "./sandbox.js";
 import { buildImportUrl, buildMethodMap, importPluginFactory, declaredAppVisibleToolMethods } from "./plugin-loader.js";
 import { withPluginInstallLock, hasExclusivePluginLifecycleMutation, isPluginInstallLockHeld, withAllPluginInstallLocks, withResolvedPluginInstallLocks } from "../install-lifecycle.js";
 import { isOutOfProcessPlugin } from "../isolation/out-of-process-plugins.js";
@@ -1964,6 +1964,14 @@ abstract class PluginRuntimeState {
 
   protected ensureDataDir(pluginId: string, pluginRoot: string): string {
     return ensurePluginDataDir(pluginId, pluginRoot, this.pluginsRoot);
+  }
+
+  /**
+   * The plugin's data directory WITHOUT creating it — for callers that run per
+   * request rather than per load. See {@link resolvePluginDataDir}.
+   */
+  protected resolveDataDir(pluginId: string, pluginRoot: string): string {
+    return resolvePluginDataDir(pluginId, pluginRoot, this.pluginsRoot);
   }
 
   protected buildHostApiIncarnation(
@@ -7288,7 +7296,14 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     const plugin = this.plugins.get(pluginId);
     if (!plugin) return undefined;
     const audit = createPluginStorageAuditSink(pluginId, (...a) => this.auditLog?.(...a));
-    return createPluginStorage(pluginId, this.ensureDataDir(pluginId, plugin.pluginRoot), audit);
+    // RESOLVES the data directory rather than ensuring it. This runs once per
+    // webview storage IPC call, and an install swap has the plugin root renamed
+    // aside for the length of two renames: a `mkdir` here landing in that window
+    // put an empty `data/` at the promoted root, which the carry that completes
+    // the swap then found and refused. The directory is created at load, and a
+    // call arriving while it is absent is refused rather than served from a
+    // directory this call invented.
+    return createPluginStorage(pluginId, this.resolveDataDir(pluginId, plugin.pluginRoot), audit);
   }
 
   /**

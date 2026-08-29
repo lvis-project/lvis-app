@@ -2,7 +2,7 @@
  * Sandboxed PluginStorage — verifies path-traversal guards, ENOENT handling,
  * and JSON helpers stay scoped to pluginDataDir.
  */
-import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -127,6 +127,68 @@ describe("createPluginStorage path guards", () => {
     await expect(s.write(danglingRel, "x")).rejects.toThrow(/dangling symlink/);
     await expect(s.read(danglingRel)).rejects.toThrow(/dangling symlink/);
     await expect(s.exists(danglingRel)).rejects.toThrow(/dangling symlink/);
+  });
+});
+
+/**
+ * What an install swap looks like from inside a live storage handle. The swap
+ * renames the plugin root aside, renames the promoted payload into its place,
+ * and carries `data/` in last — so for those few syscalls the data root this
+ * handle was built for is not on disk. A call landing there must be refused,
+ * and refused for the right reason: it is not a sandbox escape, and auditing
+ * it as one sends whoever reads the log looking for a planted symlink.
+ */
+describe("createPluginStorage — the data root is never recreated", () => {
+  it("refuses a write once the data root has been renamed away, and leaves it absent", async () => {
+    const s = createPluginStorage("p", dataDir);
+    const parked = `${dataDir}-parked`;
+    renameSync(dataDir, parked);
+    try {
+      await expect(s.writeJson("state.json", { sessions: 1 })).rejects.toThrow(
+        /data root is absent/,
+      );
+      await expect(s.write("nested/blob.bin", "bytes")).rejects.toThrow(/data root is absent/);
+      await expect(s.mkdir("nested")).rejects.toThrow(/data root is absent/);
+      expect(existsSync(dataDir)).toBe(false);
+    } finally {
+      renameSync(parked, dataDir);
+    }
+  });
+
+  it("refuses the same way whether the root went missing before or after construction", async () => {
+    const parked = `${dataDir}-parked`;
+    // AFTER construction: the handle exists, the root moves under it.
+    const built = createPluginStorage("p", dataDir);
+    renameSync(dataDir, parked);
+    try {
+      await expect(built.writeJson("state.json", { a: 1 })).rejects.toThrow(
+        /data root is absent/,
+      );
+      // BEFORE construction: `getPluginStorage` resolves rather than ensures,
+      // so it hands an absent directory here on purpose. Same classified,
+      // audited refusal — not a raw ENOENT about a path.
+      const rejections: string[] = [];
+      expect(() => createPluginStorage("p", dataDir, (message) => {
+        rejections.push(message);
+      })).toThrow(/data root is absent/);
+      expect(rejections).toEqual(["storage: rejected operation against an absent data root"]);
+    } finally {
+      renameSync(parked, dataDir);
+    }
+  });
+
+  it("still names a real symlink escape a symlink escape", async () => {
+    symlinkSync(outsideDir, join(dataDir, "link"), dirLinkType);
+    const s = createPluginStorage("p", dataDir);
+    await expect(s.writeJson("link/state.json", { a: 1 })).rejects.toThrow(
+      /symlink escapes plugin storage root/,
+    );
+  });
+
+  it("creates directories BENEATH an existing data root as before", async () => {
+    const s = createPluginStorage("p", dataDir);
+    await s.writeJson("nested/deep/state.json", { ok: true });
+    expect(existsSync(join(dataDir, "nested", "deep", "state.json"))).toBe(true);
   });
 });
 

@@ -33,6 +33,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { isResolvedPathWithin } from "./plugin-storage-containment.js";
+import { carryPluginDataDir } from "./plugin-storage-layout.js";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -723,17 +724,28 @@ export class PluginArtifactStore {
           }
           throw renameErr;
         }
-        try {
-          const result = await commit(installDir, files);
-          durableCommitCompleted = true;
-          return result;
-        } catch (commitErr) {
+        // Undo a promotion: the promoted root goes, the previous root comes back.
+        // The plugin's data directory is in exactly one of the two roots at this
+        // point; it must be in the one that survives BEFORE the other is removed,
+        // or the rollback itself destroys the state the swap was carrying.
+        const discardPromotedRoot = async (cause: unknown, failedStep: string): Promise<never> => {
+          if (hadOldDir) {
+            try {
+              await retryOnTransientFsLock(() => carryPluginDataDir(installDir, oldDir, { onConflict: "reject" }));
+            } catch (carryBackErr) {
+              throw new ArtifactRollbackError(
+                `${failedStep} and plugin data return both failed: ${safeSlug}`,
+                [cause, carryBackErr],
+                oldDir,
+              );
+            }
+          }
           try {
             await retryOnTransientFsLock(() => rm(installDir, { recursive: true, force: true }));
           } catch (cleanupErr) {
             throw new ArtifactRollbackError(
-              `artifact commit and promoted-directory cleanup both failed: ${safeSlug}`,
-              [commitErr, cleanupErr],
+              `${failedStep} and promoted-directory cleanup both failed: ${safeSlug}`,
+              [cause, cleanupErr],
               hadOldDir ? oldDir : undefined,
             );
           }
@@ -742,13 +754,34 @@ export class PluginArtifactStore {
               await retryOnTransientFsLock(() => rename(oldDir, installDir));
             } catch (restoreErr) {
               throw new ArtifactRollbackError(
-                `artifact commit and directory restore both failed: ${safeSlug}`,
-                [commitErr, restoreErr],
+                `${failedStep} and directory restore both failed: ${safeSlug}`,
+                [cause, restoreErr],
                 oldDir,
               );
             }
           }
-          throw commitErr;
+          throw cause;
+        };
+        if (hadOldDir) {
+          // The previous root went aside with the plugin's data directory inside
+          // it. Bring the state into the promoted root before the commit publishes
+          // a receipt for it — a receipt must never become durable for a root
+          // whose state still sits in a backup slated for removal.
+          try {
+            await retryOnTransientFsLock(() => carryPluginDataDir(oldDir, installDir, { onConflict: "reject" }), {
+              onRetry: (attempt, code) =>
+                log.warn({ safeSlug, attempt, code }, "retrying plugin data carry into promoted root under fs lock"),
+            });
+          } catch (carryErr) {
+            return discardPromotedRoot(carryErr, "artifact data carry");
+          }
+        }
+        try {
+          const result = await commit(installDir, files);
+          durableCommitCompleted = true;
+          return result;
+        } catch (commitErr) {
+          return discardPromotedRoot(commitErr, "artifact commit");
         }
       };
       let committedPublicationError: CommittedPluginGenerationPublicationError | undefined;
