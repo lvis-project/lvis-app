@@ -11,7 +11,7 @@ import type { Tool } from "../base.js";
 import type { ToolSource, ToolCategory } from "../types.js";
 import type { PermissionCheckResult } from "../../permissions/permission-manager.js";
 import type { PermissionAuditEntryInput, HookResult, ToolExecutionAuditMetadata } from "../../audit/audit-schema.js";
-import type { HookTrustOrigin, ScriptHookInvocationResult } from "../../hooks/script-hook-types.js";
+import type { HookTrustOrigin, ScriptHookInvocationResult, ScriptHookType } from "../../hooks/script-hook-types.js";
 import type { HookDispatchResult } from "../../hooks/script-hook-manager.js";
 import type { ToolPermissionContext } from "../executor.js";
 import { resolveToolPathForPermission } from "../../shared/tool-path-resolution.js";
@@ -120,7 +120,7 @@ function hookFailureReason(
  * remains absent).
  */
 export function hookChainFromDispatch(
-  event: "pre" | "post" | "perm",
+  event: ScriptHookType,
   dispatch: HookDispatchResult | undefined,
 ): HookResult[] | undefined {
   if (!dispatch || dispatch.results.length === 0) return undefined;

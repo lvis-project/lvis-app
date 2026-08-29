@@ -13,11 +13,8 @@ import {
   type ReviewerScopeAlignment,
   type ReviewerScopeReevaluation,
 } from "../../tools/pipeline/rationale-pr1-contract.js";
-import type {
-  LlmReviewerProvider,
-  RiskLevel,
-  RiskVerdict,
-} from "./risk-classifier.js";
+import type { LlmReviewerProvider, RiskVerdict } from "./risk-classifier.js";
+import type { RiskLevel } from "../../shared/permission-review-status.js";
 
 export const RATIONALE_SCOPE_REVIEWER_SYSTEM_PROMPT = [
   "You are a permission scope reviewer.",

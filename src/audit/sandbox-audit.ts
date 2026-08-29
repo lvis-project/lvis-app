@@ -23,6 +23,7 @@
 import type { SandboxKind, SandboxCapability } from "../permissions/sandbox-capability.js";
 import type { UserApprovalVerdict } from "../shared/permissions-events.js";
 import type { ToolTrustOrigin } from "../tools/types.js";
+import type { RiskLevel } from "../shared/permission-review-status.js";
 
 // ─── Event shapes ─────────────────────────────────────────────────────────────
 
@@ -95,20 +96,20 @@ export interface SandboxAuditEntry {
 
   reviewer: {
     /** Verdict from the deterministic rule-based classifier. */
-    ruleVerdict: "low" | "medium" | "high";
+    ruleVerdict: RiskLevel;
     /**
      * Raw parsed verdict from the LLM classifier, or "high" when the LLM
      * classifier fails closed. `null` when no LLM verdict is available —
      * e.g. memory/cache hits, rule-only mode, or fallback-to-rule parse /
      * provider failures where the final verdict comes from rules instead.
      */
-    llmVerdict: "low" | "medium" | "high" | null;
+    llmVerdict: RiskLevel | null;
     /**
      * Final composed verdict. With an LLM verdict present this is
      * max(ruleVerdict, llmVerdict). When `userApprovalUsed.memoryHit` is
      * true, it is max(ruleVerdict, verdict stored at approval time).
      */
-    finalVerdict: "low" | "medium" | "high";
+    finalVerdict: RiskLevel;
     /**
      * Composition rules that fired and influenced the final verdict.
      * Populated by the reviewer engine. Empty when no rule overrode

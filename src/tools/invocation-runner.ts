@@ -963,7 +963,7 @@ export async function runToolInvocation(
           reason: approvalReasonPrefix
             ? `${approvalReasonPrefix} ${dirLayerResult.reason}`
             : dirLayerResult.reason,
-          source: source as "builtin" | "plugin" | "mcp",
+          source: source as ToolSource,
           createdAt: Date.now(),
           target: { filePath: outOfAllowedTarget.filePath },
           isReadOnly: deriveApprovalIsReadOnly({

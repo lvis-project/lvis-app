@@ -55,7 +55,7 @@ import {
   WHITELIST_PRIMARY_KEY_ID as REVOCATION_PRIMARY_KEY_ID,
 } from "../marketplace-keys.js";
 import type { PublicKeyInput } from "../envelope-verifier.js";
-import type { SignatureEnvelope } from "../types.js";
+import type { SignatureEnvelope, ResolvedSignedSnapshot } from "../types.js";
 import { appVersionSatisfiesMin } from "../../shared/semver-compare.js";
 import {
   parseRevocationDocument,
@@ -167,13 +167,8 @@ export interface RevocationInitOptions {
   signal?: AbortSignal;
 }
 
-interface ResolvedSnapshot {
-  doc: RevocationDocument;
-  source: RevocationSource;
-}
-
 class RevocationRegistry {
-  private snapshot: ResolvedSnapshot | null = null;
+  private snapshot: ResolvedSignedSnapshot<RevocationDocument, RevocationSource> | null = null;
   private now: () => number = Date.now;
   private publicKeys: Record<string, PublicKeyInput> = REVOCATION_PUBLIC_KEYS;
   /** `true` once `init()` has run. Read only to detect a boot-ordering bug. */

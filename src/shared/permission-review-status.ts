@@ -17,7 +17,38 @@ export type PermissionReviewStatus =
   | "parent_denied"
   | "failed";
 
-export type PermissionReviewRiskLevel = "low" | "medium" | "high";
+/** Where a tool comes from. Drives the §6.4 source → trust mapping. */
+export type ToolSource = "builtin" | "plugin" | "mcp";
+
+/**
+ * Permission policy 5-axis tool category (PermissionManager Layer 3 decision
+ * matrix in permission-policy-design.md):
+ *
+ * - `read`    — automatically allowed for builtin, scope-checked for plugin
+ * - `write`   — ask (user confirmation)
+ * - `shell`   — ask + Bash AST validation (subset of write where command
+ *               structure must be parsed)
+ * - `network` — ask + endpoint surface (HTTP/IPC writes to external hosts)
+ * - `meta`    — control-flow / UI primitives (`ask_user_question`,
+ *               `agent_spawn`); decision delegated to `ToolDecisionOverride`
+ *               so executor short-circuit paths stay explicit.
+ */
+export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
+
+/** Reviewer verdict level — discrete enum. The reviewer lane never uses scalars. */
+export type RiskLevel = "low" | "medium" | "high";
+
+/**
+ * Grant breadth for a deferred approval. No "once": the call it would have
+ * scoped is already over — a post-hoc "once" would grant nothing and expire
+ * against nothing. The honest breadths are the two that outlive the dead
+ * call, and `"session"` is the narrower of them, so it is the default and
+ * the fallback for any ambiguous request.
+ */
+export type DeferredGrantScope = "session" | "always";
+
+/** Narrowest breadth a deferred approval can carry. */
+export const NARROWEST_DEFERRED_SCOPE: DeferredGrantScope = "session";
 
 export type ApprovalPurposeSuggestion = {
   text: string;
@@ -42,12 +73,12 @@ export function isSharedApprovalToolIdentifier(value: unknown): value is string 
 export type PermissionReviewEvent = {
   status: PermissionReviewStatus;
   toolName: string;
-  toolCategory?: "read" | "write" | "shell" | "network" | "meta";
-  source?: "builtin" | "plugin" | "mcp";
+  toolCategory?: ToolCategory;
+  source?: ToolSource;
   groupId: string;
   toolUseId: string;
   displayOrder: number;
-  verdictLevel?: PermissionReviewRiskLevel;
+  verdictLevel?: RiskLevel;
   reason?: string;
   approvalPurpose?: ApprovalPurposeSuggestion;
 };

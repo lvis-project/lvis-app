@@ -72,6 +72,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "a2a-remote-input-invalid": "formatIpcError.invalidInput",
   "a2a-remote-operation-rejected": "formatIpcError.remoteA2aOperationRejected",
   "a2a-remote-settings-main-owned": "formatIpcError.managed",
+  "applied-migrations-main-owned": "formatIpcError.managed",
   "missing-durable-confirm": "formatIpcError.missingDurableConfirm",
   // Windows-only IPC (sandboxWindowsInstall) refused on a non-win32 platform.
   "not-applicable": "formatIpcError.notApplicable",

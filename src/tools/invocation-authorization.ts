@@ -1314,7 +1314,7 @@ export async function authorizeToolInvocation(
           // and recovering it by splitting the prefixed `reason` above would
           // be parsing prose the host just finished composing.
           ...(approvalReasonPrefix ? { approvalReasonPrefix } : {}),
-          source: source as "builtin" | "plugin" | "mcp",
+          source: source as ToolSource,
           createdAt: Date.now(),
           ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
           isReadOnly: deriveApprovalIsReadOnly({
@@ -1415,7 +1415,7 @@ export async function authorizeToolInvocation(
             status: "needs_approval",
             toolName: toolUse.name,
             toolCategory: invocationCategory,
-            source: source as "builtin" | "plugin" | "mcp",
+            source: source as ToolSource,
             ...meta,
           });
         }
@@ -1548,7 +1548,7 @@ export async function authorizeToolInvocation(
                 : "parent_denied",
             toolName: toolUse.name,
             toolCategory: invocationCategory,
-            source: source as "builtin" | "plugin" | "mcp",
+            source: source as ToolSource,
             // The parent's own sentence. It is already sanitized and masked
             // where the answer was parsed, and it is the only account the
             // child's own panel will have of a decision no dock ever showed.

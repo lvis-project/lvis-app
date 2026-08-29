@@ -20,6 +20,7 @@ import type {
 } from "../../shared/subscription-runtime.js";
 import type { ToolCategory, ToolResultImage, ToolSource } from "../../tools/types.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
+import type { RiskLevel } from "../../shared/permission-review-status.js";
 export type { LLMVendor };
 export { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 
@@ -66,8 +67,8 @@ export interface MessageMeta {
   /** Renderer display metadata for tool_result replay parity. */
   toolDisplay?: {
     durationMs?: number;
-    source?: "builtin" | "plugin" | "mcp";
-    category?: "read" | "write" | "shell" | "network" | "meta";
+    source?: ToolSource;
+    category?: ToolCategory;
     pluginId?: string;
     mcpServerId?: string;
     uiPayload?: import("../../mcp/types.js").McpUiPayload;
@@ -81,7 +82,7 @@ export interface MessageMeta {
    */
   permissionReview?: {
     status: import("../../shared/permission-review-status.js").PermissionReviewStatus;
-    verdictLevel?: import("../../shared/permission-review-status.js").PermissionReviewRiskLevel;
+    verdictLevel?: RiskLevel;
     reason?: string;
   };
 

@@ -7,7 +7,7 @@ import { tokenizeShell } from "../shared/shell-tokenizer.js";
 
 export type ValidationDecision = "allow" | "warn" | "deny";
 
-export interface ValidationResult {
+export interface BashAstValidationResult {
   decision: ValidationDecision;
   reason?: string;
   patternId?: string;
@@ -24,7 +24,7 @@ export class BashAstValidator {
 
 
 
-  validate(toolName: string, input: Record<string, unknown>): ValidationResult {
+  validate(toolName: string, input: Record<string, unknown>): BashAstValidationResult {
     if (!this._isBashTool(toolName)) return { decision: "allow" };
 
     const command = this._extractCommand(input);

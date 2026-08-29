@@ -34,7 +34,7 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../shared/session-todo.js";
-import type { StreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
+import type { ChatStreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
@@ -368,8 +368,8 @@ export function buildInternalApiSurface() {
       ipcRenderer.invoke(CHANNELS.sidechat.abort) as Promise<
         { ok: true } | { ok: false; error: string }
       >,
-    onStream: (handler: (event: StreamEvent) => void) => {
-      const listener = (_event: unknown, payload: StreamEvent) => handler(payload);
+    onStream: (handler: (event: ChatStreamEvent) => void) => {
+      const listener = (_event: unknown, payload: ChatStreamEvent) => handler(payload);
       ipcRenderer.on(CHANNELS.sidechat.stream, listener);
       return () => ipcRenderer.removeListener(CHANNELS.sidechat.stream, listener);
     },

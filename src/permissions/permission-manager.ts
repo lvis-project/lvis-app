@@ -43,9 +43,9 @@ import {
   caseFoldForMatch,
 } from "./sensitive-paths.js";
 import { isPathAllowed } from "./allowed-directories.js";
+import type { ExecutionMode } from "../shared/permission-mode.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
-export type ExecutionMode = "default" | "strict" | "auto" | "allow";
 
 
 // This deliberately names one host-owned operation instead of weakening the
