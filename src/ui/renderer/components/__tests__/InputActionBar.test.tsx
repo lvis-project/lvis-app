@@ -7,7 +7,6 @@ import { InputActionBar } from "../InputActionBar.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../../shared/assistant-context-menu.js";
 import type { InputStatusRow } from "../../hooks/use-input-status-row.js";
-import { getVendorOption } from "../../constants.js";
 
 const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "" };
 const codingPreset: RolePreset = { id: "coding", name: "코딩", systemPromptAdd: "Code carefully." };
@@ -427,7 +426,10 @@ describe("model card (status-row model cell)", () => {
   });
 
   it("names the vendor in the card, where the status row no longer says it", async () => {
-    const vendorLabel = getVendorOption("openai-compatible").label;
+    // The literal the catalogue holds for this vendor, not the same lookup the
+    // component makes — a derived expectation would agree with a wrong label.
+    // The suite renders in Korean (src/i18n/testing/vitest-ambient-intl.ts).
+    const vendorLabel = "사용자 지정 (OpenAI 호환)";
     const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
     fireEvent.click(getByTestId("iab-status-model"));
     const card = await findByTestId("model-quick-picker");

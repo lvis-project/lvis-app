@@ -382,6 +382,9 @@ function StatusSubRow({
   // The row names the model only. Which vendor serves it is a detail of the
   // route, not of the sentence the person is about to send — it belongs in
   // the model card the cell opens, next to the models they can switch to.
+  // One case survives the strip whole: before a model is chosen the label is
+  // the vendor alone (or "not configured"), with no " · " to cut at — and that
+  // is right, because there is no model name yet to show instead.
   const displayModel = stripVendorPrefix(vendorModel);
 
   return (
