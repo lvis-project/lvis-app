@@ -31,8 +31,6 @@ export function isNonNegativeSafeInteger(value: unknown): value is number {
  * number, or throws a `RangeError` carrying `message` — the stable error
  * code or sentence the caller's contract names.
  */
-export function requirePositiveInteger(value: number, message: string): number;
-export function requirePositiveInteger(value: unknown, message: string): number;
 export function requirePositiveInteger(value: unknown, message: string): number {
   if (!isPositiveSafeInteger(value)) throw new RangeError(message);
   return value;
