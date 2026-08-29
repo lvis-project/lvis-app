@@ -764,9 +764,9 @@ function ModelSelectItemContent({
 }: {
   option: string;
   entry?: LlmModelListEntry;
-  /** Leading column: the provider the caller lists this model under. Never
-   *  read from the catalogue entry — that field is the endpoint's word for
-   *  itself, and the fallback chain lists a vendor's own models without one. */
+  /** Leading column: who serves this model. The caller decides whether the
+   *  catalogue entry may name it — see `UnifiedModelOption.vendorLabel` — and
+   *  the fallback chain lists a vendor's own models without one. */
   provider?: string;
   /** Trailing facts for the same case. */
   factsOverride?: string;
@@ -840,11 +840,17 @@ interface UnifiedModelOption {
   value: string;
   providerId: string;
   /** The name of the ROW this model is offered on — the card title. It is the
-   *  chooser's group label and every row's leading column, so a self-hosted
-   *  endpoint is named by what the user connected, never by what its catalogue
-   *  calls itself (an OpenAI-compatible server reports its models as owned by
-   *  "openai"). */
+   *  chooser's group label. */
   providerLabel: string;
+  /** Leading column: who serves THIS model.
+   *
+   *  Usually the catalogue's own word, because an aggregator's catalogue is
+   *  other companies' models and the sub-vendor is the only thing that tells
+   *  them apart. It falls back to the row name for the rows whose catalogue
+   *  cannot name itself — an OpenAI-compatible server reports everything it
+   *  serves as owned by "openai" — so a self-hosted endpoint is named by what
+   *  the user connected. See `unifiedOptions`. */
+  vendorLabel: string;
   modelId: string;
   entry?: LlmModelListEntry;
   /** Subscription-side facts, where there is no catalogue entry to read them from. */
@@ -986,7 +992,11 @@ function UnifiedModelSelect({
         <ModelSelectItemContent
           option={option.modelId}
           {...(option.entry ? { entry: option.entry } : {})}
-          provider={option.providerLabel}
+          /* Kept on grouped rows too, where it repeats the group header. Radix
+             mirrors the chosen row's ItemText into the collapsed trigger, and
+             the trigger has no label of its own, so dropping it here would
+             leave the closed control showing a bare model id. */
+          provider={option.vendorLabel}
           {...(option.facts ? { factsOverride: option.facts } : {})}
           {...(option.unlisted ? { tone: "destructive" as const } : {})}
         />
@@ -1978,6 +1988,13 @@ export function LlmTab(props: LlmTabProps) {
       const state = row.modelListKey ? modelLists[row.modelListKey] : undefined;
       const isActiveRow = rowId === activeApiRowId;
       const entries = modelEntryMap(state?.entries);
+      // Whether the catalogue may name its own models. An OpenAI-compatible
+      // server answers `/models` with `owned_by: "openai"` for everything it
+      // serves — its word for its own software, not for who made the model —
+      // and every marketplace preset is reached through that vendor. Those
+      // rows take the card title instead. A real vendor's catalogue keeps its
+      // sub-vendor, which is the whole point of an aggregator's list.
+      const catalogueNamesItsModels = row.apiVendorId !== "openai-compatible" && !row.presetId;
       for (const modelId of rowModelIds(row)) {
         // Keyed by the ROW, not the vendor: two marketplace presets are two
         // providers reached through one vendor, and a pick has to say which.
@@ -1989,6 +2006,9 @@ export function LlmTab(props: LlmTabProps) {
           value,
           providerId: apiProviderId(rowId),
           providerLabel: row.label,
+          vendorLabel: catalogueNamesItsModels
+            ? entry?.provider ?? entry?.ownedBy ?? row.label
+            : row.label,
           modelId,
           ...(entry ? { entry } : {}),
           ...(isActiveRow && modelId === unlistedModel
@@ -2010,6 +2030,7 @@ export function LlmTab(props: LlmTabProps) {
           value: unifiedValue(view.descriptor.id, ""),
           providerId: view.descriptor.id,
           providerLabel: view.descriptor.label,
+          vendorLabel: view.descriptor.label,
           modelId: t("llmTab.providerDefaultModel"),
           facts: t("llmTab.modelFixedByProvider"),
           fixed: true,
@@ -2021,6 +2042,7 @@ export function LlmTab(props: LlmTabProps) {
           value: unifiedValue(view.descriptor.id, model.id),
           providerId: view.descriptor.id,
           providerLabel: view.descriptor.label,
+          vendorLabel: view.descriptor.label,
           modelId: model.label || model.id,
         });
       }

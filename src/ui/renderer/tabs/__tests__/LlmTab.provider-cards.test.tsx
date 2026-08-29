@@ -687,6 +687,83 @@ describe("LlmTab model chooser is the whole switch", () => {
     expect(column.textContent).toBe(cardTitle);
     expect(chooserGroupText("qwen-self-hosted")).toContain(cardTitle);
   });
+
+  it("names a marketplace preset row by its card title as well", async () => {
+    // A preset is reached through the openai-compatible vendor, so its
+    // catalogue names itself the same untrustworthy way. The row the user
+    // installed is what the column says.
+    const gateway = preset("acme-gw", "Acme Gateway", "https://acme.example/v1");
+    const { api } = profileApi({
+      installedProviderPresets: [gateway],
+      modelListCache: {
+        [["openai-compatible", gateway.baseUrl, "acme-gw"].join("\n")]: {
+          vendor: "openai-compatible",
+          baseUrl: gateway.baseUrl,
+          credentialScope: "acme-gw",
+          endpoint: `${gateway.baseUrl}/models`,
+          models: ["acme-large"],
+          modelEntries: [{ id: "acme-large", provider: "openai", ownedBy: "openai" }],
+          fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    }, {
+      hasApiKey: storedKeysFor("marketplace-provider:acme-gw"),
+      // The cached catalogue is what this reads; a fresh answer would only
+      // race it.
+      listLlmModels: vi.fn(() => new Promise<LlmModelListResult>(() => {})),
+    });
+    await renderTab(api, {
+      vendor: "openai-compatible",
+      marketplaceProviderPresets: [gateway],
+      marketplaceProviderPresetId: "acme-gw",
+      model: "acme-large",
+    });
+
+    expect(await chooserModelIds()).toContain("acme-large");
+    const column = within(chooserOption("acme-large"))
+      .getByTestId("llm-tab:model-provider:acme-large");
+    expect(column.textContent).toBe("Acme Gateway");
+  });
+
+  it("keeps an aggregator's sub-vendor on the model it serves", async () => {
+    // An aggregator's catalogue IS other companies' models, and its entries
+    // say which company serves each one. Printing the row name on every one of
+    // them would erase the only thing that tells them apart — so the override
+    // that saves a self-hosted row must not reach this list.
+    const ROUTED = "anthropic/claude-sonnet-4.6";
+    const { api } = profileApi({ installedProviderIds: ["openrouter"] }, {
+      hasApiKey: storedKeysFor("openrouter"),
+      listLlmModels: vi.fn().mockResolvedValue({
+        ok: true,
+        vendor: "openrouter",
+        endpoint: "https://openrouter.ai/api/v1/models",
+        models: [ROUTED],
+        modelEntries: [{
+          id: ROUTED,
+          provider: "anthropic",
+          ownedBy: "anthropic",
+          tags: { router: true },
+        }],
+        fetchedAt: "2026-01-01T00:00:00.000Z",
+      } satisfies LlmModelListResult),
+    });
+    await renderTab(api, {
+      vendor: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: ROUTED,
+    });
+
+    expect(await chooserModelIds()).toContain(ROUTED);
+    // The row offers its own saved model before any handshake, and the entry
+    // that names the sub-vendor arrives with the catalogue — so the column is
+    // read once that has landed.
+    await waitFor(() => expect(
+      within(chooserOption(ROUTED)).getByTestId(`llm-tab:model-provider:${ROUTED}`).textContent,
+    ).toBe("anthropic"));
+    // The group is still the row: the list is navigated by provider row, and
+    // only the leading column speaks for the individual model.
+    expect(chooserGroupText(ROUTED)).toMatch(/OpenRouter/i);
+  });
 });
 
 describe("LlmTab names each route's state on a row that has two", () => {
