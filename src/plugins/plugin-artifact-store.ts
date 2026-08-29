@@ -730,7 +730,7 @@ export class PluginArtifactStore {
         const discardPromotedRoot = async (cause: unknown, failedStep: string): Promise<never> => {
           if (hadOldDir) {
             try {
-              await retryOnTransientFsLock(() => carryPluginDataDir(installDir, oldDir));
+              await retryOnTransientFsLock(() => carryPluginDataDir(installDir, oldDir, { onConflict: "reject" }));
             } catch (carryBackErr) {
               throw new ArtifactRollbackError(
                 `${failedStep} and plugin data return both failed: ${safeSlug}`,
@@ -767,7 +767,7 @@ export class PluginArtifactStore {
           // a receipt for it — a receipt must never become durable for a root
           // whose state still sits in a backup slated for removal.
           try {
-            await retryOnTransientFsLock(() => carryPluginDataDir(oldDir, installDir), {
+            await retryOnTransientFsLock(() => carryPluginDataDir(oldDir, installDir, { onConflict: "reject" }), {
               onRetry: (attempt, code) =>
                 log.warn({ safeSlug, attempt, code }, "retrying plugin data carry into promoted root under fs lock"),
             });

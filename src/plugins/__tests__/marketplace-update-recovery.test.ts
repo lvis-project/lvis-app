@@ -15,6 +15,7 @@ import { preparePluginRegistryForBoot } from "../plugin-boot-recovery.js";
 import { createRemovalTransaction, stageRemovalTransaction } from "../plugin-removal-transaction.js";
 import { readPluginRegistry, updatePluginRegistry } from "../registry.js";
 import { sweepOrphanUninstallDirs } from "../orphan-uninstall-sweeper.js";
+import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
 import type { PluginPaths } from "../plugin-paths.js";
 import { PLUGIN_DATA_FIXTURE, readPluginDataFixture, seedPluginDataFixture } from "./test-helpers.js";
 
@@ -215,6 +216,86 @@ describe("marketplace pending-update recovery", () => {
     expect(await readFile(join(paths.pluginsRoot, pluginId, "plugin.json"), "utf-8")).toBe(oldManifest);
     expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
     expect(existsSync(backupDir)).toBe(false);
+  });
+
+  /**
+   * The failure the review reproduced against `main`. An empty `data/` at the
+   * promoted root — a storage call that landed in the swap window, or an
+   * interrupted carry — used to make every carry in recovery throw, so
+   * `recoverPendingPluginUpdate` never reached a terminal disposition:
+   * `pendingUpdate` stayed set, the plugin never loaded again, and the next
+   * boot arrived at the same state and threw again.
+   */
+  it("resolves an empty data directory at the promoted root and restores the live state", async () => {
+    const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    const backupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await preparePendingPluginUpdate(paths, entry, {
+      kind: "marketplace",
+      recoveryBackupDir: backupDir,
+      recoveryBackupMode: "rename",
+    });
+    await mkdir(backupDir);
+    await seedPluginDataFixture(backupDir);
+    await mkdir(join(paths.pluginsRoot, pluginId, "data"), { recursive: true });
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(backupDir)).toBe(false);
+    expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingUpdate).toBeUndefined();
+  });
+
+  it("parks an unexplained non-empty data directory instead of deleting it, and still recovers", async () => {
+    const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    const backupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await preparePendingPluginUpdate(paths, entry, {
+      kind: "marketplace",
+      recoveryBackupDir: backupDir,
+      recoveryBackupMode: "rename",
+    });
+    await mkdir(backupDir);
+    await seedPluginDataFixture(backupDir);
+    await mkdir(join(paths.pluginsRoot, pluginId, "data"), { recursive: true });
+    await writeFile(join(paths.pluginsRoot, pluginId, "data", "unexplained.bin"), "keep me");
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
+    expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingUpdate).toBeUndefined();
+    // Parked in the uninstall tombstone namespace the boot sweeper already
+    // owns — never deleted unseen.
+    expect(existsSync(join(paths.pluginsRoot, TOMBSTONE_SUBDIR))).toBe(true);
+  });
+
+  it("carries plugin data out of an explicitly cleaned-up backup before removing it", async () => {
+    const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    const backupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await mkdir(backupDir);
+    // The crash left the plugin's only data directory in the backup; explicit
+    // cleanup is the operator-driven path that drops that backup.
+    await seedPluginDataFixture(backupDir);
+    await preparePendingPluginUpdate(paths, entry, {
+      kind: "marketplace",
+      recoveryBackupDir: backupDir,
+      recoveryBackupMode: "rename",
+    });
+
+    expect(await cleanupPendingPluginUpdateBackup(paths, pluginId)).toBe(true);
+    expect(existsSync(backupDir)).toBe(false);
+    expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
+  });
+
+  it("carries plugin data out of a journalled cleanup root before removing it", async () => {
+    const obsoleteDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await mkdir(obsoleteDir);
+    // A retry's superseded root. On a retry the live `data/` is inside it.
+    await seedPluginDataFixture(obsoleteDir);
+    await updatePluginRegistry(paths.registryPath, (registry) => {
+      const target = registry.plugins.find((candidate) => candidate.id === pluginId)!;
+      target.pendingCleanup = [{ kind: "obsolete-artifact", path: obsoleteDir }];
+    });
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    expect(existsSync(obsoleteDir)).toBe(false);
+    expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
   });
 
   it("restores a copy-mode backup's payload and moves the plugin data it holds into the live root", async () => {

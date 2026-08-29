@@ -8,15 +8,18 @@
  */
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import {
   PLUGIN_DATA_DIR_NAME,
   PLUGIN_OWN_SOCKET_DIR_NAME,
+  PLUGIN_RUNTIME_DIR_NAMES,
   PLUGIN_WORKER_RUN_DIR_NAME,
   assertUnixSocketPathFits,
   carryPluginDataDir,
+  isPluginRuntimeDirName,
+  isSamePluginPath,
   pluginPayloadCopyFilter,
   resolvePluginSocketDir,
   resolvePluginWritableRoot,
@@ -174,6 +177,8 @@ describe("assertUnixSocketPathFits", () => {
   });
 });
 
+const REJECT = { onConflict: "reject" } as const;
+
 describe("carryPluginDataDir", () => {
   let root: string;
 
@@ -192,7 +197,7 @@ describe("carryPluginDataDir", () => {
     await mkdir(to);
     await seedPluginDataFixture(from);
 
-    await expect(carryPluginDataDir(from, to)).resolves.toBe(true);
+    await expect(carryPluginDataDir(from, to, REJECT)).resolves.toBe(true);
 
     expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
     expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
@@ -204,7 +209,7 @@ describe("carryPluginDataDir", () => {
     await mkdir(from);
     await mkdir(to);
 
-    await expect(carryPluginDataDir(from, to)).resolves.toBe(false);
+    await expect(carryPluginDataDir(from, to, REJECT)).resolves.toBe(false);
 
     expect(existsSync(join(to, PLUGIN_DATA_DIR_NAME))).toBe(false);
   });
@@ -217,20 +222,152 @@ describe("carryPluginDataDir", () => {
     await seedPluginDataFixture(from);
     await seedPluginDataFixture(to);
 
-    await expect(carryPluginDataDir(from, to)).rejects.toThrow(/both roots hold a plugin data directory/);
+    await expect(carryPluginDataDir(from, to, REJECT)).rejects.toThrow(/both roots hold a plugin data directory/);
 
     expect(await readPluginDataFixture(from)).toEqual(PLUGIN_DATA_FIXTURE);
     expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
   });
 });
 
+/**
+ * The resolving policy recovery uses. Every conflict must end in a decision:
+ * refusing leaves `pendingUpdate` set and the plugin unloadable forever.
+ */
+describe("carryPluginDataDir — resolving conflict policy", () => {
+  let root: string;
+  let parked: string[];
+
+  const resolvePolicy = () => ({
+    onConflict: "resolve" as const,
+    moveAside: async (dir: string): Promise<void> => {
+      const target = join(root, `parked-${String(parked.length)}`);
+      await rename(dir, target);
+      parked.push(target);
+    },
+  });
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "plugin-data-carry-resolve-"));
+    parked = [];
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const twoRoots = async (): Promise<{ from: string; to: string }> => {
+    const from = join(root, "old");
+    const to = join(root, "new");
+    await mkdir(from);
+    await mkdir(to);
+    return { from, to };
+  };
+
+  it("removes an empty destination data directory and carries the real one in", async () => {
+    const { from, to } = await twoRoots();
+    await seedPluginDataFixture(from);
+    // Exactly the state a storage call landing in the swap window used to
+    // leave at the promoted root: the directory exists and holds nothing.
+    await mkdir(join(to, PLUGIN_DATA_DIR_NAME));
+
+    await expect(carryPluginDataDir(from, to, resolvePolicy())).resolves.toBe(true);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
+    expect(parked).toEqual([]);
+  });
+
+  it("keeps a real destination when the source directory is the empty one", async () => {
+    const { from, to } = await twoRoots();
+    await mkdir(join(from, PLUGIN_DATA_DIR_NAME));
+    await seedPluginDataFixture(to);
+
+    await expect(carryPluginDataDir(from, to, resolvePolicy())).resolves.toBe(false);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
+    expect(parked).toEqual([]);
+  });
+
+  it("parks a non-empty destination rather than deleting it, then carries", async () => {
+    const { from, to } = await twoRoots();
+    await seedPluginDataFixture(from);
+    await mkdir(join(to, PLUGIN_DATA_DIR_NAME), { recursive: true });
+    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unexplained.bin"), "keep me");
+
+    await expect(carryPluginDataDir(from, to, resolvePolicy())).resolves.toBe(true);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(parked).toHaveLength(1);
+    expect(await readdir(parked[0]!)).toEqual(["unexplained.bin"]);
+  });
+
+  it("refuses when moveAside leaves the destination in place", async () => {
+    const { from, to } = await twoRoots();
+    await seedPluginDataFixture(from);
+    await mkdir(join(to, PLUGIN_DATA_DIR_NAME), { recursive: true });
+    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unexplained.bin"), "keep me");
+
+    await expect(carryPluginDataDir(from, to, {
+      onConflict: "resolve",
+      moveAside: async () => undefined,
+    })).rejects.toThrow(/was not moved aside/);
+
+    expect(await readPluginDataFixture(from)).toEqual(PLUGIN_DATA_FIXTURE);
+  });
+});
+
 describe("pluginPayloadCopyFilter", () => {
-  it("excludes the root's own data directory and nothing else", () => {
+  it("excludes every top-level runtime directory and nothing else", () => {
     const pluginRoot = resolve(sep, "plugins", PLUGIN_ID);
     const filter = pluginPayloadCopyFilter(pluginRoot);
-    expect(filter(resolve(pluginRoot, PLUGIN_DATA_DIR_NAME))).toBe(false);
+    for (const runtimeDir of PLUGIN_RUNTIME_DIR_NAMES) {
+      // `run/` and `sockets/` hold live Unix sockets: `cp` over one fails the
+      // whole copy with ERR_FS_CP_SOCKET rather than skipping it.
+      expect(filter(resolve(pluginRoot, runtimeDir))).toBe(false);
+    }
     expect(filter(resolve(pluginRoot, "plugin.json"))).toBe(true);
     expect(filter(resolve(pluginRoot, "dist", PLUGIN_DATA_DIR_NAME))).toBe(true);
-    expect(filter(resolve(pluginRoot, PLUGIN_WORKER_RUN_DIR_NAME))).toBe(true);
+    expect(filter(resolve(pluginRoot, "database"))).toBe(true);
+  });
+});
+
+/**
+ * The carry asks the filesystem (`lstat`) and the copy filter compares
+ * strings. On a case-folding volume those two must not disagree about `Data/`,
+ * or the filter copies a directory the carry then has to reconcile.
+ */
+describe("isSamePluginPath", () => {
+  it("folds case only where the filesystem does", () => {
+    const dataDir = resolve(sep, "plugins", PLUGIN_ID, PLUGIN_DATA_DIR_NAME);
+    const aliased = resolve(sep, "plugins", PLUGIN_ID, "Data");
+    expect(isSamePluginPath(dataDir, aliased, true)).toBe(true);
+    expect(isSamePluginPath(dataDir, aliased, false)).toBe(false);
+    expect(isSamePluginPath(dataDir, dataDir, false)).toBe(true);
+  });
+
+  it("agrees with the filesystem this test is running on", async () => {
+    const root = await mkdtemp(join(tmpdir(), "plugin-data-case-"));
+    try {
+      await mkdir(join(root, PLUGIN_DATA_DIR_NAME));
+      const filter = pluginPayloadCopyFilter(root);
+      // `existsSync` is the filesystem's own answer; the filter must give the
+      // same one, whichever platform this runs on.
+      const filesystemSeesAlias = existsSync(join(root, "Data"));
+      expect(filter(join(root, "Data"))).toBe(!filesystemSeesAlias);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("isPluginRuntimeDirName", () => {
+  it("names every runtime directory, case-insensitively on every platform", () => {
+    for (const runtimeDir of PLUGIN_RUNTIME_DIR_NAMES) {
+      expect(isPluginRuntimeDirName(runtimeDir)).toBe(true);
+      expect(isPluginRuntimeDirName(runtimeDir.toUpperCase())).toBe(true);
+    }
+    expect(isPluginRuntimeDirName("dist")).toBe(false);
+    expect(isPluginRuntimeDirName("database")).toBe(false);
   });
 });

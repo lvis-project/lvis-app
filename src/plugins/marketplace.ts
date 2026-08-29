@@ -44,7 +44,7 @@ import {
   recoverPendingPluginUpdates,
   restoreSupersededPendingPluginUpdate,
 } from "./marketplace-update-recovery.js";
-import { carryPluginDataDir, pluginPayloadCopyFilter } from "./plugin-storage-layout.js";
+import { PLUGIN_RUNTIME_DIR_NAMES, carryPluginDataDir, pluginPayloadCopyFilter } from "./plugin-storage-layout.js";
 import { installReceiptPath, listFilesRecursive, restoreInstallReceiptRaw, verifyInstallReceipt } from "./plugin-install-receipt.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import {
@@ -2861,7 +2861,11 @@ export class PluginMarketplaceService {
         });
         await rejectSideloadSymlinks(stagingDir);
 
-        const receiptFiles = await listFilesRecursive(stagingDir);
+        // Same top-level exclusion the receipt VERIFIER applies on every later
+        // load (`verifyInstallReceipt` → `listFilesRecursive`). A receipt that
+        // listed a runtime directory would stop matching the payload the first
+        // time the plugin wrote to it, and the plugin would refuse to load.
+        const receiptFiles = await listFilesRecursive(stagingDir, PLUGIN_RUNTIME_DIR_NAMES);
         const localReceiptRaw = await this.prepareInstallReceipt(pluginId, stagingDir, {
           version: manifestVersion,
           installSource: "local-dev",
@@ -2891,10 +2895,16 @@ export class PluginMarketplaceService {
             // backup into the promoted root, so at every instant it is somewhere
             // boot recovery knows to reunite it with whichever root survives.
             const dataCarrier = localInstallDataCarrier(rollbackSnapshot);
-            await carryPluginDataDir(installDir, dataCarrier ?? stagingDir);
+            await retryOnTransientFsLock(
+              () => carryPluginDataDir(installDir, dataCarrier ?? stagingDir, { onConflict: "reject" }),
+            );
             await rm(installDir, { recursive: true, force: true });
             await rename(stagingDir, installDir);
-            if (dataCarrier) await carryPluginDataDir(dataCarrier, installDir);
+            if (dataCarrier) {
+              await retryOnTransientFsLock(
+                () => carryPluginDataDir(dataCarrier, installDir, { onConflict: "reject" }),
+              );
+            }
             await this.artifactStore.persistPreparedInstallReceipt(pluginId, localReceiptRaw);
             await updatePluginRegistry(this.registryPath, (registry) => {
               const existing = registry.plugins.find((x) => x.id === pluginId);
@@ -3066,21 +3076,24 @@ export class PluginMarketplaceService {
       return;
     }
     await readPluginRegistry(this.registryPath);
-    if (snapshot.backupDir) {
+    const backupDir = snapshot.backupDir;
+    if (backupDir) {
       // Whichever step of the swap failed, the plugin's data directory is in
       // exactly one of the two roots. The promoted root is about to go; the
       // state moves into the backup that is about to come back first.
-      await carryPluginDataDir(snapshot.installDir, snapshot.backupDir);
+      await retryOnTransientFsLock(
+        () => carryPluginDataDir(snapshot.installDir, backupDir, { onConflict: "reject" }),
+      );
     }
     await rm(snapshot.installDir, { recursive: true, force: true });
-    if (snapshot.backupDir) {
+    if (backupDir) {
       const restoreStageDir = `${snapshot.installDir}.restore-${process.pid}-${Date.now()}`;
       await rm(restoreStageDir, { recursive: true, force: true });
       try {
-        await cp(snapshot.backupDir, restoreStageDir, {
+        await cp(backupDir, restoreStageDir, {
           recursive: true,
           verbatimSymlinks: true,
-          filter: pluginPayloadCopyFilter(snapshot.backupDir),
+          filter: pluginPayloadCopyFilter(backupDir),
         });
         await retryOnTransientFsLock(() => rename(restoreStageDir, snapshot.installDir), {
           onRetry: (attempt, code) =>
@@ -3090,7 +3103,9 @@ export class PluginMarketplaceService {
         await rm(restoreStageDir, { recursive: true, force: true }).catch(() => undefined);
         throw err;
       }
-      await carryPluginDataDir(snapshot.backupDir, snapshot.installDir);
+      await retryOnTransientFsLock(
+        () => carryPluginDataDir(backupDir, snapshot.installDir, { onConflict: "reject" }),
+      );
     }
     const receiptPath = installReceiptPath(this.cacheRoot, pluginId);
     if (snapshot.receiptRaw !== undefined) {
