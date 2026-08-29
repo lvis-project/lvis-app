@@ -39,6 +39,7 @@ import {
   type ProjectErrorReporter,
 } from "../hooks/use-add-project-folder.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
+import { CLUSTER_LEAD_PAD_DARWIN } from "../../../shared/shell-geometry.js";
 import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
@@ -145,12 +146,13 @@ export interface SidebarProps {
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
-// On macOS the OS draws the traffic lights at {x:18,y:16} (≈12px diameter, so
-// their visual center sits at ≈y:22, ≈x:[18..76]). The floating card is anchored
-// at top-2 (8px) so the h-7 cluster strip's center lands on that line; the strip
-// carries a left clearance (≈76px) so its leftmost button starts at x≈84, just
-
-
+// On macOS the OS draws the traffic lights at `TRAFFIC_LIGHT_POSITION`
+// (shared/shell-geometry.ts), ≈12px across, so their visual centre sits on the
+// band's own centre line. The floating card is anchored at
+// `--shell-card-top-darwin` so the cluster strip's centre lands on that line;
+// the strip carries `CLUSTER_LEAD_PAD_DARWIN` of left clearance so its leftmost
+// button starts a full gap past `TRAFFIC_LIGHT_RIGHT_EDGE`, whether the strip
+// rides on the card surface or stands
 // out bare in the band when collapsed.
 // Returns false when the preload bridge is absent (jsdom / Storybook / SSR) —
 // no native chrome to align against there.
@@ -1502,12 +1504,10 @@ function onActiveSidebarTabChangeGuard(value: string, onActiveTabChange: (tab: S
 // items-center row so every glyph centers on the lights' line.
 //
 // `leadClearance` left-pads the FIRST button past the OS traffic lights on
-// darwin. The lights occupy roughly x in [18 .. 76] (trafficLightPosition.x:18
-// + ~58px for the 3 lights). The card surface starts at the aside's `left-2`
-// (≈8px), so the strip needs ≈76px of internal left padding to push its
-// leftmost button to x≈84 (lights end + ~8px gap) with NO hover overlap. The
-// card surface still paints behind the lights — the OS draws the lights ON TOP
-// of the webview, so that is purely cosmetic backing, not a collision.
+// darwin by `CLUSTER_LEAD_PAD_DARWIN` — the lights' right edge plus a gap,
+// re-expressed from the card's own left edge, which is where this padding is
+// measured from. Both halves of that derivation live in
+// `shared/shell-geometry.ts`, so the pad follows the lights if they ever move.
 function ClusterStrip({
   collapsed,
   leadClearance,
@@ -1527,13 +1527,12 @@ function ClusterStrip({
   const { t } = useTranslation();
   return (
     <div
-      className={[
-        "flex h-(--chrome-control-height) shrink-0 items-center gap-(--chrome-gap-hair) pr-(--chrome-gap-tight)",
-        // Clear the OS lights on darwin: 76px from the card's left edge, in
-        // device px like the lights themselves, so the first button lands at
-        // x=84 at every font scale. Win/Linux + non-Electron have no OS lights.
-        leadClearance ? "pl-[76px]" : "pl-(--chrome-gap-tight)",
-      ].join(" ")}
+      className="flex h-(--chrome-control-height) shrink-0 items-center gap-(--chrome-gap-hair) pl-(--chrome-gap-tight) pr-(--chrome-gap-tight)"
+      // Clear the OS lights on darwin. In device px like the lights themselves
+      // (an inline override of the class pad above), so the first button lands
+      // on the same x at every font scale. Win/Linux + non-Electron have no OS
+      // lights, so they keep the plain tight pad.
+      style={leadClearance ? { paddingLeft: `${CLUSTER_LEAD_PAD_DARWIN}px` } : undefined}
       data-testid="sidebar-cluster"
     >
       {/* 펼침/닫힘 — shell-owned collapse toggle. Leftmost, next to the lights. */}

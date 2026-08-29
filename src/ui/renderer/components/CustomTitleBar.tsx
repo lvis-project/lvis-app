@@ -12,10 +12,11 @@
  *            corner. The band stays a drag region in empty zones; every
  *            interactive control opts out via `WebkitAppRegion: "no-drag"`.
  * macOS:     no renderer-drawn window buttons — the OS draws the traffic
- *            lights into the `hiddenInset` area (trafficLightPosition
- *            {x:18,y:16}). The band renders `children` with left padding (pl-20
- *            ≈ 80px) so the first control clears the traffic lights, keeping the
- *            band a drag region elsewhere.
+ *            lights into the `hiddenInset` area (`TRAFFIC_LIGHT_POSITION` in
+ *            `shared/shell-geometry.ts`). The band renders `children` with
+ *            `BAND_LEAD_PAD_DARWIN` of left padding, derived from where those
+ *            lights end, so the first control clears them while the band stays
+ *            a drag region elsewhere.
  *
  * Platform detection uses `window.lvisPlatform.isDarwin` (set by preload)
  * rather than a UA sniff — throw if the bridge is absent so misconfigurations
@@ -33,6 +34,7 @@ import { Minus, Maximize2, Minimize2, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { useOptionalTheme } from "../theme/ThemeProvider.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { BAND_EDGE_PAD, BAND_LEAD_PAD_DARWIN } from "../../../shared/shell-geometry.js";
 
 // ─── Token → hex helpers ──────────────────────────────────────────────────
 // We read the CSS variable as an HSL triple (e.g. "222.2 84% 4.9%") and
@@ -109,10 +111,11 @@ export interface CustomTitleBarProps {
   leadClearance?: number;
 }
 
-/** Band leading pad when nothing overlaps it. macOS clears the traffic lights;
- *  the other platforms just need a gutter. */
-const DARWIN_LEAD_PAD = 80;
-const PLAIN_LEAD_PAD = 12;
+// Band leading pad when nothing overlaps it: macOS clears the traffic lights
+// (`BAND_LEAD_PAD_DARWIN`), the other platforms just need the band's own edge
+// gutter (`BAND_EDGE_PAD`) — which is also the trailing pad on both. Both live
+// in `shared/shell-geometry.ts` next to the light position they are derived
+// from, rather than as literals here.
 
 export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarProps = {}) {
   // Rules-of-hooks: all hook calls MUST come before any early return so the
@@ -172,8 +175,11 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
     return (
       <div
         data-testid="custom-titlebar-plain"
-        className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap) border-b border-border/(--opacity-half) bg-background pr-[12px] text-foreground select-none"
-        style={{ paddingLeft: `${Math.max(PLAIN_LEAD_PAD, leadClearance)}px` }}
+        className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap) border-b border-border/(--opacity-half) bg-background text-foreground select-none"
+        style={{
+          paddingLeft: `${Math.max(BAND_EDGE_PAD, leadClearance)}px`,
+          paddingRight: `${BAND_EDGE_PAD}px`,
+        }}
       >
         {children}
       </div>
@@ -183,9 +189,10 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
 
   if (isDarwin) {
     // macOS: the OS draws the traffic lights into the hiddenInset area
-    // (trafficLightPosition {x:18,y:16}). The band stays a drag region and
-    // hosts the toolbar content with left padding (pl-20 ≈ 80px) so the first
-    // control clears the traffic lights with no hover overlap.
+    // (`TRAFFIC_LIGHT_POSITION`). The band stays a drag region and hosts the
+    // toolbar content with `BAND_LEAD_PAD_DARWIN` of left padding — the lights'
+    // right edge plus a tight gap — so the first control clears them with no
+    // hover overlap.
     //
     // The band is 36px (`--chrome-band-height`, a px token: the lights are drawn
     // in device px, so the band must not follow the type scale). It is
@@ -195,16 +202,17 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
     // than the footer does. It also matches the chat group's own header, so
     // every chrome row in the window is one height.
     //
-    // 36px with items-center centers an h-7 (28px) control at cy=18, and the
-    // traffic lights (y:12, ≈12px tall → 12..24) center on the same line — see
-    // `trafficLightPosition` in main/window-chrome.ts, which is the other half
-    // of this number and must move with it.
+    // 36px with items-center centers a `--chrome-control-height` (28px) control
+    // at cy=18, and the traffic lights center on the same line — see
+    // `TRAFFIC_LIGHT_POSITION` in shared/shell-geometry.ts, which is the other
+    // half of this number and must move with it.
     return (
       <div
         data-testid="custom-titlebar-darwin"
-        className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap) border-b border-border/(--opacity-half) bg-background pr-[12px] text-foreground select-none"
+        className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap) border-b border-border/(--opacity-half) bg-background text-foreground select-none"
         style={{
-          paddingLeft: `${Math.max(DARWIN_LEAD_PAD, leadClearance)}px`,
+          paddingLeft: `${Math.max(BAND_LEAD_PAD_DARWIN, leadClearance)}px`,
+          paddingRight: `${BAND_EDGE_PAD}px`,
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "drag",
         }}
@@ -222,7 +230,7 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
       data-testid="custom-titlebar"
       className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap) border-b border-border/(--opacity-half) bg-background text-foreground select-none"
       style={{
-        paddingLeft: `${Math.max(PLAIN_LEAD_PAD, leadClearance)}px`,
+        paddingLeft: `${Math.max(BAND_EDGE_PAD, leadClearance)}px`,
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "drag",
       }}
