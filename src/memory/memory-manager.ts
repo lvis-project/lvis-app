@@ -31,6 +31,7 @@ import {
 import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-index.js";
 import { isRecord } from "../shared/is-record.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
+import { dlpSafeCandidate } from "../shared/dlp-safe-id.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
@@ -630,22 +631,25 @@ const LEGACY_ROW_ID_MAX_ATTEMPTS = 8;
  * Hashed rather than concatenated because the id is persisted on the next save
  * and read back: the digest is hex, so it cannot carry anything a redaction
  * pass would rewrite, and the DLP check still proves it for the same reason
- * `createDlpSafeUuid` proves its own output. The attempt counter keeps the
- * retry deterministic, so a second read of the same file lands on the same id
- * as the first — and it is also what lets `taken` be honoured without
- * reaching for randomness.
+ * `createDlpSafeUuid` proves its own output — literally the same retry
+ * primitive, `dlpSafeCandidate`, with a hashed draw instead of a random one.
+ * The attempt counter keeps the retry deterministic, so a second read of the
+ * same file lands on the same id as the first, and it is also what lets
+ * `taken` be honoured without reaching for randomness.
  */
 function legacyRowId(sessionId: string, index: number, taken: ReadonlySet<string>): string {
-  for (let attempt = 0; attempt < LEGACY_ROW_ID_MAX_ATTEMPTS; attempt += 1) {
+  const candidate = dlpSafeCandidate((attempt) => {
     const digest = createHash("sha256")
       .update(`${sessionId}:${index}:${attempt}`)
       .digest("hex")
       .slice(0, 32);
-    const candidate = `row-${digest}`;
-    if (taken.has(candidate)) continue;
-    if (maskSensitiveData(candidate).detections.length === 0) return candidate;
+    const derived = `row-${digest}`;
+    return taken.has(derived) ? null : derived;
+  }, LEGACY_ROW_ID_MAX_ATTEMPTS);
+  if (candidate === null) {
+    throw new Error("[legacy-row-id] could not derive a redaction-safe row identity");
   }
-  throw new Error("[legacy-row-id] could not derive a redaction-safe row identity");
+  return candidate;
 }
 
 /**
