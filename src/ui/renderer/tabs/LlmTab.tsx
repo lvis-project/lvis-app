@@ -147,8 +147,8 @@ const CREDENTIAL_FORM_ID = "llm-provider-credential-form";
  * does for the subscription runtimes' failures.
  */
 const CHAT_BLOCKER_MESSAGE_KEYS = {
-  "needs-api-key": "llmTab.useProviderNeedsCredential",
-  "needs-gcp-project": "llmTab.useProviderNeedsProject",
+  "needs-api-key": "llmTab.chatNeedsApiKey",
+  "needs-gcp-project": "llmTab.chatNeedsGcpProject",
 } as const;
 
 type ChatBlocker = keyof typeof CHAT_BLOCKER_MESSAGE_KEYS;
@@ -1182,17 +1182,6 @@ export function LlmTab(props: LlmTabProps) {
   const activeSyncedModelOptions = modelDiscoveryPolicyUsesSeededOptions(activeModelDiscoveryPolicy)
     ? undefined
     : optionsFromModelListState(activeModelList);
-  const activeModelOptions = modelOptionsFor(
-    vendor,
-    activeModelValue,
-    activeSyncedModelOptions,
-    vendorInfo,
-    activeModelDiscoveryPolicy,
-  );
-  const activeModelEntryById = useMemo(
-    () => modelEntryMap(activeModelList?.entries),
-    [activeModelList],
-  );
   // Only a synced catalogue can disqualify the saved model; a seeded vendor's
   // curated line is not the server's word on what it serves.
   const unlistedModel = unlistedSavedModel(
@@ -1205,121 +1194,6 @@ export function LlmTab(props: LlmTabProps) {
   // Mirrored from settings rather than held locally: another window may pin a
   // model too, and the chooser must show one truth.
   const [pinnedModels, setPinnedModels] = useState<readonly string[]>([]);
-
-  const unifiedOptions = useMemo<UnifiedModelOption[]>(() => {
-    const options: UnifiedModelOption[] = [];
-    // `modelOptionsFor` is the single authority on what an API vendor can
-    // offer: a curated line for a first-party vendor, and nothing at all for
-    // an endpoint-defined openai-compatible provider until its /models
-    // handshake lands. Do not add a second key-based gate on top — two
-    // policies answering the same question is how a vendor ends up with an
-    // empty chooser while its catalogue is right there.
-    const pushed = new Set<string>();
-    const pushApiOption = (
-      vendorId: string,
-      modelId: string,
-      entry: LlmModelListEntry | undefined,
-    ) => {
-      const value = unifiedValue(apiProviderId(vendorId), modelId);
-      if (pushed.has(value)) return;
-      pushed.add(value);
-      options.push({
-        value,
-        providerId: apiProviderId(vendorId),
-        providerLabel: getVendorInfo(vendorId).label,
-        modelId,
-        vendorTag: entry?.provider ?? entry?.ownedBy ?? vendorId,
-        ...(entry ? { entry } : {}),
-      });
-    };
-    // The vendor the configuration form points at goes first: it is the only
-    // one whose curated seed list and current selection are known here.
-    for (const modelId of activeModelOptions) {
-      pushApiOption(vendor, modelId, activeModelEntryById.get(modelId));
-      if (modelId === unlistedModel) {
-        const last = options[options.length - 1]!;
-        options[options.length - 1] = { ...last, unlisted: true, facts: t("llmTab.modelUnlisted") };
-      }
-    }
-    // Then every OTHER vendor whose /models handshake already landed. Without
-    // this, switching the form's vendor emptied the chooser of every vendor
-    // the user had configured — the catalogue was cached, just never offered.
-    for (const [cacheKey, state] of Object.entries(modelLists)) {
-      const cachedVendor = cacheKey.split("\n")[0];
-      if (!cachedVendor || cachedVendor === vendor) continue;
-      const entries = modelEntryMap(state.entries);
-      for (const modelId of state.options ?? []) {
-        pushApiOption(cachedVendor, modelId, entries.get(modelId));
-      }
-    }
-    for (const view of subscription.providers) {
-      // Connected only. A signed-out provider has nothing to offer yet, and
-      // listing its models would invite a choice that cannot be honoured.
-      if (view.status?.connection !== "connected") continue;
-      const models = view.status.models ?? [];
-      if (models.length === 0) {
-        // No model choice at all — the row IS the provider. It still belongs in
-        // the list, because picking it is exactly as much of a choice as
-        // picking a model from a provider that has several.
-        options.push({
-          value: unifiedValue(view.descriptor.id, ""),
-          providerId: view.descriptor.id,
-          providerLabel: view.descriptor.label,
-          modelId: t("llmTab.providerDefaultModel"),
-          vendorTag: view.descriptor.id,
-          facts: t("llmTab.modelFixedByProvider"),
-          fixed: true,
-        });
-        continue;
-      }
-      for (const model of models) {
-        options.push({
-          value: unifiedValue(view.descriptor.id, model.id),
-          providerId: view.descriptor.id,
-          providerLabel: view.descriptor.label,
-          modelId: model.label || model.id,
-          vendorTag: view.descriptor.id,
-        });
-      }
-    }
-    return options;
-  }, [
-    vendor, activeModelOptions, activeModelEntryById, modelLists,
-    subscription.providers, t, unlistedModel,
-  ]);
-
-  const selectedUnifiedValue = subscription.activeRuntime.kind === "subscription"
-    ? unifiedValue(subscription.activeRuntime.provider, subscription.activeRuntime.model ?? "")
-    : unifiedValue(apiProviderId(vendor), activeModelValue);
-
-  const handleUnifiedModelChange = useCallback((value: string) => {
-    const parsed = parseUnifiedValue(value);
-    if (!parsed) return;
-    if (parsed.providerId.startsWith(API_PROVIDER_PREFIX)) {
-      const pickedVendor = parsed.providerId.slice(API_PROVIDER_PREFIX.length);
-      if (pickedVendor === vendor) setModel(parsed.modelId);
-      else selectApiVendorModel(pickedVendor, parsed.modelId);
-      // A pick is the decision. It persists the way the vendor row and the
-      // thinking controls do — through the debounced save — rather than
-      // waiting on the section's Save button, which exists for the typed
-      // fields (a key, a base URL) where a keystroke is not yet a decision.
-      onImmediateChange?.();
-      // Only switch the runtime when it is not already the API path. Calling
-      // it unconditionally rewrites settings on every pick, and that broadcast
-      // is what used to snap the chosen model back to the persisted one.
-      if (subscription.activeRuntime.kind !== "api") {
-        void subscription.props.actions.useApiForChat?.();
-      }
-      return;
-    }
-    void subscription.props.actions.useForChat?.(
-      parsed.providerId as SubscriptionRuntimeId,
-      parsed.modelId === "" ? null : parsed.modelId,
-    );
-  }, [
-    onImmediateChange, selectApiVendorModel, setModel, vendor,
-    subscription.activeRuntime.kind, subscription.props.actions,
-  ]);
 
   const handleTogglePin = useCallback((modelId: string) => {
     const next = pinnedModels.includes(modelId)
@@ -1787,6 +1661,161 @@ export function LlmTab(props: LlmTabProps) {
       : "needs-api-key";
   }, [credentialedProviderIds, rowRequiresApiKey, savedVendorBlocks]);
 
+  /**
+   * Every model a connected provider can be asked for, in ONE list.
+   *
+   * This list IS the provider switch. Picking a model picks the provider that
+   * serves it, so there is no second "use this provider" control anywhere on
+   * the page — which means the list has to be complete, or a provider the user
+   * configured would be unreachable.
+   *
+   * A row contributes exactly when it could answer a turn: the same
+   * `rowChatBlocker` question the card's status line asks, so the two can
+   * never disagree about whether a provider is ready. What it contributes is
+   * `modelOptionsFor`'s answer and nothing else — the synced catalogue once a
+   * handshake has landed, a curated vendor's bundled line when it has one, and
+   * nothing at all for a vendor whose catalogue is the endpoint's word and has
+   * not answered yet. Do not add a second key-based gate on top of that: two
+   * policies answering the same question is how a vendor ends up with an empty
+   * chooser while its catalogue is right there.
+   */
+  const unifiedOptions = useMemo<UnifiedModelOption[]>(() => {
+    const options: UnifiedModelOption[] = [];
+    const pushed = new Set<string>();
+    for (const row of connections) {
+      if (!row.apiVendorId) continue;
+      if (rowChatBlocker(row) !== null) continue;
+      const rowId = rowCredentialId(row);
+      const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
+      const rowInfo = preset ? providerOptionFromPreset(preset) : getVendorInfo(row.apiVendorId);
+      const discoveryPolicy = preset?.modelDiscoveryPolicy;
+      const state = row.modelListKey ? modelLists[row.modelListKey] : undefined;
+      const synced = modelDiscoveryPolicyUsesSeededOptions(discoveryPolicy)
+        ? undefined
+        : optionsFromModelListState(state);
+      const isActiveRow = rowId === activeApiRowId;
+      // The active row's selection is live state; every other row's is what it
+      // has stored, so a configured provider always shows its own saved model
+      // even when its endpoint has said nothing yet.
+      const selectedModel = isActiveRow
+        ? activeModelValue
+        : savedVendorBlocks[row.apiVendorId]?.model ?? "";
+      const entries = modelEntryMap(state?.entries);
+      const modelIds = modelOptionsFor(
+        row.apiVendorId,
+        selectedModel,
+        synced,
+        rowInfo,
+        discoveryPolicy,
+      );
+      for (const modelId of modelIds) {
+        // Keyed by the ROW, not the vendor: two marketplace presets are two
+        // providers reached through one vendor, and a pick has to say which.
+        const value = unifiedValue(apiProviderId(rowId), modelId);
+        if (pushed.has(value)) continue;
+        pushed.add(value);
+        const entry = entries.get(modelId);
+        options.push({
+          value,
+          providerId: apiProviderId(rowId),
+          providerLabel: row.label,
+          modelId,
+          vendorTag: entry?.provider ?? entry?.ownedBy ?? row.apiVendorId,
+          ...(entry ? { entry } : {}),
+          ...(isActiveRow && modelId === unlistedModel
+            ? { unlisted: true, facts: t("llmTab.modelUnlisted") }
+            : {}),
+        });
+      }
+    }
+    for (const view of subscription.providers) {
+      // Connected only. A signed-out provider has nothing to offer yet, and
+      // listing its models would invite a choice that cannot be honoured.
+      if (view.status?.connection !== "connected") continue;
+      const models = view.status.models ?? [];
+      if (models.length === 0) {
+        // No model choice at all — the row IS the provider. It still belongs in
+        // the list, because picking it is exactly as much of a choice as
+        // picking a model from a provider that has several.
+        options.push({
+          value: unifiedValue(view.descriptor.id, ""),
+          providerId: view.descriptor.id,
+          providerLabel: view.descriptor.label,
+          modelId: t("llmTab.providerDefaultModel"),
+          vendorTag: view.descriptor.id,
+          facts: t("llmTab.modelFixedByProvider"),
+          fixed: true,
+        });
+        continue;
+      }
+      for (const model of models) {
+        options.push({
+          value: unifiedValue(view.descriptor.id, model.id),
+          providerId: view.descriptor.id,
+          providerLabel: view.descriptor.label,
+          modelId: model.label || model.id,
+          vendorTag: view.descriptor.id,
+        });
+      }
+    }
+    return options;
+  }, [
+    connections, rowChatBlocker, installedPresetById, modelLists, activeApiRowId,
+    activeModelValue, savedVendorBlocks, unlistedModel, subscription.providers, t,
+  ]);
+
+  const selectedUnifiedValue = subscription.activeRuntime.kind === "subscription"
+    ? unifiedValue(subscription.activeRuntime.provider, subscription.activeRuntime.model ?? "")
+    : unifiedValue(apiProviderId(activeApiRowId), activeModelValue);
+
+  /**
+   * A pick moves BOTH halves of the decision: which provider answers, and with
+   * what model. It persists the way the thinking controls do — through the
+   * debounced save — rather than waiting on a Save button, which exists for
+   * the typed fields where a keystroke is not yet a decision.
+   */
+  const handleUnifiedModelChange = useCallback((value: string) => {
+    const parsed = parseUnifiedValue(value);
+    if (!parsed) return;
+    if (parsed.providerId.startsWith(API_PROVIDER_PREFIX)) {
+      const pickedRowId = parsed.providerId.slice(API_PROVIDER_PREFIX.length);
+      const pickedPresetId = marketplaceProviderPresetIdFromSecretId(pickedRowId);
+      const pickedPreset = pickedPresetId ? installedPresetById.get(pickedPresetId) : undefined;
+      if (pickedRowId === activeApiRowId) {
+        // Same provider, different model: moving the vendor as well would
+        // re-hydrate fields the user may have just changed.
+        setModel(parsed.modelId);
+      } else if (pickedPreset) {
+        onSelectMarketplaceProviderPreset?.(pickedPreset);
+        setModel(parsed.modelId);
+      } else {
+        // The generic custom provider IS this vendor without a preset, so
+        // dropping the preset is what selects it.
+        if (pickedRowId === "openai-compatible" && marketplaceProviderPresetId) {
+          onClearMarketplaceProviderPreset?.();
+        }
+        selectApiVendorModel(pickedRowId, parsed.modelId);
+      }
+      onImmediateChange?.();
+      // Only switch the runtime when it is not already the API path. Calling
+      // it unconditionally rewrites settings on every pick, and that broadcast
+      // is what used to snap the chosen model back to the persisted one.
+      if (subscription.activeRuntime.kind !== "api") {
+        void subscription.props.actions.useApiForChat?.();
+      }
+      return;
+    }
+    void subscription.props.actions.useForChat?.(
+      parsed.providerId as SubscriptionRuntimeId,
+      parsed.modelId === "" ? null : parsed.modelId,
+    );
+  }, [
+    activeApiRowId, installedPresetById, marketplaceProviderPresetId,
+    onClearMarketplaceProviderPreset, onImmediateChange, onSelectMarketplaceProviderPreset,
+    selectApiVendorModel, setModel,
+    subscription.activeRuntime.kind, subscription.props.actions,
+  ]);
+
   const revealRow = useCallback((rowId: string) => {
     setAddedRowIds((current) => current.includes(rowId) ? current : [...current, rowId]);
     setRowToReveal(rowId);
@@ -2055,82 +2084,25 @@ export function LlmTab(props: LlmTabProps) {
       : (rowIsActiveApiProvider(row) ? "api" : null);
 
   /**
-   * Move chat onto this row's API route.
+   * What this card still needs before its models join the chooser.
    *
-   * The one place the API-side active provider changes from this list, and it
-   * persists at once the way a model pick does. Opening a card deliberately
-   * does none of this.
+   * The card carries no switch of its own: picking a model IS picking the
+   * provider, so a provider that cannot answer a turn is simply absent from
+   * the one list. Absent with no explanation reads as a bug, so the card that
+   * owns the missing piece says what it is, in the same words the list would
+   * have needed.
    */
-  const activateApiProvider = (row: ProviderConnection) => {
-    const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
-    if (preset) {
-      onSelectMarketplaceProviderPreset?.(preset);
-    } else if (row.apiVendorId === "openai-compatible" && marketplaceProviderPresetId) {
-      // The generic custom provider IS this vendor without a preset, so
-      // dropping the preset is the whole move.
-      onClearMarketplaceProviderPreset?.();
-    } else {
-      const vendorId = row.apiVendorId!;
-      selectApiVendorModel(
-        vendorId,
-        savedVendorBlocks[vendorId]?.model ?? getVendorInfo(vendorId).defaultModel,
-      );
-    }
-    onImmediateChange?.();
-    if (subscription.activeRuntime.kind !== "api") {
-      void subscription.props.actions.useApiForChat?.();
-    }
-  };
-
-  /**
-   * The explicit switch, on the card it names.
-   *
-   * A provider that cannot answer a turn must not be choosable: a vendor that
-   * needs a key and has none would take chat somewhere that can only fail, and
-   * the failure would surface a whole turn later than the click.
-   *
-   * The reason rides BESIDE the control as text, not in its `title`. A `title`
-   * on a `disabled` button is unreachable twice over — `disabled` removes the
-   * element from the tab order, and this button's own styling turns pointer
-   * events off, so neither hover nor keyboard could ever surface it. The
-   * button therefore stays focusable and announces itself with `aria-disabled`
-   * while the click is ignored, which is also how a screen reader gets told
-   * both that it cannot be used and why.
-   *
-   * The label names the PATH, not just the provider: a merged row offers this
-   * beside the subscription runtime's own "use for chat", and two unqualified
-   * buttons on one card would not say which way in they take.
-   */
-  const useProviderAction = (row: ProviderConnection) => {
+  const chatAvailabilityNote = (row: ProviderConnection) => {
     if (!row.apiVendorId) return null;
-    const isActive = activeMode(row) === "api";
     const blocker = rowChatBlocker(row);
-    const inert = isActive || blocker !== null || !settingsLoaded;
+    if (!blocker) return null;
     return (
-      <span className="flex min-w-0 flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={isActive ? "secondary" : "outline"}
-          aria-disabled={inert}
-          className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-          onClick={() => {
-            if (inert) return;
-            activateApiProvider(row);
-          }}
-          data-testid={`llm-tab:connection-use:${row.id}`}
-        >
-          {isActive ? t("llmTab.useProviderActive") : t("llmTab.useProvider")}
-        </Button>
-        {blocker && (
-          <span
-            className="min-w-0 text-[11px] text-muted-foreground"
-            data-testid={`llm-tab:connection-use-blocked:${row.id}`}
-          >
-            {t(CHAT_BLOCKER_MESSAGE_KEYS[blocker])}
-          </span>
-        )}
-      </span>
+      <p
+        className="text-[11px] text-muted-foreground"
+        data-testid={`llm-tab:connection-blocked:${row.id}`}
+      >
+        {t(CHAT_BLOCKER_MESSAGE_KEYS[blocker])}
+      </p>
     );
   };
 
@@ -2283,8 +2255,8 @@ export function LlmTab(props: LlmTabProps) {
           chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
           actions={subscription.props.actions}
           leading={<>{statusChip(row)}{modeBadge(row)}{unsavedBadge(row)}</>}
-          subline={connectionSubline(row)}
-          authAction={<>{apiKeyChip(row)}{useProviderAction(row)}</>}
+          subline={<>{connectionSubline(row)}{chatAvailabilityNote(row)}</>}
+          authAction={apiKeyChip(row)}
           {...(rowFormOpen(row) ? { trailing: credentialFormFor(row) } : {})}
         />
       ) : (
@@ -2335,7 +2307,7 @@ export function LlmTab(props: LlmTabProps) {
               aria-hidden={true}
             />
           </button>
-          <div className="flex flex-wrap gap-2">{useProviderAction(row)}</div>
+          {chatAvailabilityNote(row)}
           {rowFormOpen(row) ? credentialFormFor(row) : null}
         </div>
       ))}

@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { installMockLvisApi, type MockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import type { LlmModelListResult } from "../../../../shared/llm-model-list.js";
-import type { MarketplaceInstalledProviderPreset } from "../../../../shared/marketplace-package-assets.js";
+import type {
+  MarketplaceInstalledProviderPreset,
+  MarketplaceProviderModelDiscoveryPolicy,
+} from "../../../../shared/marketplace-package-assets.js";
 import type { SubscriptionProviderView } from "../SubscriptionProvidersSection.js";
 
 const useSubscriptionProvidersMock = vi.hoisted(() => vi.fn());
@@ -32,6 +35,9 @@ function preset(
   providerId: string,
   label: string,
   baseUrl: string,
+  /** A preset that ships its own catalogue declares it; without a policy the
+   *  models are the endpoint's word and there are none until it answers. */
+  modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy,
 ): MarketplaceInstalledProviderPreset {
   return {
     providerId,
@@ -41,6 +47,7 @@ function preset(
     modelOptions: [`${providerId}-default`],
     apiKeyPlaceholder: "sk-...",
     requiresApiKey: true,
+    ...(modelDiscoveryPolicy ? { modelDiscoveryPolicy } : {}),
   } as MarketplaceInstalledProviderPreset;
 }
 
@@ -243,6 +250,46 @@ function openMenu(trigger: HTMLElement) {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
 }
 
+/**
+ * The model chooser's contents, by the model id each row prints.
+ *
+ * The rendered text runs provider and id together in adjacent spans, so a
+ * substring match on it can land on the wrong row; the id attribute is the
+ * only unambiguous handle.
+ */
+async function chooserModelIds(): Promise<string[]> {
+  if (!document.querySelector("[role='option']")) {
+    openMenu(screen.getByTestId("llm-model-select"));
+  }
+  return waitFor(() => {
+    const found = [...document.querySelectorAll<HTMLElement>("[role='option']")];
+    if (found.length === 0) throw new Error("the model chooser did not open");
+    return found.map((option) =>
+      option.querySelector("[data-model-id]")?.getAttribute("data-model-id") ?? "");
+  });
+}
+
+/** The open chooser's row for this model id. */
+function chooserOption(modelId: string): HTMLElement {
+  const option = document
+    .querySelector(`[data-model-id="${modelId}"]`)
+    ?.closest("[role='option']");
+  if (!option) throw new Error(`the chooser offers no ${modelId}`);
+  return option as HTMLElement;
+}
+
+/** The provider group a chooser row sits under, label included. */
+function chooserGroupText(modelId: string): string {
+  return chooserOption(modelId).closest("[role='group']")?.textContent ?? "";
+}
+
+/** Radix commits a chooser row on Enter, and only for the focused one. */
+function pickChooserOption(modelId: string) {
+  const option = chooserOption(modelId);
+  option.focus();
+  fireEvent.keyDown(option, { key: "Enter" });
+}
+
 function rowOrder(): (string | null)[] {
   return Array.from(
     screen.getByTestId("llm-tab:connections").querySelectorAll("[data-provider-row]"),
@@ -331,7 +378,7 @@ describe("LlmTab provider cards", () => {
   });
 });
 
-describe("LlmTab provider activation", () => {
+describe("LlmTab provider cards leave the chat route alone", () => {
   it("opens an added provider's card without switching what chat runs on", async () => {
     // The live regression: picking a vendor from the add menu persisted
     // `llm.provider`, so chat moved to a provider with no credential at all.
@@ -356,6 +403,17 @@ describe("LlmTab provider activation", () => {
     expect(screen.queryByTestId("llm-tab:connection-mode:claude")).toBeNull();
   });
 
+  it("offers no way to choose a provider on the card itself", async () => {
+    // Picking a model is the whole decision. A second control that also moved
+    // the route made "which provider answers" a question the screen asked
+    // twice, in two places that could disagree.
+    const api = makeApi({ hasApiKey: storedKeysFor("openai", "claude") });
+    await renderTab(api, { vendor: "openai", model: "" });
+
+    await screen.findByTestId("llm-tab:connection:claude");
+    expect(document.querySelector("[data-testid^='llm-tab:connection-use']")).toBeNull();
+  });
+
   it("writes only the row's own secret when its key is saved", async () => {
     const api = makeApi({ hasApiKey: storedKeysFor("openai") });
     const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
@@ -374,45 +432,13 @@ describe("LlmTab provider activation", () => {
       apiKey: "sk-ant-new",
     }));
     // A fixed-endpoint vendor owns no persisted field here, so no block is
-    // written — and the active provider is nobody's business but the switch's.
+    // written — and saving a credential is not choosing who answers.
     expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
     expect(screen.getByTestId("llm-tab:connection-mode:openai")).toBeInTheDocument();
     // The card stays open on what it committed, with the key field emptied.
     await waitFor(() => expect(screen.getByTestId("llm-api-key-input")).toHaveValue(""));
     expect(screen.getByTestId("llm-tab:connection:claude"))
       .toContainElement(screen.getByTestId("llm-tab:manual-section"));
-  });
-
-  it("switches the active provider only on the explicit action", async () => {
-    const api = makeApi({ hasApiKey: storedKeysFor("openai", "claude") });
-    const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
-
-    const useClaude = await screen.findByTestId("llm-tab:connection-use:claude");
-    await waitFor(() =>
-      expect(useClaude).toHaveAttribute("aria-disabled", "false"));
-    fireEvent.click(useClaude);
-
-    expect(hooks.selectApiVendorModel).toHaveBeenCalledWith("claude", expect.any(String));
-    // Persisted at once, the way a model pick is.
-    expect(hooks.onImmediateChange).toHaveBeenCalled();
-  });
-
-  it("refuses the switch toward a provider with no stored credential", async () => {
-    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
-    const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
-
-    openMenu(screen.getByTestId("llm-tab:add-provider"));
-    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
-
-    const useClaude = screen.getByTestId("llm-tab:connection-use:claude");
-    // Reachable: `disabled` would take the control out of the tab order and
-    // kill the pointer events its own reason would need to be read through.
-    expect(useClaude).toHaveAttribute("aria-disabled", "true");
-    expect(useClaude).not.toBeDisabled();
-    expect(screen.getByTestId("llm-tab:connection-use-blocked:claude"))
-      .toHaveTextContent(/API/);
-    fireEvent.click(useClaude);
-    expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
   });
 
   it("edits each row's own endpoint while a third provider is the active one", async () => {
@@ -460,18 +486,100 @@ describe("LlmTab provider activation", () => {
     await screen.findByTestId("llm-tab:connection:claude");
     fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
 
-    expect(screen.getByTestId("llm-tab:connection-use:openai"))
-      .toHaveAttribute("aria-disabled", "true");
-    // Already the active route, so there is nothing blocking it to explain.
-    expect(screen.queryByTestId("llm-tab:connection-use-blocked:openai")).toBeNull();
+    // Opening a card is reading, not choosing: the badge stays where the route
+    // is, and the card that is merely open says nothing about it.
     expect(screen.getByTestId("llm-tab:connection-status:openai"))
       .toHaveTextContent(/API|사용/);
     expect(screen.queryByTestId("llm-tab:connection-mode:claude")).toBeNull();
   });
+
+  it("keeps the card on screen after its only credential is deleted", async () => {
+    // This row exists because of the stored key and nothing else, so removing
+    // the key used to remove the place a replacement could be entered.
+    const api = makeApi({ hasApiKey: storedKeysFor("claude") });
+    await renderTab(api, { vendor: "openai", model: "" });
+
+    await screen.findByTestId("llm-tab:connection:claude");
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
+    api.hasApiKey = vi.fn(async () => false);
+    fireEvent.click(screen.getByText(/^(삭제|Delete|Remove)$/));
+
+    await waitFor(() => expect(api.deleteApiKey).toHaveBeenCalledWith("claude"));
+    expect(screen.getByTestId("llm-tab:connection:claude")).toBeInTheDocument();
+    expect(screen.getByTestId("llm-api-key-input")).toBeInTheDocument();
+  });
+});
+
+describe("LlmTab model chooser is the whole switch", () => {
+  it("leaves an uncredentialed provider out of the chooser and says so on its card", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("gemini") });
+    await renderTab(api, { vendor: "gemini", model: "" });
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
+
+    // The card is there to type a key into, and it says what the key buys.
+    expect(screen.getByTestId("llm-tab:connection-blocked:claude"))
+      .toHaveTextContent(/키|key|Schlüssel|clave|clé|キー|密钥/i);
+    // The chooser is populated — by the provider that CAN answer, only.
+    const offered = await chooserModelIds();
+    expect(offered).toContain("gemini-2.5-flash");
+    expect(offered.some((id) => id.startsWith("claude"))).toBe(false);
+  });
+
+  it("offers a keyed provider's models and moves the route on the pick alone", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai", "claude") });
+    const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
+
+    const offered = await chooserModelIds();
+    // A curated vendor's bundled line is its catalogue, so a saved key is all
+    // it takes for its models to be choosable from another provider's row.
+    expect(offered).toContain("claude-sonnet-4-6");
+    expect(offered).toContain("claude-opus-4-6");
+    expect(chooserGroupText("claude-opus-4-6")).toMatch(/Claude/);
+
+    pickChooserOption("claude-opus-4-6");
+
+    // Provider and model move together, in one write, with no Save button in
+    // the path — the same way the thinking controls persist.
+    await waitFor(() => expect(hooks.selectApiVendorModel)
+      .toHaveBeenCalledWith("claude", "claude-opus-4-6"));
+    expect(hooks.onImmediateChange).toHaveBeenCalled();
+    expect(hooks.onSaveProviderCredential).not.toHaveBeenCalled();
+  });
+
+  it("offers a connected subscription's models beside the API providers", async () => {
+    const useForChat = vi.fn();
+    installSubscription(
+      [codexView({
+        status: {
+          runtime: "ready",
+          connection: "connected",
+          models: [{ id: "codex-mini", label: "codex-mini" }],
+        },
+      } as Partial<SubscriptionProviderView>)],
+      { useForChat, useApiForChat: vi.fn() },
+    );
+    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), {
+      vendor: "openai",
+      model: "",
+    });
+
+    expect(await chooserModelIds()).toContain("codex-mini");
+    expect(chooserGroupText("codex-mini")).toMatch(/Codex/);
+
+    pickChooserOption("codex-mini");
+
+    // A subscription pick still goes through the runtime's own action: it is
+    // a sign-in-backed route, not an API credential.
+    await waitFor(() => expect(useForChat).toHaveBeenCalledWith("codex", "codex-mini"));
+  });
 });
 
 describe("LlmTab preset and generic custom provider are separate rows", () => {
-  const acme = preset("acme-gw", "Acme Gateway", "https://acme.example/v1");
+  // A preset that ships its own model list, so the row has something to offer
+  // before any endpoint has answered.
+  const acme = preset("acme-gw", "Acme Gateway", "https://acme.example/v1", "static");
   const GENERIC_ENDPOINT = "http://localhost:8001/v1";
 
   /** A preset is the active route; the generic row has its own saved endpoint. */
@@ -507,20 +615,22 @@ describe("LlmTab preset and generic custom provider are separate rows", () => {
     expect(field).not.toHaveValue(acme.baseUrl);
   });
 
-  it("switches to a preset row through the preset, and moves the badge", async () => {
+  it("offers a preset's models under its own name and selects the preset on the pick", async () => {
     const { hooks, rerender } = await renderTab(bothRows(), {
       vendor: "openai-compatible",
       marketplaceProviderPresets: [acme],
       model: "local-model",
     });
 
-    const usePreset = await screen.findByTestId(
-      "llm-tab:connection-use:marketplace-provider:acme-gw",
-    );
-    await waitFor(() => expect(usePreset).toHaveAttribute("aria-disabled", "false"));
-    fireEvent.click(usePreset);
+    await screen.findByTestId("llm-tab:connection:marketplace-provider:acme-gw");
+    expect(await chooserModelIds()).toContain("acme-gw-default");
+    // Two presets are two providers reached through one vendor, so the name on
+    // the group has to be the preset's, not the vendor's.
+    expect(chooserGroupText("acme-gw-default")).toMatch(/Acme Gateway/);
 
-    expect(hooks.onSelectMarketplaceProviderPreset).toHaveBeenCalledWith(acme);
+    pickChooserOption("acme-gw-default");
+
+    await waitFor(() => expect(hooks.onSelectMarketplaceProviderPreset).toHaveBeenCalledWith(acme));
     expect(hooks.onImmediateChange).toHaveBeenCalled();
 
     // The parent moves the active route; the badge follows it, not the form.
@@ -530,15 +640,17 @@ describe("LlmTab preset and generic custom provider are separate rows", () => {
     expect(screen.queryByTestId("llm-tab:connection-mode:openai-compatible")).toBeNull();
   });
 
-  it("switches back to the generic row by dropping the preset, endpoint intact", async () => {
+  it("drops the preset when the generic row's own model is picked, endpoint intact", async () => {
     const { hooks, rerender } = await renderTab(bothRows(), activePreset);
 
-    const useGeneric = await screen.findByTestId("llm-tab:connection-use:openai-compatible");
-    await waitFor(() => expect(useGeneric).toHaveAttribute("aria-disabled", "false"));
-    fireEvent.click(useGeneric);
+    await screen.findByTestId("llm-tab:connection:openai-compatible");
+    expect(await chooserModelIds()).toContain("local-model");
+
+    pickChooserOption("local-model");
 
     // The generic custom provider IS this vendor without a preset.
-    expect(hooks.onClearMarketplaceProviderPreset).toHaveBeenCalled();
+    await waitFor(() => expect(hooks.onClearMarketplaceProviderPreset).toHaveBeenCalled());
+    expect(hooks.selectApiVendorModel).toHaveBeenCalledWith("openai-compatible", "local-model");
     expect(hooks.onImmediateChange).toHaveBeenCalled();
 
     await rerender({
@@ -556,27 +668,29 @@ describe("LlmTab preset and generic custom provider are separate rows", () => {
 describe("LlmTab chat-route availability", () => {
   it("asks Vertex for a project rather than a key it never stores", async () => {
     // Vertex authenticates out of band, so the key question can never be
-    // satisfied on this card — it used to leave the switch permanently off.
+    // satisfied on this card — it used to leave the row permanently unusable.
     const withoutProject = makeApi({
+      hasApiKey: storedKeysFor("claude"),
       getSettings: vi.fn().mockResolvedValue({
         llm: { pinnedModels: [], modelListCache: {}, vendors: {} },
         marketplace: { installedProviderIds: ["vertex-ai"], installedProviderPresets: [] },
       }),
     });
-    const { unmount } = await renderTab(withoutProject, { vendor: "openai", model: "" });
+    const { unmount } = await renderTab(withoutProject, { vendor: "claude", model: "" });
     openMenu(screen.getByTestId("llm-tab:add-provider"));
     fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:vertex-ai"));
 
     // The card asks for the project, and says that is what is missing.
     expect(screen.getByTestId("llm-tab:manual-section")).toBeInTheDocument();
     expect(screen.queryByTestId("llm-api-key-input")).toBeNull();
-    expect(screen.getByTestId("llm-tab:connection-use:vertex-ai"))
-      .toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByTestId("llm-tab:connection-use-blocked:vertex-ai"))
+    expect(screen.getByTestId("llm-tab:connection-blocked:vertex-ai"))
       .toHaveTextContent(/GCP|프로젝트|project|Projekt|proyecto|projet|プロジェクト|项目/i);
+    // And nothing of Vertex's is choosable while it cannot answer.
+    expect((await chooserModelIds()).some((id) => id.startsWith("gemini"))).toBe(false);
     unmount();
 
     const withProject = makeApi({
+      hasApiKey: storedKeysFor("claude"),
       getSettings: vi.fn().mockResolvedValue({
         llm: {
           pinnedModels: [],
@@ -586,52 +700,20 @@ describe("LlmTab chat-route availability", () => {
         marketplace: { installedProviderIds: ["vertex-ai"], installedProviderPresets: [] },
       }),
     });
-    await renderTab(withProject, { vendor: "openai", model: "" });
+    const { hooks } = await renderTab(withProject, { vendor: "claude", model: "" });
     openMenu(screen.getByTestId("llm-tab:add-provider"));
     fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:vertex-ai"));
 
-    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-use:vertex-ai"))
-      .toHaveAttribute("aria-disabled", "false"));
-    expect(screen.queryByTestId("llm-tab:connection-use-blocked:vertex-ai")).toBeNull();
-  });
+    await waitFor(() =>
+      expect(screen.queryByTestId("llm-tab:connection-blocked:vertex-ai")).toBeNull());
+    // With the project stored the row is choosable like any other — through
+    // the one chooser, with no second control of its own.
+    expect(await chooserModelIds()).toContain("gemini-2.5-flash");
+    expect(chooserGroupText("gemini-2.5-flash")).toMatch(/Vertex/i);
 
-  it("names the path on each action where a provider offers two", async () => {
-    installSubscription(
-      [codexView({
-        status: { runtime: "ready", connection: "connected", models: [], capabilities: { chat: true } },
-      } as Partial<SubscriptionProviderView>)],
-      { useForChat: vi.fn(), useApiForChat: vi.fn() },
-    );
-    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), {
-      vendor: "claude",
-      hasKey: false,
-      model: "",
-    });
-
-    const subscriptionAction = await screen.findByTestId(
-      "subscription-provider:codex:use-for-chat",
-    );
-    const apiAction = screen.getByTestId("llm-tab:connection-use:codex");
-    // Both ways in are on one card, so neither may be an unqualified
-    // "use for chat" — the label has to say which route it takes.
-    expect(apiAction.textContent?.trim()).not.toBe(subscriptionAction.textContent?.trim());
-    expect(apiAction).toHaveTextContent(/API/);
-  });
-
-  it("keeps the card on screen after its only credential is deleted", async () => {
-    // This row exists because of the stored key and nothing else, so removing
-    // the key used to remove the place a replacement could be entered.
-    const api = makeApi({ hasApiKey: storedKeysFor("claude") });
-    await renderTab(api, { vendor: "openai", model: "" });
-
-    await screen.findByTestId("llm-tab:connection:claude");
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
-    api.hasApiKey = vi.fn(async () => false);
-    fireEvent.click(screen.getByText(/^(삭제|Delete|Remove)$/));
-
-    await waitFor(() => expect(api.deleteApiKey).toHaveBeenCalledWith("claude"));
-    expect(screen.getByTestId("llm-tab:connection:claude")).toBeInTheDocument();
-    expect(screen.getByTestId("llm-api-key-input")).toBeInTheDocument();
+    pickChooserOption("gemini-2.5-flash");
+    await waitFor(() => expect(hooks.selectApiVendorModel)
+      .toHaveBeenCalledWith("vertex-ai", "gemini-2.5-flash"));
   });
 });
 
