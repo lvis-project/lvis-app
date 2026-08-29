@@ -434,6 +434,56 @@ describe("AuditLogger.search() — newest-first across a day's channel files", (
     expect(entries.map((e) => e.input)).toEqual(["first-read", "second-read", "third-read"]);
   });
 
+  it("pages exactly as a full sort of the same rows would, at every window", async () => {
+    // The page is selected with a heap capped at `offset + limit` rather than by
+    // sorting the whole match set, so the thing worth pinning is that the cap
+    // changes nothing an observer can see. The reference is a stable sort of
+    // the same rows in the order the files hold them. Instants come from a
+    // fixed-seed generator over only 40 distinct values, so ties — the case a
+    // capped selection is most likely to order differently from a sort — are
+    // dense, and a failure reproduces exactly.
+    const base = Date.parse("2026-06-16T00:00:00.000Z");
+    let seed = 20_260_616;
+    const nextInstant = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return base + (seed % 40) * 1_000;
+    };
+    const expected: Array<{ at: number; seq: number; input: string }> = [];
+    let seq = 0;
+    for (const channel of ["2026-06-16.jsonl", "2026-06-16.permission-audit.jsonl", "2026-06-16.sandbox.jsonl"]) {
+      const rows: AuditEntry[] = [];
+      for (let index = 0; index < 200; index += 1) {
+        const at = nextInstant();
+        const input = `row-${seq}`;
+        rows.push(makeEntry({ timestamp: new Date(at).toISOString(), input }));
+        expected.push({ at, seq, input });
+        seq += 1;
+      }
+      writeJsonl(channel, rows);
+    }
+    const fullSort = [...expected]
+      .sort((a, b) => (a.at === b.at ? a.seq - b.seq : b.at - a.at))
+      .map((row) => row.input);
+
+    const logger = new AuditLogger();
+    for (const [offset, limit] of [
+      [0, 10],
+      [0, 600],
+      [5, 25],
+      [590, 50],
+      [377, 1],
+    ] as const) {
+      const { entries, total } = await logger.search({
+        dateFrom: "2026-06-16",
+        dateTo: "2026-06-16",
+        offset,
+        limit,
+      });
+      expect(total).toBe(600);
+      expect(entries.map((e) => e.input)).toEqual(fullSort.slice(offset, offset + limit));
+    }
+  });
+
   it("sorts a row with an unreadable instant last, and only when no bound is set", async () => {
     writeJsonl("2026-06-16.jsonl", [
       makeEntry({ timestamp: "2026-06-16T04:00:00.000Z", input: "timed" }),
