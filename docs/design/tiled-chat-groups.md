@@ -289,7 +289,9 @@ The routing is one rule, `sessionOwnedBy`, applied by two readers:
   queue for those requests. `ApprovalDock` renders them per surface, head
   first, and answers through the window's `decide(requestId, …)`, so the
   signed response path (request id + nonce + HMAC) does not change with where
-  the card is drawn.
+  the card is drawn. The ask a sub-agent spawn raises is one of these
+  approvals (`agent_spawn` asks by contract), so the spawn card follows the
+  same rule: it is drawn in the tile whose turn is spawning.
 
 What no surface claims has one explicit home, the window's own dock over the
 route canvas: a request that names no conversation (a host or plugin ask), or

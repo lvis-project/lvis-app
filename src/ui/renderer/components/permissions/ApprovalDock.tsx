@@ -34,11 +34,12 @@ function approvalScopeOf(root: HTMLElement | null): HTMLElement | null {
 }
 
 /**
- * May this dock take focus? Only when nothing else has it, or when what has
- * it is inside this dock's own surface — a user typing in another tile is
- * never interrupted by a card that is not theirs.
+ * May a card rooted at `root` take focus? Only when nothing else has it, or
+ * when what has it is inside the card's own surface — a user typing in
+ * another tile is never interrupted by a card that is not theirs. The
+ * approval dock and the user-question card apply the same rule.
  */
-function focusIsFreeFor(root: HTMLElement | null): boolean {
+export function focusIsFreeFor(root: HTMLElement | null): boolean {
   const active = document.activeElement;
   if (!(active instanceof HTMLElement) || active === document.body) return true;
   return approvalScopeOf(root)?.contains(active) === true;

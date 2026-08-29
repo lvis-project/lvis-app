@@ -21,6 +21,7 @@ import {
   toggleTileMaximized,
 } from "./helpers.js";
 import { MOCK_DEFAULT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
+import { BLOCKING_SURFACE_SELECTOR } from "../../src/shared/test-ids.js";
 
 /** The permission namespace's subscriptions, as the mock records them. */
 function permissionSubscription(api: MockLvisApi, name: string): ReturnType<typeof vi.fn> {
@@ -543,6 +544,27 @@ describe("cards raised by one of three tiles", () => {
     tile.element.querySelector<HTMLElement>('[data-composer-placement]');
   const textarea = (tile: { element: HTMLElement }) =>
     tile.element.querySelector<HTMLTextAreaElement>("textarea");
+  const band = (tile: { element: HTMLElement }) =>
+    tile.element.querySelector('[data-testid="approval-waiting-band"]');
+  const tileCell = (node: Element) =>
+    node.closest<HTMLElement>('[data-testid^="chat-group-cell:"]');
+  /**
+   * The tiles that did not ask: nothing covers them, their composers are not
+   * inert, and each takes the keyboard — focus lands, typed text stays.
+   */
+  const expectUntouched = async (...others: Array<{ element: HTMLElement }>) => {
+    for (const tile of others) {
+      expect(tile.element.querySelectorAll(BLOCKING_SURFACE_SELECTOR)).toHaveLength(0);
+      expect(composer(tile)).not.toHaveAttribute("inert");
+      const input = textarea(tile)!;
+      await act(async () => {
+        input.focus();
+      });
+      expect(document.activeElement).toBe(input);
+      fireEvent.change(input, { target: { value: "옆 타일은 계속 입력" } });
+      expect(input.value).toBe("옆 타일은 계속 입력");
+    }
+  };
 
   it("shows the approval card in the tile that asked, while the other two keep their composers, their focus, and their turns", async () => {
     const { container, api, emitApproval } = await renderApp({ hasApiKey: true });
@@ -566,10 +588,11 @@ describe("cards raised by one of three tiles", () => {
 
     // No focus steal: the caret stays where the user was typing.
     expect(document.activeElement).toBe(textarea(first!));
+    // The card's nearest tile ancestor is the tile that asked.
+    expect(tileCell(dock(container)[0]!)).toBe(middle!.element);
     // Only the covered composer is inert; the other two accept input.
     expect(composer(middle!)).toHaveAttribute("inert");
-    expect(composer(first!)).not.toHaveAttribute("inert");
-    expect(composer(third!)).not.toHaveAttribute("inert");
+    await expectUntouched(first!, third!);
 
     // Both neighbours run a turn while the middle tile waits.
     await submitChatMessage(first!.element, "첫 타일 질문");
@@ -593,6 +616,13 @@ describe("cards raised by one of three tiles", () => {
     const { container, api, emitAskUserQuestion } = await renderApp({ hasApiKey: true });
     const [first, middle, third] = await splitIntoThreeTiles(container);
 
+    // The user is typing in the first tile when the middle tile's turn asks.
+    await focusTile(first!);
+    await act(async () => {
+      textarea(first!)!.focus();
+    });
+    expect(document.activeElement).toBe(textarea(first!));
+
     await act(async () => {
       emitAskUserQuestion({
         id: "ask-middle",
@@ -605,13 +635,75 @@ describe("cards raised by one of three tiles", () => {
     const question = (tile: { element: HTMLElement }) =>
       tile.element.querySelector('[data-testid="question-overlay"]');
     await waitFor(() => expect(question(middle!)).not.toBeNull());
-    expect(question(first!)).toBeNull();
-    expect(question(third!)).toBeNull();
+    expect(tileCell(question(middle!)!)).toBe(middle!.element);
+    expect(container.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(1);
+    // The card seats its first answer a frame after mounting; let that frame
+    // pass, then the caret must still be where the user was typing.
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(document.activeElement).toBe(textarea(first!));
+    await expectUntouched(first!, third!);
 
     await focusTile(first!);
     await submitChatMessage(first!.element, "첫 타일은 계속 진행");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
     expect(question(middle!)).not.toBeNull();
     expect(question(first!)).toBeNull();
+  });
+
+  it("shows the sub-agent spawn card in the tile that asked, and only there", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [first, middle, third] = await splitIntoThreeTiles(container);
+
+    await focusTile(first!);
+    await act(async () => {
+      textarea(first!)!.focus();
+    });
+
+    // `agent_spawn` asks by contract; its card is an approval card raised by
+    // the turn that is spawning, so it belongs to that turn's tile.
+    await act(async () => {
+      emitApproval(request({
+        id: "req-spawn-middle",
+        toolName: "agent_spawn",
+        toolCategory: "meta",
+        args: { title: "메모 정리", instructions: "메모를 한 줄로 정리해" },
+        reason: "spawn a sub-agent for the summary",
+        nonce: "nonce-spawn-middle",
+        hmac: "hmac-spawn-middle",
+        sessionId: `session-${middle!.chatGroupId}`,
+      }));
+    });
+
+    await waitFor(() => expect(dock(middle!.element)).toHaveLength(1));
+    expect(dock(container)).toHaveLength(1);
+    expect(tileCell(dock(container)[0]!)).toBe(middle!.element);
+    expect(band(middle!)?.getAttribute("data-tool-names")).toBe("agent_spawn");
+    expect(band(first!)).toBeNull();
+    expect(band(third!)).toBeNull();
+
+    expect(document.activeElement).toBe(textarea(first!));
+    expect(composer(middle!)).toHaveAttribute("inert");
+    await expectUntouched(first!, third!);
+  });
+
+  it("brings a spawn card the host was parked on back after a reload, into the tile holding its session", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      pendingApprovals: [request({
+        id: "req-spawn-parked",
+        toolName: "agent_spawn",
+        toolCategory: "meta",
+        args: { title: "메모 정리", instructions: "메모를 한 줄로 정리해" },
+        sessionId: MOCK_DEFAULT_SESSION_ID,
+      })],
+    });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
+    expect(dock(container)).toHaveLength(1);
+    expect(band(primary!)?.getAttribute("data-tool-names")).toBe("agent_spawn");
+    await expectUntouched(second!);
   });
 });
