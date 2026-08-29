@@ -7,6 +7,7 @@ import "./setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { makeMockLvisApi } from "./mock-lvis-api.js";
+import { TEST_IDS } from "../../src/shared/test-ids.js";
 
 afterEach(() => {
   cleanup();
@@ -36,7 +37,7 @@ describe("settings model chooser", () => {
         <SettingsContent api={api as never} chatGroupId="main" onSaved={() => {}} initialTab="llm" />
       </TooltipProvider>,
     );
-    const trigger = await view.findByTestId("llm-model-select");
+    const trigger = await view.findByTestId(TEST_IDS.llmModelSelect);
     // The pick must ride hydrated settings. Save now belongs to whichever
     // provider card is open, so the section's own hydration flag is the
     // readiness signal rather than a button that may not be on screen.

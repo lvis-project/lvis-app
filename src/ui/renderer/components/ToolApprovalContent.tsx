@@ -56,6 +56,7 @@ import {
   type ElicitationFieldKind as ElicitationSchemaFieldKind,
 } from "../../../shared/mcp-elicitation-schema.js";
 import { isRecord } from "../../../shared/is-record.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 type ElicitationFieldKind = ElicitationSchemaFieldKind;
 type ElicitationFormValue = string | boolean;
@@ -1039,7 +1040,7 @@ export function ToolApprovalContent({
 
             <details
               className="group min-w-0 overflow-hidden rounded-lg border border-border-strong bg-muted/(--opacity-light)"
-              data-testid="approval-review-details"
+              data-testid={TEST_IDS.approvalReviewDetails}
             >
               <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                 <span className="min-w-0 flex-1">
@@ -1267,7 +1268,7 @@ export function ToolApprovalContent({
                     onOpenPermanentDeny?.(request, finalVerdict as UserApprovalVerdict);
                   }
                 }}
-                data-testid="open-permanent-deny-settings"
+                data-testid={TEST_IDS.openPermanentDenySettings}
               >
                 {tHook("toolApprovalDialog.openPermissionSettings")}
               </Button>
@@ -1292,7 +1293,7 @@ export function ToolApprovalContent({
                 onFocus={() => setDecisionIndex(0)}
                 aria-describedby={interactionLocked ? "approval-decision-locked" : undefined}
                 data-proposed={proposedDecisionIndex === 0 && !denyDecisionDisabled ? "true" : undefined}
-                data-testid="deny-button"
+                data-testid={TEST_IDS.denyButton}
               >
                 {tHook("toolApprovalDialog.denyOnce")}
               </Button>
@@ -1328,7 +1329,7 @@ export function ToolApprovalContent({
                         ? approveDisabledDescriptionId
                         : undefined
                 }
-                data-testid="allow-always-button"
+                data-testid={TEST_IDS.allowAlwaysButton}
               >
                 {tHook("toolApprovalDialog.allowAlways")}
               </Button>
@@ -1353,7 +1354,7 @@ export function ToolApprovalContent({
                       ? approveDisabledDescriptionId
                       : undefined
                 }
-                data-testid="approve-button"
+                data-testid={TEST_IDS.approveButton}
               >
                 {tHook("toolApprovalDialog.allowOnce")}
               </Button>

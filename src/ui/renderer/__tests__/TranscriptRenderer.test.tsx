@@ -29,6 +29,7 @@ import type React from "react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { TranscriptRenderer, type TurnSummary } from "../components/TranscriptRenderer.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 // Radix Tooltip (used by WorkGroup / TurnActionBar primitives) requires a
 // provider in the tree — the real app mounts it in App.tsx. Wrap the
@@ -125,7 +126,7 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
         showTokenCostBadge={false}
       />,
     );
-    expect(queryByTestId("token-cost-badge")).toBeNull();
+    expect(queryByTestId(TEST_IDS.tokenCostBadge)).toBeNull();
   });
 
   it("keeps non-billable subscription telemetry visible when API pricing is gated off", () => {
@@ -151,14 +152,14 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
         showTokenCostBadge={false}
       />,
     );
-    expect(getByTestId("token-cost-badge").getAttribute("data-usage-kind")).toBe("subscription");
+    expect(getByTestId(TEST_IDS.tokenCostBadge).getAttribute("data-usage-kind")).toBe("subscription");
   });
 
   it("continues to show token and cost estimates by default for runtimes with a usage contract", () => {
     const { getByTestId } = renderCore(
       <TranscriptRenderer entries={[userEntry("q"), assistant("a")]} streaming={false} currentSessionId="s1" turnSummaryByTurnStart={completedTurnSummary()} />,
     );
-    expect(getByTestId("token-cost-badge")).toBeTruthy();
+    expect(getByTestId(TEST_IDS.tokenCostBadge)).toBeTruthy();
   });
 });
 

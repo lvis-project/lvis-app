@@ -94,6 +94,7 @@ import {
 } from "../../shared/project-identity.js";
 import { formatIpcError } from "./format-ipc-error.js";
 import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
+import { TEST_IDS } from "../../shared/test-ids.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -1428,7 +1429,7 @@ export function App() {
                       flex space away from the active route. */}
                   <div
                     className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-                    data-testid="route-canvas"
+                    data-testid={TEST_IDS.routeCanvas}
                   >
                     {/* Inner ErrorBoundary scoped to the routed main content so a
                         single failing plugin (e.g. stale manifest schema mismatch —

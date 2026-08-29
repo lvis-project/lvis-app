@@ -16,6 +16,7 @@ import type { PluginEntry } from "../PluginGridButton.js";
 import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../../../shared/mcp-resource-bounds.js";
 import { PASTE_TEXT_MIN_CHARS } from "../../types/attachments.js";
 import type { SubscriptionImageAttachmentLimits } from "../../../../shared/subscription-runtime.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 // Stable across renders ON PURPOSE. Passing nothing let Composer's default parameter
 // mint a fresh `[]` every render, which rebuilt the memoized keydown handler every
@@ -146,7 +147,7 @@ function imageClipboardData(file: File | null = null): DataTransfer {
 describe("Composer", () => {
   it("renders empty composer with placeholder", () => {
     render(<Harness />);
-    expect(screen.getByTestId("composer")).toBeTruthy();
+    expect(screen.getByTestId(TEST_IDS.composer)).toBeTruthy();
     expect(screen.queryByTestId("attachment-chip")).toBeNull();
     expect(screen.queryByTestId("attachment-chip-collapsed")).toBeNull();
   });
@@ -181,7 +182,7 @@ describe("Composer", () => {
       />,
     );
     expect(screen.getByTestId("attachment-chip")).toBeTruthy();
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.change(ta, { target: { value: "see " } });
     });
@@ -218,7 +219,7 @@ describe("Composer", () => {
 
   it("chips long pasted text into an attachment on a plain paste", async () => {
     render(<Harness />);
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
 
     fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
 
@@ -228,7 +229,7 @@ describe("Composer", () => {
 
   it("lets Ctrl/⌘+Shift+V paste the original text instead of chipping it", async () => {
     render(<Harness />);
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
 
     // The chord arrives as a keydown; the paste that follows carries no
     // modifier state of its own.
@@ -243,7 +244,7 @@ describe("Composer", () => {
 
   it("applies the bypass to exactly one paste, not the next ordinary one", async () => {
     render(<Harness />);
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
 
     fireEvent.keyDown(textarea, { key: "v", code: "KeyV", metaKey: true, shiftKey: true });
     fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
@@ -258,7 +259,7 @@ describe("Composer", () => {
 
   it("does not leak the bypass out of a paste the composer refused", async () => {
     const { rerender } = render(<Harness disabled />);
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
 
     // Chord + paste while the composer is disabled: the paste is refused, and
     // the chord must be spent rather than left armed.
@@ -269,7 +270,7 @@ describe("Composer", () => {
     rerender(<Harness />);
     // A context-menu paste arrives with no keydown to clear a stale flag.
     fireEvent.paste(
-      screen.getByTestId("composer-textarea"),
+      screen.getByTestId(TEST_IDS.composerTextarea),
       { clipboardData: textClipboardData(LONG_PASTE) },
     );
     await waitFor(() => expect(screen.queryByTestId("attachment-chip")).not.toBeNull());
@@ -277,7 +278,7 @@ describe("Composer", () => {
 
   it("disarms the chord when focus leaves before any paste arrives", async () => {
     render(<Harness />);
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
 
     // Chord pressed, but the paste never arrives — the OS swallowed the
     // accelerator, say — and focus moves on.
@@ -293,7 +294,7 @@ describe("Composer", () => {
     const onWarningCb = vi.fn();
     mockSave.mockClear();
     render(<Harness imagesEnabled={false} onWarningCb={onWarningCb} />);
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
 
     fireEvent.paste(textarea, { clipboardData: imageClipboardData() });
 
@@ -315,7 +316,7 @@ describe("Composer", () => {
         discardClipboardImage={discardClipboardImage}
       />,
     );
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
 
     fireEvent.paste(
       textarea,
@@ -344,7 +345,7 @@ describe("Composer", () => {
     const { rerender } = render(
       <Harness imagesEnabled discardClipboardImage={discardClipboardImage} />,
     );
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     fireEvent.paste(
       textarea,
       { clipboardData: imageClipboardData(new File(["image"], "clip.png", { type: "image/png" })) },
@@ -377,7 +378,7 @@ describe("Composer", () => {
   it("calls onSend on Enter (without shift)", () => {
     const onSendCb = vi.fn();
     render(<Harness initialText="hello" onSendCb={onSendCb} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     fireEvent.keyDown(ta, { key: "Enter", shiftKey: false });
     expect(onSendCb).toHaveBeenCalled();
   });
@@ -385,7 +386,7 @@ describe("Composer", () => {
   it("does NOT call onSend on Shift+Enter", () => {
     const onSendCb = vi.fn();
     render(<Harness initialText="hello" onSendCb={onSendCb} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     fireEvent.keyDown(ta, { key: "Enter", shiftKey: true });
     expect(onSendCb).not.toHaveBeenCalled();
   });
@@ -412,7 +413,7 @@ describe("Composer", () => {
         initialAttachments={[img1]}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     expect(screen.getByTestId("attachment-chip")).toBeTruthy();
 
     // Position caret just after `]` (end of body).
@@ -437,7 +438,7 @@ describe("Composer", () => {
         ]}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     ta.focus();
     // Caret in the middle of the marker.
     ta.setSelectionRange(8, 8);
@@ -449,7 +450,7 @@ describe("Composer", () => {
 
   it("backspace on plain text uses native single-char delete", async () => {
     render(<Harness initialText="hello" />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     ta.focus();
     ta.setSelectionRange(5, 5);
     await act(async () => {
@@ -468,7 +469,7 @@ describe("Composer", () => {
     // 본 테스트는 Composer 의 textarea-only contract 만 검증. Send disable 동작
     // 검증은 BottomActionRow 의 isSendDisabled prop 단위로 별도 (ChatView 통합).
     render(<Harness />);
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     expect(textarea).toBeTruthy();
     expect(screen.queryByTestId("composer-send-button")).toBeNull();
   });
@@ -493,7 +494,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
       />,
     );
-    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     expect(textarea.getAttribute("placeholder")).toBe("");
   });
 
@@ -571,7 +572,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: "네 확인했습니다", alternates: [], isDismissed: false }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.keyDown(ta, { key: "Tab", shiftKey: false });
     });
@@ -587,7 +588,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     const ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
     ta.dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(false);
@@ -600,7 +601,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: null, alternates: ["a"], isDismissed: false }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     const ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
     ta.dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(false);
@@ -616,7 +617,7 @@ describe("Composer", () => {
     await act(async () => {
       fireEvent.click(chips[0]!);
     });
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     expect(ta.value).toBe("아니오");
   });
 
@@ -641,7 +642,7 @@ describe("Composer", () => {
       />,
     );
     expect(screen.getByTestId("suggested-replies-ghost")).toBeTruthy();
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.compositionStart(ta);
     });
@@ -694,7 +695,7 @@ describe("Composer", () => {
     }
     render(<HarnessWithDismiss />);
     expect(screen.getByTestId("suggested-replies-ghost")).toBeTruthy();
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.keyDown(ta, { key: "Escape" });
     });
@@ -710,7 +711,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: "네", alternates: ["아니오", "나중에"], isDismissed: false }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.keyDown(ta, { key: "ArrowDown" });
     });
@@ -724,7 +725,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: "네", alternates: ["a", "b", "c"], isDismissed: false }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
     await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
     await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
@@ -739,7 +740,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: "네", alternates: ["아니오", "나중에"], isDismissed: false }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
     // Re-target keydown via the new focused chip — Composer's handler is on
     // the textarea but the focus has moved; trigger another ArrowUp through
@@ -757,7 +758,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: "네", alternates: ["a", "b"], isDismissed: false }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     const ev = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
     ta.dispatchEvent(ev);
     // text.length > 0 → chip row hidden → no interception → preventDefault
@@ -826,7 +827,7 @@ describe("Composer", () => {
         suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => { fireEvent.keyDown(ta, { key: "Tab" }); });
     expect(getSuggestedRepliesCounters()["accepted-best"]).toBe(1);
   });
@@ -837,7 +838,7 @@ describe("Composer", () => {
     __resetSuggestedRepliesStoreForTests();
     const onSendCb = vi.fn();
     render(<Harness onSendCb={onSendCb} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     // Set up: push + dismiss → latch is set.
     await act(async () => { pushSuggestedReplies(["첫"]); });
     await act(async () => { dismissSuggestedReplies(); });
@@ -935,7 +936,7 @@ describe("Composer — @ resource mention", () => {
   it("opens on @, filters by query, and closes on Escape", async () => {
     installMcpApi();
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta);
@@ -954,7 +955,7 @@ describe("Composer — @ resource mention", () => {
   it("attaches the host's fence as an ATTACHMENT and puts only a marker in the body", async () => {
     const { attachResource } = installMcpApi();
     render(<Harness initialText="" />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "look at @pol");
@@ -980,7 +981,7 @@ describe("Composer — @ resource mention", () => {
     const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
     installMcpApi({ attachResource: attachResource as never });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@pol");
@@ -1005,7 +1006,7 @@ describe("Composer — @ resource mention", () => {
     const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
     installMcpApi({ attachResource: attachResource as never });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@pol");
@@ -1027,7 +1028,7 @@ describe("Composer — @ resource mention", () => {
     installMcpApi({ attachResource: attachResource as never });
     const onWarning = vi.fn();
     render(<Harness onWarningCb={onWarning} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@pol");
@@ -1058,7 +1059,7 @@ describe("Composer — @ resource mention", () => {
     });
     const onWarning = vi.fn();
     render(<Harness onWarningCb={onWarning} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@rep");
@@ -1083,7 +1084,7 @@ describe("Composer — @ resource mention", () => {
       listResourceTemplates: templateCatalogue() as never,
     });
     render(<Harness initialText="" />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "see @proj");
@@ -1154,7 +1155,7 @@ describe("Composer — @ resource mention", () => {
         exposeSetAttachments={(set) => { setAttachments = set; }}
       />,
     );
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "[Resource #1] @proj");
@@ -1189,7 +1190,7 @@ describe("Composer — @ resource mention", () => {
     // marker is appended — same rule as the resource path, exercised where it matters.
     installMcpApi({ listResourceTemplates: templateCatalogue() as never });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@proj");
@@ -1220,7 +1221,7 @@ describe("Composer — @ resource mention", () => {
       .lvis.mcp.attachResource = undefined;
     const onWarning = vi.fn();
     render(<Harness onWarningCb={onWarning} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@proj");
@@ -1243,7 +1244,7 @@ describe("Composer — @ resource mention", () => {
       .lvis.mcp.attachResource = undefined;
     const onWarning = vi.fn();
     render(<Harness onWarningCb={onWarning} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@pol");
@@ -1264,7 +1265,7 @@ describe("Composer — @ resource mention", () => {
       .lvis.mcp.attachResourceTemplate = undefined;
     const onWarning = vi.fn();
     render(<Harness onWarningCb={onWarning} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@proj");
@@ -1285,7 +1286,7 @@ describe("Composer — @ resource mention", () => {
       listResourceTemplates: templateCatalogue() as never,
     });
     render(<Harness initialText="" />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@proj");
@@ -1310,7 +1311,7 @@ describe("Composer — @ resource mention", () => {
     });
     const onWarning = vi.fn();
     render(<Harness onWarningCb={onWarning} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@proj");
@@ -1337,7 +1338,7 @@ describe("Composer — @ resource mention", () => {
     (window as unknown as { lvis: { mcp: Record<string, unknown> } })
       .lvis.mcp.listResourceTemplates = undefined;
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta);
@@ -1354,7 +1355,7 @@ describe("Composer — @ resource mention", () => {
       }) as never,
     });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta);
@@ -1381,7 +1382,7 @@ describe("Composer — @ resource mention", () => {
     });
     const onWarning = vi.fn();
     render(<Harness onWarningCb={onWarning} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@web");
@@ -1407,7 +1408,7 @@ describe("Composer — @ resource mention", () => {
     // than the title's claim. Here the list never changes; only the active row does.
     installMcpApi({ listResourceTemplates: templateCatalogue() as never });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta);
@@ -1437,7 +1438,7 @@ describe("Composer — @ resource mention", () => {
       listResourceTemplates: templateCatalogue() as never,
     });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta);
@@ -1457,7 +1458,7 @@ describe("Composer — @ resource mention", () => {
     });
     const onWarning = vi.fn();
     render(<Harness onWarningCb={onWarning} />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     // A plain resource attach is left in flight…
@@ -1488,7 +1489,7 @@ describe("Composer — @ resource mention", () => {
     // rows, which reads as "my templates disappear sometimes".
     installMcpApi({ listResourceTemplates: templateCatalogue() as never });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta);
@@ -1530,7 +1531,7 @@ describe("Composer — @ resource mention", () => {
     const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
     installMcpApi({ attachResource: attachResource as never });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@pol");
@@ -1565,7 +1566,7 @@ describe("Composer — @ resource mention", () => {
       })) as never,
     });
     render(<Harness />);
-    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await settle();
 
     await openMenu(ta, "@pol");

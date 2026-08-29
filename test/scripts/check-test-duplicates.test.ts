@@ -281,7 +281,8 @@ describe("check-test-duplicates", () => {
     const result = analyzeDuplicateHelpers(REPO_ROOT);
     expect(result.files.length).toBeGreaterThan(1000);
     const report = result.duplicateBodies.map(
-      (group) => `${[...group.uniqueNames].join("/")}: ${[...group.uniqueLocations].join(", ")}`,
+      (group: { uniqueNames: Set<string>; uniqueLocations: Set<string> }) =>
+        `${[...group.uniqueNames].join("/")}: ${[...group.uniqueLocations].join(", ")}`,
     );
     expect(report).toEqual([]);
   }, 120_000);

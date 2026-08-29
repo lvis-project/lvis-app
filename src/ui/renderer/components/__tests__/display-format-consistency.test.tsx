@@ -27,6 +27,7 @@ import { TokenCostBadge } from "../TokenCostBadge.js";
 import { StarredView } from "../StarredView.js";
 import { formatCostBadge } from "../../../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../../../lib/chat-stream-state.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 type ToolEntry = Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
 
@@ -111,7 +112,7 @@ describe("cost renders identically across the badge, the usage panel and the est
     );
     // The badge opens in "tokens" mode; `fireEvent` wraps the click in `act()`
     // so the cost render flushes before the assertion.
-    fireEvent.click(screen.getByTestId("token-cost-badge"));
+    fireEvent.click(screen.getByTestId(TEST_IDS.tokenCostBadge));
     expect(screen.getByText(/\$0\.500/)).toBeTruthy();
   });
 
@@ -152,7 +153,7 @@ describe("cost renders identically across the badge, the usage panel and the est
         />
       </TooltipProvider>,
     );
-    fireEvent.click(screen.getByTestId("token-cost-badge"));
+    fireEvent.click(screen.getByTestId(TEST_IDS.tokenCostBadge));
     expect(screen.getByText(/\$1,234\.50/)).toBeTruthy();
     cleanup();
 

@@ -6,6 +6,7 @@ import {
   teardownSeededElectron,
   type SeededElectronContext,
 } from "./seeded-electron";
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -81,7 +82,7 @@ async function launchLargeTranscriptProbe(): Promise<SeededElectronContext> {
     homePrefix: "lvis-render-perf-home-",
   });
   await ctx.page.setViewportSize({ width: 640, height: 920 });
-  await ctx.page.locator('[data-testid="composer-textarea"]').first().waitFor({
+  await ctx.page.locator(testIdSelector(TEST_IDS.composerTextarea)).first().waitFor({
     state: "visible",
     timeout: 20_000,
   });

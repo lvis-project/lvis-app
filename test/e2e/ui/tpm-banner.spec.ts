@@ -44,6 +44,7 @@ import {
   type SeededElectronContext,
 } from "./seeded-electron";
 import { makeTestT } from "./i18n";
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -120,7 +121,7 @@ test.describe("TPM warning / destructive banner", () => {
     const ctx = await launchWithTokens({ tokensIn: 160_000, vendor: "openai", model: "gpt-5.4-nano" });
     const { page } = ctx;
     try {
-      const composer = page.locator('[data-testid="composer"]').first();
+      const composer = page.locator(testIdSelector(TEST_IDS.composer)).first();
       const booted = await composer
         .waitFor({ state: "visible", timeout: 20_000 })
         .then(() => true)
@@ -155,7 +156,7 @@ test.describe("TPM warning / destructive banner", () => {
     const ctx = await launchWithTokens({ tokensIn: 200_000, vendor: "openai", model: "gpt-5.4-nano" });
     const { page } = ctx;
     try {
-      const composer = page.locator('[data-testid="composer"]').first();
+      const composer = page.locator(testIdSelector(TEST_IDS.composer)).first();
       const booted = await composer
         .waitFor({ state: "visible", timeout: 20_000 })
         .then(() => true)
@@ -201,7 +202,7 @@ test.describe("TPM warning / destructive banner", () => {
     const ctx = await launchWithTokens({ tokensIn: 160_000, vendor: "openai", model: "gpt-4o-mini" });
     const { page } = ctx;
     try {
-      const composer = page.locator('[data-testid="composer"]').first();
+      const composer = page.locator(testIdSelector(TEST_IDS.composer)).first();
       const booted = await composer
         .waitFor({ state: "visible", timeout: 20_000 })
         .then(() => true)
@@ -226,7 +227,7 @@ test.describe("TPM warning / destructive banner", () => {
     const ctx = await launchWithTokens({ tokensIn: 160_000, vendor: "openai", model: "gpt-5.4-nano" });
     const { page } = ctx;
     try {
-      const composer = page.locator('[data-testid="composer"]').first();
+      const composer = page.locator(testIdSelector(TEST_IDS.composer)).first();
       const booted = await composer
         .waitFor({ state: "visible", timeout: 20_000 })
         .then(() => true)
@@ -271,7 +272,7 @@ test.describe("TPM warning / destructive banner", () => {
     const ctx = await launchWithTokens({ tokensIn: 288_000, vendor: "openai", model: "gpt-5.4-nano" });
     const { page } = ctx;
     try {
-      const composer = page.locator('[data-testid="composer"]').first();
+      const composer = page.locator(testIdSelector(TEST_IDS.composer)).first();
       const booted = await composer
         .waitFor({ state: "visible", timeout: 20_000 })
         .then(() => true)

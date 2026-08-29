@@ -9,6 +9,7 @@
  * resolution) has run, which is exactly what this spec exercises.
  */
 import { test, expect } from './fixtures.js';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /** Parse a computed `rgb(...)` / `rgba(...)` string into channels. */
 function parseRgb(value: string): [number, number, number] {
@@ -72,7 +73,7 @@ test('typing turns the quiet control solid', async ({ mainWindow }) => {
   const send = mainWindow.locator('[data-testid="composer-send-button"]');
   const before = await send.evaluate((el) => getComputedStyle(el).backgroundColor);
 
-  const textarea = mainWindow.locator('[data-testid="composer-textarea"]');
+  const textarea = mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea));
   await textarea.click();
   await textarea.fill('ep 세션 유지 시간 확인할 수 있나?');
 

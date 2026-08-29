@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -226,7 +227,7 @@ test.describe("chat layout overflow", () => {
     for (let i = 1; i < buttons; i++) {
       await workGroup.locator("button").nth(i).click();
     }
-    await page.locator('[data-testid="composer-textarea"]').fill(
+    await page.locator(testIdSelector(TEST_IDS.composerTextarea)).fill(
       "긴 draft 입니다. `" + LONG_IDENTIFIER + "`",
     );
 

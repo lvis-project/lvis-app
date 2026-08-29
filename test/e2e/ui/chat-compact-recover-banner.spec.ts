@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * #916 force-recover OFF-override banner + #917 recovery_exhausted banner.
@@ -35,7 +36,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     mainWindow,
     t,
   }) => {
-    const composer = mainWindow.locator('[data-testid="composer"]').first();
+    const composer = mainWindow.locator(testIdSelector(TEST_IDS.composer)).first();
     const booted = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)
@@ -72,7 +73,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     mainWindow,
     t,
   }) => {
-    const composer = mainWindow.locator('[data-testid="composer"]').first();
+    const composer = mainWindow.locator(testIdSelector(TEST_IDS.composer)).first();
     const booted = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)
@@ -110,7 +111,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     mainWindow,
     t,
   }) => {
-    const composer = mainWindow.locator('[data-testid="composer"]').first();
+    const composer = mainWindow.locator(testIdSelector(TEST_IDS.composer)).first();
     const booted = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)
@@ -134,7 +135,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     mainWindow,
     t,
   }) => {
-    const composer = mainWindow.locator('[data-testid="composer"]').first();
+    const composer = mainWindow.locator(testIdSelector(TEST_IDS.composer)).first();
     const booted = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)

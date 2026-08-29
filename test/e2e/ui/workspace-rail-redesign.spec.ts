@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../src/shared/side-panel.js";
+import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../src/shared/test-ids.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -53,9 +54,9 @@ test.describe("workspace rail redesign", () => {
 
   test("docked rail: no header count, drag splitter, launcher opens a tab", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
 
-    const panel = page.getByTestId("chat-side-panel");
+    const panel = page.getByTestId(TEST_IDS.chatSidePanel);
     await expect(panel).toBeVisible();
 
     // Header shows the title only — the removed count read "미리보기 N개 · 파일 M개".
@@ -67,7 +68,7 @@ test.describe("workspace rail redesign", () => {
 
     // Empty workspace shows the launcher; opening the browser item creates a tab.
     await expect(page.getByTestId("chat-side-panel-launcher")).toBeVisible();
-    await page.getByTestId("chat-side-panel-launcher-browser").click();
+    await page.getByTestId(chatSidePanelLauncherTestId("browser")).click();
     await expect(page.getByTestId("chat-side-panel-tab-browser")).toBeVisible();
   });
 
@@ -84,11 +85,11 @@ test.describe("workspace rail redesign", () => {
     // manifests in) and open the panel first; the mode/panel IPC resizes the OS
     // window, so pin the container width LAST so it is the final authority.
     await page.getByTestId("app-mode-chat").click();
-    await page.getByTestId("chat-group-panel-toggle").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
     await page.setViewportSize({ width: 908, height: 840 });
 
     // Docked, not a modal drawer: no drawer sheet, no backdrop blur.
-    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
+    await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
     await expect(page.getByTestId("workspace-rail-drawer")).toHaveCount(0);
     await expect(page.getByTestId("workspace-rail-drawer-backdrop")).toHaveCount(0);
     // Docked variant exposes the drag handle (the modal drawer drops it).
@@ -97,7 +98,7 @@ test.describe("workspace rail redesign", () => {
 
   test("a narrow tile floats the panel over its transcript instead of crushing it", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
     const motion = page.getByTestId("chat-side-panel-motion");
     await expect(motion).toHaveAttribute("data-panel-mode", "docked");
 
@@ -106,14 +107,14 @@ test.describe("workspace rail redesign", () => {
     // window-level, nothing dimmed, the transcript laid out underneath.
     await page.setViewportSize({ width: 460, height: 840 });
     await expect(motion).toHaveAttribute("data-panel-mode", "overlay");
-    await expect(page.getByTestId("chat-view-root").getByTestId("chat-side-panel")).toBeVisible();
+    await expect(page.getByTestId(TEST_IDS.chatViewRoot).getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
     await expect(page.getByTestId("workspace-rail-drawer")).toHaveCount(0);
     await expect(page.getByTestId("workspace-rail-drawer-backdrop")).toHaveCount(0);
     // Floating means the transcript column is NOT narrowed by the panel: the
     // composer keeps more than (root − panel), which a docked column cannot.
-    const composer = await page.getByTestId("composer-textarea").boundingBox();
-    const root = await page.getByTestId("chat-view-root").boundingBox();
-    const panel = await page.getByTestId("chat-side-panel").boundingBox();
+    const composer = await page.getByTestId(TEST_IDS.composerTextarea).boundingBox();
+    const root = await page.getByTestId(TEST_IDS.chatViewRoot).boundingBox();
+    const panel = await page.getByTestId(TEST_IDS.chatSidePanel).boundingBox();
     expect(panel?.width ?? 0).toBeGreaterThanOrEqual(Math.min(SIDE_PANEL_MIN_WIDTH, root?.width ?? 0));
     expect(panel?.width ?? 0).toBeLessThanOrEqual(root?.width ?? 0);
     expect(composer?.width ?? 0).toBeGreaterThan((root?.width ?? 0) - (panel?.width ?? 0));

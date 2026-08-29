@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 function makeAgentActionRequest(
   trustOrigin: string,
@@ -39,13 +40,13 @@ describe("ToolApprovalContent external agent-action affordances", () => {
       />,
     );
 
-    expect(screen.getByTestId("deny-button")).toHaveTextContent("거절");
-    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
-    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toHaveTextContent("거절");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
     expect(container.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]'))
       .toBeNull();
 
-    const approve = screen.getByTestId("approve-button");
+    const approve = screen.getByTestId(TEST_IDS.approveButton);
     expect(approve).toHaveTextContent("한 번만 허용");
     fireEvent.click(approve);
 
@@ -61,10 +62,10 @@ describe("ToolApprovalContent external agent-action affordances", () => {
       />,
     );
 
-    expect(screen.getByTestId("deny-button")).toHaveTextContent("거절");
-    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
-    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
-    expect(screen.getByTestId("approve-button")).toHaveTextContent("한 번만 허용");
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toHaveTextContent("거절");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
+    expect(screen.getByTestId(TEST_IDS.approveButton)).toHaveTextContent("한 번만 허용");
   });
 
   it.each([
@@ -80,9 +81,9 @@ describe("ToolApprovalContent external agent-action affordances", () => {
       />,
     );
 
-    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
-    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
-    const approve = screen.getByTestId("approve-button");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
+    const approve = screen.getByTestId(TEST_IDS.approveButton);
     expect(approve).toHaveTextContent("한 번만 허용");
     fireEvent.click(approve);
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
@@ -98,9 +99,9 @@ describe("ToolApprovalContent external agent-action affordances", () => {
       />,
     );
 
-    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
-    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
-    const approve = screen.getByTestId("approve-button");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
+    const approve = screen.getByTestId(TEST_IDS.approveButton);
     expect(approve).toHaveTextContent("한 번만 허용");
     fireEvent.click(approve);
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);

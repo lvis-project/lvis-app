@@ -6,6 +6,7 @@ import {
   teardownSeededElectron,
   type SeededElectronContext,
 } from "./seeded-electron";
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 const CHAT_VIEWPORT_SELECTOR = ".lvis-chat-scroll [data-radix-scroll-area-viewport]";
 
@@ -33,7 +34,7 @@ async function launchChatScrollProbe(): Promise<SeededElectronContext> {
     ],
   });
   await ctx.page.setViewportSize({ width: 560, height: 860 });
-  await ctx.page.locator('[data-testid="composer"]').first().waitFor({
+  await ctx.page.locator(testIdSelector(TEST_IDS.composer)).first().waitFor({
     state: "visible",
     timeout: 20_000,
   });
@@ -274,7 +275,7 @@ test.describe("chat stream bottom-follow jitter", () => {
       await ctx.page.getByTestId("sidebar-memory").click();
       await expect(ctx.page.getByTestId("view-path-current-memory")).toBeVisible({ timeout: 10_000 });
       await expect(ctx.page.getByTestId("main-content-back")).toHaveCount(0);
-      await ctx.page.getByTestId("view-path-back").click();
+      await ctx.page.getByTestId(TEST_IDS.viewPathBack).click();
       await expect(ctx.page.locator(CHAT_VIEWPORT_SELECTOR)).toBeVisible({ timeout: 10_000 });
 
       await expect.poll(async () => (await readViewport(ctx.page)).bottomGap, { timeout: 5_000 })

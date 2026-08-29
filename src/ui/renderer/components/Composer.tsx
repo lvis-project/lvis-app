@@ -41,6 +41,7 @@ import {
   dismissSuggestedReplies,
   type SuggestedRepliesSnapshot,
 } from "../hooks/use-suggested-replies.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 
 export interface ComposerHandle {
@@ -827,7 +828,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [chipAlternates.length, chipFocusIdx]);
 
   return (
-    <div data-testid="composer" className="min-w-0">
+    <div data-testid={TEST_IDS.composer} className="min-w-0">
       <SuggestedRepliesChipRow
         alternates={chipAlternates}
         focusedIdx={chipFocusIdx}
@@ -835,7 +836,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         onFocusChange={setChipFocusIdx}
       />
       <div
-        data-testid="composer-input-bar"
+        data-testid={TEST_IDS.composerInputBar}
         className="relative flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
       >
         {/* Strip is rendered ONLY when there is at least one attachment so
@@ -866,7 +867,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
         <Textarea
           ref={taRef}
-          data-testid="composer-textarea"
+          data-testid={TEST_IDS.composerTextarea}
           // SpotlightTour anchor. The
           // first-boot tour pins step 1 + step 4 to this textarea, so the
           // attribute MUST remain stable. If it moves, update

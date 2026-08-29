@@ -9,6 +9,7 @@ import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { TranslationVars } from "../../../i18n/translate.js";
+import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
 type TFn = (key: string, vars?: TranslationVars) => string;
 
@@ -125,17 +126,17 @@ export function PluginGridButton({
     // the composer — keeps this robust against multi-pane layouts where
     // a document-global query could grab the wrong panel's composer.
     let scope: Element | null = triggerEl.parentElement;
-    while (scope && !scope.querySelector('[data-testid="composer"]')) {
+    while (scope && !scope.querySelector(testIdSelector(TEST_IDS.composer))) {
       scope = scope.parentElement;
     }
-    const composer = scope?.querySelector('[data-testid="composer"]') as HTMLElement | null;
+    const composer = scope?.querySelector(testIdSelector(TEST_IDS.composer)) as HTMLElement | null;
     if (!composer) return;
     const measure = () => {
       // Re-query the input-bar each tick by its stable testid — keeps
       // sizing correct if the composer's children swap (warning row
       // appearing on attach-cap, future siblings, etc.).
       const innerBar = composer.querySelector(
-        '[data-testid="composer-input-bar"]',
+        testIdSelector(TEST_IDS.composerInputBar),
       ) as HTMLElement | null;
       if (!innerBar) return;
       const innerRect = innerBar.getBoundingClientRect();

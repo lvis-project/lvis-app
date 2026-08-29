@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, expect } from "./fixtures";
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -59,8 +60,8 @@ test("MCP elicitation approval form returns structured content", async ({ app, m
   await mainWindow.getByTestId("mcp-elicitation-field-date").fill("2026-07-01");
   await mainWindow.getByTestId("mcp-elicitation-field-count").fill("2");
   await mainWindow.getByTestId("mcp-elicitation-field-includeNotes").click();
-  await expect(mainWindow.getByTestId("approve-button")).toBeEnabled();
-  await mainWindow.getByTestId("approve-button").click();
+  await expect(mainWindow.getByTestId(TEST_IDS.approveButton)).toBeEnabled();
+  await mainWindow.getByTestId(TEST_IDS.approveButton).click();
 
   await expect.poll(
     () => app.evaluate(() =>

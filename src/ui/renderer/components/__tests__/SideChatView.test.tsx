@@ -7,6 +7,7 @@ import { SideChatView } from "../SideChatView.js";
 import type { StreamEvent } from "../../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../../types.js";
 import { ChatContextProvider, type ChatContextValue } from "../../context/ChatContext.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 function makeApi() {
   let handler: ((e: StreamEvent) => void) | null = null;
@@ -112,6 +113,6 @@ describe("SideChatView — New button gating during streaming", () => {
     } as StreamEvent);
     emit({ type: "done", streamId: 1 });
 
-    expect(screen.queryByTestId("token-cost-badge")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.tokenCostBadge)).toBeNull();
   });
 });

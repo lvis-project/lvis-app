@@ -19,6 +19,7 @@ vi.mock("../../../../components/ui/scroll-area.js", () => ({
 import { PermissionsTab } from "../PermissionsTab.js";
 import { makeHookTrustRow as hook } from "./test-helpers.js";
 import type { HookTrustRow } from "../../types.js";
+import { TEST_IDS, execModeTestId } from "../../../../shared/test-ids.js";
 
 
 /**
@@ -153,7 +154,7 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeInTheDocument(),
     );
     expect(api.permission.reviewerProviderHasKey).not.toHaveBeenCalled();
   });
@@ -164,9 +165,9 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.queryByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
+      expect(screen.queryByTestId(TEST_IDS.reviewerPromptPanel)).toBeInTheDocument(),
     );
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
@@ -178,10 +179,10 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeInTheDocument(),
     );
     expect(screen.queryByText("검증 프롬프트")).toBeNull();
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(screen.getByTestId("reviewer-system-prompt")).toHaveTextContent("UNTRUSTED_INPUT");
   });
 
@@ -191,15 +192,15 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeInTheDocument(),
     );
 
     // Re-selecting the auto-verification mode auto-wires `mode llm`.
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-default"));
+      fireEvent.click(screen.getByTestId(execModeTestId("default")));
     });
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-auto"));
+      fireEvent.click(screen.getByTestId(execModeTestId("auto")));
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
@@ -231,15 +232,15 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeInTheDocument(),
     );
 
     // Toggle away and back to re-trigger the auto-wired `mode llm` (which fails).
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-default"));
+      fireEvent.click(screen.getByTestId(execModeTestId("default")));
     });
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-auto"));
+      fireEvent.click(screen.getByTestId(execModeTestId("auto")));
     });
 
     expect(api.permission.reviewerProviderHasKey).not.toHaveBeenCalled();

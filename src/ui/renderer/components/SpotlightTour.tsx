@@ -11,6 +11,7 @@ import {
   type TourScenario,
   type TourStep,
 } from "../onboarding/default-tour-scenarios.js";
+import { BLOCKING_SURFACE_SELECTOR } from "../../../shared/test-ids.js";
 
 /**
  * Narrow API surface this component needs. Declared structurally so the
@@ -111,7 +112,7 @@ function anyBlockingSurfaceOpen(): boolean {
   if (typeof document === "undefined") return false;
   return Boolean(
     document.querySelector(
-      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
+      BLOCKING_SURFACE_SELECTOR,
     ),
   );
 }

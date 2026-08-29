@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
+import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../src/shared/test-ids.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -59,11 +60,11 @@ test.describe("side-chat tab", () => {
   });
 
   test("opens the side-chat tab and renders the dedicated SideChatView", async () => {
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
 
     // The launcher exposes side chat as a first-class workspace item.
-    const launcher = page.getByTestId("chat-side-panel-launcher-side-chat");
+    const launcher = page.getByTestId(chatSidePanelLauncherTestId("side-chat"));
     await expect(launcher).toBeVisible();
     await launcher.click();
 
@@ -80,8 +81,8 @@ test.describe("side-chat tab", () => {
   });
 
   test("side-chat renders tool / thinking / permission through the shared TranscriptRenderer", async () => {
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await page.getByTestId("chat-side-panel-launcher-side-chat").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(chatSidePanelLauncherTestId("side-chat")).click();
     await expect(page.getByTestId("side-chat-view")).toBeVisible();
 
     // Start a turn so the reducer arms its stream (send resolves only when the
