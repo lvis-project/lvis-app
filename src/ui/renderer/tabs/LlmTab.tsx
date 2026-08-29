@@ -758,15 +758,16 @@ function modelEntryPricingLabel(entry: LlmModelListEntry | undefined): string | 
 function ModelSelectItemContent({
   option,
   entry,
-  providerOverride,
+  provider,
   factsOverride,
   tone,
 }: {
   option: string;
   entry?: LlmModelListEntry;
-  /** Leading column when there is no catalogue entry to read a provider from —
-   *  a subscription model has a provider but no `LlmModelListEntry`. */
-  providerOverride?: string;
+  /** Leading column: the provider the caller lists this model under. Never
+   *  read from the catalogue entry — that field is the endpoint's word for
+   *  itself, and the fallback chain lists a vendor's own models without one. */
+  provider?: string;
   /** Trailing facts for the same case. */
   factsOverride?: string;
   /** The facts carry a problem, not a number — a saved model the endpoint dropped. */
@@ -776,7 +777,6 @@ function ModelSelectItemContent({
   const isFree = entry?.tags?.free === true || isOpenRouterFreeModel(option);
   const isRouter = entry?.tags?.router === true;
   const isLocal = entry?.tags?.local === true;
-  const provider = entry?.provider ?? entry?.ownedBy ?? providerOverride;
   // Provider is the leading column now, so it is NOT repeated in the trailing
   // facts — those are the numbers that differ between models.
   const facts = factsOverride ? [factsOverride] : [
@@ -839,10 +839,13 @@ interface UnifiedModelOption {
    *  providers still resolves to the right one. */
   value: string;
   providerId: string;
+  /** The name of the ROW this model is offered on — the card title. It is the
+   *  chooser's group label and every row's leading column, so a self-hosted
+   *  endpoint is named by what the user connected, never by what its catalogue
+   *  calls itself (an OpenAI-compatible server reports its models as owned by
+   *  "openai"). */
   providerLabel: string;
   modelId: string;
-  /** Short vendor word shown as the row's leading column. */
-  vendorTag: string;
   entry?: LlmModelListEntry;
   /** Subscription-side facts, where there is no catalogue entry to read them from. */
   facts?: string;
@@ -983,7 +986,7 @@ function UnifiedModelSelect({
         <ModelSelectItemContent
           option={option.modelId}
           {...(option.entry ? { entry: option.entry } : {})}
-          {...(option.entry ? {} : { providerOverride: option.vendorTag })}
+          provider={option.providerLabel}
           {...(option.facts ? { factsOverride: option.facts } : {})}
           {...(option.unlisted ? { tone: "destructive" as const } : {})}
         />
@@ -1971,7 +1974,6 @@ export function LlmTab(props: LlmTabProps) {
           providerId: apiProviderId(rowId),
           providerLabel: row.label,
           modelId,
-          vendorTag: entry?.provider ?? entry?.ownedBy ?? row.apiVendorId,
           ...(entry ? { entry } : {}),
           ...(isActiveRow && modelId === unlistedModel
             ? { unlisted: true, facts: t("llmTab.modelUnlisted") }
@@ -1993,7 +1995,6 @@ export function LlmTab(props: LlmTabProps) {
           providerId: view.descriptor.id,
           providerLabel: view.descriptor.label,
           modelId: t("llmTab.providerDefaultModel"),
-          vendorTag: view.descriptor.id,
           facts: t("llmTab.modelFixedByProvider"),
           fixed: true,
         });
@@ -2005,7 +2006,6 @@ export function LlmTab(props: LlmTabProps) {
           providerId: view.descriptor.id,
           providerLabel: view.descriptor.label,
           modelId: model.label || model.id,
-          vendorTag: view.descriptor.id,
         });
       }
     }

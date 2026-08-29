@@ -1,6 +1,6 @@
 import "../../../../../test/renderer/setup.js";
 import { useState } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { installMockLvisApi, type MockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
@@ -347,13 +347,15 @@ async function chooserModelIds(): Promise<string[]> {
   });
 }
 
-/** The open chooser's row for this model id. */
+/** The open chooser's row for this model id. The chosen model is mirrored
+ *  into the collapsed trigger as well, so the id alone can land outside the
+ *  list — only a match inside an option is the row. */
 function chooserOption(modelId: string): HTMLElement {
-  const option = document
-    .querySelector(`[data-model-id="${modelId}"]`)
-    ?.closest("[role='option']");
+  const option = [...document.querySelectorAll(`[data-model-id="${modelId}"]`)]
+    .map((node) => node.closest("[role='option']"))
+    .find((node): node is HTMLElement => node instanceof HTMLElement);
   if (!option) throw new Error(`the chooser offers no ${modelId}`);
-  return option as HTMLElement;
+  return option;
 }
 
 /** The provider group a chooser row sits under, label included. */
@@ -656,6 +658,34 @@ describe("LlmTab model chooser is the whole switch", () => {
     // A subscription pick still goes through the runtime's own action: it is
     // a sign-in-backed route, not an API credential.
     await waitFor(() => expect(useForChat).toHaveBeenCalledWith("codex", "codex-mini"));
+  });
+
+  it("names a self-hosted row by its card title, not by what its catalogue calls itself", async () => {
+    // An OpenAI-compatible server answers `/models` with `owned_by: "openai"`
+    // for everything it serves. That is the endpoint's word for its own
+    // software; printed beside the model, it makes a self-hosted endpoint read
+    // as OpenAI's. The chooser names the row the user connected instead — the
+    // same name the card carries.
+    const api = genericRowApi(vi.fn().mockResolvedValue({
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: `${CUSTOM_ENDPOINT}/models`,
+      models: ["qwen-self-hosted"],
+      modelEntries: [{ id: "qwen-self-hosted", provider: "openai", ownedBy: "openai" }],
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+    } satisfies LlmModelListResult));
+    await renderTab(api, { vendor: "openai-compatible", model: "qwen-self-hosted" });
+
+    const card = await screen.findByTestId("llm-tab:connection-toggle:openai-compatible");
+    const cardTitle = card.querySelector(".font-medium")?.textContent ?? "";
+    expect(cardTitle).not.toBe("");
+    expect(await chooserModelIds()).toContain("qwen-self-hosted");
+
+    // The open row, not the collapsed trigger mirroring it.
+    const column = within(chooserOption("qwen-self-hosted"))
+      .getByTestId("llm-tab:model-provider:qwen-self-hosted");
+    expect(column.textContent).toBe(cardTitle);
+    expect(chooserGroupText("qwen-self-hosted")).toContain(cardTitle);
   });
 });
 
