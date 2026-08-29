@@ -757,6 +757,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (partial && typeof partial === "object" && Object.prototype.hasOwnProperty.call(partial, "a2aRemote")) {
       return { ok: false, error: "a2a-remote-settings-main-owned" };
     }
+    // Readable in the renderer snapshot, written only by `loadSettings`: a
+    // patch naming it is refused whole, the same way as `a2aRemote`.
+    if (partial && typeof partial === "object" && Object.prototype.hasOwnProperty.call(partial, "appliedMigrations")) {
+      return { ok: false, error: "applied-migrations-main-owned" };
+    }
     const llmPatch = (partial as Record<string, unknown> | null | undefined)
       ?.llm as Record<string, unknown> | undefined;
     if (llmPatch && Object.prototype.hasOwnProperty.call(llmPatch, "activeChatRuntime")) {

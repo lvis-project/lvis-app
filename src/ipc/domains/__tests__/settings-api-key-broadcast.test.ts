@@ -1271,3 +1271,19 @@ describe("LOW-2: settings:update validates azure-foundry baseUrl at write time",
     expect(deps.settingsService.patch).toHaveBeenCalledWith(patch);
   });
 });
+
+describe("main-owned settings fields on lvis:settings:update", () => {
+  it.each([
+    ["a2aRemote", "a2a-remote-settings-main-owned"],
+    ["appliedMigrations", "applied-migrations-main-owned"],
+  ])("refuses a patch that names %s and writes nothing", async (field, error) => {
+    const deps = makeDeps([makeWindow()]);
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:update", { [field]: [], chat: { autoCompact: false } });
+
+    expect(result).toEqual({ ok: false, error });
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+  });
+});
