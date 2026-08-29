@@ -31,7 +31,6 @@ import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
 } from "../shared/subagent-policy.js";
-import { createHash } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
 import { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
@@ -130,6 +129,7 @@ import type {
   SubAgentRunStatus,
   SubAgentSuspension,
 } from "../shared/subagent-events.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("lvis");
 
 function maskSubAgentText(text: string): string {
@@ -308,6 +308,27 @@ export interface SubAgentSpawnCallbacks {
    */
   onActivity?: (update: SubAgentActivityUpdate) => void;
   onError?: (message: string) => void;
+  /**
+   * The run reached its terminal state.
+   *
+   * Fired from {@link SubAgentRunner.finalizeRun} — the single completion step
+   * that writes the tracked run's terminal status — synchronously and before
+   * that step returns. The caller therefore cannot construct a moment in which
+   * `agent_status` reports a terminal run that the renderer has not been told
+   * about: the state write and this notification are one uninterruptible step.
+   *
+   * Two paths publish a terminal task state WITHOUT firing this, on purpose:
+   * `interruptRun` and `cancelActiveWireChildForWorkspaceRoot`. Both record an
+   * abort REQUEST, not an outcome — the run is still in flight, its result has
+   * not been produced, and the caller that asked for the interrupt is handed
+   * the snapshot synchronously. The child then unwinds and reaches
+   * `finalizeRun`, which fires this with the actual outcome, so the renderer
+   * still gets exactly one terminal frame and it carries a real result.
+   *
+   * Fires at most once per tracked run; the runner drops the reference after
+   * calling it, so a second finalize on the same run cannot double-report.
+   */
+  onTerminal?: (result: SubAgentSpawnResult) => void;
 }
 
 export interface A2AWireSpawnCallbacks extends SubAgentSpawnCallbacks {
@@ -385,7 +406,7 @@ interface SubAgentExecutionPolicy {
 }
 
 function buildA2AWireInternalOrigin(handlerId: string): string {
-  const handlerTag = createHash("sha256").update(handlerId).digest("hex").slice(0, 8);
+  const handlerTag = sha256Hex(handlerId).slice(0, 8);
   return createDlpSafeUuid(`a2a-wire-${handlerTag}`);
 }
 
@@ -448,11 +469,13 @@ function normalizeA2AWireSpawnCallbacks(value: unknown): A2AWireSpawnCallbacks |
     const onLinked = candidate.onLinked;
     const onActivity = candidate.onActivity;
     const onError = candidate.onError;
+    const onTerminal = candidate.onTerminal;
     if (
       typeof onDurablyLinked !== "function"
       || (onLinked !== undefined && typeof onLinked !== "function")
       || (onActivity !== undefined && typeof onActivity !== "function")
       || (onError !== undefined && typeof onError !== "function")
+      || (onTerminal !== undefined && typeof onTerminal !== "function")
     ) {
       return null;
     }
@@ -466,6 +489,9 @@ function normalizeA2AWireSpawnCallbacks(value: unknown): A2AWireSpawnCallbacks |
         : {}),
       ...(onError
         ? { onError: (message) => notifyA2AWireObserver(onError, message, "on-error") }
+        : {}),
+      ...(onTerminal
+        ? { onTerminal: (result) => notifyA2AWireObserver(onTerminal, result, "on-terminal") }
         : {}),
     };
   } catch {
@@ -511,6 +537,28 @@ export interface SubAgentRunSnapshot {
   suspension?: SubAgentSuspension;
 }
 
+/**
+ * How a caller reading tracked run state intends to use what it reads.
+ *
+ * `agent_status` hands the whole snapshot — summary, error, transcript — to the
+ * parent LLM, which IS the completion report. Other readers take the same
+ * snapshot for narrower purposes: `agent_spawn` reads one line of it to fill
+ * the run handle it returns, and the renderer reads it to draw a row. Only the
+ * first has been told what the mailbox copy would tell, so only the first may
+ * mark that copy spent. Defaulting to a plain read keeps a new call site from
+ * silently swallowing a report nobody read.
+ *
+ * `agent_list` is deliberately NOT such a call site. It answers "which
+ * sub-agents does this conversation have", listing title, resume id, and task
+ * state from persisted rows — it never carries a report body, so reading it
+ * cannot count as reading the report. Retiring the mailbox on it would drop
+ * content the parent was never shown, trading a duplicated report for a lost
+ * one.
+ */
+export interface SubAgentRunReadOptions {
+  deliversReportToParent?: boolean;
+}
+
 export interface PersistedSubAgentTranscriptRequest {
   originSessionId?: string;
   childSessionId: string;
@@ -544,6 +592,46 @@ interface TrackedSubAgentRun {
   stopReason?: import("./turn/types.js").TurnStopReason;
   suspension?: SubAgentSuspension;
   abort?: () => void;
+  /**
+   * Renderer-facing completion observer, held here rather than threaded
+   * through the dozen call sites that finalize a run. `finalizeRun` clears it
+   * as it fires, which is what makes the terminal frame single-shot.
+   */
+  onTerminal?: (result: SubAgentSpawnResult) => void;
+  /**
+   * The terminal report this run handed to the parent mailbox, once one was
+   * accepted. Identified by message id so a mid-run `agent_send` message from
+   * the same child is never mistaken for the completion report.
+   */
+  terminalReport?: { messageId: string };
+  /**
+   * The completion step's result actually LANDED on this run — the summary,
+   * error, and transcript a reader gets back are the ones the report carries.
+   *
+   * Not the same as "the task state is terminal", which is what makes it worth
+   * a separate flag. `interruptRun` and the workspace-revocation cancel write
+   * CANCELED the instant an abort is REQUESTED, and `persistFinalResult`
+   * claims the terminal commit before its awaits — so while a run unwinds it
+   * reads as terminal with no summary and no error attached. A snapshot in
+   * that shape has told the parent nothing, and retiring the mailbox copy
+   * against it would lose the child's answer.
+   *
+   * `updateRun` is the arbiter: this flips only when the patch it was handed
+   * survived its transition check. That also covers a result the A2A state
+   * machine refuses outright — CANCELED -> COMPLETED — which is defence in
+   * depth rather than a live path: both run loops normalize an aborted run's
+   * result to `interrupted` before finalizing, so a COMPLETED result cannot
+   * arrive behind a CANCELED state today.
+   */
+  terminalReportPublished?: boolean;
+  /**
+   * The parent has already read this run's published result — and with it the
+   * summary, error, and transcript the completion report carries — through
+   * `agent_status`. The queued mailbox copy of that same report is therefore
+   * spent, and {@link SubAgentRunner.peekParentMailbox} consumes it instead of
+   * injecting it into a later turn.
+   */
+  terminalReportObserved?: boolean;
   terminalCommitClaimed?: boolean;
   cancellationPersistencePending?: boolean;
   initialMetadataFailed?: boolean;
@@ -859,7 +947,7 @@ function buildChildSessionId(originSessionId?: string): string {
 }
 
 function originSessionTag(originSessionId: string): string {
-  return createHash("sha256").update(originSessionId).digest("hex").slice(0, 8);
+  return sha256Hex(originSessionId).slice(0, 8);
 }
 
 /**
@@ -1270,7 +1358,18 @@ export class SubAgentRunner {
   }
 
 
-  async deliverToParent(input: DeliverToParentInput): Promise<DeliverToParentResult> {
+  async deliverToParent(
+    input: DeliverToParentInput,
+    options?: {
+      /**
+       * This message IS the run's completion report — the same content
+       * `agent_status` hands back once the run is terminal. Recording which
+       * message that was is what lets a report the parent already read be
+       * consumed instead of replayed as a steering row on the next turn.
+       */
+      terminalReport?: boolean;
+    },
+  ): Promise<DeliverToParentResult> {
     const bus = this.deps.messageBus;
     if (!bus) {
       log.warn(
@@ -1287,6 +1386,16 @@ export class SubAgentRunner {
     const fallbackCreated = this.prepareEphemeralParentDelivery(input);
     try {
       const result = await bus.deliverToParent(input);
+      if (options?.terminalReport === true && result.ok) {
+        const run = this.trackedRuns.get(input.childSessionId);
+        if (
+          run !== undefined
+          && run.childSessionId === input.childSessionId
+          && run.originSessionId === input.parentSessionId
+        ) {
+          run.terminalReport = { messageId: result.messageId };
+        }
+      }
       if (!result.ok && fallbackCreated) {
         this.releaseEphemeralParentDelivery(
           input.parentSessionId,
@@ -1309,9 +1418,62 @@ export class SubAgentRunner {
     }
   }
 
+  /**
+   * The parent's pending child reports, minus the ones it has already read.
+   *
+   * A completed sub-agent reports twice by construction: once as the terminal
+   * snapshot `agent_status` returns to the parent mid-turn, and once as the
+   * durable mailbox entry the next turn folds in as host steering. Both are
+   * legitimate — a parent that never polls must still receive the report — but
+   * a parent that DID poll would otherwise be handed the same report a second
+   * time, as an instruction to review work it already answered.
+   *
+   * The completion step owns both halves: it publishes the terminal state (and
+   * the renderer frame) and records which mailbox message carries that state's
+   * report. Here that record decides the entry's fate, so consumption stays
+   * single-shot in either direction.
+   */
   async peekParentMailbox(parentSessionId: string): Promise<ParentMailboxEntry[]> {
     const bus = this.deps.messageBus;
-    return bus ? await bus.peekParentMailbox(parentSessionId) : [];
+    if (!bus) return [];
+    const entries = await bus.peekParentMailbox(parentSessionId);
+    const alreadyRead = entries.filter(
+      (entry) => this.isTerminalReportAlreadyRead(parentSessionId, entry),
+    );
+    if (alreadyRead.length === 0) return entries;
+    const consumedIds = new Set(alreadyRead.map((entry) => entry.id));
+    try {
+      await bus.acknowledgeParentMailbox(parentSessionId, [...consumedIds]);
+    } catch (err) {
+      // Withholding the second delivery is unconditional — that decision is
+      // already made above and this failure does not revisit it. What the
+      // failure costs is DURABILITY of that decision: the read mark lives on
+      // the tracked run, which is process-local and evictable by
+      // `pruneTrackedRuns`, while the entry it retires is on disk. So the
+      // retry on the next peek is the only thing standing between a failed
+      // acknowledgement and the report reappearing after a restart. Persisting
+      // the mark onto the entry instead was considered and rejected: it is the
+      // same mailbox write that just failed, so it buys no durability the
+      // retry does not, and it would leave a second definition of "consumed"
+      // to keep in step with the first.
+      log.warn(
+        { parentSessionId, errorName: err instanceof Error ? err.name : "UnknownError" },
+        "sub-agent completion mailbox acknowledgement failed for an already-read report",
+      );
+    }
+    return entries.filter((entry) => !consumedIds.has(entry.id));
+  }
+
+  private isTerminalReportAlreadyRead(
+    parentSessionId: string,
+    entry: ParentMailboxEntry,
+  ): boolean {
+    const run = this.trackedRuns.get(entry.childSessionId);
+    return run !== undefined
+      && run.originSessionId === parentSessionId
+      && run.childSessionId === entry.childSessionId
+      && run.terminalReportObserved === true
+      && run.terminalReport?.messageId === entry.message.messageId;
   }
 
   async acknowledgeParentMailbox(
@@ -1984,10 +2146,16 @@ export class SubAgentRunner {
     if (active?.lease === lease) this.activeChildren.delete(childSessionId);
   }
 
-  listRunStatuses(originSessionId: string): SubAgentRunSnapshot[] {
+  listRunStatuses(
+    originSessionId: string,
+    options?: SubAgentRunReadOptions,
+  ): SubAgentRunSnapshot[] {
     return [...this.uniqueTrackedRuns()]
       .filter((run) => this.isRunVisibleToOrigin(run, originSessionId))
-      .map((run) => this.snapshotRun(run))
+      .map((run) => {
+        if (options?.deliversReportToParent === true) this.markTerminalReportRead(run);
+        return this.snapshotRun(run);
+      })
       .sort((a, b) => {
         if (a.status === "running" && b.status !== "running") return -1;
         if (a.status !== "running" && b.status === "running") return 1;
@@ -1995,10 +2163,41 @@ export class SubAgentRunner {
       });
   }
 
-  getRunStatus(id: string, originSessionId: string): SubAgentRunSnapshot | null {
+  getRunStatus(
+    id: string,
+    originSessionId: string,
+    options?: SubAgentRunReadOptions,
+  ): SubAgentRunSnapshot | null {
     const run = this.trackedRuns.get(id);
     if (run && !this.isRunVisibleToOrigin(run, originSessionId)) return null;
-    return run ? this.snapshotRun(run) : null;
+    if (!run) return null;
+    if (options?.deliversReportToParent === true) this.markTerminalReportRead(run);
+    return this.snapshotRun(run);
+  }
+
+  /**
+   * Record that the parent has now read this run's completion report.
+   *
+   * A terminal snapshot carries the same summary, error, and transcript the
+   * mailbox report carries, so a parent that read one has been told everything
+   * the other would tell it. Marking it here is what lets
+   * {@link peekParentMailbox} consume the queued copy rather than open the
+   * parent's next turn with a steering row repeating work it already answered.
+   *
+   * Gated on `terminalReportPublished`, NOT on the task state reading terminal.
+   * A run reads terminal from the moment an abort is requested and from the
+   * moment `persistFinalResult` claims the commit, both of which happen while
+   * the result is still missing; a snapshot with no summary and no error in it
+   * has told the parent nothing. Only a landed result may retire the queued
+   * copy.
+   *
+   * Order between this and the delivery does not matter: the parent may poll
+   * the finished run before the report is even enqueued (that is the reported
+   * race). The two facts are recorded separately and combined only at peek.
+   */
+  private markTerminalReportRead(run: TrackedSubAgentRun): void {
+    if (run.terminalReportPublished !== true) return;
+    run.terminalReportObserved = true;
   }
 
   /**
@@ -2129,6 +2328,7 @@ export class SubAgentRunner {
     originSessionId?: string;
     title: string;
     abort?: () => void;
+    onTerminal?: (result: SubAgentSpawnResult) => void;
     initialTaskState?: A2AProjectedTaskState;
     registerChildAlias?: boolean;
   }): TrackedSubAgentRun {
@@ -2147,6 +2347,7 @@ export class SubAgentRunner {
       turnCount: 0,
       entries: [],
       ...(args.abort ? { abort: args.abort } : {}),
+      ...(args.onTerminal ? { onTerminal: args.onTerminal } : {}),
     };
     if (args.registerChildAlias !== false) {
       this.trackedRuns.set(args.childSessionId, run);
@@ -2216,6 +2417,38 @@ export class SubAgentRunner {
     delete run.abort;
     this.updateRun(run, patch);
     run.terminalCommitClaimed = isA2ATerminalTaskState(run.taskState);
+    // Ask `updateRun` whether it took the patch: on refusal the summary, error,
+    // and transcript above never reached the run either, and only a landed
+    // result is a report a reader can be told it has already seen. This is also
+    // what separates a finished run from one that merely READS terminal while
+    // it unwinds — an abort request and the pre-await terminal claim both get
+    // there first.
+    if (run.taskState === taskState) run.terminalReportPublished = true;
+    // The renderer frame leaves from HERE, inside the step that publishes the
+    // terminal state, and never from the caller that later awaits the run.
+    // Between those two points a parent polling `agent_status` used to be able
+    // to read `done` and answer from it while the sub-agent panel still showed
+    // the run as live. Emitting synchronously after the state write closes that
+    // window: no other code can observe the run between the two lines.
+    //
+    // Fired even when the patch was refused: the frame reports the outcome the
+    // runner is returning to its caller, and a run whose result the state
+    // machine turned away still has to stop drawing as live.
+    const onTerminal = run.onTerminal;
+    if (onTerminal === undefined) return;
+    delete run.onTerminal;
+    try {
+      onTerminal(result);
+    } catch (err) {
+      // A renderer sink that throws must not leave the run half-committed.
+      log.warn(
+        {
+          childSessionId: run.childSessionId,
+          errorName: err instanceof Error ? err.name : "UnknownError",
+        },
+        "sub-agent completion observer failed",
+      );
+    }
   }
 
   private pruneTrackedRuns(): void {
@@ -2574,6 +2807,7 @@ export class SubAgentRunner {
         cancellation.abort();
         childForAbort?.abortCurrentTurn();
       },
+      ...(callbacks?.onTerminal ? { onTerminal: callbacks.onTerminal } : {}),
     });
     if (!executionPolicy) callbacks?.onLinked?.({ childSessionId });
 
@@ -3496,6 +3730,7 @@ export class SubAgentRunner {
         title,
         initialTaskState: A2ATaskState.INPUT_REQUIRED,
         registerChildAlias: false,
+        ...(callbacks?.onTerminal ? { onTerminal: callbacks.onTerminal } : {}),
       });
       const result: SubAgentSpawnResult = {
         summary: message,
@@ -3557,6 +3792,7 @@ export class SubAgentRunner {
         cancellation.abort();
         child?.abortCurrentTurn();
       },
+      ...(callbacks?.onTerminal ? { onTerminal: callbacks.onTerminal } : {}),
     });
     let activeLease: symbol | undefined;
     let completedQuestionWait: ActiveSubAgentChild["questionWait"];
@@ -3627,7 +3863,7 @@ export class SubAgentRunner {
       const tagged = /^sub-([0-9a-f]{8})-[0-9a-f]{8}-/.exec(resumeId);
       const idTag = tagged?.[1] ?? "";
       const expectedTag = originSessionId
-        ? createHash("sha256").update(originSessionId).digest("hex").slice(0, 8)
+        ? sha256Hex(originSessionId).slice(0, 8)
         : "";
       if (idTag !== expectedTag) {
         return refuseStructurally(

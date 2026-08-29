@@ -60,6 +60,7 @@ export const RAW_RESULT_META = "lvisai/rawResult";
 // ─── JSON-RPC 2.0 codes ───
 export const RPC_INVALID_PARAMS = -32602;
 export const RPC_METHOD_NOT_FOUND = -32601;
+export const RPC_INTERNAL_ERROR = -32603;
 
 /**
  * Resource not found rides `-32602` (Invalid Params) since `2026-07-28` —

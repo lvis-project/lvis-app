@@ -46,6 +46,7 @@ import {
   type A2ATaskRecord,
 } from "./a2a-task-store.js";
 import { isRecord } from "../shared/is-record.js";
+import { MAX_TIMER_DELAY_MS } from "../shared/tool-timeout-policy.js";
 
 const TEXT_MODE = "text/plain";
 /**
@@ -74,7 +75,6 @@ const LIST_KEYS = new Set([
 ]);
 const CANCEL_KEYS = new Set(["tenant", "id", "metadata"]);
 const PROTO_INT32_MAX = 2_147_483_647;
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export const A2A_INPUT_REQUIRED_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS = 60_000;

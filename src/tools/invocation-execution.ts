@@ -68,6 +68,7 @@ import {
   pluginOperationExecutionDomain,
   type PluginOperationPrincipal,
 } from "../permissions/plugin-operation-grant.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("executor");
 
@@ -240,12 +241,12 @@ export async function executeAuthorizedToolInvocation(
       if (rationaleResumeContext) {
         return returnRationaleResumeBlock(
           "permission audit chain is not writable: " +
-            (err instanceof Error ? err.message : String(err)),
+            errorMessage(err),
           finalInput,
           permissionResult,
         );
       }
-      const msg = t("be_executor.auditChainBlock", { name: toolUse.name, error: err instanceof Error ? err.message : String(err) });
+      const msg = t("be_executor.auditChainBlock", { name: toolUse.name, error: errorMessage(err) });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -320,7 +321,7 @@ export async function executeAuthorizedToolInvocation(
         audit: currentAuditMetadata(),
       }));
     }
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = errorMessage(error);
     if (rationaleResumeContext) {
       return returnRationaleResumeBlock(
         `governed operation admission failed: ${msg}`,
@@ -516,7 +517,7 @@ export async function executeAuthorizedToolInvocation(
       }
       if (!consumed.ok || grantAuditError !== undefined) {
         const reason = consumed.ok
-          ? `permission audit chain failed: ${grantAuditError instanceof Error ? grantAuditError.message : String(grantAuditError)}`
+          ? `permission audit chain failed: ${errorMessage(grantAuditError)}`
           : consumed.reason;
         const msg = `Plugin operation denied: ${reason}`;
         const durationMs = Date.now() - startTime;
@@ -959,14 +960,14 @@ export async function executeAuthorizedToolInvocation(
             log.error(
               "late plugin operation settlement audit failed; domain remains poisoned for %s: %s",
               toolUse.name,
-              error instanceof Error ? error.message : String(error),
+              errorMessage(error),
             );
           }
         }, (error) => {
           log.error(
             "late plugin operation settlement tracking failed; domain remains poisoned for %s: %s",
             toolUse.name,
-            error instanceof Error ? error.message : String(error),
+            errorMessage(error),
           );
         });
     } else if (operationExecutionLease && deferredOperationSettlement) {
@@ -974,7 +975,7 @@ export async function executeAuthorizedToolInvocation(
         log.error(
           "unaudited late plugin operation settlement tracking failed; domain remains poisoned for %s: %s",
           toolUse.name,
-          error instanceof Error ? error.message : String(error),
+          errorMessage(error),
         );
       });
       log.error(
@@ -1208,7 +1209,7 @@ export async function executeAuthorizedToolInvocation(
         log.error(
           "failed to poison governed operation domain after final boundary failure for %s: %s",
           toolUse.name,
-          poisonError instanceof Error ? poisonError.message : String(poisonError),
+          errorMessage(poisonError),
         );
       }
     }

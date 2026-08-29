@@ -58,7 +58,7 @@ export const MAX_ACP_SUBSCRIPTION_IMAGE_BYTES = 256 * 1024;
 export const MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES = MAX_ACP_SUBSCRIPTION_IMAGE_BYTES;
 /** Conservative serialized LVIS history budget when a native ACP image is present. */
 export const MAX_ACP_SUBSCRIPTION_TEXT_WITH_IMAGES_BYTES = 256 * 1024;
-const ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS: SubscriptionImageAttachmentLimits = Object.freeze({
+export const ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS: SubscriptionImageAttachmentLimits = Object.freeze({
   maxCount: MAX_ACP_SUBSCRIPTION_IMAGE_ATTACHMENTS,
   maxBytesPerImage: MAX_ACP_SUBSCRIPTION_IMAGE_BYTES,
   maxTotalBytes: MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES,

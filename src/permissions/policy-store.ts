@@ -8,6 +8,7 @@ import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { PolicySource } from "../shared/policy-editability.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 const log = createLogger("policy-store");
 
 
@@ -93,7 +94,7 @@ async function readPolicyFile(filePath: string): Promise<PolicyFile | null> {
     }
     return parsed;
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (isMissingPathError(err)) return null;
     // JSON parse errors and similar read failures log and fall back.
     log.error(`failed to read ${filePath}: %s`, (err as Error).message);
     return null;

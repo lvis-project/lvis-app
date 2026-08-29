@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   A2AHandlerError,
   A2AWireResponseError,
@@ -24,6 +23,7 @@ import {
   A2A_EXACT_SEND_REPLAY_URI,
 } from "./a2a-remote-contracts.js";
 import { isRecord } from "../shared/is-record.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const MAX_EXTENSION_HEADER_BYTES = 2_048;
@@ -225,7 +225,7 @@ export class A2AExactReplayHandler implements A2ARequestHandler {
       const begun = await this.options.store.begin({
         callerGenerationId: caller.callerGenerationId,
         messageId: identity.messageId,
-        bodySha256: createHash("sha256").update(context.rawBody).digest("hex"),
+        bodySha256: sha256Hex(context.rawBody),
         intentSha256: identity.intentSha256,
       });
       const outcome = replayOutcome(begun);

@@ -13,6 +13,8 @@
  *   - on absolute, backslash, drive, empty-segment, dot, or parent syntax
  *   - on member names that alias or cannot be represented safely on Windows
  */
+import { isPluginRuntimeDirName } from "./plugin-storage-layout.js";
+
 const WINDOWS_INVALID_SEGMENT_CHAR_RE = /[<>:"|?*]/u;
 const WINDOWS_RESERVED_BASENAME_RE =
   /^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])$/iu;
@@ -53,6 +55,19 @@ export function sanitizeZipEntryPath(slug: string, entryName: string): string | 
     throw new Error(`"${slug}" zip entry uses ambiguous or traversal syntax: ${entryName}`);
   }
   for (const segment of segments) assertPortableSegment(slug, entryName, segment);
+  // A payload may not ship a top-level RUNTIME directory. `data/`, `run/` and
+  // `sockets/` are the plugin's own state and the host's sockets, and the
+  // install swap moves the live `data/` into the promoted root as its last
+  // step — so an artifact carrying one arrives at a root where that name is
+  // already spoken for, and the carry has two candidates for one state with no
+  // way to merge them. Refused rather than dropped: an artifact that shipped
+  // state expected that state to be installed, and silently discarding it
+  // would leave the publisher believing it was.
+  if (isPluginRuntimeDirName(segments[0]!)) {
+    throw new Error(
+      `"${slug}" zip entry uses a reserved plugin runtime directory name: ${entryName}`,
+    );
+  }
   return path;
 }
 

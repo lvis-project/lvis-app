@@ -404,6 +404,9 @@ export function isMarketplaceEligibleLLMVendor(
  */
 export const DEFAULT_LLM_VENDOR: LLMVendor = "openai";
 
+/** GitHub Copilot's model inference endpoint — used when the vendor block carries no `baseUrl`. */
+export const COPILOT_BASE_URL = "https://models.github.ai/inference";
+
 /**
  * Runtime type guard — narrows `unknown` to `LLMVendor`. Use at every
  * boundary that accepts vendor strings from outside the type system:
@@ -422,6 +425,15 @@ export function isLLMVendor(v: unknown): v is LLMVendor {
     typeof v === "string" &&
     (LLM_VENDORS as readonly string[]).includes(v)
   );
+}
+
+/**
+ * {@link isLLMVendor} as a narrower: the vendor if it is known, otherwise
+ * {@link DEFAULT_LLM_VENDOR}. For the renderer's settings/IPC boundaries,
+ * where an unknown vendor string must not leave a control without a vendor.
+ */
+export function narrowLlmVendor(raw: unknown): LLMVendor {
+  return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
 }
 
 export function isOpenAICompatiblePresetVendor(

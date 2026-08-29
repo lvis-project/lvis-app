@@ -18,11 +18,13 @@ import type {
   TailnetSharePermission,
 } from "./tailnet-pairing-share-store.js";
 import { UUID_PATTERN } from "../shared/uuid.js";
+import { isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 export const TAILNET_PAIRED_SHARE_ACTOR_SECRET_NAME = "tailnet-paired-share-actor-v1.key";
 
-const ACTOR_SECRET_BYTES = 32;
-const ACTOR_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+/** A remote-controller actor secret: 32 random bytes, stored base64url (43 chars, no padding). */
+export const ACTOR_SECRET_BYTES = 32;
+export const ACTOR_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const ACTOR_HMAC_DOMAIN = "lvis/tailnet-paired-sharing/actor/v1\0";
 const MAX_LOGIN_CHARS = 512;
 
@@ -178,9 +180,9 @@ function validBinding(value: unknown): value is TailnetPairingShareBinding {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const candidate = value as Partial<TailnetPairingShareBinding>;
   return uuid(candidate.pairingId)
-    && positiveInteger(candidate.pairingEpoch)
+    && isPositiveSafeInteger(candidate.pairingEpoch)
     && uuid(candidate.shareId)
-    && positiveInteger(candidate.shareEpoch)
+    && isPositiveSafeInteger(candidate.shareEpoch)
     && uuid(candidate.scope);
 }
 
@@ -199,10 +201,6 @@ function sameActor(left: TailnetShareActorId, right: TailnetShareActorId): boole
 function uuid(value: unknown): value is string {
   return typeof value === "string"
     && UUID_PATTERN.test(value);
-}
-
-function positiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 function isPairedShareStore(value: unknown): value is TailnetPairedShareStore {

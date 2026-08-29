@@ -74,6 +74,7 @@ import {
 import { shellQuote } from "../lib/shell-resolver.js";
 import { scrubShortError } from "../shared/dlp.js";
 import { t } from "../i18n/index.js";
+import { sleep } from "../shared/abortable-deadline.js";
 const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
@@ -1342,10 +1343,6 @@ export class McpClient {
     };
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   /**
    * Drive a `CreateTaskResult` to a terminal status (§8 Tasks). Polls `tasks/get`
    * at the server's `pollIntervalMs` (clamped) until `completed` (→ render the
@@ -1389,7 +1386,7 @@ export class McpClient {
 
       polls += 1;
       const interval = Math.max(MIN_TASK_POLL_INTERVAL_MS, task.pollIntervalMs ?? DEFAULT_TASK_POLL_INTERVAL_MS);
-      await this.delay(Math.min(interval, Math.max(0, deadline - Date.now())));
+      await sleep(Math.min(interval, Math.max(0, deadline - Date.now())));
       current = await this.sendRequest<McpToolCallResult>("tasks/get", { taskId: task.taskId }, timeoutMs);
       task = this.extractTaskState(current, name);
     }

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
+import { isStringArray } from "../shared/is-record.js";
 
 export interface PluginUninstallCleanupRecord {
   pluginId: string;
@@ -40,10 +41,6 @@ interface LegacyJournalFileV1 {
       "registryRemovalCommitted" | "runtimeRetirementComplete"
     >
   >;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 const CLEANUP_PHASES = new Set<PluginUninstallCleanupPhase>([
@@ -157,7 +154,7 @@ export class PluginUninstallCleanupJournal {
         this.records.set(record.pluginId, freezeRecord(record));
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!isMissingPathError(error)) throw error;
     }
   }
 

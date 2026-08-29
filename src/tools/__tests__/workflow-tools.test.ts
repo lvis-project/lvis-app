@@ -946,7 +946,7 @@ describe("agent_spawn tool", () => {
           spawnId: parsed.spawnId,
         }),
       }),
-    }));
+    }), { terminalReport: true });
   });
 
   it("terminalizes a linked background rejection as FAILED and delivers it exactly once", async () => {
@@ -997,7 +997,7 @@ describe("agent_spawn tool", () => {
         taskId: "child-rejected-promise",
         metadata: expect.objectContaining({ taskState: "TASK_STATE_FAILED" }),
       }),
-    }));
+    }), { terminalReport: true });
   });
 
   it("keeps a successful terminal event final when parent delivery rejects", async () => {
@@ -1189,7 +1189,7 @@ describe("agent_spawn tool", () => {
           taskState: "TASK_STATE_REJECTED",
         }),
       }),
-    }));
+    }), { terminalReport: true });
   });
   it("background mode preserves interrupted status through interrupt, status, and terminal event", async () => {
     let spawnId = "";
@@ -1293,7 +1293,7 @@ describe("agent_spawn tool", () => {
       message: expect.objectContaining({
         metadata: expect.objectContaining({ taskState: "TASK_STATE_CANCELED" }),
       }),
-    }));
+    }), { terminalReport: true });
   });
 
   it("a transient resume failure hands back the SAME resumeId with retry guidance", async () => {
@@ -1650,12 +1650,12 @@ describe("agent_status and agent_interrupt tools", () => {
 
     const listed = JSON.parse((await tool.execute({}, ctx("session-a"))).output);
     expect(listed.runs).toEqual([fakeRun]);
-    expect(listSpy).toHaveBeenCalledWith("session-a");
+    expect(listSpy).toHaveBeenCalledWith("session-a", { deliversReportToParent: true });
 
     const denied = await tool.execute({ id: "spawn-1" }, ctx("session-b"));
     expect(denied.isError).toBe(true);
     expect(JSON.parse(denied.output).error).toContain("not found");
-    expect(getSpy).toHaveBeenCalledWith("spawn-1", "session-b");
+    expect(getSpy).toHaveBeenCalledWith("spawn-1", "session-b", { deliversReportToParent: true });
   });
 
   it("agent_status points at agent_list when only restored sub-agents remain", async () => {

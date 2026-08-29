@@ -40,7 +40,7 @@ import { LLM_VENDOR_MODEL_OPTIONS } from "../../shared/llm-vendor-defaults.js";
 import { AGENT_MODE_MAP } from "../../shared/agent-mode-map.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams,
 } from "../llm/types.js";
-import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
+import { createAgentSpawnTool, createAgentStatusTool } from "../../tools/agent-spawn.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import {
@@ -2542,5 +2542,373 @@ describe("spawn cancellation signal", () => {
       hasProviderSpy.mockRestore();
       runTurnSpy.mockRestore();
     }
+  });
+});
+
+describe("SubAgentRunner terminal completion step", () => {
+  /**
+   * A completing sub-agent has two audiences that must not disagree: the
+   * parent LLM, which reads the run through `agent_status`, and the tile's
+   * sub-agent panel, which is the only place the user can watch it. The
+   * renderer frame used to be dispatched by whoever awaited the run, one
+   * scheduling hop after the runner published the terminal state — so the
+   * parent could already be answering from a `done` the panel had not been
+   * told about. These pin the frame to the completion step itself.
+   */
+  function completionRunner() {
+    const toolRegistry = new ToolRegistry();
+    return new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+  }
+
+  it("publishes the terminal state and the renderer frame in one uninterruptible step", async () => {
+    const runner = completionRunner();
+    const observed: string[] = [];
+    // The child loop has no provider, so the run reaches its terminal state
+    // through the completion step without needing a scripted LLM turn.
+    const spawned = runner.spawn(
+      {
+        title: "completion order",
+        instructions: "do",
+        originSessionId: "parent-session",
+        spawnId: "spawn-completion-order",
+      },
+      {
+        onTerminal: (result) => {
+          observed.push(`frame:${result.ok ? "ok" : "error"}`);
+          // Exactly what `agent_status` would answer at this instant. If the
+          // frame were dispatched by the awaiting caller instead, the answer
+          // here would already have been readable for a whole scheduling hop.
+          observed.push(
+            `agent_status:${
+              runner.getRunStatus("spawn-completion-order", "parent-session")?.status
+            }`,
+          );
+        },
+      },
+    );
+    observed.push("awaiting");
+    const result = await spawned;
+    observed.push("resolved");
+
+    expect(result.ok).toBe(false);
+    expect(observed).toEqual([
+      "awaiting",
+      "frame:error",
+      "agent_status:error",
+      "resolved",
+    ]);
+  });
+
+  it("reports a terminal run to the renderer once, even if the run finalizes twice", async () => {
+    const runner = completionRunner();
+    const onTerminal = vi.fn();
+    await runner.spawn(
+      {
+        title: "single frame",
+        instructions: "do",
+        originSessionId: "parent-session",
+        spawnId: "spawn-single-frame",
+      },
+      { onTerminal },
+    );
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+
+    // Re-finalizing the same tracked run is what a late cancellation or a
+    // retried persistence path does. The observer must not fire again.
+    const tracked = (
+      runner as unknown as { trackedRuns: Map<string, { title: string }> }
+    ).trackedRuns.get("spawn-single-frame");
+    expect(tracked).toBeDefined();
+    (runner as unknown as {
+      finalizeRun: (run: unknown, result: SubAgentSpawnResult) => void;
+    }).finalizeRun(tracked, {
+      summary: "second finalize",
+      toolCallCount: 0,
+      turnCount: 0,
+      childSessionId: "spawn-single-frame",
+      entries: [],
+      ok: false,
+      error: "second finalize",
+    });
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SubAgentRunner completion mailbox single-shot", () => {
+  /**
+   * A finished sub-agent reports through two channels by construction: the
+   * terminal snapshot `agent_status` hands the parent mid-turn, and the
+   * durable mailbox entry the parent's NEXT turn folds in as host steering.
+   * Both are needed — a parent that never polls must still get the report —
+   * but a parent that already answered from `agent_status` was being told to
+   * go and review the same work again. The completion step records which
+   * message carries the report; reading that report retires the queued copy.
+   */
+  const parentSessionId = "parent-session";
+  const restore: Array<() => void> = [];
+
+  afterEach(() => {
+    while (restore.length > 0) restore.pop()?.();
+  });
+
+  function completionMailboxFixture() {
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "child finished" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+    restore.push(() => hasProviderSpy.mockRestore());
+    restore.push(() => refreshProviderSpy.mockRestore());
+
+    const namespace = createInMemoryMailboxNamespace();
+    const mailbox = new SubAgentMessageMailbox(namespace.handle);
+    const storedMetadata = new Map<string, Record<string, unknown>>();
+    const subAgentMemoryManager = {
+      ...fakeSubAgentMemoryManager(),
+      saveSessionMetadata: vi.fn(async (id: string, meta: Record<string, unknown>) => {
+        storedMetadata.set(id, { ...meta });
+      }),
+      loadSessionMetadata: vi.fn((id: string) => storedMetadata.get(id) ?? null),
+      hasSessionMetadataFile: vi.fn((id: string) => storedMetadata.has(id)),
+      listSubAgentSessionsForOrigin: vi.fn(() => []),
+    } as unknown as ConstructorParameters<
+      typeof SubAgentRunner
+    >[0]["subAgentMemoryManager"];
+    let runner!: SubAgentRunner;
+    const bus = new A2ASubAgentMessageBus({
+      // A parent that is not the loop's active session and has no turn open:
+      // the delivery lands in the durable mailbox rather than being injected
+      // mid-turn, which is the shape the doubled report was reported in.
+      parentLoop: {
+        getSessionId: () => "different-active-session",
+        hasActiveTurn: () => false,
+      } as unknown as ConversationLoop,
+      mailbox,
+      settingsService: {
+        get: () => ({ subAgentAutonomousWake: false }),
+      } as never,
+      auditLogger: { log: vi.fn() } as never,
+      resolveChildAddress: (parentId, childId, messageId) =>
+        runner.resolveSubAgentAddress(parentId, childId, messageId),
+    });
+    const toolRegistry = new ToolRegistry();
+    runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager,
+      messageBus: bus,
+    });
+    const spawnTool = createAgentSpawnTool({
+      getRunner: () => runner,
+      emit: () => undefined,
+    });
+    const statusTool = createAgentStatusTool({ getRunner: () => runner });
+    const parentContext = {
+      cwd: process.cwd(),
+      extraAllowedDirectories: [],
+      metadata: {
+        sessionId: parentSessionId,
+        spawnDepth: 0,
+        supportsA2AParentDelivery: true,
+      },
+    };
+    return { runner, bus, spawnTool, statusTool, parentContext };
+  }
+
+  async function spawnUntilReportQueued(
+    fixture: ReturnType<typeof completionMailboxFixture>,
+    title: string,
+  ) {
+    const handleResult = await fixture.spawnTool.execute(
+      { title, instructions: "do" },
+      fixture.parentContext,
+    );
+    expect(handleResult.isError).toBe(false);
+    const handle = JSON.parse(handleResult.output) as { spawnId: string };
+    let queued = await fixture.runner.peekParentMailbox(parentSessionId);
+    const deadline = Date.now() + 5_000;
+    while (queued.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      queued = await fixture.runner.peekParentMailbox(parentSessionId);
+    }
+    return { handle, queued };
+  }
+
+  it("retires the queued report once agent_status hands the parent the same run", async () => {
+    const fixture = completionMailboxFixture();
+    const { handle, queued } = await spawnUntilReportQueued(fixture, "already read");
+    expect(queued).toHaveLength(1);
+
+    const status = await fixture.statusTool.execute(
+      { id: handle.spawnId },
+      fixture.parentContext,
+    );
+    expect(JSON.parse(status.output)).toMatchObject({
+      run: { status: "done", spawnId: handle.spawnId },
+    });
+
+    // The parent's next turn folds the mailbox in. The report it already
+    // answered from must not come back as a steering row — this turn or any
+    // turn after it.
+    await expect(
+      fixture.runner.peekParentMailbox(parentSessionId),
+    ).resolves.toEqual([]);
+    await expect(
+      fixture.runner.peekParentMailbox(parentSessionId),
+    ).resolves.toEqual([]);
+    // And it is gone from the DURABLE mailbox, not merely hidden by the
+    // runner's filter: the read mark is process-local, so an entry the
+    // acknowledgement left behind would come back after a restart.
+    await expect(
+      fixture.bus.peekParentMailbox(parentSessionId),
+    ).resolves.toEqual([]);
+  });
+
+  it("retires the queued report through the listing form of agent_status too", async () => {
+    const fixture = completionMailboxFixture();
+    const { queued } = await spawnUntilReportQueued(fixture, "listed read");
+    expect(queued).toHaveLength(1);
+
+    const status = await fixture.statusTool.execute({}, fixture.parentContext);
+    expect((JSON.parse(status.output) as { runs: unknown[] }).runs).toHaveLength(1);
+
+    await expect(
+      fixture.runner.peekParentMailbox(parentSessionId),
+    ).resolves.toEqual([]);
+    await expect(
+      fixture.bus.peekParentMailbox(parentSessionId),
+    ).resolves.toEqual([]);
+  });
+
+  it("does not count a snapshot whose result the state machine refused as a read report", async () => {
+    // Reading terminal is not the test the guard can use: `interruptRun` writes
+    // CANCELED the instant an abort is requested, and `persistFinalResult`
+    // claims the terminal commit before its awaits, so a run reads terminal
+    // while its summary and error are still missing. The guard asks the
+    // narrower question — did the completion step's patch actually land — and
+    // a refused transition is the sharpest way to drive it.
+    //
+    // The refusal itself is defence in depth: both run loops normalize an
+    // aborted run's result to `interrupted` before finalizing, so a COMPLETED
+    // result cannot reach `finalizeRun` behind a CANCELED state at runtime.
+    // Driving it directly is what makes the guard observable.
+    const fixture = completionMailboxFixture();
+    let releaseTurn: () => void = () => {};
+    const turnParked = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    let sawTurn: () => void = () => {};
+    const turnStarted = new Promise<void>((resolve) => {
+      sawTurn = resolve;
+    });
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation((async () => {
+        sawTurn();
+        await turnParked;
+        return { text: "unused", stopReason: "end_turn" };
+      }) as never);
+    restore.push(() => runTurnSpy.mockRestore());
+    restore.push(() => releaseTurn());
+
+    const handleResult = await fixture.spawnTool.execute(
+      { title: "refused result", instructions: "do" },
+      fixture.parentContext,
+    );
+    expect(handleResult.isError).toBe(false);
+    const handle = JSON.parse(handleResult.output) as { spawnId: string };
+    await turnStarted;
+    expect(
+      fixture.runner.interruptRun(handle.spawnId, parentSessionId),
+    ).toMatchObject({ ok: true });
+
+    const run = (
+      fixture.runner as unknown as {
+        trackedRuns: Map<string, { childSessionId: string; taskState: string }>;
+      }
+    ).trackedRuns.get(handle.spawnId);
+    expect(run?.taskState).toBe(A2ATaskState.CANCELED);
+    const childSessionId = run!.childSessionId;
+
+    // The child's completed answer arrives behind the interrupt.
+    (fixture.runner as unknown as {
+      finalizeRun: (run: unknown, result: SubAgentSpawnResult) => void;
+    }).finalizeRun(run, {
+      summary: "the child's answer",
+      toolCallCount: 0,
+      turnCount: 1,
+      childSessionId,
+      entries: [],
+      ok: true,
+      stopReason: "end_turn",
+    });
+
+    // Refused: nothing of that result is readable through agent_status.
+    const snapshot = fixture.runner.getRunStatus(handle.spawnId, parentSessionId, {
+      deliversReportToParent: true,
+    });
+    expect(snapshot?.taskState).toBe(A2ATaskState.CANCELED);
+    expect(snapshot?.summary).toBeUndefined();
+    expect(snapshot?.error).toBeUndefined();
+
+    // The mailbox copy, which does carry the answer, is therefore still owed.
+    await expect(fixture.runner.deliverToParent(
+      {
+        parentSessionId,
+        childSessionId,
+        message: {
+          messageId: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+          contextId: parentSessionId,
+          taskId: childSessionId,
+          role: A2A_ROLE_AGENT,
+          parts: [{ text: "the child's answer" }],
+          metadata: { taskState: A2ATaskState.COMPLETED },
+        } satisfies A2AMessage,
+      },
+      { terminalReport: true },
+    )).resolves.toMatchObject({ ok: true });
+
+    const owed = await fixture.runner.peekParentMailbox(parentSessionId);
+    expect(owed).toHaveLength(1);
+    expect(owed[0]?.formattedText).toContain("the child's answer");
+  });
+
+  it("delivers a report the parent never read exactly once across two turns", async () => {
+    const fixture = completionMailboxFixture();
+    const { queued } = await spawnUntilReportQueued(fixture, "never read");
+    expect(queued).toHaveLength(1);
+
+    // Turn one: the parent never called agent_status, so the report is still
+    // owed and must be handed over rather than quietly retired.
+    const firstTurn = await fixture.runner.peekParentMailbox(parentSessionId);
+    expect(firstTurn).toHaveLength(1);
+    expect(firstTurn[0]?.id).toBe(queued[0]?.id);
+    await expect(
+      fixture.runner.acknowledgeParentMailbox(parentSessionId, [firstTurn[0]!.id]),
+    ).resolves.toBe(1);
+
+    // Turn two: consumed, and not replayed.
+    await expect(
+      fixture.runner.peekParentMailbox(parentSessionId),
+    ).resolves.toEqual([]);
   });
 });

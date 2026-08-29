@@ -3,7 +3,7 @@
  * gate predicate (`appVersionSatisfiesMin`).
  */
 import { describe, it, expect } from "vitest";
-import { compareSemver, appVersionSatisfiesMin } from "../semver-compare.js";
+import { compareSemver, appVersionSatisfiesMin, SEMVER_CORE_PATTERN } from "../semver-compare.js";
 
 describe("compareSemver", () => {
   it("orders plain numeric cores numerically (not lexically)", () => {
@@ -43,5 +43,14 @@ describe("appVersionSatisfiesMin — plugin↔app gate", () => {
 
   it("fails closed when min is missing/empty", () => {
     expect(appVersionSatisfiesMin("1.0.0", "")).toBe(false);
+  });
+});
+
+describe("SEMVER_CORE_PATTERN", () => {
+  it("requires a numeric major.minor.patch prefix and tolerates a suffix", () => {
+    expect(SEMVER_CORE_PATTERN.test("1.2.3")).toBe(true);
+    expect(SEMVER_CORE_PATTERN.test("1.2.3-beta.1+build")).toBe(true);
+    expect(SEMVER_CORE_PATTERN.test("1.2")).toBe(false);
+    expect(SEMVER_CORE_PATTERN.test("v1.2.3")).toBe(false);
   });
 });

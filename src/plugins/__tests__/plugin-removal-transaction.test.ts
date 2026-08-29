@@ -13,6 +13,7 @@ import {
   stageRemovalTransaction,
 } from "../plugin-removal-transaction.js";
 import { updatePluginRegistry } from "../registry.js";
+import { readPluginDataFixture, seedPluginDataFixture } from "./test-helpers.js";
 
 describe("durable plugin removal transactions", () => {
   let root: string;
@@ -76,6 +77,27 @@ describe("durable plugin removal transactions", () => {
 
     await expect(reconcileRemovalTransaction(paths, journal.transactionId)).resolves.toBe("cleaned");
     expect(existsSync(journal.mappings[0]!.stagedPath)).toBe(false);
+  });
+
+  it("removes the plugin's data directory together with its root on uninstall", async () => {
+    const before = await seed(["alpha"]);
+    await seedPluginDataFixture(join(paths.pluginsRoot, "alpha"));
+    const journal = await createRemovalTransaction(paths, {
+      kind: "uninstall",
+      pluginIds: ["alpha"],
+      registryBefore: before,
+      registryAfter: [],
+      originals: [{ pluginId: "alpha", path: join(paths.pluginsRoot, "alpha") }],
+    });
+    await stageRemovalTransaction(paths, journal);
+    await updatePluginRegistry(paths.registryPath, (registry) => {
+      registry.plugins = [];
+    });
+    await markRemovalTransactionRegistryCommitted(paths, journal);
+
+    await expect(reconcileRemovalTransaction(paths, journal.transactionId)).resolves.toBe("cleaned");
+    expect(existsSync(join(paths.pluginsRoot, "alpha"))).toBe(false);
+    expect((await readPluginDataFixture(join(paths.pluginsRoot, "alpha"))).size).toBe(0);
   });
 
   it("finishes staged cleanup after the committed phase is durable", async () => {

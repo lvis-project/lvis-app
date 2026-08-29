@@ -9,6 +9,8 @@
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
 import { UUID_PATTERN } from "./uuid.js";
+import { hasExactKeys } from "./is-record.js";
+import { isNonNegativeSafeInteger } from "./safe-integer.js";
 
 export const TAILNET_INVITATION_DURATION_PRESETS = ["10m", "1h", "24h"] as const;
 export type TailnetInvitationDurationPreset = (typeof TAILNET_INVITATION_DURATION_PRESETS)[number];
@@ -136,16 +138,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
-function timestamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 export function isTailnetSharingId(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
@@ -173,15 +165,15 @@ export function isTailnetSharingCreateInvitationInput(
 ): value is TailnetSharingCreateInvitationInput {
   if (!record(value) || !hasUserKeyboardIntent(value.intent)) return false;
   return value.duration === undefined
-    ? exactKeys(value, ["intent"])
-    : exactKeys(value, ["duration", "intent"]) && isTailnetInvitationDurationPreset(value.duration);
+    ? hasExactKeys(value, ["intent"])
+    : hasExactKeys(value, ["duration", "intent"]) && isTailnetInvitationDurationPreset(value.duration);
 }
 
 export function isTailnetSharingActivatePairingInput(
   value: unknown,
 ): value is TailnetSharingActivatePairingInput {
   return record(value)
-    && exactKeys(value, ["id", "intent"])
+    && hasExactKeys(value, ["id", "intent"])
     && hasUserKeyboardIntent(value.intent)
     && isTailnetSharingId(value.id);
 }
@@ -192,34 +184,34 @@ export function isTailnetSharingCreateCurrentConversationShareInput(
   if (!record(value) || !hasUserKeyboardIntent(value.intent)) return false;
   const base = isTailnetSharingId(value.pairingId) && isTailnetSharePermission(value.permission);
   return value.duration === undefined
-    ? exactKeys(value, ["intent", "pairingId", "permission"]) && base
-    : exactKeys(value, ["duration", "intent", "pairingId", "permission"])
+    ? hasExactKeys(value, ["intent", "pairingId", "permission"]) && base
+    : hasExactKeys(value, ["duration", "intent", "pairingId", "permission"])
       && base
       && isTailnetShareDurationPreset(value.duration);
 }
 
 export function isTailnetSharingRevokeInput(value: unknown): value is TailnetSharingRevokeInput {
   return record(value)
-    && exactKeys(value, ["id", "intent"])
+    && hasExactKeys(value, ["id", "intent"])
     && hasUserKeyboardIntent(value.intent)
     && isTailnetSharingId(value.id);
 }
 
 function parseInvitationSummary(value: unknown): TailnetSharingInvitationSummary | null {
-  if (!record(value) || !exactKeys(value, ["expiresAt", "id"])
-    || !isTailnetSharingId(value.id) || !timestamp(value.expiresAt)) {
+  if (!record(value) || !hasExactKeys(value, ["expiresAt", "id"])
+    || !isTailnetSharingId(value.id) || !isNonNegativeSafeInteger(value.expiresAt)) {
     return null;
   }
   return Object.freeze({ id: value.id, expiresAt: value.expiresAt });
 }
 
 function parsePairingSummary(value: unknown): TailnetSharingPairingSummary | null {
-  if (!record(value) || !exactKeys(value, ["actorFingerprint", "expiresAt", "id", "state"])
+  if (!record(value) || !hasExactKeys(value, ["actorFingerprint", "expiresAt", "id", "state"])
     || !isTailnetSharingId(value.id)
     || typeof value.actorFingerprint !== "string"
     || !ACTOR_FINGERPRINT.test(value.actorFingerprint)
     || (value.state !== "pending" && value.state !== "active")
-    || !(value.expiresAt === null || timestamp(value.expiresAt))) {
+    || !(value.expiresAt === null || isNonNegativeSafeInteger(value.expiresAt))) {
     return null;
   }
   return Object.freeze({
@@ -231,13 +223,13 @@ function parsePairingSummary(value: unknown): TailnetSharingPairingSummary | nul
 }
 
 function parseShareSummary(value: unknown): TailnetSharingShareSummary | null {
-  if (!record(value) || !exactKeys(value, ["actorFingerprint", "expiresAt", "id", "pairingId", "permission"])
+  if (!record(value) || !hasExactKeys(value, ["actorFingerprint", "expiresAt", "id", "pairingId", "permission"])
     || !isTailnetSharingId(value.id)
     || !isTailnetSharingId(value.pairingId)
     || typeof value.actorFingerprint !== "string"
     || !ACTOR_FINGERPRINT.test(value.actorFingerprint)
     || !isTailnetSharePermission(value.permission)
-    || !timestamp(value.expiresAt)) {
+    || !isNonNegativeSafeInteger(value.expiresAt)) {
     return null;
   }
   return Object.freeze({
@@ -255,7 +247,7 @@ function parseShareSummary(value: unknown): TailnetSharingShareSummary | null {
  * renderer callers even if a main-process producer is broadened incorrectly.
  */
 export function parseTailnetSharingSnapshot(value: unknown): TailnetSharingSnapshot | null {
-  if (!record(value) || !exactKeys(value, ["invitations", "pairings", "shares"])
+  if (!record(value) || !hasExactKeys(value, ["invitations", "pairings", "shares"])
     || !Array.isArray(value.invitations)
     || !Array.isArray(value.pairings)
     || !Array.isArray(value.shares)) {
@@ -279,18 +271,18 @@ export function parseTailnetSharingSnapshot(value: unknown): TailnetSharingSnaps
 export function parseTailnetSharingCreatedInvitation(
   value: unknown,
 ): TailnetSharingCreatedInvitation | null {
-  if (!record(value) || !exactKeys(value, ["code", "expiresAt", "id"])
+  if (!record(value) || !hasExactKeys(value, ["code", "expiresAt", "id"])
     || !isTailnetSharingId(value.id)
     || typeof value.code !== "string"
     || !INVITATION_CODE.test(value.code)
-    || !timestamp(value.expiresAt)) {
+    || !isNonNegativeSafeInteger(value.expiresAt)) {
     return null;
   }
   return Object.freeze({ id: value.id, code: value.code, expiresAt: value.expiresAt });
 }
 
 function parseTailnetSharingFailure(value: unknown): TailnetSharingFailure | null {
-  if (!record(value) || !exactKeys(value, ["error", "ok"])
+  if (!record(value) || !hasExactKeys(value, ["error", "ok"])
     || value.ok !== false || !isTailnetSharingErrorCode(value.error)) {
     return null;
   }
@@ -301,14 +293,14 @@ function parseTailnetSharingFailure(value: unknown): TailnetSharingFailure | nul
 export function parseTailnetSharingMutationResult(value: unknown): TailnetSharingMutationResult | null {
   const failure = parseTailnetSharingFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !exactKeys(value, ["ok"]) || value.ok !== true) return null;
+  if (!record(value) || !hasExactKeys(value, ["ok"]) || value.ok !== true) return null;
   return Object.freeze({ ok: true });
 }
 
 export function parseTailnetSharingSnapshotResult(value: unknown): TailnetSharingSnapshotResult | null {
   const failure = parseTailnetSharingFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !exactKeys(value, ["ok", "snapshot"]) || value.ok !== true) return null;
+  if (!record(value) || !hasExactKeys(value, ["ok", "snapshot"]) || value.ok !== true) return null;
   const snapshot = parseTailnetSharingSnapshot(value.snapshot);
   return snapshot === null ? null : Object.freeze({ ok: true, snapshot });
 }
@@ -318,7 +310,7 @@ export function parseTailnetSharingCreateInvitationResult(
 ): TailnetSharingCreateInvitationResult | null {
   const failure = parseTailnetSharingFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !exactKeys(value, ["invitation", "ok"]) || value.ok !== true) return null;
+  if (!record(value) || !hasExactKeys(value, ["invitation", "ok"]) || value.ok !== true) return null;
   const invitation = parseTailnetSharingCreatedInvitation(value.invitation);
   return invitation === null ? null : Object.freeze({ ok: true, invitation });
 }

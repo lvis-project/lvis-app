@@ -13,7 +13,12 @@ import {
 } from "./test-helpers.js";
 import { manifestSha } from "../../__tests__/support/sign-envelope-fixture.js";
 import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
-import { agentPluginsDocument } from "./test-helpers.js";
+import {
+  PLUGIN_DATA_FIXTURE,
+  agentPluginsDocument,
+  readPluginDataFixture,
+  seedPluginDataFixture,
+} from "./test-helpers.js";
 
 describe("PluginMarketplaceService.installLocal", () => {
   let testDir: string;
@@ -366,6 +371,68 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(restoredRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(true);
     expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"))
       .toBe(oldReceipt);
+  });
+
+  it("keeps the plugin's data directory byte-identical across a sideload reinstall", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir, preparedActivationOptionsForTest);
+    const installDir = join(pluginsDir, "test-plugin");
+    await seedPluginDataFixture(installDir);
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify(agentPluginsDocument({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "fixture v2",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      })),
+      "utf-8");
+
+    await service.installLocal(sourceDir, preparedActivationOptionsForTest);
+
+    expect(JSON.parse(await readFile(join(installDir, "plugin.json"), "utf-8")))
+      .toMatchObject({ version: "2.0.0" });
+    expect(await readPluginDataFixture(installDir)).toEqual(PLUGIN_DATA_FIXTURE);
+    const rollbackBackups = await readdir(
+      join(pluginsDir, ".cache", "local-install-rollback"),
+    ).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+    expect(rollbackBackups).toEqual([]);
+  });
+
+  it("returns the plugin's data directory to the restored install when the replacement receipt fails", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir, preparedActivationOptionsForTest);
+    const installDir = join(pluginsDir, "test-plugin");
+    await seedPluginDataFixture(installDir);
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify(agentPluginsDocument({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "fixture v2",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      })),
+      "utf-8");
+    const store = (service as unknown as {
+      artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+    }).artifactStore;
+    vi.spyOn(store, "persistPreparedInstallReceipt").mockRejectedValueOnce(
+      new Error("replacement receipt write failed"),
+    );
+
+    await expect(service.installLocal(sourceDir, preparedActivationOptionsForTest))
+      .rejects.toThrow("replacement receipt write failed");
+
+    expect(JSON.parse(await readFile(join(installDir, "plugin.json"), "utf-8")))
+      .toMatchObject({ version: "1.2.3" });
+    expect(await readPluginDataFixture(installDir)).toEqual(PLUGIN_DATA_FIXTURE);
   });
 
   it("does not restore a predecessor after committed local publication failure", async () => {

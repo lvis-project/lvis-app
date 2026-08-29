@@ -1,6 +1,5 @@
 import type { Stats } from "node:fs";
 import { stat } from "node:fs/promises";
-import { createHash } from "node:crypto";
 
 import type { AuditEntry } from "../audit/audit-logger.js";
 import { sanitizeRuntimeAllowedDirectories } from "./allowed-directories.js";
@@ -12,6 +11,7 @@ import {
 } from "./permission-settings-store.js";
 import { withWorkspaceRootLifecycleLock } from "./workspace-root-lifecycle.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const DEFAULT_TIMEOUT_MS = 1_500;
 const DEFAULT_CONCURRENCY = 4;
@@ -112,7 +112,7 @@ export interface ReconcileWorkspaceRootsOptions {
 
 /** Stable, opaque audit identity that never reveals `/tmp` or another root. */
 export function opaqueWorkspaceRootAuditRef(root: string): string {
-  const digest = createHash("sha256").update(root).digest("hex").slice(0, 16);
+  const digest = sha256Hex(root).slice(0, 16);
   return `<workspace-root:${digest}>`;
 }
 type RootProbe =

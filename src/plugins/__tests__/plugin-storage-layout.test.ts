@@ -6,18 +6,27 @@
  * never at the plugin root, because the root holds the bundle the next load
  * imports into the Electron main process.
  */
-import { describe, it, expect } from "vitest";
-import { resolve, sep } from "node:path";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
 import {
   PLUGIN_DATA_DIR_NAME,
   PLUGIN_OWN_SOCKET_DIR_NAME,
+  PLUGIN_RUNTIME_DIR_NAMES,
   PLUGIN_WORKER_RUN_DIR_NAME,
   assertUnixSocketPathFits,
+  carryPluginDataDir,
+  isPluginRuntimeDirName,
+  isSamePluginPath,
+  pluginPayloadCopyFilter,
   resolvePluginSocketDir,
   resolvePluginWritableRoot,
 } from "../plugin-storage-layout.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import { isPathWithin, isResolvedPathWithin } from "../plugin-storage-containment.js";
+import { PLUGIN_DATA_FIXTURE, readPluginDataFixture, seedPluginDataFixture } from "./test-helpers.js";
 
 const PLUGIN_ID = "lvis-plugin-layout-fixture";
 
@@ -165,5 +174,239 @@ describe("assertUnixSocketPathFits", () => {
     const multiByte = "가".repeat(Math.ceil(limit / 3));
     expect(multiByte.length).toBeLessThanOrEqual(limit);
     expect(() => assertUnixSocketPathFits(multiByte, "probe")).toThrow(/bytes/);
+  });
+});
+
+const REJECT = { onConflict: "reject" } as const;
+
+describe("carryPluginDataDir", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "plugin-data-carry-"));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("moves the data directory between roots with every file intact", async () => {
+    const from = join(root, "old");
+    const to = join(root, "new");
+    await mkdir(from);
+    await mkdir(to);
+    await seedPluginDataFixture(from);
+
+    await expect(carryPluginDataDir(from, to, REJECT)).resolves.toBe(true);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
+  });
+
+  it("reports nothing to carry when the source root holds no data directory", async () => {
+    const from = join(root, "old");
+    const to = join(root, "new");
+    await mkdir(from);
+    await mkdir(to);
+
+    await expect(carryPluginDataDir(from, to, REJECT)).resolves.toBe(false);
+
+    expect(existsSync(join(to, PLUGIN_DATA_DIR_NAME))).toBe(false);
+  });
+
+  it("refuses to replace a data directory the target root already holds", async () => {
+    const from = join(root, "old");
+    const to = join(root, "new");
+    await mkdir(from);
+    await mkdir(to);
+    await seedPluginDataFixture(from);
+    await seedPluginDataFixture(to);
+
+    await expect(carryPluginDataDir(from, to, REJECT)).rejects.toThrow(/both roots hold a plugin data directory/);
+
+    expect(await readPluginDataFixture(from)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+  });
+});
+
+/**
+ * The resolving policy recovery uses. Every conflict must end in a decision:
+ * refusing leaves `pendingUpdate` set and the plugin unloadable forever.
+ */
+describe("carryPluginDataDir — resolving conflict policy", () => {
+  let root: string;
+  let parked: string[];
+
+  /**
+   * `unattributedRoot` names the live install path — the only root a stray
+   * write can reach. Whichever side of the carry is under it loses.
+   */
+  const resolvePolicy = (unattributedRoot: string) => ({
+    onConflict: "resolve" as const,
+    unattributedRoot,
+    moveAside: async (dir: string): Promise<void> => {
+      const target = join(root, `parked-${String(parked.length)}`);
+      await rename(dir, target);
+      parked.push(target);
+    },
+  });
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "plugin-data-carry-resolve-"));
+    parked = [];
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const twoRoots = async (): Promise<{ from: string; to: string }> => {
+    const from = join(root, "old");
+    const to = join(root, "new");
+    await mkdir(from);
+    await mkdir(to);
+    return { from, to };
+  };
+
+  it("removes an empty destination data directory and carries the real one in", async () => {
+    const { from, to } = await twoRoots();
+    await seedPluginDataFixture(from);
+    // Exactly the state a storage call landing in the swap window used to
+    // leave at the promoted root: the directory exists and holds nothing.
+    await mkdir(join(to, PLUGIN_DATA_DIR_NAME));
+
+    await expect(carryPluginDataDir(from, to, resolvePolicy(to))).resolves.toBe(true);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
+    expect(parked).toEqual([]);
+  });
+
+  it("keeps a real destination when the source directory is the empty one", async () => {
+    const { from, to } = await twoRoots();
+    await mkdir(join(from, PLUGIN_DATA_DIR_NAME));
+    await seedPluginDataFixture(to);
+
+    await expect(carryPluginDataDir(from, to, resolvePolicy(to))).resolves.toBe(false);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
+    expect(parked).toEqual([]);
+  });
+
+  it("parks the DESTINATION when the destination is the live path, then carries", async () => {
+    const { from, to } = await twoRoots();
+    await seedPluginDataFixture(from);
+    await mkdir(join(to, PLUGIN_DATA_DIR_NAME), { recursive: true });
+    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unattributed.bin"), "keep me");
+
+    await expect(carryPluginDataDir(from, to, resolvePolicy(to))).resolves.toBe(true);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(parked).toHaveLength(1);
+    expect(await readdir(parked[0]!)).toEqual(["unattributed.bin"]);
+  });
+
+  /**
+   * The direction that made the source-always-wins rule wrong: when the LIVE
+   * path is the carry's source, the destination is a backup holding state a
+   * transaction deliberately put there, and it must survive untouched.
+   */
+  it("parks the SOURCE when the source is the live path, and leaves the destination alone", async () => {
+    const { from, to } = await twoRoots();
+    await mkdir(join(from, PLUGIN_DATA_DIR_NAME), { recursive: true });
+    await writeFile(join(from, PLUGIN_DATA_DIR_NAME, "unattributed.bin"), "keep me");
+    await seedPluginDataFixture(to);
+
+    await expect(carryPluginDataDir(from, to, resolvePolicy(from))).resolves.toBe(false);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
+    expect(parked).toHaveLength(1);
+    expect(await readdir(parked[0]!)).toEqual(["unattributed.bin"]);
+  });
+
+  it("refuses a conflict it cannot attribute to either root", async () => {
+    const { from, to } = await twoRoots();
+    await seedPluginDataFixture(from);
+    await mkdir(join(to, PLUGIN_DATA_DIR_NAME), { recursive: true });
+    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unattributed.bin"), "keep me");
+
+    await expect(
+      carryPluginDataDir(from, to, resolvePolicy(join(root, "somewhere-else"))),
+    ).rejects.toThrow(/cannot attribute a data directory conflict/);
+
+    expect(await readPluginDataFixture(from)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(parked).toEqual([]);
+  });
+
+  it("refuses when moveAside leaves the losing directory in place", async () => {
+    const { from, to } = await twoRoots();
+    await seedPluginDataFixture(from);
+    await mkdir(join(to, PLUGIN_DATA_DIR_NAME), { recursive: true });
+    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unattributed.bin"), "keep me");
+
+    await expect(carryPluginDataDir(from, to, {
+      onConflict: "resolve",
+      unattributedRoot: to,
+      moveAside: async () => undefined,
+    })).rejects.toThrow(/was not moved aside/);
+
+    expect(await readPluginDataFixture(from)).toEqual(PLUGIN_DATA_FIXTURE);
+  });
+});
+
+describe("pluginPayloadCopyFilter", () => {
+  it("excludes every top-level runtime directory and nothing else", () => {
+    const pluginRoot = resolve(sep, "plugins", PLUGIN_ID);
+    const filter = pluginPayloadCopyFilter(pluginRoot);
+    for (const runtimeDir of PLUGIN_RUNTIME_DIR_NAMES) {
+      // `run/` and `sockets/` hold live Unix sockets: `cp` over one fails the
+      // whole copy with ERR_FS_CP_SOCKET rather than skipping it.
+      expect(filter(resolve(pluginRoot, runtimeDir))).toBe(false);
+    }
+    expect(filter(resolve(pluginRoot, "plugin.json"))).toBe(true);
+    expect(filter(resolve(pluginRoot, "dist", PLUGIN_DATA_DIR_NAME))).toBe(true);
+    expect(filter(resolve(pluginRoot, "database"))).toBe(true);
+  });
+});
+
+/**
+ * The carry asks the filesystem (`lstat`) and the copy filter compares
+ * strings. On a case-folding volume those two must not disagree about `Data/`,
+ * or the filter copies a directory the carry then has to reconcile.
+ */
+describe("isSamePluginPath", () => {
+  it("folds case only where the filesystem does", () => {
+    const dataDir = resolve(sep, "plugins", PLUGIN_ID, PLUGIN_DATA_DIR_NAME);
+    const aliased = resolve(sep, "plugins", PLUGIN_ID, "Data");
+    expect(isSamePluginPath(dataDir, aliased, true)).toBe(true);
+    expect(isSamePluginPath(dataDir, aliased, false)).toBe(false);
+    expect(isSamePluginPath(dataDir, dataDir, false)).toBe(true);
+  });
+
+  it("agrees with the filesystem this test is running on", async () => {
+    const root = await mkdtemp(join(tmpdir(), "plugin-data-case-"));
+    try {
+      await mkdir(join(root, PLUGIN_DATA_DIR_NAME));
+      const filter = pluginPayloadCopyFilter(root);
+      // `existsSync` is the filesystem's own answer; the filter must give the
+      // same one, whichever platform this runs on.
+      const filesystemSeesAlias = existsSync(join(root, "Data"));
+      expect(filter(join(root, "Data"))).toBe(!filesystemSeesAlias);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("isPluginRuntimeDirName", () => {
+  it("names every runtime directory, case-insensitively on every platform", () => {
+    for (const runtimeDir of PLUGIN_RUNTIME_DIR_NAMES) {
+      expect(isPluginRuntimeDirName(runtimeDir)).toBe(true);
+      expect(isPluginRuntimeDirName(runtimeDir.toUpperCase())).toBe(true);
+    }
+    expect(isPluginRuntimeDirName("dist")).toBe(false);
+    expect(isPluginRuntimeDirName("database")).toBe(false);
   });
 });

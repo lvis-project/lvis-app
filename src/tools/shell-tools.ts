@@ -12,7 +12,7 @@
  */
 
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { Readable } from "node:stream";
@@ -59,6 +59,7 @@ import {
   assertManagedChildProcessAdmissionOpen,
   trackManagedChildProcess,
 } from "../main/managed-child-processes.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -365,9 +366,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
 
   approvalCacheKey(input: unknown): string {
     const parsed = BashToolInputSchema.parse(input);
-    return createHash("sha256")
-      .update(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }))
-      .digest("hex");
+    return sha256Hex(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }));
   }
 
   protected async executeTyped(
@@ -1130,9 +1129,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
 
   approvalCacheKey(input: unknown): string {
     const parsed = PowerShellToolInputSchema.parse(input);
-    return createHash("sha256")
-      .update(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }))
-      .digest("hex");
+    return sha256Hex(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }));
   }
 
   protected async executeTyped(

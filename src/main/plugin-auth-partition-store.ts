@@ -18,6 +18,7 @@ import { readdir, readFile, unlink } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 /** Shape written to disk. */
 interface PartitionsFile {
@@ -112,7 +113,7 @@ export async function readPersistedPluginAuthPartitions(): Promise<
   try {
     raw = await readFile(path, "utf8");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (isMissingPathError(err)) return null;
     throw new Error(
       `plugin-auth-partition-store: failed to read ${path}: ${(err as Error).message}`,
     );
@@ -161,7 +162,7 @@ export async function deletePersistedPluginAuthPartitions(pluginId: string): Pro
     try {
       raw = await readFile(path, "utf8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      if (isMissingPathError(err)) return;
       throw new Error(
         `plugin-auth-partition-store: failed to read ${path} for deletion: ${(err as Error).message}`,
       );

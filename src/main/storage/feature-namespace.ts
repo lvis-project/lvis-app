@@ -32,9 +32,8 @@ import {
   BACKGROUND_ATTEMPTS,
   transientFsLockDelayMs,
 } from "../../lib/transient-fs-lock-retry.js";
-
-const DIR_MODE = 0o700;
-const FILE_MODE = 0o600;
+import { sleep } from "../../shared/abortable-deadline.js";
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "../../lib/atomic-file.js";
 
 /**
  * Create `dir` with 0o700 and best-effort `chmod` it back to 0o700 in case
@@ -43,9 +42,9 @@ const FILE_MODE = 0o600;
  * chmod must not block the write.
  */
 async function ensureDir(dir: string): Promise<void> {
-  await fs.mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await fs.mkdir(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
   try {
-    await fs.chmod(dir, DIR_MODE);
+    await fs.chmod(dir, PRIVATE_DIR_MODE);
   } catch {
     /* best effort — pre-existing dir may already be 0o755 on some hosts */
   }
@@ -164,7 +163,7 @@ async function renameStagedFile(from: string, to: string): Promise<void> {
         RENAME_FILE_LOCK_CODES.has(code) &&
         attempt < BACKGROUND_ATTEMPTS;
       if (!retryable) throw err;
-      await new Promise<void>((resolve) => setTimeout(resolve, transientFsLockDelayMs(attempt)));
+      await sleep(transientFsLockDelayMs(attempt));
     }
   }
 }
@@ -212,7 +211,7 @@ export async function writeFileAtomicAtPath(
     const handle = await fs.open(
       tmp,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-      FILE_MODE,
+      PRIVATE_FILE_MODE,
     );
     try {
       await handle.writeFile(body);
@@ -336,7 +335,7 @@ export function adoptLegacyRootFileSync(
   const legacyPath = join(home, legacyRootFileName);
   const destinationPath = join(home, featureId, destinationName);
   try {
-    mkdirSync(join(home, featureId), { recursive: true, mode: DIR_MODE });
+    mkdirSync(join(home, featureId), { recursive: true, mode: PRIVATE_DIR_MODE });
     linkSync(legacyPath, destinationPath);
   } catch (err) {
     // ENOENT — no legacy file, which is the steady state from the second run
@@ -355,7 +354,7 @@ export function adoptLegacyRootFileSync(
     // The link published the legacy INODE under the new name, so it published
     // the legacy mode with it. Restore the namespace's own file mode while the
     // two names still share the inode.
-    chmodSync(destinationPath, FILE_MODE);
+    chmodSync(destinationPath, PRIVATE_FILE_MODE);
     rmSync(legacyPath, { force: true });
     log.info(`storage migration: adopted ${legacyRootFileName} as ${featureId}/${destinationName}`);
   } catch (err) {

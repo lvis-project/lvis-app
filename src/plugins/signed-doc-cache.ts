@@ -26,6 +26,7 @@ import { readFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 const log = createLogger("signed-doc-cache");
 
@@ -102,8 +103,7 @@ async function safeReadJsonFile<T>(path: string): Promise<T | null> {
     const raw = await readFile(path, "utf-8");
     return JSON.parse(raw) as T;
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return null;
+    if (isMissingPathError(err)) return null;
     throw new Error(`[signed-doc-cache] read ${path}: ${(err as Error).message}`);
   }
 }
@@ -112,7 +112,7 @@ async function safeReadTextFile(path: string): Promise<string | null> {
   try {
     return await readFile(path, "utf-8");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (isMissingPathError(err)) return null;
     throw new Error(`[signed-doc-cache] read ${path}: ${(err as Error).message}`);
   }
 }

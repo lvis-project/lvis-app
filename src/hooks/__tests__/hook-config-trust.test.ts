@@ -23,6 +23,7 @@ import {
   loadHookConfig,
   syntheticConfigHook,
   resolveScriptAnchor,
+  trustAnchorKey,
   HOOKS_CONFIG_FILENAME,
 } from "../hook-config-trust.js";
 import { runHookTrustWorkflow } from "../hook-trust-prompt.js";
@@ -196,5 +197,12 @@ describe("hooks.json /permission hooks accept restores + loads", () => {
     await expect(
       acceptHookTrust("hooks.json.bak", layout),
     ).resolves.toMatchObject({ ok: false });
+  });
+});
+
+describe("trustAnchorKey", () => {
+  it("folds the same script identically whichever separator spelled its path", () => {
+    expect(trustAnchorKey("C:\\Users\\me\\hooks\\run.sh")).toBe(trustAnchorKey("C:/Users/me/hooks/run.sh"));
+    expect(trustAnchorKey("/home/me/hooks/run.sh")).toBe("/home/me/hooks/run.sh");
   });
 });

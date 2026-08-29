@@ -17,6 +17,7 @@ import { isValidCronExpression } from "../routines/cron-evaluator.js";
 import { readJsonFileOrEmpty, writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
+import { isStringArray } from "../shared/is-record.js";
 const log = createLogger("lvis");
 
 // Re-export from shared so callers that import from routines-store continue
@@ -68,10 +69,6 @@ function isValidRecord(r: unknown): r is RoutineRecord {
   if (x.source !== undefined && (typeof x.source !== "string" || x.source.length > MAX_ROUTINE_SOURCE_LENGTH)) return false;
   if (x.scope !== undefined && !isValidRoutineScope(x.scope)) return false;
   return true;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function isValidRoutinePluginScope(value: unknown): value is RoutineScope["pluginIds"] {

@@ -43,6 +43,7 @@ import {
   caseFoldForMatch,
 } from "./sensitive-paths.js";
 import { isPathAllowed } from "./allowed-directories.js";
+import { errorMessage } from "../shared/error-message.js";
 import type { ExecutionMode } from "../shared/permission-mode.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
@@ -1637,7 +1638,7 @@ export class PermissionManager {
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         verdict = { level: "high", reason: `reviewer error — ${message}` };
         outcome = "error";
         ruleVerdictForAudit = new RuleBasedRiskClassifier().classify(ctx).level;

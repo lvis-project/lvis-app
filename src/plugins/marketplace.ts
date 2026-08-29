@@ -1,6 +1,5 @@
 import { cp, mkdir, readFile, rename, rm, stat as statAsync } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { dirname, isAbsolute, posix, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
@@ -23,6 +22,7 @@ import {
 } from "./update-condition.js";
 import { getCachedCatalog, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
+import { throwIfMarketplaceInstallAborted } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import {
   ArtifactRollbackError,
@@ -44,6 +44,7 @@ import {
   recoverPendingPluginUpdates,
   restoreSupersededPendingPluginUpdate,
 } from "./marketplace-update-recovery.js";
+import { PLUGIN_RUNTIME_DIR_NAMES, carryPluginDataDir, pluginPayloadCopyFilter } from "./plugin-storage-layout.js";
 import { installReceiptPath, listFilesRecursive, restoreInstallReceiptRaw, verifyInstallReceipt } from "./plugin-install-receipt.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import {
@@ -56,7 +57,7 @@ import {
   type RemovalTransactionKind,
 } from "./plugin-removal-transaction.js";
 import type { PluginAdmissionRecord, PluginInstallReceipt } from "./plugin-install-receipt.js";
-import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
+import { STABLE_SEMVER_RE, normalizeInstallPolicy } from "./runtime/manifest-validation.js";
 import { flattenAgentPluginsManifest } from "./public-contract.js";
 import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
@@ -73,6 +74,8 @@ import {
 } from "../shared/network-access.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { materializePluginContributions } from "./plugin-contributions.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 const log = createLogger("marketplace");
 
 import {
@@ -200,15 +203,6 @@ function requirePreparedMarketplacePluginActivation(
   return activation;
 }
 
-function normalizeInstallPolicy(source: {
-  installPolicy?: InstallPolicy;
-}): InstallPolicy {
-  if (source.installPolicy === "admin") {
-    return "admin";
-  }
-  return "user";
-}
-
 function deepFreezeValue<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     for (const nested of Object.values(value as Record<string, unknown>)) {
@@ -265,7 +259,7 @@ export type RemoveDelistedAdminInstall = (
 ) => Promise<void>;
 
 function shaOfManifest(manifest: unknown): string {
-  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
+  return sha256Hex(canonicalJSON(manifest));
 }
 
 /**
@@ -276,17 +270,7 @@ function shaOfManifest(manifest: unknown): string {
  * the catalog between the policy decision and the artifact install (TOCTOU).
  */
 function shaOfCatalogItem(item: PluginMarketplaceItem): string {
-  return createHash("sha256").update(canonicalJSON(item)).digest("hex");
-}
-
-function throwIfMarketplaceInstallAborted(
-  signal: AbortSignal | undefined,
-  pluginId: string,
-): void {
-  if (!signal?.aborted) return;
-  const error = new Error(`marketplace plugin install aborted before promotion: ${pluginId}`);
-  error.name = "AbortError";
-  throw error;
+  return sha256Hex(canonicalJSON(item));
 }
 
 function findRuntimeCapabilityMismatches(
@@ -424,6 +408,21 @@ type LocalInstallRollbackSnapshot = {
   receiptRaw?: string;
   registryEntry: PluginRegistryEntry;
 };
+
+/**
+ * The directory a sideload replacement moves the plugin's data directory
+ * through while the live root is removed and the candidate promoted: the
+ * recovery backup boot recovery is told about. It is the only place a crash
+ * mid-swap can leave the state where `recoverPendingPluginUpdate` will look
+ * for it. A first install has no such backup and no predecessor state to
+ * protect; the candidate itself receives whatever the vacated root held.
+ */
+function localInstallDataCarrier(snapshot: LocalInstallRollbackSnapshot | null): string | undefined {
+  if (!snapshot) return undefined;
+  return snapshot.kind === "filesystem-snapshot"
+    ? snapshot.backupDir
+    : snapshot.registryEntry.pendingUpdate?.recoveryBackupDir;
+}
 
 type InstallReceiptValidation = {
   ok: boolean;
@@ -2041,7 +2040,7 @@ export class PluginMarketplaceService {
     try {
       raw = await readFile(manifestPath, "utf-8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      if (isMissingPathError(err)) return null;
       throw err;
     }
     const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
@@ -2251,7 +2250,7 @@ export class PluginMarketplaceService {
       } catch (err) {
         // ENOENT → stale registry entry; skip silently. Other errors
         // (permission, IO) propagate.
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+        if (isMissingPathError(err)) continue;
         throw err;
       }
       manifests.push(flattenAgentPluginsManifest(JSON.parse(raw)));
@@ -2329,14 +2328,14 @@ export class PluginMarketplaceService {
             "utf-8",
           );
         } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          if (!isMissingPathError(err)) throw err;
         }
         let receiptCommitted = false;
         let preparedReceiptRaw: string | undefined;
         let preparedManifest: PluginManifest | undefined;
         let preparedDocument: unknown;
         try {
-          throwIfMarketplaceInstallAborted(opts.signal, plugin.id);
+          throwIfMarketplaceInstallAborted(opts.signal, "marketplace plugin", plugin.id);
           const transaction = await this.artifactStore.extractZipWithCommit(
             plugin.id,
             verified.zipBuffer,
@@ -2845,7 +2844,11 @@ export class PluginMarketplaceService {
         });
         await rejectSideloadSymlinks(stagingDir);
 
-        const receiptFiles = await listFilesRecursive(stagingDir);
+        // Same top-level exclusion the receipt VERIFIER applies on every later
+        // load (`verifyInstallReceipt` → `listFilesRecursive`). A receipt that
+        // listed a runtime directory would stop matching the payload the first
+        // time the plugin wrote to it, and the plugin would refuse to load.
+        const receiptFiles = await listFilesRecursive(stagingDir, PLUGIN_RUNTIME_DIR_NAMES);
         const localReceiptRaw = await this.prepareInstallReceipt(pluginId, stagingDir, {
           version: manifestVersion,
           installSource: "local-dev",
@@ -2870,8 +2873,21 @@ export class PluginMarketplaceService {
                   : {}),
               });
             }
+            // The live root is removed whole. Its data directory is the plugin's
+            // state, not payload: it travels through the registered recovery
+            // backup into the promoted root, so at every instant it is somewhere
+            // boot recovery knows to reunite it with whichever root survives.
+            const dataCarrier = localInstallDataCarrier(rollbackSnapshot);
+            await retryOnTransientFsLock(
+              () => carryPluginDataDir(installDir, dataCarrier ?? stagingDir, { onConflict: "reject" }),
+            );
             await rm(installDir, { recursive: true, force: true });
             await rename(stagingDir, installDir);
+            if (dataCarrier) {
+              await retryOnTransientFsLock(
+                () => carryPluginDataDir(dataCarrier, installDir, { onConflict: "reject" }),
+              );
+            }
             await this.artifactStore.persistPreparedInstallReceipt(pluginId, localReceiptRaw);
             await updatePluginRegistry(this.registryPath, (registry) => {
               const existing = registry.plugins.find((x) => x.id === pluginId);
@@ -2988,7 +3004,7 @@ export class PluginMarketplaceService {
     try {
       snapshot.receiptRaw = await readFile(installReceiptPath(this.cacheRoot, pluginId), "utf-8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      if (!isMissingPathError(err)) throw err;
     }
     try {
       const current = await statAsync(installDir);
@@ -3001,7 +3017,11 @@ export class PluginMarketplaceService {
     await mkdir(backupRoot, { recursive: true });
     const backupDir = resolve(backupRoot, `${pluginId}-${process.pid}-${Date.now()}`);
     await rm(backupDir, { recursive: true, force: true });
-    await cp(installDir, backupDir, { recursive: true, verbatimSymlinks: true });
+    await cp(installDir, backupDir, {
+      recursive: true,
+      verbatimSymlinks: true,
+      filter: pluginPayloadCopyFilter(installDir),
+    });
     snapshot.backupDir = backupDir;
     return snapshot;
   }
@@ -3039,12 +3059,25 @@ export class PluginMarketplaceService {
       return;
     }
     await readPluginRegistry(this.registryPath);
+    const backupDir = snapshot.backupDir;
+    if (backupDir) {
+      // Whichever step of the swap failed, the plugin's data directory is in
+      // exactly one of the two roots. The promoted root is about to go; the
+      // state moves into the backup that is about to come back first.
+      await retryOnTransientFsLock(
+        () => carryPluginDataDir(snapshot.installDir, backupDir, { onConflict: "reject" }),
+      );
+    }
     await rm(snapshot.installDir, { recursive: true, force: true });
-    if (snapshot.backupDir) {
+    if (backupDir) {
       const restoreStageDir = `${snapshot.installDir}.restore-${process.pid}-${Date.now()}`;
       await rm(restoreStageDir, { recursive: true, force: true });
       try {
-        await cp(snapshot.backupDir, restoreStageDir, { recursive: true, verbatimSymlinks: true });
+        await cp(backupDir, restoreStageDir, {
+          recursive: true,
+          verbatimSymlinks: true,
+          filter: pluginPayloadCopyFilter(backupDir),
+        });
         await retryOnTransientFsLock(() => rename(restoreStageDir, snapshot.installDir), {
           onRetry: (attempt, code) =>
             log.warn({ pluginId, attempt, code }, "retrying local rollback directory restore under fs lock"),
@@ -3053,6 +3086,9 @@ export class PluginMarketplaceService {
         await rm(restoreStageDir, { recursive: true, force: true }).catch(() => undefined);
         throw err;
       }
+      await retryOnTransientFsLock(
+        () => carryPluginDataDir(backupDir, snapshot.installDir, { onConflict: "reject" }),
+      );
     }
     const receiptPath = installReceiptPath(this.cacheRoot, pluginId);
     if (snapshot.receiptRaw !== undefined) {

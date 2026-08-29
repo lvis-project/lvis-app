@@ -844,3 +844,13 @@ export function assetFromMarketplaceCatalogFields(
 
   return assetFromMarketplacePackageSpec(pluginType, packageSpec, fields);
 }
+
+/**
+ * ISO-8601 instant as the signed marketplace documents carry it — the subset
+ * `Date.parse` round-trips. Admission, revocation and whitelist schemas all
+ * gate `issuedAt`/`expiresAt` on this one predicate.
+ */
+export function isValidIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  return Number.isFinite(Date.parse(value));
+}

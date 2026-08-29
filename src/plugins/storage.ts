@@ -29,6 +29,7 @@ import {
   type PluginStorage,
 } from "./types.js";
 import { instrumentEffectsByPath } from "../permissions/hostapi-effect-recorder.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 // Storage-namespace permission bits (CLAUDE.md §Storage Namespace per Feature):
 // plugin data directories are 0o700 and files 0o600, so a plugin's persisted
@@ -97,11 +98,48 @@ export function createPluginStorageAuditSink(
 }
 
 /**
+ * Resolve the pinned data root, turning an absent one into the SAME refusal the
+ * per-operation guard raises. Without this the two orderings diverged: a root
+ * that vanished after construction produced a classified `PluginStorageError`
+ * with an audit record, while a root already absent at construction produced a
+ * raw `ENOENT` from `realpathSync` — unclassified, unaudited, and carrying a
+ * message about a path rather than about a plugin.
+ */
+function canonicaliseDataRoot(
+  pluginId: string,
+  pluginDataDir: string,
+  log?: PluginStorageRejectionLog,
+): string {
+  try {
+    return realpathSync(pluginDataDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    log?.(`storage: rejected operation against an absent data root`, {
+      target: pluginDataDir,
+      root: pluginDataDir,
+    });
+    throw new PluginStorageError(
+      "plugin data root is absent — refusing to recreate it",
+      pluginId,
+      pluginDataDir,
+    );
+  }
+}
+
+/**
  * Build a sandboxed `PluginStorage` instance pinned to `pluginDataDir`.
  *
  * The root is canonicalised via `realpathSync` once at construction; all
- * subsequent path checks compare against the canonical form. Callers must
- * have created `pluginDataDir` before calling this.
+ * subsequent path checks compare against the canonical form.
+ *
+ * `pluginDataDir` NOT EXISTING is a supported outcome, not a caller error.
+ * `ensurePluginDataDir` creates it at load, and `getPluginStorage` deliberately
+ * only RESOLVES it per request — during an install swap the plugin root is
+ * renamed aside for the length of two renames, and a handle built in that
+ * window must be refused rather than served out of a directory this call
+ * invented. So an absent root raises the same classified, audited
+ * {@link PluginStorageError} the per-operation guard raises for a root that
+ * vanishes AFTER construction. Both orderings look identical to the caller.
  *
  * `log` receives every containment refusal. Production callers MUST pass
  * {@link createPluginStorageAuditSink} — omitting it silently discards the
@@ -117,7 +155,7 @@ export function createPluginStorage(
   // per plugin during boot and the result is reused on every subsequent
   // operation, so it does not contribute to the hot-path event-loop pressure
   // the per-call guard() check addresses.
-  const canonicalRoot = realpathSync(pluginDataDir);
+  const canonicalRoot = canonicaliseDataRoot(pluginId, pluginDataDir, log);
 
   /**
    * Climb up the path until we hit an existing entry, then realpath it and
@@ -135,6 +173,16 @@ export function createPluginStorage(
    */
   async function realpathContainmentCheck(target: string): Promise<void> {
     let probe = target;
+    // Set when the climb passes THROUGH the data root because the root itself
+    // is not on disk. It changes what the first out-of-root ancestor means: not
+    // "something inside the root points outside it" (a sandbox escape, audited
+    // as one) but "the root is gone" — which is what an install swap looks like
+    // from in here, since it renames the plugin root aside for the length of
+    // two renames before carrying `data/` back in. Reporting that as a symlink
+    // escape put a security event in the audit log for a directory that was
+    // merely mid-move, and told whoever read it to look for a planted link
+    // that does not exist.
+    let dataRootAbsent = false;
     // Stop when probe equals the lexical root or we've climbed to the
     // filesystem root (dirname returns the same path when at /).
     // Bound the loop to avoid pathological recursion.
@@ -142,14 +190,24 @@ export function createPluginStorage(
       try {
         const real = await realpath(probe);
         if (!isPathWithin(canonicalRoot, real)) {
+          if (dataRootAbsent) {
+            log?.(`storage: rejected operation against an absent data root`, {
+              target,
+              root: canonicalRoot,
+            });
+            throw new PluginStorageError(
+              "plugin data root is absent — refusing to recreate it",
+              pluginId,
+              target,
+            );
+          }
           log?.(`storage: rejected symlink escape`, { target, probe, real });
           throw new PluginStorageError("symlink escapes plugin storage root", pluginId, target);
         }
         return;
       } catch (err) {
         if (err instanceof PluginStorageError) throw err;
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === "ENOENT" || code === "ENOTDIR") {
+        if (isMissingPathError(err)) {
           // Distinguish two ENOENT shapes:
           //   1. probe doesn't exist at all  → climb to parent (safe).
           //   2. probe IS a (broken) symlink → realpath fails because its
@@ -175,6 +233,7 @@ export function createPluginStorage(
             if ((lstatErr as NodeJS.ErrnoException).code !== "ENOENT") throw lstatErr;
             // probe doesn't exist at all — fall through to parent climb.
           }
+          if (probe === canonicalRoot) dataRootAbsent = true;
           const parent = dirname(probe);
           if (parent === probe) {
             // Climbed past the filesystem root without finding any existing
@@ -247,7 +306,7 @@ export function createPluginStorage(
         const text = await readFile(target, "utf-8");
         return JSON.parse(text) as T;
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+        if (isMissingPathError(err)) return null;
         throw err;
       }
     },
