@@ -136,10 +136,15 @@ describe("useContainerNarrow", () => {
 
 describe("sidePanelLayout", () => {
   it("docks with the pixel floors when the container can hold both columns", () => {
-    // The reserve is the 448px card plus 16px of insets.
+    // The reserve is the 448px card plus 16px of insets. The maxima are written
+    // out in absolute px: `width - MIN_DOCKED_TRANSCRIPT_WIDTH` would restate
+    // the implementation and pass however the transcript floor moved, so the
+    // literals are what actually pins it.
     expect(sidePanelLayout(Number.POSITIVE_INFINITY, false)).toEqual({ mode: "docked", min: 464, max: Number.POSITIVE_INFINITY });
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: 464, max: DOCK_ENTER_WIDTH - MIN_DOCKED_TRANSCRIPT_WIDTH });
-    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: 464, max: 1200 - MIN_DOCKED_TRANSCRIPT_WIDTH });
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: 464, max: DOCK_ENTER_WIDTH - 320 });
+    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: 464, max: 880 });
+    // And the floor those literals encode, named once so they read as arithmetic.
+    expect(MIN_DOCKED_TRANSCRIPT_WIDTH).toBe(320);
   });
 
   it("floats over the transcript, keeping its own floor, when the container cannot", () => {

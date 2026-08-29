@@ -52,7 +52,7 @@ import { AXIS_OF,
  * no documented floor; 240px is a header, a composer, and one visible turn,
  * below which a tile is a composer with no transcript above it.
  */
-const CHAT_GROUP_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
+export const CHAT_GROUP_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
 export const CHAT_GROUP_MIN_HEIGHT = 240;
 
 /** The 1px hairline the frame draws itself with, on each of its four sides. */
