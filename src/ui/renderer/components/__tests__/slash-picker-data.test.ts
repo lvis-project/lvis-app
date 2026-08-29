@@ -3,6 +3,7 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
 import { MessageSquareText, Server, Sparkles } from "lucide-react";
 import {
+  SLASH_COMMANDS,
   CATEGORY_ICON,
   CATEGORY_ORDER,
   catLabel,
@@ -76,5 +77,15 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
     expect(filterSkills(skills, "")).toHaveLength(2);
     expect(filterSkills(skills, "research")).toEqual([skills[0]]);
     expect(filterSkills(skills, "diff")).toEqual([skills[1]]);
+  });
+
+  it("SLASH_COMMANDS is the one built-in command list: unique commands, each with a catalog label", () => {
+    const commands = SLASH_COMMANDS.map((entry) => entry.cmd);
+    expect(new Set(commands).size).toBe(commands.length);
+    expect(commands).toContain("/help");
+    for (const entry of SLASH_COMMANDS) {
+      expect(entry.cmd.startsWith("/")).toBe(true);
+      expect(entry.labelKey).toMatch(/^commandPopoverPanel\.cmd/);
+    }
   });
 });

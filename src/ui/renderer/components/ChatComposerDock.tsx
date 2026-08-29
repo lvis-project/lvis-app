@@ -16,7 +16,7 @@ import { MessageQueueStore, type MessageQueueItem } from "../state/message-queue
 import type { LvisApi } from "../types.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { SuggestedRepliesSnapshot } from "../hooks/use-suggested-replies.js";
-import type { QuickAction } from "./CommandPopover.js";
+import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import type { ViewModeState } from "./ViewModeBanner.js";
 import type { RolePreset } from "../../../data/role-presets.js";
