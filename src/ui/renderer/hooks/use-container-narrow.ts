@@ -14,7 +14,7 @@ export interface UseContainerNarrowResult {
  * transcript, so the panel floats over it instead; at or above it both panes
  * stay interactive side by side.
  */
-const MIN_DOCKED_TRANSCRIPT_WIDTH = 320;
+export const MIN_DOCKED_TRANSCRIPT_WIDTH = 320;
 
 /**
  * Container width at/below which docking both the transcript and the side panel

@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import { useTranslation } from "../../../i18n/react.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../../contract/app-contract.js";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
+import { CHROME_GAP_TIGHT } from "../../../shared/shell-geometry.js";
 import type { LvisApi } from "../types.js";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import { useMeasuredSize } from "../hooks/use-edge-resize.js";
@@ -52,7 +53,19 @@ import { AXIS_OF,
  * below which a tile is a composer with no transcript above it.
  */
 const CHAT_GROUP_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
-const CHAT_GROUP_MIN_HEIGHT = 240;
+export const CHAT_GROUP_MIN_HEIGHT = 240;
+
+/** The 1px hairline the frame draws itself with, on each of its four sides. */
+const CHAT_GROUP_FRAME_BORDER = 1;
+
+/**
+ * What a cell's frame loses to the air around it: the half-gutter it carries on
+ * each side — two adjacent halves making the gap between tiles, which is why
+ * the cell pads by `--chrome-gap-tight` rather than a full gap — plus its own
+ * border. The tile floors above are on the frame's CONTENT, not on the cell, so
+ * a split has to subtract this before comparing.
+ */
+export const CHAT_GROUP_CELL_INSET = 2 * CHROME_GAP_TIGHT + 2 * CHAT_GROUP_FRAME_BORDER;
 
 /** Which way a tile is halved: `row` puts the new tile beside it, `column` under it. */
 export type ChatGroupSplitAxis = SplitAxis;
@@ -599,10 +612,6 @@ export function useChatGroups(appMode?: "chat" | "work") {
   const split = useCallback((groupId: string, axis: ChatGroupSplitAxis) => {
     dropOnEdge(groupId, SPLIT_EDGE[axis]);
   }, [dropOnEdge]);
-
-  // What a cell's frame loses to its half-gutter (4px each side) and border
-  // (1px each side) — the tile floors are on the frame's content, not the cell.
-  const CHAT_GROUP_CELL_INSET = 10;
 
   /**
    * Whether halving `groupId` on `axis` leaves both halves at or above the

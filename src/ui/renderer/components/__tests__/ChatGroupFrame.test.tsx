@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, createEvent, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
-import { ChatGroupFrame, ChatGroupGutter, buildChatGroupActions, chatGroupApi, useChatGroupPanelSlot, useChatGroups, type ChatGroupPanelSlot } from "../ChatGroupFrame.js";
+import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroupGutter, buildChatGroupActions, chatGroupApi, useChatGroupPanelSlot, useChatGroups, type ChatGroupPanelSlot } from "../ChatGroupFrame.js";
 import { layoutBoxes, layoutGutters, leaf, resizeGutter, splitLeaf, type ChatGroupGutter as ChatGroupGutterShape } from "../chat-group-tree.js";
 import { CHAT_SESSION_DRAG_TYPE } from "../chat-group-drop.js";
 import type { LvisApi } from "../../types.js";
@@ -219,12 +219,16 @@ describe("useChatGroups", () => {
 
   it("says which split directions the floors still afford", () => {
     const { result } = renderHook(() => useChatGroups("work"));
-    // 1000 wide: two 500px columns clear the 448 floor; 500 tall: two 250px rows clear 240.
-    expect(result.current.splitFits("main", "row", { width: 1000, height: 500 })).toBe(true);
-    expect(result.current.splitFits("main", "column", { width: 1000, height: 500 })).toBe(true);
-    // 800 wide: 400px columns are under the floor; 400 tall: 200px rows are too.
-    expect(result.current.splitFits("main", "row", { width: 800, height: 400 })).toBe(false);
-    expect(result.current.splitFits("main", "column", { width: 800, height: 400 })).toBe(false);
+    // Each half loses CHAT_GROUP_CELL_INSET before it is measured against the
+    // floor, so the tightest canvas that still affords a split is twice
+    // floor-plus-inset. 500 tall is exactly that for the height floor; 1000
+    // wide has room to spare over the width one.
+    const tightestHeight = 2 * (CHAT_GROUP_MIN_HEIGHT + CHAT_GROUP_CELL_INSET);
+    expect(result.current.splitFits("main", "row", { width: 1000, height: tightestHeight })).toBe(true);
+    expect(result.current.splitFits("main", "column", { width: 1000, height: tightestHeight })).toBe(true);
+    // One pixel under, in either axis, and the half no longer clears its floor.
+    expect(result.current.splitFits("main", "row", { width: 800, height: tightestHeight - 1 })).toBe(false);
+    expect(result.current.splitFits("main", "column", { width: 800, height: tightestHeight - 1 })).toBe(false);
     // Unmeasured: nothing to check against.
     expect(result.current.splitFits("main", "row", undefined)).toBe(true);
     // After a side-by-side split each half is 500 of 1000 — a second split beside no longer fits.

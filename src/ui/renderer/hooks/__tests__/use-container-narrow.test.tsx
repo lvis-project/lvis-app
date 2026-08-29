@@ -16,8 +16,9 @@ import "../../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
-import { DOCK_ENTER_WIDTH, DOCK_EXIT_WIDTH, useContainerNarrow, sidePanelLayout } from "../use-container-narrow.js";
+import { DOCK_ENTER_WIDTH, DOCK_EXIT_WIDTH, MIN_DOCKED_TRANSCRIPT_WIDTH, useContainerNarrow, sidePanelLayout } from "../use-container-narrow.js";
 import { SIDE_PANEL_MIN_RESERVE, SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
+import { MAIN_WINDOW_MIN_WIDTH } from "../../../../main/main-window-bounds.js";
 
 /**
  * A controllable ResizeObserver stub: capture the callback so a test can push
@@ -85,7 +86,7 @@ describe("useContainerNarrow", () => {
     // The chat-mode side-panel window reserves SIDE_PANEL_MIN_RESERVE on top
     // of the ~460px base window; after the collapsed sidebar padding the
     // observed chat-view-root is ≈ 800px. Docking must be allowed there.
-    expect(DOCK_EXIT_WIDTH).toBeLessThan(460 + SIDE_PANEL_MIN_RESERVE);
+    expect(DOCK_EXIT_WIDTH).toBeLessThan(MAIN_WINDOW_MIN_WIDTH + SIDE_PANEL_MIN_RESERVE);
   });
 
   it("docks (isNarrow=false) at chat-mode side-panel container width", () => {
@@ -137,8 +138,8 @@ describe("sidePanelLayout", () => {
   it("docks with the pixel floors when the container can hold both columns", () => {
     // The reserve is the 448px card plus 16px of insets.
     expect(sidePanelLayout(Number.POSITIVE_INFINITY, false)).toEqual({ mode: "docked", min: 464, max: Number.POSITIVE_INFINITY });
-    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: 464, max: DOCK_ENTER_WIDTH - 320 });
-    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: 464, max: 880 });
+    expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: 464, max: DOCK_ENTER_WIDTH - MIN_DOCKED_TRANSCRIPT_WIDTH });
+    expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: 464, max: 1200 - MIN_DOCKED_TRANSCRIPT_WIDTH });
   });
 
   it("floats over the transcript, keeping its own floor, when the container cannot", () => {

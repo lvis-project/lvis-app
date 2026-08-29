@@ -14,7 +14,7 @@
  *
  * px, never rem — the OS draws the lights in device pixels, so nothing that
  * lines up with them may follow the user's type scale. That is the same rule
- * the `--chrome-*` tokens in `src/styles.css` carry, and `CHROME_GAP` /
+ * the `--chrome-*` tokens in `src/styles.css` carry, and `SHELL_GUTTER` /
  * `CHROME_GAP_TIGHT` below are those tokens' values for the arithmetic that
  * happens in TypeScript rather than in CSS.
  */
@@ -38,20 +38,18 @@ const TRAFFIC_LIGHT_CLUSTER_RUN = 58;
  * content, the sidebar card's cluster strip — measures its clearance from
  * here rather than from a copy of the number.
  */
-export const TRAFFIC_LIGHT_RIGHT_EDGE = TRAFFIC_LIGHT_POSITION.x + TRAFFIC_LIGHT_CLUSTER_RUN;
+const TRAFFIC_LIGHT_RIGHT_EDGE = TRAFFIC_LIGHT_POSITION.x + TRAFFIC_LIGHT_CLUSTER_RUN;
 
-/** px value of `--chrome-gap` in src/styles.css. */
-export const CHROME_GAP = 8;
 /** px value of `--chrome-gap-tight` in src/styles.css. */
 export const CHROME_GAP_TIGHT = 4;
 
 /**
  * The air between the window edge and a floating card, and between that card
- * and the content beside it — one gutter, not two numbers. Mirrored in CSS as
- * `--shell-gutter` / `--shell-card-inset`, both defined as `var(--chrome-gap)`
- * so the pixel count still has a single home.
+ * and the content beside it — one gutter, not two numbers. This is also the px
+ * value of `--chrome-gap`, mirrored in CSS as `--shell-card-inset` (defined as
+ * `var(--chrome-gap)`) so the pixel count still has a single home there too.
  */
-export const SHELL_GUTTER = CHROME_GAP;
+export const SHELL_GUTTER = 8;
 
 /**
  * The band's own edge gutter: its trailing pad on every platform, and its
@@ -76,4 +74,5 @@ export const BAND_LEAD_PAD_DARWIN = TRAFFIC_LIGHT_RIGHT_EDGE + CHROME_GAP_TIGHT;
  * The card surface still paints behind the lights. The OS draws them ON TOP of
  * the webview, so that is cosmetic backing, not a collision.
  */
-export const CLUSTER_LEAD_PAD_DARWIN = TRAFFIC_LIGHT_RIGHT_EDGE + CHROME_GAP - SHELL_GUTTER;
+const CLUSTER_FIRST_BUTTON_X = TRAFFIC_LIGHT_RIGHT_EDGE + SHELL_GUTTER;
+export const CLUSTER_LEAD_PAD_DARWIN = CLUSTER_FIRST_BUTTON_X - SHELL_GUTTER;
