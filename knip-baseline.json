@@ -2890,22 +2890,12 @@
     {
       "type": "types",
       "file": "src/ui/renderer/types.ts",
-      "name": "ApprovalKind"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
       "name": "Checkpoint"
     },
     {
       "type": "types",
       "file": "src/ui/renderer/types.ts",
       "name": "CheckpointTrigger"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
-      "name": "HostShellExecutionPlanAuditProjection"
     },
     {
       "type": "types",

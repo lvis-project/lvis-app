@@ -301,7 +301,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
 }
 
 export interface ModelCardChoice {
-  vendor: string;
+  vendor: LLMVendor;
   vendorLabel: string;
   modelId: string;
   /** The model the chat is on right now. */
@@ -326,8 +326,8 @@ export interface ModelCardChoice {
  */
 export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
   const pinned = llm.pinnedModels ?? [];
-  const offered = new Map<string, Set<string>>();
-  const offer = (vendor: string, modelId: string) => {
+  const offered = new Map<string, Set<LLMVendor>>();
+  const offer = (vendor: LLMVendor, modelId: string) => {
     let models = offered.get(modelId);
     if (!models) {
       models = new Set();
@@ -341,6 +341,9 @@ export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
   // vendor's bundled line first made a pin resolve to whichever vendor happens
   // to be active rather than to the one serving it.
   for (const entry of Object.values(llm.modelListCache ?? {})) {
+    // The cache is persisted host data keyed by vendor string; only entries
+    // naming a known vendor can be offered as a pick.
+    if (!isLLMVendor(entry.vendor)) continue;
     for (const modelId of entry.models) offer(entry.vendor, modelId);
   }
   for (const modelId of getVendorOption(active).modelOptions) offer(active, modelId);

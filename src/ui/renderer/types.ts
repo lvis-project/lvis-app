@@ -7,7 +7,6 @@ import type {
   PluginInstallResultPayload,
   SkillInstallResultPayload,
 } from "../../contract/app-contract.js";
-import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
@@ -16,11 +15,7 @@ import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
 import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
-import type { PricingOverride } from "../../shared/pricing-overrides.js";
-import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
-import type { BundleId } from "../../shared/theme-bundles.js";
-import type { LlmModelListCache } from "../../shared/llm-model-list.js";
 import type {
   CodexSubscriptionActionResult,
   CodexSubscriptionDeviceCodeResult,
@@ -31,7 +26,6 @@ import type {
   AcpSubscriptionProviderId,
 } from "../../shared/acp-subscription.js";
 import type {
-  ActiveChatRuntime,
   SubscriptionLoginMethod,
   SubscriptionRuntimeActionResult,
   SubscriptionRuntimeErrorCode,
@@ -68,9 +62,6 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
-import type { SidebarTab } from "../../shared/sidebar-tab.js";
-import type { InlineViewKey } from "../../shared/view-key.js";
-import type { SettingsTab } from "../../shared/settings-tabs.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
@@ -92,6 +83,12 @@ export type { ExecutionMode } from "../../shared/permission-mode.js";
 
 // Re-export checkpoint types for renderer-side consumers (type-only, no main-process runtime).
 export type { CheckpointTrigger, Checkpoint } from "../../memory/memory-manager.js";
+// Settings: the renderer sees the host AppSettings minus the main-only
+// `a2aRemote` block, expressed once by the IPC projection type.
+import type { RendererSettingsSnapshot as AppSettings } from "../../ipc/domains/settings.js";
+import type { MemoryCaptureMode } from "../../data/settings-store.js";
+export type { AppSettings, MemoryCaptureMode };
+
 // Approval / permission contracts are the host types themselves (the full
 // ApprovalRequest crosses the IPC boundary — see approval-gate.ts IPC_APPROVAL_REQUEST).
 import type { ApprovalChoice, ApprovalDecision, ApprovalRequest } from "../../permissions/approval-gate.js";
@@ -261,210 +258,6 @@ export type LLMVendorSettingsRenderer = {
   presetModels?: Record<string, string>;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
-};
-
-/** How eligible user input is proposed for long-term memory. */
-export type MemoryCaptureMode = "off" | "review" | "auto";
-
-export type AppSettings = {
-  llm: {
-    provider: string;
-    activeChatRuntime?: ActiveChatRuntime;
-    marketplaceProviderPresetId?: string;
-    vendors: Record<string, LLMVendorSettingsRenderer>;
-    streamSmoothing: "none" | "word" | "char";
-    fallbackChain: Array<{ provider: string; model: string }>;
-    modelListCache?: LlmModelListCache;
-    /**
-     * Per-model price corrections. Mirrors the main-process SOT in
-     * `src/data/settings-store.ts` `LLMSettings.pricingOverrides`. Optional
-     * here because a settings file written before this shipped has no list.
-     */
-    pricingOverrides?: PricingOverride[];
-    /**
-     * Models pinned to the top of the model chooser. ONE list across every
-     * provider — see `LLMSettings.pinnedModels` for why, and for why a stored
-     * id is never trusted without intersecting it against what is connected.
-     */
-    pinnedModels?: string[];
-  };
-  chat: { systemPrompt: string; autoCompact: boolean; subAgentMaxRounds?: number };
-  webSearch: { provider: string };
-  routine?: Record<string, unknown>;
-  privacy?: { piiRedactEnabled: boolean };
-  /**
-   * Anonymous opt-in telemetry + crash reporting. Mirrors the main-process SOT
-   * in `src/data/settings-store.ts` `TelemetrySettings`. Every field is
-   * optional here for the same reason it is there: an install that never
-   * configured a destination stores no destination.
-   */
-  telemetry?: {
-    enabled: boolean;
-    endpoint?: string;
-    sentryDsn?: string;
-    crashReportEndpoint?: string;
-    crashReportingEnabled?: boolean;
-    telemetryPromptAnswered?: boolean;
-  };
-  plugins?: Record<string, never>;
-  marketplace?: {
-    backend?: "real-cloud";
-    cloudBaseUrl?: string;
-    cloudAllowPrivateNetwork?: boolean;
-    /** Whether LVIS polls the marketplace for plugin updates and announcements. */
-    updateCheckEnabled?: boolean;
-    /** Whether the catalog and downloaded artifacts are kept on disk for offline use. */
-    offlineCacheEnabled?: boolean;
-    /** Announcement banner ids the user has dismissed (persisted). */
-    dismissedAnnouncementIds?: number[];
-    /** Plugin update versions skipped until the marketplace publishes a newer version. */
-    skippedPluginUpdates?: Record<string, string>;
-    /** Marketplace-installed provider packages visible in the LLM picker. */
-    installedProviderIds?: MarketplaceEligibleLLMVendor[];
-    /** Marketplace-installed custom OpenAI-compatible provider presets. */
-    installedProviderPresets?: MarketplaceInstalledProviderPreset[];
-    /** Marketplace-installed theme bundles visible in Appearance. */
-    installedThemeBundleIds?: BundleId[];
-    /** Marketplace-installed language packs visible in Appearance. */
-    installedLanguagePacks?: Locale[];
-  };
-  updates?: {
-    autoCheckEnabled?: boolean;
-    /** App version skipped until a newer app version is available. */
-    skippedVersion?: string;
-  };
-  /** Visual theme preferences. */
-  appearance?: {
-    schemaVersion?: 2;
-    bundleId?: string;
-    followSystem?: boolean;
-    /** UI language (i18n). SOT: `AppearanceSettings` in settings-store. */
-    language?: Locale;
-    /** User-configurable font family + size. */
-    font?: {
-      /** `"system"` = HOST_FONT_STACK default; otherwise a validated raw stack. */
-      family?: "system" | string;
-      /** Multiplier on `1rem` base. Allowed: 0.75 / 0.875 / 1 / 1.125. */
-      sizeScale?: 0.75 | 0.875 | 1 | 1.125;
-    };
-  };
-  /** §B1 — external URL viewer policy (in-app vs system browser). */
-  webView?: {
-    preferredFlow: "in-app" | "system-browser";
-  };
-  /** Window close-button behaviour. SOT: `SystemSettings` in settings-store. */
-  system?: {
-    closeBehavior: "hide-to-tray" | "quit";
-    /** Persisted workspace mode (chat vs work). SOT: `SystemSettings`. */
-    appMode?: "chat" | "work";
-    /** Persisted docked side-panel width (px). SOT: `SystemSettings`. */
-    sidePanelWidth?: number;
-    /** Persisted primary navigation sidebar width (px). SOT: `SystemSettings`. */
-    sidebarWidth?: number;
-    /**
-     * Persisted TOP-pane percent of the workspace-rail vertical (list↕viewer)
-     * split, per tab kind (file-browser / preview / subagent). Browser excluded.
-     * SOT: `SystemSettings` in settings-store.
-     */
-    sidePanelSplitFilePercent?: number;
-    sidePanelSplitPreviewPercent?: number;
-    sidePanelSplitSubagentPercent?: number;
-    /** Persisted active sidebar tab ("chats" | "projects"). SOT: `SystemSettings`. */
-    sidebarActiveTab?: SidebarTab;
-    /** Persisted main-window location, restored on next launch. Structural
-     *  validity only — a plugin key survives its plugin being uninstalled, so
-     *  the renderer re-checks it against the views it loaded. SOT: `SystemSettings`. */
-    activeView?: InlineViewKey;
-    /** Persisted settings tab, so restoring into `activeView: "settings"` lands
-     *  on the page the user left. SOT: `SystemSettings`. */
-    settingsTab?: SettingsTab;
-    /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
-    pinnedProjectRoots?: string[];
-    archivedProjectRoots?: string[];
-    projectLabels?: Record<string, string>;
-    /** Auto-launch LVIS at OS login. SOT: `SystemSettings`. Default false. */
-    launchAtStartup?: boolean;
-    /** When launching at startup, start hidden in the tray. SOT: `SystemSettings`. Default false. */
-    launchMinimized?: boolean;
-    /**
-     * Opt-in loopback HTTP API server. Mirrors the main-process SOT in
-     * `src/data/settings-store.ts` `SystemSettings.localApiServer`. Default
-     * false; the host resolves it as `setting || LVIS_LOCAL_API=1` once at boot.
-     */
-    localApiServer?: boolean;
-    /**
-     * Whether Chromium's GPU process may start. Mirrors the main-process SOT in
-     * `src/data/settings-store.ts` `SystemSettings.hardwareAcceleration`.
-     * Platform-derived default (Windows/Linux OFF, macOS ON); applied at launch
-     * only, so the Settings toggle says so.
-     */
-    hardwareAcceleration?: boolean;
-    /** Whether the corporate root CA is acquired and injected at launch. */
-    corpCaEnabled?: boolean;
-    /** Certificate common name searched for in the system trust store. */
-    corpCaCommonName?: string;
-    /** Whether the skipped certificate paths are logged instead of silent. */
-    corpCaDebugLog?: boolean;
-    /**
-     * Quit-time cleanup window in milliseconds. Mirrors the main-process SOT in
-     * `src/data/settings-store.ts` `SystemSettings.shutdownCleanupTimeoutMs`.
-     * Default 15_000; `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` overrides it.
-     */
-    shutdownCleanupTimeoutMs?: number;
-  };
-  /** Global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
-  shortcuts?: {
-    /** Accelerator for the show/hide window toggle, or null when unset. */
-    toggleWindow: string | null;
-    /** Master on/off for global shortcut registration. Default false. */
-    enabled: boolean;
-  };
-  /** Experimental feature flags — all default false. */
-  features?: {
-    idlePreferenceRefresh?: boolean;
-    idleMemoryConsolidation?: boolean;
-    /** Default off: model-reviewed memory capture needs an explicit opt-in. */
-    memoryCaptureMode?: MemoryCaptureMode;
-    /** Idle parents may start a gated turn for queued background sub-agent messages. Default false. */
-    subAgentAutonomousWake?: boolean;
-    subAgentMaxRounds?: number;
-    /** #893 — `true` after the user has dismissed the first-boot onboarding. */
-    onboardingCompleted?: boolean;
-    /**
-     * Permission policy host-classifies-risk migration gate. Mirrors the
-     * main-process SOT in `src/data/settings-store.ts`
-     * `FeatureFlags.hostClassifiesRisk`. Default true on ALL platforms: the
-     * host classifies plugin risk and grants foreground plugin
-     * read-relaxation. Safe
-     * all-platform because the read-relaxation is COUPLED to the OS sandbox
-     * being active: on a non-sandbox platform it falls back to the pre-exec ask.
-     */
-    hostClassifiesRisk?: boolean;
-    /**
-     * OS tool sandbox opt-in. Mirrors the main-process SOT in
-     * `src/data/settings-store.ts` `FeatureFlags.osToolSandbox`. STAGED default
-     * (macOS-first): true on `darwin`, false on `linux`/`win32` (opt-in) until
-     * the C/D-series QA is green. Takes effect only when a platform sandbox
-     * runner is available.
-     */
-    osToolSandbox?: boolean;
-    /**
-     * Sub-agent parent-adjudication lane (tier 2 of the approval chain).
-     * Mirrors the main-process SOT in `src/data/settings-store.ts`
-     * `FeatureFlags.subAgentParentAdjudication`. Default true — with the flag
-     * off the approval gate takes the pre-existing path unchanged.
-     */
-    subAgentParentAdjudication?: boolean;
-    /**
-     * The three independently opt-in A2A route families. Each mirrors the
-     * main-process SOT in `src/data/settings-store.ts` `FeatureFlags`, and each
-     * is resolved once at boot as `setting || <its env var>`: `LVIS_A2A`,
-     * `LVIS_A2A_REMOTE`, `LVIS_A2A_REMOTE_RECEIVER`. All default false.
-     */
-    a2aLoopbackServer?: boolean;
-    a2aRemoteRouting?: boolean;
-    a2aRemoteReceiver?: boolean;
-  };
 };
 
 export type IpcErrorResult = { ok: false; error: string; message?: string };
