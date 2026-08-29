@@ -681,7 +681,7 @@ export const deMessages: Record<string, string> = {
   "be_routineEngine.runRoutineError": "Routinefehler: {message}",
   "be_routineEngine.summaryTagMissing": "[Zusammenfassungsformat fehlt]",
   "be_routineSchedule.allowedPluginsDescription": "Liste der Plugin-IDs, die in Ausführungsroutinen=llm-session verfügbar gemacht werden sollen. Wenn weggelassen oder [], sind keine Plugin-Tools verfügbar.",
-  "be_routineSchedule.atDescription": "ISO 8601 Datum/Uhrzeit (z. B. „2026-05-09T09:00:00+09:00“) oder JJJJ-MM-TT",
+  "be_routineSchedule.atDescription": "ISO 8601 Datum/Uhrzeit (z. B. „2026-05-09T09:00:00“) oder JJJJ-MM-TT",
   "be_routineSchedule.executionDescription": "Ausführungsmodus. llm-session=LLM-Konversation starten, notification-only=nur Benachrichtigung",
   "be_routineSchedule.expressionDescription": "Nur Cron-Typ: Cron-Ausdruck mit 5 Feldern",
   "be_routineSchedule.intervalMsDescription": "Nur Intervalltyp: Intervall in ms",

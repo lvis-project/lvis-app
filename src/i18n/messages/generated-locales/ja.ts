@@ -668,7 +668,7 @@ export const jaMessages: Record<string, string> = {
   "be_routineEngine.runRoutineError": "定期的なエラー: {message}",
   "be_routineEngine.summaryTagMissing": "[概要フォーマットがありません]",
   "be_routineSchedule.allowedPluginsDescription": "execution=llm-session ルーチンで公開するプラグイン ID のリスト。省略または [] の場合、プラグイン ツールは使用できません。",
-  "be_routineSchedule.atDescription": "ISO 8601 日時 (例: '2026-05-09T09:00:00+09:00') または YYYY-MM-DD",
+  "be_routineSchedule.atDescription": "ISO 8601 日時 (例: '2026-05-09T09:00:00') または YYYY-MM-DD",
   "be_routineSchedule.executionDescription": "実行モード。 llm-session=LLM 会話を開始、notification-only=通知のみ",
   "be_routineSchedule.expressionDescription": "cron タイプのみ: 5 フィールド cron 式",
   "be_routineSchedule.intervalMsDescription": "間隔タイプのみ: ミリ秒単位の間隔",

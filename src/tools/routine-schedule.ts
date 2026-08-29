@@ -19,7 +19,7 @@
  *
  * Examples
  *   Daily report at 09:00 every morning:
- *     { execution:"llm-session", schedule:{ at:"2026-05-09T09:00:00+09:00",
+ *     { execution:"llm-session", schedule:{ at:"2026-05-09T09:00:00",
  *       repeat:{kind:"daily"} }, prePrompt:"Write today's daily report", title:"Daily report" }
  *
  *   Weekly work summary at 09:00 every Monday:

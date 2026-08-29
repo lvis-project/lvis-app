@@ -668,7 +668,7 @@ export const zhMessages: Record<string, string> = {
   "be_routineEngine.runRoutineError": "例行错误：{message}",
   "be_routineEngine.summaryTagMissing": "[摘要格式缺失]",
   "be_routineSchedule.allowedPluginsDescription": "要在execution=llm-session 例程中公开的插件ID 列表。如果省略或[]，则没有可用的插件工具。",
-  "be_routineSchedule.atDescription": "ISO 8601 日期时间（例如“2026-05-09T09:00:00+09:00”）或 YYYY-MM-DD",
+  "be_routineSchedule.atDescription": "ISO 8601 日期时间（例如“2026-05-09T09:00:00”）或 YYYY-MM-DD",
   "be_routineSchedule.executionDescription": "执行模式。 llm-session=开始LLM对话，notification-only=仅通知",
   "be_routineSchedule.expressionDescription": "仅 cron 类型：5 字段 cron 表达式",
   "be_routineSchedule.intervalMsDescription": "仅间隔类型：间隔（以毫秒为单位）",

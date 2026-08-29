@@ -684,7 +684,7 @@ export const frMessages: Record<string, string> = {
   "be_routineEngine.runRoutineError": "Erreur de routine: {message}",
   "be_routineEngine.summaryTagMissing": "[format résumé manquant]",
   "be_routineSchedule.allowedPluginsDescription": "Liste des ID de plugin à exposer dans les routines d'exécution=llm-session. En cas d'omission ou de [], aucun outil de plug-in n'est disponible.",
-  "be_routineSchedule.atDescription": "Dateheure ISO 8601 (par exemple « 2026-05-09T09:00:00+09:00 ») ou AAAA-MM-JJ",
+  "be_routineSchedule.atDescription": "Dateheure ISO 8601 (par exemple « 2026-05-09T09:00:00 ») ou AAAA-MM-JJ",
   "be_routineSchedule.executionDescription": "Mode d'exécution. llm-session=démarrer la conversation LLM, notification-only=notification uniquement",
   "be_routineSchedule.expressionDescription": "type cron uniquement: expression cron à 5 champs",
   "be_routineSchedule.intervalMsDescription": "type d'intervalle uniquement: intervalle en ms",

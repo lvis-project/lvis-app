@@ -18,7 +18,7 @@ export const en = {
     "repeat.kind: none|daily|weekly|monthly|interval|cron. " +
     "cron type requires only repeat.expression (5-field cron).",
   "be_routineSchedule.atDescription":
-    "ISO 8601 datetime (e.g. '2026-05-09T09:00:00+09:00') or YYYY-MM-DD",
+    "ISO 8601 datetime (e.g. '2026-05-09T09:00:00') or YYYY-MM-DD",
   "be_routineSchedule.intervalMsDescription": "interval type only: interval in ms",
   "be_routineSchedule.expressionDescription": "cron type only: 5-field cron expression",
   "be_routineSchedule.prePromptDescription":
@@ -52,7 +52,7 @@ export const ko: Record<keyof typeof en, string> = {
     "repeat.kind: none|daily|weekly|monthly|interval|cron. " +
     "cron 타입은 repeat.expression(5필드)만 필요.",
   "be_routineSchedule.atDescription":
-    "ISO 8601 datetime (예: '2026-05-09T09:00:00+09:00') 또는 YYYY-MM-DD",
+    "ISO 8601 datetime (예: '2026-05-09T09:00:00') 또는 YYYY-MM-DD",
   "be_routineSchedule.intervalMsDescription": "interval 타입 전용: ms 단위 간격",
   "be_routineSchedule.expressionDescription": "cron 타입 전용: 5필드 cron 표현식",
   "be_routineSchedule.prePromptDescription":
