@@ -14,7 +14,7 @@ import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { highlightText } from "../utils/html-preview.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { formatMediumDateTime } from "../utils/format-time.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 
 type ConversationMatch = {
   entryIndex: number;

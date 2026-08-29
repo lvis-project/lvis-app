@@ -15,7 +15,7 @@ import {
 } from "../../../shared/telegram-connection.js";
 import { SettingsSection } from "../components/PageShell.js";
 import { formatIpcError } from "../format-ipc-error.js";
-import { formatMediumDateTime } from "../utils/format-time.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 import { AwayAuthorityContent } from "./AwayAuthorityContent.js";
 import type { LvisApi } from "../types.js";
 

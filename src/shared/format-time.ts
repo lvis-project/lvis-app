@@ -1,7 +1,11 @@
 /**
  * Time formatting helpers — single source of truth for the time strings the
- * app shows. Every chat time label goes through one of these, so all surfaces
- * agree on which zone an instant is rendered in.
+ * app shows. Every time label goes through one of these, so all surfaces agree
+ * on which zone an instant is rendered in.
+ *
+ * In `shared/` rather than under the renderer because main formats times too —
+ * the `/sessions` command lists them — and a copy on that side is exactly how
+ * the split this module exists to close would grow back.
  *
  * That zone is the HOST's: `Intl` gets `undefined` for the locale and no
  * `timeZone` option. The chat labels used to pin `ko-KR`/`Asia/Seoul` while the

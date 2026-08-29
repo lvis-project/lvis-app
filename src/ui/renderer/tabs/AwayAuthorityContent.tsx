@@ -4,7 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import type { AwayAuthorityStatus } from "../../../shared/away-authority-arm.js";
 import { AwayAuthorityArmDialog } from "../components/AwayAuthorityArmDialog.js";
 import { formatIpcError } from "../format-ipc-error.js";
-import { formatMediumDateTime } from "../utils/format-time.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 import type { LvisApi } from "../types.js";
 
 export interface AwayAuthorityContentProps {

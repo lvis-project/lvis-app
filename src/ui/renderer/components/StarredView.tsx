@@ -11,7 +11,7 @@ import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
 import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 import { formatCost } from "../../../lib/cost-format.js";
-import { formatHhMm, formatMediumDateTime } from "../utils/format-time.js";
+import { formatHhMm, formatMediumDateTime } from "../../../shared/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
 
 export interface StarredItem {

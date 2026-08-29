@@ -25,7 +25,7 @@ import type { LvisApi, PluginCardSummary } from "../types.js";
 import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, RoutineSchedule } from "../../../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
-import { formatMediumDateTime } from "../utils/format-time.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;

@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } from "./TokenCostBadge.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
-import { formatHhMm } from "../utils/format-time.js";
+import { formatHhMm } from "../../../shared/format-time.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 

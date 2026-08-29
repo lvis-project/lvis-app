@@ -14,6 +14,7 @@ import type { ToolSource } from "../../tools/types.js";
 import { t } from "../../i18n/index.js";
 import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import { findSessionByIdPrefix } from "../../shared/session-lookup.js";
+import { formatMediumDateTime } from "../../shared/format-time.js";
 
 function toolProvenanceLabel(tool: {
   source: ToolSource;
@@ -85,7 +86,7 @@ export async function handleCommand(
         const current = self.sessionId;
         const sessionListLines = sessions.slice(0, 10).map((s) => {
           const marker = s.id === current ? t("be_conversationLoop.cmdSessionMarkerCurrent") : "";
-          const date = s.modifiedAt.toLocaleString();
+          const date = formatMediumDateTime(s.modifiedAt.getTime());
           return `- ${s.id.slice(0, 8)}… (${date})${marker}`;
         }).join("\n");
         result = t("be_conversationLoop.cmdSessionsList", { max: 10, list: sessionListLines });

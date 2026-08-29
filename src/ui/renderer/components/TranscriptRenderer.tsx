@@ -14,7 +14,7 @@ import { lookupBillablePricingOptional } from "../../../shared/pricing-data.js";
 import { highlightText } from "../utils/html-preview.js";
 import { trustOriginLabel } from "../utils/trust-origin-label.js";
 import { classifyTurnEntries, isTurnStartEntry } from "../utils/classify-turn-entries.js";
-import { formatHhMm } from "../utils/format-time.js";
+import { formatHhMm } from "../../../shared/format-time.js";
 import { entryRenderRevision } from "../utils/chat-entry-revision.js";
 import { AssistantCard } from "./AssistantCard.js";
 import { UserMessageEditor } from "./UserMessageEditor.js";

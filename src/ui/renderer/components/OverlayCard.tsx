@@ -32,7 +32,7 @@ import {
   TooltipTrigger,
 } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { formatMediumDateTime } from "../utils/format-time.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 
 export interface OverlayCardProps {
   /** Card title — routine name or plugin-supplied title */

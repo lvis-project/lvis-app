@@ -18,7 +18,7 @@ import {
 } from "../../../shared/tailnet-sharing.js";
 import { SettingsSection } from "../components/PageShell.js";
 import { TailnetObserverSection } from "./TailnetObserverSection.js";
-import { formatMediumDateTime } from "../utils/format-time.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 import type { LvisApi } from "../types.js";
 
 export interface TailnetAccessContentProps {
