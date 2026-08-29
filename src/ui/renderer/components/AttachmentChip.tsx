@@ -13,6 +13,7 @@ import {
 } from "../types/attachments.js";
 import { collapsePath } from "../utils/attachment-markers.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatBytes } from "../../../lib/turn-summary-format.js";
 
 const THUMB_MAX_PX = 48;
 
@@ -343,10 +344,4 @@ export function AttachmentOverlay({
       </div>
     </div>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

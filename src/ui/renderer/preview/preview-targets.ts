@@ -24,6 +24,7 @@ import {
 import { displaySafeLabel } from "../../../shared/display-safe-text.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../../../shared/mcp-resource-bounds.js";
 import { isRecord } from "../../../shared/is-record.js";
+import { formatBytes } from "../../../lib/turn-summary-format.js";
 
 type ToolItem = Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
 
@@ -456,7 +457,7 @@ export function collectChatPreviewModel({
         id: targetId,
         kind: "image",
         title: attachment.path ? basename(attachment.path) : `Image #${attachment.n}`,
-        subtitle: `${attachment.width}x${attachment.height} · ${Math.round(attachment.bytes / 1024)} KB`,
+        subtitle: `${attachment.width}x${attachment.height} · ${formatBytes(attachment.bytes)}`,
         sourceLabel: "attachment",
         createdOrder: order++,
         path: attachment.path,
@@ -483,7 +484,7 @@ export function collectChatPreviewModel({
         id: targetId,
         kind: "file",
         title: attachment.name,
-        subtitle: `${attachment.ext.toUpperCase()} · ${Math.round(attachment.bytes / 1024)} KB`,
+        subtitle: `${attachment.ext.toUpperCase()} · ${formatBytes(attachment.bytes)}`,
         sourceLabel: "attachment",
         createdOrder: order++,
         path: attachment.path,
