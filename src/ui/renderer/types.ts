@@ -15,7 +15,6 @@ import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
 import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
-import type { ParentEscalationNotice } from "../../shared/parent-escalation-notice.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { PricingOverride } from "../../shared/pricing-overrides.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -48,7 +47,7 @@ import type { TelegramConnectionOwnerApi } from "../../shared/telegram-connectio
 import type { AwayAuthorityOwnerApi } from "../../shared/away-authority-arm.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
-import type { ApprovalPurposeSuggestion, ToolCategory, ToolSource, RiskLevel, DeferredGrantScope } from "../../shared/permission-review-status.js";
+import type { ToolCategory, ToolSource, RiskLevel, DeferredGrantScope } from "../../shared/permission-review-status.js";
 import type {
   AssistantAgentSummary,
   AssistantSkillSummary,
@@ -82,7 +81,6 @@ import type {
 } from "../../shared/llm-model-list.js";
 import type {
   SandboxCapabilityInfo,
-  SandboxConfinement,
   SandboxWindowsStatusInfo,
   SandboxWindowsInstallResult,
 } from "../../shared/sandbox-capability-info.js";
@@ -94,6 +92,13 @@ export type { ExecutionMode } from "../../shared/permission-mode.js";
 
 // Re-export checkpoint types for renderer-side consumers (type-only, no main-process runtime).
 export type { CheckpointTrigger, Checkpoint } from "../../memory/memory-manager.js";
+// Approval / permission contracts are the host types themselves (the full
+// ApprovalRequest crosses the IPC boundary — see approval-gate.ts IPC_APPROVAL_REQUEST).
+import type { ApprovalChoice, ApprovalDecision, ApprovalRequest } from "../../permissions/approval-gate.js";
+import type { PermissionRule } from "../../permissions/permission-manager.js";
+import type { ParentAdjudicationBackgroundEscalation, ParentAdjudicationMaxVerdict, ParentAdjudicationModelSource } from "../../permissions/permission-settings-store.js";
+export type { ApprovalChoice, ApprovalDecision, ApprovalRequest, PermissionRule, ParentAdjudicationBackgroundEscalation, ParentAdjudicationMaxVerdict, ParentAdjudicationModelSource };
+
 
 export type MarketplaceItem = {
   id: string;
@@ -1475,159 +1480,6 @@ export type LvisApi = {
   };
 };
 
-// ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
-export type ApprovalChoice = "allow-once" | "allow-session" | "allow-always" | "deny-once" | "deny-always";
-
-/**
- * Permission policy — discriminated approval kinds. Renderer routes on this to
- * pick the right card. Default `"tool"` is the standard approval dock content.
- */
-export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action" | "rationale";
-/**
- * Renderer-safe view of the host-sealed substrate selected for a builtin shell
- * invocation. It intentionally omits command, CWD, directories, the permit or
- * receipt, nonce, HMAC, and the free-form capability reason.
- */
-export type HostShellExecutionPlanAuditProjection = {
-  version: "host-shell-execution-plan/v2";
-  identity: string;
-  platform: NodeJS.Platform;
-  requestedSandbox: boolean;
-  mode: "asrt" | "plain" | "blocked";
-  fallbackReason:
-    | "none"
-    | "windows-partial-shell-acl-unsafe"
-    | "requested-sandbox-unavailable"
-    | "active-sandbox-not-shell-contained";
-  requiresExplicitUserApproval: boolean;
-  capability: {
-    kind: "none" | "asrt" | "partial" | "fs-only";
-    confidence: "verified" | "assumed" | "policy-best-effort";
-    platform: NodeJS.Platform;
-    confines?: SandboxConfinement;
-  };
-};
-
-export type ApprovalRequest = {
-  id: string;
-  category: "tool" | "agent-action";
-  /** Permission policy — discriminator (defaults to "tool" when absent). */
-  kind?: ApprovalKind;
-  /** Choices the host will accept for this request. */
-  allowedChoices?: readonly ApprovalChoice[];
-  toolName: string;
-  /** Permission policy category for the invocation shown in the UI. */
-  toolCategory?: ToolCategory;
-  /** Reviewer verdict when the ask came from auto-review. */
-  reviewerVerdict?: { level: RiskLevel; reason: string };
-  /** Captured policy/sandbox context for user review. */
-  evaluationContext?: PermissionEvaluationContextShape;
-  /** Suggested natural-language purpose shown in the approval dock. */
-  approvalPurpose?: ApprovalPurposeSuggestion;
-  /**
-   * Present iff the sub-agent chain's parent-adjudication stage ran for this
-   * ask and handed it back to the user. Display-only: the host writes it, the
-   * dock shows it, and no decision field echoes it — it is deliberately not in
-   * the request-signature preimage, which authenticates only the fields that
-   * make the renderer round trip.
-   *
-   * The canonical declaration is imported rather than re-declared: a mirror
-   * that drifted from the host's cause union would silently render an
-   * escalation the dock has no label for.
-   */
-  parentEscalation?: ParentEscalationNotice;
-  args: unknown;
-  reason: string;
-  source?: ToolSource;
-  /** Plugin id that issued this approval request, when source === "plugin". */
-  sourcePluginId?: string;
-  /** Manifest-declared plugin approval scope for agent-action requests. */
-  approvalScope?: string;
-  createdAt: number;
-  requireExplicit: boolean;
-  target?: { filePath?: string };
-  isReadOnly?: boolean;
-  mode?: "default" | "ask_all" | "plan" | "full_auto";
-  /**
-   * Host-owned id of the conversation that raised this approval. Sub-agents
-   * and side chats can raise requests from another route, so the dock and the
-   * queue name the asking conversation. Main-process
-   * value only — the renderer displays it and never supplies it.
-   */
-  sessionId?: string;
-  /** Confused-deputy nonce issued by the main process; renderer echoes verbatim. */
-  nonce?: string;
-  /**
-   * HMAC over (id, nonce, toolName, sessionId, args) — echoed verbatim for
-   * confused-deputy defense.
-   */
-  hmac?: string;
-  /**
-   * Permission policy — present when `kind === "out-of-allowed-dir"`. Carries
-   * the auto-suggest payload so the renderer can render the directory-
-   * confirm card without re-running validation.
-   */
-  outOfAllowedDir?: {
-    candidatePath: string;
-    suggestedParent: string | null;
-    currentAllowed: readonly string[];
-    adjacencyWarnings: readonly string[];
-  };
-  /** Permission policy trust-origin classification, e.g. "user" / "agent". */
-  trustOrigin?: string;
-  /**
-   * Semantic cache key for the approval (e.g. a stable hash of
-   * the tool invocation, distinct from the raw args string). Propagated from
-   * the main process so the renderer can include it in the record IPC call,
-   * ensuring record/lookup key symmetry in user-approval-store.
-   */
-  approvalCacheKey?: string;
-  /**
-   * Host-issued execution-plan projection for canonical builtin shell calls.
-   * It is display-only and never contains the private one-shot permit binding
-   * or action input.
-   */
-  executionPlan?: HostShellExecutionPlanAuditProjection;
-  /**
-   * Issue #691 — OS-level execution sandbox capability captured at
-   * request build time. Renderer surfaces this in the approval card so
-   * the user can see whether the tool will run under the ASRT sandbox
-   * (`asrt`) or with no isolation.
-   *
-   * Mirrors the canonical SandboxKind union in
-   * src/permissions/sandbox-capability.ts. `platform` is typed
-   * `NodeJS.Platform` (strict enum) instead of `string` so the renderer type
-   * cannot silently widen the canonical SOT shape.
-   */
-  sandboxCapability?: {
-    kind: "none" | "asrt" | "partial" | "fs-only";
-    confidence: "verified" | "assumed" | "policy-best-effort";
-    platform: NodeJS.Platform;
-    reason: string;
-    /**
-     * Per-dimension confinement (filesystem / process / network) for the
-     * substrate this capability describes. Mirrors the optional `confines`
-     * field on the canonical SandboxCapability so the approval dock can show
-     * an HONEST label — e.g. Windows ASRT confines filesystem + network but not
-     * process, and the approval dock must not show a blanket full-isolation label.
-     * Absent ⇒ "not declared";
-     * callers MUST NOT read absence as "all confined".
-     */
-    confines?: SandboxConfinement;
-  };
-};
-export type ApprovalDecision = {
-  requestId: string;
-  choice: ApprovalChoice;
-  rememberPattern?: string;
-  /** One-shot MCP elicitation form content returned with an allow decision. */
-  elicitationContent?: Record<string, unknown>;
-  /** Echoed nonce from the matching ApprovalRequest (confused-deputy defense). */
-  nonce?: string;
-  /** Echoed HMAC from the matching ApprovalRequest (confused-deputy defense). */
-  hmac?: string;
-};
-
 /**
  * Result of resolving a `/allow` sentence. `ok: true` carries a scope to
  * PRE-SELECT on the pending card — never a grant, and never a path. Every
@@ -1696,8 +1548,6 @@ export type LvisUserApprovalApi = {
   }>>;
 };
 
-export type PermissionRule = { pattern: string; action: "allow" | "deny"; source?: string };
-
 export type AddRuleResult =
   | { ok: true; rule: PermissionRule }
   | { ok: false; error: string; message?: string };
@@ -1751,16 +1601,6 @@ export type PermissionReviewerProvider = "openai" | "anthropic" | "google" | "fo
 export type PermissionReviewerFallbackOnError = "deny" | "rule";
 /** Issue #690 — interactive reviewer auto-approve scope. */
 export type PermissionReviewerInteractiveAutoApprove = "off" | "low" | "medium";
-
-/**
- * Tier-2 parent-adjudication ceilings. Mirrors
- * `ReviewerParentAdjudicationBlock` in the main-process settings store; the
- * numeric bounds the form types against come from
- * `shared/parent-adjudication-bounds.ts` so both layers agree.
- */
-export type ParentAdjudicationMaxVerdict = "low" | "medium";
-export type ParentAdjudicationBackgroundEscalation = "deferred" | "modal";
-export type ParentAdjudicationModelSource = "reviewer" | "parent-session";
 
 interface PermissionReviewerParentAdjudication {
   maxVerdict: ParentAdjudicationMaxVerdict;
