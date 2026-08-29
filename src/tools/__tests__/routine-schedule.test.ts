@@ -10,9 +10,8 @@ import { describe, it, expect } from "vitest";
 import { createRoutineScheduleTool } from "../routine-schedule.js";
 import { MAX_ROUTINE_SOURCE_LENGTH } from "../../main/routines-store.js";
 import { futureIso, tempRoutinesStore } from "../../main/__tests__/routines-fixture.js";
-import type { ToolExecutionContext } from "../base.js";
+import { toolExecutionContext as ctx } from "./tool-context-fixture.js";
 
-const ctx = (): ToolExecutionContext => ({ cwd: "/tmp", extraAllowedDirectories: [], metadata: {} });
 
 describe("routine_schedule tool — source marker", () => {
   it("stamps the source marker onto the persisted routine", async () => {

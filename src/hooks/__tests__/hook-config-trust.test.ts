@@ -28,19 +28,18 @@ import {
 import { runHookTrustWorkflow } from "../hook-trust-prompt.js";
 import { acceptHookTrust, listHookTrustState } from "../hook-trust-commands.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
-import { writeJsonConfig } from "./test-helpers.js";
+import { writeJsonConfig, hookDirLayout, type HookDirLayout } from "./test-helpers.js";
 
 let tmpDir: string;
 let hooksDir: string;
 let disabledDir: string;
-let lockfilePath: string;
+let layout: HookDirLayout;
 let configPath: string;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "hook-config-trust-"));
-  hooksDir = join(tmpDir, "hooks");
-  disabledDir = join(hooksDir, ".disabled");
-  lockfilePath = join(hooksDir, ".lockfile.json");
+  layout = hookDirLayout(tmpDir);
+  ({ hooksDir, disabledDir } = layout);
   configPath = join(hooksDir, HOOKS_CONFIG_FILENAME);
   mkdirSync(hooksDir, { recursive: true });
 });
@@ -48,10 +47,6 @@ beforeEach(() => {
 afterEach(async () => {
   if (tmpDir) await cleanupTmpDir(tmpDir);
 });
-
-function opts() {
-  return { hooksDir, disabledDir, lockfilePath };
-}
 
 function writeScript(name: string, body: string): string {
   const p = join(hooksDir, name);
@@ -121,7 +116,7 @@ describe("loadHookConfig — composite trust hash", () => {
 describe("hooks.json TOFU diff — quarantine by default", () => {
   it("a NEW hooks.json is quarantined (strict-deny, no dispatcher)", async () => {
     writeJsonConfig(configPath, ALLOW_CONFIG);
-    const result = await runHookTrustWorkflow(opts());
+    const result = await runHookTrustWorkflow(layout);
     // The synthetic config hook was quarantined; commands never load.
     expect(result.disabledHooks.map((h) => h.fileName)).toContain(HOOKS_CONFIG_FILENAME);
     expect(result.trustedConfigEntries).toEqual([]);
@@ -133,7 +128,7 @@ describe("hooks.json TOFU diff — quarantine by default", () => {
   it("a trusted (dispatcher-approved) hooks.json loads its command entries", async () => {
     writeJsonConfig(configPath, ALLOW_CONFIG);
     const result = await runHookTrustWorkflow({
-      ...opts(),
+      ...layout,
       promptDispatcher: { prompt: async (d) => d.map((x) => ({ fileName: x.hook.fileName, trust: true })) },
     });
     expect(result.trustedHooks.map((h) => h.fileName)).toContain(HOOKS_CONFIG_FILENAME);
@@ -146,7 +141,7 @@ describe("hooks.json TOFU diff — quarantine by default", () => {
     writeJsonConfig(configPath, ALLOW_CONFIG);
     // First boot: trust it.
     await runHookTrustWorkflow({
-      ...opts(),
+      ...layout,
       promptDispatcher: { prompt: async (d) => d.map((x) => ({ fileName: x.hook.fileName, trust: true })) },
     });
     // Mutate the config.
@@ -154,7 +149,7 @@ describe("hooks.json TOFU diff — quarantine by default", () => {
     // Second boot: strict-deny → re-quarantine, commands stop loading.
     const seen: string[] = [];
     const result = await runHookTrustWorkflow({
-      ...opts(),
+      ...layout,
       promptDispatcher: {
         prompt: async (d) => {
           for (const x of d) seen.push(`${x.state}:${x.hook.fileName}`);
@@ -171,13 +166,13 @@ describe("hooks.json TOFU diff — quarantine by default", () => {
 describe("hooks.json /permission hooks accept restores + loads", () => {
   it("accept restores a quarantined hooks.json and the manager loads its entries", async () => {
     writeJsonConfig(configPath, ALLOW_CONFIG);
-    const boot = await wireHookSystem(opts());
+    const boot = await wireHookSystem(layout);
     // Quarantined → registry empty.
     expect(boot.manager.size()).toBe(0);
     expect(existsSync(join(disabledDir, HOOKS_CONFIG_FILENAME))).toBe(true);
 
     const accepted = await acceptHookTrust(HOOKS_CONFIG_FILENAME, {
-      ...opts(),
+      ...layout,
       manager: boot.manager,
     });
     expect(accepted).toMatchObject({ ok: true, verb: "accept" });
@@ -185,7 +180,7 @@ describe("hooks.json /permission hooks accept restores + loads", () => {
     expect(existsSync(configPath)).toBe(true);
     expect(boot.manager.size()).toBe(1);
 
-    const listed = listHookTrustState(opts());
+    const listed = listHookTrustState(layout);
     const configRow = listed.active.find((r) => r.fileName === HOOKS_CONFIG_FILENAME);
     expect(configRow?.state).toBe("trusted");
     // STEP 6 — additive trust-review fields populated.
@@ -196,10 +191,10 @@ describe("hooks.json /permission hooks accept restores + loads", () => {
 
   it("accept rejects an identity that is not the exact config literal (no traversal)", async () => {
     await expect(
-      acceptHookTrust("../hooks.json", opts()),
+      acceptHookTrust("../hooks.json", layout),
     ).resolves.toMatchObject({ ok: false });
     await expect(
-      acceptHookTrust("hooks.json.bak", opts()),
+      acceptHookTrust("hooks.json.bak", layout),
     ).resolves.toMatchObject({ ok: false });
   });
 });

@@ -18,10 +18,6 @@ import { runGateScript } from "./gate-script-runner.js";
 const SCRIPT = resolve(process.cwd(), "scripts/check-shell-geometry-tokens.mjs");
 const roots: string[] = [];
 
-function runGate(root: string) {
-  return runGateScript(SCRIPT, root);
-}
-
 function write(root: string, rel: string, source: string): void {
   const path = join(root, rel);
   mkdirSync(dirname(path), { recursive: true });
@@ -50,14 +46,14 @@ afterEach(() => {
 
 describe("check-shell-geometry-tokens", () => {
   it("accepts a stylesheet and a module that agree", () => {
-    const result = runGate(createRoot(css("8px", "4px"), ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px"), ts("8", "4")));
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("[shell-geometry-tokens] OK pairs=3");
   });
 
   it("rejects a token the module no longer matches", () => {
-    const result = runGate(createRoot(css("10px", "4px"), ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(css("10px", "4px"), ts("8", "4")));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("--chrome-gap is 10px");
@@ -65,7 +61,7 @@ describe("check-shell-geometry-tokens", () => {
   });
 
   it("rejects a constant the stylesheet no longer matches", () => {
-    const result = runGate(createRoot(css("8px", "4px"), ts("8", "6")));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px"), ts("8", "6")));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("--chrome-gap-tight is 4px");
@@ -73,14 +69,14 @@ describe("check-shell-geometry-tokens", () => {
   });
 
   it("fails closed when the CSS token is gone rather than reporting nothing to compare", () => {
-    const result = runGate(createRoot("@layer base {\n  :root {\n    --chrome-gap-tight: 4px;\n  }\n}\n", ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot("@layer base {\n  :root {\n    --chrome-gap-tight: 4px;\n  }\n}\n", ts("8", "4")));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("--chrome-gap: not declared");
   });
 
   it("fails closed when the TypeScript mirror is gone", () => {
-    const result = runGate(createRoot(css("8px", "4px"), "export const CHROME_GAP_TIGHT = 4;\n"));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px"), "export const CHROME_GAP_TIGHT = 4;\n"));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("SHELL_GUTTER: no numeric `export const` found");
@@ -88,14 +84,14 @@ describe("check-shell-geometry-tokens", () => {
 
   it("rejects a token declared twice with two different values", () => {
     const twice = css("8px", "4px").replace("--chrome-band-height: 36px;", "--chrome-gap: 12px;");
-    const result = runGate(createRoot(twice, ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(twice, ts("8", "4")));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("declared more than once with different values");
   });
 
   it("rejects a constant defined twice", () => {
-    const result = runGate(createRoot(css("8px", "4px"), `${ts("8", "4")}export const SHELL_GUTTER = 9;\n`));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px"), `${ts("8", "4")}export const SHELL_GUTTER = 9;\n`));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("SHELL_GUTTER: defined 2 times");
@@ -106,7 +102,7 @@ describe("check-shell-geometry-tokens", () => {
     roots.push(root);
     write(root, "src/styles.css", css("8px", "4px"));
 
-    const result = runGate(root);
+    const result = runGateScript(SCRIPT, root);
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("cannot read a mirror side");
@@ -115,7 +111,7 @@ describe("check-shell-geometry-tokens", () => {
   // ── comments are not declarations ────────────────────────────────────────
   it("does not accept a commented-out token as a live declaration", () => {
     const commented = css("8px", "4px").replace("--chrome-gap: 8px;", "/* --chrome-gap: 8px; */");
-    const result = runGate(createRoot(commented, ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(commented, ts("8", "4")));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("--chrome-gap: not declared");
@@ -124,7 +120,7 @@ describe("check-shell-geometry-tokens", () => {
 
   it("ignores a historical value quoted in a docstring above the real constant", () => {
     const withHistory = `/** was: export const SHELL_GUTTER = 99; */\n${ts("8", "4")}`;
-    const result = runGate(createRoot(css("8px", "4px"), withHistory));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px"), withHistory));
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("[shell-geometry-tokens] OK pairs=3");
@@ -132,7 +128,7 @@ describe("check-shell-geometry-tokens", () => {
 
   it("ignores a commented-out constant above the real one", () => {
     const withDeadCode = `// export const SHELL_GUTTER = 99;\n${ts("8", "4")}`;
-    const result = runGate(createRoot(css("8px", "4px"), withDeadCode));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px"), withDeadCode));
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("[shell-geometry-tokens] OK pairs=3");
@@ -140,14 +136,14 @@ describe("check-shell-geometry-tokens", () => {
 
   // ── one level of var() alias ─────────────────────────────────────────────
   it("resolves a token written as a var() alias", () => {
-    const result = runGate(createRoot(css("8px", "4px", "var(--chrome-gap)"), ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px", "var(--chrome-gap)"), ts("8", "4")));
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("OK pairs=3");
   });
 
   it("rejects an alias redefined as a literal that disagrees with the constant", () => {
-    const result = runGate(createRoot(css("8px", "4px", "9px"), ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px", "9px"), ts("8", "4")));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("--shell-card-inset is 9px");
@@ -155,7 +151,7 @@ describe("check-shell-geometry-tokens", () => {
   });
 
   it("fails closed on an alias pointing at a token that does not exist", () => {
-    const result = runGate(createRoot(css("8px", "4px", "var(--nope)"), ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(css("8px", "4px", "var(--nope)"), ts("8", "4")));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("aliases --nope, which does not resolve");
@@ -164,14 +160,14 @@ describe("check-shell-geometry-tokens", () => {
   // ── value shapes ─────────────────────────────────────────────────────────
   it("reads through !important and a missing final semicolon", () => {
     const awkward = ":root{\n  --chrome-gap-tight: 4px;\n  --shell-card-inset: var(--chrome-gap);\n  --chrome-gap: 8px !important\n}\n";
-    const result = runGate(createRoot(awkward, ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(awkward, ts("8", "4")));
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("OK pairs=3");
   });
 
   it("fails on a mirrored token whose value is a calc() it cannot reduce", () => {
-    const result = runGate(createRoot(css("calc(4px * 2)", "4px"), ts("8", "4")));
+    const result = runGateScript(SCRIPT, createRoot(css("calc(4px * 2)", "4px"), ts("8", "4")));
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("neither a px literal nor a single-level var() alias");

@@ -19,7 +19,7 @@ import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../executor.js";
-import { userPermissionContext } from "./permission-context-fixture.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool } from "../base.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";

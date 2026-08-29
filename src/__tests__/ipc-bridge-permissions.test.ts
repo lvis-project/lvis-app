@@ -155,10 +155,6 @@ async function setupHandlers(pm = makeMockPM(), gate = makeMockGate()) {
   return { pm, gate };
 }
 
-function invoke(channel: string, ...args: unknown[]): unknown {
-  return invokeRegisteredHandler(handlers, channel, ...args);
-}
-
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
 const modePayload = (mode: string) => ({ mode, intent: USER_INTENT });
 const rulePayload = (pattern: string, action: string) => ({ pattern, action, intent: USER_INTENT });
@@ -169,7 +165,7 @@ const policyPayload = (patch: Record<string, unknown>) => ({ patch, intent: USER
 describe("lvis:permission:add-rule", () => {
   it("action=allow → calls addAlwaysAllowedPersist with pattern", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:add-rule", rulePayload("my_tool", "allow")) as { ok: boolean };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:add-rule", rulePayload("my_tool", "allow")) as { ok: boolean };
     expect(pm.addAlwaysAllowedPersist).toHaveBeenCalledWith("my_tool");
     expect(pm.addAlwaysDeniedPersist).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -177,7 +173,7 @@ describe("lvis:permission:add-rule", () => {
 
   it("action=deny → calls addAlwaysDeniedPersist with pattern", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:add-rule", rulePayload("dangerous_*", "deny")) as { ok: boolean };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:add-rule", rulePayload("dangerous_*", "deny")) as { ok: boolean };
     expect(pm.addAlwaysDeniedPersist).toHaveBeenCalledWith("dangerous_*");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -191,7 +187,7 @@ describe("lvis:permission:add-rule", () => {
     const services = makeServices(pm);
     registerIpcHandlers(services, () => null);
 
-    await invoke("lvis:permission:add-rule", rulePayload("dangerous_*", "deny"));
+    await invokeRegisteredHandler(handlers, "lvis:permission:add-rule", rulePayload("dangerous_*", "deny"));
 
     expect(pm.getVisibilityDenyRules).toHaveBeenCalled();
     expect(services.toolRegistry.setDenyRules).toHaveBeenCalledWith([{ pattern: "dangerous_*" }]);
@@ -206,7 +202,7 @@ describe("lvis:permission:add-rule", () => {
     const services = makeServices(pm);
     (services.conversationLoop as any).permissionManager = undefined;
     registerIpcHandlers(services, () => null);
-    const result = await invoke("lvis:permission:add-rule", rulePayload("tool", "allow")) as { ok: boolean };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:add-rule", rulePayload("tool", "allow")) as { ok: boolean };
     expect(result.ok).toBe(false);
   });
 });
@@ -214,14 +210,14 @@ describe("lvis:permission:add-rule", () => {
 describe("lvis:permission:remove-rule", () => {
   it("calls removeRule with pattern and action", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:remove-rule", rulePayload("my_tool", "allow")) as { ok: boolean };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:remove-rule", rulePayload("my_tool", "allow")) as { ok: boolean };
     expect(pm.removeRule).toHaveBeenCalledWith("my_tool", "allow");
     expect(result.ok).toBe(true);
   });
 
   it("deny action passes deny to removeRule", async () => {
     const { pm } = await setupHandlers();
-    await invoke("lvis:permission:remove-rule", rulePayload("mcp_*", "deny"));
+    await invokeRegisteredHandler(handlers, "lvis:permission:remove-rule", rulePayload("mcp_*", "deny"));
     expect(pm.removeRule).toHaveBeenCalledWith("mcp_*", "deny");
   });
 
@@ -233,7 +229,7 @@ describe("lvis:permission:remove-rule", () => {
     const services = makeServices(pm);
     registerIpcHandlers(services, () => null);
 
-    await invoke("lvis:permission:remove-rule", rulePayload("mcp_*", "deny"));
+    await invokeRegisteredHandler(handlers, "lvis:permission:remove-rule", rulePayload("mcp_*", "deny"));
 
     expect(pm.getVisibilityDenyRules).toHaveBeenCalled();
     expect(services.toolRegistry.setDenyRules).toHaveBeenCalledWith([{ pattern: "dangerous_*" }]);
@@ -251,7 +247,7 @@ describe("lvis:policy:get", () => {
     };
     mockLoadPolicy.mockResolvedValue(fakePolicy);
     await setupHandlers();
-    const result = await invoke("lvis:policy:get");
+    const result = await invokeRegisteredHandler(handlers, "lvis:policy:get");
     expect(result).toEqual({ ...fakePolicy, editable: true });
     expect(mockLoadPolicy).toHaveBeenCalled();
   });
@@ -269,7 +265,7 @@ describe("lvis:policy:get", () => {
     };
     mockLoadPolicy.mockResolvedValue(fakePolicy);
     await setupHandlers();
-    const result = await invoke("lvis:policy:get");
+    const result = await invokeRegisteredHandler(handlers, "lvis:policy:get");
     expect(result).toEqual({ ...fakePolicy, editable: false });
   });
 });
@@ -315,7 +311,7 @@ describe("lvis:memory:entries:*", () => {
     ]);
     registerIpcHandlers(services, () => null);
 
-    const result = await invoke("lvis:memory:entries:search", "body") as Array<Record<string, unknown>>;
+    const result = await invokeRegisteredHandler(handlers, "lvis:memory:entries:search", "body") as Array<Record<string, unknown>>;
 
     expect(result[0]).toMatchObject({
       filename: "my-memory.md",
@@ -342,7 +338,7 @@ describe("lvis:memory:entries:*", () => {
     ]);
     registerIpcHandlers(services, () => null);
 
-    const result = await invoke("lvis:memory:entries:search", "본문") as Array<Record<string, unknown>>;
+    const result = await invokeRegisteredHandler(handlers, "lvis:memory:entries:search", "본문") as Array<Record<string, unknown>>;
 
     expect(result[0]?.excerpt).toBe("첫 문단\n# 중간 제목\n본문");
   });
@@ -382,7 +378,7 @@ describe("lvis:memory:entries:*", () => {
     const { registerIpcHandlers } = await import("../ipc-bridge.js");
     registerIpcHandlers(services, () => null);
 
-    await invoke("lvis:memory:index:sections:update", { urgentMemory: "Keep this.", references: "ref" });
+    await invokeRegisteredHandler(handlers, "lvis:memory:index:sections:update", { urgentMemory: "Keep this.", references: "ref" });
 
     expect(services.memoryManager.updateMemoryIndexSections).toHaveBeenCalledWith({
       urgentMemory: "Keep this.",
@@ -453,7 +449,7 @@ describe("lvis:plugins:config:*", () => {
     const services = makeServices(pm);
     registerIpcHandlers(services, () => null);
 
-    const result = await invoke("lvis:plugins:config:set", "meeting", { apiKey: "secret" }) as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:plugins:config:set", "meeting", { apiKey: "secret" }) as {
       ok: boolean;
       config: unknown;
     };
@@ -484,7 +480,7 @@ describe("lvis:plugins:config:*", () => {
     const services = makeServices(pm);
     registerIpcHandlers(services, () => null);
 
-    const result = await invoke("lvis:plugins:config:set", "meeting", { volume: 5 }) as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:plugins:config:set", "meeting", { volume: 5 }) as {
       ok: boolean;
     };
 
@@ -526,7 +522,7 @@ describe("lvis:plugins:config:*", () => {
     services.pluginRuntime.getPluginManifest = vi.fn(() => manifest);
     registerIpcHandlers(services, () => null);
 
-    const result = await invoke(
+    const result = await invokeRegisteredHandler(handlers,
       "lvis:plugins:config:set",
       "meeting",
       { endpoint: "https://api.example.com", apiKey: "sk-LEAK" },
@@ -562,7 +558,7 @@ describe("lvis:plugins:config:*", () => {
     }));
     registerIpcHandlers(services, () => null);
 
-    const result = await invoke(
+    const result = await invokeRegisteredHandler(handlers,
       "lvis:plugins:config:secret:set",
       "meeting",
       "apiKey",
@@ -598,7 +594,7 @@ describe("lvis:plugins:config:*", () => {
     }));
     registerIpcHandlers(services, () => null);
 
-    const result = await invoke(
+    const result = await invokeRegisteredHandler(handlers,
       "lvis:plugins:config:secret:set",
       "meeting",
       "endpoint",
@@ -615,7 +611,7 @@ describe("lvis:policy:set", () => {
     const updatedPolicy = { version: 1, requireExplicitApproval: false, managed: false, updatedAt: "2026-01-02" };
     mockSavePolicy.mockResolvedValue(updatedPolicy);
     const { gate } = await setupHandlers();
-    const result = await invoke("lvis:policy:set", policyPayload({ requireExplicitApproval: false })) as { ok: boolean; policy: unknown };
+    const result = await invokeRegisteredHandler(handlers, "lvis:policy:set", policyPayload({ requireExplicitApproval: false })) as { ok: boolean; policy: unknown };
     expect(mockSavePolicy).toHaveBeenCalledWith({ requireExplicitApproval: false });
     expect(gate.setPolicy).toHaveBeenCalledWith(updatedPolicy);
     expect(result.ok).toBe(true);
@@ -625,7 +621,7 @@ describe("lvis:policy:set", () => {
   it("managed error → returns { ok: false, error: 'managed' } without throwing", async () => {
     mockSavePolicy.mockRejectedValue(new Error("IT 관리 정책은 사용자가 변경할 수 없습니다."));
     const { gate } = await setupHandlers();
-    const result = await invoke("lvis:policy:set", policyPayload({ requireExplicitApproval: false })) as { ok: boolean; error: string; message: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:policy:set", policyPayload({ requireExplicitApproval: false })) as { ok: boolean; error: string; message: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("managed");
     expect(result.message).toContain("IT 관리");
@@ -643,7 +639,7 @@ describe("lvis:policy:set", () => {
     services.approvalGate = undefined as any;
     registerIpcHandlers(services, () => null);
     // Should not throw even with no gate
-    const result = await invoke("lvis:policy:set", policyPayload({})) as { ok: boolean };
+    const result = await invokeRegisteredHandler(handlers, "lvis:policy:set", policyPayload({})) as { ok: boolean };
     expect(result.ok).toBe(true);
   });
 });
@@ -653,7 +649,7 @@ describe("lvis:permission:get-mode", () => {
     const pm = makeMockPM();
     pm.getMode.mockReturnValue("strict");
     await setupHandlers(pm);
-    const result = await invoke("lvis:permission:get-mode") as { mode: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:get-mode") as { mode: string };
     expect(result.mode).toBe("strict");
   });
 });
@@ -661,14 +657,14 @@ describe("lvis:permission:get-mode", () => {
 describe("lvis:permission:set-mode", () => {
   it("calls setModePersist with given mode", async () => {
     const { pm } = await setupHandlers();
-    await invoke("lvis:permission:set-mode", modePayload("auto"));
+    await invokeRegisteredHandler(handlers, "lvis:permission:set-mode", modePayload("auto"));
     expect(pm.setModePersist).toHaveBeenCalledWith("auto");
   });
 
   // §F8: whitelist validation
   it("invalid mode → returns { ok: false, error: 'invalid-mode' } without calling setModePersist", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:set-mode", modePayload("turbo")) as { ok: boolean; error: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:set-mode", modePayload("turbo")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-mode");
     expect(pm.setModePersist).not.toHaveBeenCalled();
@@ -676,7 +672,7 @@ describe("lvis:permission:set-mode", () => {
 
   it("empty string mode → returns { ok: false, error: 'invalid-mode' }", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:set-mode", modePayload("")) as { ok: boolean; error: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:set-mode", modePayload("")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-mode");
   });
@@ -686,7 +682,7 @@ describe("lvis:permission:set-mode", () => {
 describe("lvis:permission:add-rule — F8 validation", () => {
   it("empty pattern → returns { ok: false, error: 'invalid-pattern' }", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:add-rule", rulePayload("", "allow")) as { ok: boolean; error: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:add-rule", rulePayload("", "allow")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-pattern");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
@@ -695,7 +691,7 @@ describe("lvis:permission:add-rule — F8 validation", () => {
   it("pattern > 128 chars → returns { ok: false, error: 'invalid-pattern' }", async () => {
     const { pm } = await setupHandlers();
     const longPattern = "a".repeat(129);
-    const result = await invoke("lvis:permission:add-rule", rulePayload(longPattern, "allow")) as { ok: boolean; error: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:add-rule", rulePayload(longPattern, "allow")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-pattern");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
@@ -703,7 +699,7 @@ describe("lvis:permission:add-rule — F8 validation", () => {
 
   it("invalid action → returns { ok: false, error: 'invalid-action' }", async () => {
     const { pm } = await setupHandlers();
-    const result = await invoke("lvis:permission:add-rule", rulePayload("my_tool", "permit")) as { ok: boolean; error: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:permission:add-rule", rulePayload("my_tool", "permit")) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-action");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
@@ -715,7 +711,7 @@ describe("lvis:permission:add-rule — F8 validation", () => {
 describe("lvis:policy:set — F8 validation", () => {
   it("patch with 'managed' key → returns { ok: false, error: 'invalid-patch' } without calling savePolicy", async () => {
     await setupHandlers();
-    const result = await invoke("lvis:policy:set", policyPayload({ managed: true })) as { ok: boolean; error: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:policy:set", policyPayload({ managed: true })) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-patch");
     expect(mockSavePolicy).not.toHaveBeenCalled();
@@ -723,7 +719,7 @@ describe("lvis:policy:set — F8 validation", () => {
 
   it("requireExplicitApproval as non-boolean → returns { ok: false, error: 'invalid-patch' }", async () => {
     await setupHandlers();
-    const result = await invoke("lvis:policy:set", policyPayload({ requireExplicitApproval: "yes" })) as { ok: boolean; error: string };
+    const result = await invokeRegisteredHandler(handlers, "lvis:policy:set", policyPayload({ requireExplicitApproval: "yes" })) as { ok: boolean; error: string };
     expect(result.ok).toBe(false);
     expect(result.error).toBe("invalid-patch");
     expect(mockSavePolicy).not.toHaveBeenCalled();

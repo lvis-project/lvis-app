@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { classifyTurnEntries, isTurnStartEntry } from "../utils/classify-turn-entries.js";
+import { userEntry } from "../../../__tests__/test-helpers.js";
 
-const user = (text: string): ChatEntry => ({ kind: "user", text });
 const assistant = (text: string, extra: Partial<Extract<ChatEntry, { kind: "assistant" }>> = {}): ChatEntry => ({
   kind: "assistant",
   text,
@@ -37,7 +37,7 @@ describe("isTurnStartEntry", () => {
 
 describe("classifyTurnEntries", () => {
   it("marks the last completed assistant as final (non-streaming)", () => {
-    const entries: ChatEntry[] = [user("q"), assistant("a")];
+    const entries: ChatEntry[] = [userEntry("q"), assistant("a")];
     const { lastTurnStartIdx, entryClassMap, finalTurnStartMap } = classifyTurnEntries(entries, false);
     expect(lastTurnStartIdx).toBe(0);
     expect(entryClassMap.get(1)).toBe("final");
@@ -45,7 +45,7 @@ describe("classifyTurnEntries", () => {
   });
 
   it("collapses mid-turn work to intermediate, final answer stays final", () => {
-    const entries: ChatEntry[] = [user("q"), toolGroup(), assistant("done")];
+    const entries: ChatEntry[] = [userEntry("q"), toolGroup(), assistant("done")];
     const { entryClassMap, entryTurnStartMap } = classifyTurnEntries(entries, false);
     expect(entryClassMap.get(1)).toBe("intermediate"); // tool_group has subsequent assistant
     expect(entryClassMap.get(2)).toBe("final");
@@ -54,14 +54,14 @@ describe("classifyTurnEntries", () => {
   });
 
   it("keeps the active streaming assistant as intermediate (no TurnActionBar)", () => {
-    const entries: ChatEntry[] = [user("q"), assistant("partial")];
+    const entries: ChatEntry[] = [userEntry("q"), assistant("partial")];
     const { entryClassMap, finalTurnStartMap } = classifyTurnEntries(entries, true);
     expect(entryClassMap.get(1)).toBe("intermediate");
     expect(finalTurnStartMap.has(1)).toBe(false);
   });
 
   it("assigns each entry to its owning turn-start across multiple turns", () => {
-    const entries: ChatEntry[] = [user("q1"), assistant("a1"), user("q2"), assistant("a2")];
+    const entries: ChatEntry[] = [userEntry("q1"), assistant("a1"), userEntry("q2"), assistant("a2")];
     const { lastTurnStartIdx, entryTurnStartMap, entryClassMap } = classifyTurnEntries(entries, false);
     expect(lastTurnStartIdx).toBe(2);
     expect(entryTurnStartMap.get(1)).toBe(0);

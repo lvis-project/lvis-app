@@ -11,7 +11,7 @@ import {
   type LocalApiHttpServer,
 } from "../http-server.js";
 import { createStreamBroadcaster } from "../stream-broadcaster.js";
-import { makeStubLocalApi } from "./a2a-test-helpers.js";
+import { makeStubLocalApi, a2aRpcRequestJson } from "./a2a-test-helpers.js";
 import {
   A2AHostJsonRpcErrorDefinition,
   A2AJsonRpcErrorDefinition,
@@ -156,10 +156,6 @@ function headers(extra: Record<string, string> = {}): Record<string, string> {
   };
 }
 
-function rpc(method: string, params: unknown, id: string | number | null = 1): string {
-  return JSON.stringify({ jsonrpc: "2.0", id, method, params });
-}
-
 afterEach(async () => {
   const toClose = servers;
   servers = [];
@@ -204,7 +200,7 @@ describe("A2A v1 loopback router", () => {
     const operation = await fetch(url(server), {
       method: "POST",
       headers: { "content-type": "application/json", "a2a-version": "1.0" },
-      body: rpc(A2AJsonRpcMethod.LIST_TASKS, {}),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.LIST_TASKS, {}),
     });
     expect(operation.status).toBe(401);
     expect(handle).not.toHaveBeenCalled();
@@ -276,7 +272,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(
+      body: a2aRpcRequestJson(
         A2AJsonRpcMethod.SEND_MESSAGE,
         {
           message: {
@@ -306,7 +302,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }, "wire-no-headers"),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }, "wire-no-headers"),
     });
 
     expect(response.status).toBe(200);
@@ -321,7 +317,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers({ "a2a-version": "99.0" }),
-      body: rpc(A2AJsonRpcMethod.LIST_TASKS, {}, "version-id"),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.LIST_TASKS, {}, "version-id"),
     });
     const body = (await response.json()) as any;
 
@@ -343,7 +339,7 @@ describe("A2A v1 loopback router", () => {
     const patchVersion = await fetch(url(server), {
       method: "POST",
       headers: headers({ "a2a-version": "1.0.17" }),
-      body: rpc(A2AJsonRpcMethod.LIST_TASKS, {}),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.LIST_TASKS, {}),
     });
     expect((await patchVersion.json()) as any).toMatchObject({
       jsonrpc: "2.0",
@@ -353,7 +349,7 @@ describe("A2A v1 loopback router", () => {
     const emptyVersion = await fetch(url(server), {
       method: "POST",
       headers: headers({ "a2a-version": "" }),
-      body: rpc(A2AJsonRpcMethod.LIST_TASKS, {}, "empty"),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.LIST_TASKS, {}, "empty"),
     });
     expect((await emptyVersion.json()) as any).toMatchObject({
       id: "empty",
@@ -365,7 +361,7 @@ describe("A2A v1 loopback router", () => {
     const missingVersion = await fetch(url(server), {
       method: "POST",
       headers: missingHeaders,
-      body: rpc(A2AJsonRpcMethod.LIST_TASKS, {}, "missing"),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.LIST_TASKS, {}, "missing"),
     });
     expect((await missingVersion.json()) as any).toMatchObject({
       id: "missing",
@@ -428,7 +424,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(method, {}),
+      body: a2aRpcRequestJson(method, {}),
     });
     const body = (await response.json()) as any;
 
@@ -445,7 +441,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(A2AJsonRpcMethod.SEND_MESSAGE, {
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, {
         message: { messageId: "message-2", role: A2ARole.USER, parts: [{ text: "hello" }] },
         configuration: { taskPushNotificationConfig: { url: "https://example.invalid" } },
       }),
@@ -476,7 +472,7 @@ describe("A2A v1 loopback router", () => {
     const method = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc("NoSuchMethod", {}),
+      body: a2aRpcRequestJson("NoSuchMethod", {}),
     });
     const methodBody = (await method.json()) as any;
     expect(methodBody.error.code).toBe(-32601);
@@ -485,14 +481,14 @@ describe("A2A v1 loopback router", () => {
     const params = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(A2AJsonRpcMethod.SEND_MESSAGE, {}),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, {}),
     });
     expect((await params.json() as any).error.code).toBe(-32602);
 
     const missing = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "missing" }),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "missing" }),
     });
     const missingBody = (await missing.json()) as any;
     expect(missingBody.error.code).toBe(-32001);
@@ -504,7 +500,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "explode" }),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "explode" }),
     });
     const body = (await response.json()) as any;
 
@@ -535,7 +531,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }),
     });
 
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
@@ -576,7 +572,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "task-1" }),
     });
 
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
@@ -601,7 +597,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(A2AJsonRpcMethod.GET_TASK, { id: "typed-secret" }),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "typed-secret" }),
     });
     const body = (await response.json()) as any;
 
@@ -620,7 +616,7 @@ describe("A2A v1 loopback router", () => {
     const response = await fetch(url(server), {
       method: "POST",
       headers: headers(),
-      body: rpc(
+      body: a2aRpcRequestJson(
         A2AJsonRpcMethod.SEND_MESSAGE,
         { message: { messageId: "consent-denied" } },
         "consent-id",

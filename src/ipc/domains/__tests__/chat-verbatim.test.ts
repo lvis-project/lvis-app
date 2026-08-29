@@ -219,10 +219,6 @@ async function setupHandlers(
   return deps;
 }
 
-function invoke(channel: string, ...args: unknown[]): unknown {
-  return invokeRegisteredHandler(handlers, channel, ...args);
-}
-
 class SessionMutationGate<T> {
   readonly promise: Promise<T>;
   resolve!: (value: T | PromiseLike<T>) => void;
@@ -247,7 +243,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toEqual({ content, lineCount: 3 });
   });
 
@@ -257,7 +253,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: "other-session", toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "other-session", toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -267,7 +263,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-UNKNOWN" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-UNKNOWN" }, "main");
     expect(result).toBeNull();
   });
 
@@ -282,7 +278,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -302,7 +298,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -329,7 +325,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
       createdAt: "2026-05-19T00:00:00.000Z",
     });
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toEqual({ content: artifactContent, lineCount: 2 });
     expect(deps.memoryManager.loadToolResultArtifact).toHaveBeenCalledWith(SESSION_ID, "tu-1");
   });
@@ -342,7 +338,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -362,7 +358,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toEqual({ content, lineCount: 2 });
   });
 
@@ -382,7 +378,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-prefix" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-prefix" }, "main");
     expect(result).toEqual({ content, lineCount: 2 });
   });
 
@@ -399,7 +395,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toEqual({ content, lineCount: 2 });
   });
 
@@ -411,7 +407,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-50" }, "main") as {
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-50" }, "main") as {
       content: string;
       lineCount: number;
     };
@@ -427,7 +423,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-single" }, "main") as {
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-single" }, "main") as {
       content: string;
       lineCount: number;
     };
@@ -444,8 +440,8 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const resultA = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-A" }, "main");
-    const resultB = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-B" }, "main");
+    const resultA = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-A" }, "main");
+    const resultB = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-B" }, "main");
     expect((resultA as any).content).toBe("content-A");
     expect((resultB as any).content).toBe("content-B");
   });
@@ -490,7 +486,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
     await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
 
-    const result = invoke(CHANNEL, {
+    const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
       childSessionId: "child-1",
     }, "main");
@@ -511,7 +507,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
     await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
 
-    const result = invoke(CHANNEL, {
+    const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
       toolUseId: "tu-agent",
       spawnId: "spawn-live",
@@ -530,7 +526,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
     await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
 
-    const result = invoke(CHANNEL, {
+    const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
       childSessionId: "child-1",
     }, "main");
@@ -583,7 +579,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
       ),
     );
 
-    const result = invoke(CHANNEL, {
+    const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
       childSessionId: "child-artifact",
     }, "main");
@@ -602,7 +598,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
     await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
 
-    const result = invoke(CHANNEL, {
+    const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: "other-session",
       childSessionId: "child-1",
     }, "main");
@@ -616,7 +612,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
     await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
 
-    const result = invoke(CHANNEL, {
+    const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
       childSessionId: "child-from-another-run",
     }, "main");
@@ -631,7 +627,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:chat:new", undefined, "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main");
 
     expect(loop.newConversation).toHaveBeenCalled();
     expect(deps.memoryManager.markMainActiveFresh).toHaveBeenCalledTimes(1);
@@ -648,7 +644,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:chat:new", undefined, "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main");
 
     expect(deps.memoryManager.saveSessionMetadata).not.toHaveBeenCalled();
   });
@@ -663,7 +659,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:chat:new", { projectRoot: explicitProjectRoot, projectName: "spoofed-project-name" }, "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:new", { projectRoot: explicitProjectRoot, projectName: "spoofed-project-name" }, "main");
 
     expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledTimes(1);
     const [savedId, savedMeta] = (deps.memoryManager.saveSessionMetadata as any).mock.calls[0];
@@ -685,7 +681,7 @@ describe("lvis:chat active main state", () => {
     mainLoop.resetAndResume.mockReturnValue({ ok: true });
     const mainDeps = await setupHandlers(mainLoop);
 
-    await invoke("lvis:chat:session-resume", "session-main", "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "session-main", "main");
 
     expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-main");
 
@@ -694,7 +690,7 @@ describe("lvis:chat active main state", () => {
     routineLoop.resetAndResume.mockReturnValue({ ok: true });
     const routineDeps = await setupHandlers(routineLoop);
 
-    await invoke("lvis:chat:session-resume", "session-routine", "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "session-routine", "main");
 
     expect(routineDeps.memoryManager.markMainActiveResume).not.toHaveBeenCalled();
   });
@@ -703,7 +699,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-main", []);
     const deps = await setupHandlers(loop);
 
-    const result = await invoke("lvis:chat:session-resume", "../evil", "main") as { ok: boolean };
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "../evil", "main") as { ok: boolean };
 
     expect(result.ok).toBe(false);
     expect(loop.resetAndResume).not.toHaveBeenCalled();
@@ -715,7 +711,7 @@ describe("lvis:chat active main state", () => {
     mainLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     const mainDeps = await setupHandlers(mainLoop);
 
-    await invoke("lvis:chat:send", {
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "next",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -728,7 +724,7 @@ describe("lvis:chat active main state", () => {
     routineLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     const routineDeps = await setupHandlers(routineLoop);
 
-    await invoke("lvis:chat:send", {
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "continue routine",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -758,7 +754,7 @@ describe("lvis:chat:session-history parent provenance", () => {
       title: "Child",
     });
 
-    const result = await invoke("lvis:chat:session-history", "child-session") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:session-history", "child-session") as {
       ok: boolean;
       messages: Array<{ content: string }>;
       preambleChars?: number;
@@ -786,7 +782,7 @@ describe("lvis:chat:fork", () => {
       summaryPreamble: "요약된 이전 맥락",
     });
 
-    const result = await invoke("lvis:chat:fork", undefined, "main") as { ok: boolean; sessionId: string | null };
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:fork", undefined, "main") as { ok: boolean; sessionId: string | null };
 
     expect(result.ok).toBe(true);
     expect(result.sessionId).toEqual(expect.any(String));
@@ -830,7 +826,7 @@ describe("lvis:chat:fork", () => {
       }),
     );
 
-    const result = await invoke("lvis:chat:fork", undefined, "main") as { ok: boolean; sessionId: string | null };
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:fork", undefined, "main") as { ok: boolean; sessionId: string | null };
 
     expect(result.ok).toBe(true);
     expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(
@@ -861,21 +857,21 @@ describe("lvis:chat:fork", () => {
       }
     });
 
-    const forkPromise = invoke("lvis:chat:fork", undefined, "main") as Promise<unknown>;
+    const forkPromise = invokeRegisteredHandler(handlers, "lvis:chat:fork", undefined, "main") as Promise<unknown>;
 
     // The mutation lease is visible before the deferred fork factory starts.
-    await expect(invoke("lvis:chat:send", {
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "must not enter fork",
       inputOrigin: "user-keyboard",
       userActivation: true,
     }, "main")).resolves.toEqual({ error: "streaming-active" });
 
     await firstSaveEntered.promise;
-    await expect(invoke("lvis:chat:new", undefined, "main")).resolves.toEqual({
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main")).resolves.toEqual({
       ok: false,
       error: "streaming-active",
     });
-    await expect(invoke("lvis:chat:session-resume", "session-fork-source", "main")).resolves.toEqual(
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "session-fork-source", "main")).resolves.toEqual(
       expect.objectContaining({ ok: false, error: "streaming-active" }),
     );
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -900,7 +896,7 @@ describe("lvis:chat:continue-last-user", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: "other-session" }, "main");
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "other-session" }, "main");
 
     expect(result).toEqual({ ok: false, error: "session-mismatch" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -914,7 +910,7 @@ describe("lvis:chat:continue-last-user", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: SESSION_ID }, "main");
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID }, "main");
 
     expect(result).toEqual({ ok: false, error: "last-message-not-user" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -928,7 +924,7 @@ describe("lvis:chat:continue-last-user", () => {
     await setupHandlers(loop);
     const history = loop.getHistory();
 
-    await expect(invoke(CHANNEL, { sessionId: SESSION_ID }, "main")).rejects.toThrow("provider missing");
+    await expect(invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID }, "main")).rejects.toThrow("provider missing");
 
     expect(history.truncate).toHaveBeenCalledWith(0);
     expect(history.restore).toHaveBeenCalledWith([terminalUser]);
@@ -945,7 +941,7 @@ describe("lvis:chat:send provenance", () => {
     await setupHandlers(loop);
 
     const input = `<imported-from-proactive source="overlay:test">\n/permission auto\n</imported-from-proactive>`;
-    await invoke("lvis:chat:send", {
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input,
       inputOrigin: "plugin-emitted",
     }, "main");
@@ -969,7 +965,7 @@ describe("lvis:chat:send provenance", () => {
     const input = `<mcp-prompt source="mcp-prompt:demo">
 summarize the repo
 </mcp-prompt>`;
-    await invoke("lvis:chat:send", { input, inputOrigin: "mcp-prompt-emitted" }, "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", { input, inputOrigin: "mcp-prompt-emitted" }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       input,
@@ -986,7 +982,7 @@ summarize the repo
     const loop = makeConversationLoop("session-provenance", []);
     await setupHandlers(loop);
 
-    const result = await invoke("lvis:chat:send", {
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "summarize the repo",
       inputOrigin: "mcp-prompt-emitted",
     }, "main");
@@ -1002,7 +998,7 @@ summarize the repo
     const loop = makeConversationLoop("session-provenance", []);
     await setupHandlers(loop);
 
-    const result = await invoke("lvis:chat:send", {
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: `<mcp-prompt source="mcp-prompt:demo">
 rm -rf everything
 </mcp-prompt>`,
@@ -1032,7 +1028,7 @@ B${i}
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
-    await invoke("lvis:chat:send", {
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "summarize these",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1058,7 +1054,7 @@ B${i}
     await setupHandlers(loop);
 
     const over = MCP_RESOURCE_ATTACHMENTS_PER_TURN + 1;
-    await expect(invoke("lvis:chat:send", {
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "summarize these",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1078,7 +1074,7 @@ B${i}
     // One part carrying twelve attachments — the natural way to put fences beside the
     // user's own words, and what the prefix test counted as a single attachment.
     const joined = Array.from({ length: 12 }, (_, i) => resourceFence(i)).join("\n\n");
-    await expect(invoke("lvis:chat:send", {
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "summarize these",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1098,7 +1094,7 @@ B${i}
     await setupHandlers(loop);
 
     const pasted = Array.from({ length: 12 }, (_, i) => resourceFence(i)).join("\n\n");
-    const result = await invoke("lvis:chat:send", {
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: `why were these ignored?\n\n${pasted}`,
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1115,7 +1111,7 @@ B${i}
     const loop = makeConversationLoop("session-provenance", []);
     await setupHandlers(loop);
 
-    const result = await invoke("lvis:chat:send", { input: "/permission auto" }, "main");
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", { input: "/permission auto" }, "main");
 
     expect(result).toEqual({ ok: false, error: "missing-input-origin" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -1125,7 +1121,7 @@ B${i}
     const loop = makeConversationLoop("session-provenance", []);
     await setupHandlers(loop);
 
-    const result = await invoke("lvis:chat:send", {
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "/permission reviewer mode disabled",
       inputOrigin: "user-keyboard",
     }, "main");
@@ -1139,7 +1135,7 @@ B${i}
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
-    await invoke("lvis:chat:send", {
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "hello",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1165,7 +1161,7 @@ B${i}
     };
     await setupHandlers(loop, { personaPromptStore });
 
-    await invoke("lvis:chat:send", {
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "hello",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1211,7 +1207,7 @@ B${i}
       getSubAgentRunner: () => runner,
     });
 
-    const sendPromise = invoke("lvis:chat:send", {
+    const sendPromise = invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "must stay in the original session",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1238,7 +1234,7 @@ B${i}
     const personaPromptStore = { get: vi.fn(async () => null) };
     await setupHandlers(loop, { personaPromptStore });
 
-    const result = await invoke("lvis:chat:send", {
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "hello",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1254,7 +1250,7 @@ B${i}
     const personaPromptStore = { get: vi.fn() };
     await setupHandlers(loop, { personaPromptStore });
 
-    const result = await invoke("lvis:chat:send", {
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "queued follow-up",
       inputOrigin: "queue-auto",
       personaPromptId: "reviewer",
@@ -1280,7 +1276,7 @@ B${i}
       }),
     });
 
-    await invoke("lvis:chat:send", {
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "/permission mode allow",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1319,7 +1315,7 @@ B${i}
       }),
     });
 
-    await expect(invoke("lvis:chat:send", {
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "hello",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1370,7 +1366,7 @@ B${i}
     };
     await setupHandlers(loop, { personaPromptStore });
 
-    await invoke("lvis:chat:edit-resend", "row-old-text", "new text", "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:edit-resend", "row-old-text", "new text", "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       "new text",
@@ -1434,7 +1430,7 @@ B${i}
     const restoreRedactor = await redactPii();
 
     try {
-      await invoke("lvis:chat:edit-resend", "row-old-text", "contact alice@example.com", "main");
+      await invokeRegisteredHandler(handlers, "lvis:chat:edit-resend", "row-old-text", "contact alice@example.com", "main");
 
       expect(editLoop.runTurn.mock.calls[0]?.[0]).toBe("contact [REDACTED:EMAIL]");
       // Every frame carries the tiled chat group it belongs to, so a second
@@ -1471,7 +1467,7 @@ B${i}
         return {};
       });
 
-      await invoke("lvis:chat:continue-last-user", { sessionId: "session-replay-redaction" }, "main");
+      await invokeRegisteredHandler(handlers, "lvis:chat:continue-last-user", { sessionId: "session-replay-redaction" }, "main");
 
       const replayInput = replayLoop.runTurn.mock.calls[0]?.[0] as string;
       const replayOptions = replayLoop.runTurn.mock.calls[0]?.[3] as Record<string, unknown>;
@@ -1511,7 +1507,7 @@ B${i}
       // DLP turns the source header into a non-parseable placeholder. The
       // replay must fail closed rather than treat the originally app-authored
       // message as user-keyboard input with its force-ask gate removed.
-      await expect(invoke("lvis:chat:continue-last-user", { sessionId: "session-staged-redaction" }, "main"))
+      await expect(invokeRegisteredHandler(handlers, "lvis:chat:continue-last-user", { sessionId: "session-staged-redaction" }, "main"))
         .rejects.toThrow("missing-app-envelope");
       expect(stagedLoop.runTurn).not.toHaveBeenCalled();
       expect(sent.filter(({ payload }) => (payload as { type?: string }).type === "redact_notice"))
@@ -1561,7 +1557,7 @@ B${i}
         return {};
       });
 
-      await expect(invoke("lvis:chat:edit-resend", "row-existing-user", stagedInput, "main"))
+      await expect(invokeRegisteredHandler(handlers, "lvis:chat:edit-resend", "row-existing-user", stagedInput, "main"))
         .rejects.toThrow("missing-app-envelope");
       expect(editLoop.runTurn).not.toHaveBeenCalled();
       expect(editLoop.getHistory().restore).toHaveBeenCalledWith(original);
@@ -1579,7 +1575,7 @@ B${i}
         return {};
       });
 
-      await expect(invoke("lvis:chat:retry-effort", { enableThinking: true }, "main"))
+      await expect(invokeRegisteredHandler(handlers, "lvis:chat:retry-effort", { enableThinking: true }, "main"))
         .rejects.toThrow("missing-app-envelope");
       expect(retryLoop.runTurn).not.toHaveBeenCalled();
       expect(retryLoop.getHistory().restore).toHaveBeenCalledWith(retryOriginal);
@@ -1620,7 +1616,7 @@ B${i}
     };
     await setupHandlers(loop, { personaPromptStore });
 
-    await invoke("lvis:chat:retry-effort", { enableThinking: true, thinkingBudgetTokens: 12345 }, "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:retry-effort", { enableThinking: true, thinkingBudgetTokens: 12345 }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       "retry text",
@@ -1661,7 +1657,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
     };
     await setupHandlers(loop, { getSubAgentRunner: () => runner });
 
-    await invoke("lvis:chat:send", {
+    await invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "What changed?",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1708,7 +1704,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
       new Error("main-active-bookkeeping-failed"),
     );
 
-    await expect(invoke("lvis:chat:send", {
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "Consume child result",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1740,7 +1736,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
       peekParentMailbox: vi.fn(() => {
         // This re-entrant mutation observes whether trackStreamTurn published
         // its lease before executing the mailbox factory.
-        reentrantNew = invoke("lvis:chat:new", undefined, "main") as Promise<unknown>;
+        reentrantNew = invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main") as Promise<unknown>;
         peekEntered.resolve(undefined);
         return peekGate.promise;
       }),
@@ -1751,7 +1747,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
     };
     const deps = await setupHandlers(loop, { getSubAgentRunner: () => runner });
 
-    const sendPromise = invoke("lvis:chat:send", {
+    const sendPromise = invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "Consume child result",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -1759,10 +1755,10 @@ describe("sub-agent parent mailbox on manual turns", () => {
 
     await peekEntered.promise;
     await expect(reentrantNew).resolves.toEqual({ ok: false, error: "streaming-active" });
-    await expect(invoke("lvis:chat:session-resume", "parent-session", "main")).resolves.toEqual(
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "parent-session", "main")).resolves.toEqual(
       expect.objectContaining({ ok: false, error: "streaming-active" }),
     );
-    await expect(invoke("lvis:chat:fork", undefined, "main")).resolves.toEqual({
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:fork", undefined, "main")).resolves.toEqual({
       ok: false,
       sessionId: null,
       error: "streaming-active",
@@ -1780,7 +1776,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
 
     // ACK is part of the same lease, so switching sessions is still forbidden
     // after the LLM turn has returned but before durable removal completes.
-    await expect(invoke("lvis:chat:new", undefined, "main")).resolves.toEqual({
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main")).resolves.toEqual({
       ok: false,
       error: "streaming-active",
     });
@@ -1907,12 +1903,12 @@ describe("sub-agent autonomous parent wake", () => {
 
     // trackStreamTurn publishes the lease synchronously, before its deferred
     // factory begins mailbox I/O.
-    await expect(invoke("lvis:chat:send", {
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "concurrent user message",
       inputOrigin: "user-keyboard",
       userActivation: true,
     }, "main")).resolves.toEqual({ error: "streaming-active" });
-    await expect(invoke("lvis:chat:new", undefined, "main")).resolves.toEqual({
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main")).resolves.toEqual({
       ok: false,
       error: "streaming-active",
     });
@@ -1983,7 +1979,7 @@ describe("sub-agent autonomous parent wake", () => {
     };
     await setupHandlers(loop, { getSubAgentRunner: () => runner });
 
-    const sendPromise = invoke("lvis:chat:send", {
+    const sendPromise = invokeRegisteredHandler(handlers, "lvis:chat:send", {
       input: "manual parent turn",
       inputOrigin: "user-keyboard",
       userActivation: true,
@@ -2043,7 +2039,7 @@ describe("sub-agent autonomous parent wake", () => {
       return mutationGate.promise;
     });
 
-    const mutationPromise = invoke("lvis:chat:new", undefined, "main") as Promise<unknown>;
+    const mutationPromise = invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main") as Promise<unknown>;
     await mutationEntered.promise;
     const wakePromise = wakeHandler!("parent-session");
     await Promise.resolve();
@@ -2082,7 +2078,7 @@ describe("sub-agent autonomous parent wake", () => {
       return mutationGate.promise;
     });
 
-    const mutationPromise = invoke("lvis:chat:new", undefined, "main") as Promise<unknown>;
+    const mutationPromise = invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main") as Promise<unknown>;
     await mutationEntered.promise;
     const wakePromise = wakeHandler!("parent-session");
     mutationGate.resolve(undefined);
@@ -2152,7 +2148,7 @@ describe("lvis:chat:continue-last-user — a resource turn's row", () => {
     expect((seeded[seeded.length - 1] as { meta?: { displayText?: string } }).meta?.displayText)
       .toBe("summarize [Resource #1]");
 
-    await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID }, "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:continue-last-user", { sessionId: SESSION_ID }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledTimes(1);
     const options = loop.runTurn.mock.calls[0][3] as { displayText?: string };
@@ -2176,7 +2172,7 @@ describe("lvis:chat:continue-last-user — a resource turn's row", () => {
     await setupHandlers(loop);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
 
-    await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID }, "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:continue-last-user", { sessionId: SESSION_ID }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledTimes(1);
     const options = loop.runTurn.mock.calls[0][3] as Record<string, unknown>;
@@ -2202,19 +2198,19 @@ describe("shared main-conversation lease on replay commands", () => {
     const deps = await setupHandlers(loop);
     const history = loop.getHistory();
 
-    const activeTurn = invoke(CHANNELS.chat.send, {
+    const activeTurn = invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "from-local-api-surface",
       inputOrigin: "user-keyboard",
       userActivation: true,
     }, "main") as Promise<unknown>;
     await turnEntered.promise;
 
-    await expect(invoke(CHANNELS.chat.editResend, "row-lease-user", "replacement", "main"))
+    await expect(invokeRegisteredHandler(handlers, CHANNELS.chat.editResend, "row-lease-user", "replacement", "main"))
       .resolves.toEqual({ ok: false, error: "streaming-active" });
-    await expect(invoke(CHANNELS.chat.continueLastUser, {
+    await expect(invokeRegisteredHandler(handlers, CHANNELS.chat.continueLastUser, {
       sessionId: "shared-lease-session",
     }, "main")).resolves.toEqual({ ok: false, error: "streaming-active" });
-    await expect(invoke(CHANNELS.chat.retryEffort, { enableThinking: true }, "main"))
+    await expect(invokeRegisteredHandler(handlers, CHANNELS.chat.retryEffort, { enableThinking: true }, "main"))
       .resolves.toEqual({ ok: false, error: "streaming-active" });
 
     expect(history.truncate).not.toHaveBeenCalled();
@@ -2248,12 +2244,12 @@ describe("an interrupt send while a turn is running", () => {
     const { loop, turnEntered } = runningTurn();
     await setupHandlers(loop);
 
-    const first = invoke(CHANNELS.chat.send, {
+    const first = invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "first", inputOrigin: "user-keyboard", userActivation: true,
     }, "main") as Promise<unknown>;
     await turnEntered.promise;
 
-    const second = await invoke(CHANNELS.chat.send, {
+    const second = await invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "second", inputOrigin: "user-keyboard", userActivation: true, interrupt: true,
     }, "main");
     await first;
@@ -2267,13 +2263,13 @@ describe("an interrupt send while a turn is running", () => {
     const { loop, turnEntered } = runningTurn();
     await setupHandlers(loop);
 
-    const first = invoke(CHANNELS.chat.send, {
+    const first = invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "first", inputOrigin: "user-keyboard", userActivation: true,
     }, "main") as Promise<unknown>;
     await turnEntered.promise;
 
     // Expired keyboard intent: no userActivation.
-    await expect(invoke(CHANNELS.chat.send, {
+    await expect(invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "second", inputOrigin: "user-keyboard", interrupt: true,
     }, "main")).resolves.toEqual({ ok: false, error: "user-keyboard-required" });
     expect(loop.abortCurrentTurn).not.toHaveBeenCalled();
@@ -2286,13 +2282,13 @@ describe("an interrupt send while a turn is running", () => {
     const { loop, turnEntered } = runningTurn();
     await setupHandlers(loop);
 
-    const first = invoke(CHANNELS.chat.send, {
+    const first = invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "first", inputOrigin: "user-keyboard", userActivation: true,
     }, "main") as Promise<unknown>;
     await turnEntered.promise;
 
     // Admitted at the door, refused later while resolving its persona prompt.
-    const second = await invoke(CHANNELS.chat.send, {
+    const second = await invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "second", inputOrigin: "user-keyboard", userActivation: true, interrupt: true,
       personaPromptId: "persona-that-does-not-exist",
     }, "main");
@@ -2307,12 +2303,12 @@ describe("an interrupt send while a turn is running", () => {
     const { loop, turnEntered } = runningTurn();
     await setupHandlers(loop);
 
-    const first = invoke(CHANNELS.chat.send, {
+    const first = invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "first", inputOrigin: "user-keyboard", userActivation: true,
     }, "main") as Promise<unknown>;
     await turnEntered.promise;
 
-    await expect(invoke(CHANNELS.chat.send, {
+    await expect(invokeRegisteredHandler(handlers, CHANNELS.chat.send, {
       input: "second", inputOrigin: "user-keyboard", userActivation: true,
     }, "main")).resolves.toEqual({ error: "streaming-active" });
     expect(loop.abortCurrentTurn).not.toHaveBeenCalled();

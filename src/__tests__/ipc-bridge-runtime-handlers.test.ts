@@ -134,10 +134,6 @@ async function setupHandlers(
 
 // ─── Invocation helpers ───────────────────────────────────────────────────────
 
-function invoke(channel: string, ...args: unknown[]): unknown {
-  return invokeRegisteredHandler(handlers, channel, ...args);
-}
-
 // Convenience: build a fake IpcMainInvokeEvent with an untrusted sender.
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,7 +152,7 @@ describe("lvis:runtime:counts", () => {
       ],
     });
 
-    const result = await invoke("lvis:runtime:counts") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:runtime:counts") as {
       tools: number;
       plugins: number;
       mcps: number;
@@ -187,7 +183,7 @@ describe("lvis:runtime:env", () => {
   it("returns { platform, hostname, user } — no cwd, no release", async () => {
     await setupHandlers();
 
-    const result = await invoke("lvis:runtime:env") as Record<string, unknown>;
+    const result = await invokeRegisteredHandler(handlers, "lvis:runtime:env") as Record<string, unknown>;
 
     // Required fields.
     expect(typeof result.platform).toBe("string");
@@ -223,7 +219,7 @@ describe("lvis:marketplace:ping", () => {
       marketplaceSettings: { backend: "mock" },
     });
 
-    const result = await invoke("lvis:marketplace:ping") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -240,7 +236,7 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const result = await invoke("lvis:marketplace:ping") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -275,7 +271,7 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const result = await invoke("lvis:marketplace:ping") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -299,7 +295,7 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const result = await invoke("lvis:marketplace:ping") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -326,8 +322,8 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const first = invoke("lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
-    const second = invoke("lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
+    const first = invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
+    const second = invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     resolveFetch({ ok: true } as Response);
@@ -350,11 +346,11 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const first = await invoke("lvis:marketplace:ping") as {
+    const first = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
-    const second = await invoke("lvis:marketplace:ping") as {
+    const second = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };

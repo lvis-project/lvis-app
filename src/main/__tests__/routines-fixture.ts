@@ -27,7 +27,17 @@ export function tempRoutinesStore(): {
   return { store, dir, cleanup };
 }
 
-/** ISO stamp `offsetMs` from now — a schedule that is due later, never already past. */
-export function futureIso(offsetMs = 60_000): string {
+/** ISO stamp `offsetMs` from now. */
+export function isoFromNow(offsetMs: number): string {
   return new Date(Date.now() + offsetMs).toISOString();
+}
+
+/** A schedule that is due later, never already past. */
+export function futureIso(offsetMs = 60_000): string {
+  return isoFromNow(offsetMs);
+}
+
+/** A schedule that is already due. */
+export function pastIso(offsetMs = -1000): string {
+  return isoFromNow(offsetMs);
 }

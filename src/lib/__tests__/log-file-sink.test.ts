@@ -27,6 +27,7 @@ import {
 } from "../log-file-sink.js";
 import { LOG_RETENTION_DAYS as SHARED_LOG_RETENTION_DAYS } from "../../shared/log-retention.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { utcDateKey as todayDateStr } from "../../shared/local-date.js";
 
 let logDir: string;
 
@@ -45,10 +46,6 @@ afterEach(async () => {
   await new Promise((r) => setTimeout(r, 0));
   await cleanupTmpDir(logDir);
 });
-
-function todayDateStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /** date N days ago as YYYY-MM-DD */
 function daysAgo(n: number): string {

@@ -40,6 +40,7 @@ import {
   SECRET_REDACTED_SENTINEL,
 } from "../host-api-wire.js";
 import type { PluginManifest } from "../../types.js";
+import { settleMacrotask as flush } from "../../../__tests__/test-helpers.js";
 
 const PLUGIN_ID = "com.example.subscriber";
 const GENERATION = "gen-11";
@@ -52,11 +53,6 @@ const MANIFEST: PluginManifest = {
   description: "a plugin that subscribes to everything the host offers",
   tools: [],
 };
-
-/** Let the un-awaited subscribe round trip settle before asserting on it. */
-function flush(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
-}
 
 /**
  * A stand-in for the real per-incarnation hostApi.

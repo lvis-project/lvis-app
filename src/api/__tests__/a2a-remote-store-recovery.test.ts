@@ -3,9 +3,9 @@ import { A2AJsonRpcMethod } from "../../shared/a2a-wire.js";
 import { A2ARemoteClient } from "../a2a-remote-client.js";
 import { A2A_EXACT_SEND_REPLAY_URI, type A2ARemotePreparedAttempt } from "../a2a-remote-contracts.js";
 import { A2ARemoteDurableStore } from "../a2a-remote-store.js";
+import { fixedNow as now } from "./a2a-test-helpers.js";
 
 const digest = "a".repeat(64);
-const now = () => new Date("2026-07-16T00:00:00.000Z");
 const lineage = { targetAgentId: 1, interfaceUrl: "https://agent.example.test/a2a", agentCardDigestSha256: digest, trustKeyId: 2, credentialBindingId: 3, callerGenerationId: "generation-1", routePolicyVersion: 4, routePolicyDigestSha256: digest, extensionSpecDigestSha256: digest };
 
 function prepared(overrides: Partial<A2ARemotePreparedAttempt> = {}): A2ARemotePreparedAttempt {

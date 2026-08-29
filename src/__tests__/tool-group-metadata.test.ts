@@ -31,7 +31,7 @@ vi.mock("../audit/dlp-filter.js", () => ({
 import { ToolExecutor } from "../tools/executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createDynamicTool } from "../tools/base.js";
-import { userPermissionContext } from "../tools/__tests__/permission-context-fixture.js";
+import { userPermissionContext } from "../tools/__tests__/tool-context-fixture.js";
 
 beforeEach(() => {
   vi.clearAllMocks();

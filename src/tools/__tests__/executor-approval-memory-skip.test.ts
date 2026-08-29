@@ -58,7 +58,7 @@ vi.mock("../../audit/sandbox-audit-sink.js", async () => {
 });
 
 import { ToolExecutor } from "../executor.js";
-import { userPermissionContext } from "./permission-context-fixture.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { tryUserApprovalMemorySkip } from "../pipeline/approval-memory-skip.js";

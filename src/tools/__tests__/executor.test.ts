@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 
 import { ToolExecutor } from "../executor.js";
-import { userPermissionContext } from "./permission-context-fixture.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
 import { BashTool, PowerShellTool } from "../shell-tools.js";

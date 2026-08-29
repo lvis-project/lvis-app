@@ -8,13 +8,12 @@ import { A2A_EXACT_SEND_REPLAY_URI } from "../a2a-remote-contracts.js";
 import { createA2AHttpRouter, type A2ARequestHandler } from "../a2a-router.js";
 import { startLocalApiHttpServer, type LocalApiHttpServer } from "../http-server.js";
 import { createStreamBroadcaster } from "../stream-broadcaster.js";
-import { makeStubLocalApi } from "./a2a-test-helpers.js";
+import { makeStubLocalApi, a2aRpcRequestJson } from "./a2a-test-helpers.js";
 import {
   A2AJsonRpcErrorDefinition,
   A2AJsonRpcMethod,
   type A2ADirectJsonRpcMethod,
   type A2AJsonObject,
-  type A2AJsonRpcId,
   type A2ASendMessageResult,
 } from "../../shared/a2a-wire.js";
 import { A2ARole, A2ATaskState } from "../../shared/a2a.js";
@@ -122,10 +121,6 @@ function headers(extensions?: string): Record<string, string> {
   };
 }
 
-function rpc(id: A2AJsonRpcId, method: string, params: unknown): string {
-  return JSON.stringify({ jsonrpc: "2.0", id, method, params });
-}
-
 function initialParams(messageId: string): A2AJsonObject {
   return {
     message: { messageId, role: A2ARole.USER, parts: [{ text: "hello" }] },
@@ -202,7 +197,7 @@ describe("P4-5 production wire vectors", () => {
   });
 
   vector("task-oneof-and-numeric-zero-id", async () => {
-    const body = rpc(0, A2AJsonRpcMethod.SEND_MESSAGE, initialParams("task-branch"));
+    const body = a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, initialParams("task-branch"), 0);
     const response = await post(body, A2A_EXACT_SEND_REPLAY_URI);
     expect(response.headers.get("a2a-version")).toBe("1.0");
     expect(response.headers.get("a2a-extensions")).toBe(A2A_EXACT_SEND_REPLAY_URI);
@@ -210,7 +205,7 @@ describe("P4-5 production wire vectors", () => {
   });
 
   vector("message-oneof-and-string-id", async () => {
-    const body = rpc("message-id", A2AJsonRpcMethod.SEND_MESSAGE, initialParams("message-branch"));
+    const body = a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, initialParams("message-branch"), "message-id");
     const response = await post(body, A2A_EXACT_SEND_REPLAY_URI);
     expect(await response.json()).toEqual({
       jsonrpc: "2.0",
@@ -228,7 +223,7 @@ describe("P4-5 production wire vectors", () => {
 
   vector("exact-byte-replay-executes-once", async () => {
     handle.mockClear();
-    const body = rpc("replay-id", A2AJsonRpcMethod.SEND_MESSAGE, initialParams("replay-once"));
+    const body = a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, initialParams("replay-once"), "replay-id");
     const first = await post(body, A2A_EXACT_SEND_REPLAY_URI);
     const second = await post(body, A2A_EXACT_SEND_REPLAY_URI);
     expect(await second.json()).toEqual(await first.json());
@@ -245,7 +240,7 @@ describe("P4-5 production wire vectors", () => {
     vector(`exact-error-${code}`, async () => {
       const id = `id-${code}`;
       const response = await post(
-        rpc(id, A2AJsonRpcMethod.SEND_MESSAGE, initialParams(messageId)),
+        a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, initialParams(messageId), id),
         A2A_EXACT_SEND_REPLAY_URI,
       );
       const body = await response.json() as any;
@@ -274,22 +269,22 @@ describe("P4-5 production wire vectors", () => {
 
   vector("header-only-activation-fails-closed", async () => {
     const response = await post(
-      rpc("header-only", A2AJsonRpcMethod.SEND_MESSAGE, {
+      a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, {
         message: { messageId: "header-only", role: A2ARole.USER, parts: [{ text: "hello" }] },
-      }),
+      }, "header-only"),
       A2A_EXACT_SEND_REPLAY_URI,
     );
     expect((await response.json() as any).error.code).toBe(A2AJsonRpcErrorDefinition.EXTENSION_SUPPORT_REQUIRED.code);
   });
 
   vector("metadata-only-activation-fails-closed", async () => {
-    const response = await post(rpc("metadata-only", A2AJsonRpcMethod.SEND_MESSAGE, initialParams("metadata-only")));
+    const response = await post(a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, initialParams("metadata-only"), "metadata-only"));
     expect((await response.json() as any).error.code).toBe(A2AJsonRpcErrorDefinition.EXTENSION_SUPPORT_REQUIRED.code);
   });
 
   vector("advertised-optional-extension-cannot-be-declared-required", async () => {
     const response = await post(
-      rpc("exact-required", A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1" }),
+      a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1" }, "exact-required"),
       `${A2A_EXACT_SEND_REPLAY_URI};required`,
     );
     expect((await response.json() as any).error.code).toBe(A2AJsonRpcErrorDefinition.EXTENSION_SUPPORT_REQUIRED.code);
@@ -297,7 +292,7 @@ describe("P4-5 production wire vectors", () => {
 
   vector("unrelated-required-extension-fails-closed", async () => {
     const response = await post(
-      rpc("unknown-required", A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1" }),
+      a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1" }, "unknown-required"),
       "https://example.test/a2a/required;required",
     );
     expect((await response.json() as any).error.code).toBe(A2AJsonRpcErrorDefinition.EXTENSION_SUPPORT_REQUIRED.code);
@@ -305,7 +300,7 @@ describe("P4-5 production wire vectors", () => {
 
   vector("unrelated-optional-extension-is-ignored", async () => {
     const response = await post(
-      rpc("optional-id", A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1", historyLength: 0 }),
+      a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1", historyLength: 0 }, "optional-id"),
       "https://example.test/a2a/optional",
     );
     expect(response.headers.get("a2a-version")).toBe("1.0");
@@ -324,11 +319,11 @@ describe("P4-5 production wire vectors", () => {
       },
     };
     const rejected = await post(
-      rpc("continuation-rejected", A2AJsonRpcMethod.SEND_MESSAGE, continuation),
+      a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, continuation, "continuation-rejected"),
       A2A_EXACT_SEND_REPLAY_URI,
     );
     expect((await rejected.json() as any).error.code).toBe(A2AJsonRpcErrorDefinition.EXTENSION_SUPPORT_REQUIRED.code);
-    const accepted = await post(rpc("continuation-ok", A2AJsonRpcMethod.SEND_MESSAGE, continuation));
+    const accepted = await post(a2aRpcRequestJson(A2AJsonRpcMethod.SEND_MESSAGE, continuation, "continuation-ok"));
     expect(accepted.headers.get("a2a-version")).toBe("1.0");
     expect(accepted.headers.get("a2a-extensions")).toBeNull();
     expect((await accepted.json() as any).id).toBe("continuation-ok");
@@ -340,7 +335,7 @@ describe("P4-5 production wire vectors", () => {
       ["cancel-id", A2AJsonRpcMethod.CANCEL_TASK, { id: "remote-task-1" }],
       ["list-id", A2AJsonRpcMethod.LIST_TASKS, {}],
     ] as const) {
-      const response = await post(rpc(id, method, params));
+      const response = await post(a2aRpcRequestJson(method, params, id));
       expect(response.headers.get("a2a-version")).toBe("1.0");
       expect(response.headers.get("a2a-extensions")).toBeNull();
       expect((await response.json() as any).id).toBe(id);
@@ -349,7 +344,7 @@ describe("P4-5 production wire vectors", () => {
 
   vector("exact-extension-is-rejected-on-get-task", async () => {
     const response = await post(
-      rpc("get-exact", A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1", historyLength: 0 }),
+      a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1", historyLength: 0 }, "get-exact"),
       A2A_EXACT_SEND_REPLAY_URI,
     );
     expect(response.headers.get("a2a-version")).toBe("1.0");
@@ -366,7 +361,7 @@ describe("P4-5 production wire vectors", () => {
         "a2a-version": "1.0",
         "a2a-extensions": "not-a-uri",
       },
-      body: rpc("auth-first", A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1" }),
+      body: a2aRpcRequestJson(A2AJsonRpcMethod.GET_TASK, { id: "remote-task-1" }, "auth-first"),
     });
     expect(response.status).toBe(401);
     expect(response.headers.get("a2a-extensions")).toBeNull();

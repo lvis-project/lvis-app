@@ -157,10 +157,6 @@ async function setupHandlers(loop: ReturnType<typeof makeConversationLoop>) {
   return deps;
 }
 
-function invoke(channel: string, ...args: unknown[]): unknown {
-  return invokeRegisteredHandler(handlers, channel, ...args);
-}
-
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("lvis:chat:get-write-diff", () => {
@@ -173,7 +169,7 @@ describe("lvis:chat:get-write-diff", () => {
     await setupHandlers(loop);
     mockReadDiffSidecar.mockResolvedValue({ before: "old content", after: "new content" });
 
-    const result = await invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: TOOL_USE_ID });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: TOOL_USE_ID });
     expect(result).toEqual({ before: "old content", after: "new content" });
     expect(mockReadDiffSidecar).toHaveBeenCalledWith(SESSION_ID, TOOL_USE_ID);
   });
@@ -183,7 +179,7 @@ describe("lvis:chat:get-write-diff", () => {
     await setupHandlers(loop);
     mockReadDiffSidecar.mockResolvedValue(null);
 
-    const result = await invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: TOOL_USE_ID });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: TOOL_USE_ID });
     expect(result).toBeNull();
   });
 
@@ -191,7 +187,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: "../../etc/passwd", toolUseId: TOOL_USE_ID });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "../../etc/passwd", toolUseId: TOOL_USE_ID });
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -200,7 +196,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "../evil" });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "../evil" });
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -209,7 +205,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: "", toolUseId: TOOL_USE_ID });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "", toolUseId: TOOL_USE_ID });
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -218,7 +214,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: 123, toolUseId: null });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: 123, toolUseId: null });
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -227,7 +223,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, null);
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, null);
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -250,7 +246,7 @@ describe("lvis:llm:ping", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke("lvis:llm:ping");
+    const result = await invokeRegisteredHandler(handlers, "lvis:llm:ping");
     expect(result).toMatchObject({ configured: true, online: true });
     expect(loop.pingProvider).toHaveBeenCalledOnce();
   });
@@ -358,8 +354,8 @@ describe("lvis:memory:index:get project options", () => {
     const loop = makeConversationLoop(SESSION_ID);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:memory:index:get");
-    await invoke("lvis:memory:index:get", { projectRoot: process.cwd(), projectName: "spoofed-workspace-name" });
+    await invokeRegisteredHandler(handlers, "lvis:memory:index:get");
+    await invokeRegisteredHandler(handlers, "lvis:memory:index:get", { projectRoot: process.cwd(), projectName: "spoofed-workspace-name" });
 
     expect(deps.memoryManager.getMemoryIndex).toHaveBeenNthCalledWith(1, {});
     expect(deps.memoryManager.getMemoryIndex).toHaveBeenNthCalledWith(2, {

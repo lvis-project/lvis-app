@@ -18,6 +18,7 @@ import {
   type ToolExecutionContext,
   type ToolResult,
 } from "../base.js";
+import { toolExecutionContext as ctx } from "./tool-context-fixture.js";
 
 // ─── Fixtures ─────────────────────────────────────────
 
@@ -49,7 +50,6 @@ class PluginEchoTool extends EchoTool {
   override readonly source = "plugin" as const;
 }
 
-const ctx = (): ToolExecutionContext => ({ cwd: "/tmp", extraAllowedDirectories: [], metadata: {} });
 
 // ─── ZodTool ──────────────────────────────────────────
 

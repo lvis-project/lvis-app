@@ -6,7 +6,7 @@ import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 import { createDynamicTool } from "../base.js";
 import { ToolExecutor } from "../executor.js";
-import { userPermissionContext } from "./permission-context-fixture.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { makePermissionManager } from "./executor-reviewer-fixtures.js";
 

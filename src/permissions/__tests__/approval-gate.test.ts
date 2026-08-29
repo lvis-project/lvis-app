@@ -34,6 +34,7 @@ import {
   auditRowTexts,
   makePlatformBridgeAuthority,
   makeTestPolicy,
+  auditRowStartingWith,
 } from "./test-helpers.js";
 
 // ─── Mock WebContents ─────────────────────────────────
@@ -2450,13 +2451,6 @@ describe("ApprovalGate", () => {
       return harness;
     }
 
-    function rowFor(
-      auditLogger: { log: ReturnType<typeof vi.fn> },
-      marker: string,
-    ): string | undefined {
-      return auditRowTexts(auditLogger).find((row) => row.startsWith(marker));
-    }
-
     it("answers an armed, in-scope paired-platform write without a modal", async () => {
       const { wc, auditLogger, gate } = armedGate();
 
@@ -2468,14 +2462,14 @@ describe("ApprovalGate", () => {
       // Nobody was asked. No modal, and no OS toast to wake a room the owner
       // is not in — the answer is the whole point.
       expect(wc.send).not.toHaveBeenCalled();
-      const answered = rowFor(auditLogger, "[approval:away-answered]");
+      const answered = auditRowStartingWith(auditLogger, "[approval:away-answered]");
       expect(answered).toContain("away-1");
       expect(answered).toContain("answeredBy=away-authority");
       expect(answered).toContain("remoteControllerOrigin=platform-bridge");
       expect(answered).toContain("toolName=fs_write");
       // Below the requested row, so an away-answered call still has the full
       // pair a reviewer replays.
-      expect(rowFor(auditLogger, "[approval:requested]")).toContain("away-1");
+      expect(auditRowStartingWith(auditLogger, "[approval:requested]")).toContain("away-1");
     });
 
     it("leaves nothing an answer could be widened through", async () => {
@@ -2508,10 +2502,10 @@ describe("ApprovalGate", () => {
       );
       // Spent in the same step that answered. The row says so, because from
       // the next call on there is no grant left to explain the silence.
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toContain(
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toContain(
         "remaining=0",
       );
-      expect(rowFor(auditLogger, "[approval:away-retired]")).toContain(
+      expect(auditRowStartingWith(auditLogger, "[approval:away-retired]")).toContain(
         "reason=budget-spent",
       );
       expect(gate.awayAuthoritySnapshot()).toBeNull();
@@ -2533,13 +2527,13 @@ describe("ApprovalGate", () => {
       await expect(gate.requestAndWait(makeAwayRequest())).resolves.toMatchObject(
         { choice: "allow-once" },
       );
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toContain(
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toContain(
         "remaining=1",
       );
       // Non-vacuous companion to the test above: with budget left, the grant
       // survives and no retirement row is written.
       expect(gate.awayAuthoritySnapshot()?.remaining).toBe(1);
-      expect(rowFor(auditLogger, "[approval:away-retired]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-retired]")).toBeUndefined();
     });
 
     it("re-checks the controller authority at the moment it answers", async () => {
@@ -2551,10 +2545,10 @@ describe("ApprovalGate", () => {
         makeAwayRequest({ remoteControllerAuthority: makePlatformBridgeAuthority(false) }),
       );
 
-      expect(rowFor(auditLogger, "[approval:away-declined]")).toContain(
+      expect(auditRowStartingWith(auditLogger, "[approval:away-declined]")).toContain(
         "reason=authority-not-current",
       );
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toBeUndefined();
       // It fell through to the desk rather than being denied outright: the
       // answerer declining is not a decision about the request.
       expect(wc.send).toHaveBeenCalledTimes(1);
@@ -2567,15 +2561,15 @@ describe("ApprovalGate", () => {
 
       expect(gate.retireAwayAuthority("share-lifecycle")).toBe(true);
       expect(gate.awayAuthoritySnapshot()).toBeNull();
-      expect(rowFor(auditLogger, "[approval:away-retired]")).toContain(
+      expect(auditRowStartingWith(auditLogger, "[approval:away-retired]")).toContain(
         "reason=share-lifecycle",
       );
 
       const promise = gate.requestAndWait(makeAwayRequest());
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toBeUndefined();
       // A retired grant is not this answerer's business any more, so it is also
       // not worth a declined row on every later approval.
-      expect(rowFor(auditLogger, "[approval:away-declined]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-declined]")).toBeUndefined();
       gate.disposeAll();
       await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
     });
@@ -2588,8 +2582,8 @@ describe("ApprovalGate", () => {
       const promise = gate.requestAndWait(
         makeRequest({ id: "desk-while-armed", sessionId: AWAY_CONVERSATION }),
       );
-      expect(rowFor(auditLogger, "[approval:away-declined]")).toBeUndefined();
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-declined]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toBeUndefined();
       gate.disposeAll();
       await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
     });
@@ -2608,13 +2602,13 @@ describe("ApprovalGate", () => {
         }),
       ).toBe(false);
       expect(gate.awayAuthoritySnapshot()).toBeNull();
-      expect(rowFor(auditLogger, "[approval:away-armed]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-armed]")).toBeUndefined();
     });
 
     it("keeps local paths out of the armed row", () => {
       const { auditLogger } = armedGate();
 
-      const armedRow = rowFor(auditLogger, "[approval:away-armed]") as string;
+      const armedRow = auditRowStartingWith(auditLogger, "[approval:away-armed]") as string;
       expect(armedRow).toContain("categories=read,write");
       expect(armedRow).toContain("directories=1");
       expect(armedRow).toContain("budget=5");
@@ -2658,12 +2652,12 @@ describe("ApprovalGate", () => {
         ),
       ).resolves.toMatchObject({ choice: "deny-once" });
 
-      expect(rowFor(auditLogger, "[approval:sensitive-path-blocked]")).toContain(
+      expect(auditRowStartingWith(auditLogger, "[approval:sensitive-path-blocked]")).toContain(
         "away-1",
       );
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toBeUndefined();
       // Not even a declined row: the request never reached the answerer.
-      expect(rowFor(auditLogger, "[approval:away-declined]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-declined]")).toBeUndefined();
       expect(wc.send).not.toHaveBeenCalled();
     });
 
@@ -2703,9 +2697,9 @@ describe("ApprovalGate", () => {
       ).resolves.toMatchObject({ choice: "deny-once" });
 
       expect(
-        rowFor(auditLogger, "[approval:host-shell-binding-mismatch]"),
+        auditRowStartingWith(auditLogger, "[approval:host-shell-binding-mismatch]"),
       ).toContain("away-1");
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toBeUndefined();
     });
 
     it("cannot re-open an unissued execution plan", async () => {
@@ -2719,10 +2713,10 @@ describe("ApprovalGate", () => {
         ),
       ).resolves.toMatchObject({ choice: "deny-once" });
 
-      expect(rowFor(auditLogger, "[approval:execution-plan-invalid]")).toContain(
+      expect(auditRowStartingWith(auditLogger, "[approval:execution-plan-invalid]")).toContain(
         "away-1",
       );
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toBeUndefined();
     });
 
     it("cannot answer for a destroyed window", async () => {
@@ -2743,8 +2737,8 @@ describe("ApprovalGate", () => {
         { choice: "deny-once" },
       );
 
-      expect(rowFor(auditLogger, "[approval:send-failed]")).toContain("away-1");
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:send-failed]")).toContain("away-1");
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toBeUndefined();
     });
 
     it("does not reach the read-only fail-open", async () => {
@@ -2759,10 +2753,10 @@ describe("ApprovalGate", () => {
         ),
       ).resolves.toMatchObject({ choice: "allow-once" });
 
-      const autoApproved = rowFor(auditLogger, "[approval:read-only-auto-approve]");
+      const autoApproved = auditRowStartingWith(auditLogger, "[approval:read-only-auto-approve]");
       expect(autoApproved).toContain("away-1");
       expect(autoApproved).not.toContain("answeredBy=");
-      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      expect(auditRowStartingWith(auditLogger, "[approval:away-answered]")).toBeUndefined();
     });
   });
 

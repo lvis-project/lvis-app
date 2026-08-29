@@ -29,15 +29,12 @@ import {
   dispatchPermissionDirCommand,
   parsePermissionDirCommand,
 } from "../../permissions/permission-slash.js";
+import { parseJsonRecord as parse } from "../../__tests__/test-helpers.js";
 
 let workDir: string;
 
 function ctx(): ToolExecutionContext {
   return { cwd: workDir, extraAllowedDirectories: [], metadata: {} };
-}
-
-function parse(output: string): Record<string, unknown> {
-  return JSON.parse(output) as Record<string, unknown>;
 }
 
 function portablePath(path: string): string {

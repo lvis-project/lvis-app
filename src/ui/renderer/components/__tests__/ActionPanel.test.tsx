@@ -1,15 +1,9 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { type ReactElement } from "react";
+import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { ActionPanel } from "../ActionPanel.js";
-import { emptyActionPanelActivity } from "../../../../../test/renderer/helpers.js";
-
-function renderPanel(ui: ReactElement) {
-  return render(<TooltipProvider>{ui}</TooltipProvider>);
-}
+import { emptyActionPanelActivity, renderWithTooltipProvider as renderPanel } from "../../../../../test/renderer/helpers.js";
 
 describe("ActionPanel item routing", () => {
   it("single-click routes ephemeral, double-click routes pinned (VS Code preview-tab model)", () => {

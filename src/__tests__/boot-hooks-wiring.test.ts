@@ -16,7 +16,7 @@ import { createHookRunner } from "../boot/conversation.js";
 import { wireHookSystem } from "../boot/steps/hook-system-wiring.js";
 import { acceptHookTrust } from "../hooks/hook-trust-commands.js";
 import { HOOKS_CONFIG_FILENAME } from "../hooks/hook-config-trust.js";
-import { writeJsonConfig } from "../hooks/__tests__/test-helpers.js";
+import { writeJsonConfig, hookDirLayout, type HookDirLayout } from "../hooks/__tests__/test-helpers.js";
 import { cleanupTmpDir } from "../__tests__/support/tmp-dir-teardown.js";
 
 describe("boot hook runner wiring", () => {
@@ -45,14 +45,13 @@ describe("boot wireHookSystem — hooks.json rides the TOFU quarantine gate (#81
   let tmpDir: string;
   let hooksDir: string;
   let disabledDir: string;
-  let lockfilePath: string;
+  let layout: HookDirLayout;
   let configPath: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "boot-hooks-wiring-"));
-    hooksDir = join(tmpDir, "hooks");
-    disabledDir = join(hooksDir, ".disabled");
-    lockfilePath = join(hooksDir, ".lockfile.json");
+    layout = hookDirLayout(tmpDir);
+    ({ hooksDir, disabledDir } = layout);
     configPath = join(hooksDir, HOOKS_CONFIG_FILENAME);
     mkdirSync(hooksDir, { recursive: true });
     // Referenced local-script the config points at. Named WITHOUT a
@@ -67,24 +66,20 @@ describe("boot wireHookSystem — hooks.json rides the TOFU quarantine gate (#81
     if (tmpDir) await cleanupTmpDir(tmpDir);
   });
 
-  function opts() {
-    return { hooksDir, disabledDir, lockfilePath };
-  }
-
   const CONFIG = {
     version: 1,
     hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "./policy.sh" }] }] },
   };
 
   it("no hooks.json ⇒ empty registry (back-compat — behavior identical to today)", async () => {
-    const boot = await wireHookSystem(opts());
+    const boot = await wireHookSystem(layout);
     expect(boot.manager.size()).toBe(0);
     expect(boot.trust.trustedConfigEntries).toEqual([]);
   });
 
   it("an UNTRUSTED hooks.json is loaded ONLY into quarantine — never into the registry", async () => {
     writeJsonConfig(configPath, CONFIG);
-    const boot = await wireHookSystem(opts());
+    const boot = await wireHookSystem(layout);
     // Production strict-deny: the config IS discovered but quarantined.
     expect(boot.manager.size()).toBe(0);
     expect(boot.trust.trustedConfigEntries).toEqual([]);
@@ -97,31 +92,31 @@ describe("boot wireHookSystem — hooks.json rides the TOFU quarantine gate (#81
   it("a TRUSTED hooks.json loads its command entries into the registry", async () => {
     writeJsonConfig(configPath, CONFIG);
     // First boot quarantines; user accepts; second boot loads.
-    const firstBoot = await wireHookSystem(opts());
+    const firstBoot = await wireHookSystem(layout);
     expect(firstBoot.manager.size()).toBe(0);
 
     const accepted = await acceptHookTrust(HOOKS_CONFIG_FILENAME, {
-      ...opts(),
+      ...layout,
       manager: firstBoot.manager,
     });
     expect(accepted).toMatchObject({ ok: true });
 
     // A fresh boot now finds the config trusted+unchanged and loads it.
-    const secondBoot = await wireHookSystem(opts());
+    const secondBoot = await wireHookSystem(layout);
     expect(secondBoot.trust.trustedConfigEntries).toHaveLength(1);
     expect(secondBoot.manager.size()).toBe(1);
   });
 
   it("a CHANGED hooks.json after trust is re-quarantined — commands stop running", async () => {
     writeJsonConfig(configPath, CONFIG);
-    const boot1 = await wireHookSystem(opts());
-    await acceptHookTrust(HOOKS_CONFIG_FILENAME, { ...opts(), manager: boot1.manager });
-    const boot2 = await wireHookSystem(opts());
+    const boot1 = await wireHookSystem(layout);
+    await acceptHookTrust(HOOKS_CONFIG_FILENAME, { ...layout, manager: boot1.manager });
+    const boot2 = await wireHookSystem(layout);
     expect(boot2.manager.size()).toBe(1);
 
     // Tamper with the trusted config.
     writeJsonConfig(configPath, { ...CONFIG, version: 999 });
-    const boot3 = await wireHookSystem(opts());
+    const boot3 = await wireHookSystem(layout);
     // Re-quarantined: registry empty again, NO commands load from the changed config.
     expect(boot3.manager.size()).toBe(0);
     expect(boot3.trust.trustedConfigEntries).toEqual([]);

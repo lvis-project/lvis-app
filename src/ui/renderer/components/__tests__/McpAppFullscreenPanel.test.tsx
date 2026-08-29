@@ -22,7 +22,7 @@ import {
   getSlotOccupant,
   moveCard,
 } from "../../state/mcp-app-card-location-store.js";
-import type { McpUiPayload } from "../../../../mcp/types.js";
+import { mcpUiPayload as payload, webviewNodes } from "./mcp-app-panel-fixture.js";
 
 const { createMcpAppBridgeMock } = vi.hoisted(() => ({ createMcpAppBridgeMock: vi.fn() }));
 vi.mock("../mcp-app-bridge.js", () => ({
@@ -35,11 +35,6 @@ const readUiResource = vi.fn(async (serverId: string) => ({
 }));
 const disposeUiSession = vi.fn();
 
-const payload = (serverId: string): McpUiPayload => ({ serverId, resourceUri: "ui://card/1" });
-
-function webviewNodes(container: HTMLElement): NodeListOf<Element> {
-  return container.querySelectorAll("webview");
-}
 
 /** The display-mode halves (5th arg) of the Nth createMcpAppBridge call. */
 function displayDeps(index: number) {

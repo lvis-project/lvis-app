@@ -10,51 +10,46 @@ import {
   rejectHookTrust,
 } from "../hook-trust-commands.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
-import { writeExecutableHook } from "./test-helpers.js";
+import { writeExecutableHook, hookDirLayout, type HookDirLayout } from "./test-helpers.js";
 
 let tmpDir: string;
 let hooksDir: string;
 let disabledDir: string;
-let lockfilePath: string;
+let layout: HookDirLayout;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-hook-commands-"));
-  hooksDir = join(tmpDir, "hooks");
-  disabledDir = join(hooksDir, ".disabled");
-  lockfilePath = join(hooksDir, ".lockfile.json");
+  layout = hookDirLayout(tmpDir);
+  ({ hooksDir, disabledDir } = layout);
 });
 
 afterEach(async () => {
   if (tmpDir) await cleanupTmpDir(tmpDir);
 });
 
-function opts() {
-  return { hooksDir, disabledDir, lockfilePath };
-}
-
 describe("hook trust slash command operations", () => {
   it("accepts a boot-quarantined hook and updates runtime trust", async () => {
     writeExecutableHook(hooksDir, "pre-demo.sh");
-    const boot = await wireHookSystem(opts());
+    const boot = await wireHookSystem(layout);
     expect(boot.manager.size()).toBe(0);
     expect(existsSync(join(disabledDir, "pre-demo.sh"))).toBe(true);
 
     const accepted = await acceptHookTrust("pre-demo.sh", {
-      ...opts(),
+      ...layout,
       manager: boot.manager,
     });
 
     expect(accepted).toMatchObject({ ok: true, verb: "accept" });
     expect(boot.manager.size()).toBe(1);
     expect(existsSync(join(hooksDir, "pre-demo.sh"))).toBe(true);
-    const listed = listHookTrustState(opts());
+    const listed = listHookTrustState(layout);
     expect(listed.active).toMatchObject([{ fileName: "pre-demo.sh", state: "trusted" }]);
   });
 
   it("disables an accepted hook and removes it from runtime trust", async () => {
     writeExecutableHook(hooksDir, "perm-demo.sh");
     const boot = await wireHookSystem({
-      ...opts(),
+      ...layout,
       promptDispatcher: {
         prompt: async () => [{ fileName: "perm-demo.sh", trust: true }],
       },
@@ -62,7 +57,7 @@ describe("hook trust slash command operations", () => {
     expect(boot.manager.size()).toBe(1);
 
     const disabled = await disableHookTrust("perm-demo.sh", {
-      ...opts(),
+      ...layout,
       manager: boot.manager,
     });
 
@@ -72,19 +67,19 @@ describe("hook trust slash command operations", () => {
   });
 
   it("rejects hook names with path separators", async () => {
-    await expect(acceptHookTrust("../pre-demo.sh", opts())).resolves.toMatchObject({
+    await expect(acceptHookTrust("../pre-demo.sh", layout)).resolves.toMatchObject({
       ok: false,
     });
   });
 
   it("reject permanently removes a quarantined hook from .disabled/", async () => {
     writeExecutableHook(hooksDir, "pre-quarantined.sh");
-    const boot = await wireHookSystem(opts());
+    const boot = await wireHookSystem(layout);
     expect(boot.manager.size()).toBe(0);
     expect(existsSync(join(disabledDir, "pre-quarantined.sh"))).toBe(true);
 
     const result = await rejectHookTrust("pre-quarantined.sh", {
-      ...opts(),
+      ...layout,
       manager: boot.manager,
     });
 
@@ -96,7 +91,7 @@ describe("hook trust slash command operations", () => {
   it("reject refuses an active (trusted) hook — must disable first", async () => {
     writeExecutableHook(hooksDir, "perm-active.sh");
     const boot = await wireHookSystem({
-      ...opts(),
+      ...layout,
       promptDispatcher: {
         prompt: async () => [{ fileName: "perm-active.sh", trust: true }],
       },
@@ -104,7 +99,7 @@ describe("hook trust slash command operations", () => {
     expect(boot.manager.size()).toBe(1);
 
     const result = await rejectHookTrust("perm-active.sh", {
-      ...opts(),
+      ...layout,
       manager: boot.manager,
     });
 
@@ -115,14 +110,14 @@ describe("hook trust slash command operations", () => {
   });
 
   it("reject of unknown hook name returns not-found", async () => {
-    await wireHookSystem(opts());
-    const result = await rejectHookTrust("pre-nope.sh", opts());
+    await wireHookSystem(layout);
+    const result = await rejectHookTrust("pre-nope.sh", layout);
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.error).toMatch(/not found/);
   });
 
   it("reject rejects hook names with path separators", async () => {
-    await expect(rejectHookTrust("../escape.sh", opts())).resolves.toMatchObject({
+    await expect(rejectHookTrust("../escape.sh", layout)).resolves.toMatchObject({
       ok: false,
     });
   });

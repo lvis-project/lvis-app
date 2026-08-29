@@ -6,11 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { RoutinesScheduler } from "../routines-scheduler.js";
-import { futureIso, tempRoutinesStore } from "./routines-fixture.js";
-
-function pastIso(offsetMs = -1000): string {
-  return new Date(Date.now() + offsetMs).toISOString();
-}
+import { futureIso, tempRoutinesStore, pastIso } from "./routines-fixture.js";
 
 describe("RoutinesScheduler — llm-session dispatch", () => {
   it("fires onLlmSession handler when llm-session routine is due", async () => {

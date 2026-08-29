@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type { IpcMainInvokeEvent } from "electron";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
+import type { ChatEntry } from "../lib/chat-stream-state.js";
 
 export function makeMockWebContents() {
   return {
@@ -215,4 +216,32 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
  */
 export function readRepoFile(path: string): string {
   return readFileSync(resolve(REPO_ROOT, path), "utf8");
+}
+
+/** A user transcript entry — the minimal shape every transcript suite starts from. */
+export function userEntry(text: string): ChatEntry {
+  return { kind: "user", text };
+}
+
+/** A settled (non-streaming) assistant entry with the given body. */
+export function assistantEntry(text: string): Extract<ChatEntry, { kind: "assistant" }> {
+  return { kind: "assistant", text, streaming: false };
+}
+
+/** Let un-awaited work that was queued with setImmediate run before asserting on it. */
+export function settleMacrotask(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Override `process.platform` for a platform-branching subject. The caller
+ * owns restoring the real value in its own afterEach.
+ */
+export function setProcessPlatform(value: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", { value, configurable: true });
+}
+
+/** Parse a tool's JSON text output as a keyed record. */
+export function parseJsonRecord(output: string): Record<string, unknown> {
+  return JSON.parse(output) as Record<string, unknown>;
 }

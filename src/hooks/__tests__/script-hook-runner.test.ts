@@ -4,24 +4,17 @@
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  */
 import { describe, expect, it } from "vitest";
-import { resolve } from "node:path";
 import {
   parseHookStdout,
   runHookChain,
   runOneHookScript,
 } from "../script-hook-runner.js";
 import type { ScriptHookStdin } from "../script-hook-types.js";
-import { fixtureHook as buildFixtureHook } from "./test-helpers.js";
+import { repoFixtureHook as hookFixture } from "./test-helpers.js";
 
-const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 const WINDOWS_SHELL_TIMEOUT_MS = 20_000;
 const shellIntegrationOptions =
   process.platform === "win32" ? { timeoutMs: WINDOWS_SHELL_TIMEOUT_MS } : undefined;
-
-const hookFixture = (
-  fileName: string,
-  type: "pre" | "post" | "perm" = "pre",
-): ReturnType<typeof buildFixtureHook> => buildFixtureHook(FIXTURE_ROOT, fileName, type);
 
 const samplePayload: ScriptHookStdin = {
   hookType: "pre",

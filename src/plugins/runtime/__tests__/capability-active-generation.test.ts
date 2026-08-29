@@ -25,6 +25,7 @@ import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
 import { canonicalJSON } from "../../whitelist/canonical-json.js";
 import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
+import { settleMacrotask as nextTurn } from "../../../__tests__/test-helpers.js";
 
 type WrittenPlugin = {
   id: string;
@@ -55,10 +56,6 @@ function deferredGate(): {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
-}
-
-function nextTurn(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
 }
 
 describe("PluginRuntime capability dependencies use active generations", () => {
