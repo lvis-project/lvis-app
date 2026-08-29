@@ -30,13 +30,10 @@ import {
 } from "../shared/tool-result-stub.js";
 import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-index.js";
 import { isRecord } from "../shared/is-record.js";
+import { escapeRegExp } from "../shared/escape-reg-exp.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 interface FileSnapshot {
   content: string;

@@ -1,4 +1,5 @@
 import { TOOL_SEARCH_TOOL_NAME } from "../tools/registry.js";
+import { escapeRegExp } from "./escape-reg-exp.js";
 
 export const OPENAI_RESPONSES_TOOL_SEARCH_ALIAS = "lvis_tool_search";
 
@@ -27,8 +28,4 @@ export function normalizeProviderToolAliasText(text: string): string {
     );
   }
   return restored;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
