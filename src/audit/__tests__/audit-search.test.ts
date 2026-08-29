@@ -168,8 +168,16 @@ describe("AuditLogger.search()", () => {
     const filePath = join(auditDir, "2026-04-17.jsonl");
     const output = createWriteStream(filePath, { encoding: "utf-8" });
     const totalRows = 50_000;
+    // One millisecond apart, so the newest-first order the page is sliced from
+    // is the row index reversed and the expectation below is exact rather than
+    // a tie-break the writer happened to produce.
+    const firstInstant = Date.parse("2026-04-17T00:00:00.000Z");
     for (let index = 0; index < totalRows; index += 1) {
-      const line = `${JSON.stringify(makeEntry({ input: `${index}:${"x".repeat(1_000)}` }))}\n`;
+      const entry = makeEntry({
+        input: `${index}:${"x".repeat(1_000)}`,
+        timestamp: new Date(firstInstant + index).toISOString(),
+      });
+      const line = `${JSON.stringify(entry)}\n`;
       if (!output.write(line)) await once(output, "drain");
     }
     output.end();
@@ -189,12 +197,13 @@ describe("AuditLogger.search()", () => {
 
     expect(result.total).toBe(totalRows);
     expect(result.entries).toHaveLength(5);
+    // Newest first: offset 49_990 lands 49_990 rows back from the newest.
     expect(result.entries.map((entry) => entry.input?.split(":", 1)[0])).toEqual([
-      "49990",
-      "49991",
-      "49992",
-      "49993",
-      "49994",
+      "9",
+      "8",
+      "7",
+      "6",
+      "5",
     ]);
     expect(eventLoopTicks).toBeGreaterThan(0);
   }, 30_000);
@@ -343,6 +352,137 @@ describe("AuditLogger.search() — host-local day range over UTC partitions", ()
   it("rejects a malformed day key instead of silently widening the range", async () => {
     const logger = new AuditLogger();
     await expect(logger.search({ dateFrom: "2026-6-1" })).rejects.toThrow(TypeError);
+  });
+});
+
+/**
+ * One day's rows are split across a handful of channel files that are read in
+ * file-name order, so the raw stream restarts at the day's first instant on
+ * every channel boundary. `search` orders by the row's own instant instead, and
+ * every case below pins a TZ so the fixture means the same thing under the UTC
+ * and Asia/Seoul runs.
+ */
+describe("AuditLogger.search() — newest-first across a day's channel files", () => {
+  let previousTz: string | undefined;
+
+  beforeEach(() => {
+    previousTz = process.env.TZ;
+    process.env.TZ = "Asia/Seoul";
+  });
+
+  afterEach(() => {
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  });
+
+  /** Instants inside 2026-06-16 in BOTH UTC and Asia/Seoul. */
+  function writeDayChannels(): void {
+    writeJsonl("2026-06-16.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T01:00:00.000Z", input: "turn-first" }),
+      makeEntry({ timestamp: "2026-06-16T09:00:00.000Z", input: "turn-last" }),
+    ]);
+    writeJsonl("2026-06-16.permission-audit.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T02:00:00.000Z", input: "permission" }),
+    ]);
+    writeJsonl("2026-06-16.sandbox-gate.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T05:00:00.000Z", input: "gate" }),
+    ]);
+    writeJsonl("2026-06-16.sandbox.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T03:00:00.000Z", input: "sandbox" }),
+    ]);
+  }
+
+  it("returns one monotonically descending run, not one per channel file", async () => {
+    writeDayChannels();
+    const logger = new AuditLogger();
+    const { entries, total } = await logger.search({ dateFrom: "2026-06-16", dateTo: "2026-06-16" });
+    expect(total).toBe(5);
+    expect(entries.map((e) => e.input)).toEqual([
+      "turn-last",
+      "gate",
+      "sandbox",
+      "permission",
+      "turn-first",
+    ]);
+    const instants = entries.map((e) => Date.parse(e.timestamp));
+    expect(instants).toEqual([...instants].sort((a, b) => b - a));
+  });
+
+  it("offset indexes that order, so paging walks backwards through time", async () => {
+    writeDayChannels();
+    const logger = new AuditLogger();
+    const page = await logger.search({
+      dateFrom: "2026-06-16",
+      dateTo: "2026-06-16",
+      limit: 2,
+      offset: 1,
+    });
+    expect(page.total).toBe(5);
+    expect(page.entries.map((e) => e.input)).toEqual(["gate", "sandbox"]);
+  });
+
+  it("breaks a same-millisecond tie on read order, so a page is deterministic", async () => {
+    writeJsonl("2026-06-16.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T04:00:00.000Z", input: "first-read" }),
+      makeEntry({ timestamp: "2026-06-16T04:00:00.000Z", input: "second-read" }),
+    ]);
+    writeJsonl("2026-06-16.sandbox.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T04:00:00.000Z", input: "third-read" }),
+    ]);
+    const logger = new AuditLogger();
+    const { entries } = await logger.search({ dateFrom: "2026-06-16", dateTo: "2026-06-16" });
+    expect(entries.map((e) => e.input)).toEqual(["first-read", "second-read", "third-read"]);
+  });
+
+  it("sorts a row with an unreadable instant last, and only when no bound is set", async () => {
+    writeJsonl("2026-06-16.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T04:00:00.000Z", input: "timed" }),
+      { ...makeEntry({ input: "untimed" }), timestamp: undefined } as unknown as AuditEntry,
+    ]);
+    const logger = new AuditLogger();
+    const unbounded = await logger.search({});
+    expect(unbounded.entries.map((e) => e.input)).toEqual(["timed", "untimed"]);
+    const bounded = await logger.search({ dateFrom: "2026-06-16", dateTo: "2026-06-16" });
+    expect(bounded.entries.map((e) => e.input)).toEqual(["timed"]);
+  });
+});
+
+/**
+ * Rows whose HMAC seal did not verify are moved aside into a `…-unverified-…`
+ * file. Nothing in a search result or a stat count can say a row lost its seal,
+ * so those files stay out of both.
+ */
+describe("AuditLogger — quarantined unverified rows", () => {
+  const QUARANTINE_FILES = [
+    "2026-06-16.permission-audit.torn-unverified-4096-1781568000000.jsonl",
+    "2026-06-16.permission-audit.legacy-unverified-a1b2c3d4e5f6.jsonl",
+  ];
+
+  function writeVerifiedAndQuarantined(): void {
+    writeJsonl("2026-06-16.permission-audit.jsonl", [
+      makeEntry({ timestamp: "2026-06-16T04:00:00.000Z", type: "approval", input: "sealed" }),
+    ]);
+    for (const name of QUARANTINE_FILES) {
+      writeJsonl(name, [
+        makeEntry({ timestamp: "2026-06-16T05:00:00.000Z", type: "approval", input: "unsealed" }),
+      ]);
+    }
+  }
+
+  it("search never returns them", async () => {
+    writeVerifiedAndQuarantined();
+    const logger = new AuditLogger();
+    const { entries, total } = await logger.search({ dateFrom: "2026-06-16", dateTo: "2026-06-16" });
+    expect(total).toBe(1);
+    expect(entries.map((e) => e.input)).toEqual(["sealed"]);
+  });
+
+  it("getStats never counts them", async () => {
+    writeVerifiedAndQuarantined();
+    const logger = new AuditLogger(undefined, { now: () => new Date("2026-06-16T12:00:00.000Z") });
+    const stats = await logger.getStats(1);
+    expect(stats.sensitiveOps).toBe(1);
+    expect(stats.totalByType).toEqual({ approval: 1 });
   });
 });
 
