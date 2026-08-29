@@ -18,7 +18,7 @@ import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-
 import {
   isSharedApprovalToolIdentifier,
   type ApprovalPurposeSuggestion,
-  type PermissionReviewRiskLevel,
+  type RiskLevel,
   type PermissionReviewStatus,
 } from "../shared/permission-review-status.js";
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
@@ -91,7 +91,7 @@ export interface ConversationAssistantRound {
 export interface ConversationPermissionReview {
   readonly status: PermissionReviewStatus;
   readonly tool: ConversationToolReference;
-  readonly verdictLevel?: PermissionReviewRiskLevel;
+  readonly verdictLevel?: RiskLevel;
   /** Reason and generated approval purpose are owner-only review context. */
   readonly ownerDetail: {
     readonly reason?: string;

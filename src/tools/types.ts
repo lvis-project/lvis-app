@@ -12,27 +12,14 @@
  *   - Carry §6.3 Layer 1 deny rules through the registry.
  */
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
+import type { ToolCategory, ToolSource } from "../shared/permission-review-status.js";
 
-export type ToolSource = "builtin" | "plugin" | "mcp";
+// Owned by `shared/permission-review-status.ts` so renderer/lib code can name
+// them without depending on the tools domain; re-exported here for tools callers.
+export type { ToolCategory, ToolSource };
 import type { HostShellExecutionPlan } from "../permissions/host-shell-execution-plan.js";
 import type { HostShellExecutionPermit } from "../permissions/host-shell-execution-permit.js";
 export type TrustLevel = "high" | "medium" | "low";
-
-/**
- * Permission policy 5-axis tool category. Replaces the legacy `read | write | dangerous`
- * binary-ish split with category-aware policy lanes (PermissionManager
- * Layer 3 decision matrix in permission-policy-design.md):
- *
- * - `read`    — automatically allowed for builtin, scope-checked for plugin
- * - `write`   — ask (user confirmation)
- * - `shell`   — ask + Bash AST validation (subset of write where command
- *               structure must be parsed)
- * - `network` — ask + endpoint surface (HTTP/IPC writes to external hosts)
- * - `meta`    — control-flow / UI primitives (`ask_user_question`,
- *               `agent_spawn`). Decision delegated to {@link ToolDecisionOverride}
- *               so executor short-circuit paths stay explicit.
- */
-export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
 
 /**
  * Permission policy explicit decision override for `meta` category tools. When a tool's

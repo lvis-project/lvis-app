@@ -20,7 +20,7 @@ import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { ExecutionMode } from "../permissions/permission-manager.js";
 import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
-import type { DeferredGrantScope } from "../permissions/reviewer/deferred-queue.js";
+import type { DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
 
 export type TrustOrigin = HookTrustOrigin;
 export type PermissionMode = ExecutionMode;
@@ -31,7 +31,7 @@ export type PermissionMode = ExecutionMode;
  * can pass the runtime verdict in directly.
  */
 export interface RiskVerdict {
-  level: "low" | "medium" | "high";
+  level: RiskLevel;
   reason: string;
 }
 

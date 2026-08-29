@@ -48,7 +48,7 @@ import type { TelegramConnectionOwnerApi } from "../../shared/telegram-connectio
 import type { AwayAuthorityOwnerApi } from "../../shared/away-authority-arm.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
-import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
+import type { ApprovalPurposeSuggestion, ToolCategory, ToolSource, RiskLevel, DeferredGrantScope } from "../../shared/permission-review-status.js";
 import type {
   AssistantAgentSummary,
   AssistantSkillSummary,
@@ -1516,9 +1516,9 @@ export type ApprovalRequest = {
   allowedChoices?: readonly ApprovalChoice[];
   toolName: string;
   /** Permission policy category for the invocation shown in the UI. */
-  toolCategory?: "read" | "write" | "shell" | "network" | "meta";
+  toolCategory?: ToolCategory;
   /** Reviewer verdict when the ask came from auto-review. */
-  reviewerVerdict?: { level: "low" | "medium" | "high"; reason: string };
+  reviewerVerdict?: { level: RiskLevel; reason: string };
   /** Captured policy/sandbox context for user review. */
   evaluationContext?: PermissionEvaluationContextShape;
   /** Suggested natural-language purpose shown in the approval dock. */
@@ -1537,7 +1537,7 @@ export type ApprovalRequest = {
   parentEscalation?: ParentEscalationNotice;
   args: unknown;
   reason: string;
-  source?: "builtin" | "plugin" | "mcp";
+  source?: ToolSource;
   /** Plugin id that issued this approval request, when source === "plugin". */
   sourcePluginId?: string;
   /** Manifest-declared plugin approval scope for agent-action requests. */
@@ -1710,12 +1710,12 @@ export interface DeferredQueueEntry {
   id: string;
   ts: string;
   toolName: string;
-  source: "builtin" | "plugin" | "mcp";
-  category: "read" | "write" | "shell" | "network" | "meta";
+  source: ToolSource;
+  category: ToolCategory;
   inputSummary: string;
   /** Captured policy/sandbox context for user review. */
   evaluationContext?: PermissionEvaluationContextShape;
-  verdict: { level: "low" | "medium" | "high"; reason: string };
+  verdict: { level: RiskLevel; reason: string };
   /**
    * What approving this entry grants. Absent ⇒ approval is unavailable: the
    * original call is dead and this lane recorded nothing to grant forward, so
@@ -1727,15 +1727,6 @@ export interface DeferredQueueEntry {
   resolvedScope?: DeferredGrantScope;
   resolutionReason?: string;
 }
-
-/**
- * Grant breadth for a deferred approval. No "once": the call it would have
- * scoped is already over. Mirrors `DeferredGrantScope`.
- */
-export type DeferredGrantScope = "session" | "always";
-
-/** Narrowest breadth a deferred approval can carry. Mirrors the host constant. */
-export const NARROWEST_DEFERRED_SCOPE: DeferredGrantScope = "session";
 
 export interface HookTrustRow {
   fileName: string;

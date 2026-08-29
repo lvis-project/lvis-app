@@ -2600,11 +2600,6 @@
     {
       "type": "types",
       "file": "src/shared/rationale-approval-display.ts",
-      "name": "RationaleApprovalDisplayRiskLevel"
-    },
-    {
-      "type": "types",
-      "file": "src/shared/rationale-approval-display.ts",
       "name": "RationaleApprovalDisplayScopeAlignment"
     },
     {
