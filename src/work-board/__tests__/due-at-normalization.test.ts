@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { normalizeBoardDueDates, normalizeDueAt } from "../board-file.js";
-import { localDateKey } from "../../shared/local-date.js";
+import { localDateKey, localDayStart } from "../../shared/local-date.js";
 import type { WorkItem } from "../../shared/work-board-types.js";
 
 let previousTz: string | undefined;
@@ -68,6 +68,40 @@ describe("normalizeDueAt", () => {
   it("leaves an unparseable value alone", () => {
     withTz("UTC", () => {
       expect(normalizeDueAt("not-a-date+09:00")).toBe("not-a-date+09:00");
+    });
+  });
+
+  it("never touches a value this code wrote, so the day survives host hopping", () => {
+    // The current format is `localDayStart(day).toISOString()` — always `Z`.
+    // Re-anchoring one would make the stored bytes follow whichever host opened
+    // the board last: written on a UTC host as the 16th and re-stamped by a
+    // Seoul host, it read as the 15th back on the original host. The
+    // single-host idempotency case below cannot see this; only a round trip can.
+    const seeded = withTz("UTC", () => localDayStart("2026-06-16")!.toISOString());
+    expect(seeded).toBe("2026-06-16T00:00:00.000Z");
+
+    const afterSeoul = withTz("Asia/Seoul", () => normalizeDueAt(seeded));
+    expect(afterSeoul).toBe(seeded);
+
+    withTz("UTC", () => {
+      expect(localDateKey(new Date(afterSeoul))).toBe("2026-06-16");
+    });
+  });
+
+  it("still migrates the legacy +09:00 stamp in every zone", () => {
+    // The guard above must not have switched the migration off. In each zone the
+    // legacy value moves, and moves to that zone's midnight for the picked day.
+    for (const zone of ["UTC", "America/New_York", "America/Los_Angeles", "Europe/London"]) {
+      withTz(zone, () => {
+        const migrated = normalizeDueAt(KST_MIDNIGHT_JUN16);
+        expect(migrated).not.toBe(KST_MIDNIGHT_JUN16);
+        expect(migrated).toBe(localDayStart("2026-06-16")!.toISOString());
+        expect(localDateKey(new Date(migrated))).toBe("2026-06-16");
+      });
+    }
+    // Seoul is the one zone where it is already correct and stays byte-identical.
+    withTz("Asia/Seoul", () => {
+      expect(normalizeDueAt(KST_MIDNIGHT_JUN16)).toBe(KST_MIDNIGHT_JUN16);
     });
   });
 

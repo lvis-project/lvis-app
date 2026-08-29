@@ -69,6 +69,8 @@ function explicitOffsetMinutes(iso: string): number | null {
  *
  *   - it must carry an explicit offset (no offset means we cannot tell what the
  *     writer meant, so we leave it alone);
+ *   - that offset must not be `Z`, which is this code's own output rather than
+ *     the legacy stamp;
  *   - that offset must differ from the host's offset at that instant (otherwise
  *     it is already host-local midnight, or a value we have already converted);
  *   - and its time of day IN ITS OWN OFFSET must be exactly 00:00:00.000.
@@ -76,13 +78,21 @@ function explicitOffsetMinutes(iso: string): number | null {
  * A due date with a real time on it was never a day-picker value and keeps its
  * instant exactly.
  *
- * Idempotent: the value it writes back is host-local midnight serialized as
- * UTC, so on the next load either the offset matches the host (nothing to do)
- * or the time of day is no longer 00:00 (nothing to do).
+ * Idempotent, and stable across hosts rather than merely across repeat loads on
+ * one host: what it writes back is serialized with a `Z`, which the second rule
+ * above excludes from ever being touched again — by this host or any other.
  */
 export function normalizeDueAt(dueAt: string): string {
   const offsetMinutes = explicitOffsetMinutes(dueAt);
   if (offsetMinutes === null) return dueAt;
+  // `Z` is what THIS code writes (`localDayStart(day).toISOString()`), never the
+  // legacy `+09:00` stamp — so a `Z` value is already anchored to the day its
+  // author picked and has nothing to migrate. Re-anchoring it would make the
+  // value follow whichever host opened the board last: written on a UTC host as
+  // the 16th, re-stamped by a Seoul host, it reads as the 15th back on the
+  // original host. A one-time fix-up of historical data must not become a
+  // rewrite that ping-pongs between machines.
+  if (offsetMinutes === 0) return dueAt;
 
   const instant = new Date(dueAt);
   if (Number.isNaN(instant.getTime())) return dueAt;
