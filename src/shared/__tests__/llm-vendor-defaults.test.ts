@@ -20,6 +20,8 @@ import {
   isSelfHostedTrustedNetworkVendor,
   isSelfHostedVllmVendor,
   normalizeLlmVendorModel,
+  DEFAULT_LLM_VENDOR,
+  narrowLlmVendor,
 } from "../llm-vendor-defaults.js";
 
 describe("isLLMVendor", () => {
@@ -243,5 +245,14 @@ describe("LLM vendor defaults", () => {
       }
       expect(options).toContain(defaultModel);
     }
+  });
+});
+
+describe("narrowLlmVendor", () => {
+  it("returns a known vendor unchanged and the default for anything else", () => {
+    expect(narrowLlmVendor("claude")).toBe("claude");
+    expect(narrowLlmVendor("not-a-vendor")).toBe(DEFAULT_LLM_VENDOR);
+    expect(narrowLlmVendor(undefined)).toBe(DEFAULT_LLM_VENDOR);
+    expect(narrowLlmVendor(42)).toBe(DEFAULT_LLM_VENDOR);
   });
 });

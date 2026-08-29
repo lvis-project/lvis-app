@@ -424,6 +424,15 @@ export function isLLMVendor(v: unknown): v is LLMVendor {
   );
 }
 
+/**
+ * {@link isLLMVendor} as a narrower: the vendor if it is known, otherwise
+ * {@link DEFAULT_LLM_VENDOR}. For the renderer's settings/IPC boundaries,
+ * where an unknown vendor string must not leave a control without a vendor.
+ */
+export function narrowLlmVendor(raw: unknown): LLMVendor {
+  return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
+}
+
 export function isOpenAICompatiblePresetVendor(
   v: unknown,
 ): v is OpenAICompatiblePresetVendor {

@@ -6,7 +6,7 @@ import {
   canUseLlmVendorWithoutApiKey,
   DEFAULT_LLM_VENDOR,
   getLlmVendorSettings,
-  isLLMVendor,
+  narrowLlmVendor,
   type LLMVendor,
 } from "../../../shared/llm-vendor-defaults.js";
 import {
@@ -16,18 +16,6 @@ import {
   type SubscriptionRuntimeCapabilities,
 } from "../../../shared/subscription-runtime.js";
 import { selectSubscriptionRuntimeUiPolicy, type SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
-
-/**
- * External-boundary narrowing helper. Lives at module scope so its
- * identity is stable — `useCallback` / `useEffect` closures that call
- * this never change identity because of render churn, which keeps the
- * `react-hooks/exhaustive-deps` lint happy and prevents false-positive
- * stale-closure churn. Pure: depends only on the module-level
- * `isLLMVendor` import.
- */
-function narrowVendor(raw: unknown): LLMVendor {
-  return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
-}
 
 function canUseSettingsWithoutApiKey(
   settings: Awaited<ReturnType<LvisApi["getSettings"]>>,
@@ -135,7 +123,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
   const applySettingsSnapshot = useCallback(
     (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
       if (!isMountedRef.current) return;
-      const provider = narrowVendor(settings.llm.provider);
+      const provider = narrowLlmVendor(settings.llm.provider);
       const block = getLlmVendorSettings(settings.llm.vendors, provider);
       setLlmVendor(provider);
       setLlmModel(llmRouteModel(
@@ -263,7 +251,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
         // update lands somewhere valid; if the user is actively on a
         // different vendor, the next settings load will re-narrow and
         // the toggle re-targets correctly.
-        const provider = narrowVendor(s.llm.provider);
+        const provider = narrowLlmVendor(s.llm.provider);
         setEnableThinkingChat(next);
         await api.updateSettings({
           llm: { vendors: { [provider]: { enableThinking: next } } },
