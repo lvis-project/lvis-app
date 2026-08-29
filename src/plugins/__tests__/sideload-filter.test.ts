@@ -21,6 +21,23 @@ describe("buildSideloadCopyFilter", () => {
     expect(filter(join(root, "plugin.json"))).toBe(true);
   });
 
+  /**
+   * Thrown rather than filtered out. A developer whose source tree carries a
+   * `data/` expected that state to be installed; dropping it silently would
+   * leave them believing it was, and promoting it would put a second candidate
+   * for the plugin's state into the root the swap carries the live one into.
+   */
+  it("refuses a top-level runtime directory in the source tree", () => {
+    expect(() => filter(join(root, "data"))).toThrow(/top-level runtime directory/);
+    expect(() => filter(join(root, "run"))).toThrow(/top-level runtime directory/);
+    expect(() => filter(join(root, "sockets"))).toThrow(/top-level runtime directory/);
+  });
+
+  it("accepts the same names nested inside the payload", () => {
+    expect(filter(join(root, "dist", "data"))).toBe(true);
+    expect(filter(join(root, "database"))).toBe(true);
+  });
+
   it("rejects top-level node_modules/electron", () => {
     expect(filter(join(root, "node_modules", "electron"))).toBe(false);
   });

@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
+import { isPluginRuntimeDirName } from "./plugin-storage-layout.js";
 
 /**
  * Returns a `node:fs/promises.cp({ filter })` callback that skips trees
@@ -17,6 +18,17 @@ export function buildSideloadCopyFilter(sourceRoot: string): (src: string) => bo
     const rel = relative(sourceRoot, src);
     if (!rel) return true;
     const parts = rel.split(/[\\/]/);
+    // Same refusal the marketplace path makes in `sanitizeZipEntryPath`, for
+    // the same reason: a sideload source holding a top-level runtime directory
+    // would promote a second candidate for the plugin's state into the root
+    // the swap is about to carry the live one into. Thrown rather than
+    // filtered out — `cp` propagates it — because a developer whose source
+    // tree has a `data/` in it needs to be told, not quietly trimmed.
+    if (parts.length === 1 && isPluginRuntimeDirName(parts[0]!)) {
+      throw new Error(
+        `[installLocal] plugin source may not contain a top-level runtime directory: ${rel}`,
+      );
+    }
     if (parts[0] === ".git") return false;
     const nmIdx = parts.indexOf("node_modules");
     if (nmIdx >= 0) {
