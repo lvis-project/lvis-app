@@ -7,7 +7,15 @@ export type WorkAreaBounds = {
   height: number;
 };
 
-const MAIN_WINDOW_WIDTH = 460;
+/**
+ * The width the shell OPENS at — a single chat column — as opposed to the
+ * width it may be dragged down to. They are the same number today because the
+ * shell opens at its own floor with nothing to give back, but they answer
+ * different questions and must stay separately settable: a wider default would
+ * not widen the minimum. Exported so the bounds tests assert against the
+ * preferred width rather than writing 460 out again.
+ */
+export const MAIN_WINDOW_WIDTH = 460;
 const MAIN_WINDOW_HEIGHT = 840;
 export const MAIN_WINDOW_MIN_WIDTH = 460;
 export const MAIN_WINDOW_MIN_HEIGHT = 640;

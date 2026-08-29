@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHAT_SIDE_PANEL_WIDTH, computeChatModeSidePanelBounds, computeInitialMainWindowBounds } from "../main-window-bounds.js";
+import { CHAT_SIDE_PANEL_WIDTH, MAIN_WINDOW_WIDTH, computeChatModeSidePanelBounds, computeInitialMainWindowBounds } from "../main-window-bounds.js";
 
 describe("computeInitialMainWindowBounds", () => {
   it("keeps the default macOS placement at the upper-right of the work area", () => {
@@ -8,7 +8,7 @@ describe("computeInitialMainWindowBounds", () => {
       "darwin"
     );
 
-    expect(bounds).toEqual({ x: 1450, y: 24, width: 460, height: 840 });
+    expect(bounds).toEqual({ x: 1450, y: 24, width: MAIN_WINDOW_WIDTH, height: 840 });
   });
 
   it("places the default Windows window at the lower-right of the work area", () => {
@@ -17,7 +17,7 @@ describe("computeInitialMainWindowBounds", () => {
       "win32"
     );
 
-    expect(bounds).toEqual({ x: 1450, y: 216, width: 460, height: 840 });
+    expect(bounds).toEqual({ x: 1450, y: 216, width: MAIN_WINDOW_WIDTH, height: 840 });
   });
 
   it("honors offset work areas when computing Windows lower-right placement", () => {
@@ -26,7 +26,7 @@ describe("computeInitialMainWindowBounds", () => {
       "win32"
     );
 
-    expect(bounds).toEqual({ x: 1230, y: 86, width: 460, height: 840 });
+    expect(bounds).toEqual({ x: 1230, y: 86, width: MAIN_WINDOW_WIDTH, height: 840 });
   });
 
   it("keeps the window on the top edge when the work area cannot fit the preferred bottom gap", () => {
@@ -35,7 +35,7 @@ describe("computeInitialMainWindowBounds", () => {
       "win32"
     );
 
-    expect(bounds).toEqual({ x: 30, y: 0, width: 460, height: 650 });
+    expect(bounds).toEqual({ x: 30, y: 0, width: MAIN_WINDOW_WIDTH, height: 650 });
   });
 
   it("expands chat bounds by the side-panel width while keeping the right edge docked on Windows", () => {
