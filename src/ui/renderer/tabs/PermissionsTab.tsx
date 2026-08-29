@@ -16,6 +16,11 @@ import {
 } from "../../../components/ui/select.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS, LONG_TOAST_TTL_MS } from "../constants.js";
+import {
+  isExecutionMode,
+  normalizeExecutionMode,
+  type ExecutionModeDisplay,
+} from "../../../shared/permission-mode.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import type {
   ExecutionMode,
@@ -134,7 +139,9 @@ export function PermissionsTab({
   }, []);
 
   // ── Execution Mode ────────────────────────────────
-  const [mode, setMode] = useState<ExecutionMode>("default");
+  // "unknown" until the first host read lands, and whenever the host reports a
+  // mode this tab cannot name: no radio is selected rather than a wrong one.
+  const [mode, setMode] = useState<ExecutionModeDisplay>("unknown");
   const [modeBusy, setModeBusy] = useState(false);
 
   // ── Explicit Approval Policy ──────────────────────
@@ -234,7 +241,7 @@ export function PermissionsTab({
       if (!reviewerRes.ok) {
         throw new Error(reviewerRes.error);
       }
-      setMode((modeRes.mode as ExecutionMode) ?? "default");
+      setMode(normalizeExecutionMode(modeRes.mode));
       setRequireExplicit(policyRes.requireExplicitApproval);
       // Host-derived: `managed` alone misses an admin-dir file that does not
       // set managed:true, which savePolicy still refuses to overwrite.
@@ -361,7 +368,7 @@ export function PermissionsTab({
 
   useEffect(() => {
     const unsubscribe = window.lvis?.permission?.onModeChanged?.((nextMode) => {
-      setMode((nextMode as ExecutionMode) ?? "default");
+      setMode(normalizeExecutionMode(nextMode));
       void fetchAll();
     });
     return () => {
@@ -427,7 +434,7 @@ export function PermissionsTab({
       if (m !== mode) {
         const res = await window.lvis.permission.setMode(m);
         if (res.ok) {
-          setMode(res.mode as ExecutionMode);
+          setMode(normalizeExecutionMode(res.mode));
           modeChanged = true;
         } else {
           showBanner("error", res.message ?? res.error ?? t("permissionsTab.errorModeChangeFailed"));
@@ -917,7 +924,7 @@ export function PermissionsTab({
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="rounded-md border px-3 py-2">
               <p className="text-[11px] font-medium text-muted-foreground">{t("permissionsTab.summaryPolicyPreset")}</p>
-              <p className="mt-1 text-sm font-medium">{EXEC_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? mode}</p>
+              <p className="mt-1 text-sm font-medium">{EXEC_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? t("permissionModeBadge.labelUnknown")}</p>
             </div>
             <div className="rounded-md border px-3 py-2">
               <p className="text-[11px] font-medium text-muted-foreground">{t("permissionsTab.summaryApprovalDialog")}</p>
@@ -935,7 +942,10 @@ export function PermissionsTab({
             value={mode}
             disabled={modeBusy}
             aria-label={t("permissionsTab.policyAriaLabel")}
-            onValueChange={(value) => void handleModeChange(value as ExecutionMode)}
+            onValueChange={(value) => {
+              if (!isExecutionMode(value)) return;
+              void handleModeChange(value);
+            }}
             className="space-y-1.5"
           >
             {EXEC_MODE_OPTIONS.map((opt) => (

@@ -17,11 +17,11 @@ export type ExecutionMode = (typeof EXECUTION_MODES)[number];
  */
 export type ExecutionModeDisplay = ExecutionMode | "unknown";
 
-function isExecutionMode(value: unknown): value is ExecutionMode {
+export function isExecutionMode(value: unknown): value is ExecutionMode {
   return typeof value === "string" && (EXECUTION_MODES as readonly string[]).includes(value);
 }
 
-/** Narrow a host-reported mode string to the display union. */
-export function normalizeExecutionMode(raw: string): ExecutionModeDisplay {
+/** Narrow a host-reported mode (an IPC value, so anything) to the display union. */
+export function normalizeExecutionMode(raw: unknown): ExecutionModeDisplay {
   return isExecutionMode(raw) ? raw : "unknown";
 }
