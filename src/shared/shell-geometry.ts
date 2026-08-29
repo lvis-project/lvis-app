@@ -113,3 +113,36 @@ const CARD_LEFT_INSET = SHELL_GUTTER;
  */
 const CLUSTER_FIRST_BUTTON_X = TRAFFIC_LIGHT_RIGHT_EDGE + SHELL_GUTTER;
 export const CLUSTER_LEAD_PAD_DARWIN = CLUSTER_FIRST_BUTTON_X - CARD_LEFT_INSET;
+
+/**
+ * Card edge -> where a content title starts.
+ *
+ * The main surface sits one gutter past the sidebar card and carries another of
+ * its own leading padding, so every view's title — a plugin's name, the chat
+ * group's conversation title — begins two gutters in. The band's path is the
+ * same label one row up, and a path that stopped at the card edge read as
+ * belonging to the sidebar rather than to the thing it names.
+ */
+export const CONTENT_TITLE_INSET = SHELL_GUTTER * 2;
+
+/**
+ * What `<main>` reserves on its leading edge while the sidebar is a collapsed
+ * icon rail — in px, like everything else on the lights' line. Mirrored in CSS
+ * as `--shell-collapsed-rail-reserve` (a pair `check-shell-geometry-tokens.mjs`
+ * holds together): the content surface pads by the token, the banner stack
+ * insets past it, and the title band reads this constant to put its path on
+ * the content title.
+ *
+ * The number is pinned by the traffic lights, not by the rail. On darwin the
+ * band's content can start no further left than `BAND_LEAD_PAD_DARWIN`, and
+ * the collapsed title sits `CONTENT_TITLE_INSET` past the reserve, so the path
+ * and the title line up only when the reserve is exactly the difference. It is
+ * written as a literal because the CSS mirror gate reads this module as source
+ * text; `__tests__/shell-geometry.test.ts` holds the identity.
+ *
+ * The rail card's own width is derived from this in CSS
+ * (`--shell-collapsed-rail-width` = reserve − card inset − one gutter), so the
+ * rail ends a gutter before the content at every type scale rather than only
+ * at the one the app ships with.
+ */
+export const COLLAPSED_RAIL_RESERVE = 64;

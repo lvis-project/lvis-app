@@ -1810,14 +1810,15 @@ export function Sidebar({
         className={
           collapsed
             ? // Collapsed: a compact icon-rail card BELOW the bare cluster,
-              // pinned to the aside's left edge (`--shell-card-inset`) so it stays
-              // within the main content's collapsed left padding
-              // (`--shell-collapsed-rail-reserve`). The cluster strip above keeps
-              // its own lead clearance to clear the OS lights; the rail does NOT
-              // inherit that clearance. `mt-2.5` gives the rail card top margin
-              // below the band so it is not flush against the cluster strip in
-              // chat mode.
-              "lvis-surface-raised mt-2.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-card"
+              // pinned to the aside's left edge (`--shell-card-inset`). Its width
+              // is `--shell-collapsed-rail-width` — the main content's collapsed
+              // left padding (`--shell-collapsed-rail-reserve`) minus that inset
+              // and one gutter — so the rail ends a gutter before the content
+              // at every type scale. The cluster strip above keeps its own lead
+              // clearance to clear the OS lights; the rail does NOT inherit that
+              // clearance. `mt-2.5` gives the rail card top margin below the
+              // band so it is not flush against the cluster strip in chat mode.
+              "lvis-surface-raised mt-2.5 w-(--shell-collapsed-rail-width) flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-card"
             : "flex min-h-0 flex-1 flex-col overflow-hidden"
         }
       >
