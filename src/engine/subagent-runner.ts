@@ -548,12 +548,12 @@ export interface SubAgentRunSnapshot {
  * mark that copy spent. Defaulting to a plain read keeps a new call site from
  * silently swallowing a report nobody read.
  *
- * `agent_list` is deliberately NOT such a call site, and this is a considered
- * departure from the wording of issue #2325, which named it alongside
- * `agent_status`. It answers "which sub-agents does this conversation have",
- * listing title, resume id, and task state from persisted rows — it never
- * carries a report body. Retiring the mailbox on it would drop content the
- * parent was never shown, trading a duplicated report for a lost one.
+ * `agent_list` is deliberately NOT such a call site. It answers "which
+ * sub-agents does this conversation have", listing title, resume id, and task
+ * state from persisted rows — it never carries a report body, so reading it
+ * cannot count as reading the report. Retiring the mailbox on it would drop
+ * content the parent was never shown, trading a duplicated report for a lost
+ * one.
  */
 export interface SubAgentRunReadOptions {
   deliversReportToParent?: boolean;
