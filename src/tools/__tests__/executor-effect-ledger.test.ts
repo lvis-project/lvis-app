@@ -19,6 +19,7 @@ import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../executor.js";
+import { userPermissionContext } from "./permission-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool } from "../base.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
@@ -31,10 +32,6 @@ import {
   currentInvocationOrigin,
   type InvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
-
-function userPermissionContext(): import("../executor.js").ToolPermissionContext {
-  return { trustOrigin: "user-keyboard" };
-}
 
 /**
  * A plugin tool that DECLARES `read` but, in its handler, performs the given
