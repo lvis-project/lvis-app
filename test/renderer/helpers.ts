@@ -35,6 +35,22 @@ export interface RenderedTile {
 }
 
 /**
+ * Every tile currently mounted in `container`, in layout order.
+ *
+ * The `chat-group-cell:` testid prefix — and the slice that recovers the chat
+ * group id from it — is this one place, so a test that needs the open tiles
+ * never has to restate the naming scheme.
+ */
+export function collectTiles(container: HTMLElement): RenderedTile[] {
+  const prefix = "chat-group-cell:";
+  return Array.from(container.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`))
+    .map((element) => ({
+      chatGroupId: element.getAttribute("data-testid")!.slice(prefix.length),
+      element,
+    }));
+}
+
+/**
  * Halve the window into a second tile and hand back both, in layout order.
  *
  * The split control lives in each tile's header, so this drives the same
@@ -55,12 +71,7 @@ export async function splitIntoTwoTiles(container: HTMLElement): Promise<Rendere
   await act(async () => {
     fireEvent.click(sideBySide);
   });
-  const prefix = "chat-group-cell:";
-  const tiles = Array.from(container.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`))
-    .map((element) => ({
-      chatGroupId: element.getAttribute("data-testid")!.slice(prefix.length),
-      element,
-    }));
+  const tiles = collectTiles(container);
   if (tiles.length !== 2) throw new Error(`expected 2 tiles, got ${tiles.length}`);
   return tiles;
 }

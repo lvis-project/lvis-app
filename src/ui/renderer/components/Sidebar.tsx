@@ -312,6 +312,18 @@ function NavItem({
   return btn;
 }
 
+/**
+ * The `data-testid` a sidebar row carries for a view key.
+ *
+ * A view key can contain colons (`plugin-doctor:<id>`), which a testid cannot
+ * carry legibly, so they flatten to dashes. Tests addressing a row have to
+ * apply the same flattening; exporting it keeps the rule where the rows are
+ * rendered instead of mirrored into a test helper.
+ */
+export function sidebarViewTestId(viewKey: string): string {
+  return `sidebar-${viewKey.replace(/:/g, "-")}`;
+}
+
 function FailedPluginNavItem({
   plugin,
   onSelect,

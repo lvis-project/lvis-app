@@ -3,7 +3,8 @@ import "../../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
-import { Sidebar } from "../Sidebar.js";
+import { Sidebar, sidebarViewTestId } from "../Sidebar.js";
+import { toPluginDoctorViewKey } from "../../utils/plugin-doctor-view.js";
 
 function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const props: Parameters<typeof Sidebar>[0] = {
@@ -57,7 +58,7 @@ describe("Sidebar plugin Doctor affordance", () => {
       }],
     });
 
-    const row = screen.getByTestId("sidebar-plugin-doctor-agent-hub");
+    const row = screen.getByTestId(sidebarViewTestId(toPluginDoctorViewKey("agent-hub")));
     expect(row.textContent).toContain("Agent Hub");
     expect(row.textContent).toContain("Doctor");
 
