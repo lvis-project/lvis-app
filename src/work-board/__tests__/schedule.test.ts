@@ -7,27 +7,13 @@
  * at 17:00 in Los Angeles. The day *key* projection is covered by
  * `shared/__tests__/local-date.test.ts`, which owns it.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
+import { withTz } from "../../__tests__/test-helpers.js";
 import { localDayBounds, sundayWeekBoundsLocal, isoWeekFor } from "../schedule.js";
 import { localDayStart } from "../../shared/local-date.js";
 
 const TUE_JUN16_09_SEOUL = Date.parse("2026-06-16T00:00:00.000Z");
 const DAY_MS = 24 * 60 * 60_000;
-let previousTz: string | undefined;
-
-function withTz<T>(zone: string, run: () => T): T {
-  process.env.TZ = zone;
-  return run();
-}
-
-beforeEach(() => {
-  previousTz = process.env.TZ;
-});
-
-afterEach(() => {
-  if (previousTz === undefined) delete process.env.TZ;
-  else process.env.TZ = previousTz;
-});
 
 describe("schedule (host-local report bounds)", () => {
   it("localDayBounds spans the local day, anchored where the host's midnight is", () => {

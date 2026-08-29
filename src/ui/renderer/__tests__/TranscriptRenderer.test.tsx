@@ -23,6 +23,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
+import { withTz } from "../../../__tests__/test-helpers.js";
 import { fireEvent, render } from "@testing-library/react";
 import type React from "react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
@@ -318,9 +319,7 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
   it("shows the send time recorded on a user message, in the host time zone", () => {
     // `formatHhMm` renders in the host zone, so pin it — otherwise this asserts
     // nothing more than "whatever zone the machine running the suite is in".
-    const previousTz = process.env.TZ;
-    process.env.TZ = "UTC";
-    try {
+    withTz("UTC", () => {
       const { getByTestId } = renderCore(
         <TranscriptRenderer
           entries={[{ kind: "user", text: "timed", createdAt: Date.UTC(2026, 0, 2, 4, 26) }]}
@@ -330,10 +329,7 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
       );
 
       expect(getByTestId("user-message-time").textContent).toContain("04:26");
-    } finally {
-      if (previousTz === undefined) delete process.env.TZ;
-      else process.env.TZ = previousTz;
-    }
+    });
   });
 
   it("shows no time on a message that never recorded one", () => {

@@ -16,6 +16,7 @@
  *   - Corrupt `board.json` recovery (backup-and-reset path).
  */
 import { describe, it, expect } from "vitest";
+import { withTz } from "../../__tests__/test-helpers.js";
 import {
   mkdtempSync,
   readFileSync,
@@ -367,35 +368,31 @@ describe("WorkBoardStore — due dates stamped in another zone", () => {
   }
 
   it("shows the originally picked day on a host west of the stamped zone", async () => {
-    const previousTz = process.env.TZ;
     const { store, path, cleanup } = tempBoard(fixedClock);
     try {
-      process.env.TZ = "America/Los_Angeles";
-      seedBoard(path, "2026-06-16T00:00:00+09:00");
+      await withTz("America/Los_Angeles", async () => {
+        seedBoard(path, "2026-06-16T00:00:00+09:00");
 
-      const listed = await store.list();
-      if (listed.status !== "ok") throw new Error("unreachable");
-      expect(localDateKey(new Date(listed.items[0].due_at as string))).toBe("2026-06-16");
+        const listed = await store.list();
+        if (listed.status !== "ok") throw new Error("unreachable");
+        expect(localDateKey(new Date(listed.items[0].due_at as string))).toBe("2026-06-16");
+      });
     } finally {
-      if (previousTz === undefined) delete process.env.TZ;
-      else process.env.TZ = previousTz;
       await cleanup();
     }
   });
 
   it("leaves a due date with a real time of day exactly as stored", async () => {
-    const previousTz = process.env.TZ;
     const { store, path, cleanup } = tempBoard(fixedClock);
     try {
-      process.env.TZ = "America/Los_Angeles";
-      seedBoard(path, "2026-06-16T14:30:00+09:00");
+      await withTz("America/Los_Angeles", async () => {
+        seedBoard(path, "2026-06-16T14:30:00+09:00");
 
-      const listed = await store.list();
-      if (listed.status !== "ok") throw new Error("unreachable");
-      expect(listed.items[0].due_at).toBe("2026-06-16T14:30:00+09:00");
+        const listed = await store.list();
+        if (listed.status !== "ok") throw new Error("unreachable");
+        expect(listed.items[0].due_at).toBe("2026-06-16T14:30:00+09:00");
+      });
     } finally {
-      if (previousTz === undefined) delete process.env.TZ;
-      else process.env.TZ = previousTz;
       await cleanup();
     }
   });

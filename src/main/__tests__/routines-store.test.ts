@@ -9,6 +9,7 @@
  * - markFired advances daily/weekly/monthly/interval repeat.
  */
 import { describe, it, expect } from "vitest";
+import { withTz } from "../../__tests__/test-helpers.js";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
@@ -548,36 +549,30 @@ describe("RoutinesStore v2 — advanceInterval far-past (no loop)", () => {
 
 describe("RoutinesStore v2 — advanceMonthly UTC correctness (DST-independence)", () => {
   it("monthly clamp is unaffected by host timezone (TZ=America/Los_Angeles)", async () => {
-    // Save original TZ, force a DST-heavy timezone, then restore.
-    const origTZ = process.env.TZ;
-    process.env.TZ = "America/Los_Angeles";
     const { store, cleanup } = tempStore();
     try {
-      // Jan 31 in UTC — if advanceMonthly used local-time methods, LA timezone
-      // offset would shift the date and produce a different day.
-      const jan31Utc = new Date("2026-01-31T12:00:00Z");
-      const r = await store.add({
-        trigger: "schedule",
-        execution: "notification-only",
-        schedule: { at: jan31Utc.toISOString(), repeat: { kind: "monthly" } },
-        notificationTitle: "utc-monthly",
+      await withTz("America/Los_Angeles", async () => {
+        // Jan 31 in UTC — if advanceMonthly used local-time methods, LA timezone
+        // offset would shift the date and produce a different day.
+        const jan31Utc = new Date("2026-01-31T12:00:00Z");
+        const r = await store.add({
+          trigger: "schedule",
+          execution: "notification-only",
+          schedule: { at: jan31Utc.toISOString(), repeat: { kind: "monthly" } },
+          notificationTitle: "utc-monthly",
+        });
+        const updated = await store.markFired(r.id);
+        const nextAt = new Date(updated!.schedule!.at!);
+        // Must be after now
+        expect(nextAt.getTime()).toBeGreaterThan(Date.now());
+        // Day must be clamped to last day of month using UTC, not local time
+        const year = nextAt.getUTCFullYear();
+        const month = nextAt.getUTCMonth();
+        const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+        const actualDay = nextAt.getUTCDate();
+        expect(actualDay).toBe(Math.min(31, lastDayOfMonth));
       });
-      const updated = await store.markFired(r.id);
-      const nextAt = new Date(updated!.schedule!.at!);
-      // Must be after now
-      expect(nextAt.getTime()).toBeGreaterThan(Date.now());
-      // Day must be clamped to last day of month using UTC, not local time
-      const year = nextAt.getUTCFullYear();
-      const month = nextAt.getUTCMonth();
-      const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-      const actualDay = nextAt.getUTCDate();
-      expect(actualDay).toBe(Math.min(31, lastDayOfMonth));
     } finally {
-      if (origTZ === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = origTZ;
-      }
       await cleanup();
     }
   });

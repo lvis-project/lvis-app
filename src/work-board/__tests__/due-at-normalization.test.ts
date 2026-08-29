@@ -6,26 +6,11 @@
  * the host calendar — but the day it DISPLAYS under did, and the user picked a
  * day. These tests pin which values move and which are left exactly alone.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
+import { withTz } from "../../__tests__/test-helpers.js";
 import { normalizeBoardDueDates, normalizeDueAt } from "../board-file.js";
 import { localDateKey, localDayStart } from "../../shared/local-date.js";
 import type { WorkItem } from "../../shared/work-board-types.js";
-
-let previousTz: string | undefined;
-
-function withTz<T>(zone: string, run: () => T): T {
-  process.env.TZ = zone;
-  return run();
-}
-
-beforeEach(() => {
-  previousTz = process.env.TZ;
-});
-
-afterEach(() => {
-  if (previousTz === undefined) delete process.env.TZ;
-  else process.env.TZ = previousTz;
-});
 
 // What the old panel wrote for a user who picked 2026-06-16.
 const KST_MIDNIGHT_JUN16 = "2026-06-16T00:00:00+09:00";

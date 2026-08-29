@@ -161,3 +161,35 @@ export function liveWindow(): FakeBrowserWindow {
     webContents: { isDestroyed: () => false, send: vi.fn() },
   };
 }
+
+/**
+ * Run `fn` with `process.env.TZ` pinned to `zone`, restoring the previous value
+ * afterwards — for a sync `fn` on return, for an async one when its promise
+ * settles. Node re-reads `TZ` on assignment for both `Date` and the `Intl`
+ * default, so no other setup is needed.
+ *
+ * Every civil-calendar assertion has to pin the zone or it asserts nothing
+ * beyond "the machine running the suite agrees with itself". Three suites
+ * carried the same `withTz` plus a `beforeEach`/`afterEach` pair to undo it;
+ * this is the one owner and it undoes itself.
+ */
+export function withTz<T>(zone: string, fn: () => T): T {
+  const previous = process.env.TZ;
+  const restore = (): void => {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  };
+  process.env.TZ = zone;
+  let result: T;
+  try {
+    result = fn();
+  } catch (err) {
+    restore();
+    throw err;
+  }
+  if (result instanceof Promise) {
+    return result.finally(restore) as T;
+  }
+  restore();
+  return result;
+}
