@@ -11,6 +11,7 @@ import {
   type A2APart,
   type A2AProjectedTaskState,
   type A2ATask,
+  A2A_HANDLER_ID_PATTERN,
 } from "../shared/a2a.js";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 import { maskSensitiveData } from "../shared/dlp.js";
@@ -27,7 +28,6 @@ import { isRecord } from "../shared/is-record.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "tasks.json";
-const HANDLER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /**
  * Wire-level shape rules shared with the A2A subagent handler. Both modules
  * validate the same ids off the same wire, so they must reject the same
@@ -347,7 +347,7 @@ function normalizeRecord(value: unknown, maxHistoryMessages: number): A2ATaskRec
   if (!isRecord(value) || !hasOnlyKeys(value, RECORD_KEYS)) return null;
   if (
     typeof value.handlerId !== "string"
-    || !HANDLER_ID_PATTERN.test(value.handlerId)
+    || !A2A_HANDLER_ID_PATTERN.test(value.handlerId)
     || maskSensitiveData(value.handlerId).detections.length > 0
   ) {
     return null;
@@ -743,7 +743,7 @@ export class A2ATaskStore {
   }): Promise<A2AInitialTaskAdmissionResult> {
     return await this.withLock(() => {
       if (
-        !HANDLER_ID_PATTERN.test(input.handlerId)
+        !A2A_HANDLER_ID_PATTERN.test(input.handlerId)
         || maskSensitiveData(input.handlerId).detections.length > 0
         || !isSafeA2AMessageId(input.message.messageId)
         || input.message.taskId !== undefined
@@ -808,7 +808,7 @@ export class A2ATaskStore {
   }): Promise<A2ATaskCreateResult> {
     return await this.withLock(async () => {
       if (
-        !HANDLER_ID_PATTERN.test(input.handlerId)
+        !A2A_HANDLER_ID_PATTERN.test(input.handlerId)
         || !CHILD_SESSION_ID_PATTERN.test(input.childSessionId)
         || maskSensitiveData(input.handlerId).detections.length > 0
         || maskSensitiveData(input.childSessionId).detections.length > 0

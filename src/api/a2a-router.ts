@@ -26,10 +26,10 @@ import { parseA2AStrictJson } from "./a2a-strict-json.js";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import { isRecord } from "../shared/is-record.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { A2A_HANDLER_ID_PATTERN } from "../shared/a2a.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const MAX_BODY_BYTES = 1024 * 1024;
-const HANDLER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const A2A_ROOT_PATTERN = /^\/a2a\/([a-z0-9][a-z0-9-]{0,63})\/?$/;
 const A2A_CARD_PATTERN =
   /^\/a2a\/([a-z0-9][a-z0-9-]{0,63})\/\.well-known\/agent-card\.json$/;
@@ -308,7 +308,7 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
   }
   const handlers = new Map<string, A2ARequestHandler>();
   for (const handler of options.handlers) {
-    if (!HANDLER_ID_PATTERN.test(handler.id)) {
+    if (!A2A_HANDLER_ID_PATTERN.test(handler.id)) {
       throw new Error("invalid A2A handler id: " + handler.id);
     }
     if (handlers.has(handler.id)) {
