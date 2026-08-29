@@ -106,7 +106,7 @@ export interface CustomTitleBarProps {
    * leading reserve of its own — the traffic-light inset on macOS, a plain gutter
    * elsewhere — and the two are the same reserve, not two stacked ones. The
    * band takes whichever is larger; a second padding applied by the content
-   * pushed the path 80px past the sidebar's edge.
+   * pushed the path a whole `BAND_LEAD_PAD_DARWIN` past the sidebar's edge.
    */
   leadClearance?: number;
 }

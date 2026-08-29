@@ -1661,15 +1661,16 @@ export function Sidebar({
   const hasPluginEntries = pluginViews.length > 0
     || failedPluginCards.length > 0
     || inactivePluginCards.length > 0;
-  // On darwin the OS traffic lights (x:18,y:16) sit just left of the cluster
   // Subscription readiness is distinct from API-key presence: when a login
   // runtime is selected, never describe its verification state as an API-key
   // problem or invite the user to configure an unrelated credential.
   const runtimeUnavailable = subscriptionRuntimePolicy ? subscriptionRuntimePolicy.chatUnavailable : subscriptionUnavailable;
   const runtimePending = subscriptionRuntimePolicy ? subscriptionRuntimePolicy.chatPending : subscriptionPending;
   const settingsNeedsApiKey = hasApiKey === false && !runtimeUnavailable && !runtimePending;
-  // strip. The aside's top inset is tuned so the strip's buttons land on the
-  // lights' line. Win/Linux + non-Electron have no OS lights to align against.
+  // On darwin the OS traffic lights (`TRAFFIC_LIGHT_POSITION`) sit just left of
+  // the cluster strip. The aside's top inset (`--shell-card-top-darwin`) is
+  // derived so the strip's buttons land on the lights' line. Win/Linux +
+  // non-Electron have no OS lights to align against.
   const darwinTopClearance = isDarwinPlatform();
 
   const navListId = "sidebar-nav-list";
