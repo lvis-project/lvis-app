@@ -403,7 +403,19 @@ export function useSideChat(api: LvisApi): UseSideChat {
     );
     // Awaited last: an interrupting send goes out immediately after this
     // resolves, and the host refuses a send while its turn is still in flight.
-    await api.sideChat.abort();
+    //
+    // Reported, not thrown. By this point the interrupt is committed on both
+    // sides — the composer cleared the draft before calling and the transcript
+    // already marks the answer stopped — so letting a transport failure escape
+    // would destroy the text the user typed and strand the host turn, still
+    // streaming into frames this hook now drops. The send goes out either way;
+    // if the host really is still busy it refuses that send with its own
+    // message.
+    try {
+      await api.sideChat.abort();
+    } catch (err) {
+      setEntries((p) => setAssistantError(p, (err as Error).message, "", "stream-error"));
+    }
   }, [api, resetStreamState, setStreaming]);
 
   const send = useCallback(
@@ -418,6 +430,17 @@ export function useSideChat(api: LvisApi): UseSideChat {
       if (isStreamingRef.current && opts?.inputOrigin !== "queue-auto") {
         await abort();
       }
+      // What the stream state held before this send re-armed it. A send the
+      // host REFUSES creates no turn, so the re-arm has to be undone: whatever
+      // turn was streaming is still streaming there, and a guard left re-armed
+      // drops the rest of its frames for good — their ids are no longer above
+      // the high-water mark, so they can never be adopted again.
+      const streamStateBeforeSend = {
+        activeStreamId: activeStreamIdRef.current,
+        stream: streamRef.current,
+        thought: thoughtRef.current,
+        finalAssistantRoundClosed: finalAssistantRoundClosedRef.current,
+      };
       // Re-arm the stale-frame guard + clear accumulators: the next turn's first
       // frame adopts its freshly-allocated streamId (see activeStreamIdRef doc).
       resetStreamState();
@@ -452,7 +475,11 @@ export function useSideChat(api: LvisApi): UseSideChat {
             ),
           );
           setStreaming(false);
-          resetStreamState();
+          // The handler returned a verdict, so we know no turn was started.
+          activeStreamIdRef.current = streamStateBeforeSend.activeStreamId;
+          streamRef.current = streamStateBeforeSend.stream;
+          thoughtRef.current = streamStateBeforeSend.thought;
+          finalAssistantRoundClosedRef.current = streamStateBeforeSend.finalAssistantRoundClosed;
         }
       } catch (err) {
         // Left raw on purpose: this branch is a transport failure, not a handler code
@@ -468,6 +495,9 @@ export function useSideChat(api: LvisApi): UseSideChat {
           ),
         );
         setStreaming(false);
+        // Left re-armed on purpose, unlike the refusal above: the invoke never
+        // returned a verdict, so the host may well have started a turn, and its
+        // first frame needs a guard that can adopt it.
         resetStreamState();
       }
     },
