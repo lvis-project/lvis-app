@@ -16,8 +16,16 @@ import {
   transientFsLockDelayMs,
 } from "./transient-fs-lock-retry.js";
 
-/** POSIX-only — see {@link writeUtf8FileAtomicSync}; Win32 ignores it. */
-const DEFAULT_FILE_MODE = 0o600;
+/**
+ * The modes every user-data file and directory under `~/.lvis/` is created
+ * with — the storage-namespace rule (dir 0o700, file 0o600). POSIX-only:
+ * Win32 maps `mode` onto the read-only attribute, and `lvis-home.ts` sets
+ * the DACL instead. Declared here because `lib/` is the lowest layer that
+ * writes files; the feature-namespace store, the log sink, the session
+ * search index and the secret document store all read them from here.
+ */
+export const PRIVATE_FILE_MODE = 0o600;
+export const PRIVATE_DIR_MODE = 0o700;
 const DIRECTORY_SYNC_ERROR_CODE = "ATOMIC_FILE_DIRECTORY_SYNC_FAILED";
 
 interface ParentDirectorySyncRuntime {
@@ -149,7 +157,7 @@ export function writeUtf8FileAtomicSync(
 export function writeUtf8FileAtomicSync(
   filePath: string,
   content: string,
-  mode = DEFAULT_FILE_MODE,
+  mode = PRIVATE_FILE_MODE,
   directorySyncRuntime: ParentDirectorySyncRuntime = DEFAULT_PARENT_DIRECTORY_SYNC_RUNTIME,
 ): void {
   writeUtf8FileAtomicSyncInternal(
@@ -169,7 +177,7 @@ export function replaceUtf8FileAtomicSyncIf(
   filePath: string,
   content: string,
   precondition: () => boolean,
-  mode = DEFAULT_FILE_MODE,
+  mode = PRIVATE_FILE_MODE,
 ): boolean {
   return writeUtf8FileAtomicSyncInternal(
     filePath,

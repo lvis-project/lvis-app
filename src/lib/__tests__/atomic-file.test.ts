@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  PRIVATE_DIR_MODE,
+  PRIVATE_FILE_MODE,
   isMissingPathError,
   replaceUtf8FileAtomicSyncIf,
   writeUtf8FileAtomicSync,
@@ -289,5 +291,12 @@ describe("isMissingPathError", () => {
     expect(isMissingPathError(Object.assign(new Error("exists"), { code: "EEXIST" }))).toBe(false);
     expect(isMissingPathError(new Error("plain"))).toBe(false);
     expect(isMissingPathError(undefined)).toBe(false);
+  });
+});
+
+describe("private storage modes", () => {
+  it("are the storage-namespace rule: 0o700 directories, 0o600 files", () => {
+    expect(PRIVATE_DIR_MODE).toBe(0o700);
+    expect(PRIVATE_FILE_MODE).toBe(0o600);
   });
 });
