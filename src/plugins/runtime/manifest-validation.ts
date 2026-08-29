@@ -97,7 +97,7 @@ function resolveAddFormats(): (a: unknown) => void {
 }
 
 export function normalizeInstallPolicy(
-  source: Partial<Pick<PluginManifest, "installPolicy">> | undefined,
+  source: Partial<Pick<PluginManifest, "installPolicy">> | null | undefined,
 ): InstallPolicy {
   if (source?.installPolicy === "admin") {
     return "admin";

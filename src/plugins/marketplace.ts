@@ -55,7 +55,7 @@ import {
   type RemovalTransactionKind,
 } from "./plugin-removal-transaction.js";
 import type { PluginAdmissionRecord, PluginInstallReceipt } from "./plugin-install-receipt.js";
-import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
+import { STABLE_SEMVER_RE, normalizeInstallPolicy } from "./runtime/manifest-validation.js";
 import { flattenAgentPluginsManifest } from "./public-contract.js";
 import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
@@ -199,15 +199,6 @@ function requirePreparedMarketplacePluginActivation(
     );
   }
   return activation;
-}
-
-function normalizeInstallPolicy(source: {
-  installPolicy?: InstallPolicy;
-}): InstallPolicy {
-  if (source.installPolicy === "admin") {
-    return "admin";
-  }
-  return "user";
 }
 
 function deepFreezeValue<T>(value: T): T {
