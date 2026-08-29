@@ -11,13 +11,9 @@ import {
   preparedActivationOptionsForTest,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
-import { canonicalJSON } from "../whitelist/canonical-json.js";
+import { manifestSha } from "../../__tests__/support/sign-envelope-fixture.js";
 import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 import { agentPluginsDocument } from "./test-helpers.js";
-
-function manifestSha(manifest: unknown): string {
-  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
-}
 
 describe("PluginMarketplaceService.installLocal", () => {
   let testDir: string;
