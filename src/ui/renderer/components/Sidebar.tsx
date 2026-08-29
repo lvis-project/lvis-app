@@ -39,7 +39,7 @@ import {
   type ProjectErrorReporter,
 } from "../hooks/use-add-project-folder.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
-import { CLUSTER_LEAD_PAD_DARWIN } from "../../../shared/shell-geometry.js";
+import { CLUSTER_LEAD_PAD_DARWIN, RAIL_CONTROL_SIZE_CLASS } from "../../../shared/shell-geometry.js";
 import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
@@ -51,6 +51,7 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from "../../../shared/side-panel.js";
+import { formatRelativeTime } from "../../../shared/format-time.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -253,7 +254,7 @@ function NavItem({
       data-viewkey={dataViewKey}
       data-tour-anchor={tourAnchor}
       className={[
-        "relative h-9 w-9 aspect-square flex items-center justify-center rounded-md transition-colors",
+        `relative ${RAIL_CONTROL_SIZE_CLASS} aspect-square flex items-center justify-center rounded-md transition-colors`,
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
           ? toneStyle.active
@@ -630,15 +631,12 @@ function RevealingSessionList({
 }
 
 function formatRelativeSessionTime(modifiedAt: string, t: ReturnType<typeof useTranslation>["t"]): string {
-  const ms = Date.now() - new Date(modifiedAt).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "";
-  const minutes = Math.floor(ms / 60000);
-  if (minutes < 1) return t("sidebar.justNow");
-  if (minutes < 60) return t("sidebar.minutesAgo", { count: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("sidebar.hoursAgo", { count: hours });
-  const days = Math.floor(hours / 24);
-  return t("sidebar.daysAgo", { count: days });
+  return formatRelativeTime(modifiedAt, {
+    justNow: () => t("sidebar.justNow"),
+    minutesAgo: (count) => t("sidebar.minutesAgo", { count }),
+    hoursAgo: (count) => t("sidebar.hoursAgo", { count }),
+    daysAgo: (count) => t("sidebar.daysAgo", { count }),
+  });
 }
 
 function projectTestId(root: string, fallback: string): string {
@@ -1810,14 +1808,15 @@ export function Sidebar({
         className={
           collapsed
             ? // Collapsed: a compact icon-rail card BELOW the bare cluster,
-              // pinned to the aside's left edge (`--shell-card-inset`) so it stays
-              // within the main content's collapsed left padding
-              // (`--shell-collapsed-rail-reserve`). The cluster strip above keeps
-              // its own lead clearance to clear the OS lights; the rail does NOT
-              // inherit that clearance. `mt-2.5` gives the rail card top margin
-              // below the band so it is not flush against the cluster strip in
-              // chat mode.
-              "lvis-surface-raised mt-2.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-card"
+              // pinned to the aside's left edge (`--shell-card-inset`). Its width
+              // is `--shell-collapsed-rail-width` — the main content's collapsed
+              // left padding (`--shell-collapsed-rail-reserve`) minus that inset
+              // and one gutter — so the rail ends a gutter before the content
+              // at every type scale. The cluster strip above keeps its own lead
+              // clearance to clear the OS lights; the rail does NOT inherit that
+              // clearance. `mt-2.5` gives the rail card top margin below the
+              // band so it is not flush against the cluster strip in chat mode.
+              "lvis-surface-raised mt-2.5 w-(--shell-collapsed-rail-width) flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-card"
             : "flex min-h-0 flex-1 flex-col overflow-hidden"
         }
       >
@@ -1830,7 +1829,7 @@ export function Sidebar({
               <Button
                 variant="default"
                 size="icon"
-                className="h-9 w-9 aspect-square p-0 shrink-0"
+                className={`${RAIL_CONTROL_SIZE_CLASS} aspect-square p-0 shrink-0`}
                 onClick={onNewChat}
                 disabled={streaming}
                 aria-label={t("mainToolbar.newChat")}

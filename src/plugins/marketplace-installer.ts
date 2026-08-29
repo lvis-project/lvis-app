@@ -14,7 +14,7 @@
  * so the feature-flag dispatcher can compose both paths without leaking
  * marketplace URLs into the npm install branch.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
@@ -26,6 +26,8 @@ import {
   resolveMarketplaceArtifactLimits,
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { sleep } from "../shared/abortable-deadline.js";
 
 /**
  * Minimal HTTP surface the installer needs. Lets callers inject either
@@ -161,6 +163,25 @@ const MAX_DOWNLOAD_RETRY_ELAPSED_MS = 90_000;
  * Using a byte-preserving hex encoding avoids path separators and traversal
  * segments while keeping the mapping deterministic and collision-free.
  */
+/** Longest root text file (manifest, AGENTS.md, SKILL.md) an assistant package may carry. */
+export const MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES = 1024 * 1024;
+
+/**
+ * Stop an install at its last safe point before promotion. `subject` names
+ * what was being installed ("agent package", "marketplace plugin"); the
+ * error is an `AbortError` so callers can tell cancellation from failure.
+ */
+export function throwIfMarketplaceInstallAborted(
+  signal: AbortSignal | undefined,
+  subject: string,
+  slug: string,
+): void {
+  if (!signal?.aborted) return;
+  const error = new Error(`${subject} install aborted before promotion: ${slug}`);
+  error.name = "AbortError";
+  throw error;
+}
+
 export function encodeMarketplaceVersionForFilename(version: string): string {
   const encoded = Buffer.from(version, "utf8").toString("hex");
   return encoded.length > 0 ? encoded : "empty";
@@ -245,7 +266,7 @@ export async function installFromMarketplace(
         artifactLimits.maxCompressedBytes,
         `cached marketplace artifact ${slug}@${version}`,
       );
-      const cachedSha256 = createHash("sha256").update(cached).digest("hex");
+      const cachedSha256 = sha256Hex(cached);
       if (!expectedArtifactSha256 || cachedSha256 === expectedArtifactSha256) {
         body = cached;
         fromCache = true;
@@ -279,7 +300,7 @@ export async function installFromMarketplace(
   //    no header was returned, but always compute the digest for sig verification).
   // Fire verifying event before computing the sha256 digest.
   opts.onProgress?.({ phase: "verifying" });
-  computedSha256 = createHash("sha256").update(body).digest("hex");
+  computedSha256 = sha256Hex(body);
   if (sha256Header && sha256Header.toLowerCase() !== computedSha256) {
     throw new MarketplaceInstallerError(
       "SHA256_HEADER_MISMATCH",
@@ -570,27 +591,16 @@ function backoffMs(attempt: number): number {
   return Math.pow(2, attempt) * 500;
 }
 
-function sleep(ms: number, signal: AbortSignal | undefined, slug: string, version: string): Promise<void> {
-  if (signal?.aborted) {
-    return Promise.reject(new MarketplaceArtifactLimitError(
+/** `sleep` rejects only when `signal` aborts; that rejection becomes the artifact-download error. */
+async function sleepUnlessDownloadAborted(ms: number, signal: AbortSignal | undefined, slug: string, version: string): Promise<void> {
+  try {
+    await sleep(ms, signal);
+  } catch {
+    throw new MarketplaceArtifactLimitError(
       "ARTIFACT_DOWNLOAD_ABORTED",
       `marketplace artifact download aborted for ${slug}@${version}`,
-    ));
+    );
   }
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new MarketplaceArtifactLimitError(
-        "ARTIFACT_DOWNLOAD_ABORTED",
-        `marketplace artifact download aborted for ${slug}@${version}`,
-      ));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 async function sleepWithinRetryDeadline(
@@ -607,7 +617,7 @@ async function sleepWithinRetryDeadline(
       `download retry deadline exceeded for ${slug}@${version}`,
     );
   }
-  await sleep(Math.min(requestedMs, remainingMs), signal, slug, version);
+  await sleepUnlessDownloadAborted(Math.min(requestedMs, remainingMs), signal, slug, version);
   if (Date.now() >= deadlineMs) {
     throw new MarketplaceInstallerError(
       "RETRY_EXHAUSTED",

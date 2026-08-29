@@ -23,7 +23,6 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { resolve as pathResolve } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import {
@@ -33,6 +32,8 @@ import {
   type HookConfigEntry,
 } from "./hook-config.js";
 import { defaultHooksDir, type DiscoveredHook } from "./hook-discovery.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { expandLeadingTilde } from "../shared/home-tilde.js";
 
 const log = createLogger("hook-config-trust");
 
@@ -47,15 +48,6 @@ export const HOOKS_CONFIG_FILENAME = "hooks.json";
 /** Default `hooks.json` path inside the hooks directory. */
 export function defaultHooksConfigPath(dir: string = defaultHooksDir()): string {
   return pathResolve(dir, HOOKS_CONFIG_FILENAME);
-}
-
-/** Expand a leading `~` / `~/` to the user's home directory (NO fs access). */
-function expandHome(token: string): string {
-  if (token === "~") return homedir();
-  if (token.startsWith("~/") || token.startsWith("~\\")) {
-    return homedir() + token.slice(1);
-  }
-  return token;
 }
 
 /**
@@ -73,7 +65,7 @@ export function resolveScriptAnchor(command: string[]): string | null {
       ? command[0]
       : command.slice(1).find(looksLikeLocalScriptPath);
   if (token === undefined) return null;
-  return expandHome(token);
+  return expandLeadingTilde(token);
 }
 
 export interface LoadedHookConfig {
@@ -144,7 +136,7 @@ export function loadHookConfig(
   const anchors = collectScriptAnchors(parsed.entries);
   for (const anchorPath of anchors) {
     hasher.update("\0");
-    hasher.update(anchorPath);
+    hasher.update(trustAnchorKey(anchorPath));
     hasher.update("\0");
     try {
       hasher.update(readFileSync(anchorPath));
@@ -163,8 +155,21 @@ export function loadHookConfig(
   };
 }
 
+/**
+ * The form of a script anchor that is folded into the trust hash.
+ *
+ * Separator-stable on purpose: the anchor comes back from `expandLeadingTilde`
+ * through `path.resolve`, so on win32 the same script is spelled with `\`
+ * where it was once spelled with `/`. The hash must name the script, not the
+ * spelling, or a platform's path style — and any future change to how the
+ * anchor is resolved — silently re-quarantines every `~/`-anchored hook.
+ */
+export function trustAnchorKey(anchorPath: string): string {
+  return anchorPath.replaceAll("\\", "/");
+}
+
 function hashBytesOnly(raw: Buffer): string {
-  return createHash("sha256").update(raw).digest("hex");
+  return sha256Hex(raw);
 }
 
 /** Sorted, de-duplicated list of resolved local-script anchors across entries. */

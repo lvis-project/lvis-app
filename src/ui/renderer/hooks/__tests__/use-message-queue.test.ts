@@ -7,7 +7,7 @@ import { useMessageQueue } from "../use-message-queue.js";
 import { useSideChat } from "../use-side-chat.js";
 import type { ComposerHandle } from "../../components/Composer.js";
 import type { Attachment } from "../../types/attachments.js";
-import type { StreamEvent } from "../../../../lib/chat-stream-state.js";
+import type { ChatStreamEvent } from "../../../../lib/chat-stream-state.js";
 import type { UserKeyboardIntentSnapshot } from "../../../../shared/chat-origin.js";
 import type { LvisApi } from "../../types.js";
 
@@ -30,8 +30,8 @@ import type { LvisApi } from "../../types.js";
  * transcript's own suite uses would let the second overwrite the first.
  */
 function makeApi(options: { reverseDispatch?: boolean } = {}) {
-  const handlers = new Set<(e: StreamEvent) => void>();
-  const dispatch = (e: StreamEvent) => {
+  const handlers = new Set<(e: ChatStreamEvent) => void>();
+  const dispatch = (e: ChatStreamEvent) => {
     // Each subscriber gets its OWN copy of the frame: the context bridge builds
     // a fresh object per listener, so a verdict cached by frame identity would
     // not survive the crossing.
@@ -44,7 +44,7 @@ function makeApi(options: { reverseDispatch?: boolean } = {}) {
     for (const h of ordered) h({ ...e });
   };
   /** Frames the host emits while the abort round trip is still in flight. */
-  let framesDuringAbort: StreamEvent[] = [];
+  let framesDuringAbort: ChatStreamEvent[] = [];
   const abort = vi.fn(async () => {
     for (const e of framesDuringAbort) dispatch(e);
     framesDuringAbort = [];
@@ -58,7 +58,7 @@ function makeApi(options: { reverseDispatch?: boolean } = {}) {
       load: vi.fn(async () => ({ ok: true as const, sessionId: "side-3", messages: [] })),
       list: vi.fn(async () => ({ current: "side-1", sessions: [] })),
       abort,
-      onStream: (h: (e: StreamEvent) => void) => {
+      onStream: (h: (e: ChatStreamEvent) => void) => {
         handlers.add(h);
         return () => {
           handlers.delete(h);
@@ -71,7 +71,7 @@ function makeApi(options: { reverseDispatch?: boolean } = {}) {
     api,
     subscriberCount: () => handlers.size,
     /** One dispatch to every subscriber, as the stream channel does. */
-    emit: async (e: StreamEvent) => {
+    emit: async (e: ChatStreamEvent) => {
       await act(async () => {
         dispatch(e);
       });
@@ -81,7 +81,7 @@ function makeApi(options: { reverseDispatch?: boolean } = {}) {
      * the real timing of an interrupted turn's trailing `done`: the host settles
      * the turn before the abort invoke resolves.
      */
-    emitDuringAbort: (e: StreamEvent) => {
+    emitDuringAbort: (e: ChatStreamEvent) => {
       framesDuringAbort.push(e);
     },
     spies: { send, abort },

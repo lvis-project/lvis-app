@@ -76,6 +76,7 @@ import type { ConversationSurfaceRuntime } from "../../engine/conversation-surfa
 import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
+import { hasOnlyKeys } from "../../shared/is-record.js";
 
 /** Refusal: the session named is already open in another tile of this window. */
 const SESSION_OPEN_IN_OTHER_GROUP = "session-open-in-other-group";
@@ -109,18 +110,6 @@ const USER_CONTENT_PART_KEYS: Record<string, readonly string[]> = {
 };
 
 const UNREADABLE_FIELD = Symbol("unreadable-field");
-
-function hasOnlyKeys(obj: Record<string, unknown>, allowed: readonly string[]): boolean {
-  try {
-    const keys = Object.keys(obj);
-    for (let index = 0; index < keys.length; index += 1) {
-      if (!allowed.includes(keys[index])) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function ownField(obj: Record<string, unknown>, key: string): unknown {
   try {

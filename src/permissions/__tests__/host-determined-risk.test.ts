@@ -89,18 +89,33 @@ describe("host-determined risk bypass", () => {
     expect(trace.outcome).toBe("fresh");
   });
 
-  it("never calls the LLM for builtin agent_status and keeps the rule LOW", async () => {
+  it("never calls the LLM for builtin agent_status under its declared read category", async () => {
     const { provider, spy } = alwaysHighProvider();
     const classifier = new LlmRiskClassifier(provider, "test-model");
 
     const trace = await classifier.classifyWithTrace(
-      ctx({ toolName: "agent_status", source: "builtin", category: "meta", pathFields: [], finalInput: {} }),
+      ctx({ toolName: "agent_status", source: "builtin", category: "read", pathFields: [], finalInput: { id: "spawn-1" } }),
     );
 
     expect(spy).not.toHaveBeenCalled();
     expect(trace.outcome).toBe("host-determined");
     expect(trace.finalVerdict.level).toBe("low");
     expect(trace.llmVerdict).toBeNull();
+  });
+
+  it("does NOT bypass agent_status under a category it does not declare", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    // Issue #2323 moved `agent_status` off `meta` and onto the `read` it always
+    // was. A call still arriving as `meta` is a drift, not the tool, so it loses
+    // the bypass and takes the full composed path.
+    const trace = await classifier.classifyWithTrace(
+      ctx({ toolName: "agent_status", source: "builtin", category: "meta", pathFields: [], finalInput: {} }),
+    );
+
+    expect(spy).toHaveBeenCalled();
+    expect(trace.outcome).toBe("fresh");
   });
 
   it("never calls the LLM for builtin agent_list under its declared read category", async () => {

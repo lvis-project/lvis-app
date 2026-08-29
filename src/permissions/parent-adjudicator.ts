@@ -3,6 +3,7 @@ import { sanitizeUntrustedReviewerText } from "./reviewer/rationale-scope-review
 import type { LlmReviewerProvider, RiskVerdict } from "./reviewer/risk-classifier.js";
 import type { ParentContextTurn } from "./parent-context-evidence.js";
 import type { ToolCategory } from "../tools/types.js";
+import type { ToolSource } from "../shared/permission-review-status.js";
 
 /**
  * Tier 2 of the sub-agent approval chain: the parent agent decides a tool call
@@ -45,7 +46,7 @@ import type { ToolCategory } from "../tools/types.js";
 export interface ParentAdjudicationEvidence {
   toolName: string;
   toolCategory?: ToolCategory;
-  source?: "builtin" | "plugin" | "mcp";
+  source?: ToolSource;
   /** Output of the gate's display masking — never raw arguments. */
   maskedArgs: unknown;
   /** Tier-1 reviewer verdict. Its absence is a human-only condition upstream. */

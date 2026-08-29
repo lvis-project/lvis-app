@@ -3090,6 +3090,7 @@ export const deMessages: Record<string, string> = {
   "subscriptionProvidersSection.statusDeviceCodePending": "Gerätecode-Anmeldung ausstehend",
   "subscriptionProvidersSection.statusConnected": "Verbunden",
   "subscriptionProvidersSection.statusSignedOut": "Abgemeldet",
+  "subscriptionProvidersSection.routeStatus": "{route} · {status}",
   "subscriptionProvidersSection.statusReady": "Bereit zur Anmeldung",
   "subscriptionProvidersSection.refreshStatus": "{provider}-Verbindungsstatus aktualisieren",
   "subscriptionProvidersSection.errorProviderNotSupported": "Dieser Abonnementanbieter wird nicht unterstützt.",

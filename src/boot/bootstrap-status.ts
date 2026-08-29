@@ -43,7 +43,7 @@ export interface BootstrapStatusError {
   message: string;
 }
 
-export type BootstrapStatus =
+export type AppBootstrapStatus =
   | BootstrapStatusStart
   | BootstrapStatusComplete
   | BootstrapStatusError;
@@ -58,7 +58,7 @@ export const BOOTSTRAP_STATUS_CHANNEL = "lvis:bootstrap:status";
  */
 export function notifyBootstrapStatus(
   mainWindow: BrowserWindow | null | undefined,
-  status: BootstrapStatus,
+  status: AppBootstrapStatus,
 ): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {

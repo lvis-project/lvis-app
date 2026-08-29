@@ -266,7 +266,7 @@ export async function evaluateHostFetch(
 }
 
 /** Statuses that name another location instead of answering. */
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 
 /** How many gated hops a `redirect: "follow"` request may take after the first. */
 export const MAX_REDIRECT_HOPS = 5;

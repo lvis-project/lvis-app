@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 
 export type PluginContributionTrustKind = "hook" | "mcpServer";
 
@@ -53,7 +53,7 @@ export class PluginContributionTrustStore {
         this.approvals.set(key(identity), Object.freeze({ ...identity }));
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!isMissingPathError(error)) throw error;
     }
   }
 

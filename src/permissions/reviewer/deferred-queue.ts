@@ -11,6 +11,7 @@ import type { RiskVerdict } from "./risk-classifier.js";
 import type { PermissionEvaluationContext } from "../evaluation-context.js";
 import type { ToolCategory, ToolSource } from "../../tools/types.js";
 import { lvisHome } from "../../shared/lvis-home.js";
+import type { DeferredGrantScope } from "../../shared/permission-review-status.js";
 
 const log = createLogger("deferred-queue");
 
@@ -40,21 +41,6 @@ export type DeferredEntryStatus = "pending" | "approved" | "rejected";
  *     approval that grants nothing.
  */
 export type DeferredGrant = { kind: "directory"; path: string };
-
-/**
- * Grant breadth available when resolving a deferred entry.
- *
- * Deliberately NOT the foreground card's three-way choice: `allow-once` has no
- * meaning here. "Once" scopes a grant to the call being decided, and that call
- * is already over — a post-hoc "once" would grant nothing and expire against
- * nothing. The honest breadths are the two that outlive the dead call, and
- * `"session"` is the narrower of them, so it is the default and the fallback
- * for any ambiguous request.
- */
-export type DeferredGrantScope = "session" | "always";
-
-/** Narrowest breadth a deferred approval can carry. */
-export const NARROWEST_DEFERRED_SCOPE: DeferredGrantScope = "session";
 
 export interface DeferredEntry {
   id: string;

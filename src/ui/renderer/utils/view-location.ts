@@ -14,13 +14,13 @@
  *   - the marketplace, which opens an external URL and is not an in-app
  *     place at all.
  */
-import type { useTranslation } from "../../../i18n/react.js";
 import {
   SETTINGS_TAB_LABEL_KEYS,
   normalizeSettingsTab,
   type SettingsTab,
 } from "../../../shared/settings-tabs.js";
 import { parseViewKey, type InlineViewKey } from "../../../shared/view-key.js";
+import type { TranslateFn } from "../../../i18n/translate.js";
 
 export interface ViewLocation {
   view: InlineViewKey;
@@ -52,10 +52,9 @@ export interface BreadcrumbSegment {
   target?: ViewLocation;
 }
 
-type TFn = ReturnType<typeof useTranslation>["t"];
 
 export interface BreadcrumbDeps {
-  t: TFn;
+  t: TranslateFn;
   /** Resolves a plugin view key to its display title. */
   pluginViewLabel: (viewKey: string) => string | undefined;
 }

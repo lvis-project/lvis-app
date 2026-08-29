@@ -11,6 +11,9 @@ import { messages, type Messages } from "./messages/index.js";
 /** Values that can be interpolated into a message placeholder. */
 export type TranslationVars = Record<string, string | number>;
 
+/** Signature shared by the module-level `t` and the hook-provided `t`. */
+export type TranslateFn = (key: string, vars?: TranslationVars) => string;
+
 /**
  * Replace `{name}` placeholders in `template` with values from `vars`.
  *

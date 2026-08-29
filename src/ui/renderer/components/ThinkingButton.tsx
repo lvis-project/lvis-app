@@ -27,10 +27,8 @@ import { Label } from "../../../components/ui/label.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
 import {
-  DEFAULT_LLM_VENDOR,
   getLlmVendorSettings,
-  isLLMVendor,
-  type LLMVendor,
+  narrowLlmVendor,
 } from "../../../shared/llm-vendor-defaults.js";
 
 type Depth = "low" | "medium" | "high";
@@ -62,10 +60,6 @@ function budgetToDepth(budget: number): Depth {
   return best;
 }
 
-function narrowVendor(raw: unknown): LLMVendor {
-  return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
-}
-
 export interface ThinkingButtonProps {
   enabled: boolean;
   onToggle: (next: boolean) => void | Promise<void>;
@@ -82,7 +76,7 @@ export function ThinkingButton({ enabled, onToggle }: ThinkingButtonProps) {
     void (async () => {
       try {
         const s = await getApi().getSettings();
-        const provider = narrowVendor(s.llm.provider);
+        const provider = narrowLlmVendor(s.llm.provider);
         const budget = getLlmVendorSettings(
           s.llm.vendors,
           provider,
@@ -102,7 +96,7 @@ export function ThinkingButton({ enabled, onToggle }: ThinkingButtonProps) {
     try {
       const api = getApi();
       const s = await api.getSettings();
-      const provider = narrowVendor(s.llm.provider);
+      const provider = narrowLlmVendor(s.llm.provider);
       await api.updateSettings({
         llm: { vendors: { [provider]: { thinkingBudgetTokens: DEPTH_BUDGET[next] } } },
       });

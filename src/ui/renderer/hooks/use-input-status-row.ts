@@ -5,6 +5,7 @@ import {
   isSubscriptionRuntimeId,
   subscriptionRuntimeDescriptor,
 } from "../../../shared/subscription-runtime.js";
+import { normalizeExecutionMode, type ExecutionModeDisplay } from "../../../shared/permission-mode.js";
 
 /**
  * In-bar status sub-row data.
@@ -23,33 +24,21 @@ import {
  * settles to the same state and React bails out — no upsert→new-array→re-render
  * cycle is possible here.
  */
-export type PermissionModeVariant =
-  | "default"
-  | "strict"
-  | "auto"
-  | "allow"
-  | "unknown";
-
 export interface InputStatusRow {
   /** True once a model is configured — drives the green "active" dot. */
   active: boolean;
   /** "OpenAI · gpt-5.4" style label (vendor · model), or vendor alone. */
   vendorModel: string;
   /** Permission policy mode for per-mode text color + label. */
-  permissionMode: PermissionModeVariant;
+  permissionMode: ExecutionModeDisplay;
   /** Pending deferred-approval count (appended to the permission cell). */
   pendingApprovals: number;
-}
-
-function normalizeMode(raw: string): PermissionModeVariant {
-  if (raw === "default" || raw === "strict" || raw === "auto" || raw === "allow") return raw;
-  return "unknown";
 }
 
 export function useInputStatusRow(api: LvisApi): InputStatusRow {
   const [vendorModel, setVendorModel] = useState("");
   const [active, setActive] = useState(false);
-  const [permissionMode, setPermissionMode] = useState<PermissionModeVariant>("unknown");
+  const [permissionMode, setPermissionMode] = useState<ExecutionModeDisplay>("unknown");
   const [pendingApprovals, setPendingApprovals] = useState(0);
 
   // Vendor + model — mirrors use-status-bar-vendor.
@@ -97,7 +86,7 @@ export function useInputStatusRow(api: LvisApi): InputStatusRow {
     void (async () => {
       try {
         const r = await perm.getMode();
-        if (!cancelled) setPermissionMode(normalizeMode(r.mode));
+        if (!cancelled) setPermissionMode(normalizeExecutionMode(r.mode));
       } catch {
         if (!cancelled) setPermissionMode("unknown");
       }
@@ -113,7 +102,7 @@ export function useInputStatusRow(api: LvisApi): InputStatusRow {
     })();
 
     const unsubs: Array<() => void> = [];
-    const offMode = perm.onModeChanged?.((next) => setPermissionMode(normalizeMode(next)));
+    const offMode = perm.onModeChanged?.((next) => setPermissionMode(normalizeExecutionMode(next)));
     if (offMode) unsubs.push(offMode);
     const offPending = perm.onDeferredPending?.((summary) =>
       setPendingApprovals(Math.max(0, summary.pending)),

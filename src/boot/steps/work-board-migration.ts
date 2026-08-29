@@ -38,6 +38,7 @@ import { join } from "node:path";
 import { lvisHome } from "../../shared/lvis-home.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { createLogger } from "../../lib/logger.js";
+import { isMissingPathError } from "../../lib/atomic-file.js";
 
 const log = createLogger("lvis");
 
@@ -84,7 +85,7 @@ async function findLegacyPluginBoards(pluginsRoot: string): Promise<string[]> {
       await readFile(candidate, "utf-8");
       found.push(candidate);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      if (!isMissingPathError(err)) throw err;
       // No board.json in this plugin dir — skip.
     }
   }

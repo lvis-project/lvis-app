@@ -1,5 +1,5 @@
 import { createDynamicTool, type Tool } from "./base.js";
-import type { ToolResult } from "./types.js";
+import type { ToolExecutionResult } from "./types.js";
 import type { A2APart } from "../shared/a2a.js";
 import {
   A2A_CAUSAL_CONTEXT_METADATA_KEY,
@@ -147,7 +147,7 @@ export const SEND_FAILURE_GUIDANCE: Readonly<Record<AgentSendFailureReason, stri
       "The turn was stopped while this send was in flight. Do not re-send automatically — the stop was deliberate.",
   });
 
-function resultError(reason: string): ToolResult {
+function resultError(reason: string): ToolExecutionResult {
   const guidance = (SEND_FAILURE_GUIDANCE as Record<string, string | undefined>)[reason];
   return {
     output: JSON.stringify({ error: reason, ...(guidance ? { guidance } : {}) }),
@@ -211,7 +211,7 @@ export function createAgentSendTool(deps: AgentSendToolDeps): Tool {
       const rawRecipient = isRecord(rawInput) && typeof rawInput.to === "string"
         ? rawInput.to.trim()
         : "invalid";
-      const fail = async (reason: A2AAgentSendAuditInput["reason"]): Promise<ToolResult> => {
+      const fail = async (reason: A2AAgentSendAuditInput["reason"]): Promise<ToolExecutionResult> => {
         try {
           await runtime?.auditAgentSendDrop({
             senderChildSessionId: senderChildSessionId || "invalid",

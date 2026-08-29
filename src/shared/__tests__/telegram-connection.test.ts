@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { isTelegramBotUsername } from "../telegram-connection.js";
+import { isTelegramBotUsername, isTelegramBotToken, TELEGRAM_BOT_TOKEN_PATH_GRAMMAR } from "../telegram-connection.js";
 
 describe("isTelegramBotUsername", () => {
   it("accepts the 5-char minimum handle (regression: 5-6 char handles were rejected)", () => {
@@ -56,5 +56,16 @@ describe("isTelegramBotUsername", () => {
   it("rejects non-string input", () => {
     expect(isTelegramBotUsername(undefined)).toBe(false);
     expect(isTelegramBotUsername(42)).toBe(false);
+  });
+});
+
+describe("TELEGRAM_BOT_TOKEN_PATH_GRAMMAR", () => {
+  it("is the URL-safety bound: every plausible token passes it, and nothing outside the path alphabet does", () => {
+    const plausible = "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    expect(isTelegramBotToken(plausible)).toBe(true);
+    expect(TELEGRAM_BOT_TOKEN_PATH_GRAMMAR.test(plausible)).toBe(true);
+    expect(TELEGRAM_BOT_TOKEN_PATH_GRAMMAR.test("abc/../def")).toBe(false);
+    expect(TELEGRAM_BOT_TOKEN_PATH_GRAMMAR.test("a?b=c")).toBe(false);
+    expect(TELEGRAM_BOT_TOKEN_PATH_GRAMMAR.test("x".repeat(257))).toBe(false);
   });
 });

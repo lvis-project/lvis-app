@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -6,6 +5,7 @@ import { gunzipSync } from "node:zlib";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 import { projectRoot } from "./main-paths.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const DEFAULT_RUNTIME_UV_DIR = path.join(lvisHome(), "runtime", "uv");
 
@@ -119,8 +119,4 @@ function readPackagedUvMetadata(metaPath: string): { binarySha256: string } {
     throw new Error(`packaged uv metadata has invalid binarySha256: ${metaPath}`);
   }
   return { binarySha256 };
-}
-
-function sha256Hex(buffer: Buffer): string {
-  return createHash("sha256").update(buffer).digest("hex");
 }

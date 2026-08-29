@@ -1,5 +1,6 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { PluginToolOperationPolicy } from "../plugins/types.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 export interface PluginOperationPrincipal {
   ownerPluginId: string;
@@ -103,10 +104,6 @@ export type GrantConsumeResult =
   | { ok: true; grantId: string }
   | { ok: false; reason: string; grantId?: string };
 
-function hash(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function principalKey(value: PluginOperationPrincipal): string {
   return [
     value.ownerPluginId,
@@ -147,7 +144,7 @@ export function pluginOperationExecutionDomain(
       `plugin operation domain is missing '${toolName}.${operation}' in active generation`,
     );
   }
-  return hash([
+  return sha256Hex([
     "plugin-operation-domain/v1",
     principal.ownerPluginId,
     principal.ownerVersion,
@@ -339,7 +336,7 @@ export class PluginOperationGrantCoordinator {
     }
     const token = randomBytes(32).toString("base64url");
     const grantId = randomUUID();
-    this.grants.set(hash(token), {
+    this.grants.set(sha256Hex(token), {
       id: grantId,
       binding: { ...binding, contractVersion: 1, nonce: randomUUID() },
       ...(reservedRead ? { reservedRead } : {}),
@@ -355,7 +352,7 @@ export class PluginOperationGrantCoordinator {
     domainKey: string,
   ): GrantConsumeResult {
     if (!token) return { ok: false, reason: "operation grant missing" };
-    const key = hash(token);
+    const key = sha256Hex(token);
     const stored = this.grants.get(key);
     this.grants.delete(key); // burn before every comparison; no await may precede this line
     if (!stored) return { ok: false, reason: "operation grant unknown or already consumed" };
@@ -1114,7 +1111,7 @@ export class PluginOperationGrantCoordinator {
     ownerPluginId: string,
     accountScopeHash: string,
   ): string {
-    return hash([
+    return sha256Hex([
       "plugin-operation-execution-scope/v1",
       ownerPluginId,
       accountScopeHash,

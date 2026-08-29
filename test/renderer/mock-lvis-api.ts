@@ -7,7 +7,7 @@
  */
 import { vi, type Mock } from "vitest";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
-import type { ChatEntry, StreamEvent } from "../../src/lib/chat-stream-state.js";
+import type { ChatEntry, ChatStreamEvent } from "../../src/lib/chat-stream-state.js";
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../../src/shared/subagent-events.js";
 import type { SubscriptionRuntimeStatusUpdatedEvent } from "../../src/shared/subscription-runtime.js";
 
@@ -158,7 +158,7 @@ export const DEFAULT_APP_INFO = {
 
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
-  emitChatStream: (ev: StreamEvent) => void;
+  emitChatStream: (ev: ChatStreamEvent) => void;
   emitAgentSpawnEvent: (event: AgentSpawnEvent) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
@@ -213,7 +213,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     updatedAt: new Date().toISOString(),
   };
 
-  const chatStreamHandlers = new Set<(ev: StreamEvent) => void>();
+  const chatStreamHandlers = new Set<(ev: ChatStreamEvent) => void>();
   const agentSpawnEventHandlers = new Set<(event: AgentSpawnEvent) => void>();
   const overlayShowHandlers = new Set<(item: unknown) => void>();
   const overlayDismissHandlers = new Set<(id: string) => void>();
@@ -397,7 +397,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
         text,
         origin: "user-keyboard",
         messageId: `sent-msg-${sentTurnCount}`,
-      } as StreamEvent));
+      } as ChatStreamEvent));
       return { ok: true };
     }),
     chatGuide: vi.fn(async () => ({ ok: true })),
@@ -478,7 +478,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       sessionTodoHandlers.add(handler);
       return () => sessionTodoHandlers.delete(handler);
     }),
-    onChatStream: vi.fn((h: (ev: StreamEvent) => void) => {
+    onChatStream: vi.fn((h: (ev: ChatStreamEvent) => void) => {
       chatStreamHandlers.add(h);
       return () => chatStreamHandlers.delete(h);
     }),

@@ -8,7 +8,7 @@ import {
 } from "../state/message-queue-store.js";
 import type { Attachment } from "../types/attachments.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
-import type { StreamEvent } from "../../../lib/chat-stream-state.js";
+import type { ChatStreamEvent } from "../../../lib/chat-stream-state.js";
 import type { ComposerHandle, ComposerSurface } from "../components/Composer.js";
 
 /**
@@ -41,7 +41,7 @@ export interface UseMessageQueueParams {
    * wire channel, so a queue subscribed to the wrong one would drain on the
    * other surface's `done`.
    */
-  subscribeStream: (handler: (event: StreamEvent) => void) => () => void;
+  subscribeStream: (handler: (event: ChatStreamEvent) => void) => () => void;
   /**
    * Does this frame belong to the turn currently on screen? A surface whose
    * stream carries a turn id (side chat's monotonic `streamId`) supplies its
@@ -56,7 +56,7 @@ export interface UseMessageQueueParams {
    * Omitted by a surface whose host serializes turns for itself and whose
    * frames carry no turn id to judge by; every frame then counts as current.
    */
-  isCurrentTurnEvent?: (event: StreamEvent) => boolean;
+  isCurrentTurnEvent?: (event: ChatStreamEvent) => boolean;
   /**
    * The composer whose textarea the window-level shortcuts (⌘⏎, Esc) act on.
    * Several composers are mounted at once — one per tile, plus the side chat

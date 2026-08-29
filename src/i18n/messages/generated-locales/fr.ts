@@ -3093,6 +3093,7 @@ export const frMessages: Record<string, string> = {
   "subscriptionProvidersSection.statusDeviceCodePending": "Connexion par code d’appareil en attente",
   "subscriptionProvidersSection.statusConnected": "Connecté",
   "subscriptionProvidersSection.statusSignedOut": "Déconnecté",
+  "subscriptionProvidersSection.routeStatus": "{route} · {status}",
   "subscriptionProvidersSection.statusReady": "Prêt à se connecter",
   "subscriptionProvidersSection.refreshStatus": "Actualiser l’état de connexion de {provider}",
   "subscriptionProvidersSection.errorProviderNotSupported": "Ce fournisseur d’abonnement n’est pas pris en charge.",

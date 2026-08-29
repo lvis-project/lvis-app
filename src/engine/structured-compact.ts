@@ -41,7 +41,7 @@ export type SummarySectionName = (typeof SUMMARY_TEMPLATE_HEADERS_V1)[number];
 
 
 
-export interface ParsedSummary {
+export interface ParsedCompactSummary {
   templateVersion: 1;
   sections: Partial<Record<SummarySectionName, string>>;
 
@@ -55,7 +55,7 @@ export interface CompactBoundary {
   templateVersion: 1;
 
   vendorOpaqueState?: VendorOpaqueState;
-  structuredSummary: ParsedSummary;
+  structuredSummary: ParsedCompactSummary;
   recentVerbatim: GenericMessage[];
   pinnedArtifacts: string[];
   toolBoundaryLedger: ToolCallSummary[];
@@ -99,7 +99,7 @@ export const SUMMARY_TEMPLATE_PROMPT_V1: string = t("be_structuredCompact.summar
 
 
 
-export function parseSummary(text: string): ParsedSummary {
+export function parseSummary(text: string): ParsedCompactSummary {
   const sections: Partial<Record<SummarySectionName, string>> = {};
 
 
@@ -489,7 +489,7 @@ export async function compactWithBoundary(
 
   // 2-3. LLM call + parse with retry-once.
   const conversationText = renderConversation(finalToCompact);
-  let summary: ParsedSummary | null = null;
+  let summary: ParsedCompactSummary | null = null;
   let lastRawText = "";
   for (let attempt = 0; attempt <= MAX_PARSE_RETRY; attempt++) {
     const text = await callSummaryLLM({

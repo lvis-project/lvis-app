@@ -46,7 +46,7 @@ import {
   upsertStreamingAssistant,
   upsertStreamingReasoning,
   type ChatEntry,
-  type StreamEvent,
+  type ChatStreamEvent,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
@@ -93,7 +93,7 @@ export interface UseSideChat {
    * a frame belongs to. Calling it ADOPTS the streamId of a turn's first frame,
    * which is idempotent for a given frame however many subscribers ask.
    */
-  isCurrentTurnEvent: (event: StreamEvent) => boolean;
+  isCurrentTurnEvent: (event: ChatStreamEvent) => boolean;
 }
 
 export function useSideChat(api: LvisApi): UseSideChat {
@@ -184,7 +184,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
   // those never run inside a dispatch. Caching the answer by frame identity
   // would NOT work: the context bridge hands each subscriber its own copy.
   const isCurrentTurnEvent = useCallback(
-    (event: StreamEvent): boolean =>
+    (event: ChatStreamEvent): boolean =>
       judgeStreamFrame(event, activeStreamIdRef, maxStreamIdRef),
     [],
   );
@@ -195,7 +195,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
   // before any reducer, so it stays orthogonal to the richer frame set.
   useEffect(() => {
     if (!api.sideChat) return;
-    const handleSideStreamEvent = (event: StreamEvent) => {
+    const handleSideStreamEvent = (event: ChatStreamEvent) => {
       if (!isCurrentTurnEvent(event)) return;
 
       const ev = event;
@@ -590,7 +590,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
  * when the turn ENDS), so a turn's FIRST frame is what establishes it.
  */
 function judgeStreamFrame(
-  event: StreamEvent,
+  event: ChatStreamEvent,
   activeStreamId: { current: number | null },
   maxStreamId: { current: number },
 ): boolean {
@@ -623,7 +623,7 @@ function dropPendingStreamingAssistant(entries: ChatEntry[]): ChatEntry[] {
   return entries;
 }
 
-function parseTurnSummaryEvent(ev: StreamEvent): Pick<
+function parseTurnSummaryEvent(ev: ChatStreamEvent): Pick<
   Extract<ChatEntry, { kind: "turn_summary" }>,
   | "turnDurationMs"
   | "toolCount"

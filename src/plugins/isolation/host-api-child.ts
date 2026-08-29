@@ -92,6 +92,7 @@ import {
   type WireFloatingPanelHandle,
   type WireAudioCaptureHandle,
 } from "./host-api-wire.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 /** One hostApi member as the child's stub table holds it. */
 export type ChildHostApiMember = (...args: unknown[]) => unknown;
@@ -241,7 +242,7 @@ export function createServiceChildMembers(
   /** One wording for the two members whose failure arrives after they returned. */
   const reportDetached = (path: HostApiPath, error: unknown): void => {
     deps.report(`hostApi.${path} failed after returning`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     });
   };
 
@@ -802,7 +803,7 @@ function subscribe(
   void deps.call(path, args(subscription.subscriptionId)).catch((error: unknown) => {
     deps.report(`hostApi.${path}: the host refused the subscription`, {
       subscriptionId: subscription.subscriptionId,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     });
     // Drop the local half too. Keeping it would leave the plugin holding a
     // disposer for a registration that exists on neither side.
@@ -929,7 +930,7 @@ export function createConfigSubscriptionChildMembers(
               await handler();
             } catch (error) {
               deps.report("hostApi.onShutdown: the plugin's handler threw", {
-                error: error instanceof Error ? error.message : String(error),
+                error: errorMessage(error),
               });
             } finally {
               // The release is how the host learns the handler has finished —

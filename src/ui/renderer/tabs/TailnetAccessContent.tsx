@@ -16,7 +16,7 @@ import {
   type TailnetSharingMutationResult,
   type TailnetSharingSnapshot,
 } from "../../../shared/tailnet-sharing.js";
-import { SettingsSection } from "../components/PageShell.js";
+import { SettingsSection, type SettingsSectionFeedback } from "../components/PageShell.js";
 import { TailnetObserverSection } from "./TailnetObserverSection.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
 import type { LvisApi } from "../types.js";
@@ -24,10 +24,6 @@ import type { LvisApi } from "../types.js";
 export interface TailnetAccessContentProps {
   api: LvisApi;
 }
-
-type Feedback =
-  | { readonly tone: "error" | "success"; readonly text: string }
-  | null;
 
 function durationLabel(
   value: TailnetInvitationDurationPreset | TailnetShareDurationPreset,
@@ -61,7 +57,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   const [snapshot, setSnapshot] = useState<TailnetSharingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [disabled, setDisabled] = useState(false);
-  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [feedback, setFeedback] = useState<SettingsSectionFeedback>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [invitationDuration, setInvitationDuration] = useState<TailnetInvitationDurationPreset>("10m");
   const [shareDuration, setShareDuration] = useState<TailnetShareDurationPreset>("8h");

@@ -3111,6 +3111,7 @@ export const esMessages: Record<string, string> = {
   "subscriptionProvidersSection.statusDeviceCodePending": "Inicio de sesión con código de dispositivo pendiente",
   "subscriptionProvidersSection.statusConnected": "Conectado",
   "subscriptionProvidersSection.statusSignedOut": "Sesión cerrada",
+  "subscriptionProvidersSection.routeStatus": "{route} · {status}",
   "subscriptionProvidersSection.statusReady": "Listo para iniciar sesión",
   "subscriptionProvidersSection.refreshStatus": "Actualizar estado de conexión de {provider}",
   "subscriptionProvidersSection.errorProviderNotSupported": "Este proveedor de suscripción no es compatible.",

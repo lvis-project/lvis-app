@@ -36,10 +36,10 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve as pathResolve } from "node:path";
-import { createHash } from "node:crypto";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import type { ScriptHookType } from "./script-hook-types.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const log = createLogger("hook-discovery");
 
@@ -139,7 +139,7 @@ function parseMatcher(buf: Buffer): string | undefined {
 function sha256OfFile(path: string): { sha256: string; size: number; matcher?: string } {
   const buf = readFileSync(path);
   return {
-    sha256: createHash("sha256").update(buf).digest("hex"),
+    sha256: sha256Hex(buf),
     size: buf.byteLength,
     matcher: parseMatcher(buf),
   };

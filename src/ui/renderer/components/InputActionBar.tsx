@@ -41,7 +41,8 @@ import type { RolePreset } from "../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../shared/assistant-context-menu.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
-import type { InputStatusRow, PermissionModeVariant } from "../hooks/use-input-status-row.js";
+import type { InputStatusRow } from "../hooks/use-input-status-row.js";
+import type { ExecutionModeDisplay } from "../../../shared/permission-mode.js";
 
 export interface InputActionBarProps {
   // Leading — slash/command picker (folds plugins/mcp/skills inside its own
@@ -126,7 +127,7 @@ function attachButtonLabel(
   return t("inputActionBar.attachDisabledLimit");
 }
 
-const PERMISSION_LABEL_KEYS: Record<PermissionModeVariant, string> = {
+const PERMISSION_LABEL_KEYS: Record<ExecutionModeDisplay, string> = {
   default: "permissionModeBadge.labelDefault",
   strict: "permissionModeBadge.labelStrict",
   auto: "permissionModeBadge.labelAuto",
@@ -137,7 +138,7 @@ const PERMISSION_LABEL_KEYS: Record<PermissionModeVariant, string> = {
 // Per-mode TEXT color (no pill/outline) — reuses the PermissionModeBadge color
 
 
-const PERMISSION_TEXT_COLOR: Record<PermissionModeVariant, string> = {
+const PERMISSION_TEXT_COLOR: Record<ExecutionModeDisplay, string> = {
   default: "text-info",
   strict: "text-destructive",
   auto: "text-warning",

@@ -24,8 +24,7 @@
  */
 import type { Readable, Writable } from "node:stream";
 import { frameMessage, StdioFrameDecoder } from "../stdio-framing.js";
-
-const RPC_INTERNAL_ERROR = -32603;
+import { RPC_INTERNAL_ERROR } from "../protocol-constants.js";
 
 interface JsonRpcRequestLike {
   jsonrpc: "2.0";

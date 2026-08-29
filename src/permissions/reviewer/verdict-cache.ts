@@ -7,7 +7,7 @@
  * Storage: `~/.lvis/permissions/reviewer-cache.jsonl` (append-only,
  * per-feature namespace per CLAUDE.md storage rule).
  *
- * Cache key: sha256(toolName + source + category + trustOrigin +
+ * Cache key: sha256Hex(toolName + source + category + trustOrigin +
  * approvalCacheKey + canonicalInputIdentity + conversationContext +
  * toolPolicyIdentity).
  *   - canonicalInputShape replaces every value with its type-name and
@@ -17,7 +17,7 @@
  *     hosts, and target paths drive the deterministic risk classifier, so
  *     those keys use sorted literal JSON.
  *
- * invalidationKey: sha256(allowedDirectories.sorted ‖ scope.json.sorted ‖
+ * invalidationKey: sha256Hex(allowedDirectories.sorted ‖ scope.json.sorted ‖
  * sandboxWrapState.json.sorted).
  *   - When settings change (additionalDirectories, scope) the cached
  *     entries with stale invalidationKey are dropped on next read.
@@ -35,12 +35,12 @@
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve as pathResolve } from "node:path";
-import { createHash } from "node:crypto";
 import type { RiskVerdict } from "./risk-classifier.js";
 import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../../tools/types.js";
 import { withFileLock } from "../../lib/with-file-lock.js";
 import { createLogger } from "../../lib/logger.js";
 import { lvisHome } from "../../shared/lvis-home.js";
+import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 const log = createLogger("reviewer-cache");
 
@@ -48,7 +48,7 @@ const TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_VERDICT_CACHE_ENTRIES = 500;
 
 export interface VerdictCacheEntry {
-  /** sha256(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputIdentity) */
+  /** sha256Hex(toolName+source+category+trustOrigin+approvalCacheKey+canonicalInputIdentity) */
   key: string;
   verdict: RiskVerdict;
   /** Unix ms, expiresAt = createdAt + TTL_MS */
@@ -139,10 +139,6 @@ function shapeOf(v: unknown): unknown {
 
 // ─── Hash helpers ────────────────────────────────────────────────────
 
-function sha256(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
-}
-
 export function computeCacheKey(lookup: VerdictCacheLookupKey): string {
   const shape = isValueSensitiveCategory(lookup.category)
     ? canonicalInputValue(lookup.finalInput)
@@ -151,7 +147,7 @@ export function computeCacheKey(lookup: VerdictCacheLookupKey): string {
     conversationContext: lookup.conversationContext ?? null,
   });
   // #885 v6 (§5.4): `writesToOwnSandbox` REMOVED from the hashed identity. This
-  // shrinks the canonical JSON of EVERY entry, so sha256(new) ≠ sha256(old) for
+  // shrinks the canonical JSON of EVERY entry, so sha256Hex(new) ≠ sha256Hex(old) for
   // all keys — the pre-migration on-disk cache becomes unreachable (mass
   // re-classify on first lookup, never a stale HIT that could replay an old
   // dead-rule verdict). `ownerPluginSandboxRoot` STAYS — the auto-LOW now DEPENDS
@@ -163,7 +159,7 @@ export function computeCacheKey(lookup: VerdictCacheLookupKey): string {
     pluginId: lookup.pluginId ?? null,
     workerId: lookup.workerId ?? null,
   });
-  return sha256(`${lookup.toolName}\x1f${lookup.source}\x1f${lookup.category}\x1f${lookup.trustOrigin}\x1f${lookup.approvalCacheKey ?? ""}\x1f${shape}\x1f${conversationContext}\x1f${toolPolicyIdentity}`);
+  return sha256Hex(`${lookup.toolName}\x1f${lookup.source}\x1f${lookup.category}\x1f${lookup.trustOrigin}\x1f${lookup.approvalCacheKey ?? ""}\x1f${shape}\x1f${conversationContext}\x1f${toolPolicyIdentity}`);
 }
 
 function isValueSensitiveCategory(category: ToolCategory): boolean {
@@ -174,7 +170,7 @@ export function computeInvalidationKey(ctx: VerdictCacheContext): string {
   const dirs = [...ctx.allowedDirectories].sort();
   const scopeJson = JSON.stringify(ctx.scope, sortedReplacer);
   const sandboxWrapJson = JSON.stringify(ctx.sandboxWrapState ?? null, sortedReplacer);
-  return sha256(`${JSON.stringify(dirs)}\x1f${scopeJson}\x1f${sandboxWrapJson}`);
+  return sha256Hex(`${JSON.stringify(dirs)}\x1f${scopeJson}\x1f${sandboxWrapJson}`);
 }
 
 function sortedReplacer(_key: string, value: unknown): unknown {

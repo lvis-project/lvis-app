@@ -257,6 +257,7 @@ export function SubscriptionProviderRow({
   subline,
   authAction,
   trailing,
+  routeName,
 }: {
   provider: SubscriptionProviderView;
   /** The name the embedding list uses — the company, not the runtime. */
@@ -274,6 +275,11 @@ export function SubscriptionProviderRow({
   authAction?: ReactNode;
   /** Contributed at the end of the row — the API-key credential form. */
   trailing?: ReactNode;
+  /** Names the route this row's connection state is about. Given when the
+   *  provider is reachable a second way as well, so "connected" here and
+   *  "not set" on the API-key chip beside it read as two routes, not as one
+   *  row contradicting itself. */
+  routeName?: string;
 }) {
   const { t } = useTranslation();
   const invoke = (operation: (() => void | Promise<void>) | undefined) => {
@@ -342,7 +348,9 @@ export function SubscriptionProviderRow({
               className={runtimeUnavailable ? "bg-destructive text-destructive-foreground" : undefined}
               data-testid={`subscription-provider:${descriptor.id}:connection`}
             >
-              {statusLabel(status)}
+              {routeName
+                ? t("subscriptionProvidersSection.routeStatus", { route: routeName, status: statusLabel(status) })
+                : statusLabel(status)}
             </Badge>
             {activeForChat ? (
               <Badge

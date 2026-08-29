@@ -1,7 +1,6 @@
 import {
   createCipheriv,
   createDecipheriv,
-  createHash,
   createHmac,
   randomBytes,
   randomUUID,
@@ -13,7 +12,8 @@ import { maskA2AMessage } from "../engine/a2a-subagent-message-codec.js";
 import { A2A_EXACT_SEND_REPLAY_RETENTION_MS } from "./a2a-remote-contracts.js";
 import type { A2AOsEncryption } from "./a2a-remote-store.js";
 import { canonicalizeA2ARemoteTask } from "./a2a-task-store.js";
-import { isRecord } from "../shared/is-record.js";
+import { isRecord, hasExactKeys } from "../shared/is-record.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const STORE_VERSION = 2;
 const DEFAULT_FILE = "exact-send-replay.json";
@@ -63,10 +63,6 @@ export type A2AReplayBeginResult =
   | { kind: "outcome-unknown" }
   | { kind: "capacity-exhausted" };
 
-function sha256(value: string | Uint8Array): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function decodeCanonicalBase64(value: string): Buffer | null {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return null;
   const decoded = Buffer.from(value, "base64");
@@ -81,18 +77,12 @@ function initialState(): ReplayStateFile {
   return { version: STORE_VERSION, records: [] };
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
 function validRecord(value: unknown): value is ReplayRecord {
   if (!isRecord(value) || !["in-progress", "completed", "outcome-unknown", "RETENTION_EXPIRED"].includes(String(value.state))) return false;
   const common = ["keyToken", "callerToken", "messageToken", "bodySha256", "intentSha256", "firstAcceptedAt", "expiresAt", "state"];
   const stateKeys = value.state === "in-progress" ? ["ownerTokenHmac"]
     : value.state === "completed" ? ["resultCiphertext", "resultIv", "resultAuthTag", "resultCiphertextSha256"] : [];
-  if (!exactKeys(value, [...common, ...stateKeys])) return false;
+  if (!hasExactKeys(value, [...common, ...stateKeys])) return false;
   if (![value.keyToken, value.callerToken, value.messageToken, value.bodySha256, value.intentSha256].every((entry) => typeof entry === "string" && DIGEST.test(entry))) return false;
   if (typeof value.firstAcceptedAt !== "string" || !Number.isFinite(Date.parse(value.firstAcceptedAt)) || typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt))) return false;
   if (value.state === "in-progress" && (typeof value.ownerTokenHmac !== "string" || !DIGEST.test(value.ownerTokenHmac))) return false;
@@ -103,7 +93,7 @@ function validRecord(value: unknown): value is ReplayRecord {
 function validState(value: unknown): value is ReplayStateFile {
   if (!isRecord(value)) return false;
   const keys = value.encryptedDataKey === undefined ? ["version", "records"] : ["version", "encryptedDataKey", "records"];
-  return exactKeys(value, keys) && value.version === STORE_VERSION
+  return hasExactKeys(value, keys) && value.version === STORE_VERSION
     && (value.encryptedDataKey === undefined || typeof value.encryptedDataKey === "string")
     && Array.isArray(value.records) && value.records.every(validRecord);
 }
@@ -204,7 +194,7 @@ export class A2AExactReplayStore {
         const tag = decodeCanonicalBase64(record.resultAuthTag!);
         const valid = ciphertext !== null && ciphertext.byteLength > 0
           && iv?.byteLength === 12 && tag?.byteLength === 16
-          && sha256(ciphertext) === record.resultCiphertextSha256;
+          && sha256Hex(ciphertext) === record.resultCiphertextSha256;
         ciphertext?.fill(0); iv?.fill(0); tag?.fill(0);
         if (!valid) throw new Error("a2a-replay-store-invalid");
         try { this.decryptResult(state, record); } catch { throw new Error("a2a-replay-store-invalid"); }
@@ -238,7 +228,7 @@ export class A2AExactReplayStore {
     const key = this.dataKey(state);
     try {
       const ciphertext = Buffer.from(record.resultCiphertext!, "base64");
-      if (sha256(ciphertext) !== record.resultCiphertextSha256) throw new Error("a2a-replay-result-corrupt");
+      if (sha256Hex(ciphertext) !== record.resultCiphertextSha256) throw new Error("a2a-replay-result-corrupt");
       const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(record.resultIv!, "base64"));
       decipher.setAAD(Buffer.from(`result\0${record.keyToken}\0${record.bodySha256}\0${record.intentSha256}`));
       decipher.setAuthTag(Buffer.from(record.resultAuthTag!, "base64"));
@@ -297,7 +287,7 @@ export class A2AExactReplayStore {
         record.resultCiphertext = ciphertext.toString("base64");
         record.resultIv = iv.toString("base64");
         record.resultAuthTag = cipher.getAuthTag().toString("base64");
-        record.resultCiphertextSha256 = sha256(ciphertext);
+        record.resultCiphertextSha256 = sha256Hex(ciphertext);
         await this.persist(next);
         this.state = next;
         return true;

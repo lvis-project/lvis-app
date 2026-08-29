@@ -1,3 +1,5 @@
+import { escapeHtml } from "../shared/escape-html.js";
+
 export interface AgentProfilePromptSource {
   name: string;
   body: string;
@@ -15,7 +17,7 @@ export function renderAgentProfilePrompt(
   taskInstructions: string,
 ): string {
   return [
-    '<lvis-agent-profile name="' + escapeAttr(profile.name) + '">',
+    '<lvis-agent-profile name="' + escapeHtml(profile.name) + '">',
     neutralizeAgentProfileFence(profile.body),
     "</lvis-agent-profile>",
     "",
@@ -23,14 +25,6 @@ export function renderAgentProfilePrompt(
     neutralizeAgentProfileFence(taskInstructions),
     "</lvis-agent-task>",
   ].join("\n");
-}
-
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 function neutralizeAgentProfileFence(body: string): string {

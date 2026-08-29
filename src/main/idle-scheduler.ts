@@ -6,6 +6,7 @@
 import * as os from "node:os";
 import { clearIntervalSafe, clearTimeoutSafe } from "../lib/clear-timer.js";
 import { createLogger } from "../lib/logger.js";
+import { sleep } from "../shared/abortable-deadline.js";
 const log = createLogger("idle-scheduler");
 
 // ─── Types ──────────────────────────────────────────
@@ -364,7 +365,7 @@ export class IdleSchedulerService {
       const cooldown =
         this.state === "THROTTLED" ? this.throttledCooldownMs : this.chunkCooldownMs;
       if (cooldown > 0) {
-        await new Promise<void>((r) => setTimeout(r, cooldown));
+        await sleep(cooldown);
       }
     } catch (err) {
       // 실패 시 로그만, 재시도/DLQ는 추후 구현

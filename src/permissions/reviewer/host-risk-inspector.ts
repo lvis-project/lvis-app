@@ -37,6 +37,7 @@ import type { ToolCategory } from "../../tools/types.js";
 import { stripCommandPath, tokenizeShell, type ShellLeaf } from "../../shared/shell-tokenizer.js";
 import { extractShellCommands } from "../../shared/shell-command-fields.js";
 import { hasNetworkTarget } from "./network-target.js";
+import type { ToolSource } from "../../shared/permission-review-status.js";
 
 /**
  * Built-in read-only command set — the host-side allow-list model. A compound
@@ -342,7 +343,7 @@ const EXECUTION_SELECTING_ENV_NAMES: ReadonlySet<string> = new Set([
 /** Signals the host owns about the observed call. The inspector reads ONLY these. */
 export interface HostRiskSignals {
   /** Where the tool came from. Network MCP servers are foreign peers. */
-  source: "builtin" | "plugin" | "mcp";
+  source: ToolSource;
   /** The actual, post-hook tool-call arguments. */
   finalInput: Record<string, unknown>;
 }

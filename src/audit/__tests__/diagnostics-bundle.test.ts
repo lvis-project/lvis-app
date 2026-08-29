@@ -6,7 +6,7 @@
  * ZIP. These tests unzip the bundle and assert the raw bytes are clean, per
  * secret/PII class (API key, DSN, email, phone, SSN, CC).
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -288,5 +288,68 @@ describe("buildDiagnosticsBundle — resilience", () => {
     const buf = await build({ maxBytes: 500 });
     const manifest = JSON.parse(new AdmZip(buf).getEntry("manifest.json")!.getData().toString("utf-8"));
     expect(manifest.truncated).toBe(true);
+  });
+});
+
+/**
+ * The window is picked in HOST-LOCAL civil days; the audit store partitions by
+ * UTC day and the log files are NAMED for one. East of Greenwich the two
+ * calendars disagree through the first hours of every local day, and a default
+ * window built from UTC keys used to end on the local day BEFORE the current
+ * one — losing the audit rows and the log file the support request is about.
+ *
+ * The clock is pinned to 01:00 on the 16th in Seoul (16:00Z on the 15th) so the
+ * disagreement is present in both the UTC and the Asia/Seoul suite run, instead
+ * of only during the hours the suite happens to be started in.
+ */
+describe("buildDiagnosticsBundle — default window over the local/UTC split", () => {
+  const NOW = new Date("2026-06-15T16:00:00.000Z");
+  let previousTz: string | undefined;
+
+  beforeEach(() => {
+    previousTz = process.env.TZ;
+    process.env.TZ = "Asia/Seoul";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  });
+
+  it("keeps audit rows written after UTC midnight but before local midnight", async () => {
+    // 01:00 local on the 16th — inside the default window's last local day, and
+    // written into the PREVIOUS UTC partition.
+    writeFileSync(
+      join(auditDir, "2026-06-15.jsonl"),
+      JSON.stringify({
+        timestamp: "2026-06-15T16:00:00.000Z",
+        sessionId: "s",
+        type: "turn",
+        input: "AFTER-UTC-MIDNIGHT-MARKER",
+        output: "",
+      }) + "\n",
+      "utf-8",
+    );
+    const { names, allText } = unzipToText(await build({ dateFrom: undefined, dateTo: undefined }));
+    expect(names).toContain("audit/2026-06-09_2026-06-16.jsonl");
+    expect(allText).toContain("AFTER-UTC-MIDNIGHT-MARKER");
+  });
+
+  it("keeps the log files named for the UTC days the local window reaches into", async () => {
+    // The window's last local day (the 16th) runs to 15:00Z ON the 16th, so the
+    // file named for UTC the 16th holds part of it; the first local day (the
+    // 9th) begins at 15:00Z on the 8th, so the file named for the 8th does too.
+    writeFileSync(join(logsDir, "lvis-2026-06-16.log"), "LAST-LOCAL-DAY-MARKER\n", "utf-8");
+    writeFileSync(join(logsDir, "lvis-2026-06-08.log"), "FIRST-LOCAL-DAY-MARKER\n", "utf-8");
+    writeFileSync(join(logsDir, "lvis-2026-06-07.log"), "OUTSIDE-MARKER\n", "utf-8");
+    const { names, allText } = unzipToText(await build({ dateFrom: undefined, dateTo: undefined }));
+    expect(names).toContain("logs/lvis-2026-06-16.log");
+    expect(names).toContain("logs/lvis-2026-06-08.log");
+    expect(names).not.toContain("logs/lvis-2026-06-07.log");
+    expect(allText).toContain("LAST-LOCAL-DAY-MARKER");
+    expect(allText).not.toContain("OUTSIDE-MARKER");
   });
 });
