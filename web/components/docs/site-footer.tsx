@@ -14,7 +14,6 @@ export function SiteFooter() {
       links: [
         { label: strings.footerHome, href: href(locale, "/") },
         { label: "Marketplace", href: "https://marketplace.lvisai.xyz" },
-        { label: "Agent Hub", href: "https://agent-hub.lvisai.xyz" },
       ],
     },
     {

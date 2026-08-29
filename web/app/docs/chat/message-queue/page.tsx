@@ -26,7 +26,7 @@ export default function Page() {
 
       <h2 id="queue">MessageQueuePanel</h2>
       <p>
-        외부 신호 (Outlook 새 메일, meeting 종료, Agent Hub 메시지 등) 가 들어오면 ChatView 본문을 막지 않고 패널에 카드 형태로 쌓입니다.
+        외부 신호 (Outlook 새 메일, meeting 종료 등) 가 들어오면 ChatView 본문을 막지 않고 패널에 카드 형태로 쌓입니다.
         구현: <code>src/ui/renderer/components/MessageQueuePanel.tsx</code>. 사용자가 카드를 클릭하면 채팅 본문에 ask-user question card 또는 도구 호출로 전환.
       </p>
 

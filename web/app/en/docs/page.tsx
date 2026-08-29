@@ -7,16 +7,16 @@ import { HeroBackdrop } from "@/components/motion/hero-backdrop";
 import { Reveal } from "@/components/motion/reveal";
 
 const stats = [
-  { value: "41", label: "static routes" },
-  { value: "61", label: "product screenshots" },
+  { value: "40", label: "static routes" },
+  { value: "46", label: "product screenshots" },
   { value: "11", label: "repo fact-checks" },
 ];
 
 const layers = [
   { tag: "Desktop Host", label: "LVIS App", note: "ChatView · MainToolbar · MessageQueuePanel · SessionTodoPanel" },
-  { tag: "Plugin Runtime", label: "6 plugins", note: "ms-graph · local-indexer · meeting · work-assistant · agent-hub · internal portal" },
+  { tag: "Plugin Runtime", label: "5 plugins", note: "ms-graph · local-indexer · meeting · work-assistant · internal portal" },
   { tag: "Storage", label: "~/.lvis", note: "0o700 dir · 0o600 file · audit/<YYYY-MM-DD>.jsonl" },
-  { tag: "Servers", label: "Marketplace · Agent Hub", note: "FastAPI · React 19 · Ed25519 · HTTPBearer + ApiKey sha256" },
+  { tag: "Server", label: "Marketplace", note: "FastAPI · React 19 · Ed25519 · ApiKey sha256" },
 ];
 
 const features = [
@@ -25,7 +25,7 @@ const features = [
   { eyebrow: "Plugins", title: "Plugins", desc: "Domain features are split out into plugins. Each declares its tools in a static manifest, and the host builds the tool list from that declaration.", href: "/en/docs/plugins", icon: Plug, span: "lg:col-span-3" },
   { eyebrow: "Architecture", title: "System architecture", desc: "HostApi contract · ~/.lvis storage tree · RiskLevel × Category grid.", href: "/en/docs/architecture/overview", icon: Bot, span: "lg:col-span-3" },
   { eyebrow: "Trust", title: "Permissions & risk management", desc: "Directory grants · 4 LLM autonomous review modes · agentApproval cryptographic chain.", href: "/en/docs/chat/permissions/directory", icon: ShieldCheck, span: "lg:col-span-2" },
-  { eyebrow: "Servers", title: "Marketplace & Agent Hub", desc: "FastAPI + SQLAlchemy 2.0 catalog · board · worklog · Ed25519 package signing.", href: "/en/docs/servers/marketplace", icon: Server, span: "lg:col-span-4" },
+  { eyebrow: "Server", title: "Marketplace", desc: "FastAPI + SQLAlchemy 2.0 catalog · publisher · admin · Ed25519 package signing.", href: "/en/docs/servers/marketplace", icon: Server, span: "lg:col-span-4" },
 ];
 
 const tour = [
@@ -49,14 +49,14 @@ export default function HomePage() {
           </Reveal>
           <Reveal delay={60}>
             <h1 className="mx-auto max-w-4xl text-[clamp(2.25rem,5vw,3.5rem)] font-semibold leading-[1.06] tracking-[-0.025em] text-ink">
-              Work AI where the app, plugins,
+              Work AI where the app
               <br />
-              and agent hub move <span className="text-ink-soft">as one</span>
+              and its plugins move <span className="text-ink-soft">as one</span>
             </h1>
           </Reveal>
           <Reveal delay={120}>
             <p className="mx-auto mt-6 max-w-xl text-[17px] leading-relaxed text-muted-foreground">
-              From login to chat · permissions · routines · seven domain plugins · two servers —
+              From login to chat · permissions · routines · five domain plugins · the Marketplace —
               a unified user guide grounded in signatures and file/line citations verified against the real source.
             </p>
           </Reveal>
@@ -66,7 +66,7 @@ export default function HomePage() {
                 <Link href="/en/docs/getting-started/install">Get started <ArrowRight className="h-4 w-4" /></Link>
               </Button>
               <Button asChild size="lg" variant="outline" className="text-[15px]">
-                <Link href="/en/docs/plugins">Explore the 6 plugins</Link>
+                <Link href="/en/docs/plugins">Explore the 5 plugins</Link>
               </Button>
             </div>
           </Reveal>

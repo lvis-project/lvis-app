@@ -14,7 +14,7 @@ export default function Page() {
         eyebrow="Host · Integration Recipes"
         title="A Collection of Plugin Combination Scenarios"
         description="What matters more than using a single plugin is the 'chain' where several plugins work together. This page lays out four commonly used combination scenarios as short flows. Every chain goes through a user consent card, and any step that runs automatically is marked explicitly."
-        tags={["Meeting + Work Assistant + MS-Graph", "Local Indexer + Meeting + Agent Hub", "MS-Graph + Internal Portal", "Agent Hub + Meeting + Internal Portal"]}
+        tags={["Meeting + Work Assistant + MS-Graph", "Local Indexer + work board", "MS-Graph + Internal Portal", "Meeting + Internal Portal + work board"]}
       />
 
       <h2 id="recipe-1">Recipe 1 — Meeting → Action → Schedule → Reply</h2>
@@ -40,7 +40,7 @@ export default function Page() {
           { title: "Natural language search", body: <p>Ask in chat, "where was the material about OOO?" → <strong>Local Indexer</strong> answers with candidate files and its reasoning.</p>, badge: "Local Indexer" },
           { title: "Path lookup", body: <p>Ask for the "exact file path" → the absolute path (including NAS mounts) is printed as-is. Open it directly from the OS file manager.</p> },
           { title: "Summarize + reformat", body: <p>On the same file, ask to "format this into one slide for a presentation" → the host LLM reuses the same match result and reformats it for a presentation.</p>, badge: "Reused" },
-          { title: "Send to a work-board card", body: <p>Register the summary as a "prepare presentation material" card on the <strong>Agent Hub</strong> work board to share with the team.</p>, badge: "Agent Hub" },
+          { title: "Send to a work-board card", body: <p>Register the summary as a "prepare presentation material" card on the <strong>work board</strong> built into the app.</p>, badge: "work board" },
         ]}
       />
 
@@ -61,7 +61,7 @@ export default function Page() {
         steps={[
           { title: "Join the video call", body: <p>Start the video call from the link attached to the event — the <strong>internal portal plugin</strong>'s video call flow.</p>, badge: "Internal Portal" },
           { title: "Automatic meeting notes", body: <p>During the meeting, the <strong>Meeting</strong> plugin runs live transcription. On end, it automatically generates notes, a summary, and action items.</p>, badge: "Meeting" },
-          { title: "Distributed to the team board", body: <p>Action item cards are registered automatically on the <strong>Agent Hub</strong> work board. Candidate assignees are filled in automatically, and cards nearing their deadline are sent as notifications.</p>, badge: "Agent Hub" },
+          { title: "Moved onto the work board", body: <p>Action items are registered as cards on the <strong>work board</strong> built into the app. Cards nearing their deadline are sent as notifications.</p>, badge: "work board" },
           { title: "Notes stay in their own area", body: <p>The original meeting notes are kept only inside the Meeting plugin's own area. They are not automatically sent to an external server.</p>, badge: "Only on your PC" },
         ]}
       />

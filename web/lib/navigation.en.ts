@@ -56,7 +56,6 @@ export const navigationEn: NavGroup[] = [
       { title: "Microsoft 365 (Outlook)", href: "/en/docs/plugins/ms-graph" },
       { title: "Meeting (Recording)", href: "/en/docs/plugins/meeting" },
       { title: "Work Assistant", href: "/en/docs/plugins/work-assistant" },
-      { title: "Agent Hub", href: "/en/docs/plugins/agent-hub" },
     ],
   },
   {
@@ -70,11 +69,6 @@ export const navigationEn: NavGroup[] = [
       { title: "Marketplace — Skills", href: "/en/docs/servers/marketplace/skills" },
       { title: "Marketplace — Publishers", href: "/en/docs/servers/marketplace/publisher" },
       { title: "Marketplace — Admin", href: "/en/docs/servers/marketplace/admin" },
-      { title: "Agent Hub Server Overview", href: "/en/docs/servers/agent-hub" },
-      { title: "Agent Hub — Workboard", href: "/en/docs/servers/agent-hub/workboard" },
-      { title: "Agent Hub — Inbox", href: "/en/docs/servers/agent-hub/inbox" },
-      { title: "Agent Hub — Report", href: "/en/docs/servers/agent-hub/report" },
-      { title: "Agent Hub — Team Feed Subscription", href: "/en/docs/servers/agent-hub/subscription" },
     ],
   },
   {

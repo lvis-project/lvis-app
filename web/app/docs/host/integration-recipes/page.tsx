@@ -14,7 +14,7 @@ export default function Page() {
         eyebrow="Host · Integration Recipes"
         title="플러그인 결합 시나리오 모음"
         description="단일 플러그인 사용법보다 더 중요한 건 ‘여러 플러그인이 함께 일하는 사슬’ 입니다. 본 페이지는 자주 쓰이는 결합 시나리오 네 가지를 짧은 흐름으로 정리했습니다. 모든 사슬은 사용자 동의 카드를 거치며, 자동 실행되는 단계는 명시적으로 표시합니다."
-        tags={["Meeting + Work Assistant + MS-Graph", "Local Indexer + Meeting + Agent Hub", "MS-Graph + 사내 포털", "Agent Hub + Meeting + 사내 포털"]}
+        tags={["Meeting + Work Assistant + MS-Graph", "Local Indexer + 업무 보드", "MS-Graph + 사내 포털", "Meeting + 사내 포털 + 업무 보드"]}
       />
 
       <h2 id="recipe-1">레시피 1 — 회의 → 액션 → 일정 → 답장</h2>
@@ -40,7 +40,7 @@ export default function Page() {
           { title: "자연어 검색", body: <p>채팅에 ‘OOO 관련 자료 어디 있었지?’ → <strong>Local Indexer</strong> 가 후보 파일과 근거를 함께 답합니다.</p>, badge: "Local Indexer" },
           { title: "경로 확인", body: <p>‘정확한 파일경로’ 요청 → 절대 경로 (NAS 마운트 포함) 그대로 출력. OS 파일 매니저에서 바로 열기.</p> },
           { title: "내용 요약 + 재포맷", body: <p>같은 파일 기준 ‘발표용 1장으로 정리’ → 호스트 LLM 이 동일한 매칭 결과를 재사용해 발표용 포맷으로 다시 정리.</p>, badge: "재사용" },
-          { title: "업무 보드 카드로 보내기", body: <p>요약 결과를 <strong>Agent Hub</strong> 업무 보드에 ‘발표 자료 준비’ 카드로 등록해 팀원과 공유.</p>, badge: "Agent Hub" },
+          { title: "업무 보드 카드로 보내기", body: <p>요약 결과를 앱에 내장된 <strong>업무 보드</strong> 에 ‘발표 자료 준비’ 카드로 등록.</p>, badge: "업무 보드" },
         ]}
       />
 
@@ -61,7 +61,7 @@ export default function Page() {
         steps={[
           { title: "화상회의 진입", body: <p>일정에 첨부된 링크로 화상회의 시작 — <strong>사내 포털 플러그인</strong> 의 화상회의 흐름.</p>, badge: "사내 포털" },
           { title: "자동 회의록", body: <p>회의 중 <strong>Meeting</strong> 플러그인이 받아쓰기를 실시간으로 진행. 종료 시 회의록 + 요약 + 액션 아이템 자동 생성.</p>, badge: "Meeting" },
-          { title: "팀 보드로 분배", body: <p><strong>Agent Hub</strong> 업무 보드에 액션 아이템 카드 자동 등록. 담당자 후보가 자동 채워지고, 마감 임박 카드는 알림으로 전달.</p>, badge: "Agent Hub" },
+          { title: "업무 보드로 옮기기", body: <p>앱에 내장된 <strong>업무 보드</strong> 에 액션 아이템이 카드로 등록됩니다. 마감이 가까운 카드는 알림으로 전달.</p>, badge: "업무 보드" },
           { title: "회의록은 자기 영역에", body: <p>회의록 원본은 Meeting 플러그인 자기 영역 안에만 보관. 외부 서버로 자동 전송되지 않습니다.</p>, badge: "내 PC 안에만" },
         ]}
       />

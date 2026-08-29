@@ -60,7 +60,7 @@ export default function Page() {
 
       <h2 id="where">Where is it stored?</h2>
       <p>
-        All memory is kept only inside the LVIS area on the user's PC. It is never sent to an external server, the Marketplace, or the Agent Hub.
+        All memory is kept only inside the LVIS area on the user's PC. It is never sent to an external server or the Marketplace.
         Because it's a plain single-line text file, users can also open and edit the file directly.
       </p>
 

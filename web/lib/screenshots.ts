@@ -229,19 +229,6 @@ export const shots: Record<string, Shot> = {
     captionEn: "Converting extracted action items into TODOs/emails",
   },
 
-  // agent-hub plugin (host sidebar)
-  "agent-hub-my-work": {
-    slug: "agent-hub-my-work.png",
-    topic: "agent-hub-plugin",
-    caption: "My Work — 개인 업무 보드",
-    captionEn: "My Work — personal task board",
-  },
-  "agent-hub-team-board": {
-    slug: "agent-hub-team-board.png",
-    topic: "agent-hub-plugin",
-    caption: "Team Board — 팀 단위 업무 카드",
-    captionEn: "Team Board — team-level task cards",
-  },
 
   // marketplace server
   "mp-login": {
@@ -317,43 +304,6 @@ export const shots: Record<string, Shot> = {
     captionEn: "Admin — metrics/audit",
   },
 
-  // agent-hub server
-  "ah-dashboard": {
-    slug: "ah-dashboard.png",
-    topic: "agent-hub",
-    caption: "Agent Hub — 대시보드",
-    captionEn: "Agent Hub — dashboard",
-  },
-  "ah-workboard": {
-    slug: "ah-workboard.png",
-    topic: "agent-hub",
-    caption: "Workboard — 팀 단위 업무",
-    captionEn: "Workboard — team-level tasks",
-  },
-  "ah-worklog": {
-    slug: "ah-worklog.png",
-    topic: "agent-hub",
-    caption: "Work Log — 처리 이력",
-    captionEn: "Work Log — processing history",
-  },
-  "ah-inbox": {
-    slug: "ah-inbox.png",
-    topic: "agent-hub",
-    caption: "Inbox — 직접 메시지/승인",
-    captionEn: "Inbox — direct messages/approvals",
-  },
-  "ah-report": {
-    slug: "ah-report.png",
-    topic: "agent-hub",
-    caption: "Report — 운영 리포트",
-    captionEn: "Report — operations report",
-  },
-  "ah-subscription": {
-    slug: "ah-subscription.png",
-    topic: "agent-hub",
-    caption: "구독 관리",
-    captionEn: "Subscription management",
-  },
 };
 
 export function shotUrl(key: keyof typeof shots): string {

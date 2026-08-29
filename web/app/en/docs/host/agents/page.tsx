@@ -33,7 +33,7 @@ export default function Page() {
             body: <p>Search directly for the Agent's name in the host's command palette. The most common way to call one.</p>,
           },
           {
-            title: "Delegate via an Agent Hub message",
+            title: "Delegate from the work board",
             body: <p>From the work board, choose "hand this task to this Agent" → the Agent produces the result in the background and returns it as a message.</p>,
           },
           {

@@ -6,11 +6,10 @@ import { PageNav } from "@/components/docs/page-nav";
 import { Badge } from "@/components/ui/badge";
 
 const plugins = [
-  { slug: "local-indexer", title: "Local Indexer", id: "local-indexer", ver: "0.4.11", scope: "Local · RAG", desc: "kiwipiepy Korean morphological analysis + pymupdf4llm + FTS5 + LanceDB. Folder watching via chokidar.", color: "from-teal/10 to-transparent" },
-  { slug: "ms-graph", title: "Microsoft 365 (Outlook)", id: "ms-graph", ver: "0.3.28", scope: "Mail · Calendar", desc: "MSAL OAuth + Electron safeStorage tokens. 31 mail + calendar tools.", color: "from-accent/60 to-transparent" },
-  { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.4.18", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec chunks.", color: "from-coral/10 to-transparent" },
-  { slug: "work-assistant", title: "Work Assistant", id: "work-assistant", ver: "0.7.0", scope: "Proactive", desc: "10+ detectors → triggerConversation. Unifies mail/calendar/meeting signals.", color: "from-citron/30 to-transparent" },
-  { slug: "agent-hub", title: "Agent Hub Sidebar", id: "agent-hub", ver: "0.8.1", scope: "Host UI Plugin", desc: "Work board sidebar + 43 tools + 5-minute polling. Talks to agent-hub.lvisai.xyz.", color: "from-ink/[0.06] to-transparent" },
+  { slug: "local-indexer", title: "Local Indexer", id: "local-indexer", ver: "0.6.2", scope: "Local · RAG", desc: "kiwipiepy Korean morphological analysis + pymupdf4llm + FTS5 + LanceDB. Folder watching via chokidar.", color: "from-teal/10 to-transparent" },
+  { slug: "ms-graph", title: "Microsoft 365 (Outlook)", id: "ms-graph", ver: "0.5.2", scope: "Mail · Calendar", desc: "MSAL OAuth + Electron safeStorage tokens. 31 mail + calendar tools.", color: "from-accent/60 to-transparent" },
+  { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.8.3", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec chunks.", color: "from-coral/10 to-transparent" },
+  { slug: "work-assistant", title: "Work Assistant", id: "work-assistant", ver: "0.11.2", scope: "Proactive", desc: "10+ detectors → triggerConversation. Unifies mail/calendar/meeting signals.", color: "from-citron/30 to-transparent" },
 ];
 
 export const metadata = { title: "Plugins — Overview" };
@@ -65,7 +64,8 @@ export default function Page() {
         <ul className="my-1 list-disc pl-5">
           <li><strong>lvis-plugin-email</strong> + <strong>lvis-plugin-calendar</strong> merged into <strong>ms-graph</strong> (archived 2026-04-28/04-30).</li>
           <li><strong>work-assistant</strong> now handles proactive work suggestions.</li>
-          <li>The intranet-only <strong>internal portal plugin</strong> is the sixth active plugin, but it neither installs nor runs outside the internal network, so it has no individual page in the public docs.</li>
+          <li>The <strong>agent-hub</strong> sidebar plugin was archived (2026-06-15) and its work board was folded into the personal kanban board built into the app. It is no longer an installable plugin.</li>
+          <li>The intranet-only <strong>internal portal plugin</strong> is the fifth active plugin, but it neither installs nor runs outside the internal network, so it has no individual page in the public docs.</li>
         </ul>
       </Callout>
 

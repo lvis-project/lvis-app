@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Mail, Mic, FolderSearch, LayoutDashboard, HandHelping } from "lucide-react";
+import { ArrowRight, Mail, Mic, FolderSearch, HandHelping } from "lucide-react";
 import { Reveal } from "@/components/motion/reveal";
 import { href, type Locale } from "@/lib/i18n";
 
@@ -7,7 +7,6 @@ const pluginChips = [
   { icon: Mail, label: "Microsoft 365" },
   { icon: Mic, label: "Meeting" },
   { icon: FolderSearch, label: "Local Indexer" },
-  { icon: LayoutDashboard, label: "Agent Hub" },
   { icon: HandHelping, label: "Work Assistant" },
 ];
 

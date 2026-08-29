@@ -28,7 +28,6 @@ const layers = [
       "local-indexer (kiwi · pymupdf4llm · LanceDB · FTS5)",
       "meeting (Whisper STT)",
       "work-assistant (proactive · detectors)",
-      "agent-hub (sidebar · 43 tools)",
       "internal portal plugin (24 tools)",
     ],
   },
@@ -48,10 +47,9 @@ const layers = [
   },
   {
     tag: "Servers",
-    band: "Marketplace · Agent Hub · external",
+    band: "Marketplace · external",
     boxes: [
       "Marketplace (FastAPI · plugin/agent/mcp/skill catalog)",
-      "Agent Hub (FastAPI + asyncpg + alembic)",
       "MCP servers (external)",
       "ms-graph · internal portal · internal search (external APIs)",
     ],

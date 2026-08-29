@@ -28,6 +28,7 @@ export function Header() {
 
   const nav = [
     { label: strings.nav.workday, href: `${landingBase}#workday` },
+    { label: strings.nav.workbench, href: `${landingBase}#workbench` },
     { label: strings.nav.download, href: `${landingBase}#download` },
     { label: strings.nav.architecture, href: `${landingBase}#architecture` },
     { label: strings.nav.roadmap, href: `${landingBase}#roadmap` },

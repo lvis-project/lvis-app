@@ -130,13 +130,13 @@ function getMoments(locale: Locale): Moment[] {
       {
         time: "11:47",
         railTitle: "Meeting ends → summary and actions",
-        plugins: "meeting · agent-hub",
+        plugins: "meeting · work-assistant",
         title: "When a meeting ends, the summary is ready first.",
         body: (
           <>
             LVIS detects the meeting's end, transcribes it, and automatically organizes a summary
-            and action items. It estimates owners and deadlines and moves them straight to Agent
-            Hub's kanban board.
+            and action items. It estimates owners and deadlines and moves them straight to the
+            kanban work board built into the app.
           </>
         ),
         mock: (
@@ -161,7 +161,7 @@ function getMoments(locale: Locale): Moment[] {
       {
         time: "14:32",
         railTitle: "Daily signals → kanban board",
-        plugins: "work-assistant · agent-hub",
+        plugins: "work-assistant",
         title: "One more check with you before it runs.",
         body: (
           <>
@@ -172,7 +172,7 @@ function getMoments(locale: Locale): Moment[] {
           </>
         ),
         mock: (
-          <MockShell kicker="Approval request" meta="agent_hub_add_cards">
+          <MockShell kicker="Approval request" meta="work_board_add_cards">
             <div className="flex items-center gap-2">
               <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-bold text-amber-700">Medium risk</span>
             </div>
@@ -368,12 +368,12 @@ function getMoments(locale: Locale): Moment[] {
     {
       time: "11:47",
       railTitle: "회의 종료 → 요약과 액션",
-      plugins: "meeting · agent-hub",
+      plugins: "meeting · work-assistant",
       title: "회의가 끝나면, 요약이 먼저 준비됩니다.",
       body: (
         <>
           회의 종료를 감지해 내용을 텍스트로 옮기고, 요약과 액션 아이템을 자동으로 정리합니다.
-          담당자와 마감을 추정해 Agent Hub의 칸반 보드에 그대로 옮깁니다.
+          담당자와 마감을 추정해 앱에 내장된 칸반 업무 보드에 그대로 옮깁니다.
         </>
       ),
       mock: (
@@ -397,7 +397,7 @@ function getMoments(locale: Locale): Moment[] {
     {
       time: "14:32",
       railTitle: "일일 신호 → 칸반 보드",
-      plugins: "work-assistant · agent-hub",
+      plugins: "work-assistant",
       title: "실행 전, 다시 한 번 당신에게.",
       body: (
         <>
@@ -407,7 +407,7 @@ function getMoments(locale: Locale): Moment[] {
         </>
       ),
       mock: (
-        <MockShell kicker="승인 요청" meta="agent_hub_add_cards">
+        <MockShell kicker="승인 요청" meta="work_board_add_cards">
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-bold text-amber-700">위험도 보통</span>
           </div>

@@ -4,7 +4,7 @@ export const searchEntriesEn: SearchEntry[] = [
   // Getting Started
   { group: "Getting Started", href: "/en/docs/", title: "LVIS AI Overview", snippet: "Desktop host · plugin runtime · storage · server, 4 layers", keywords: ["overview", "intro"] },
   { group: "Getting Started", href: "/en/docs/getting-started/install", title: "Install & First Launch", snippet: "macOS arm64 / Windows / Linux AppImage · electron-updater · lvis:// registration" },
-  { group: "Getting Started", href: "/en/docs/getting-started/login", title: "Login & First Screen", snippet: "Marketplace SSO · ApiKey sha256 · Agent Hub PKCE", keywords: ["sso", "auth"] },
+  { group: "Getting Started", href: "/en/docs/getting-started/login", title: "Login & First Screen", snippet: "Marketplace SSO · ApiKey sha256", keywords: ["sso", "auth"] },
   { group: "Getting Started", href: "/en/docs/getting-started/updates", title: "App Updates", snippet: "electron-updater · autoDownload=false · 4h interval · channel=latest" },
 
   // Host · Chat
@@ -37,7 +37,6 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Plugins", href: "/en/docs/plugins/ms-graph", title: "Microsoft 365 (Outlook)", snippet: "MSAL OAuth · safeStorage · 31 tools · scopes: User.Read Mail.* Calendars.*", keywords: ["outlook", "calendar", "mail", "ms-graph"] },
   { group: "Plugins", href: "/en/docs/plugins/meeting", title: "Meeting (Recording)", snippet: "OpenAI Whisper · PCM16LE 16kHz/3sec · 18 tools · meeting.ended", keywords: ["stt", "whisper", "audio"] },
   { group: "Plugins", href: "/en/docs/plugins/work-assistant", title: "Work Assistant", snippet: "10 detectors · proactive triggerConversation · daily briefing" },
-  { group: "Plugins", href: "/en/docs/plugins/agent-hub", title: "Agent Hub Sidebar", snippet: "ui[] slot=sidebar · 43 tools · 5-min polling · agent-hub.lvisai.xyz" },
 
   // Servers
   { group: "Servers", href: "/en/docs/servers/marketplace", title: "Marketplace Overview", snippet: "FastAPI + SQLAlchemy 2.0 · single Plugin model + plugin_type · Ed25519" },
@@ -47,11 +46,6 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Servers", href: "/en/docs/servers/marketplace/skills", title: "Marketplace — Skills", snippet: "SKILL.md · references · verified instruction bundles" },
   { group: "Servers", href: "/en/docs/servers/marketplace/publisher", title: "Marketplace — Publisher", snippet: "POST /plugins/{slug}/versions · Ed25519 signature · @lvis-marketplace/cli" },
   { group: "Servers", href: "/en/docs/servers/marketplace/admin", title: "Marketplace — Admin", snippet: "Single-page AdminPage · 4 tabs: Catalog/Approvals/Manage/API Keys" },
-  { group: "Servers", href: "/en/docs/servers/agent-hub", title: "Agent Hub Server Overview", snippet: "FastAPI + asyncpg + alembic · HTTPBearer + ApiKey sha256 · React 19 admin" },
-  { group: "Servers", href: "/en/docs/servers/agent-hub/workboard", title: "Agent Hub — Workboard", snippet: "work_items + work_logs append-only signed chain" },
-  { group: "Servers", href: "/en/docs/servers/agent-hub/inbox", title: "Agent Hub — Inbox", snippet: "DirectMessage · ApprovalRequest · Notification, 3 models" },
-  { group: "Servers", href: "/en/docs/servers/agent-hub/report", title: "Agent Hub — Report", snippet: "/reports/personal · /reports/team/{team_code}" },
-  { group: "Servers", href: "/en/docs/servers/agent-hub/subscription", title: "Agent Hub — Team Feed Subscription", snippet: "Subscription = team-feed opt-in (no plan/license model)" },
 
   // Architecture
   { group: "Architecture", href: "/en/docs/architecture/overview", title: "System at a Glance", snippet: "4 layers · plugins · ~/.lvis · servers" },

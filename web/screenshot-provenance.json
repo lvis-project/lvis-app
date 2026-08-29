@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pendingReplacementBaseline": 9,
+  "pendingReplacementBaseline": 7,
   "seededAccounts": [
     "work-board-seed",
     "marketplace-dev",
@@ -17,109 +17,65 @@
       "data": "synthetic",
       "action": "none"
     },
-    "screenshots/agent-hub-my-work.png": {
-      "surface": "work board plugin panel",
-      "data": "third-party",
-      "action": "redact"
-    },
-    "screenshots/agent-hub-team-board.png": {
-      "surface": "work board plugin panel",
-      "data": "third-party",
-      "action": "redact"
-    },
-    "screenshots/ah-dashboard.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-inbox.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-report.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-subscription.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-workboard.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
-    "screenshots/ah-worklog.png": {
-      "surface": "work board web app",
-      "data": "seeded",
-      "action": "none",
-      "account": "work-board-seed",
-      "overlayChecked": true
-    },
     "screenshots/chat-app-update.png": {
       "surface": "host chat surface",
       "data": "owner",
-      "action": "none"
+      "action": "none",
+      "note": "Frame predates the v0.8.0 tiled workbench: the chat area now splits into up to four tiles, each with its own conversation and its own full-height work panel, so this layout no longer matches the shipped UI. Reshoot against a seeded account."
     },
     "screenshots/chat-permission-directory.png": {
       "surface": "host chat surface",
       "data": "seeded",
       "action": "none",
       "account": "host-capture-seed",
-      "overlayChecked": true
+      "overlayChecked": true,
+      "note": "Frame predates the v0.8.0 tiled workbench: the chat area now splits into up to four tiles, each with its own conversation and its own full-height work panel, so this layout no longer matches the shipped UI. Reshoot against a seeded account."
     },
     "screenshots/chat-permission-llm-review.png": {
       "surface": "host chat surface",
       "data": "seeded",
       "action": "none",
       "account": "host-capture-seed",
-      "overlayChecked": true
+      "overlayChecked": true,
+      "note": "Frame predates the v0.8.0 tiled workbench: the chat area now splits into up to four tiles, each with its own conversation and its own full-height work panel, so this layout no longer matches the shipped UI. Reshoot against a seeded account."
     },
     "screenshots/chat-permission-risk.png": {
       "surface": "host chat surface",
       "data": "seeded",
       "action": "none",
       "account": "host-capture-seed",
-      "overlayChecked": true
+      "overlayChecked": true,
+      "note": "Frame predates the v0.8.0 tiled workbench: the chat area now splits into up to four tiles, each with its own conversation and its own full-height work panel, so this layout no longer matches the shipped UI. Reshoot against a seeded account."
     },
     "screenshots/chat-plugin-panel.png": {
       "surface": "host chat surface",
       "data": "owner",
-      "action": "none"
+      "action": "none",
+      "note": "Frame predates the v0.8.0 tiled workbench: the chat area now splits into up to four tiles, each with its own conversation and its own full-height work panel, so this layout no longer matches the shipped UI. Reshoot against a seeded account."
     },
     "screenshots/chat-question-card.png": {
       "surface": "host chat surface",
       "data": "seeded",
       "action": "none",
       "account": "host-capture-seed",
-      "overlayChecked": true
+      "overlayChecked": true,
+      "note": "Frame predates the v0.8.0 tiled workbench: the chat area now splits into up to four tiles, each with its own conversation and its own full-height work panel, so this layout no longer matches the shipped UI. Reshoot against a seeded account."
     },
     "screenshots/chat-todo-queue.png": {
       "surface": "host chat surface",
       "data": "seeded",
       "action": "none",
       "account": "host-capture-seed",
-      "overlayChecked": true
+      "overlayChecked": true,
+      "note": "Frame predates the v0.8.0 tiled workbench: the chat area now splits into up to four tiles, each with its own conversation and its own full-height work panel, so this layout no longer matches the shipped UI. Reshoot against a seeded account."
     },
     "screenshots/chat-tool-thinking.png": {
       "surface": "host chat surface",
       "data": "seeded",
       "action": "none",
       "account": "host-capture-seed",
-      "overlayChecked": true
+      "overlayChecked": true,
+      "note": "Frame predates the v0.8.0 tiled workbench: the chat area now splits into up to four tiles, each with its own conversation and its own full-height work panel, so this layout no longer matches the shipped UI. Reshoot against a seeded account."
     },
     "screenshots/local-indexer-add-folder.png": {
       "surface": "local-indexer plugin panel",
@@ -315,7 +271,8 @@
       "data": "seeded",
       "action": "none",
       "account": "host-capture-seed",
-      "overlayChecked": true
+      "overlayChecked": true,
+      "note": "Frame predates the v0.8.0 tiled workbench. The dialog itself is unchanged, but the chat area behind it now splits into tiles and push cards are scoped to the tile that raised them. Reshoot against a seeded account."
     },
     "screenshots/work-assistant-conflict-2.png": {
       "surface": "work-assistant host overlay card",
