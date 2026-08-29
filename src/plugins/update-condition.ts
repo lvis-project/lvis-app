@@ -1,6 +1,7 @@
 import { compareSemver, appVersionSatisfiesMin } from "../shared/semver-compare.js";
 import { IncompatibleAppVersionError } from "./types.js";
-import type { InstallPolicy, PluginMarketplaceItem } from "./types.js";
+import type { PluginMarketplaceItem } from "./types.js";
+import { normalizeInstallPolicy } from "./runtime/manifest-validation.js";
 
 export type PluginUpdateCondition =
   | Readonly<{ kind: "catalog_unavailable" }>
@@ -46,10 +47,6 @@ const CONDITIONS = {
   eligibleManagedBootUpdate: Object.freeze({ kind: "eligible_managed_boot_update" } as const),
 };
 
-function normalizeInstallPolicy(policy: InstallPolicy | undefined): InstallPolicy {
-  return policy === "admin" ? "admin" : "user";
-}
-
 export function resolvePluginUpdateCondition(
   input: PluginUpdateConditionInput,
 ): PluginUpdateCondition {
@@ -86,7 +83,7 @@ export function resolvePluginUpdateCondition(
     return CONDITIONS.blockedByChannel;
   }
 
-  const managed = normalizeInstallPolicy(candidate.installPolicy) === "admin";
+  const managed = normalizeInstallPolicy(candidate) === "admin";
   if (input.installed.presence === "absent") {
     return managed ? CONDITIONS.eligibleManagedInstall : CONDITIONS.eligibleUserInstall;
   }

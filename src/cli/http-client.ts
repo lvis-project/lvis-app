@@ -42,11 +42,9 @@ import type {
 import {
   LOCAL_API_INFO_FILE,
   type LocalApiServerInfoFile,
+  LOCAL_API_FEATURE,
 } from "../main/local-api-server.js";
 import { openFeatureNamespace } from "../main/storage/feature-namespace.js";
-
-/** Feature namespace id — resolves to `~/.lvis/local-api/` (same as the server). */
-const LOCAL_API_FEATURE = "local-api";
 
 /**
  * Transport failure code: the loopback server could not be reached (connection

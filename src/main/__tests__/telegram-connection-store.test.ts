@@ -7,6 +7,7 @@ import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
 import {
   createTelegramConnectionStore,
   type TelegramConnectionStore,
+  TELEGRAM_BRIDGE_FEATURE,
 } from "../telegram-connection-store.js";
 import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
@@ -755,5 +756,11 @@ describe("createTelegramConnectionStore", () => {
     await store.open();
     expect(await store.setPaused()).toBe(false);
     expect(store.desiredState()).toBe("disconnected");
+  });
+});
+
+describe("TELEGRAM_BRIDGE_FEATURE", () => {
+  it("is the feature namespace the store and the bridge server share", () => {
+    expect(TELEGRAM_BRIDGE_FEATURE).toBe("telegram-bridge");
   });
 });

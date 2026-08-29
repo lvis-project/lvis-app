@@ -61,8 +61,8 @@ import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("local-api");
 
-/** Feature namespace id — resolves to `~/.lvis/local-api/`. */
-const LOCAL_API_FEATURE = "local-api";
+/** Feature namespace id — resolves to `~/.lvis/local-api/`; the CLI reads the same namespace. */
+export const LOCAL_API_FEATURE = "local-api";
 
 /** The discovery file the CLI reads to find the running server. */
 export const LOCAL_API_INFO_FILE = "server.json";

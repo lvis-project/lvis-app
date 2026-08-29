@@ -15,7 +15,7 @@ import type {
   UserKeyboardIntentSnapshot,
 } from "../shared/chat-origin.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
-import type { StreamEvent } from "../lib/chat-stream-state.js";
+import type { ChatStreamEvent } from "../lib/chat-stream-state.js";
 
 /**
  * The chat channels that address ONE conversation.
@@ -235,8 +235,8 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
     ipcRenderer.invoke(CHANNELS.starred.add, entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke(CHANNELS.starred.remove, opts),
-  onChatStream: (handler: (event: StreamEvent) => void) =>
-    subscribeForChatGroup<StreamEvent>(CHANNELS.chat.stream, chatGroupId, handler),
+  onChatStream: (handler: (event: ChatStreamEvent) => void) =>
+    subscribeForChatGroup<ChatStreamEvent>(CHANNELS.chat.stream, chatGroupId, handler),
   // The fallback rides the same labelled adapter as the stream, so it answers
   // the same question: a provider swap happened in ONE conversation, and an
   // unfiltered banner would announce it in every open tile at once.

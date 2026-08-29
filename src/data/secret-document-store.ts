@@ -11,13 +11,12 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError, PRIVATE_FILE_MODE } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
-import { isRecord } from "../shared/is-record.js";
+import { isRecord, hasOnlyKeys } from "../shared/is-record.js";
 
 const DOCUMENT_VERSION = 1;
-const FILE_MODE = 0o600;
 const MAX_SECRET_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_SECRET_KEY_LENGTH = 1_024;
 const MAX_STABLE_READ_ATTEMPTS = 3;
@@ -60,11 +59,6 @@ export interface SecretStoreReconciliationWarning {
   reason: "atomic-directory-sync-unconfirmed" | "lock-release-failed-after-commit";
   path: string;
   error: unknown;
-}
-
-function isMissingPathError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function pathEntryExists(path: string): boolean {
@@ -248,11 +242,6 @@ function validateSecretKey(key: string): void {
     || key.includes("\0")) {
     throw new SecretDocumentValidationError("Secret document contains an invalid key");
   }
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const allowed = new Set(expected);
-  return Object.keys(value).every((key) => allowed.has(key));
 }
 
 function isCanonicalBase64(value: string): boolean {
@@ -596,7 +585,7 @@ export class SecretDocumentStore {
           const modeWasRepaired = options.repairModeBeforeRead === true
             && this.platform !== "win32"
             && this.runtime.exists(this.path)
-            ? this.runtime.repairMode(this.path, FILE_MODE)
+            ? this.runtime.repairMode(this.path, PRIVATE_FILE_MODE)
             : false;
           const state = this.readState(allowLegacy);
           const document = cloneDocument(state.document);
@@ -609,7 +598,7 @@ export class SecretDocumentStore {
             && (state.kind !== "absent" || Object.keys(document.entries).length > 0);
           if (shouldWrite) {
             try {
-              this.runtime.writeAtomic(this.path, intended, FILE_MODE);
+              this.runtime.writeAtomic(this.path, intended, PRIVATE_FILE_MODE);
             } catch (error) {
               if ((error as { committed?: unknown }).committed !== true
                 || this.runtime.read(this.path) !== intended) {

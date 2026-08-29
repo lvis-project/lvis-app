@@ -3,6 +3,7 @@ import { Button } from "../../../components/ui/button.js";
 import type { LvisApi, PluginPerfStats } from "../types.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatClockTime } from "../../../shared/format-time.js";
 
 type Row = {
   pluginId: string;
@@ -127,7 +128,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
                         <td className="px-3 py-2 text-right tabular-nums">{avg.toFixed(1)}</td>
                         <td className="px-3 py-2 text-muted-foreground">
                           {r.stats.lastCallAt
-                            ? new Date(r.stats.lastCallAt).toLocaleTimeString()
+                            ? formatClockTime(r.stats.lastCallAt)
                             : "—"}
                         </td>
                       </tr>

@@ -18,6 +18,7 @@ import {
   type RationaleTicketResolvedOutcomes,
   type RationaleTicketState,
   type RationaleTicketStateRecord,
+  RATIONALE_TICKET_TERMINAL_STATES,
 } from "./rationale-ticket-lifecycle.js";
 
 function seal<T>(value: T, label: string): T {
@@ -30,14 +31,6 @@ const TICKET_STATES: readonly RationaleTicketState[] = [
   "rationale_ready",
   "rationale_failed",
   "user_pending",
-  "allowed_once",
-  "denied",
-  "cancelled",
-  "expired",
-  "rejected",
-];
-
-const TERMINAL_STATES: readonly RationaleTicketState[] = [
   "allowed_once",
   "denied",
   "cancelled",
@@ -162,7 +155,7 @@ function assertExpectation(expectation: RationaleTicketCasExpectation): void {
 }
 
 function isTerminal(state: RationaleTicketState): boolean {
-  return TERMINAL_STATES.includes(state);
+  return RATIONALE_TICKET_TERMINAL_STATES.includes(state);
 }
 
 export function createRationaleTicketCasExpectation(

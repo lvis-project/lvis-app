@@ -1,6 +1,5 @@
 import { cp, mkdir, readFile, rename, rm, stat as statAsync } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { dirname, isAbsolute, posix, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
@@ -23,6 +22,7 @@ import {
 } from "./update-condition.js";
 import { getCachedCatalog, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
+import { throwIfMarketplaceInstallAborted } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import {
   ArtifactRollbackError,
@@ -57,7 +57,7 @@ import {
   type RemovalTransactionKind,
 } from "./plugin-removal-transaction.js";
 import type { PluginAdmissionRecord, PluginInstallReceipt } from "./plugin-install-receipt.js";
-import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
+import { STABLE_SEMVER_RE, normalizeInstallPolicy } from "./runtime/manifest-validation.js";
 import { flattenAgentPluginsManifest } from "./public-contract.js";
 import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
@@ -74,6 +74,8 @@ import {
 } from "../shared/network-access.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { materializePluginContributions } from "./plugin-contributions.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 const log = createLogger("marketplace");
 
 import {
@@ -201,15 +203,6 @@ function requirePreparedMarketplacePluginActivation(
   return activation;
 }
 
-function normalizeInstallPolicy(source: {
-  installPolicy?: InstallPolicy;
-}): InstallPolicy {
-  if (source.installPolicy === "admin") {
-    return "admin";
-  }
-  return "user";
-}
-
 function deepFreezeValue<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     for (const nested of Object.values(value as Record<string, unknown>)) {
@@ -266,7 +259,7 @@ export type RemoveDelistedAdminInstall = (
 ) => Promise<void>;
 
 function shaOfManifest(manifest: unknown): string {
-  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
+  return sha256Hex(canonicalJSON(manifest));
 }
 
 /**
@@ -277,17 +270,7 @@ function shaOfManifest(manifest: unknown): string {
  * the catalog between the policy decision and the artifact install (TOCTOU).
  */
 function shaOfCatalogItem(item: PluginMarketplaceItem): string {
-  return createHash("sha256").update(canonicalJSON(item)).digest("hex");
-}
-
-function throwIfMarketplaceInstallAborted(
-  signal: AbortSignal | undefined,
-  pluginId: string,
-): void {
-  if (!signal?.aborted) return;
-  const error = new Error(`marketplace plugin install aborted before promotion: ${pluginId}`);
-  error.name = "AbortError";
-  throw error;
+  return sha256Hex(canonicalJSON(item));
 }
 
 function findRuntimeCapabilityMismatches(
@@ -2057,7 +2040,7 @@ export class PluginMarketplaceService {
     try {
       raw = await readFile(manifestPath, "utf-8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      if (isMissingPathError(err)) return null;
       throw err;
     }
     const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
@@ -2267,7 +2250,7 @@ export class PluginMarketplaceService {
       } catch (err) {
         // ENOENT → stale registry entry; skip silently. Other errors
         // (permission, IO) propagate.
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+        if (isMissingPathError(err)) continue;
         throw err;
       }
       manifests.push(flattenAgentPluginsManifest(JSON.parse(raw)));
@@ -2345,14 +2328,14 @@ export class PluginMarketplaceService {
             "utf-8",
           );
         } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          if (!isMissingPathError(err)) throw err;
         }
         let receiptCommitted = false;
         let preparedReceiptRaw: string | undefined;
         let preparedManifest: PluginManifest | undefined;
         let preparedDocument: unknown;
         try {
-          throwIfMarketplaceInstallAborted(opts.signal, plugin.id);
+          throwIfMarketplaceInstallAborted(opts.signal, "marketplace plugin", plugin.id);
           const transaction = await this.artifactStore.extractZipWithCommit(
             plugin.id,
             verified.zipBuffer,
@@ -3021,7 +3004,7 @@ export class PluginMarketplaceService {
     try {
       snapshot.receiptRaw = await readFile(installReceiptPath(this.cacheRoot, pluginId), "utf-8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      if (!isMissingPathError(err)) throw err;
     }
     try {
       const current = await statAsync(installDir);

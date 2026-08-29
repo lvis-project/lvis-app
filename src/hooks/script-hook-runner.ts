@@ -34,8 +34,6 @@
  * sees it.
  */
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { homedir } from "node:os";
 import { buildSafeChildEnv } from "../tools/safe-env.js";
 import {
   resolveShell,
@@ -59,6 +57,8 @@ import {
 } from "./script-hook-types.js";
 import type { DiscoveredHook } from "./hook-discovery.js";
 import type { PluginHookOwner } from "./hook-registry.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { expandLeadingTilde } from "../shared/home-tilde.js";
 
 const log = createLogger("hook-runner");
 
@@ -118,7 +118,7 @@ export interface RunnableHook {
 /** sha256 (hex) of a verbatim command argv — the forensic anchor for a generic
  * `command` hook that has no on-disk local-script sha. */
 function hashCommandArgv(command: string[]): string {
-  return createHash("sha256").update(command.join("\0")).digest("hex");
+  return sha256Hex(command.join("\0"));
 }
 
 /** Adapt a legacy `DiscoveredHook` to the {@link RunnableHook} shape. */
@@ -134,15 +134,6 @@ export function runnableFromDiscovered(hook: DiscoveredHook): RunnableHook {
     // canonical command identity.
     commandIdentity: hook.sha256,
   };
-}
-
-/** Expand a leading `~` / `~/` to the user's home directory. */
-function expandHome(token: string): string {
-  if (token === "~") return homedir();
-  if (token.startsWith("~/") || token.startsWith("~\\")) {
-    return homedir() + token.slice(1);
-  }
-  return token;
 }
 
 /**
@@ -258,7 +249,7 @@ export async function runOneHookScript(
     // Generic command-hook: spawn argv[0] directly with NO shell. Expand a
     // leading `~` in each token (the shell would have done this; a direct
     // spawn does not). NO shell quoting / parsing → no shell-injection surface.
-    const argv = runnable.command.map(expandHome);
+    const argv = runnable.command.map(expandLeadingTilde);
     spawnCmd = argv[0];
     spawnArgs = argv.slice(1);
     spawnEnv = childEnvBase;

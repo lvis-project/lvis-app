@@ -3,6 +3,7 @@ import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
 import type { FireOptions } from "./notification-service.js";
 import type { RoutineRecord } from "../shared/routines-types.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -27,10 +28,6 @@ export interface ShutdownRoutineServices {
   routinesStore?: ShutdownRoutinesStore;
   routineEngine?: ShutdownRoutineEngine;
   notificationService?: ShutdownNotificationService;
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 export async function runShutdownRoutines(

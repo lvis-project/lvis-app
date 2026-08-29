@@ -20,8 +20,12 @@
  * `optionalTheme.resolved` usage (maps to the active bundle's shell).
  */
 
-/** Active bundle id. */
-export type BundleId = string;
+/**
+ * A bundle id as the renderer holds it before validation — settings and the
+ * boot-time global can name a bundle that is not installed; `isBundleId`
+ * narrows to the shared `BundleId` union before use.
+ */
+export type UnvalidatedBundleId = string;
 
 /** Derived shell color scheme from the active bundle. */
 export type ResolvedShell = "light" | "dark";
@@ -31,19 +35,19 @@ export interface ThemeContextValue {
    * The user-configured bundle id (e.g. "violet-light" or "violet-dark").
    * When `followSystem` is active this may differ from `effectiveBundleId`.
    */
-  bundleId: BundleId;
+  bundleId: UnvalidatedBundleId;
   /**
    * The bundle id actually applied to the DOM after resolving `followSystem`.
    * When `followSystem` is false this equals `bundleId`.
    * When `followSystem` is true and bundleId is a violet pair id, this reflects
    * the OS-resolved variant ("violet-light" or "violet-dark").
    */
-  effectiveBundleId: BundleId;
+  effectiveBundleId: UnvalidatedBundleId;
   /**
    * Live-set the active bundle. Updates the DOM immediately and persists
    * to `~/.lvis/settings.json` via `api.updateSettings({ appearance: ... })`.
    */
-  setBundle: (id: BundleId) => void;
+  setBundle: (id: UnvalidatedBundleId) => void;
   /**
    * Shell color scheme derived from the active bundle's `shell` field.
    * Kept for backward compatibility (CustomTitleBar uses `optionalTheme.resolved`).

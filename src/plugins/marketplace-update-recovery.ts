@@ -13,7 +13,6 @@
  * - only obsolete backups from an already-successful commit enter the existing
  *   tombstone/sweeper lifecycle.
  */
-import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { isResolvedPathWithin } from "./plugin-storage-containment.js";
@@ -37,19 +36,17 @@ import type { PluginRegistryEntry } from "./types.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 type PendingUpdate = NonNullable<PluginRegistryEntry["pendingUpdate"]>;
 type PendingCleanup = NonNullable<PluginRegistryEntry["pendingCleanup"]>[number];
-
-function sha256(raw: string): string {
-  return createHash("sha256").update(raw).digest("hex");
-}
 
 async function readNullable(path: string): Promise<string | null> {
   try {
     return await readFile(path, "utf-8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (isMissingPathError(error)) return null;
     throw error;
   }
 }
@@ -188,7 +185,7 @@ async function payloadMatchesPrevious(
   const pending = entry.pendingUpdate;
   if (!pending || pending.previousReceiptRaw === null) return false;
   const rawManifest = await readNullable(resolve(pluginRoot, "plugin.json"));
-  const manifestHash = rawManifest === null ? null : sha256(rawManifest);
+  const manifestHash = rawManifest === null ? null : sha256Hex(rawManifest);
   if (manifestHash !== pending.previousManifestFileSha256) return false;
   return (await verifyInstallReceiptRaw(pending.previousReceiptRaw, entry.id, pluginRoot)).ok;
 }
@@ -228,7 +225,7 @@ export async function preparePendingPluginUpdate(
         const receiptRaw = await readNullable(installReceiptPath(paths.cacheRoot, expectedEntry.id));
         return {
           kind: options.kind,
-          previousManifestFileSha256: rawManifest === null ? null : sha256(rawManifest),
+          previousManifestFileSha256: rawManifest === null ? null : sha256Hex(rawManifest),
           previousReceiptRaw: receiptRaw,
           ...(options.recoveryBackupDir && options.recoveryBackupMode
             ? {

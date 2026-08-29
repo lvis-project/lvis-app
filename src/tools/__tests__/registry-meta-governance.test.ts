@@ -43,13 +43,13 @@ describe("ToolRegistry host-only meta governance", () => {
       decisionOverride: "ask",
     }));
     registry.register(tool({
-      name: "agent_status",
+      name: "ask_user_question",
       category: "meta",
       decisionOverride: "always-allow-with-audit",
     }));
 
     expect(registry.findByName("agent_spawn")?.decisionOverride).toBe("ask");
-    expect(registry.findByName("agent_status")?.decisionOverride).toBe(
+    expect(registry.findByName("ask_user_question")?.decisionOverride).toBe(
       "always-allow-with-audit",
     );
   });

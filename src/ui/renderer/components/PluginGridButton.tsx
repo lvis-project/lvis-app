@@ -8,11 +8,10 @@ import { pluginIconFor } from "../utils/plugin-icon.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
-import type { TranslationVars } from "../../../i18n/translate.js";
+import type { TranslateFn } from "../../../i18n/translate.js";
 
-type TFn = (key: string, vars?: TranslationVars) => string;
 
-function getPhaseLabel(phase: InstallPhase, t: TFn): string {
+function getPhaseLabel(phase: InstallPhase, t: TranslateFn): string {
   const map: Record<InstallPhase, string> = {
     downloading: t("pluginGridButton.phaseDownloading"),
     verifying: t("pluginGridButton.phaseVerifying"),
@@ -24,7 +23,7 @@ function getPhaseLabel(phase: InstallPhase, t: TFn): string {
   return map[phase];
 }
 
-function getPreparationShortLabel(phase: string, t: TFn): string {
+function getPreparationShortLabel(phase: string, t: TranslateFn): string {
   const map: Record<string, string> = {
     pending: t("pluginGridButton.prepPending"),
     "installing-python": "Python",
@@ -36,7 +35,7 @@ function getPreparationShortLabel(phase: string, t: TFn): string {
   return map[phase] ?? phase;
 }
 
-function formatPreparationText(status: PluginCardSummary["preparationStatus"], t: TFn): string | null {
+function formatPreparationText(status: PluginCardSummary["preparationStatus"], t: TranslateFn): string | null {
   if (!status) return null;
   const label = getPreparationShortLabel(status.phase, t);
   const pct = typeof status.progressPct === "number" && Number.isFinite(status.progressPct)
@@ -45,7 +44,7 @@ function formatPreparationText(status: PluginCardSummary["preparationStatus"], t
   return `${label}${pct}`;
 }
 
-function formatPreparationTitle(status: PluginCardSummary["preparationStatus"], t: TFn): string | null {
+function formatPreparationTitle(status: PluginCardSummary["preparationStatus"], t: TranslateFn): string | null {
   if (!status) return null;
   const text = formatPreparationText(status, t);
   return [text, status.message].filter(Boolean).join(" · ");

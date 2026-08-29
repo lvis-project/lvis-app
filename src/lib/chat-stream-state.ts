@@ -1,7 +1,9 @@
 import type {
   ApprovalPurposeSuggestion,
-  PermissionReviewRiskLevel,
+  RiskLevel,
   PermissionReviewStatus,
+  ToolCategory,
+  ToolSource,
 } from "../shared/permission-review-status.js";
 import type { LLMVendor } from "../shared/llm-vendor-defaults.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
@@ -12,6 +14,7 @@ import {
 } from "../shared/subscription-runtime.js";
 import { isExternalSurfaceInputOrigin } from "../shared/chat-origin.js";
 import { t } from "../i18n/index.js";
+import type { ExecutionMode } from "../shared/permission-mode.js";
 
 export type TokenUsageSegment = {
   vendorProvider: LLMVendor;
@@ -31,7 +34,7 @@ export type CheckpointTrigger = "auto-compact" | "manual";
 
 export const EMPTY_ASSISTANT_RESPONSE_TEXT = t("be_chatStreamState.emptyAssistantResponse");
 
-export type StreamEvent = {
+export type ChatStreamEvent = {
   type: string;
   streamId?: number;
   text?: string;
@@ -56,13 +59,13 @@ export type StreamEvent = {
   toolUseId?: string;
   displayOrder?: number;
   reviewStatus?: PermissionReviewStatus;
-  toolCategory?: "read" | "write" | "shell" | "network" | "meta";
-  source?: "builtin" | "plugin" | "mcp";
+  toolCategory?: ToolCategory;
+  source?: ToolSource;
   pluginId?: string;
   mcpServerId?: string;
   /** Renderer-safe host shell substrate projection on tool completion. */
   executionPlan?: HostShellExecutionPlanAuditProjection;
-  verdictLevel?: PermissionReviewRiskLevel;
+  verdictLevel?: RiskLevel;
   approvalPurpose?: ApprovalPurposeSuggestion;
   roundIndex?: number;
   stopReason?: "end_turn" | "tool_use" | "max_tokens";
@@ -107,7 +110,7 @@ export type StreamEvent = {
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
   /** Permission mode changed by slash command; renderer fans this into the badge event bus. */
-  mode?: "default" | "strict" | "auto" | "allow";
+  mode?: ExecutionMode;
   /** LLM call status events emitted before first stream content arrives. */
   phase?: "attempt" | "retry" | "fallback";
   label?: string;
@@ -172,8 +175,8 @@ export type ToolEntryItem = {
   status: "running" | "done" | "error" | "cancelled";
   input?: Record<string, unknown>;
   result?: string;
-  source?: "builtin" | "plugin" | "mcp";
-  category?: "read" | "write" | "shell" | "network" | "meta";
+  source?: ToolSource;
+  category?: ToolCategory;
   pluginId?: string;
   mcpServerId?: string;
   /** Renderer-safe host shell substrate projection on tool completion. */
@@ -270,13 +273,13 @@ export type ChatEntry =
       kind: "permission_review";
       status: PermissionReviewStatus;
       toolName: string;
-      toolCategory?: "read" | "write" | "shell" | "network" | "meta";
-      source?: "builtin" | "plugin" | "mcp";
+      toolCategory?: ToolCategory;
+      source?: ToolSource;
       groupId: string;
       toolUseId: string;
       displayOrder: number;
       createdAt?: number;
-      verdictLevel?: PermissionReviewRiskLevel;
+      verdictLevel?: RiskLevel;
       reason?: string;
       approvalPurpose?: ApprovalPurposeSuggestion;
     }
@@ -915,12 +918,12 @@ export function upsertPermissionReview(
   payload: {
     status: PermissionReviewStatus;
     toolName: string;
-    toolCategory?: "read" | "write" | "shell" | "network" | "meta";
-    source?: "builtin" | "plugin" | "mcp";
+    toolCategory?: ToolCategory;
+    source?: ToolSource;
     groupId: string;
     toolUseId: string;
     displayOrder?: number;
-    verdictLevel?: PermissionReviewRiskLevel;
+    verdictLevel?: RiskLevel;
     reason?: string;
     approvalPurpose?: ApprovalPurposeSuggestion;
   },
@@ -964,8 +967,8 @@ export function applyToolStart(
     name: string;
     displayOrder?: number;
     input?: Record<string, unknown>;
-    source?: "builtin" | "plugin" | "mcp";
-    category?: "read" | "write" | "shell" | "network" | "meta";
+    source?: ToolSource;
+    category?: ToolCategory;
     pluginId?: string;
     mcpServerId?: string;
   },
@@ -1040,8 +1043,8 @@ export function applyToolEnd(
     cancelled?: boolean;
     uiPayload?: ToolEntryItem["uiPayload"];
     durationMs?: number;
-    source?: "builtin" | "plugin" | "mcp";
-    category?: "read" | "write" | "shell" | "network" | "meta";
+    source?: ToolSource;
+    category?: ToolCategory;
     pluginId?: string;
     mcpServerId?: string;
     executionPlan?: ToolEntryItem["executionPlan"];

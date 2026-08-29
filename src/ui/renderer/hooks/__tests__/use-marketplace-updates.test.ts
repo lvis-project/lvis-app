@@ -9,18 +9,18 @@ import "../../../../../test/renderer/setup.js";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useMarketplaceUpdates, type PluginUpdateInfo } from "../use-marketplace-updates.js";
-import type { AppSettings, LvisApi, SettingsUpdateResult } from "../../types.js";
+import type { AppSettings, DeepPartial, LvisApi, SettingsUpdateResult } from "../../types.js";
 
 function marketplaceUpdatesApi(options: {
-  settings?: Partial<AppSettings>;
-  updateSettings?: (patch: Partial<AppSettings>) => Promise<SettingsUpdateResult>;
+  settings?: DeepPartial<AppSettings>;
+  updateSettings?: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
 } = {}) {
   let handler: ((updates: PluginUpdateInfo[]) => void) | null = null;
   const api = {
     getSettings: vi.fn(async () => options.settings ?? {}),
     updateSettings: vi.fn(
       options.updateSettings ??
-        (async (patch: Partial<AppSettings>) =>
+        (async (patch: DeepPartial<AppSettings>) =>
           ({ ...(options.settings ?? {}), ...patch }) as SettingsUpdateResult),
     ),
     onMarketplaceUpdatesAvailable: vi.fn((h: (updates: PluginUpdateInfo[]) => void) => {

@@ -55,6 +55,7 @@ import {
 } from "./permission-audit-runner.js";
 import type { PermissionAuditEntry } from "../audit/audit-schema.js";
 import type { SecretStore } from "../audit/hmac-chain.js";
+import { EXECUTION_MODES, type ExecutionMode } from "../shared/permission-mode.js";
 
 export type PermissionDirVerb = "allow" | "deny" | "list";
 
@@ -702,20 +703,13 @@ export function dispatchPermissionAuditCommand(
 
 // ─── /permission mode ──────────────────────────────────────────────────
 
-export type SlashPermissionMode = "strict" | "default" | "auto" | "allow";
-
 export interface PermissionModeCommand {
   verb: "mode";
-  mode: SlashPermissionMode;
+  mode: ExecutionMode;
   durable: boolean;
 }
 
-const VALID_MODES: ReadonlySet<SlashPermissionMode> = new Set([
-  "strict",
-  "default",
-  "auto",
-  "allow",
-]);
+const VALID_MODES: ReadonlySet<ExecutionMode> = new Set(EXECUTION_MODES);
 
 export function parsePermissionModeCommand(
   rawArgs: string,
@@ -727,7 +721,7 @@ export function parsePermissionModeCommand(
       error: "missing mode — usage: /permission mode <strict|default|auto|allow> [--durable]",
     };
   }
-  const candidate = args[0] as SlashPermissionMode;
+  const candidate = args[0] as ExecutionMode;
   if (!VALID_MODES.has(candidate)) {
     return {
       ok: false,

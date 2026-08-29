@@ -29,6 +29,7 @@ import { parseMcpRuntimeSpec } from "../plugins/mcp-runtime-spec.js";
 import type { McpRuntimeSpec } from "../plugins/types.js";
 import type { McpServerConfig } from "./types.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
+import { throwIfMarketplaceInstallAborted } from "../plugins/marketplace-installer.js";
 import { MAX_MCP_MANIFEST_BYTES } from "./safe-names.js";
 
 export interface InstallMcpResult {
@@ -99,7 +100,7 @@ export async function installMcpFromMarketplace(
       const substituted = substituteRuntimeTokens(runtime, tokens);
       const config = buildMcpServerConfig(safeSlug, substituted);
       const authMode = substituted.auth ?? "none";
-      throwIfMarketplaceInstallAborted(opts.signal, safeSlug);
+      throwIfMarketplaceInstallAborted(opts.signal, "MCP package", safeSlug);
       const { result: registration } = await opts.store.extractZipWithCommit(
         safeSlug,
         zipBuffer,
@@ -167,13 +168,6 @@ export function readRuntimeFromVerifiedZip(
     rootFiles["plugin.json"],
     `MCP manifest in verified zip for "${safeSlug}"`,
   );
-}
-
-function throwIfMarketplaceInstallAborted(signal: AbortSignal | undefined, slug: string): void {
-  if (!signal?.aborted) return;
-  const error = new Error(`MCP package install aborted before promotion: ${slug}`);
-  error.name = "AbortError";
-  throw error;
 }
 
 function parseRuntimeManifest(raw: string, source: string): McpRuntimeSpec {

@@ -6,6 +6,7 @@ import {
   canUseLlmVendorWithoutApiKey,
   DEFAULT_LLM_VENDOR,
   getLlmVendorSettings,
+  narrowLlmVendor,
   isLLMVendor,
   type LLMVendor,
 } from "../../../shared/llm-vendor-defaults.js";
@@ -16,18 +17,6 @@ import {
   type SubscriptionRuntimeCapabilities,
 } from "../../../shared/subscription-runtime.js";
 import { selectSubscriptionRuntimeUiPolicy, type SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
-
-/**
- * External-boundary narrowing helper. Lives at module scope so its
- * identity is stable — `useCallback` / `useEffect` closures that call
- * this never change identity because of render churn, which keeps the
- * `react-hooks/exhaustive-deps` lint happy and prevents false-positive
- * stale-closure churn. Pure: depends only on the module-level
- * `isLLMVendor` import.
- */
-function narrowVendor(raw: unknown): LLMVendor {
-  return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
-}
 
 function canUseSettingsWithoutApiKey(
   settings: Awaited<ReturnType<LvisApi["getSettings"]>>,
@@ -135,7 +124,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
   const applySettingsSnapshot = useCallback(
     (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
       if (!isMountedRef.current) return;
-      const provider = narrowVendor(settings.llm.provider);
+      const provider = narrowLlmVendor(settings.llm.provider);
       const block = getLlmVendorSettings(settings.llm.vendors, provider);
       setLlmVendor(provider);
       setLlmModel(llmRouteModel(
@@ -263,7 +252,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
         // update lands somewhere valid; if the user is actively on a
         // different vendor, the next settings load will re-narrow and
         // the toggle re-targets correctly.
-        const provider = narrowVendor(s.llm.provider);
+        const provider = narrowLlmVendor(s.llm.provider);
         setEnableThinkingChat(next);
         await api.updateSettings({
           llm: { vendors: { [provider]: { enableThinking: next } } },
@@ -301,7 +290,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
 }
 
 export interface ModelCardChoice {
-  vendor: string;
+  vendor: LLMVendor;
   vendorLabel: string;
   modelId: string;
   /** The model the chat is on right now. */
@@ -326,8 +315,8 @@ export interface ModelCardChoice {
  */
 export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
   const pinned = llm.pinnedModels ?? [];
-  const offered = new Map<string, Set<string>>();
-  const offer = (vendor: string, modelId: string) => {
+  const offered = new Map<string, Set<LLMVendor>>();
+  const offer = (vendor: LLMVendor, modelId: string) => {
     let models = offered.get(modelId);
     if (!models) {
       models = new Set();
@@ -341,6 +330,9 @@ export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
   // vendor's bundled line first made a pin resolve to whichever vendor happens
   // to be active rather than to the one serving it.
   for (const entry of Object.values(llm.modelListCache ?? {})) {
+    // The cache is persisted host data keyed by vendor string; only entries
+    // naming a known vendor can be offered as a pick.
+    if (!isLLMVendor(entry.vendor)) continue;
     for (const modelId of entry.models) offer(entry.vendor, modelId);
   }
   for (const modelId of getVendorOption(active).modelOptions) offer(active, modelId);

@@ -9,6 +9,7 @@ import {
   caseFoldForMatch,
   isSensitivePath,
 } from "../permissions/sensitive-paths.js";
+import { errorMessage } from "../shared/error-message.js";
 
 export type ShellPathPolicyViolationKind =
   | "dynamic-path"
@@ -147,7 +148,7 @@ export function findShellPathPolicyViolation(
     } catch (err) {
       return {
         kind: "invalid-path",
-        reason: err instanceof Error ? err.message : String(err),
+        reason: errorMessage(err),
         candidate,
       };
     }
@@ -279,7 +280,7 @@ function checkOperandAgainstBase(
     } catch (err) {
       return {
         kind: "invalid-path",
-        reason: err instanceof Error ? err.message : String(err),
+        reason: errorMessage(err),
         candidate,
       };
     }

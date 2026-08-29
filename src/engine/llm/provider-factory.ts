@@ -18,8 +18,7 @@ import type {
   StreamEvent,
   StreamTurnParams,
 } from "./types.js";
-
-const COPILOT_BASE_URL = "https://models.github.ai/inference";
+import { COPILOT_BASE_URL } from "../../shared/llm-vendor-defaults.js";
 
 let adapterModuleP: Promise<typeof import("./vercel/adapter.js")> | null = null;
 function loadAdapterModule(): Promise<typeof import("./vercel/adapter.js")> {
@@ -77,7 +76,6 @@ class LazyVercelProvider implements LLMProvider {
 export function createProvider(config: ProviderConfig): LLMProvider {
   return new LazyVercelProvider(config);
 }
-
 
 export function secretKeyFor(vendor: LLMVendor): string {
   return `llm.apiKey.${vendor}`;

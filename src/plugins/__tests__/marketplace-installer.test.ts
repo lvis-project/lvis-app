@@ -17,7 +17,9 @@ import {
   installFromMarketplace,
   MarketplaceInstallerError,
   MarketplaceTransientDownloadError,
-  type MarketplaceHttp
+  type MarketplaceHttp,
+  MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES,
+  throwIfMarketplaceInstallAborted,
 } from "../marketplace-installer.js";
 import { verifyEnvelope } from "../envelope-verifier.js";
 import { setCachedTarball } from "../offline-cache.js";
@@ -986,5 +988,30 @@ describe("installFromMarketplace — artifact cache invalidation", () => {
       else process.env.LVIS_MARKETPLACE_USE_CACHE = originalCacheFlag;
       await cleanupTmpDir(root);
     }
+  });
+});
+
+describe("throwIfMarketplaceInstallAborted", () => {
+  it("is a no-op without a signal or with a live one", () => {
+    expect(() => throwIfMarketplaceInstallAborted(undefined, "agent package", "slug")).not.toThrow();
+    expect(() => throwIfMarketplaceInstallAborted(new AbortController().signal, "agent package", "slug")).not.toThrow();
+  });
+
+  it("throws an AbortError naming the subject and slug once the signal is aborted", () => {
+    const controller = new AbortController();
+    controller.abort();
+    let thrown: unknown;
+    try {
+      throwIfMarketplaceInstallAborted(controller.signal, "marketplace plugin", "acme.tool");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).name).toBe("AbortError");
+    expect((thrown as Error).message).toBe("marketplace plugin install aborted before promotion: acme.tool");
+  });
+
+  it("bounds assistant package root text files at one MiB", () => {
+    expect(MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES).toBe(1024 * 1024);
   });
 });

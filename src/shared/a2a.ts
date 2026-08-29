@@ -31,6 +31,9 @@ export const A2A_TASK_STATE_REJECTED = A2ATaskState.REJECTED;
 export const A2A_TASK_STATE_AUTH_REQUIRED = A2ATaskState.AUTH_REQUIRED;
 export type A2ATaskState = (typeof A2ATaskState)[keyof typeof A2ATaskState];
 
+/** Grammar of a registered A2A handler id: lowercase, hyphenated, at most 64 characters. */
+export const A2A_HANDLER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
 export const A2A_TASK_STATE_VALUES = [
   A2ATaskState.UNSPECIFIED,
   A2ATaskState.SUBMITTED,

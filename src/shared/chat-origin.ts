@@ -276,3 +276,19 @@ export function hasUserKeyboardIntent(value: unknown): value is UserKeyboardInte
   const payload = value as { inputOrigin?: unknown; userActivation?: unknown };
   return payload.inputOrigin === "user-keyboard" && payload.userActivation === true;
 }
+
+/**
+ * The one answer every mutation IPC domain gives when a request arrives
+ * without user-keyboard intent. Shared so the renderer sees one error code
+ * whichever domain refused.
+ */
+export const USER_KEYBOARD_REQUIRED = Object.freeze({
+  ok: false as const,
+  error: "user-keyboard-required" as const,
+});
+
+/** Whether an IPC mutation payload carries a valid `intent` field. */
+export function hasUserKeyboardIntentPayload(payload: unknown): boolean {
+  return typeof payload === "object" && payload !== null
+    && hasUserKeyboardIntent((payload as { intent?: unknown }).intent);
+}

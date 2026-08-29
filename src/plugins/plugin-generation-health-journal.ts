@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 
 export interface PluginGenerationHealthFault {
   pluginId: string;
@@ -38,7 +38,7 @@ export class PluginGenerationHealthJournal {
         this.records.set(this.key(fault.pluginId, fault.generationId, fault.phase), Object.freeze({ ...fault }));
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!isMissingPathError(error)) throw error;
     }
   }
 

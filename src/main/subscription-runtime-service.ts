@@ -30,7 +30,6 @@ import {
   type SubscriptionRuntimeState,
   type SubscriptionRuntimeStatus,
   type SubscriptionRuntimeCapabilities,
-  type SubscriptionImageAttachmentLimits,
   type SubscriptionUsageTelemetry,
 } from "../shared/subscription-runtime.js";
 import {
@@ -58,12 +57,10 @@ import {
 import {
   AcpSubscriptionSessionClient,
   AcpSubscriptionSessionError,
-  MAX_ACP_SUBSCRIPTION_IMAGE_ATTACHMENTS,
-  MAX_ACP_SUBSCRIPTION_IMAGE_BYTES,
-  MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES,
   type AcpSubscriptionHostRequestObservation,
   type AcpSubscriptionPromptHandle,
   type AcpSubscriptionSessionClientOptions,
+  ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS,
 } from "./acp-subscription-session-client.js";
 import {
   openFeatureNamespace,
@@ -333,12 +330,6 @@ export class AcpSubscriptionRuntimeRegistry {
 }
 
 // ─── Subscription runtime service ─────────────────────────────────────────────
-
-const ACP_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS: SubscriptionImageAttachmentLimits = Object.freeze({
-  maxCount: MAX_ACP_SUBSCRIPTION_IMAGE_ATTACHMENTS,
-  maxBytesPerImage: MAX_ACP_SUBSCRIPTION_IMAGE_BYTES,
-  maxTotalBytes: MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES,
-});
 
 const MAX_QUEUED_EVENTS = 256;
 const HOST_TOOL_ACCEPTED = "LVIS accepted the host tool request and will provide its result in the next model round.";

@@ -22,7 +22,7 @@ export const DEFAULT_TOAST_TTL_MS = 4000;
  */
 export const LONG_TOAST_TTL_MS = 5000;
 
-import type { ExecMode } from "./types.js";
+import type { AppSettings, ExecutionMode } from "./types.js";
 import {
   DEFAULT_VISIBLE_LLM_VENDOR_IDS,
   LLM_VENDOR_DEFAULTS,
@@ -140,7 +140,7 @@ export function visibleVendorsFor(currentVendorIds: readonly string[] = []): Ven
   return visible;
 }
 
-export const WEB_PROVIDERS: { id: string; label: string; readonly placeholder: string; needsKey: boolean }[] = [
+export const WEB_PROVIDERS: { id: AppSettings["webSearch"]["provider"]; label: string; readonly placeholder: string; needsKey: boolean }[] = [
   { id: "duckduckgo", label: "DuckDuckGo", get placeholder() { return t("constants.webProviderDuckDuckGoPlaceholder"); }, needsKey: false },
   { id: "tavily", label: "Tavily AI", placeholder: "tvly-...", needsKey: true },
   { id: "serper", label: "Serper.dev", get placeholder() { return t("constants.webProviderSerperPlaceholder"); }, needsKey: true },
@@ -177,7 +177,7 @@ export function budgetToEffortIndex(budget: number): number {
 
 // auto-wired from this mode (handleModeChange), so this is the only permission
 // axis the user sets.
-export const EXEC_MODE_OPTIONS: { value: ExecMode; readonly label: string; readonly description: string }[] = [
+export const EXEC_MODE_OPTIONS: { value: ExecutionMode; readonly label: string; readonly description: string }[] = [
   {
     value: "strict",
     get label() { return t("constants.execModeStrictLabel"); },

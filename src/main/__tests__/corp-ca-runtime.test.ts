@@ -19,6 +19,7 @@ vi.mock("node:child_process", () => ({
 vi.mock("node:fs", () => ({
   closeSync: vi.fn(),
   fstatSync: vi.fn(),
+  fsyncSync: vi.fn(),
   mkdirSync: vi.fn(),
   openSync: vi.fn(),
   readFileSync: vi.fn(),

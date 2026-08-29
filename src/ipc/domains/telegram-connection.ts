@@ -13,7 +13,7 @@
  */
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
-import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
+import { hasUserKeyboardIntentPayload, USER_KEYBOARD_REQUIRED } from "../../shared/chat-origin.js";
 import {
   isTelegramApproveCurrentConversationInput,
   isTelegramConnectInput,
@@ -35,7 +35,6 @@ const INPUT_INVALID = Object.freeze({
   ok: false as const,
   error: "telegram-connection-input-invalid" as const,
 });
-const KEYBOARD_REQUIRED = Object.freeze({ ok: false as const, error: "user-keyboard-required" as const });
 const OPERATION_REJECTED = Object.freeze({
   ok: false as const,
   error: "telegram-connection-operation-rejected" as const,
@@ -44,14 +43,6 @@ const UNAVAILABLE = Object.freeze({
   ok: false as const,
   error: "telegram-connection-unavailable" as const,
 });
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasIntent(payload: unknown): boolean {
-  return record(payload) && hasUserKeyboardIntent(payload.intent);
-}
 
 /**
  * Broadcast only a change hint. Each renderer must refetch its safe snapshot;
@@ -92,7 +83,7 @@ export function registerTelegramConnectionHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTelegramConnectInput(payload)) return INPUT_INVALID;
     try {
       return parseTelegramConnectionMutationResult(await service.connect(payload.botToken))
@@ -108,7 +99,7 @@ export function registerTelegramConnectionHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTelegramIntentOnlyInput(payload)) return INPUT_INVALID;
     try {
       return parseTelegramConnectionMutationResult(await service.disconnect()) ?? OPERATION_REJECTED;
@@ -123,7 +114,7 @@ export function registerTelegramConnectionHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTelegramIntentOnlyInput(payload)) return INPUT_INVALID;
     try {
       return parseTelegramConnectionMutationResult(await service.pause()) ?? OPERATION_REJECTED;
@@ -138,7 +129,7 @@ export function registerTelegramConnectionHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTelegramIntentOnlyInput(payload)) return INPUT_INVALID;
     try {
       return parseTelegramConnectionMutationResult(await service.resume()) ?? OPERATION_REJECTED;
@@ -153,7 +144,7 @@ export function registerTelegramConnectionHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTelegramIntentOnlyInput(payload)) return INPUT_INVALID;
     try {
       return parseTelegramCreatePairingCodeResult(await service.createPairingCode())
@@ -169,7 +160,7 @@ export function registerTelegramConnectionHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTelegramRevokeInput(payload)) return INPUT_INVALID;
     try {
       return parseTelegramConnectionMutationResult(await service.revokePairing(payload.id))
@@ -191,7 +182,7 @@ export function registerTelegramConnectionHandlers(deps: IpcDeps): void {
         return UNAUTHORIZED_FRAME;
       }
       if (!service) return DISABLED;
-      if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+      if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
       if (!isTelegramApproveCurrentConversationInput(payload)) return INPUT_INVALID;
       try {
         return parseTelegramConnectionMutationResult(
@@ -209,7 +200,7 @@ export function registerTelegramConnectionHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isTelegramRevokeInput(payload)) return INPUT_INVALID;
     try {
       return parseTelegramConnectionMutationResult(await service.revokeApproval(payload.id))

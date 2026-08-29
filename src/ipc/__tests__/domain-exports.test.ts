@@ -129,6 +129,7 @@ describe("IPC domain runtime named-export lock", () => {
           "registerAttachHandlers",
         ],
         "audit": [
+          "parseIsoDate",
           "registerAuditHandlers",
         ],
         "chat": [
