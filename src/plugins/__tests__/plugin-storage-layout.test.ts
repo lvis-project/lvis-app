@@ -237,8 +237,13 @@ describe("carryPluginDataDir — resolving conflict policy", () => {
   let root: string;
   let parked: string[];
 
-  const resolvePolicy = () => ({
+  /**
+   * `unattributedRoot` names the live install path — the only root a stray
+   * write can reach. Whichever side of the carry is under it loses.
+   */
+  const resolvePolicy = (unattributedRoot: string) => ({
     onConflict: "resolve" as const,
+    unattributedRoot,
     moveAside: async (dir: string): Promise<void> => {
       const target = join(root, `parked-${String(parked.length)}`);
       await rename(dir, target);
@@ -270,7 +275,7 @@ describe("carryPluginDataDir — resolving conflict policy", () => {
     // leave at the promoted root: the directory exists and holds nothing.
     await mkdir(join(to, PLUGIN_DATA_DIR_NAME));
 
-    await expect(carryPluginDataDir(from, to, resolvePolicy())).resolves.toBe(true);
+    await expect(carryPluginDataDir(from, to, resolvePolicy(to))).resolves.toBe(true);
 
     expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
     expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
@@ -282,34 +287,68 @@ describe("carryPluginDataDir — resolving conflict policy", () => {
     await mkdir(join(from, PLUGIN_DATA_DIR_NAME));
     await seedPluginDataFixture(to);
 
-    await expect(carryPluginDataDir(from, to, resolvePolicy())).resolves.toBe(false);
+    await expect(carryPluginDataDir(from, to, resolvePolicy(to))).resolves.toBe(false);
 
     expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
     expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
     expect(parked).toEqual([]);
   });
 
-  it("parks a non-empty destination rather than deleting it, then carries", async () => {
+  it("parks the DESTINATION when the destination is the live path, then carries", async () => {
     const { from, to } = await twoRoots();
     await seedPluginDataFixture(from);
     await mkdir(join(to, PLUGIN_DATA_DIR_NAME), { recursive: true });
-    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unexplained.bin"), "keep me");
+    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unattributed.bin"), "keep me");
 
-    await expect(carryPluginDataDir(from, to, resolvePolicy())).resolves.toBe(true);
+    await expect(carryPluginDataDir(from, to, resolvePolicy(to))).resolves.toBe(true);
 
     expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
     expect(parked).toHaveLength(1);
-    expect(await readdir(parked[0]!)).toEqual(["unexplained.bin"]);
+    expect(await readdir(parked[0]!)).toEqual(["unattributed.bin"]);
   });
 
-  it("refuses when moveAside leaves the destination in place", async () => {
+  /**
+   * The direction that made the source-always-wins rule wrong: when the LIVE
+   * path is the carry's source, the destination is a backup holding state a
+   * transaction deliberately put there, and it must survive untouched.
+   */
+  it("parks the SOURCE when the source is the live path, and leaves the destination alone", async () => {
+    const { from, to } = await twoRoots();
+    await mkdir(join(from, PLUGIN_DATA_DIR_NAME), { recursive: true });
+    await writeFile(join(from, PLUGIN_DATA_DIR_NAME, "unattributed.bin"), "keep me");
+    await seedPluginDataFixture(to);
+
+    await expect(carryPluginDataDir(from, to, resolvePolicy(from))).resolves.toBe(false);
+
+    expect(await readPluginDataFixture(to)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(existsSync(join(from, PLUGIN_DATA_DIR_NAME))).toBe(false);
+    expect(parked).toHaveLength(1);
+    expect(await readdir(parked[0]!)).toEqual(["unattributed.bin"]);
+  });
+
+  it("refuses a conflict it cannot attribute to either root", async () => {
     const { from, to } = await twoRoots();
     await seedPluginDataFixture(from);
     await mkdir(join(to, PLUGIN_DATA_DIR_NAME), { recursive: true });
-    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unexplained.bin"), "keep me");
+    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unattributed.bin"), "keep me");
+
+    await expect(
+      carryPluginDataDir(from, to, resolvePolicy(join(root, "somewhere-else"))),
+    ).rejects.toThrow(/cannot attribute a data directory conflict/);
+
+    expect(await readPluginDataFixture(from)).toEqual(PLUGIN_DATA_FIXTURE);
+    expect(parked).toEqual([]);
+  });
+
+  it("refuses when moveAside leaves the losing directory in place", async () => {
+    const { from, to } = await twoRoots();
+    await seedPluginDataFixture(from);
+    await mkdir(join(to, PLUGIN_DATA_DIR_NAME), { recursive: true });
+    await writeFile(join(to, PLUGIN_DATA_DIR_NAME, "unattributed.bin"), "keep me");
 
     await expect(carryPluginDataDir(from, to, {
       onConflict: "resolve",
+      unattributedRoot: to,
       moveAside: async () => undefined,
     })).rejects.toThrow(/was not moved aside/);
 

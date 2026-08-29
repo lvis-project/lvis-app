@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +15,7 @@ import { preparePluginRegistryForBoot } from "../plugin-boot-recovery.js";
 import { createRemovalTransaction, stageRemovalTransaction } from "../plugin-removal-transaction.js";
 import { readPluginRegistry, updatePluginRegistry } from "../registry.js";
 import { sweepOrphanUninstallDirs } from "../orphan-uninstall-sweeper.js";
-import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
+import { PARKED_PLUGIN_STATE_SUBDIR, TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
 import type { PluginPaths } from "../plugin-paths.js";
 import { PLUGIN_DATA_FIXTURE, readPluginDataFixture, seedPluginDataFixture } from "./test-helpers.js";
 
@@ -69,6 +69,18 @@ describe("marketplace pending-update recovery", () => {
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   });
+
+  /**
+   * The single file under the unattributed-state namespace with this name.
+   * Fails loudly rather than returning a path that does not exist, so a park
+   * that silently deleted its input cannot read as a pass.
+   */
+  async function findParkedFile(name: string): Promise<string> {
+    const parkRoot = join(paths.pluginsRoot, PARKED_PLUGIN_STATE_SUBDIR);
+    const parked = await readdir(parkRoot);
+    expect(parked).toHaveLength(1);
+    return join(parkRoot, parked[0]!, name);
+  }
 
   it("clears a pre-promotion crash marker when old bytes and receipt remain exact", async () => {
     const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
@@ -244,7 +256,15 @@ describe("marketplace pending-update recovery", () => {
     expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingUpdate).toBeUndefined();
   });
 
-  it("parks an unexplained non-empty data directory instead of deleting it, and still recovers", async () => {
+  /**
+   * The parked bytes must still be THERE. An earlier revision handed them to
+   * `tombstoneAndDeferredRemove`, which schedules an `rm` of what it renames —
+   * so "parked" meant "deleted a tick later", and a test that only asserted the
+   * namespace directory exists could not tell the difference (`mkdir` creates
+   * it either way). This reads the contents back, and reads them again after
+   * the deferred removal would have run.
+   */
+  it("parks an unattributable data directory and keeps its contents readable", async () => {
     const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
     const backupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
     await preparePendingPluginUpdate(paths, entry, {
@@ -254,15 +274,52 @@ describe("marketplace pending-update recovery", () => {
     });
     await mkdir(backupDir);
     await seedPluginDataFixture(backupDir);
+    // A stray write reached the live path while the swap was in flight.
     await mkdir(join(paths.pluginsRoot, pluginId, "data"), { recursive: true });
-    await writeFile(join(paths.pluginsRoot, pluginId, "data", "unexplained.bin"), "keep me");
+    await writeFile(join(paths.pluginsRoot, pluginId, "data", "unattributed.bin"), "keep me");
 
     expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    // The transaction's own state wins the live root.
     expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
     expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingUpdate).toBeUndefined();
-    // Parked in the uninstall tombstone namespace the boot sweeper already
-    // owns — never deleted unseen.
-    expect(existsSync(join(paths.pluginsRoot, TOMBSTONE_SUBDIR))).toBe(true);
+
+    const parkedFile = await findParkedFile("unattributed.bin");
+    expect(await readFile(parkedFile, "utf-8")).toBe("keep me");
+    // Past any deferred-removal tick a removal lifecycle would have scheduled.
+    await new Promise((done) => setTimeout(done, 400));
+    expect(await readFile(parkedFile, "utf-8")).toBe("keep me");
+    // And never routed into the swept namespace.
+    expect(existsSync(join(paths.pluginsRoot, TOMBSTONE_SUBDIR))).toBe(false);
+  });
+
+  /**
+   * The other direction: the promoted root is discarded and the backup becomes
+   * live. Here the BACKUP holds the pre-upgrade state, so a stray directory at
+   * the live path must not win — the loser is whichever side is the live
+   * install path, not whichever side happens to be the carry's source.
+   */
+  it("parks a stray live-root directory rather than carrying it over the backup's state", async () => {
+    const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    const backupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await preparePendingPluginUpdate(paths, entry, {
+      kind: "marketplace",
+      recoveryBackupDir: backupDir,
+      recoveryBackupMode: "rename",
+    });
+    await rename(join(paths.pluginsRoot, pluginId), backupDir);
+    // The backup is the pre-upgrade root, data included.
+    await seedPluginDataFixture(backupDir);
+    await mkdir(join(paths.pluginsRoot, pluginId), { recursive: true });
+    await writeFile(join(paths.pluginsRoot, pluginId, "plugin.json"), JSON.stringify({ id: pluginId, version: "2.0.0" }));
+    await mkdir(join(paths.pluginsRoot, pluginId, "data"), { recursive: true });
+    await writeFile(join(paths.pluginsRoot, pluginId, "data", "unattributed.bin"), "keep me");
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    expect(await readFile(join(paths.pluginsRoot, pluginId, "plugin.json"), "utf-8")).toBe(oldManifest);
+    expect(await readPluginDataFixture(join(paths.pluginsRoot, pluginId))).toEqual(PLUGIN_DATA_FIXTURE);
+
+    const parkedFile = await findParkedFile("unattributed.bin");
+    expect(await readFile(parkedFile, "utf-8")).toBe("keep me");
   });
 
   it("carries plugin data out of an explicitly cleaned-up backup before removing it", async () => {

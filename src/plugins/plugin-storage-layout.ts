@@ -197,7 +197,7 @@ export async function carryPluginDataDir(
           + `replace ${target} with ${source}`,
       );
     }
-    if (!await clearCarryDestination(source, target, policy.moveAside)) return false;
+    if (!await clearCarryDestination(source, target, fromRoot, toRoot, policy)) return false;
   }
   await rename(source, target);
   return true;
@@ -216,25 +216,38 @@ export async function carryPluginDataDir(
  * `resolve` — RECOVERY. It is handed whatever the crash left behind and has no
  * rollback: refusing leaves `pendingUpdate` set forever, so the plugin never
  * loads again and no later boot can clear it. Recovery must always reach a
- * terminal disposition, so a conflict is decided here, by one rule that never
- * deletes state:
+ * terminal disposition, so a conflict is decided here, by rules that never
+ * delete state:
  *
  *  1. an EMPTY directory holds no state and is removed. That is the conflict
  *     seen in practice — an interrupted carry, or a storage call landing in
- *     the swap window — and either side of the carry can be the empty one;
- *  2. if the DESTINATION is empty it goes and the carry proceeds;
- *  3. if the SOURCE is empty instead, the destination's real state stays where
- *     it already is and the empty source is removed (nothing moved);
- *  4. two non-empty directories cannot be told apart from here, so the
- *     destination is handed to `moveAside` — recovery passes the existing
- *     uninstall tombstone lifecycle the boot sweeper already owns, so the
- *     bytes survive for an operator — and the carry proceeds.
+ *     the swap window — and either side of the carry can be the empty one. If
+ *     the DESTINATION is empty it goes and the carry proceeds; if the SOURCE is
+ *     empty instead, the destination's real state stays where it already is;
+ *  2. two non-empty directories are not equal candidates, and which one is the
+ *     stray is structural rather than a guess. Only the LIVE plugin path
+ *     (`unattributedRoot`) is somewhere a stray write can land — a recovery
+ *     backup path is never a storage target, and it holds state a transaction
+ *     deliberately put there. So the directory under `unattributedRoot` is the
+ *     one handed to `moveAside`, and the other one wins: when the loser is the
+ *     destination the carry proceeds over it, and when the loser is the SOURCE
+ *     the destination keeps the state it already holds and nothing is carried.
+ *
+ * `moveAside` must KEEP what it is handed. Recovery parks it in the
+ * unattributed-state namespace, which nothing sweeps — the point of the call is
+ * that a human decides, so a destination that deletes (the uninstall tombstone
+ * lifecycle, say) would make rule 2 a lie.
  */
 export type PluginDataCarryPolicy =
   | { onConflict: "reject" }
   | {
       onConflict: "resolve";
-      /** Take custody of a non-empty conflicting `data/` and leave its path free. */
+      /**
+       * The plugin root whose `data/` is NOT authoritative when both roots hold
+       * state: the live install path, the only one a stray write can reach.
+       */
+      unattributedRoot: string;
+      /** Take custody of the losing `data/`, KEEP it, and leave its path free. */
       moveAside: (conflictingDataDir: string) => Promise<void>;
     };
 
@@ -242,7 +255,9 @@ export type PluginDataCarryPolicy =
 async function clearCarryDestination(
   source: string,
   target: string,
-  moveAside: (conflictingDataDir: string) => Promise<void>,
+  fromRoot: string,
+  toRoot: string,
+  policy: Extract<PluginDataCarryPolicy, { onConflict: "resolve" }>,
 ): Promise<boolean> {
   if (await isEmptyDirectory(target)) {
     await rmdir(target);
@@ -252,13 +267,25 @@ async function clearCarryDestination(
     await rmdir(source);
     return false;
   }
-  await moveAside(target);
-  if (await pathExists(target)) {
+  const sourceIsUnattributed = isSamePluginPath(fromRoot, policy.unattributedRoot);
+  const targetIsUnattributed = isSamePluginPath(toRoot, policy.unattributedRoot);
+  if (sourceIsUnattributed === targetIsUnattributed) {
+    // Neither side is the live path, or both claim to be. Recovery always
+    // carries to or from the live install directory, so this is a caller that
+    // named the wrong root — a bug to fix, not a state to guess at.
     throw new Error(
-      `[plugin-storage-layout] conflicting plugin data directory was not moved aside: ${target}`,
+      `[plugin-storage-layout] cannot attribute a data directory conflict between `
+        + `${source} and ${target}: neither is under ${policy.unattributedRoot}`,
     );
   }
-  return true;
+  const loser = sourceIsUnattributed ? source : target;
+  await policy.moveAside(loser);
+  if (await pathExists(loser)) {
+    throw new Error(
+      `[plugin-storage-layout] conflicting plugin data directory was not moved aside: ${loser}`,
+    );
+  }
+  return !sourceIsUnattributed;
 }
 
 async function isEmptyDirectory(path: string): Promise<boolean> {

@@ -22,7 +22,7 @@ import {
   carryPluginDataDir,
   pluginPayloadCopyFilter,
 } from "./plugin-storage-layout.js";
-import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
+import { parkUnattributedPluginState } from "./installed-entry-fs.js";
 
 import { retryOnTransientFsLock } from "./plugin-artifact-store.js";
 import {
@@ -70,16 +70,26 @@ function ownedManifestPath(paths: PluginPaths, pluginId: string): string {
  * throw out of a carry is neither: the row stays pending, the plugin stays
  * unloadable, and the next boot arrives at the identical state and throws
  * again. So a conflicting data directory is resolved here rather than
- * reported — see {@link PluginDataCarryPolicy} for the rule — and anything
- * that cannot be resolved by removing an empty directory is parked in the
- * uninstall tombstone namespace the boot sweeper already owns, rather than
- * deleted or left in the way.
+ * reported — see {@link PluginDataCarryPolicy} for the rules.
+ *
+ * `unattributedRoot` is the live install directory because that is the only
+ * path a stray write can reach: `getPluginStorage` and every `hostApi.storage`
+ * handle resolve `<pluginsRoot>/<id>/data`, and no recovery backup path is ever
+ * a storage target. So when a carry finds state on both sides, the backup's is
+ * the one a transaction deliberately put there and the live one is the stray.
+ *
+ * `moveAside` PARKS. It does not use `tombstoneAndDeferredRemove`, which reads
+ * like the right helper and is not one: that is a removal lifecycle — it
+ * schedules an `rm` of what it renames, and `sweepOrphanUninstallDirs` finishes
+ * off anything that survives on the next boot. Handing unattributable state to
+ * it would delete the very bytes this branch exists to keep.
  */
-function recoveryDataCarry(paths: PluginPaths): PluginDataCarryPolicy {
+function recoveryDataCarry(paths: PluginPaths, pluginId: string): PluginDataCarryPolicy {
   return {
     onConflict: "resolve",
+    unattributedRoot: ownedInstallDir(paths, pluginId),
     moveAside: async (conflictingDataDir) => {
-      await tombstoneAndDeferredRemove(conflictingDataDir, paths.pluginsRoot);
+      await parkUnattributedPluginState(conflictingDataDir, paths.pluginsRoot);
     },
   };
 }
@@ -102,7 +112,7 @@ async function discardOwnedPluginRoot(
   rootDir: string,
 ): Promise<void> {
   await retryOnTransientFsLock(
-    () => carryPluginDataDir(rootDir, ownedInstallDir(paths, pluginId), recoveryDataCarry(paths)),
+    () => carryPluginDataDir(rootDir, ownedInstallDir(paths, pluginId), recoveryDataCarry(paths, pluginId)),
   );
   await retryOnTransientFsLock(() => rm(rootDir, { recursive: true, force: true }));
 }
@@ -291,7 +301,7 @@ export async function recoverPendingPluginUpdate(
   // The promoted root is discarded. A crash after the replacement carried the
   // plugin's data directory into it leaves the state there; it goes back into
   // the backup that becomes the live root before anything is removed.
-  await retryOnTransientFsLock(() => carryPluginDataDir(installDir, backupDir, recoveryDataCarry(paths)));
+  await retryOnTransientFsLock(() => carryPluginDataDir(installDir, backupDir, recoveryDataCarry(paths, pluginId)));
   await retryOnTransientFsLock(() => rm(installDir, { recursive: true, force: true }));
   if (pending.recoveryBackupMode === "rename") {
     await retryOnTransientFsLock(() => rename(backupDir, installDir));
@@ -310,7 +320,7 @@ export async function recoverPendingPluginUpdate(
       await rm(restoreStage, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     }
-    await retryOnTransientFsLock(() => carryPluginDataDir(backupDir, installDir, recoveryDataCarry(paths)));
+    await retryOnTransientFsLock(() => carryPluginDataDir(backupDir, installDir, recoveryDataCarry(paths, pluginId)));
   }
   if (pending.previousReceiptRaw === null) return "unresolved";
   await restoreInstallReceiptRaw(paths.cacheRoot, pluginId, pending.previousReceiptRaw);
