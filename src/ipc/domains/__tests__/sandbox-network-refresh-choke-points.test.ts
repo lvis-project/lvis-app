@@ -115,7 +115,80 @@ describe("ASRT choke-point 1 — lvis:settings:update (settings.ts)", () => {
   });
 });
 
-// ── CHOKE POINT 2: lvis:chat:retry-effort (chat.ts) ──────────────────────────
+// ── CHOKE POINT 2: marketplace provider preset install/uninstall ─────────────
+
+describe("ASRT choke-point 2 — marketplace provider preset mutations (settings.ts)", () => {
+  beforeEach(() => {
+    handlers.clear();
+    vi.resetModules();
+  });
+
+  const preset = {
+    providerId: "future-router",
+    label: "Future Router",
+    baseUrl: "https://future.example/v1",
+    defaultModel: "future/free",
+    modelOptions: ["future/free"],
+    requiresApiKey: true,
+  };
+
+  function makePresetDeps() {
+    let presets: Array<typeof preset> = [preset];
+    let presetId: string | undefined = "future-router";
+    const refreshSandboxNetworkConfig = vi.fn();
+    const deps = {
+      settingsService: {
+        getAll: vi.fn(() => ({ llm: { provider: "openai-compatible", vendors: {} }, appearance: {} })),
+        get: vi.fn((key: string) => {
+          if (key === "llm") {
+            return {
+              provider: "openai-compatible",
+              ...(presetId ? { marketplaceProviderPresetId: presetId } : {}),
+              vendors: { "openai-compatible": {} },
+            };
+          }
+          if (key === "marketplace") {
+            return { cloudAllowPrivateNetwork: false, installedProviderPresets: presets };
+          }
+          return {};
+        }),
+        uninstallMarketplaceProviderPreset: vi.fn(async () => {
+          presets = [];
+          presetId = undefined;
+          return { ok: true };
+        }),
+        patch: vi.fn(async () => ({ ok: true })),
+        replaceLlm: vi.fn(async () => {}),
+        getSecret: vi.fn(() => null),
+        setSecret: vi.fn(async () => {}),
+        deleteSecret: vi.fn(async () => {}),
+      },
+      conversationLoop: { refreshProvider: vi.fn() },
+      auditLogger: { log: vi.fn() },
+      getAppWindows: vi.fn(() => []),
+      rewireReviewerAgent: vi.fn(),
+      refreshActiveLlmWildcard: vi.fn(),
+      refreshSandboxNetworkConfig,
+    };
+    return { deps, refreshSandboxNetworkConfig };
+  }
+
+  it("calls refreshSandboxNetworkConfig when the active preset is uninstalled", async () => {
+    // A preset's address lives only in the preset registry. Comparing the
+    // before and after signatures against the POST-mutation registry made the
+    // uninstalled host missing from both — equal signatures, no refresh, and
+    // the host stayed inside the sandbox allow-list.
+    const { deps, refreshSandboxNetworkConfig } = makePresetDeps();
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:marketplace:uninstall-provider-preset", "future-router");
+
+    expect(refreshSandboxNetworkConfig).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── CHOKE POINT 3: lvis:chat:retry-effort (chat.ts) ──────────────────────────
 
 describe("ASRT choke-point 3 — lvis:chat:retry-effort (chat.ts)", () => {
   beforeEach(() => {

@@ -352,6 +352,15 @@ function refreshChatRuntimeProviders(
 async function finishProviderPresetMarketplaceMutation(
   deps: IpcDeps,
   prevLlm: LLMSettings,
+  /**
+   * The preset registry as it stood BEFORE the mutation. A preset's address
+   * lives only in that registry, so reading the post-mutation list for both
+   * sides of the comparison makes an uninstalled preset's host absent from
+   * both — the signatures match, no refresh fires, and the host it used to
+   * reach stays inside the sandbox's allow-list until something unrelated
+   * refreshes it.
+   */
+  prevInstalledProviderPresets: MarketplaceSettings["installedProviderPresets"],
 ): Promise<{ ok: false; error: string; message: string } | null> {
   const newLlm = deps.settingsService.get("llm");
   let rewireError: { ok: false; error: string; message: string } | null = null;
@@ -368,10 +377,12 @@ async function finishProviderPresetMarketplaceMutation(
   }
   refreshChatRuntimeProviders(deps);
   deps.refreshActiveLlmWildcard?.();
-  const sideEffectPresets = deps.settingsService.get("marketplace").installedProviderPresets;
   if (
-    vendorBaseUrlSignature(prevLlm, sideEffectPresets)
-    !== vendorBaseUrlSignature(newLlm, sideEffectPresets)
+    vendorBaseUrlSignature(prevLlm, prevInstalledProviderPresets)
+    !== vendorBaseUrlSignature(
+      newLlm,
+      deps.settingsService.get("marketplace").installedProviderPresets,
+    )
   ) {
     void deps.refreshSandboxNetworkConfig?.();
   }
@@ -910,11 +921,14 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     const prevLlm = settingsService.get("llm");
+    const prevPresets = settingsService.get("marketplace").installedProviderPresets;
     try {
       const result = await settingsService.installMarketplaceProviderPreset(
         preset as MarketplaceInstalledProviderPreset,
       );
-      const finishError = await finishProviderPresetMarketplaceMutation(deps, prevLlm);
+      const finishError = await finishProviderPresetMarketplaceMutation(
+        deps, prevLlm, prevPresets,
+      );
       return finishError ?? result;
     } catch (err) {
       return {
@@ -938,9 +952,12 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       };
     }
     const prevLlm = settingsService.get("llm");
+    const prevPresets = settingsService.get("marketplace").installedProviderPresets;
     try {
       const result = await settingsService.uninstallMarketplaceProviderPreset(providerId);
-      const finishError = await finishProviderPresetMarketplaceMutation(deps, prevLlm);
+      const finishError = await finishProviderPresetMarketplaceMutation(
+        deps, prevLlm, prevPresets,
+      );
       return finishError ?? result;
     } catch (err) {
       return {

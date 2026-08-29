@@ -848,25 +848,22 @@ export function llmRouteModel(
   return block.presetModels?.[presetId] ?? "";
 }
 
-/** That same question asked of the settings as a whole. */
+/**
+ * That same question asked of the settings as a whole.
+ *
+ * `provider` is a known vendor by the time settings reach anyone: the store
+ * coerces an unrecognized name at the file boundary (`pruneLazyLlmVendorBlocks`),
+ * so every caller reading through `SettingsService` is handed one of these.
+ */
 export function activeLlmRouteModel(llm: {
-  provider: string;
+  provider: LLMVendor;
   vendors: LLMVendorSettingsMap;
   marketplaceProviderPresetId?: string;
 }): string {
-  const presetId = llm.provider === "openai-compatible"
-    ? llm.marketplaceProviderPresetId
-    : undefined;
-  if (isLLMVendor(llm.provider)) {
-    return llmRouteModel(getLlmVendorSettings(llm.vendors, llm.provider), presetId);
-  }
-  // A settings file written by another build can name a provider this one has
-  // never heard of — there are no defaults to read for it, but a caller asking
-  // what the route runs on (a diagnostics bundle above all) must get an answer
-  // rather than a crash on a missing defaults entry.
-  const stored = Object.entries(llm.vendors)
-    .find(([vendorId]) => vendorId === llm.provider)?.[1];
-  return stored ? llmRouteModel(stored, presetId) : "";
+  return llmRouteModel(
+    getLlmVendorSettings(llm.vendors, llm.provider),
+    llm.provider === "openai-compatible" ? llm.marketplaceProviderPresetId : undefined,
+  );
 }
 
 

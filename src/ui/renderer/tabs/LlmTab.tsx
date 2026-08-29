@@ -38,6 +38,7 @@ import {
   isRetiredLlmModel,
   isSelfHostedTrustedNetworkVendor,
   llmRouteModel,
+  LLM_VENDOR_DEFAULTS,
 } from "../../../shared/llm-vendor-defaults.js";
 import {
   llmModelListCacheKey,
@@ -51,6 +52,7 @@ import {
 import {
   marketplaceProviderPresetIdFromSecretId,
   marketplaceProviderPresetSecretId,
+  modelDiscoveryPolicyAllowsFetch,
   modelDiscoveryPolicyUsesSeededOptions,
   type MarketplaceInstalledProviderPreset,
   type MarketplaceProviderModelDiscoveryPolicy,
@@ -129,6 +131,17 @@ export interface ProviderCredentialSave {
 
 const MODEL_LIST_SYNC_DEBOUNCE_MS = 350;
 
+/** Whether two vendor-block maps say the same thing about every row. */
+function sameSavedVendorBlocks(
+  a: Readonly<Record<string, unknown>>,
+  b: Readonly<Record<string, unknown>>,
+): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) =>
+    key in b && JSON.stringify(a[key]) === JSON.stringify(b[key]));
+}
+
 /** The credential form's element id. One form is open at a time, so the button
  *  that reveals it can name it in `aria-controls`. */
 const CREDENTIAL_FORM_ID = "llm-provider-credential-form";
@@ -151,6 +164,8 @@ const CHAT_BLOCKER_MESSAGE_KEYS = {
   "needs-api-key": "llmTab.chatNeedsApiKey",
   "needs-gcp-project": "llmTab.chatNeedsGcpProject",
   "awaiting-catalogue": "llmTab.chatAwaitingCatalogue",
+  "catalogue-empty": "llmTab.chatCatalogueEmpty",
+  "catalogue-failed": "llmTab.chatCatalogueFailed",
 } as const;
 
 type ChatBlocker = keyof typeof CHAT_BLOCKER_MESSAGE_KEYS;
@@ -462,18 +477,28 @@ const STANDARD_CATALOGUE_ENDPOINT_VENDORS: ReadonlySet<string> = new Set([
   "copilot",
 ]);
 
+/**
+ * Whether this provider has a model list worth asking its endpoint for.
+ *
+ * The two contract questions come FIRST, before any address is considered:
+ * may the host fetch this provider's list at all, and is that list the
+ * endpoint's word rather than ours. An address is not a catalogue — Azure AI
+ * Foundry's `baseUrl` names one deployment while its models are the curated
+ * table here — so letting a configured endpoint short-circuit these made a
+ * card fetch a list it does not read, and paint itself red when the fetch
+ * failed. Only once both are answered does the address decide: a user-supplied
+ * endpoint is asked, and so are the vendors whose `/models` is fixed and known.
+ */
 function shouldSyncModelList(
   vendorId: string,
-  info: ProviderOption | VendorOption,
   baseUrl?: string,
   modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy,
 ): boolean {
   if (!vendorId) return false;
-  if (modelDiscoveryPolicyUsesSeededOptions(modelDiscoveryPolicy)) return false;
+  if (!modelDiscoveryPolicyAllowsFetch(modelDiscoveryPolicy)) return false;
+  if (!usesEndpointModelCatalogue(vendorId)) return false;
   if (baseUrl?.trim()) return true;
-  if (STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(vendorId)) return true;
-  if (!info.needsBaseUrl) return false;
-  return vendorId !== "openai-compatible" && vendorId !== "azure-foundry";
+  return STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(vendorId);
 }
 
 /**
@@ -1041,6 +1066,25 @@ export function LlmTab(props: LlmTabProps) {
   /** The row whose credential was saved on this screen, if any. Saving never
    *  moves the chat route, so that row may need telling where the switch is. */
   const [credentialSavedRowId, setCredentialSavedRowId] = useState<string | null>(null);
+  /**
+   * The address this row's catalogue lives at, or "" when the row has none of
+   * its own. Whether that address is ever ASKED is `shouldSyncModelList`'s
+   * question, not this one — one decision, in one place.
+   */
+  const rowModelListBaseUrl = useCallback((
+    vendorId: string,
+    preset: MarketplaceInstalledProviderPreset | undefined,
+  ): string => {
+    if (preset) return preset.baseUrl.trim();
+    const saved = savedVendorBlocks[vendorId]?.baseUrl?.trim();
+    if (saved) return saved;
+    // A preset vendor ships the one address it serves from; the generic custom
+    // provider ships none until the user supplies one.
+    return isLLMVendor(vendorId)
+      ? LLM_VENDOR_DEFAULTS[vendorId].baseUrl?.trim() ?? ""
+      : "";
+  }, [savedVendorBlocks]);
+
   /** Bumped on every settings broadcast; `setApiKey`/`deleteApiKey` send one,
    *  so this is what re-asks the credential store. */
   const [settingsRevision, setSettingsRevision] = useState(0);
@@ -1065,9 +1109,8 @@ export function LlmTab(props: LlmTabProps) {
       } = {},
     ) => {
       if (!settingsLoaded && !options.force) return;
-      const providerInfo = getVendorInfo(provider);
       const baseUrl = options.baseUrl?.trim() ?? "";
-      if (!shouldSyncModelList(provider, providerInfo, baseUrl, options.modelDiscoveryPolicy)) return;
+      if (!shouldSyncModelList(provider, baseUrl, options.modelDiscoveryPolicy)) return;
       const credentialScope =
         provider === "openai-compatible" ? options.credentialScope?.trim() ?? "" : "";
       const key = llmModelListCacheKey(provider, baseUrl, credentialScope);
@@ -1078,6 +1121,11 @@ export function LlmTab(props: LlmTabProps) {
       );
       if (!options.force) {
         if (existing && existing.source !== "cache" && persistedCacheHasKey) return;
+        // A failure is an answer too. Re-asking on every settings broadcast
+        // turned one unreachable endpoint into a request per write; the effect
+        // re-runs when the row's own inputs change, and the refresh control
+        // passes `force` when the user asks again deliberately.
+        if (existing?.status === "error") return;
       }
       // A fixed-endpoint vendor reaches its own /models with a stored key, so a
       // request with nothing stored could only come back 401 — and a red "sync
@@ -1181,7 +1229,6 @@ export function LlmTab(props: LlmTabProps) {
   const activeModelList = modelLists[activeModelListKey];
   const activeShouldSyncModelList = shouldSyncModelList(
     vendor,
-    vendorInfo,
     activeModelListBaseUrl,
     activeModelDiscoveryPolicy,
   );
@@ -1240,7 +1287,14 @@ export function LlmTab(props: LlmTabProps) {
     const applySettings = (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
       const ids = settings.marketplace?.installedProviderIds;
       setMarketplaceProviderIds(Array.isArray(ids) ? ids : []);
-      setSavedVendorBlocks(settings.llm?.vendors ?? {});
+      // Content-compared, like the credential set below it: a broadcast arrives
+      // for every settings write, and a fresh object identity each time would
+      // re-run every effect that reads a row's endpoint — including the one
+      // that asks endpoints for their catalogues.
+      setSavedVendorBlocks((current) => {
+        const next = settings.llm?.vendors ?? {};
+        return sameSavedVendorBlocks(current, next) ? current : next;
+      });
       setSettingsRevision((current) => current + 1);
       setPinnedModels(settings.llm?.pinnedModels ?? []);
       const cache = settings.llm?.modelListCache ?? {};
@@ -1336,9 +1390,12 @@ export function LlmTab(props: LlmTabProps) {
   useEffect(() => {
     if (!settingsLoaded || !fallbackOpen) return;
     for (const provider of fallbackProviderKey.split("\n").filter(Boolean)) {
-      void requestModelList(provider);
+      // With its own address, so the catalogue is filed under the endpoint it
+      // came from — the same key the provider's row reads.
+      const baseUrl = rowModelListBaseUrl(provider, undefined);
+      void requestModelList(provider, { ...(baseUrl ? { baseUrl } : {}) });
     }
-  }, [fallbackOpen, fallbackProviderKey, requestModelList, settingsLoaded]);
+  }, [fallbackOpen, fallbackProviderKey, requestModelList, rowModelListBaseUrl, settingsLoaded]);
 
   // A provider that arrived from the marketplace says so on its row. The badge
   // used to hang off the vendor dropdown; the dropdown is gone, but where a
@@ -1423,7 +1480,7 @@ export function LlmTab(props: LlmTabProps) {
         modelListKey: keyByRow.get(providerId)
           ?? llmModelListCacheKey(
             vendorId,
-            preset?.baseUrl ?? savedVendorBlocks[vendorId]?.baseUrl ?? "",
+            preset?.baseUrl ?? rowModelListBaseUrl(vendorId, undefined),
             presetId ?? "",
           ),
       });
@@ -1431,7 +1488,7 @@ export function LlmTab(props: LlmTabProps) {
     return [...routes.values()];
   }, [
     modelLists, apiPathConfigured, vendor, marketplaceProviderPresetId, activeModelListKey,
-    credentialedProviderIds, installedPresetById, savedVendorBlocks,
+    credentialedProviderIds, installedPresetById, rowModelListBaseUrl,
   ]);
 
   const configuredRowIds = useMemo(
@@ -1489,37 +1546,40 @@ export function LlmTab(props: LlmTabProps) {
     [addedRowIds, draftRowId],
   );
 
-  // A provider we hold a key for gets a row, and a row has to be able to say
-  // what its endpoint last answered. The debounced sync above only covers the
-  // provider being edited, so without this a configured provider that is not
-  // the open one shows a name and nothing else — including the one whose key
-  // has gone stale, which is exactly the row that needs to say so.
+  // A configured provider that is not the active one still has to be
+  // choosable, and the debounced sync above only covers the active route — so
+  // a row whose catalogue is its endpoint's word would have nothing to offer
+  // and could never be picked.
   //
-  // Each row is synced against its OWN saved endpoint. Reading the address off
-  // the active route instead left every non-active user-supplied endpoint
-  // (the generic custom provider above all) syncing against nothing, so its
-  // catalogue could never land and it could never be chosen.
+  // Each such row is synced against its OWN address, which is the whole reason
+  // this exists: nobody else knows it. `rowModelListRoute` decides which rows
+  // those are, and it is the only thing that decides — a row without a route
+  // is not asked at all, rather than asked and then having its answer ignored.
   useEffect(() => {
     if (!settingsLoaded) return;
-    for (const providerId of credentialedProviderIds) {
-      if (providerId === activeApiRowId) continue;
-      const presetId = marketplaceProviderPresetIdFromSecretId(providerId);
-      const preset = presetId ? installedPresetById.get(presetId) : undefined;
-      if (presetId && !preset) continue;
-      const rowBaseUrl = preset
-        ? preset.baseUrl
-        : savedVendorBlocks[providerId]?.baseUrl?.trim() ?? "";
-      void requestModelList(preset ? "openai-compatible" : providerId, {
-        ...(rowBaseUrl ? { baseUrl: rowBaseUrl } : {}),
-        ...(preset ? { credentialScope: preset.providerId } : {}),
-        ...(preset?.modelDiscoveryPolicy
-          ? { modelDiscoveryPolicy: preset.modelDiscoveryPolicy }
-          : {}),
-      });
-    }
+    // Debounced on the same window as the active row's sync: several settings
+    // writes can land in a burst, and a row's endpoint should be asked once
+    // the dust settles rather than once per write.
+    const timer = window.setTimeout(() => {
+      for (const providerId of credentialedProviderIds) {
+        if (providerId === activeApiRowId) continue;
+        const presetId = marketplaceProviderPresetIdFromSecretId(providerId);
+        const preset = presetId ? installedPresetById.get(presetId) : undefined;
+        if (presetId && !preset) continue;
+        const rowBaseUrl = rowModelListBaseUrl(preset ? "openai-compatible" : providerId, preset);
+        void requestModelList(preset ? "openai-compatible" : providerId, {
+          ...(rowBaseUrl ? { baseUrl: rowBaseUrl } : {}),
+          ...(preset ? { credentialScope: preset.providerId } : {}),
+          ...(preset?.modelDiscoveryPolicy
+            ? { modelDiscoveryPolicy: preset.modelDiscoveryPolicy }
+            : {}),
+        });
+      }
+    }, MODEL_LIST_SYNC_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
   }, [
     activeApiRowId, credentialedProviderIds, installedPresetById,
-    requestModelList, savedVendorBlocks, settingsLoaded,
+    requestModelList, rowModelListBaseUrl, settingsLoaded,
   ]);
 
   const connections = useMemo<ProviderConnection[]>(() => {
@@ -1583,7 +1643,7 @@ export function LlmTab(props: LlmTabProps) {
         ...(preset ? { presetId: preset.providerId } : {}),
         modelListKey: preset
           ? llmModelListCacheKey("openai-compatible", preset.baseUrl, preset.providerId)
-          : llmModelListCacheKey(rowId, savedVendorBlocks[rowId]?.baseUrl ?? "", ""),
+          : llmModelListCacheKey(rowId, rowModelListBaseUrl(rowId, undefined), ""),
         apiConfigured: false,
         connected: false,
       });
@@ -1591,7 +1651,7 @@ export function LlmTab(props: LlmTabProps) {
     return rows;
   }, [
     subscription.providers, configuredApiRoutes, pinnedRowIds, providerSelectOptions,
-    marketplaceProviderPresets, installedPresetById, savedVendorBlocks,
+    marketplaceProviderPresets, installedPresetById, rowModelListBaseUrl,
   ]);
 
   // The order the user built the list in: everything already connected, then
@@ -1718,6 +1778,10 @@ export function LlmTab(props: LlmTabProps) {
    * provider the chooser is not offering.
    */
   const rowChatBlocker = useCallback((row: ProviderConnection): ChatBlocker | null => {
+    // A signed-in subscription row answers turns through its runtime. Whether
+    // its API counterpart also has a key is a different question, and asking
+    // it here told a working card to go set one up.
+    if (row.subscription?.status?.connection === "connected") return null;
     const vendorId = row.apiVendorId ?? "";
     if (vendorId === "vertex-ai" && !savedVendorBlocks[vendorId]?.vertexProject?.trim()) {
       return "needs-gcp-project";
@@ -1729,8 +1793,16 @@ export function LlmTab(props: LlmTabProps) {
     ) {
       return "needs-api-key";
     }
-    return rowModelIds(row).length > 0 ? null : "awaiting-catalogue";
-  }, [credentialedProviderIds, rowModelIds, rowRequiresApiKey, savedVendorBlocks]);
+    if (rowModelIds(row).length > 0) return null;
+    // Nothing to choose, and the four ways to arrive there are four different
+    // sentences: a list that never came, one that failed, and one that came
+    // back empty are not the same news, and saying "has not sent its list" for
+    // the last two would be false.
+    const state = row.modelListKey ? modelLists[row.modelListKey] : undefined;
+    if (state?.status === "error") return "catalogue-failed";
+    if (state?.status === "ready") return "catalogue-empty";
+    return "awaiting-catalogue";
+  }, [credentialedProviderIds, modelLists, rowModelIds, rowRequiresApiKey, savedVendorBlocks]);
 
   /**
    * Every model a connected provider can be asked for, in ONE list.
@@ -2231,6 +2303,12 @@ export function LlmTab(props: LlmTabProps) {
    */
   const connectionSubline = (row: ProviderConnection) => {
     if (!row.apiVendorId || !row.modelListKey) return null;
+    // A subscription row borrows its API counterpart's cache key, so anything
+    // filed under that key — a leftover entry from a previous session above
+    // all — would paint a signed-in runtime's card with a handshake it never
+    // made. The line belongs to the API path, so it appears only where that
+    // path is actually configured.
+    if (!row.apiConfigured) return null;
     const state = modelLists[row.modelListKey];
     if (!state) return null;
     const endpoint = state.endpoint ?? row.modelListKey.split("\n")[1] ?? "";

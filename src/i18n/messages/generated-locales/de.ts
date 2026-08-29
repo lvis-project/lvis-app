@@ -1569,6 +1569,8 @@ export const deMessages: Record<string, string> = {
   "llmTab.modelSyncFailedUsingCache": "Die Modellliste konnte nicht synchronisiert werden; der zuletzt empfangene Katalog wird angezeigt.",
   "llmTab.modelSyncNeedsApiKey": "Legen Sie einen API-Schlüssel fest, um die Modellliste zu synchronisieren.",
   "llmTab.unsavedChanges": "Nicht gespeichert",
+  "llmTab.chatCatalogueEmpty": "Dieser Endpunkt hat eine leere Modellliste zurückgegeben.",
+  "llmTab.chatCatalogueFailed": "Die Modellliste dieses Endpunkts konnte nicht gelesen werden.",
   "llmTab.chatAwaitingCatalogue": "Noch keine Modelle: Dieser Endpunkt hat seine Modellliste nicht gesendet.",
   "llmTab.pickModelToUse": "Gespeichert. Wählen Sie eines seiner Modelle aus der Modellliste, um damit zu chatten.",
   "llmTab.chatNeedsApiKey": "Speichern Sie einen Schlüssel, und seine Modelle erscheinen in der Modellliste.",

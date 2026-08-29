@@ -1583,6 +1583,8 @@ export const esMessages: Record<string, string> = {
   "llmTab.modelSyncFailedUsingCache": "No se pudo sincronizar la lista de modelos; se muestra el último catálogo recibido.",
   "llmTab.modelSyncNeedsApiKey": "Configure una clave API para sincronizar la lista de modelos.",
   "llmTab.unsavedChanges": "Sin guardar",
+  "llmTab.chatCatalogueEmpty": "Este punto de conexión devolvió una lista de modelos vacía.",
+  "llmTab.chatCatalogueFailed": "No se pudo leer la lista de modelos de este punto de conexión.",
   "llmTab.chatAwaitingCatalogue": "Aún no hay modelos: este punto de conexión no ha enviado su lista de modelos.",
   "llmTab.pickModelToUse": "Guardado. Elige uno de sus modelos en la lista de modelos para chatear con él.",
   "llmTab.chatNeedsApiKey": "Guarda una clave y sus modelos aparecerán en la lista de modelos.",

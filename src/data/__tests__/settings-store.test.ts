@@ -660,6 +660,66 @@ describe("SettingsService marketplace defaults", () => {
     expect(block.baseUrl).toBe("http://localhost:8001/v1");
   });
 
+  it("merges one preset's model into the map instead of replacing it", async () => {
+    // The renderer sends the key it just chose and nothing else, so the store
+    // has to merge: replacing the map would delete every other preset's model
+    // on every pick — including one another window chose a moment ago.
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai-compatible",
+          vendors: {
+            "openai-compatible": {
+              model: "local-model",
+              presetModels: { "beta-gw": "beta/chosen" },
+            },
+          },
+        },
+      }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({
+      llm: { vendors: { "openai-compatible": { presetModels: { "alpha-gw": "alpha/chosen" } } } },
+    });
+
+    const block = getLlmVendorSettings(service.get("llm").vendors, "openai-compatible");
+    expect(block.presetModels).toEqual({ "beta-gw": "beta/chosen", "alpha-gw": "alpha/chosen" });
+    // And the generic row's own model, which the patch never named, is intact.
+    expect(block.model).toBe("local-model");
+  });
+
+  it("clears one preset's model when its route is saved with none", async () => {
+    // An empty model is what "not configured yet" looks like for this family
+    // (the openai-compatible default model is ""), and the provider builder
+    // reads an empty model as not-configured. So the key goes away rather than
+    // keeping a value the user has moved off.
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai-compatible",
+          vendors: {
+            "openai-compatible": {
+              presetModels: { "alpha-gw": "alpha/chosen", "beta-gw": "beta/chosen" },
+            },
+          },
+        },
+      }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({
+      llm: { vendors: { "openai-compatible": { presetModels: { "alpha-gw": "" } } } },
+    });
+
+    expect(getLlmVendorSettings(service.get("llm").vendors, "openai-compatible").presetModels)
+      .toEqual({ "beta-gw": "beta/chosen" });
+  });
+
   it("leaves the model with the generic row when no preset is selected", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),

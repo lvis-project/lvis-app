@@ -840,6 +840,308 @@ describe("LlmTab rows that are not the active one", () => {
   });
 });
 
+describe("LlmTab asks only the rows that have a catalogue to give", () => {
+  /**
+   * Let the sync debounce elapse. Asserting "nothing was asked" before the
+   * window opens proves nothing at all.
+   */
+  async function settleSyncDebounce() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+  }
+
+  /** Every endpoint the tab actually asked for a model list, in call order. */
+  function requestedEndpoints(api: MockApi): string[] {
+    return (api.listLlmModels as Mock<(request: {
+      vendor: string; baseUrl?: string;
+    }) => unknown>).mock.calls
+      .map(([request]) => request.baseUrl ?? `<fixed:${request.vendor}>`);
+  }
+
+  it("asks a paired vendor's fixed endpoint, since a stored key makes it an API row too", async () => {
+    // OpenAI's `/models` is fixed and known, so a stored key is all it takes to
+    // ask — the card is the Codex runtime's AND a configured API route's, and
+    // the API half is entitled to its own catalogue. What must not happen is
+    // that call being reported on a card with no API route: see
+    // "keeps a subscription card free of a sync line…" above.
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    installSubscription([codexView()]);
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6", hasKey: false });
+
+    await waitFor(() => expect(rowOrder()).toEqual(["codex"]));
+    await settleSyncDebounce();
+    expect(requestedEndpoints(api)).toEqual(["<fixed:openai>"]);
+  });
+
+  it("keeps a subscription card free of a sync line for an API path it has not configured", async () => {
+    // The card borrows its API counterpart's cache key, so whatever is filed
+    // under that key — here the active route's own "no credential stored"
+    // answer — would otherwise be printed on a signed-in runtime's card as if
+    // the runtime had made that call.
+    const api = makeApi({ hasApiKey: storedKeysFor() });
+    installSubscription([codexView({
+      status: { runtime: "ready", connection: "connected", models: [] },
+    })]);
+    await renderTab(api, { vendor: "openai", model: "", hasKey: false });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+
+    expect(rowOrder()).toEqual(["codex"]);
+    expect(screen.queryByTestId("llm-tab:connection-subline:codex")).toBeNull();
+  });
+
+  it("asks nothing of a vendor whose model list is curated here", async () => {
+    // Azure AI Foundry's endpoint is one deployment's address, not a catalogue,
+    // and its models are the bundled list — so there is nothing to ask it for.
+    const api = makeApi({
+      hasApiKey: storedKeysFor("azure-foundry"),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: {
+          pinnedModels: [],
+          modelListCache: {},
+          vendors: { "azure-foundry": { baseUrl: "https://example-resource.example/deployments/gpt" } },
+        },
+        marketplace: { installedProviderIds: ["azure-foundry"], installedProviderPresets: [] },
+      }),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await screen.findByTestId("llm-tab:connection:azure-foundry");
+    await settleSyncDebounce();
+    expect(requestedEndpoints(api)).toEqual([]);
+    // And its curated models are still choosable, so nothing was lost.
+    expect(await chooserModelIds()).toContain("gpt-5.4-mini");
+  });
+
+  it("asks a preset that declares its models nothing, and one that does not for its list", async () => {
+    const declared = preset("declared-gw", "Declared Gateway", "https://declared.example/v1", "static");
+    const asked = preset("asked-gw", "Asked Gateway", "https://asked.example/v1");
+    const api = makeApi({
+      hasApiKey: storedKeysFor(
+        "marketplace-provider:declared-gw",
+        "marketplace-provider:asked-gw",
+      ),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: { pinnedModels: [], modelListCache: {}, vendors: {} },
+        marketplace: {
+          installedProviderIds: [],
+          installedProviderPresets: [declared, asked],
+        },
+      }),
+    });
+    await renderTab(api, {
+      vendor: "claude",
+      model: "claude-sonnet-4-6",
+      marketplaceProviderPresets: [declared, asked],
+    });
+
+    await screen.findByTestId("llm-tab:connection:marketplace-provider:declared-gw");
+    await waitFor(() => expect(requestedEndpoints(api)).toEqual(["https://asked.example/v1"]));
+    // The declaring preset needs no handshake to be choosable.
+    expect(await chooserModelIds()).toContain("declared-gw-default");
+  });
+
+  it("asks a credentialed custom provider for the list at its own endpoint", async () => {
+    const api = makeApi({
+      hasApiKey: storedKeysFor("openai-compatible"),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: {
+          pinnedModels: [],
+          modelListCache: {},
+          vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+        },
+        marketplace: { installedProviderIds: [], installedProviderPresets: [] },
+      }),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(() => expect(requestedEndpoints(api)).toEqual([CUSTOM_ENDPOINT]));
+  });
+
+  it("asks nothing for a row with no credential, and says that is what is missing", async () => {
+    const api = makeApi({
+      hasApiKey: storedKeysFor(),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: { pinnedModels: [], modelListCache: {}, vendors: {} },
+        marketplace: { installedProviderIds: ["openrouter"], installedProviderPresets: [] },
+      }),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    for (const vendorId of ["openrouter", "gemini", "openai"]) {
+      openMenu(screen.getByTestId("llm-tab:add-provider"));
+      fireEvent.click(await screen.findByTestId(`llm-tab:add-provider-item:${vendorId}`));
+      expect(screen.getByTestId(`llm-tab:connection-blocked:${vendorId}`))
+        .toHaveTextContent(/키|key|Schlüssel|clave|clé|キー|密钥/i);
+    }
+    await settleSyncDebounce();
+    expect(requestedEndpoints(api)).toEqual([]);
+  });
+});
+
+describe("LlmTab says which kind of nothing a row has", () => {
+  const NOT_ASKED = /아직|yet|noch|Aún|encore|まだ|暂无/i;
+  const EMPTY = /비어|empty|leere|vacía|vide|空/i;
+  const FAILED = /못했습니다|Could not|konnte nicht|No se pudo|Impossible|できませんでした|无法/i;
+
+  function genericRow(
+    listLlmModels: MockApi["listLlmModels"] | undefined,
+    baseUrl = CUSTOM_ENDPOINT,
+  ) {
+    return makeApi({
+      hasApiKey: storedKeysFor("openai-compatible"),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: {
+          pinnedModels: [],
+          modelListCache: {},
+          vendors: { "openai-compatible": baseUrl ? { baseUrl } : {} },
+        },
+        marketplace: { installedProviderIds: [], installedProviderPresets: [] },
+      }),
+      ...(listLlmModels ? { listLlmModels } : {}),
+    });
+  }
+
+  async function blockerText(): Promise<string> {
+    const note = await screen.findByTestId("llm-tab:connection-blocked:openai-compatible");
+    return note.textContent ?? "";
+  }
+
+  it("says the list has not been asked for when the row has no endpoint yet", async () => {
+    const api = genericRow(undefined, "");
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    expect(await blockerText()).toMatch(NOT_ASKED);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+    expect(api.listLlmModels).not.toHaveBeenCalled();
+  });
+
+  it("says the same while the endpoint has been asked and has not answered", async () => {
+    const api = genericRow(vi.fn(() => new Promise<LlmModelListResult>(() => {})));
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalled());
+    expect(await blockerText()).toMatch(NOT_ASKED);
+  });
+
+  it("says the list could not be read when the handshake failed", async () => {
+    const api = genericRow(vi.fn(async () => FETCH_FAILED));
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(async () => expect(await blockerText()).toMatch(FAILED));
+  });
+
+  it("says the list came back empty when the endpoint answered with none", async () => {
+    const api = genericRow(vi.fn(async () => ({
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: `${CUSTOM_ENDPOINT}/models`,
+      models: [],
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+    } satisfies LlmModelListResult)));
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(async () => expect(await blockerText()).toMatch(EMPTY));
+  });
+
+  it("says it on the ACTIVE row too, whose own catalogue came back empty", async () => {
+    // The row chat is running on is the one where an empty list matters most:
+    // with no model saved there is nothing to send, and "has not answered yet"
+    // would be the wrong account of an endpoint that answered with nothing.
+    const api = genericRow(vi.fn(async () => ({
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: `${CUSTOM_ENDPOINT}/models`,
+      models: [],
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+    } satisfies LlmModelListResult)));
+    await renderTab(api, {
+      vendor: "openai-compatible",
+      baseUrl: CUSTOM_ENDPOINT,
+      model: "",
+    });
+
+    await waitFor(async () => expect(await blockerText()).toMatch(EMPTY));
+  });
+
+  /** Longer than the sync debounce, so a queued request has actually fired. */
+  const PAST_THE_SYNC_DEBOUNCE_MS = 550;
+
+  function broadcast(api: MockApi, vendors: Record<string, unknown>) {
+    const handler = (api.onSettingsUpdated as Mock).mock.calls.at(-1)?.[0] as
+      ((s: unknown) => void) | undefined;
+    expect(handler).toBeTruthy();
+    return (async () => {
+      await act(async () => {
+        handler!({
+          llm: { provider: "claude", pinnedModels: [], modelListCache: {}, vendors },
+          marketplace: { installedProviderIds: [], installedProviderPresets: [] },
+        });
+        await Promise.resolve();
+      });
+      // A second act, so the effects the broadcast queued are already mounted
+      // when the debounce window opens — inside one act they would not be.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, PAST_THE_SYNC_DEBOUNCE_MS));
+      });
+    })();
+  }
+
+  it("does not ask a failed endpoint again on a broadcast that changed nothing", async () => {
+    // Every settings write broadcasts one of these, and a fresh object identity
+    // each time re-ran every effect reading a row's endpoint — including the
+    // one that asks endpoints for their catalogues.
+    const api = genericRow(vi.fn(async () => FETCH_FAILED));
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(async () => expect(await blockerText()).toMatch(FAILED));
+    const asked = (api.listLlmModels as Mock).mock.calls.length;
+
+    await broadcast(api, { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } });
+
+    expect((api.listLlmModels as Mock).mock.calls.length).toBe(asked);
+  });
+
+  it("does not re-ask an endpoint mid-handshake when a broadcast changed nothing", async () => {
+    // The broadcast carries the same vendor content, so nothing about this row
+    // moved. A fresh object identity for the vendor map on every settings write
+    // was enough to re-run the sync and ask again while the first ask was
+    // still in flight.
+    const api = genericRow(vi.fn(() => new Promise<LlmModelListResult>(() => {})));
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(() => expect((api.listLlmModels as Mock).mock.calls.length).toBe(1));
+
+    await broadcast(api, { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } });
+
+    expect((api.listLlmModels as Mock).mock.calls.length).toBe(1);
+  });
+
+  it("does not ask a failed endpoint again when some other row changes", async () => {
+    // Here the broadcast IS news — another vendor's block moved — so the effect
+    // legitimately re-runs. This row's own inputs did not change, and a failure
+    // is an answer: re-asking on someone else's edit is how one unreachable
+    // endpoint became a request per settings write.
+    const api = genericRow(vi.fn(async () => FETCH_FAILED));
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(async () => expect(await blockerText()).toMatch(FAILED));
+    const asked = (api.listLlmModels as Mock).mock.calls.length;
+
+    await broadcast(api, {
+      "openai-compatible": { baseUrl: CUSTOM_ENDPOINT },
+      ollama: { baseUrl: "http://127.0.0.1:11434/v1" },
+    });
+
+    expect((api.listLlmModels as Mock).mock.calls.length).toBe(asked);
+  });
+});
+
 describe("LlmTab marketplace preset rows", () => {
   const presets = [
     preset("acme-gw", "Acme Gateway", "https://acme.example/v1"),
@@ -1023,17 +1325,20 @@ describe("LlmTab OpenAI model catalogue", () => {
     await waitFor(() => expect(api.hasApiKey).toHaveBeenCalledWith("openai"));
     expect(api.listLlmModels).not.toHaveBeenCalled();
 
-    const subline = await screen.findByTestId("llm-tab:connection-subline:codex");
-    expect(subline).toHaveAttribute("data-provider-sync-status", "needs-credential");
-    expect(subline).not.toHaveClass("text-destructive");
+    // Nothing is stored, so this card has no API path — and no sync line for
+    // one. The runtime it does have is signed in and healthy, so the card says
+    // nothing is missing either.
+    expect(screen.queryByTestId("llm-tab:connection-subline:codex")).toBeNull();
+    expect(screen.queryByTestId("llm-tab:connection-blocked:codex")).toBeNull();
     // And no second, API-side OpenAI row conjured out of the attempt.
     expect(rowOrder()).toEqual(["codex"]);
   });
 
-  it("keeps a provider with a stored key on screen when its handshake fails", async () => {
-    // The live regression: OpenAI's key is stored but stale, the /models call
-    // comes back failed, and the form is pointed at a DIFFERENT provider — so
-    // nothing but the credential itself can put this row on the page.
+  it("keeps a provider with a stored key on screen without a handshake of its own", async () => {
+    // The credential alone puts this row on the page — the form is pointed at
+    // a DIFFERENT provider and no catalogue has landed. What it must NOT do is
+    // report a failure: this vendor's `/models` is fixed and is fetched when it
+    // is the active route, and the card here is the Codex runtime's.
     const api = makeApi({ hasApiKey: storedKeysFor("openai") });
     installSubscription([codexView()]);
     await renderTab(api, { vendor: "claude", model: "", hasKey: false });
@@ -1041,10 +1346,9 @@ describe("LlmTab OpenAI model catalogue", () => {
     // The pairing carries it: one OpenAI row on the Codex runtime, not a
     // second plain card beside it.
     await waitFor(() => expect(rowOrder()).toEqual(["codex"]));
-    const subline = screen.getByTestId("llm-tab:connection-subline:codex");
-    expect(subline).toHaveAttribute("data-provider-sync-status", "error");
-    // A key exists and it is not working: that is a fault, and it reads as one.
-    expect(subline).toHaveClass("text-destructive");
+    expect(api.listLlmModels).not.toHaveBeenCalled();
+    // No handshake, so no sync line at all — and above all no red one.
+    expect(screen.queryByTestId("llm-tab:connection-subline:codex")).toBeNull();
   });
 
   it("keeps the stored key replaceable on a row whose handshake failed", async () => {

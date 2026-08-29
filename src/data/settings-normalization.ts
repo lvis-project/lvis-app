@@ -496,16 +496,16 @@ export function mergeLlmPatch(
       // Spread carries explicit `undefined` keys through (e.g. clearing `seed`).
       // Omitting a key from the patch leaves the previous value intact —
       // omit ≠ clear by design.
-      vendors[v] = getLlmVendorSettings(
-        {
-          ...vendors,
-          [v]: {
-            ...getLlmVendorSettings(vendors, v),
-            ...incoming,
-          },
-        },
-        v,
-      );
+      const previous = getLlmVendorSettings(vendors, v);
+      const merged: LLMVendorSettings = { ...previous, ...incoming };
+      // `presetModels` is a store keyed by preset, not a single value: a patch
+      // naming one preset's model must not delete every other preset's. A key
+      // set to an empty string still clears that one, which is what an
+      // unconfigured route means — the normalizer drops it.
+      if (incoming.presetModels) {
+        merged.presetModels = { ...previous.presetModels, ...incoming.presetModels };
+      }
+      vendors[v] = getLlmVendorSettings({ ...vendors, [v]: merged }, v);
     }
   }
   for (const vendorId of Object.keys(vendors)) {

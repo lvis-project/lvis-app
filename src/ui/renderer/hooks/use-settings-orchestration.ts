@@ -482,13 +482,12 @@ export function useSettingsOrchestration(
           ? marketplaceProviderPresetId
           : "";
         const routeModel = model.trim() || vendorInfo.defaultModel;
-        const storedPresetModels = getLlmVendorSettings(
-          settingsSnapshot?.llm.vendors,
-          "openai-compatible",
-        ).presetModels;
         const activeBlock: DeepPartial<AppSettings["llm"]["vendors"][string]> = {
+          // This preset's key alone. The main side merges it into the stored
+          // map (`mergeLlmPatch`), so a save here can never carry a stale copy
+          // of another preset's model back over a newer one.
           ...(activePresetId
-            ? { presetModels: { ...storedPresetModels, [activePresetId]: routeModel } }
+            ? { presetModels: { [activePresetId]: routeModel } }
             : { model: routeModel }),
           baseUrl: trimmedBaseUrl || undefined,
           vertexProject: trimmedVertexProject || undefined,

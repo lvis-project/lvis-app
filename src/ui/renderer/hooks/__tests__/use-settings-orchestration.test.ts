@@ -490,9 +490,10 @@ describe("useSettingsOrchestration", () => {
       }> } })
       .filter((call) => Boolean(call.llm?.vendors))
       .at(-1)?.llm?.vendors?.["openai-compatible"];
-    // Alpha's pick lands in alpha's slot; beta's stays exactly as stored, and
-    // the generic row's `model` is not written at all, so it survives the merge.
-    expect(block?.presetModels).toEqual({ "beta-gw": "beta/chosen", "alpha-gw": "alpha/chosen" });
+    // Alpha's key ALONE — the stored map is merged on the main side, so this
+    // save cannot carry a stale copy of beta's model back over a newer one.
+    // The generic row's `model` is not written at all, so it survives too.
+    expect(block?.presetModels).toEqual({ "alpha-gw": "alpha/chosen" });
     expect(block).not.toHaveProperty("model");
 
     // Switching rows restores what each row was last set to.

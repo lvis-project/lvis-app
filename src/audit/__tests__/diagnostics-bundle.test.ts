@@ -29,11 +29,15 @@ let crashDir: string;
 function makeSettings(): AppSettings {
   const settings = {
     llm: {
-      provider: "anthropic",
+      // A vendor the store recognises: settings reach every reader through
+      // SettingsService, which coerces an unknown provider name at the file
+      // boundary, so a fixture naming one would be testing a state no caller
+      // can be handed.
+      provider: "claude",
       streamSmoothing: "none",
       fallbackChain: [],
       vendors: {
-        anthropic: { model: "claude-x", apiKey: "sk-ant-SUPERSECRETKEY123", baseUrl: "https://api.example.com" },
+        claude: { model: "claude-x", apiKey: "sk-ant-SUPERSECRETKEY123", baseUrl: "https://api.example.com" },
       } as unknown as AppSettings["llm"]["vendors"],
     },
     chat: { systemPrompt: "sp", autoCompact: true },
@@ -121,10 +125,10 @@ describe("pickRedactedSettings — deny-by-default whitelist", () => {
 
   it("keeps safe provider/model shape", () => {
     const out = pickRedactedSettings(makeSettings()) as { llm: { provider: string; vendors: Record<string, { model?: string; hasBaseUrl: boolean }> } };
-    expect(out.llm.provider).toBe("anthropic");
-    expect(out.llm.vendors.anthropic.model).toBe("claude-x");
+    expect(out.llm.provider).toBe("claude");
+    expect(out.llm.vendors.claude.model).toBe("claude-x");
     // baseUrl becomes a presence flag, never the value.
-    expect(out.llm.vendors.anthropic.hasBaseUrl).toBe(true);
+    expect(out.llm.vendors.claude.hasBaseUrl).toBe(true);
     expect(JSON.stringify(out)).not.toContain("api.example.com");
   });
 });
