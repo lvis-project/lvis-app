@@ -416,6 +416,10 @@ describe("StarredView", () => {
           { id: "fine", modifiedAt: new Date().toISOString(), title: "정상 대화", sessionKind: "main" },
         ]}
         workspaceProjects={[]}
+        currentSessionId=""
+        refreshStarred={vi.fn()}
+        onJumpToSession={vi.fn()}
+        onActivateHome={vi.fn()}
       />,
     );
 
