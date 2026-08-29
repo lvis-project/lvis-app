@@ -35,12 +35,11 @@ import {
 } from "../engine/subagent-runner.js";
 import { GUIDE_MAX_CHARS } from "../engine/turn/guidance-limits.js";
 import { maskSensitiveData } from "../shared/dlp.js";
-import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
+import { createDlpSafeUuid, isSafeStructuralId } from "../shared/dlp-safe-id.js";
 import { A2AHandlerError, type A2ARequestHandler } from "./a2a-router.js";
 import {
   A2ATaskStore,
   CHILD_SESSION_ID_PATTERN,
-  CONTROL_CHAR,
   isA2ARfc3339Timestamp,
   type A2ATaskCreateResult,
   type A2ATaskContinuationResult,
@@ -90,14 +89,6 @@ function hasOwn(value: object, key: PropertyKey): boolean {
 
 function hasValidTenant(params: Record<string, unknown>): boolean {
   return !hasOwn(params, "tenant") || params.tenant === "";
-}
-
-function isSafeStructuralId(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 256
-    && !CONTROL_CHAR.test(value)
-    && maskSensitiveData(value).detections.length === 0;
 }
 
 function isSafeChildSessionId(value: unknown): value is string {

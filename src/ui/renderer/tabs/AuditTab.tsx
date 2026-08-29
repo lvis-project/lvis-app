@@ -7,6 +7,8 @@ import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-
 import type { AuditEntry } from "../../../audit/audit-logger.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
+import { localDateKey, shiftLocalDateKey } from "../../../shared/local-date.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
 import { TelemetrySection } from "./TelemetrySection.js";
 
@@ -21,11 +23,8 @@ interface AuditSearchResult {
   total: number;
 }
 
-function isoDateOffset(days: number): string {
-  return new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
-}
-
 const PAGE_SIZE = 50;
+const DEFAULT_RANGE_DAYS = 7;
 
 const TYPE_BADGE: Record<string, string> = {
   // Telemetry AuditEntry types (src/audit/audit-logger.ts:85)
@@ -52,8 +51,13 @@ const TYPE_BADGE: Record<string, string> = {
 
 export function AuditTab() {
   const { t } = useTranslation();
-  const [dateFrom, setDateFrom] = useState(isoDateOffset(7));
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  // The picker shows host-local civil days: "today" is the day on the
+  // person's calendar, not the UTC day the store partitions by. The search
+  // side maps these keys back onto the UTC partitions.
+  const [dateFrom, setDateFrom] = useState(() =>
+    shiftLocalDateKey(localDateKey(new Date()), -DEFAULT_RANGE_DAYS),
+  );
+  const [dateTo, setDateTo] = useState(() => localDateKey(new Date()));
   const [typeFilter, setTypeFilter] = useState("");
   const [textSearch, setTextSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -182,6 +186,7 @@ export function AuditTab() {
               <Input
                 type="date"
                 className="h-8 text-xs"
+                data-testid="audit-date-from"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
               />
@@ -191,6 +196,7 @@ export function AuditTab() {
               <Input
                 type="date"
                 className="h-8 text-xs"
+                data-testid="audit-date-to"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
               />
@@ -296,8 +302,11 @@ export function AuditTab() {
                           className="cursor-pointer border-b last:border-0 hover:bg-muted/(--opacity-light)"
                           onClick={() => setExpandedIdx(isExpanded ? null : i)}
                         >
-                          <td className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground whitespace-nowrap">
-                            {ts?.slice(0, 19).replace("T", " ") ?? "—"}
+                          <td
+                            className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground whitespace-nowrap"
+                            data-testid="audit-row-time"
+                          >
+                            {ts === undefined ? "—" : formatMediumDateTime(ts)}
                           </td>
                           <td className="px-3 py-1.5">
                             <Badge className={`text-[10px] ${badgeClass}`}>{rowType}</Badge>

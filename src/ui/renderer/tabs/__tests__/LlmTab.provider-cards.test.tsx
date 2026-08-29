@@ -1,6 +1,6 @@
 import "../../../../../test/renderer/setup.js";
 import { useState } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { installMockLvisApi, type MockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
@@ -348,13 +348,15 @@ async function chooserModelIds(): Promise<string[]> {
   });
 }
 
-/** The open chooser's row for this model id. */
+/** The open chooser's row for this model id. The chosen model is mirrored
+ *  into the collapsed trigger as well, so the id alone can land outside the
+ *  list — only a match inside an option is the row. */
 function chooserOption(modelId: string): HTMLElement {
-  const option = document
-    .querySelector(`[data-model-id="${modelId}"]`)
-    ?.closest("[role='option']");
+  const option = [...document.querySelectorAll(`[data-model-id="${modelId}"]`)]
+    .map((node) => node.closest("[role='option']"))
+    .find((node): node is HTMLElement => node instanceof HTMLElement);
   if (!option) throw new Error(`the chooser offers no ${modelId}`);
-  return option as HTMLElement;
+  return option;
 }
 
 /** The provider group a chooser row sits under, label included. */
@@ -657,6 +659,153 @@ describe("LlmTab model chooser is the whole switch", () => {
     // A subscription pick still goes through the runtime's own action: it is
     // a sign-in-backed route, not an API credential.
     await waitFor(() => expect(useForChat).toHaveBeenCalledWith("codex", "codex-mini"));
+  });
+
+  it("names a self-hosted row by its card title, not by what its catalogue calls itself", async () => {
+    // An OpenAI-compatible server answers `/models` with `owned_by: "openai"`
+    // for everything it serves. That is the endpoint's word for its own
+    // software; printed beside the model, it makes a self-hosted endpoint read
+    // as OpenAI's. The chooser names the row the user connected instead — the
+    // same name the card carries.
+    const api = genericRowApi(vi.fn().mockResolvedValue({
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: `${CUSTOM_ENDPOINT}/models`,
+      models: ["qwen-self-hosted"],
+      modelEntries: [{ id: "qwen-self-hosted", provider: "openai", ownedBy: "openai" }],
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+    } satisfies LlmModelListResult));
+    await renderTab(api, { vendor: "openai-compatible", model: "qwen-self-hosted" });
+
+    const card = await screen.findByTestId("llm-tab:connection-toggle:openai-compatible");
+    const cardTitle = card.querySelector(".font-medium")?.textContent ?? "";
+    expect(cardTitle).not.toBe("");
+    expect(await chooserModelIds()).toContain("qwen-self-hosted");
+
+    // The open row, not the collapsed trigger mirroring it.
+    const column = within(chooserOption("qwen-self-hosted"))
+      .getByTestId("llm-tab:model-provider:qwen-self-hosted");
+    expect(column.textContent).toBe(cardTitle);
+    expect(chooserGroupText("qwen-self-hosted")).toContain(cardTitle);
+  });
+
+  it("names a marketplace preset row by its card title as well", async () => {
+    // A preset is reached through the openai-compatible vendor, so its
+    // catalogue names itself the same untrustworthy way. The row the user
+    // installed is what the column says.
+    const gateway = preset("acme-gw", "Acme Gateway", "https://acme.example/v1");
+    const { api } = profileApi({
+      installedProviderPresets: [gateway],
+      modelListCache: {
+        [["openai-compatible", gateway.baseUrl, "acme-gw"].join("\n")]: {
+          vendor: "openai-compatible",
+          baseUrl: gateway.baseUrl,
+          credentialScope: "acme-gw",
+          endpoint: `${gateway.baseUrl}/models`,
+          models: ["acme-large"],
+          modelEntries: [{ id: "acme-large", provider: "openai", ownedBy: "openai" }],
+          fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    }, {
+      hasApiKey: storedKeysFor("marketplace-provider:acme-gw"),
+      // The cached catalogue is what this reads; a fresh answer would only
+      // race it.
+      listLlmModels: vi.fn(() => new Promise<LlmModelListResult>(() => {})),
+    });
+    await renderTab(api, {
+      vendor: "openai-compatible",
+      marketplaceProviderPresets: [gateway],
+      marketplaceProviderPresetId: "acme-gw",
+      model: "acme-large",
+    });
+
+    expect(await chooserModelIds()).toContain("acme-large");
+    const column = within(chooserOption("acme-large"))
+      .getByTestId("llm-tab:model-provider:acme-large");
+    expect(column.textContent).toBe("Acme Gateway");
+  });
+
+  it("keeps an aggregator's sub-vendor on the model it serves", async () => {
+    // An aggregator's catalogue IS other companies' models, and its entries
+    // say which company serves each one. Printing the row name on every one of
+    // them would erase the only thing that tells them apart — so the override
+    // that saves a self-hosted row must not reach this list.
+    const ROUTED = "anthropic/claude-sonnet-4.6";
+    const { api } = profileApi({ installedProviderIds: ["openrouter"] }, {
+      hasApiKey: storedKeysFor("openrouter"),
+      listLlmModels: vi.fn().mockResolvedValue({
+        ok: true,
+        vendor: "openrouter",
+        endpoint: "https://openrouter.ai/api/v1/models",
+        models: [ROUTED],
+        modelEntries: [{
+          id: ROUTED,
+          provider: "anthropic",
+          ownedBy: "anthropic",
+          tags: { router: true },
+        }],
+        fetchedAt: "2026-01-01T00:00:00.000Z",
+      } satisfies LlmModelListResult),
+    });
+    await renderTab(api, {
+      vendor: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: ROUTED,
+    });
+
+    expect(await chooserModelIds()).toContain(ROUTED);
+    // The row offers its own saved model before any handshake, and the entry
+    // that names the sub-vendor arrives with the catalogue — so the column is
+    // read once that has landed.
+    await waitFor(() => expect(
+      within(chooserOption(ROUTED)).getByTestId(`llm-tab:model-provider:${ROUTED}`).textContent,
+    ).toBe("anthropic"));
+    // The group is still the row: the list is navigated by provider row, and
+    // only the leading column speaks for the individual model.
+    expect(chooserGroupText(ROUTED)).toMatch(/OpenRouter/i);
+  });
+});
+
+describe("LlmTab names each route's state on a row that has two", () => {
+  const SIGNED_IN = { runtime: "ready", connection: "connected", models: [] } as const;
+  const SUBSCRIPTION = /구독|Subscription/;
+  const API_KEY = /API/;
+  const CONNECTED = /연결됨|Connected/;
+  const SIGNED_OUT = /로그아웃됨|Signed out/;
+  const NOT_SET = /미설정|Not set/;
+
+  it("says the API key is not set beside a signed-in subscription, not that the row is signed out", async () => {
+    // The row is one provider reached two ways. Its sign-in is healthy and it
+    // holds no key; "connected" and "signed out" side by side described those
+    // two routes without saying so, and read as a contradiction.
+    installSubscription([codexView({ status: SIGNED_IN })]);
+    await renderTab(makeApi(), { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    const card = await screen.findByTestId("subscription-provider:codex");
+    const signIn = within(card).getByTestId("subscription-provider:codex:connection");
+    expect(signIn).toHaveTextContent(SUBSCRIPTION);
+    expect(signIn).toHaveTextContent(CONNECTED);
+    const apiRoute = within(card).getByTestId("llm-tab:connection-status:codex");
+    expect(apiRoute).toHaveTextContent(API_KEY);
+    expect(apiRoute).toHaveTextContent(NOT_SET);
+    expect(within(card).queryByText(SIGNED_OUT)).toBeNull();
+  });
+
+  it("says the API key is connected beside a signed-out subscription", async () => {
+    installSubscription([codexView()]);
+    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), {
+      vendor: "claude",
+      model: "claude-sonnet-4-6",
+    });
+
+    const card = await screen.findByTestId("subscription-provider:codex");
+    await waitFor(() => expect(within(card).getByTestId("llm-tab:connection-status:codex"))
+      .toHaveTextContent(CONNECTED));
+    expect(within(card).getByTestId("llm-tab:connection-status:codex")).toHaveTextContent(API_KEY);
+    const signIn = within(card).getByTestId("subscription-provider:codex:connection");
+    expect(signIn).toHaveTextContent(SUBSCRIPTION);
+    expect(signIn).toHaveTextContent(SIGNED_OUT);
   });
 });
 
@@ -1394,6 +1543,51 @@ describe("LlmTab model lists are cached, not re-fetched", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     });
     expect(askedCount(api)).toBe(1);
+  });
+
+  it("asks a fixed-endpoint vendor once when its refresh is pressed twice in a row", async () => {
+    // Such a vendor is asked whether it holds a key before anything is
+    // fetched. A second press landing during that question is the same
+    // request, and the answer to the first is the answer to both.
+    const { api } = presetProfile({}, {
+      hasApiKey: storedKeysFor("openai"),
+      listLlmModels: answering(["gpt-from-the-endpoint"]),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-subline:openai"))
+      .toHaveAttribute("data-provider-sync-status", "ready"));
+    expect(askedCount(api)).toBe(1);
+
+    const refresh = screen.getByTestId("llm-tab:connection-refresh:openai");
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+
+    await waitFor(() => expect(askedCount(api)).toBe(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(askedCount(api)).toBe(2);
+  });
+
+  it("shows no sync on a keyless row while the credential store is still answering", async () => {
+    // The in-flight claim is taken before the credential question, but the
+    // visible "syncing" state is not: a row with nothing stored makes no
+    // request, and must not look for a moment as if it had.
+    const { api } = presetProfile({}, {
+      hasApiKey: vi.fn(() => new Promise<boolean>(() => {})),
+    });
+    installSubscription([codexView({
+      status: { runtime: "ready", connection: "connected", models: [] },
+    })]);
+    await renderTab(api, { model: "", hasKey: false });
+
+    await waitFor(() => expect(api.hasApiKey).toHaveBeenCalledWith("openai"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(askedCount(api)).toBe(0);
+    expect(document.querySelector("[data-provider-sync-status=\"loading\"]")).toBeNull();
+    expect(document.querySelector(".animate-spin")).toBeNull();
   });
 
   it("offers a refresh only on the cards that have a list to refresh", async () => {
