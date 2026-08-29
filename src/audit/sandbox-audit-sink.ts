@@ -22,6 +22,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
+import { utcDateKey } from "../shared/local-date.js";
 import type { SandboxAuditEntry } from "./sandbox-audit.js";
 
 // ─── Sink path ────────────────────────────────────────────────────────────────
@@ -38,15 +39,14 @@ import type { SandboxAuditEntry } from "./sandbox-audit.js";
  * Accepts an optional `date` parameter so tests can inject a fixed date without
  * touching the real clock.
  *
- * Timezone — UTC (issue #801). `toISOString().slice(0, 10)` yields the UTC
- * calendar day, matching the daily rollover convention used by
- * `audit-logger.ts` (lines 147 / 292 / 433 — same `toISOString().slice(0, 10)`).
+ * Timezone — UTC. {@link utcDateKey} yields the UTC calendar day, the same
+ * partition key `audit-logger.ts` names its daily files by.
  * Both channels roll at UTC midnight so events emitted moments apart cannot
  * land in different daily files based on the operator's local timezone.
  * Forensic correlation across timezones relies on this invariant.
  */
 function sinkPath(date = new Date()): string {
-  const ymd = date.toISOString().slice(0, 10); // YYYY-MM-DD (UTC, see #801)
+  const ymd = utcDateKey(date);
   return resolve(lvisHome(), "audit", `${ymd}.sandbox.jsonl`);
 }
 

@@ -9,7 +9,7 @@ import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
-import { localDateKey, localDayStart } from "../../../shared/local-date.js";
+import { localDateKey, localDayStart, utcDateKey } from "../../../shared/local-date.js";
 import { formatCost } from "../../../lib/cost-format.js";
 import { formatHhMm, formatMediumDateTime, formatMonthYear } from "../../../shared/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
@@ -161,7 +161,7 @@ function buildYearHeatmap(year: number, usageByDate: Map<string, number>): Heatm
   const maxTokens = Math.max(0, ...usageByDate.values());
   const cells: HeatmapCell[] = Array.from({ length: first.getUTCDay() }, (_, index) => ({ key: `blank-${index}` }));
   for (const day = new Date(first); day <= last; day.setUTCDate(day.getUTCDate() + 1)) {
-    const dateKey = day.toISOString().slice(0, 10);
+    const dateKey = utcDateKey(day);
     const tokens = usageByDate.get(dateKey) ?? 0;
     const ratio = maxTokens > 0 ? tokens / maxTokens : 0;
     const level = tokens <= 0 ? 0 : ratio >= 0.75 ? 4 : ratio >= 0.5 ? 3 : ratio >= 0.25 ? 2 : 1;
