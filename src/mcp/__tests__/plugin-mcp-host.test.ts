@@ -10,6 +10,9 @@
  */
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
+import { LoopbackTransport } from "../loopback-transport.js";
+import { META_CLIENT_INFO } from "../protocol-constants.js";
+import { getLvisAppVersion } from "../../shared/app-version.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createPluginUiResourceProvider } from "../plugin-ui-resource-provider.js";
 import type { PluginToolDelegate } from "../plugin-mcp-server.js";
@@ -352,5 +355,24 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     );
     await publishTestHost(host, MANIFEST.id, registry);
     await expect(host.readUiResource("ui://other-plugin/read.html")).rejects.toThrow(/own namespace/i);
+  });
+});
+
+describe("PluginMcpHost — RC request meta", () => {
+  it("advertises the running app version as clientInfo on every request", async () => {
+    const send = vi.spyOn(LoopbackTransport.prototype, "send");
+    try {
+      const registry = new ToolRegistry();
+      const host = testLoopbackHost(MANIFEST, vi.fn(async () => ({ content: [] })), registry);
+      await publishTestHost(host, MANIFEST.id, registry);
+
+      expect(send.mock.calls.length).toBeGreaterThan(0);
+      for (const [message] of send.mock.calls) {
+        const params = (message as { params?: { _meta?: Record<string, unknown> } }).params;
+        expect(params?._meta?.[META_CLIENT_INFO]).toEqual({ name: "lvis-app", version: getLvisAppVersion() });
+      }
+    } finally {
+      send.mockRestore();
+    }
   });
 });
