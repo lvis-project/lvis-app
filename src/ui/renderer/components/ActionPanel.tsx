@@ -12,6 +12,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { FLOATING_LANE_ITEM_WIDTH } from "./FloatingRightLane.js";
 import {
   useNativeContextMenu,
   type NativeContextMenuHandlers,
@@ -340,7 +341,10 @@ export function ActionPanel({
         align="end"
         sideOffset={6}
         aria-label={t("actionPanel.title")}
-        className="flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
+        // The popover is one of the floating lane's occupants, so it takes the
+        // lane's width rather than a copy of it — a copy is what would let the
+        // panel and the overlay card below it step in and out by a few pixels.
+        className={`flex ${FLOATING_LANE_ITEM_WIDTH} flex-col overflow-hidden p-0`}
         style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
         data-testid="action-panel"
       >
