@@ -383,7 +383,7 @@ export function WriteFileSidecarDiff({
           </button>
         </div>
         <div
-          className="max-h-[24rem] overflow-y-auto font-mono text-[10px] leading-[1.5] rounded-b-md px-0 py-1"
+          className="max-h-(--preview-block-max-height-compact) overflow-y-auto font-mono text-[10px] leading-[1.5] rounded-b-md px-0 py-1"
           style={{ backgroundColor: "hsl(var(--code-bg))", color: "hsl(var(--code-fg))" }}
         >
           {hunks.length === 0 ? (

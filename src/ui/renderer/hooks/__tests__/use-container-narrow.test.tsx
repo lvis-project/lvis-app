@@ -16,9 +16,9 @@ import "../../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
-import { DOCK_ENTER_WIDTH, DOCK_EXIT_WIDTH, useContainerNarrow, sidePanelLayout } from "../use-container-narrow.js";
+import { DOCK_ENTER_WIDTH, DOCK_EXIT_WIDTH, MIN_DOCKED_TRANSCRIPT_WIDTH, useContainerNarrow, sidePanelLayout } from "../use-container-narrow.js";
 import { SIDE_PANEL_MIN_RESERVE, SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
-import { MAIN_WINDOW_MIN_WIDTH } from "../../../../main/main-window-bounds.js";
+import { MAIN_WINDOW_MIN_WIDTH } from "../../../../shared/shell-geometry.js";
 
 /**
  * A controllable ResizeObserver stub: capture the callback so a test can push
@@ -136,10 +136,20 @@ describe("useContainerNarrow", () => {
 
 describe("sidePanelLayout", () => {
   it("docks with the pixel floors when the container can hold both columns", () => {
-    // The reserve is the 448px card plus 16px of insets.
+    // `min` names the reserve it is about, so the assertion says which width it
+    // means rather than repeating a number. The maxima stay absolute px:
+    // `width - MIN_DOCKED_TRANSCRIPT_WIDTH` would restate the implementation
+    // and pass however the transcript floor moved, so the literals are what
+    // actually pins them.
     expect(sidePanelLayout(Number.POSITIVE_INFINITY, false)).toEqual({ mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: Number.POSITIVE_INFINITY });
     expect(sidePanelLayout(DOCK_ENTER_WIDTH, false)).toEqual({ mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: DOCK_ENTER_WIDTH - 320 });
     expect(sidePanelLayout(1200, false)).toEqual({ mode: "docked", min: SIDE_PANEL_MIN_RESERVE, max: 880 });
+    // Both constants the expectations lean on, pinned to their absolute values
+    // once. Without this the `min` assertions would be identities — the
+    // implementation returns SIDE_PANEL_MIN_RESERVE, so comparing against it
+    // holds whatever it becomes.
+    expect(SIDE_PANEL_MIN_RESERVE).toBe(464);
+    expect(MIN_DOCKED_TRANSCRIPT_WIDTH).toBe(320);
   });
 
   it("floats over the transcript, keeping its own floor, when the container cannot", () => {

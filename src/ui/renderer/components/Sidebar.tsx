@@ -39,6 +39,7 @@ import {
   type ProjectErrorReporter,
 } from "../hooks/use-add-project-folder.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
+import { CLUSTER_LEAD_PAD_DARWIN } from "../../../shared/shell-geometry.js";
 import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
@@ -145,12 +146,13 @@ export interface SidebarProps {
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
-// On macOS the OS draws the traffic lights at {x:18,y:16} (≈12px diameter, so
-// their visual center sits at ≈y:22, ≈x:[18..76]). The floating card is anchored
-// at top-2 (8px) so the h-7 cluster strip's center lands on that line; the strip
-// carries a left clearance (≈76px) so its leftmost button starts at x≈84, just
-
-
+// On macOS the OS draws the traffic lights at `TRAFFIC_LIGHT_POSITION`
+// (shared/shell-geometry.ts), ≈12px across, so their visual centre sits on the
+// band's own centre line. The floating card is anchored at
+// `--shell-card-top-darwin` so the cluster strip's centre lands on that line;
+// the strip carries `CLUSTER_LEAD_PAD_DARWIN` of left clearance so its leftmost
+// button starts a full gap past where the lights end, whether the strip
+// rides on the card surface or stands
 // out bare in the band when collapsed.
 // Returns false when the preload bridge is absent (jsdom / Storybook / SSR) —
 // no native chrome to align against there.
@@ -1508,18 +1510,17 @@ function onActiveSidebarTabChangeGuard(value: string, onActiveTabChange: (tab: S
 // "Workbench model".
 // Always rendered (both expanded + collapsed). When the surrounding card is
 // expanded it forms the card's top strip; when collapsed it stands bare in the
-// band. Each control is an h-6 w-6 icon button (24px, ~4px pad around the 16px
-// glyph) with TIGHT ~2px gaps (gap-0.5) so the hover-highlight box hugs the
-// icon and never pops out of the band; the whole strip is a single h-7
-// items-center row so every glyph centers on the lights' line.
+// band. Each control is a `--chrome-icon-button` square (~4px pad around the
+// 16px glyph) with `--chrome-gap-hair` gaps so the hover-highlight box hugs
+// the icon and never pops out of the band; the whole strip is a single
+// `--chrome-control-height` items-center row, which is what centres every
+// glyph on the lights' line.
 //
 // `leadClearance` left-pads the FIRST button past the OS traffic lights on
-// darwin. The lights occupy roughly x in [18 .. 76] (trafficLightPosition.x:18
-// + ~58px for the 3 lights). The card surface starts at the aside's `left-2`
-// (≈8px), so the strip needs ≈76px of internal left padding to push its
-// leftmost button to x≈84 (lights end + ~8px gap) with NO hover overlap. The
-// card surface still paints behind the lights — the OS draws the lights ON TOP
-// of the webview, so that is purely cosmetic backing, not a collision.
+// darwin by `CLUSTER_LEAD_PAD_DARWIN` — the lights' right edge plus a gap,
+// re-expressed from the card's own left edge, which is where this padding is
+// measured from. Both halves of that derivation live in
+// `shared/shell-geometry.ts`, so the pad follows the lights if they ever move.
 function ClusterStrip({
   collapsed,
   leadClearance,
@@ -1539,13 +1540,12 @@ function ClusterStrip({
   const { t } = useTranslation();
   return (
     <div
-      className={[
-        "flex h-(--chrome-control-height) shrink-0 items-center gap-(--chrome-gap-hair) pr-(--chrome-gap-tight)",
-        // Clear the OS lights on darwin: 76px from the card's left edge, in
-        // device px like the lights themselves, so the first button lands at
-        // x=84 at every font scale. Win/Linux + non-Electron have no OS lights.
-        leadClearance ? "pl-[76px]" : "pl-(--chrome-gap-tight)",
-      ].join(" ")}
+      className="flex h-(--chrome-control-height) shrink-0 items-center gap-(--chrome-gap-hair) pl-(--chrome-gap-tight) pr-(--chrome-gap-tight)"
+      // Clear the OS lights on darwin. In device px like the lights themselves
+      // (an inline override of the class pad above), so the first button lands
+      // on the same x at every font scale. Win/Linux + non-Electron have no OS
+      // lights, so they keep the plain tight pad.
+      style={leadClearance ? { paddingLeft: `${CLUSTER_LEAD_PAD_DARWIN}px` } : undefined}
       data-testid="sidebar-cluster"
     >
       {/* 펼침/닫힘 — shell-owned collapse toggle. Leftmost, next to the lights. */}
@@ -1673,15 +1673,16 @@ export function Sidebar({
   const hasPluginEntries = pluginViews.length > 0
     || failedPluginCards.length > 0
     || inactivePluginCards.length > 0;
-  // On darwin the OS traffic lights (x:18,y:16) sit just left of the cluster
   // Subscription readiness is distinct from API-key presence: when a login
   // runtime is selected, never describe its verification state as an API-key
   // problem or invite the user to configure an unrelated credential.
   const runtimeUnavailable = subscriptionRuntimePolicy ? subscriptionRuntimePolicy.chatUnavailable : subscriptionUnavailable;
   const runtimePending = subscriptionRuntimePolicy ? subscriptionRuntimePolicy.chatPending : subscriptionPending;
   const settingsNeedsApiKey = hasApiKey === false && !runtimeUnavailable && !runtimePending;
-  // strip. The aside's top inset is tuned so the strip's buttons land on the
-  // lights' line. Win/Linux + non-Electron have no OS lights to align against.
+  // On darwin the OS traffic lights (`TRAFFIC_LIGHT_POSITION`) sit just left of
+  // the cluster strip. The aside's top inset (`--shell-card-top-darwin`) is
+  // derived so the strip's buttons land on the lights' line. Win/Linux +
+  // non-Electron have no OS lights to align against.
   const darwinTopClearance = isDarwinPlatform();
 
   const navListId = "sidebar-nav-list";
@@ -1700,19 +1701,25 @@ export function Sidebar({
     //      retracts (body removed) and the cluster pops OUT into the bare band
     //      with NO surface behind it. The strip's screen position is identical in
     //      both states; the only visual delta is the card surface behind it.
-    // The cluster strip must share the traffic lights' CENTRE LINE, and that
-    // line moved when the band went 44px -> 36px: the lights are now at
-    // trafficLightPosition.y:12 with a ≈12px diameter, so their centre is 18.
-    // An h-7 (28px) strip centres at inset + 14, so the inset has to be 4
-    // (top-1), not 8 — at top-2 the icons sat 4px BELOW the lights.
-    // win/linux + non-Electron have no OS lights to align against.
+    // The cluster strip must share the traffic lights' CENTRE LINE, which is
+    // also the band's. `--shell-card-top-darwin` is that constraint solved
+    // rather than a number someone picked: a `--chrome-control-height` strip
+    // centres on a `--chrome-band-height` band only at half their difference,
+    // and a hand-written inset stopped being right the moment the band went
+    // 44px -> 36px (the icons then sat 4px BELOW the lights).
+    // win/linux + non-Electron have no OS lights to align against, so they
+    // take `--shell-card-top`.
     <aside
       data-testid="primary-sidebar"
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
-        "absolute left-[8px] bottom-[12px] z-30 flex min-h-0 flex-col",
-        darwinTopClearance ? "top-[4px]" : "top-[6px]",
+        // The card's air, from the same `--shell-card-inset*` tokens the docked
+        // side panel's wrapper uses — the two cards are the same shape and have
+        // to sit on the same lines, and the chat group's bottom edge is lined up
+        // against this one.
+        "absolute left-(--shell-card-inset) bottom-(--shell-card-inset-bottom) z-30 flex min-h-0 flex-col",
+        darwinTopClearance ? "top-(--shell-card-top-darwin)" : "top-(--shell-card-top)",
         collapsed && "pointer-events-none",
       ].join(" ")}
       // The aside overlays the Electron drag band. Mark it no-drag so its controls
@@ -1783,9 +1790,10 @@ export function Sidebar({
           />
         ) : null}
         {/* ── Cluster strip — [펼침/닫힘 toggle] → [검색] → [즐겨찾기] → [내보내기],
-            ~8px gaps, each h-7 w-7. Sits on the traffic-light line. When the card
-            is expanded this is the card's top strip; when collapsed it stands bare
-            in the band. Always rendered — never hidden in either state. */}
+            `--chrome-gap-hair` gaps, each button a `--chrome-icon-button` square.
+            Sits on the traffic-light line. When the card is expanded this is the
+            card's top strip; when collapsed it stands bare in the band. Always
+            rendered — never hidden in either state. */}
         <ClusterStrip
           collapsed={collapsed}
           leadClearance={darwinTopClearance}
@@ -1802,12 +1810,13 @@ export function Sidebar({
         className={
           collapsed
             ? // Collapsed: a compact icon-rail card BELOW the bare cluster,
-              // pinned to the aside's left edge (left-2 ≈ 8px) so it stays within
-              // the main content's collapsed left padding (pl-20 ≈ 80px). The
-              // cluster strip above keeps its own lead clearance to clear the OS
-              // lights; the rail does NOT inherit that clearance. `mt-2.5`
-              // (≈10px) gives the rail card adequate top margin below the band so
-              // it is not flush against the cluster strip in chat mode.
+              // pinned to the aside's left edge (`--shell-card-inset`) so it stays
+              // within the main content's collapsed left padding
+              // (`--shell-collapsed-rail-reserve`). The cluster strip above keeps
+              // its own lead clearance to clear the OS lights; the rail does NOT
+              // inherit that clearance. `mt-2.5` gives the rail card top margin
+              // below the band so it is not flush against the cluster strip in
+              // chat mode.
               "lvis-surface-raised mt-2.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-card"
             : "flex min-h-0 flex-1 flex-col overflow-hidden"
         }

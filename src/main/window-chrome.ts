@@ -9,9 +9,9 @@
  * source-of-truth governs the platform branching.
  *
  *  - macOS: keep native frame; `hiddenInset` removes the title bar but keeps
- *           the OS-drawn traffic lights, positioned 18 px from the left with a
- *           modest top inset (y:16) so they breathe inside the band. The band /
- *           titlebar left clearance grows in lockstep (CustomTitleBar pl) so the
+ *           the OS-drawn traffic lights at `TRAFFIC_LIGHT_POSITION` so they
+ *           breathe inside the band. The band / titlebar left clearance is
+ *           derived from that same position (CustomTitleBar pl) so the
  *           leftmost cluster button never hover-overlaps the OS lights.
  *  - Win/Linux: remove native frame entirely; `CustomTitleBar.tsx` renders
  *               our own minimize / maximize / close buttons in the renderer.
@@ -25,15 +25,16 @@
  * `link-window-service.ts`, and `auth-window-service.ts`.
  */
 import type { BrowserWindowConstructorOptions } from "electron";
+import { TRAFFIC_LIGHT_POSITION } from "../shared/shell-geometry.js";
 
 export function getCommonChromeOptions(): Partial<BrowserWindowConstructorOptions> {
   const isDarwin = process.platform === "darwin";
   return {
     frame: isDarwin,
     titleBarStyle: isDarwin ? "hiddenInset" : "hidden",
-    // y pairs with the 36px band (`--chrome-band-height` in styles.css): 12 + ≈12px of light
-    // puts their centre at 18, the band's centre. Changing one without the
-    // other leaves the lights off the band's line.
-    trafficLightPosition: isDarwin ? { x: 18, y: 12 } : undefined,
+    // The position, and the reason it pairs with the band height, live in
+    // `shared/shell-geometry.ts` — the renderer derives its own clearances
+    // from the same constant, so the two sides cannot drift apart.
+    trafficLightPosition: isDarwin ? { ...TRAFFIC_LIGHT_POSITION } : undefined,
   };
 }

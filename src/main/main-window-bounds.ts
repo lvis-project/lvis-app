@@ -1,4 +1,10 @@
 import { SIDE_PANEL_MIN_RESERVE } from "../shared/side-panel.js";
+import {
+  MAIN_WINDOW_HEIGHT,
+  MAIN_WINDOW_MIN_HEIGHT,
+  MAIN_WINDOW_MIN_WIDTH,
+  MAIN_WINDOW_WIDTH,
+} from "../shared/shell-geometry.js";
 
 export type WorkAreaBounds = {
   x: number;
@@ -7,10 +13,6 @@ export type WorkAreaBounds = {
   height: number;
 };
 
-const MAIN_WINDOW_WIDTH = 460;
-const MAIN_WINDOW_HEIGHT = 840;
-export const MAIN_WINDOW_MIN_WIDTH = 460;
-export const MAIN_WINDOW_MIN_HEIGHT = 640;
 // Width the OS window reserves for the docked side panel in chat mode. This is
 // the panel's MINIMUM width (the drag handle cannot go below it) so the window
 // always has room for at least a collapsed panel; widening past it reflows the

@@ -237,7 +237,7 @@ describe("ChatView", () => {
       const dock = container.querySelector('[data-testid="session-todo-dock"]');
       expect(dock).not.toBeNull();
       expect(dock).toHaveClass("mx-auto");
-      expect(dock).toHaveClass("max-w-[58rem]");
+      expect(dock).toHaveClass("max-w-(--reading-column-max)");
     });
   });
 
@@ -373,7 +373,7 @@ describe("ChatView", () => {
       expect(dock).toHaveClass("w-full");
       expect(dock).toHaveClass("max-w-full");
       expect(dock).not.toHaveClass("mx-auto");
-      expect(dock).not.toHaveClass("max-w-[58rem]");
+      expect(dock).not.toHaveClass("max-w-(--reading-column-max)");
     });
   });
 

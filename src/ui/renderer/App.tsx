@@ -32,6 +32,7 @@ import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
+import { SHELL_GUTTER } from "../../shared/shell-geometry.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
@@ -99,13 +100,31 @@ import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
 /**
  * Card edge -> where a content title starts.
  *
- * The main surface sits one 8px gutter past the sidebar card and carries 8px of
+ * The main surface sits one gutter past the sidebar card and carries another of
  * its own leading padding, so every view's title — a plugin's name, the chat
- * group's conversation title — begins 16px in. The band's path is the same
- * label one row up, and a path that stopped at the card edge read as belonging
- * to the sidebar rather than to the thing it names.
+ * group's conversation title — begins two gutters in. The band's path is the
+ * same label one row up, and a path that stopped at the card edge read as
+ * belonging to the sidebar rather than to the thing it names.
  */
-const CONTENT_TITLE_INSET = 16;
+const CONTENT_TITLE_INSET = SHELL_GUTTER * 2;
+
+/**
+ * What the BAND assumes `<main>` reserves on its leading edge for the collapsed
+ * icon rail. The content surface's own reserve is
+ * `--shell-collapsed-rail-reserve` (4rem), and the two do not agree: the app
+ * ships at a 0.875 font scale (`FONT_SIZE_SCALE_DEFAULT`), so 4rem resolves to
+ * 56px while this reads 64. The band's path therefore starts 8px to the right
+ * of the content it names whenever the sidebar is collapsed.
+ *
+ * That gap predates this constant being named — it was a bare 64 against a
+ * bare `pl-[4rem]`, which is why nobody had noticed the units differ. It is
+ * left as-is here rather than silently "fixed", because closing it is a visual
+ * change and this pass is behaviour-preserving. The band genuinely may not
+ * follow the type scale (it shares the traffic lights' line, drawn in device
+ * px), so the fix is to decide which number is right and make the content
+ * surface px too — tracked as follow-up, not done here.
+ */
+const COLLAPSED_RAIL_LEAD_RESERVE = 64;
 
 /** The per-turn output ceiling the cost projection assumes. */
 const MAX_OUTPUT_TOKENS = 4096;
@@ -1175,7 +1194,7 @@ export function App() {
                   where a title starts: the gutter between the card and the
                   content, plus the content surface's own leading padding. */}
               <CustomTitleBar
-                leadClearance={(sidebarCollapsed ? 64 : sidebarWidth + 8) + CONTENT_TITLE_INSET}
+                leadClearance={(sidebarCollapsed ? COLLAPSED_RAIL_LEAD_RESERVE : sidebarWidth + SHELL_GUTTER) + CONTENT_TITLE_INSET}
               >
                 <MainToolbar
                   viewNav={viewNav}
@@ -1241,23 +1260,26 @@ export function App() {
               <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
                 <main
                   className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
-                    sidebarCollapsed ? "pl-[4rem]" : ""
+                    sidebarCollapsed ? "pl-(--shell-collapsed-rail-reserve)" : ""
                   }`}
-                  // Expanded: reserve the sidebar card width + the ~8px right gap so the
-                  // floating rail never occludes the canvas. Collapsed uses the fixed
-                  // pl-[4rem] class above. Inline style so the durable, user-resized
-                  // width (SystemSettings.sidebarWidth) drives the reserve directly —
+                  // Expanded: reserve the sidebar card width plus one SHELL_GUTTER
+                  // of right gap so the floating rail never occludes the canvas.
+                  // Collapsed uses the fixed `--shell-collapsed-rail-reserve`
+                  // class above. Inline style so the durable, user-resized width
+                  // (SystemSettings.sidebarWidth) drives the reserve directly —
                   // during a drag this tracks the live width for a seamless resize.
-                  style={sidebarCollapsed ? undefined : { paddingLeft: `${sidebarWidth + 8}px` }}
+                  style={sidebarCollapsed ? undefined : { paddingLeft: `${sidebarWidth + SHELL_GUTTER}px` }}
                 >
                   {/* Floating notification stack — update/announcement banners are an
                       OVERLAY, not in-flow content. They float over the canvas anchored
                       top-RIGHT so they never push the routed content or the composer
                       down. The wrapper is pointer-events-none (clicks pass through the
                       gaps); each banner card re-enables pointer-events so
-                      Update/dismiss still work. The left edge is inset by the sidebar
-                      width (`left-[4.5rem]` / `left-[15rem]`, tracking <main>'s
-                      collapsed/expanded padding) so a wide banner (max-w-md) in a
+                      Update/dismiss still work. The left edge is inset past the
+                      sidebar — `--shell-collapsed-banner-inset` when collapsed, the
+                      live `sidebarWidth + CONTENT_TITLE_INSET` inline when expanded,
+                      each one gutter clear of <main>'s own leading padding — so a
+                      wide banner (max-w-md) in a
                       narrow window can never slide UNDER the floating sidebar card —
                       absolute positioning resolves against main's padding box, which
                       starts at the window edge beneath the rail. Multiple DISTINCT
@@ -1266,12 +1288,13 @@ export function App() {
                       the stack height stays bounded. */}
                   <div
                     className={`pointer-events-none absolute right-2 top-2 z-50 ml-auto flex max-w-md flex-col gap-2 transition-[left] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto [&>*]:m-0 ${
-                      sidebarCollapsed ? "left-[4.5rem]" : ""
+                      sidebarCollapsed ? "left-(--shell-collapsed-banner-inset)" : ""
                     }`}
                     // Expanded: inset the banner stack past the resized sidebar card so a
                     // wide banner can never slide under the floating rail. Tracks
-                    // sidebarWidth (+~16px gap) to stay just right of the card edge.
-                    style={sidebarCollapsed ? undefined : { left: `${sidebarWidth + 16}px` }}
+                    // sidebarWidth by the same CONTENT_TITLE_INSET a view's own title
+                    // starts at, so the stack lines up with the content it floats over.
+                    style={sidebarCollapsed ? undefined : { left: `${sidebarWidth + CONTENT_TITLE_INSET}px` }}
                   >
                     <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
                     <MarketplaceUpdateBanner

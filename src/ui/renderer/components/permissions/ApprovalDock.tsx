@@ -206,7 +206,7 @@ export function ApprovalDock({
   return (
     <section
       ref={rootRef}
-      className="pointer-events-auto absolute z-40 mx-auto flex min-w-0 max-w-[58rem] flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl"
+      className="pointer-events-auto absolute z-40 mx-auto flex min-w-0 max-w-(--reading-column-max) flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl"
       style={{
         left: "max(0.75rem, env(safe-area-inset-left, 0px))",
         right: "max(0.75rem, env(safe-area-inset-right, 0px))",

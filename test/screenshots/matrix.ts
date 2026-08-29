@@ -1618,7 +1618,7 @@ export const scenarios: Record<string, ScenarioEntry> = {
     // exists to show. Approving it is not what the shot is about.
     executionMode: 'allow',
     // Narrower than the default, and load-bearing rather than cosmetic. The
-    // page shell caps a plugin view at its 58rem reading column, and this guest
+    // page shell caps a plugin view at its --reading-column-max reading column, and this guest
     // reserves a fixed left gutter inside its own viewport: measured at a
     // 1600px window the <webview> is 912px, the guest starts its card 481px in
     // and lays it out 477px wide, so the last 46px — the right edge of every

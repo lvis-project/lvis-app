@@ -353,7 +353,7 @@ describe("PluginUiHostView — webview security attributes", () => {
 
 describe("PluginUiHostView — panel width", () => {
   /**
-   * The panel used to be clamped to the chat reading column (max-w-[58rem]).
+   * The panel used to be clamped to the chat reading column (--reading-column-max).
    * That clamp was compensation: the plugin UIs were authored for a ~800px
    * detached window, so the host pinned the panel narrow rather than let their
    * non-adapting layouts show. Measured consequence — at a 2200px window the
@@ -378,6 +378,6 @@ describe("PluginUiHostView — panel width", () => {
     expect(container.querySelector('[data-testid="plugin-page-shell"]')).not.toBeNull();
 
     // The clamp lives on the shell's inner column, not on the testid node.
-    expect(container.querySelector('[class*="max-w-[58rem]"]')).toBeNull();
+    expect(container.querySelector('[class*="max-w-(--reading-column-max)"]')).toBeNull();
   });
 });

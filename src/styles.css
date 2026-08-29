@@ -1761,11 +1761,16 @@
   }
   /* Window-chrome geometry — px, never rem. The title band, the sidebar's
    * cluster strip and the chat group headers sit on the line of the OS
-   * traffic lights (`trafficLightPosition` in main/window-chrome.ts, drawn in
-   * device px), so their heights, control boxes and gaps must not follow the
-   * type scale above: a smaller default font would otherwise drop every
-   * chrome row a few px under the lights. Band 36 centres a 28px control and
-   * the ~12px lights (y 12) on the same y=18. */
+   * traffic lights (`TRAFFIC_LIGHT_POSITION` in shared/shell-geometry.ts,
+   * drawn in device px), so their heights, control boxes and gaps must not
+   * follow the type scale above: a smaller default font would otherwise drop
+   * every chrome row a few px under the lights. Band 36 centres a 28px control
+   * and the ~12px lights on the same y=18.
+   *
+   * `--chrome-gap` / `--chrome-gap-tight` are mirrored in TypeScript as
+   * `SHELL_GUTTER` / `CHROME_GAP_TIGHT` (shared/shell-geometry.ts) for the
+   * same geometry done in JS — the main process's window-bounds math, the chat
+   * group's split arithmetic. */
   :root {
     --chrome-band-height: 36px;
     --chrome-control-height: 28px;
@@ -1773,6 +1778,60 @@
     --chrome-gap: 8px;
     --chrome-gap-tight: 4px;
     --chrome-gap-hair: 2px;
+  }
+  /* Floating-shell geometry — the air around the raised cards (the sidebar
+   * rail, the chat group's tiles, the docked side panel). Every one of them
+   * has to line its edges up with the others, so the insets are ONE set of
+   * tokens rather than a literal per card; and they are px for the same reason
+   * as the chrome block above, since the sidebar card's top edge is what puts
+   * the cluster strip on the traffic lights' line.
+   *
+   * The inset is the shell's gutter by construction — the air between the
+   * window and a card is the air between that card and its neighbour — so it
+   * aliases `--chrome-gap` instead of restating the pixel count. The bottom
+   * inset is larger: a card resting exactly on the window's bottom edge reads
+   * as stuck to it rather than floating. `SHELL_GUTTER`
+   * (shared/shell-geometry.ts) is the same value for the arithmetic done in
+   * TypeScript, and doubled it is the side panel's card inset
+   * (shared/side-panel.ts). */
+  :root {
+    --shell-card-inset: var(--chrome-gap);
+    --shell-card-inset-bottom: 12px;
+    /* The sidebar card's top edge. On darwin it is not a chosen number: the
+     * card's cluster strip has to share the traffic lights' centre line, so a
+     * `--chrome-control-height` strip inside a `--chrome-band-height` band
+     * starts exactly where the band would centre it. Elsewhere there are no
+     * lights to align against and the card takes a slightly deeper top so it
+     * reads as lifted off the window's top edge. */
+    --shell-card-top-darwin: calc((var(--chrome-band-height) - var(--chrome-control-height)) / 2);
+    --shell-card-top: 6px;
+    /* What the content surface reserves on its leading edge while the sidebar
+     * is a collapsed icon rail, and where the floating banner stack starts so
+     * it clears that reserve. rem here, unlike the insets above: nothing on
+     * this edge shares the traffic lights' line, and the rail's own width hugs
+     * its content, which does follow the type scale.
+     *
+     * KNOWN MISMATCH: `App.tsx` carries the band's counterpart
+     * (`COLLAPSED_RAIL_LEAD_RESERVE`) as a flat 64px, because the band may not
+     * scale. At the shipped 0.875 font scale this 4rem resolves to 56px, so
+     * the band's path sits 8px right of the content it names. Pre-existing;
+     * see the note on that constant. */
+    --shell-collapsed-rail-reserve: 4rem;
+    --shell-collapsed-banner-inset: 4.5rem;
+  }
+  /* Content measures — how wide a column of prose gets to be, and how tall the
+   * panels that hold a scrolling body are. rem, unlike the shell geometry
+   * above: these are measured in text, so they SHOULD follow the type scale.
+   *
+   * The reading column is the one that travels furthest — the chat transcript,
+   * a routed page's shell, the approval dock that has to land centred on that
+   * transcript, a plugin view. They were four copies of 58rem, and a dock a
+   * hair wider than the column it docks to is a visible seam. */
+  :root {
+    --reading-column-max: 58rem;
+    --insights-panel-height: 22rem;
+    --preview-block-max-height: 36rem;
+    --preview-block-max-height-compact: 24rem;
   }
   body {
     @apply bg-background text-foreground;
