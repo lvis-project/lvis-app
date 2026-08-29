@@ -88,6 +88,23 @@ interface HeatmapMonthLabel {
 
 
 /**
+ * Add the civil day of `timestamp` to `keys`, skipping a timestamp that is not
+ * an instant at all.
+ *
+ * `modifiedAt` and `starredAt` are read back off disk, so a truncated or
+ * hand-edited record can carry a string `Date` cannot parse. `localDateKey` of
+ * an Invalid Date is the string `"0NaN-NaN-NaN"`, which is not a day — it would
+ * flow into the calendar's activity matchers and reach `dateFromKey`. Rejecting
+ * it here keeps the bad value out at the boundary it enters, rather than making
+ * `dateFromKey` tolerant of input that means nothing.
+ */
+function addDayKey(keys: Set<string>, timestamp: string): void {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return;
+  keys.add(localDateKey(parsed));
+}
+
+/**
  * A `YYYY-MM-DD` key as the local `Date` the calendar and its month label read.
  *
  * Local, not UTC noon: the calendar reads the `Date` with local getters, and a
@@ -241,8 +258,11 @@ export function StarredView({
   );
   const activityDateKeys = useMemo(() => {
     const keys = new Set<string>();
-    for (const session of allSessions) keys.add(localDateKey(new Date(session.modifiedAt)));
-    for (const item of starred) keys.add(localDateKey(new Date(item.starredAt)));
+    for (const session of allSessions) addDayKey(keys, session.modifiedAt);
+    for (const item of starred) addDayKey(keys, item.starredAt);
+    // Usage keys are already `localDateKey` output over a validated instant —
+    // `computeUsageSummary` skips an entry whose timestamp does not parse — so
+    // they need no second check here.
     for (const [dateKey, tokens] of yearlyUsageByDate) if (tokens > 0) keys.add(dateKey);
     return keys;
   }, [allSessions, starred, yearlyUsageByDate]);
