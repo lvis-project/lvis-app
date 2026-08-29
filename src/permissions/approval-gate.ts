@@ -975,6 +975,14 @@ interface PendingEntry {
   nonce: string;
   /** Expected HMAC for this request (confused-deputy defense) */
   expectedHmac: string;
+  /**
+   * The request exactly as the renderer received it — masked, sealed, signed —
+   * so a renderer that (re)loads while this entry is parked can be handed the
+   * same card again. Written right before the send: an entry a host observer
+   * settled during the park announcement never gets one, and needs none,
+   * because nothing is waiting on it any more.
+   */
+  rendererRequest?: ApprovalRequest;
 }
 
 /**
@@ -2699,6 +2707,10 @@ export class ApprovalGate {
           output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} detections=${[...dlpHits].join(",")}`,
         });
       }
+      // Keep what the renderer is about to receive, so a renderer that loads
+      // after this send can be handed the same card (see listPendingRendererRequests).
+      const parked = this.pending.get(fullReq.id);
+      if (parked !== undefined) parked.rendererRequest = maskedSignedReq;
       // §F2: on send failure (webContents destruction race), clear pending and deny once.
       try {
         this.webContents.send(IPC_APPROVAL_REQUEST, maskedSignedReq);
@@ -2896,6 +2908,20 @@ export class ApprovalGate {
       durableApprovalRecordAllowed: entry.durableApprovalRecordAllowed,
       verdictAtApproval: entry.verdictAtApproval,
     };
+  }
+
+  /**
+   * Every request still waiting on the renderer, in the order it was asked,
+   * exactly as `lvis:approval:request` delivered it. A renderer that loaded
+   * after a request went out subscribed too late to have seen it; this is how
+   * it recovers the card instead of leaving the turn to sit out its timeout.
+   */
+  listPendingRendererRequests(): ApprovalRequest[] {
+    const out: ApprovalRequest[] = [];
+    for (const entry of this.pending.values()) {
+      if (entry.rendererRequest !== undefined) out.push(entry.rendererRequest);
+    }
+    return out;
   }
 
   /**

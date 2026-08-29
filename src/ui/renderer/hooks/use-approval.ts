@@ -53,10 +53,45 @@ export function useApproval() {
       if (!aliveRef.current) return;
       setQueue((q) => approvalQueueReducer(q, { type: "push", req }));
     });
+    // Requests parked before this renderer subscribed — a reload mid-approval.
+    // Subscribed first, fetched second, so nothing can fall between the two;
+    // a request that arrived both ways is kept once. Parked requests were
+    // asked first, so they go ahead of anything that arrived meanwhile.
+    void window.lvis.approval.listPending().then(
+      (parked) => {
+        if (!aliveRef.current) return;
+        setQueue((q) =>
+          [...parked, ...q].reduce<ApprovalRequest[]>(
+            (acc, req) =>
+              acc.some((held) => held.id === req.id)
+                ? acc
+                : approvalQueueReducer(acc, { type: "push", req }),
+            [],
+          ),
+        );
+      },
+      (err: unknown) => {
+        console.warn("[use-approval] listPending failed:", (err as Error).message);
+      },
+    );
     return () => {
       aliveRef.current = false;
       unsub();
     };
+  }, []);
+
+  /**
+   * Forget requests the host has already settled without an answer from here
+   * — a turn that timed out or was cancelled while its ask was parked. The
+   * head a click is still being acknowledged for is kept: `decide` shifts by
+   * position once the host replies, and removing that head underneath it
+   * would shift the request behind it instead.
+   */
+  const dropSettled = useCallback((ids: readonly string[]) => {
+    const inFlight = inFlightRequestIdRef.current;
+    const settled = inFlight === null ? ids : ids.filter((id) => id !== inFlight);
+    if (settled.length === 0) return;
+    setQueue((q) => approvalQueueReducer(q, { type: "drop", ids: settled }));
   }, []);
 
   /**
@@ -113,5 +148,5 @@ export function useApproval() {
     [],
   );
 
-  return { queue, decide };
+  return { queue, decide, dropSettled };
 }

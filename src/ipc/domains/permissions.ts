@@ -412,6 +412,14 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
+  // The requests the gate is still waiting on, as the renderer received them.
+  // Read once by a renderer that (re)loaded after a request went out; the
+  // masked, signed payload is the same one `lvis:approval:request` carried.
+  ipcMain.handle(PERMISSIONS.approvalPending, (e) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.approvalPending, e); return UNAUTHORIZED_FRAME; }
+    return approvalGate ? approvalGate.listPendingRendererRequests() : [];
+  });
+
   /**
    * `/allow <sentence>` — issue #1940.
    *

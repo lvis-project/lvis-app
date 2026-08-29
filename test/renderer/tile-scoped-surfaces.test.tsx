@@ -15,9 +15,10 @@ import {
   focusTile,
   forceOverflowingSummaries,
   splitIntoTwoTiles,
+  submitChatMessage,
   toggleTileMaximized,
 } from "./helpers.js";
-import type { MockLvisApi } from "./mock-lvis-api.js";
+import { MOCK_DEFAULT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
 
 /** The permission namespace's subscriptions, as the mock records them. */
 function permissionSubscription(api: MockLvisApi, name: string): ReturnType<typeof vi.fn> {
@@ -374,5 +375,115 @@ describe("a card that follows focus keeps what the user did to it", () => {
     } finally {
       restoreOverflow();
     }
+  });
+});
+
+describe("a turn parked on an approval, with two tiles", () => {
+  const request = (overrides: Record<string, unknown>) => ({
+    id: "req-parked-turn",
+    category: "tool",
+    toolName: "read_file",
+    toolCategory: "read",
+    args: { path: "/tmp/notes.md" },
+    reason: "read the notes",
+    createdAt: Date.now(),
+    requireExplicit: false,
+    nonce: "nonce-parked-turn",
+    hmac: "hmac-parked-turn",
+    ...overrides,
+  });
+  const band = (tile: { element: HTMLElement }) =>
+    tile.element.querySelector('[data-testid="approval-waiting-band"]');
+  const dock = (container: HTMLElement) =>
+    container.querySelectorAll('[data-testid="approval-dock"]');
+
+  it("says so in the tile holding the session that asked, and nowhere else, until the card is answered", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+
+    await waitFor(() => expect(band(second!)).not.toBeNull());
+    expect(band(second!)!.getAttribute("data-tool-names")).toBe("read_file");
+    expect(band(primary!)).toBeNull();
+    // The card itself is the window's, shown once.
+    expect(dock(container)).toHaveLength(1);
+
+    const deny = container.querySelector<HTMLButtonElement>('[data-testid="deny-button"]');
+    expect(deny).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(deny!);
+    });
+
+    await waitFor(() => expect(band(second!)).toBeNull());
+    await waitFor(() => expect(dock(container)).toHaveLength(0));
+  });
+
+  it("tells the waiting tile that its queued messages are held by the approval", async () => {
+    const { container, api, emitApproval } = await renderApp({
+      hasApiKey: true,
+      lvisEnv: { isDev: true, isE2E: true },
+    });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    // A turn that never ends keeps the second tile streaming; the next Enter
+    // there goes to the queue, not to the model.
+    api.chatSend.mockImplementationOnce(() => new Promise(() => {}));
+    await submitChatMessage(second!.element, "첫 질문");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
+    await submitChatMessage(second!.element, "이어서 부탁");
+    await waitFor(() =>
+      expect(second!.element.querySelector('[data-testid="message-queue-panel"]')).not.toBeNull(),
+    );
+    expect(second!.element.querySelector('[data-testid="message-queue-held-by-approval"]')).toBeNull();
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+
+    await waitFor(() =>
+      expect(second!.element.querySelector('[data-testid="message-queue-held-by-approval"]')).not.toBeNull(),
+    );
+    expect(primary!.element.querySelector('[data-testid="message-queue-panel"]')).toBeNull();
+  });
+
+  it("names what was blocked in that tile's transcript when the turn ends unanswered, and lets the dead card go", async () => {
+    const { container, emitApproval, emitChatStream } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+    await waitFor(() => expect(band(second!)).not.toBeNull());
+
+    // The host settled the ask (timeout) and the turn ended on a failed call.
+    await act(async () => {
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      const notices = Array.from(second!.element.querySelectorAll('[data-testid="system-entry"]'));
+      expect(notices.some((el) => el.textContent?.includes("read_file"))).toBe(true);
+    });
+    expect(
+      Array.from(primary!.element.querySelectorAll('[data-testid="system-entry"]'))
+        .some((el) => el.textContent?.includes("read_file")),
+    ).toBe(false);
+    expect(band(second!)).toBeNull();
+    await waitFor(() => expect(dock(container)).toHaveLength(0));
+  });
+
+  it("brings a request the host was already parked on back after a reload, in the tile holding its session", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      pendingApprovals: [request({ sessionId: MOCK_DEFAULT_SESSION_ID })],
+    });
+
+    const [primary] = collectTiles(container);
+    await waitFor(() => expect(band(primary!)).not.toBeNull());
+    expect(band(primary!)!.getAttribute("data-tool-names")).toBe("read_file");
+    await waitFor(() => expect(dock(container)).toHaveLength(1));
   });
 });

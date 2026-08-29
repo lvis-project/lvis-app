@@ -423,7 +423,11 @@ export function App() {
   } = useMarketplaceUpdates(api);
   const { announcements: marketplaceAnnouncements, dismiss: dismissMarketplaceAnnouncement } = useMarketplaceAnnouncements(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
-  const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
+  const {
+    queue: approvalQueue,
+    decide: handleApprovalDecide,
+    dropSettled: dropSettledApprovals,
+  } = useApproval();
   // Approval-memory hit + permission review suggestion. Both report on the
   // WINDOW's permission settings, not on one conversation, so they are
   // subscribed and rendered once here — per tile they would raise the same
@@ -1135,6 +1139,10 @@ export function App() {
     },
     onRoutineAcknowledge: handleRoutineAcknowledge,
     approvalSentenceInterceptSubmit: interceptApprovalSentence,
+    // The dock shows the head of this queue once for the window; each tile
+    // reads it for the requests its own conversation is parked on.
+    approvalQueue,
+    dropSettledApprovals,
     activeProject: activeProject ?? defaultWorkspaceProject,
     workspaceProjects,
     onNewChatForProject,
@@ -1157,7 +1165,8 @@ export function App() {
     handleExport, handleImport, pluginEntries, handleViewSelectWithDoctor, appMode,
     commandActions, commandPopoverOpen, overlayCardTileForWindow,
     handlePluginPrimaryAction, handleRoutineAcknowledge,
-    interceptApprovalSentence, activeProject, defaultWorkspaceProject, workspaceProjects,
+    interceptApprovalSentence, approvalQueue, dropSettledApprovals,
+    activeProject, defaultWorkspaceProject, workspaceProjects,
     onNewChatForProject, refreshWorkspaceProjects, handleProjectError,
   ]);
 

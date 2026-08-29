@@ -219,6 +219,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:agents:list",
         "lvis:agents:uninstall",
         "lvis:app:info",
+        "lvis:approval:pending",
         "lvis:approval:respond",
         "lvis:ask-user-question:respond",
         "lvis:attach:discardClipboardImage",

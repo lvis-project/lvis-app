@@ -86,6 +86,7 @@ const CHANNEL_MANIFEST: Record<string, "mutating" | "sensitive" | "public-read">
   [PERMISSIONS.hookTrustList]: "sensitive",
   // Approval
   "lvis:approval:respond": "mutating",
+  "lvis:approval:pending": "sensitive",
   "lvis:permissions:approval-sentence-select": "mutating",
   // Policy
   "lvis:policy:get": "public-read",
@@ -221,6 +222,7 @@ describe("ipc-bridge.ts — mutating/sensitive channels have a sender guard", ()
     "lvis:permission:add-rule": "PERMISSIONS.addRule",
     "lvis:permission:remove-rule": "PERMISSIONS.removeRule",
     "lvis:approval:respond": "PERMISSIONS.approvalRespond",
+    "lvis:approval:pending": "PERMISSIONS.approvalPending",
     "lvis:permissions:approval-sentence-select": "PERMISSIONS.approvalSentenceSelect",
     "lvis:policy:get": "PERMISSIONS.policyGet",
     "lvis:policy:set": "PERMISSIONS.policySet",

@@ -25,7 +25,7 @@ import { formatIpcError } from "../format-ipc-error.js";
 import { lookupBillablePricingOptional } from "../../../shared/pricing-data.js";
 import { McpPromptArgsDialog } from "../dialogs/McpPromptArgsDialog.js";
 import type { Attachment } from "../types/attachments.js";
-import type { LvisApi } from "../types.js";
+import type { ApprovalRequest, LvisApi } from "../types.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
@@ -120,6 +120,15 @@ export interface ChatGroupEnvironment {
   onPluginPrimaryAction: (id: string, chatGroupId: string) => void;
   onRoutineAcknowledge: React.ComponentProps<typeof ChatView>["onRoutineAcknowledge"];
   approvalSentenceInterceptSubmit: React.ComponentProps<typeof ChatView>["approvalSentenceInterceptSubmit"];
+  /**
+   * The window's approval queue. The card for its head is shown once for the
+   * window; each tile reads the queue for the requests its OWN conversation
+   * (or a sub-agent it spawned) is parked on, so the wait is explained in the
+   * tile that is waiting and in no other.
+   */
+  approvalQueue: readonly ApprovalRequest[];
+  /** Forget requests the host settled without an answer from this window. */
+  dropSettledApprovals: (ids: readonly string[]) => void;
 
   // project binding
   activeProject: React.ComponentProps<typeof ChatView>["activeProject"];
@@ -544,6 +553,45 @@ export function ChatGroupSession({
     [runMcpPrompt],
   );
 
+  // ── the approvals this tile's turn is parked on ────────────────────────────
+
+  // A request names the session that asked. A sub-agent's ask names the
+  // child's session, which the tile that spawned it also owns — its turn is
+  // the one waiting on the answer.
+  const pendingApprovals = useMemo(
+    () => env.approvalQueue.filter((req) =>
+      req.sessionId !== undefined
+        && (req.sessionId === currentSessionId
+          || subAgentSpawns.some((spawn) => spawn.childSessionId === req.sessionId))),
+    [env.approvalQueue, currentSessionId, subAgentSpawns],
+  );
+
+  // A turn that ends while an ask of ITS OWN session is still parked here ended
+  // without an answer: the host settled the ask (timeout, cancel) and moved on,
+  // and the transcript shows a failed call with nothing that says why. Name what
+  // was blocked next to it, and let go of the dead card — its buttons no longer
+  // reach anything. A child's ask is not this turn's to close: a sub-agent can
+  // outlive its parent's turn, and `agent-action` asks are not turn-bound.
+  const turnEndApprovalsRef = useRef({
+    pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: env.dropSettledApprovals, t,
+  });
+  useLayoutEffect(() => {
+    turnEndApprovalsRef.current = {
+      pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: env.dropSettledApprovals, t,
+    };
+  });
+  useEffect(() => api.onChatStream((ev) => {
+    if (ev.type !== "done") return;
+    const turnEnd = turnEndApprovalsRef.current;
+    const unanswered = turnEnd.pendingApprovals.filter(
+      (req) => req.category === "tool" && req.sessionId === turnEnd.currentSessionId,
+    );
+    if (unanswered.length === 0) return;
+    const tools = [...new Set(unanswered.map((req) => req.toolName))].join(", ");
+    turnEnd.appendSystemEntry(turnEnd.t("chatView.approvalUnansweredNotice", { tools }));
+    turnEnd.dropSettled(unanswered.map((req) => req.id));
+  }), [api]);
+
   // ── what this tile tells the window ────────────────────────────────────────
 
   useRegisterChatGroupSession(registry, chatGroupId, {
@@ -635,6 +683,7 @@ export function ChatGroupSession({
         askQuestions={askQuestions}
         onResolveAskQuestion={dismissAskQuestion}
         approvalSentenceInterceptSubmit={env.approvalSentenceInterceptSubmit}
+        pendingApprovals={pendingApprovals}
         plugins={env.plugins}
         onSelectPlugin={env.onSelectPlugin}
         appMode={env.appMode}

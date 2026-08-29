@@ -1071,6 +1071,13 @@ export function buildInternalApiSurface() {
     respond: async (decision: unknown) =>
       ipcRenderer.invoke(PERMISSIONS.approvalRespond, decision),
     /**
+     * The requests the host is still waiting on, exactly as `onRequest`
+     * delivered them. A renderer that (re)loads while a turn is parked on an
+     * approval subscribed after the request went out, so this is how it gets
+     * the card back instead of leaving the turn to time out.
+     */
+    listPending: async () => ipcRenderer.invoke(PERMISSIONS.approvalPending),
+    /**
      * `/allow <sentence>` — ask the host which of the PENDING request's own
      * scopes the sentence meant. Returns a choice to pre-select; it decides
      * nothing, so `respond` above is still the only way to answer a prompt.

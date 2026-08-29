@@ -75,6 +75,7 @@ export const PERMISSIONS = {
   addRule: "lvis:permission:add-rule",
   removeRule: "lvis:permission:remove-rule",
   approvalRespond: "lvis:approval:respond",
+  approvalPending: "lvis:approval:pending",
   policyGet: "lvis:policy:get",
   policySet: "lvis:policy:set",
   dirDispatch: "lvis:permissions:dir-dispatch",

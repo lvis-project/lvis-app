@@ -106,6 +106,7 @@ describe("preload contextBridge world shape lock", () => {
         "__lvisInitialTheme": "null",
         "lvis": {
           "approval": [
+            "listPending",
             "onRequest",
             "respond",
             "selectSentence",
@@ -219,6 +220,7 @@ describe("preload contextBridge world shape lock", () => {
           "addWorkBoardItem": "function",
           "applyClaudeDesktopMcpImport": "function",
           "approval": [
+            "listPending",
             "onRequest",
             "respond",
             "selectSentence",

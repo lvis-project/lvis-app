@@ -23,7 +23,7 @@ import { hasActiveSuggestedReplies } from "./utils/composer-placeholder.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
-import type { LvisApi } from "./types.js";
+import type { ApprovalRequest, LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./subagents/types.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
@@ -93,6 +93,11 @@ export interface ChatViewProps {
   askQuestions: AskUserQuestionRequest[];
   /** App-owned `/allow` interceptor; approval UI itself lives beside routed content. */
   approvalSentenceInterceptSubmit?: (text: string) => boolean;
+  /**
+   * The approvals THIS conversation's turn is parked on. The window shows the
+   * approval card once; the tile that is waiting says so above its composer.
+   */
+  pendingApprovals: readonly ApprovalRequest[];
   /** Called when a card submits or is dismissed; removes it from `askQuestions`. */
   onResolveAskQuestion: (id: string) => void;
   /** Plugin list — surfaced inside the SlashPicker's plugin category. */
@@ -156,7 +161,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -836,6 +841,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         onOpenModelSettings={onOpenModelSettings}
         onOpenPermissions={onOpenInputPermissions}
         onOpenApprovalQueue={onOpenApprovalQueue}
+        pendingApprovals={pendingApprovals}
         askQuestions={askQuestions}
         onResolveAskQuestion={onResolveAskQuestion}
         activeProject={activeProject}

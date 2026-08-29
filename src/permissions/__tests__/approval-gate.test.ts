@@ -170,6 +170,20 @@ describe("ApprovalGate", () => {
     expect(result.requestId).toBe("req-1");
   });
 
+  it("listPendingRendererRequests hands back the parked request exactly as it was sent, and nothing once it is answered", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const promise = gate.requestAndWait(makeRequest({ id: "req-parked" }));
+
+    const sent = (wc.send.mock.calls[0] as unknown as [string, ApprovalRequest])[1];
+    expect(gate.listPendingRendererRequests()).toEqual([sent]);
+
+    const { nonce, hmac } = lastSentNonceHmac(wc);
+    gate.resolve("req-parked", { requestId: "req-parked", choice: "deny-once", nonce, hmac });
+    await promise;
+    expect(gate.listPendingRendererRequests()).toEqual([]);
+  });
+
   it("issues a private one-shot receipt only after an HMAC-verified allow-once", async () => {
     const wc = makeMockWebContents();
     const auditLogger = { log: vi.fn() };

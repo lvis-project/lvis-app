@@ -10,7 +10,7 @@ function renderQueuePanel() {
   store.add("first queued message");
   store.add("second queued message");
   const onSendNow = vi.fn();
-  render(<MessageQueuePanel store={store} onSendNow={onSendNow} />);
+  render(<MessageQueuePanel store={store} onSendNow={onSendNow} heldByApproval={false} />);
   return { store, onSendNow };
 }
 
