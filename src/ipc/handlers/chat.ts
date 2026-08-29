@@ -32,7 +32,7 @@ import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-o
 import { SESSION_LIST_MAX_LIMIT } from "../../shared/session-lookup.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
-import type { SessionKind } from "../../memory/memory-manager.js";
+import { isValidSessionId, type SessionKind } from "../../memory/memory-manager.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 import { isDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import {
@@ -44,7 +44,6 @@ import {
 const log = createLogger("chat");
 
 export const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routine", "all"]);
-const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 const MAX_PROJECT_ROOT_CHARS = 2_048;
 const MAX_PROJECT_NAME_CHARS = 120;
 
@@ -158,10 +157,6 @@ export async function acknowledgeParentMailboxAfterTurn(
 export interface ChatSessionProjectPayload {
   projectRoot?: string;
   projectName?: string;
-}
-
-export function isSafeSessionId(sessionId: unknown): sessionId is string {
-  return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
 }
 
 function normalizeProjectString(value: unknown, maxChars: number): string | undefined {
@@ -602,7 +597,7 @@ export function handleChatSessions(
   const before = Number.isNaN(beforeTime) ? undefined : new Date(beforeTime);
   const afterTime = typeof opts?.after === "string" ? Date.parse(opts.after) : Number.NaN;
   const after = Number.isNaN(afterTime) ? undefined : new Date(afterTime);
-  const beforeId = isSafeSessionId(opts?.beforeId)
+  const beforeId = isValidSessionId(opts?.beforeId)
     ? opts.beforeId
     : undefined;
   const kind = SESSION_KIND_VALUES.has(opts?.kind as SessionKind | "all")
@@ -717,7 +712,7 @@ export function handleChatGetHistory(deps: IpcDeps) {
  */
 export function handleChatSessionHistory(deps: IpcDeps, sessionId: string) {
   const { memoryManager } = deps;
-  if (!isSafeSessionId(sessionId)) {
+  if (!isValidSessionId(sessionId)) {
     return { ok: false, messages: [] };
   }
   // loadSession() reads the session JSONL via readFileSync; IO/parse errors

@@ -32,6 +32,7 @@ import {
 } from "./rationale-ticket-lifecycle.js";
 import type { RationaleRequiredControl } from "./rationale-control.js";
 import { timingSafeEqualHexDigest } from "../../lib/hex-digest-equal.js";
+import { isRecord } from "../../shared/is-record.js";
 
 const JOURNAL_SCHEMA_VERSION = 1 as const;
 const MAX_JOURNAL_BYTES = 16 * 1024 * 1024;
@@ -152,10 +153,6 @@ export type RecoveryInvocationAuditSink = (
   sessionId: string,
   record: InvocationAuditRecord,
 ) => Promise<void> | void;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function exactKeys(
   value: Record<string, unknown>,

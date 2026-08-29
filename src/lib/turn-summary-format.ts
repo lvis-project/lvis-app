@@ -1,5 +1,10 @@
 /**
- * Wall-clock duration display formatting — single authority.
+ * Display formatting for the quantities a turn summary renders — wall-clock
+ * duration and byte size. Single authority for both: these labels appear side
+ * by side across the transcript, the plugin tabs and the status bar, so the
+ * rounding rules have to be one decision, not one per call site.
+ *
+ * ── Duration ──
  *
  * The turn footer (`WorkGroup`) and the per-tool badges on `ToolGroupCard`
  * render the same quantity. They used to do it with two functions
@@ -50,4 +55,30 @@ export function formatDuration(ms: number): string {
   const hours = Math.floor(totalMin / 60);
   const minutes = Math.round(totalMin - hours * 60);
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+}
+
+/**
+ * Format a byte count into a compact label.
+ *
+ * Rules:
+ *   - <1 KB  → `840 B`     (a raw count is more useful than `0.8 KB`)
+ *   - <1 MB  → `12.4 KB`
+ *   - <1 GB  → `3.1 MB`
+ *   - ≥1 GB  → `1.2 GB`
+ *
+ * One decimal above the byte tier throughout: the four copies this replaced
+ * disagreed (`Math.round(b/1024) KB` vs `toFixed(0) KB` vs `toFixed(1) KB`,
+ * and two of them printed `0.5 KB` for half a kilobyte while a third printed
+ * `512 B`), so the same download could show two different sizes in the plugin
+ * tab and the status-bar toast.
+ *
+ * Uses binary units (1 KB = 1024 B), matching every copy it replaced.
+ * Negative or non-finite inputs collapse to `0 B`; the function never throws.
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
 }

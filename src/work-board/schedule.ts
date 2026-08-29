@@ -1,58 +1,54 @@
 /**
- * KST calendar helpers for Work Board reports.
+ * Host-civil calendar *bounds* for Work Board reports: the daily report covers
+ * one local day, the weekly report a Sunday-anchored local week. These helpers
+ * project an instant onto those boundaries so report windows match the calendar
+ * the user is looking at.
  *
- * Reports are anchored to the user's local (KST) calendar: the daily report
- * covers one KST day, the weekly report a Sunday-anchored KST week. These
- * helpers project a UTC instant onto those boundaries so report windows match
- * what the user sees on a wall clock, independent of the host's process TZ.
+ * The day *key* itself is not computed here — `localDateKey` in
+ * `shared/local-date.ts` is the one projection, shared with usage and Insights.
+ *
+ * Bounds are built from `localDayStart` rather than an offset subtracted from
+ * UTC, so a DST transition inside the window still yields midnight-to-midnight
+ * rather than a 23- or 25-hour day misaligned by an hour — and so the day this
+ * report covers is bounded by exactly the instant the panel stamps on a due
+ * date for that day.
  *
  * All functions are pure over an injected instant (no `Date.now()` inside) so
  * report windows are deterministically testable.
  */
+import { localDayStart, shiftLocalDateKey } from "../shared/local-date.js";
 
-const KST_OFFSET_MIN = 9 * 60;
-
-/** Project an instant to the KST calendar day `YYYY-MM-DD`. */
-export function kstDay(nowMs: number): string {
-  const kst = new Date(nowMs + KST_OFFSET_MIN * 60_000);
-  const yyyy = kst.getUTCFullYear();
-  const mm = String(kst.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(kst.getUTCDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-/** UTC instants bounding the given `YYYY-MM-DD` KST day, or null if malformed. */
-export function kstDayBounds(day: string): { startMs: number; endMs: number } | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
-  if (!m) return null;
-  const startUtcForKstMidnight =
-    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - KST_OFFSET_MIN * 60_000;
-  return { startMs: startUtcForKstMidnight, endMs: startUtcForKstMidnight + 24 * 60 * 60_000 };
+/** Instants bounding the given `YYYY-MM-DD` local day, or null if malformed. */
+export function localDayBounds(day: string): { startMs: number; endMs: number } | null {
+  const start = localDayStart(day);
+  const end = localDayStart(shiftLocalDateKey(day, 1));
+  if (start === null || end === null) return null;
+  return { startMs: start.getTime(), endMs: end.getTime() };
 }
 
 /**
- * Sunday-anchored KST week bounds as UTC `Date`s. `weekOffset` shifts whole
- * weeks (0 = the week containing `now`, -1 = the prior week).
+ * Sunday-anchored local week bounds. `weekOffset` shifts whole weeks (0 = the
+ * week containing `now`, -1 = the prior week).
+ *
+ * Sunday, unlike `localMondayWeekStartKey` which usage reporting uses — two
+ * different weekly reports, not a drift between two copies of one.
  */
-export function sundayWeekBoundsKst(
+export function sundayWeekBoundsLocal(
   now: Date,
   weekOffset = 0,
 ): { start: Date; end: Date } {
-  const kstNow = new Date(now.getTime() + KST_OFFSET_MIN * 60_000);
-  const sundayKstMidnight = Date.UTC(
-    kstNow.getUTCFullYear(),
-    kstNow.getUTCMonth(),
-    kstNow.getUTCDate() - kstNow.getUTCDay() + weekOffset * 7,
+  const start = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - now.getDay() + weekOffset * 7,
   );
-  const start = new Date(sundayKstMidnight - KST_OFFSET_MIN * 60_000);
-  const end = new Date(start.getTime() + 7 * 24 * 60 * 60_000);
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
   return { start, end };
 }
 
-/** ISO-8601 week label (`YYYY-Www`) for the KST projection of an instant. */
+/** ISO-8601 week label (`YYYY-Www`) for the local civil day of an instant. */
 export function isoWeekFor(now: Date): string {
-  const kst = new Date(now.getTime() + KST_OFFSET_MIN * 60_000);
-  const d = new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()));
+  const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));

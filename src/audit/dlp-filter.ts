@@ -6,6 +6,7 @@ import os from "node:os";
 import { pathToFileURL } from "node:url";
 
 import { PII_PATTERNS } from "../shared/dlp.js";
+import { escapeRegExp } from "../shared/escape-reg-exp.js";
 
 export { maskSensitiveData, scrubSecretsForLLM } from "../shared/dlp.js";
 
@@ -101,10 +102,6 @@ export function redactFsPath(p: string): string {
   // Use code-point iteration so a surrogate pair at the boundary is not split.
   const codePoints = [...out];
   return codePoints.length > MAX_AUDIT_PATH ? codePoints.slice(0, MAX_AUDIT_PATH).join("") + "…" : out;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^{}$()|[\]\\]/g, "\\$&");
 }
 
 /**

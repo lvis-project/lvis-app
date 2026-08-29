@@ -67,6 +67,28 @@ function summaryWithInput(inputTokens = 100): ReturnType<typeof computeUsageSumm
   ], new Date("2026-07-04T12:00:00Z"));
 }
 
+/**
+ * Every bucket boundary in this file is the HOST's midnight, so the fixture
+ * instants only mean what their comments say once the zone is pinned — and the
+ * pin has to be at MODULE scope, not inside one `describe`. It was inside
+ * `describe("usage-stats")` first, which left `UsageSummaryCache`,
+ * `getUsageRange` and `usage summary cache wiring` running on the ambient zone:
+ * green on a KST laptop, 8 failures under `America/New_York`.
+ *
+ * Seoul is simply what these fixtures were written against; nothing in the code
+ * knows the name. Node re-reads `TZ` on assignment, for both `Date` and the
+ * `Intl` default.
+ */
+let previousTz: string | undefined;
+beforeEach(() => {
+  previousTz = process.env.TZ;
+  process.env.TZ = "Asia/Seoul";
+});
+afterEach(() => {
+  if (previousTz === undefined) delete process.env.TZ;
+  else process.env.TZ = previousTz;
+});
+
 describe("UsageSummaryCache", () => {
   it("reuses a stable revision and returns isolated summaries", async () => {
     const cache = createUsageSummaryCache({ maxEntries: 2 });
@@ -252,8 +274,8 @@ describe("usage-stats", () => {
     ]);
   });
 
-  it("uses KST calendar days for today and trend around UTC midnight", () => {
-    const now = new Date("2026-07-03T16:00:00Z"); // 2026-07-04 01:00 KST
+  it("buckets today and the trend on the host's calendar day, not UTC's", () => {
+    const now = new Date("2026-07-03T16:00:00Z"); // 2026-07-04 01:00 in Seoul
     const entries: AuditTurnEntry[] = [
       turn({ timestamp: "2026-07-03T15:30:00Z", tokenUsage: { inputTokens: 100, outputTokens: 10 },
       }),
@@ -912,7 +934,7 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
     }
   });
 
-  it("reads adjacent UTC gzip archives for a selected KST day", async () => {
+  it("reads adjacent UTC gzip archives for a selected local day", async () => {
     const home = mkdtempSync(join(tmpdir(), "usage-range-kst-home-"));
     const originalHome = process.env.LVIS_HOME;
     try {
@@ -1103,7 +1125,7 @@ describe("usage summary cache wiring", () => {
     }
   });
 
-  it("uses the KST calendar date in the rolling-summary cache key", async () => {
+  it("uses the local calendar date in the rolling-summary cache key", async () => {
     const home = mkdtempSync(join(tmpdir(), "usage-summary-cache-kst-"));
     const originalHome = process.env.LVIS_HOME;
     try {
@@ -1119,17 +1141,17 @@ describe("usage summary cache wiring", () => {
         "utf-8",
       );
 
-      const beforeKstMidnight = await getUsageSummary(
+      const beforeLocalMidnight = await getUsageSummary(
         60,
         new Date("2026-07-03T14:59:00Z"),
       );
-      const afterKstMidnight = await getUsageSummary(
+      const afterLocalMidnight = await getUsageSummary(
         60,
         new Date("2026-07-03T15:01:00Z"),
       );
 
-      expect(beforeKstMidnight.today.inputTokens).toBe(0);
-      expect(afterKstMidnight.today.inputTokens).toBe(100);
+      expect(beforeLocalMidnight.today.inputTokens).toBe(0);
+      expect(afterLocalMidnight.today.inputTokens).toBe(100);
     } finally {
       if (originalHome === undefined) {
         delete process.env.LVIS_HOME;

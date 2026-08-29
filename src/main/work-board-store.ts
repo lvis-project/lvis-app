@@ -30,6 +30,7 @@ import {
 import { createDirStorage, type WorkBoardStorage } from "../work-board/storage.js";
 import {
   BOARD_VERSION,
+  normalizeBoardDueDates,
   resolveWorkItemStatus,
   type BoardFile,
 } from "../work-board/board-file.js";
@@ -188,7 +189,17 @@ async function readFileOrEmpty(filePath: string): Promise<BoardFile> {
     if (!Array.isArray(parsed.items)) {
       return emptyBoard();
     }
-    const items = parsed.items.filter(isValidRecord);
+    const valid = parsed.items.filter(isValidRecord);
+    // One-time re-anchoring of due dates stamped as midnight in a fixed zone,
+    // back when the board was KST-anchored. Idempotent by its own rule, so it
+    // runs on every load and converges; nothing marks it done.
+    const { items, changed } = normalizeBoardDueDates(valid);
+    if (changed > 0) {
+      log.info(
+        { event: "work-board-due-at-localized", changed, total: items.length },
+        "[work-board-store] re-anchored due dates stamped as midnight in another zone",
+      );
+    }
     const maxId = items.reduce((m, it) => Math.max(m, it.id), 0);
     const nextId =
       typeof parsed.nextId === "number" && Number.isInteger(parsed.nextId) && parsed.nextId > maxId

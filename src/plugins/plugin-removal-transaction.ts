@@ -11,6 +11,7 @@ import { readPluginRegistry, validatePluginRegistryEntries } from "./registry.js
 import type { PluginRegistryEntry } from "./types.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import { pendingOwnedBackupPaths } from "./marketplace-update-recovery.js";
+import { isRecord } from "../shared/is-record.js";
 
 const TRANSACTION_ROOT = "+transactions+";
 const REMOVAL_SUBDIR = "removals";
@@ -136,10 +137,6 @@ async function assertOwnedTransactionDirectory(paths: PluginPaths, transactionId
     resolve(canonicalRoot, TRANSACTION_ROOT, REMOVAL_SUBDIR, transactionId, "staged"),
     "staged directory",
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function assertOnlyKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {

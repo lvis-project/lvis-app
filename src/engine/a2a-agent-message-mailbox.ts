@@ -20,6 +20,7 @@ import {
   GUIDE_MAX_CHARS,
   GUIDE_MAX_ENTRIES,
 } from "./turn/guidance-limits.js";
+import { isRecord } from "../shared/is-record.js";
 
 const MAILBOX_FILE = "agent-mailbox.json";
 const MAILBOX_VERSION = 1 as const;
@@ -104,10 +105,6 @@ const ENTRY_KEYS = new Set([
   "formattedText",
   "approvalLabel",
 ]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function isSafeString(value: unknown, maxLength = GUIDE_MAX_CHARS): value is string {
   return typeof value === "string"

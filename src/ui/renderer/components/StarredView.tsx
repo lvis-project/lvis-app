@@ -9,8 +9,9 @@ import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
-import { kstDateKey } from "../../../shared/kst-date.js";
+import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 import { formatCost } from "../../../lib/cost-format.js";
+import { formatHhMm, formatMediumDateTime } from "../../../shared/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
 
 export interface StarredItem {
@@ -86,13 +87,39 @@ interface HeatmapMonthLabel {
 }
 
 
+/**
+ * Add the civil day of `timestamp` to `keys`, skipping a timestamp that is not
+ * an instant at all.
+ *
+ * `modifiedAt` and `starredAt` are read back off disk, so a truncated or
+ * hand-edited record can carry a string `Date` cannot parse. `localDateKey` of
+ * an Invalid Date is the string `"0NaN-NaN-NaN"`, which is not a day — it would
+ * flow into the calendar's activity matchers and reach `dateFromKey`. Rejecting
+ * it here keeps the bad value out at the boundary it enters, rather than making
+ * `dateFromKey` tolerant of input that means nothing.
+ */
+function addDayKey(keys: Set<string>, timestamp: string): void {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return;
+  keys.add(localDateKey(parsed));
+}
+
+/**
+ * A `YYYY-MM-DD` key as the local `Date` the calendar and its month label read.
+ *
+ * Local, not UTC noon: the calendar reads the `Date` with local getters, and a
+ * midpoint only happens to land on the right day for offsets inside ±12h.
+ * Every key reaching here came from `localDateKey` or `monthRange`, so the
+ * throw is an assertion about that, not a case to handle.
+ */
 function dateFromKey(dateKey: string): Date {
-  const [year = "0", month = "1", day = "1"] = dateKey.split("-");
-  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+  const start = localDayStart(dateKey);
+  if (start === null) throw new Error(`[starred-view] not a date key: ${dateKey}`);
+  return start;
 }
 
 function monthRange(date: Date): { monthKey: string; dateFrom: string; dateTo: string } {
-  const monthKey = kstDateKey(date).slice(0, 7);
+  const monthKey = localDateKey(date).slice(0, 7);
   const [year = 0, month = 1] = monthKey.split("-").map(Number);
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return {
@@ -104,10 +131,6 @@ function monthRange(date: Date): { monthKey: string; dateFrom: string; dateTo: s
 
 function formatTokenCount(value: number | undefined): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.max(0, value ?? 0));
-}
-
-function formatSessionTime(value: string): string {
-  return new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 function usageForDate(summary: unknown, dateKey: string): UsageTotals | null {
@@ -190,7 +213,7 @@ export function StarredView({
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
   const [visibleYear, setVisibleYear] = useState<number>(
-    () => Number(kstDateKey(new Date()).slice(0, 4)),
+    () => Number(localDateKey(new Date()).slice(0, 4)),
   );
   const [dailyUsageResult, setDailyUsageResult] = useState<DailyUsageResult | null>(null);
   const [monthlyUsageResult, setMonthlyUsageResult] = useState<MonthlyUsageResult | null>(null);
@@ -198,13 +221,13 @@ export function StarredView({
   const [yearlyUsageByDate, setYearlyUsageByDate] = useState<Map<string, number>>(() => new Map());
   const [llmSummary, setLlmSummary] = useState<string | null>(null);
   const [llmSummaryState, setLlmSummaryState] = useState<"idle" | "loading" | "error">("idle");
-  const selectedKey = kstDateKey(selectedDate);
-  const todayKey = kstDateKey(new Date());
+  const selectedKey = localDateKey(selectedDate);
+  const todayKey = localDateKey(new Date());
   const currentYear = Number(todayKey.slice(0, 4));
   const getUsageRange = (api as Partial<LvisApi>).getUsageRange;
   const monthlyRange = useMemo(() => monthRange(calendarMonth), [calendarMonth]);
   const monthlyLabel = useMemo(
-    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "long", timeZone: "UTC" })
+    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "long" })
       .format(dateFromKey(monthlyRange.dateFrom)),
     [locale, monthlyRange.dateFrom],
   );
@@ -226,17 +249,20 @@ export function StarredView({
     return Array.from(byId.values());
   }, [discoveredSessions, sessions]);
   const sessionsForDay = useMemo(
-    () => allSessions.filter((session) => kstDateKey(new Date(session.modifiedAt)) === selectedKey),
+    () => allSessions.filter((session) => localDateKey(new Date(session.modifiedAt)) === selectedKey),
     [allSessions, selectedKey],
   );
   const starredForDay = useMemo(
-    () => starred.filter((item) => kstDateKey(new Date(item.starredAt)) === selectedKey),
+    () => starred.filter((item) => localDateKey(new Date(item.starredAt)) === selectedKey),
     [selectedKey, starred],
   );
   const activityDateKeys = useMemo(() => {
     const keys = new Set<string>();
-    for (const session of allSessions) keys.add(kstDateKey(new Date(session.modifiedAt)));
-    for (const item of starred) keys.add(kstDateKey(new Date(item.starredAt)));
+    for (const session of allSessions) addDayKey(keys, session.modifiedAt);
+    for (const item of starred) addDayKey(keys, item.starredAt);
+    // Usage keys are already `localDateKey` output over a validated instant —
+    // `computeUsageSummary` skips an entry whose timestamp does not parse — so
+    // they need no second check here.
     for (const [dateKey, tokens] of yearlyUsageByDate) if (tokens > 0) keys.add(dateKey);
     return keys;
   }, [allSessions, starred, yearlyUsageByDate]);
@@ -448,21 +474,20 @@ export function StarredView({
             <LazyCalendar
               data-testid="insights-calendar"
               mode="single"
-              timeZone="Asia/Seoul"
               selected={selectedDate}
               month={calendarMonth}
               onMonthChange={(month) => {
                 setCalendarMonth(month);
-                setVisibleYear(Number(kstDateKey(month).slice(0, 4)));
+                setVisibleYear(Number(localDateKey(month).slice(0, 4)));
               }}
               onSelect={(date) => {
                 if (!date) return;
                 setSelectedDate(date);
                 setCalendarMonth(date);
-                setVisibleYear(Number(kstDateKey(date).slice(0, 4)));
+                setVisibleYear(Number(localDateKey(date).slice(0, 4)));
               }}
               disabled={(date) => {
-                const dateKey = kstDateKey(date);
+                const dateKey = localDateKey(date);
                 return dateKey > todayKey || !activityDateKeys.has(dateKey);
               }}
               modifiers={{ hasActivity: activityMatchers }}
@@ -634,7 +659,7 @@ export function StarredView({
                       {conversation.totalTokens !== undefined ? (
                         <span className="shrink-0">{formatTokenCount(conversation.totalTokens)} {t("starredView.tokensTitle")}</span>
                       ) : conversation.modifiedAt ? (
-                        <span className="shrink-0">{formatSessionTime(conversation.modifiedAt)}</span>
+                        <span className="shrink-0">{formatHhMm(conversation.modifiedAt)}</span>
                       ) : null}
                       <span className="ml-auto shrink-0 font-mono opacity-60" title={conversation.sessionId}>
                         #{conversation.sessionId.slice(0, 8)}
@@ -663,7 +688,7 @@ export function StarredView({
                   <div key={s.id} className="rounded-md border bg-muted/(--opacity-light) transition-colors hover:border-border">
                     <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
                       <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
-                      <span>{new Date(s.starredAt).toLocaleString("ko-KR")}</span>
+                      <span>{formatMediumDateTime(s.starredAt)}</span>
                       <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
                       <Button variant="ghost" size="icon-xs" className="ml-auto hover:bg-muted" title={t("starredView.unstar")} onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
                         <XIcon className="h-3 w-3" />

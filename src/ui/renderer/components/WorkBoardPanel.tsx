@@ -36,6 +36,7 @@ import type {
 } from "../../../shared/work-board-types.js";
 import { MAX_ITEMS } from "../../../shared/work-board-types.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
+import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 
 export interface WorkBoardPanelProps {
   api: LvisApi;
@@ -83,27 +84,31 @@ function PriorityChip({ priority }: { priority: WorkItemPriority }) {
   );
 }
 
-// ─── Date helpers (KST-anchored, matches the store + plugin contract) ─────────
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+//
+// The board's day projection is the shared one. It used to be a fourth,
+// independent `Intl`/`Asia/Seoul` spelling, so the day a due date displayed
+// under here and the day the work report counted it in could differ.
 
-/** Project a Date to YYYY-MM-DD in Asia/Seoul (board due dates are KST-anchored). */
-function kstYmd(d: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-}
-
-function isoToKstDate(iso: string | undefined): string {
+/** Project a stored instant to the local civil day the `<input type="date">` speaks. */
+function isoToLocalDate(iso: string | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return kstYmd(d);
+  return localDateKey(d);
+}
+
+/**
+ * The wire form of a picked due date: the instant that calendar day begins,
+ * locally. Absolute and self-describing, which is what the store persists and
+ * what `localDayBounds` compares a report window against.
+ */
+function dueAtForPickedDay(dayKey: string): string | null {
+  return localDayStart(dayKey)?.toISOString() ?? null;
 }
 
 function formatDue(iso: string | undefined): string {
-  const date = isoToKstDate(iso);
+  const date = isoToLocalDate(iso);
   return date ? t("workBoard.dueLabel", { date }) : t("workBoard.noDueDate");
 }
 
@@ -552,7 +557,7 @@ interface CreateDialogProps {
 function defaultDueIso(): string {
   const d = new Date();
   d.setDate(d.getDate() + 7);
-  return kstYmd(d);
+  return localDateKey(d);
 }
 
 export function WorkItemCreateDialog({ api, project, onClose, onCreated }: CreateDialogProps) {
@@ -572,9 +577,12 @@ export function WorkItemCreateDialog({ api, project, onClose, onCreated }: Creat
     }
     const input: WorkItemCreateInput = { title: titleTrimmed };
     if (detail.trim()) input.detail = detail.trim();
-    // KST-anchored midnight so the store's due_at matches the calendar day the
-    // user picked, independent of OS timezone.
-    if (!noDeadline && dueDate) input.due_at = `${dueDate}T00:00:00+09:00`;
+    // Local midnight, so the stored instant is the start of the calendar day
+    // the user actually picked on their own calendar.
+    if (!noDeadline && dueDate) {
+      const dueAt = dueAtForPickedDay(dueDate);
+      if (dueAt) input.due_at = dueAt;
+    }
     if (priority !== DEFAULT_PRIORITY) input.priority = priority;
     if (project?.projectRoot) {
       input.projectRoot = project.projectRoot;
@@ -813,7 +821,7 @@ function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved
               className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-muted"
             >
               <span className="min-w-0 line-clamp-1">
-                {t(`workBoard.run_${h.status}`)} · {isoToKstDate(h.startedAt)}
+                {t(`workBoard.run_${h.status}`)} · {isoToLocalDate(h.startedAt)}
               </span>
               <span className="text-muted-foreground">{openRun === h.runId ? "▲" : "▼"}</span>
             </button>
@@ -871,7 +879,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
           setItem(it);
           setTitle(it.title);
           setDetail(it.detail ?? "");
-          const due = isoToKstDate(it.due_at);
+          const due = isoToLocalDate(it.due_at);
           setDueDate(due);
           setNoDeadline(!it.due_at);
           setPriority(it.priority);
@@ -902,7 +910,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
     if (title.trim() !== item.title.trim()) return true;
     if ((detail.trim() || "") !== (item.detail?.trim() ?? "")) return true;
     if (noDeadline !== !item.due_at) return true;
-    if (!noDeadline && dueDate !== isoToKstDate(item.due_at)) return true;
+    if (!noDeadline && dueDate !== isoToLocalDate(item.due_at)) return true;
     if (priority !== item.priority) return true;
     return false;
   }, [item, title, detail, dueDate, noDeadline, priority]);
@@ -918,8 +926,8 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
     const oldDetail = item.detail?.trim() ?? "";
     if (newDetail !== oldDetail) patch.detail = newDetail ? newDetail : null;
     const origNoDeadline = !item.due_at;
-    if (noDeadline !== origNoDeadline || (!noDeadline && isoToKstDate(item.due_at) !== dueDate)) {
-      patch.due_at = noDeadline || !dueDate ? null : `${dueDate}T00:00:00+09:00`;
+    if (noDeadline !== origNoDeadline || (!noDeadline && isoToLocalDate(item.due_at) !== dueDate)) {
+      patch.due_at = noDeadline || !dueDate ? null : dueAtForPickedDay(dueDate);
     }
     if (priority !== item.priority) patch.priority = priority;
 
@@ -1040,8 +1048,8 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
                 {t("workBoard.statusLabel")}: <strong>{t(`workBoard.${STATUS_LABEL[item.status_resolved]}`)}</strong>
               </span>
               <span>
-                {t("workBoard.metaCreated", { date: isoToKstDate(item.created_at) })} ·{" "}
-                {t("workBoard.metaUpdated", { date: isoToKstDate(item.updated_at) })}
+                {t("workBoard.metaCreated", { date: isoToLocalDate(item.created_at) })} ·{" "}
+                {t("workBoard.metaUpdated", { date: isoToLocalDate(item.updated_at) })}
               </span>
             </div>
             {actionError && <p className="text-sm text-destructive" data-testid="work-board-detail-error">{actionError}</p>}

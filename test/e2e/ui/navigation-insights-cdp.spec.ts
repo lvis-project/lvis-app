@@ -7,7 +7,7 @@ import {
   launchSeededElectron,
   teardownSeededElectron,
 } from "./seeded-electron.js";
-import { kstDateKey } from "../../../src/shared/kst-date.js";
+import { localDateKey } from "../../../src/shared/local-date.js";
 import { makeTestT } from "./i18n.js";
 
 const t = makeTestT("ko");
@@ -24,7 +24,7 @@ type NavigationProbe = {
 
 function writeUsageAudit(lvisHome: string): void {
   const now = new Date();
-  const dateKey = kstDateKey(now);
+  const dateKey = localDateKey(now);
   const auditDir = path.join(lvisHome, "audit");
   fs.mkdirSync(auditDir, { recursive: true });
   const rows = [

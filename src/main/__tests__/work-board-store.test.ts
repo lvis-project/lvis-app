@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WorkBoardStore, MAX_ITEMS } from "../work-board-store.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { localDateKey } from "../../shared/local-date.js";
 
 function tempBoard(now?: () => number) {
   const dir = mkdtempSync(join(tmpdir(), "lvis-wb-"));
@@ -337,6 +338,64 @@ describe("WorkBoardStore — corrupt board.json recovery", () => {
       if (created.status !== "created") throw new Error("unreachable");
       expect(created.itemId).toBe(6);
     } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe("WorkBoardStore — due dates stamped in another zone", () => {
+  /**
+   * The end-to-end half of `work-board/__tests__/due-at-normalization.test.ts`:
+   * a `board.json` written by the old KST-anchored panel, loaded on a host west
+   * of Seoul. What the picker shows is `localDateKey(due_at)`, so that is what
+   * this asserts.
+   */
+  function seedBoard(path: string, dueAt: string): void {
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      nextId: 2,
+      items: [{
+        id: 1,
+        title: "picked the 16th",
+        status: "planned",
+        priority: "medium",
+        created_at: "2026-06-16T01:00:00.000Z",
+        updated_at: "2026-06-16T01:00:00.000Z",
+        due_at: dueAt,
+      }],
+    }, null, 2), "utf-8");
+  }
+
+  it("shows the originally picked day on a host west of the stamped zone", async () => {
+    const previousTz = process.env.TZ;
+    const { store, path, cleanup } = tempBoard(fixedClock);
+    try {
+      process.env.TZ = "America/Los_Angeles";
+      seedBoard(path, "2026-06-16T00:00:00+09:00");
+
+      const listed = await store.list();
+      if (listed.status !== "ok") throw new Error("unreachable");
+      expect(localDateKey(new Date(listed.items[0].due_at as string))).toBe("2026-06-16");
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+      await cleanup();
+    }
+  });
+
+  it("leaves a due date with a real time of day exactly as stored", async () => {
+    const previousTz = process.env.TZ;
+    const { store, path, cleanup } = tempBoard(fixedClock);
+    try {
+      process.env.TZ = "America/Los_Angeles";
+      seedBoard(path, "2026-06-16T14:30:00+09:00");
+
+      const listed = await store.list();
+      if (listed.status !== "ok") throw new Error("unreachable");
+      expect(listed.items[0].due_at).toBe("2026-06-16T14:30:00+09:00");
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
       await cleanup();
     }
   });

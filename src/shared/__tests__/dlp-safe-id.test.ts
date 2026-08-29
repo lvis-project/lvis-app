@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { maskSensitiveData } from "../dlp.js";
-import { createDlpSafeUuid } from "../dlp-safe-id.js";
+import { createDlpSafeUuid, dlpSafeCandidate } from "../dlp-safe-id.js";
 
 const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -83,5 +83,41 @@ describe("createDlpSafeUuid", () => {
       expect(source, relativePath).toContain("createDlpSafeUuid");
       expect(source, relativePath).not.toMatch(/\b(?:crypto\.)?randomUUID\s*\(/);
     }
+  });
+});
+
+describe("dlpSafeCandidate", () => {
+  it("returns the first draw the scanner accepts", () => {
+    const draws = vi.fn()
+      .mockReturnValueOnce(UNSAFE_UUID)
+      .mockReturnValueOnce(SAFE_UUID);
+
+    expect(dlpSafeCandidate(draws, 8)).toBe(SAFE_UUID);
+    expect(draws).toHaveBeenCalledTimes(2);
+  });
+
+  it("hands the draw its attempt number so a deterministic generator can vary", () => {
+    const seen: number[] = [];
+    dlpSafeCandidate((attempt) => {
+      seen.push(attempt);
+      return attempt === 2 ? SAFE_UUID : UNSAFE_UUID;
+    }, 8);
+
+    expect(seen).toEqual([0, 1, 2]);
+  });
+
+  it("skips a rejected draw without spending a scan on it", () => {
+    // `null` is how a caller says "this candidate is unusable for a reason the
+    // scanner cannot see" — a malformed uuid, or a name already taken.
+    const draws = vi.fn()
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(SAFE_UUID);
+
+    expect(dlpSafeCandidate(draws, 8)).toBe(SAFE_UUID);
+  });
+
+  it("returns null on exhaustion, leaving the error to the caller", () => {
+    expect(dlpSafeCandidate(() => UNSAFE_UUID, 3)).toBeNull();
+    expect(dlpSafeCandidate(() => null, 3)).toBeNull();
   });
 });

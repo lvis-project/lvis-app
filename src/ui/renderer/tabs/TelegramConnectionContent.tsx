@@ -15,6 +15,7 @@ import {
 } from "../../../shared/telegram-connection.js";
 import { SettingsSection } from "../components/PageShell.js";
 import { formatIpcError } from "../format-ipc-error.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 import { AwayAuthorityContent } from "./AwayAuthorityContent.js";
 import type { LvisApi } from "../types.js";
 
@@ -29,11 +30,6 @@ export interface TelegramConnectionContentProps {
 }
 
 type Feedback = { readonly tone: "error" | "success"; readonly text: string } | null;
-
-function formattedTime(value: number): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
-    .format(new Date(value));
-}
 
 function durationLabel(
   value: TelegramApprovalDurationPreset,
@@ -356,7 +352,7 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
                   </a>
                 </div>
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  {t("telegramConnection.expiresAt", { time: formattedTime(issuedCode.expiresAt) })}
+                  {t("telegramConnection.expiresAt", { time: formatMediumDateTime(issuedCode.expiresAt) })}
                 </p>
               </div>
             ) : null}
@@ -402,7 +398,7 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
 
             {snapshot.approval !== null ? (
               <p className="text-[11px] text-muted-foreground" data-testid="telegram-connection-approval">
-                {t("telegramConnection.expiresAt", { time: formattedTime(snapshot.approval.expiresAt) })}
+                {t("telegramConnection.expiresAt", { time: formatMediumDateTime(snapshot.approval.expiresAt) })}
               </p>
             ) : null}
 

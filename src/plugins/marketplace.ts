@@ -79,6 +79,7 @@ import {
   isMarketplaceAnnouncementLevel,
   type MarketplaceAnnouncement,
 } from "../shared/marketplace-announcements.js";
+import { isRecord } from "../shared/is-record.js";
 export type { MarketplaceAnnouncement, MarketplaceFetcher } from "./marketplace-fetcher.js";
 
 export interface MarketplaceInstallFailureDiagnostic {
@@ -367,10 +368,6 @@ type MarketplaceCatalog = {
   /** Optional dev/test announcement fixtures (mirrors GET /api/v1/announcements). */
   announcements?: MarketplaceAnnouncement[];
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function isMarketplaceAnnouncement(value: unknown): value is MarketplaceAnnouncement {
   if (!isRecord(value)) return false;

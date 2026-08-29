@@ -5,6 +5,7 @@ import { formatIpcError } from "../../format-ipc-error.js";
 import type { LvisApi } from "../../types.js";
 import type { StatusBarSeverity } from "./types.js";
 import { sanitizeToastField } from "./toast-field.js";
+import { formatBytes } from "../../../../lib/turn-summary-format.js";
 
 interface Options {
   api: LvisApi;
@@ -27,13 +28,6 @@ type InstallProgressPayload =
  * install-PROGRESS channel, which has a `phase: "preparing"`.
  */
 type InstallResultPayload = PluginInstallResultPayload;
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_048_576) {
-    return `${(bytes / 1_048_576).toFixed(1)} MB`;
-  }
-  return `${(bytes / 1024).toFixed(1)} KB`;
-}
 
 function targetLabel(slug: string, label: string): string {
   return label ? `${slug} ${label}` : slug;

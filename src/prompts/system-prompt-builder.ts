@@ -990,21 +990,25 @@ export class SystemPromptBuilder {
       refresh: "per-turn",
       build: () => {
         const now = new Date();
-        const kstParts = new Intl.DateTimeFormat("en-GB", {
-          timeZone: "Asia/Seoul",
-          year: "numeric", month: "2-digit", day: "2-digit",
-          hour: "2-digit", minute: "2-digit", second: "2-digit",
-          hour12: false,
-        }).formatToParts(now);
-        const pick = (type: string) => kstParts.find((p) => p.type === type)?.value ?? "00";
-        const kstIso = `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}+09:00`;
+        // The model's clock is the user's clock. It used to be pinned to
+        // Asia/Seoul, so a user anywhere else asked for "tomorrow 9am" and got
+        // a tool call for an instant that was not their 9am. The offset is
+        // computed from the same instant rather than named, so the string stays
+        // self-describing across DST.
+        const pad = (value: number) => String(value).padStart(2, "0");
+        const offsetMinutes = -now.getTimezoneOffset();
+        const offsetSign = offsetMinutes < 0 ? "-" : "+";
+        const offset = `${offsetSign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
+        const localIso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+          + `T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}${offset}`;
+        const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         return [
           "<environment>",
           `OS: ${platform()}`,
           `Host: ${hostname()}`,
           `User: ${userInfo().username}`,
           `LVIS Home: ${redactFsPath(lvisHome())}`,
-          `Time: ${kstIso} (KST, UTC+9)`,
+          `Time: ${localIso} (${zone})`,
           `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
           t("be_systemPromptBuilder.environmentDateTimeNote"),
           "</environment>",

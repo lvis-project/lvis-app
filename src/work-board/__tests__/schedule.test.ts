@@ -1,50 +1,111 @@
 /**
- * KST calendar helpers for reports. The fixed instant 2026-06-16T00:00:00Z is
- * 2026-06-16 09:00 KST (a Tuesday), so day/week projections are checkable by
- * hand against the KST wall clock.
+ * Host-local report bounds. Every assertion pins `TZ` first — these helpers
+ * answer "where does the user's day start", so a test that lets the host
+ * decide is only checking the machine against itself.
+ *
+ * 2026-06-16T00:00:00Z is Tue the 16th at 09:00 in Seoul and still Mon the 15th
+ * at 17:00 in Los Angeles. The day *key* projection is covered by
+ * `shared/__tests__/local-date.test.ts`, which owns it.
  */
-import { describe, it, expect } from "vitest";
-import { kstDay, kstDayBounds, sundayWeekBoundsKst, isoWeekFor } from "../schedule.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { localDayBounds, sundayWeekBoundsLocal, isoWeekFor } from "../schedule.js";
+import { localDayStart } from "../../shared/local-date.js";
 
-const UTC_MIDNIGHT_JUN16 = Date.parse("2026-06-16T00:00:00.000Z"); // 09:00 KST, Tue
+const TUE_JUN16_09_SEOUL = Date.parse("2026-06-16T00:00:00.000Z");
+const DAY_MS = 24 * 60 * 60_000;
+let previousTz: string | undefined;
 
-describe("schedule (KST helpers)", () => {
-  it("kstDay projects to the KST calendar day", () => {
-    expect(kstDay(UTC_MIDNIGHT_JUN16)).toBe("2026-06-16");
-    // 2026-06-15T16:00Z = 2026-06-16 01:00 KST → still the 16th in KST.
-    expect(kstDay(Date.parse("2026-06-15T16:00:00.000Z"))).toBe("2026-06-16");
-    // 2026-06-15T14:00Z = 2026-06-15 23:00 KST → the 15th.
-    expect(kstDay(Date.parse("2026-06-15T14:00:00.000Z"))).toBe("2026-06-15");
+function withTz<T>(zone: string, run: () => T): T {
+  process.env.TZ = zone;
+  return run();
+}
+
+beforeEach(() => {
+  previousTz = process.env.TZ;
+});
+
+afterEach(() => {
+  if (previousTz === undefined) delete process.env.TZ;
+  else process.env.TZ = previousTz;
+});
+
+describe("schedule (host-local report bounds)", () => {
+  it("localDayBounds spans the local day, anchored where the host's midnight is", () => {
+    withTz("UTC", () => {
+      const b = localDayBounds("2026-06-16");
+      expect(new Date(b!.startMs).toISOString()).toBe("2026-06-16T00:00:00.000Z");
+      expect(b!.endMs - b!.startMs).toBe(DAY_MS);
+    });
+    withTz("Asia/Seoul", () => {
+      const b = localDayBounds("2026-06-16");
+      expect(new Date(b!.startMs).toISOString()).toBe("2026-06-15T15:00:00.000Z");
+      expect(b!.endMs - b!.startMs).toBe(DAY_MS);
+    });
   });
 
-  it("kstDayBounds spans exactly one KST day in UTC", () => {
-    const b = kstDayBounds("2026-06-16");
-    expect(b).not.toBeNull();
-    // KST midnight 2026-06-16 == 2026-06-15T15:00:00Z.
-    expect(new Date(b!.startMs).toISOString()).toBe("2026-06-15T15:00:00.000Z");
-    expect(b!.endMs - b!.startMs).toBe(24 * 60 * 60_000);
+  it("localDayBounds still spans midnight-to-midnight across a DST transition", () => {
+    withTz("America/Los_Angeles", () => {
+      // 2026-03-08 springs forward: the civil day is 23 hours long, and the
+      // window has to be that day rather than a fixed 24-hour slab.
+      const b = localDayBounds("2026-03-08");
+      expect(b!.endMs - b!.startMs).toBe(23 * 60 * 60_000);
+      expect(new Date(b!.startMs).toISOString()).toBe("2026-03-08T08:00:00.000Z");
+      expect(new Date(b!.endMs).toISOString()).toBe("2026-03-09T07:00:00.000Z");
+    });
   });
 
-  it("kstDayBounds rejects malformed dates", () => {
-    expect(kstDayBounds("2026-6-16")).toBeNull();
-    expect(kstDayBounds("not-a-date")).toBeNull();
+  it("localDayBounds rejects malformed dates", () => {
+    expect(localDayBounds("2026-6-16")).toBeNull();
+    expect(localDayBounds("not-a-date")).toBeNull();
   });
 
-  it("sundayWeekBoundsKst anchors on the KST Sunday and spans 7 days", () => {
-    const { start, end } = sundayWeekBoundsKst(new Date(UTC_MIDNIGHT_JUN16), 0);
-    // The Sunday before Tue 2026-06-16 KST is 2026-06-14; its KST midnight is
-    // 2026-06-13T15:00:00Z.
-    expect(start.toISOString()).toBe("2026-06-13T15:00:00.000Z");
-    expect(end.getTime() - start.getTime()).toBe(7 * 24 * 60 * 60_000);
+  it("sundayWeekBoundsLocal anchors on the local Sunday and spans 7 days", () => {
+    withTz("Asia/Seoul", () => {
+      const { start, end } = sundayWeekBoundsLocal(new Date(TUE_JUN16_09_SEOUL), 0);
+      // The Sunday before Tue 2026-06-16 in Seoul is the 14th; its local
+      // midnight is 2026-06-13T15:00:00Z.
+      expect(start.toISOString()).toBe("2026-06-13T15:00:00.000Z");
+      expect(end.getTime() - start.getTime()).toBe(7 * DAY_MS);
+    });
   });
 
-  it("sundayWeekBoundsKst shifts whole weeks by offset", () => {
-    const thisWeek = sundayWeekBoundsKst(new Date(UTC_MIDNIGHT_JUN16), 0);
-    const lastWeek = sundayWeekBoundsKst(new Date(UTC_MIDNIGHT_JUN16), -1);
-    expect(thisWeek.start.getTime() - lastWeek.start.getTime()).toBe(7 * 24 * 60 * 60_000);
+  it("sundayWeekBoundsLocal follows the host into a week the fixed anchor would miss", () => {
+    withTz("America/Los_Angeles", () => {
+      // The same instant is Mon 2026-06-15 in Los Angeles, so its Sunday is the
+      // 14th local — 2026-06-14T07:00:00Z, not Seoul's boundary.
+      const { start } = sundayWeekBoundsLocal(new Date(TUE_JUN16_09_SEOUL), 0);
+      expect(start.toISOString()).toBe("2026-06-14T07:00:00.000Z");
+    });
   });
 
-  it("isoWeekFor returns a YYYY-Www label", () => {
-    expect(isoWeekFor(new Date(UTC_MIDNIGHT_JUN16))).toMatch(/^2026-W\d{2}$/);
+  it("sundayWeekBoundsLocal shifts whole weeks by offset", () => {
+    withTz("UTC", () => {
+      const thisWeek = sundayWeekBoundsLocal(new Date(TUE_JUN16_09_SEOUL), 0);
+      const lastWeek = sundayWeekBoundsLocal(new Date(TUE_JUN16_09_SEOUL), -1);
+      expect(thisWeek.start.getTime() - lastWeek.start.getTime()).toBe(7 * DAY_MS);
+    });
+  });
+
+  it("bounds the day that the panel's own due-date stamp lands in", () => {
+    // The panel stamps a picked due date with `localDayStart`; this report
+    // counts an item by whether its instant falls inside `localDayBounds`. If
+    // those two ever disagree, an item due on the day the report covers falls
+    // outside it. Checked in a zone the fixtures were not written for.
+    for (const zone of ["UTC", "Asia/Seoul", "America/Los_Angeles"]) {
+      withTz(zone, () => {
+        const stamped = localDayStart("2026-06-16")!.getTime();
+        const bounds = localDayBounds("2026-06-16")!;
+        expect(stamped).toBe(bounds.startMs);
+        expect(stamped).toBeLessThan(bounds.endMs);
+        // And the day before it is outside, not merely earlier.
+        expect(localDayStart("2026-06-15")!.getTime()).toBeLessThan(bounds.startMs);
+      });
+    }
+  });
+
+  it("isoWeekFor labels the week of the local civil day", () => {
+    withTz("UTC", () => {
+      expect(isoWeekFor(new Date(TUE_JUN16_09_SEOUL))).toBe("2026-W25");
+    });
   });
 });

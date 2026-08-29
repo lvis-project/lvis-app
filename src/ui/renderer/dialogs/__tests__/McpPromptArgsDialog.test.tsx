@@ -5,7 +5,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { McpPromptArgsDialog } from "../McpPromptArgsDialog.js";
 import type { McpPromptEntry } from "../../components/slash-picker-data.js";
 
-// Renderer suite runs under the `ko` locale (vitest-locale-ko setup).
+// Renderer suite runs under the `ko` locale (vitest-ambient-intl setup).
 function prompt(over: Partial<McpPromptEntry> = {}): McpPromptEntry {
   return {
     name: "summarize",

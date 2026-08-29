@@ -33,6 +33,7 @@ import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { buildNetworkAccessAcknowledgement } from "../../../shared/network-access.js";
 import { isReinstallFixableFailureKind } from "../../../shared/plugin-install-failure.js";
+import { formatBytes } from "../../../lib/turn-summary-format.js";
 
 type KV = { key: string; value: string };
 type BannerType = "error" | "success" | "warning";
@@ -62,12 +63,6 @@ function formatInstallProgress(progress: InstallProgressPayload): string {
     return t("pluginConfigTab.downloadingBytes", { received });
   }
   return t("pluginConfigTab.downloadingBytesOf", { received, total: formatBytes(progress.bytesTotal) });
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${bytes} B`;
 }
 
 function isRuntimeCallablePlugin(plugin: PluginCardSummary): boolean {

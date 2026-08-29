@@ -32,6 +32,7 @@ import {
   TooltipTrigger,
 } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 
 export interface OverlayCardProps {
   /** Card title — routine name or plugin-supplied title */
@@ -127,7 +128,7 @@ export function OverlayCard({
 
   const isoLabel = useMemo(() => {
     try {
-      return new Date(firedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+      return formatMediumDateTime(firedAt);
     } catch {
       return firedAt;
     }

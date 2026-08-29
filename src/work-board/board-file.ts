@@ -16,6 +16,7 @@ import type {
   WorkItem,
   WorkItemStatusResolved,
 } from "../shared/work-board-types.js";
+import { localDayStart } from "../shared/local-date.js";
 
 /** On-disk shape of `board.json`. */
 export interface BoardFile {
@@ -43,4 +44,89 @@ export function resolveWorkItemStatus(
     return "overdue";
   }
   return item.status;
+}
+
+/** `Z` or `±HH:MM` at the end of an ISO instant, in minutes. `null` if absent. */
+function explicitOffsetMinutes(iso: string): number | null {
+  const match = /(?:(Z)|([+-])(\d{2}):(\d{2}))$/.exec(iso);
+  if (!match) return null;
+  if (match[1]) return 0;
+  const magnitude = Number(match[3]) * 60 + Number(match[4]);
+  return match[2] === "-" ? -magnitude : magnitude;
+}
+
+/**
+ * Re-anchor a due date that was stamped as midnight in some other zone.
+ *
+ * Until the board moved to the host calendar, the panel wrote a picked day as
+ * `${day}T00:00:00+09:00` — midnight in Seoul. That is an absolute instant, so
+ * its meaning did not change, but the day it now DISPLAYS under is the host's
+ * day for that instant: on any host west of Seoul, an item the user set for the
+ * 16th reads as the 15th. The user picked a day, not a moment, so the day is
+ * what has to survive.
+ *
+ * Only a value that is unambiguously "midnight somewhere else" is touched:
+ *
+ *   - it must carry an explicit offset (no offset means we cannot tell what the
+ *     writer meant, so we leave it alone);
+ *   - that offset must not be `Z`, which is this code's own output rather than
+ *     the legacy stamp;
+ *   - that offset must differ from the host's offset at that instant (otherwise
+ *     it is already host-local midnight, or a value we have already converted);
+ *   - and its time of day IN ITS OWN OFFSET must be exactly 00:00:00.000.
+ *
+ * A due date with a real time on it was never a day-picker value and keeps its
+ * instant exactly.
+ *
+ * Idempotent, and stable across hosts rather than merely across repeat loads on
+ * one host: what it writes back is serialized with a `Z`, which the second rule
+ * above excludes from ever being touched again — by this host or any other.
+ */
+export function normalizeDueAt(dueAt: string): string {
+  const offsetMinutes = explicitOffsetMinutes(dueAt);
+  if (offsetMinutes === null) return dueAt;
+  // `Z` is what THIS code writes (`localDayStart(day).toISOString()`), never the
+  // legacy `+09:00` stamp — so a `Z` value is already anchored to the day its
+  // author picked and has nothing to migrate. Re-anchoring it would make the
+  // value follow whichever host opened the board last: written on a UTC host as
+  // the 16th, re-stamped by a Seoul host, it reads as the 15th back on the
+  // original host. A one-time fix-up of historical data must not become a
+  // rewrite that ping-pongs between machines.
+  if (offsetMinutes === 0) return dueAt;
+
+  const instant = new Date(dueAt);
+  if (Number.isNaN(instant.getTime())) return dueAt;
+
+  if (offsetMinutes === -instant.getTimezoneOffset()) return dueAt;
+
+  // Read the wall clock the writer saw, by shifting into their offset and using
+  // the UTC getters as a plain calendar reader.
+  const asWritten = new Date(instant.getTime() + offsetMinutes * 60_000);
+  const isMidnightThere =
+    asWritten.getUTCHours() === 0
+    && asWritten.getUTCMinutes() === 0
+    && asWritten.getUTCSeconds() === 0
+    && asWritten.getUTCMilliseconds() === 0;
+  if (!isMidnightThere) return dueAt;
+
+  const pickedDay = asWritten.toISOString().slice(0, 10);
+  return localDayStart(pickedDay)?.toISOString() ?? dueAt;
+}
+
+/**
+ * Apply {@link normalizeDueAt} across a board, reporting whether anything moved
+ * so the caller can say so once instead of per item.
+ */
+export function normalizeBoardDueDates(
+  items: readonly WorkItem[],
+): { items: WorkItem[]; changed: number } {
+  let changed = 0;
+  const next = items.map((item) => {
+    if (item.due_at === undefined) return item;
+    const due_at = normalizeDueAt(item.due_at);
+    if (due_at === item.due_at) return item;
+    changed += 1;
+    return { ...item, due_at };
+  });
+  return { items: next, changed };
 }

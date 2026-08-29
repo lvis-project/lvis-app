@@ -19,7 +19,7 @@
  *
  * Examples
  *   Daily report at 09:00 every morning:
- *     { execution:"llm-session", schedule:{ at:"2026-05-09T09:00:00+09:00",
+ *     { execution:"llm-session", schedule:{ at:"2026-05-09T09:00:00",
  *       repeat:{kind:"daily"} }, prePrompt:"Write today's daily report", title:"Daily report" }
  *
  *   Weekly work summary at 09:00 every Monday:
@@ -37,7 +37,7 @@ import { MAX_ROUTINE_SOURCE_LENGTH } from "../main/routines-store.js";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const KST_OFFSET = "+09:00";
+const DATE_ONLY_DEFAULT_HOUR = 9;
 
 /** Maximum allowed cron expression length (prevents regex DoS on oversized inputs). */
 const MAX_CRON_EXPR_LENGTH = 256;
@@ -53,8 +53,12 @@ const MAX_INTERVAL_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
  *
  * Accepts:
  * - ISO 8601 datetime strings (with or without timezone offset)
- * - `YYYY-MM-DD` date-only strings — defaults to **09:00 KST (+09:00)**
- *   when no time component is provided.
+ * - `YYYY-MM-DD` date-only strings — defaults to **09:00 in the host's zone**
+ *   when no time component is provided. Host-local because the person who said
+ *   "on the 14th" meant their own calendar, and because the routine panel's own
+ *   picker already builds `at` from the host zone — a fixed offset here made
+ *   the same field mean two different instants depending on which door it came
+ *   through.
  *
  * @returns UTC ISO string, or null if the input cannot be parsed.
  */
@@ -62,9 +66,16 @@ function asIso(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  if (DATE_ONLY_RE.test(trimmed)) {
-    // Default time 09:00 KST when only date provided (YYYY-MM-DD).
-    const parsed = new Date(`${trimmed}T09:00:00${KST_OFFSET}`);
+  const dateOnly = DATE_ONLY_RE.exec(trimmed);
+  if (dateOnly) {
+    const parsed = new Date(
+      Number(dateOnly[1]),
+      Number(dateOnly[2]) - 1,
+      Number(dateOnly[3]),
+      DATE_ONLY_DEFAULT_HOUR,
+    );
+    // `new Date(y, …)` maps a year of 0-99 onto 1900+y; restate it explicitly.
+    parsed.setFullYear(Number(dateOnly[1]));
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   }
   const parsed = new Date(trimmed);

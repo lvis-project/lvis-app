@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } from "./TokenCostBadge.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
-import { formatHhMmKst } from "../utils/format-time.js";
+import { formatHhMm } from "../../../shared/format-time.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 
@@ -66,9 +66,9 @@ export function TurnActionBar({
     copyResetTimer.current = setTimeout(() => setCopied(false), 1500);
   };
 
-  // Centralized KST formatter — keeps wall-clock display stable regardless of
-  // the host OS timezone.
-  const timestampLabel = useMemo(() => formatHhMmKst(timestamp), [timestamp]);
+  // The shared formatter, so this label reads the same clock as every other
+  // time in the transcript.
+  const timestampLabel = useMemo(() => formatHhMm(timestamp), [timestamp]);
 
   return (
     <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5 px-3">

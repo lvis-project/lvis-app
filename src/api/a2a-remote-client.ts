@@ -35,6 +35,7 @@ import {
 } from "./a2a-remote-store.js";
 import { parseA2AStrictJson } from "./a2a-strict-json.js";
 import { canonicalizeA2ARemoteTask } from "./a2a-task-store.js";
+import { isRecord } from "../shared/is-record.js";
 
 const EXTENSION_ERROR_CODES = new Set([-32090, -32091, -32092, -32093, -32094]);
 const FULL_COMMIT_SHA = /^[a-f0-9]{40}$/;
@@ -121,10 +122,6 @@ type BoundReplaySource = A2ARemoteAttemptRecord & {
     messageId: string;
   };
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
