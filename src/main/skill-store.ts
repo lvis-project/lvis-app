@@ -211,32 +211,50 @@ const SKILL_CATALOG_SCAN_LIMIT = 256;
 const SKILL_FRONTMATTER_READ_BYTES = 16 * 1024;
 const SKILL_CATALOG_DESCRIPTION_MAX_CHARS = 1024;
 
+export interface FrontmatterBlock {
+  /** `key` → the raw text after the colon (untrimmed, quotes intact). Last key wins. */
+  fields: ReadonlyMap<string, string>;
+  /** Everything after the closing `---`; the whole input when there is no block. */
+  body: string;
+}
+
 /**
- * Parse a YAML-ish frontmatter block. Supports `key: value` lines.
- * Quoted strings (single/double) are unwrapped.
- * Deliberately tiny — full YAML would pull in a dep we don't need.
+ * Split a markdown document into its YAML-ish `---` frontmatter block and
+ * body. Supports `key: value` lines only — deliberately tiny, full YAML would
+ * pull in a dep we don't need. Skills, agent profiles and persona prompts
+ * all read their headers through this one parser; each maps the fields onto
+ * its own typed shape.
  */
+export function parseFrontmatterBlock(raw: string): FrontmatterBlock {
+  const fmRegex = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/;
+  const match = raw.match(fmRegex);
+  const fields = new Map<string, string>();
+  if (!match) {
+    return { fields, body: raw };
+  }
+  const [full, block] = match;
+  for (const line of block.split(/\r?\n/)) {
+    const m = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    if (!m) continue;
+    fields.set(m[1], m[2]);
+  }
+  return { fields, body: raw.slice(full.length) };
+}
+
+/** Trim a frontmatter scalar and unwrap one pair of surrounding quotes (single or double). */
+export function unquoteFrontmatterValue(raw: string): string {
+  return raw.trim().replace(/^["']|["']$/g, "");
+}
+
+/** The skill header: `name` (required) and `description`. */
 export function parseFrontmatter(raw: string): {
   fm: SkillFrontmatter;
   body: string;
 } {
-  const fmRegex = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/;
-  const match = raw.match(fmRegex);
-  if (!match) {
-    return { fm: { name: "" }, body: raw };
-  }
-  const [full, block] = match;
-  const body = raw.slice(full.length);
-  const fm: SkillFrontmatter = { name: "" };
-  for (const line of block.split(/\r?\n/)) {
-    const m = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1];
-    let val = m[2].trim();
-    val = val.replace(/^["']|["']$/g, "");
-    if (key === "name") fm.name = val;
-    else if (key === "description") fm.description = val;
-  }
+  const { fields, body } = parseFrontmatterBlock(raw);
+  const fm: SkillFrontmatter = { name: unquoteFrontmatterValue(fields.get("name") ?? "") };
+  const description = fields.get("description");
+  if (description !== undefined) fm.description = unquoteFrontmatterValue(description);
   return { fm, body };
 }
 
