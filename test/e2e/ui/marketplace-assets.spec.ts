@@ -16,9 +16,8 @@ test('settings marketplace assets expand provider, theme, and language pickers',
     name: t('settingsContent.tabMarketplace'),
   });
 
-  await settingsPage.locator('#vendor-select').click();
-  await settingsPage.getByTestId('llm-tab:vendor-search').fill('groq');
-  await expect(settingsPage.getByRole('option', { name: /Groq/i })).toHaveCount(0);
+  await settingsPage.getByTestId('llm-tab:add-provider').click();
+  await expect(settingsPage.getByTestId('llm-tab:add-provider-item:groq')).toHaveCount(0);
   await settingsPage.keyboard.press('Escape');
 
   await settingsPage.getByTestId('llm-tab:marketplace-providers').click();
@@ -30,9 +29,8 @@ test('settings marketplace assets expand provider, theme, and language pickers',
   await expect(providerAction).toContainText(t('marketplaceTab.removeButton'));
 
   await llmTab.click();
-  await settingsPage.locator('#vendor-select').click();
-  await settingsPage.getByTestId('llm-tab:vendor-search').fill('groq');
-  await settingsPage.getByRole('option', { name: /Groq/i }).click();
+  await settingsPage.getByTestId('llm-tab:add-provider').click();
+  await settingsPage.getByTestId('llm-tab:add-provider-item:groq').click();
   await expect(settingsPage.getByTestId('llm-tab:selected-provider-marketplace:groq'))
     .toBeVisible();
 
