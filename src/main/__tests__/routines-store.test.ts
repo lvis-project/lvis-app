@@ -10,26 +10,15 @@
  */
 import { describe, it, expect } from "vitest";
 import { withTz } from "../../__tests__/test-helpers.js";
-import { mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir, platform } from "node:os";
+import { platform } from "node:os";
 import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LENGTH } from "../routines-store.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-
-function tempStore() {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-rs-v2-"));
-  const store = new RoutinesStore(join(dir, "routines.json"));
-  const cleanup = () => cleanupTmpDir(dir);
-  return { store, dir, cleanup };
-}
-
-function futureIso(offsetMs = 60_000): string {
-  return new Date(Date.now() + offsetMs).toISOString();
-}
+import { futureIso, tempRoutinesStore } from "./routines-fixture.js";
 
 describe("RoutinesStore v2 — basic persistence", () => {
   it("adds a notification-only routine and reads it back", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -46,7 +35,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
   });
 
   it("adds an llm-session routine", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -63,7 +52,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
   });
 
   it("persists the exact last routine session id and clears it on the next fire", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -90,7 +79,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
   });
 
   it("rejects non-canonical routine records with flat plugin scope fields", async () => {
-    const { store, dir, cleanup } = tempStore();
+    const { store, dir, cleanup } = tempRoutinesStore();
     try {
       writeFileSync(
         join(dir, "routines.json"),
@@ -115,7 +104,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
   });
 
   it("rejects non-canonical routine records with malformed scope shape", async () => {
-    const { store, dir, cleanup } = tempStore();
+    const { store, dir, cleanup } = tempRoutinesStore();
     try {
       writeFileSync(
         join(dir, "routines.json"),
@@ -146,7 +135,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
 
 describe("RoutinesStore v2 — cap enforcement", () => {
   it("rejects after the 50-record cap is reached", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       for (let i = 0; i < MAX_PERSISTED_ROUTINES; i++) {
         await store.add({
@@ -172,7 +161,7 @@ describe("RoutinesStore v2 — cap enforcement", () => {
 
 describe("RoutinesStore v2 — invalid at", () => {
   it("rejects non-ISO at value", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await expect(
         store.add({
@@ -192,7 +181,7 @@ describe("RoutinesStore v2 — non-cron repeat requires schedule.at", () => {
   const kinds = ["daily", "weekly", "monthly", "interval"] as const;
   for (const kind of kinds) {
     it(`rejects ${kind} repeat without schedule.at`, async () => {
-      const { store, cleanup } = tempStore();
+      const { store, cleanup } = tempRoutinesStore();
       try {
         const repeat =
           kind === "interval"
@@ -215,7 +204,7 @@ describe("RoutinesStore v2 — non-cron repeat requires schedule.at", () => {
 
 describe("RoutinesStore v2 — atomic write", () => {
   it("does not leave a .tmp file behind after successful add", async () => {
-    const { store, dir, cleanup } = tempStore();
+    const { store, dir, cleanup } = tempRoutinesStore();
     try {
       const path = join(dir, "routines.json");
       await store.add({
@@ -234,7 +223,7 @@ describe("RoutinesStore v2 — atomic write", () => {
   it.skipIf(platform() === "win32")(
     "sets file mode 0o600 on POSIX",
     async () => {
-      const { store, dir, cleanup } = tempStore();
+      const { store, dir, cleanup } = tempRoutinesStore();
       try {
         const path = join(dir, "routines.json");
         await store.add({
@@ -254,7 +243,7 @@ describe("RoutinesStore v2 — atomic write", () => {
 
 describe("RoutinesStore v2 — dismiss / remove", () => {
   it("dismiss sets dismissedAt and hides from listActive", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -272,7 +261,7 @@ describe("RoutinesStore v2 — dismiss / remove", () => {
   });
 
   it("remove deletes from list entirely", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -290,7 +279,7 @@ describe("RoutinesStore v2 — dismiss / remove", () => {
 
 describe("RoutinesStore v2 — markFired repeat advancement", () => {
   it("none: dismisses after first fire", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -306,7 +295,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
   });
 
   it("daily: advances at by 24h+", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const pastIso = new Date(Date.now() - 1000).toISOString();
       const r = await store.add({
@@ -325,7 +314,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
   });
 
   it("monthly clamping: Jan 31 → Feb stays within Feb", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       // Use a past date: Jan 31, 2026
       const jan31 = new Date("2026-01-31T09:00:00Z");
@@ -345,7 +334,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
   });
 
   it("interval: advances at by intervalMs", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const pastIso = new Date(Date.now() - 1000).toISOString();
       const r = await store.add({
@@ -365,7 +354,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
 
 describe("RoutinesStore v2 — schedule.at ISO normalization", () => {
   it("normalizes tz-offset at to UTC ISO string", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const kstAt = "2026-05-09T09:00:00+09:00";
       const r = await store.add({
@@ -388,7 +377,7 @@ describe("RoutinesStore v2 — schedule.at ISO normalization", () => {
 
 describe("RoutinesStore v2 — cron validation", () => {
   it("rejects invalid cron expression", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await expect(
         store.add({
@@ -404,7 +393,7 @@ describe("RoutinesStore v2 — cron validation", () => {
   });
 
   it("rejects cron expression exceeding 256 chars", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await expect(
         store.add({
@@ -420,7 +409,7 @@ describe("RoutinesStore v2 — cron validation", () => {
   });
 
   it("accepts valid 5-field cron expression", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -437,7 +426,7 @@ describe("RoutinesStore v2 — cron validation", () => {
 
 describe("RoutinesStore v2 — execution validation", () => {
   it("rejects llm-session with empty prePrompt", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await expect(
         store.add({
@@ -453,7 +442,7 @@ describe("RoutinesStore v2 — execution validation", () => {
   });
 
   it("rejects notification-only with empty notificationTitle", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await expect(
         store.add({
@@ -471,7 +460,7 @@ describe("RoutinesStore v2 — execution validation", () => {
 
 describe("RoutinesStore v2 — LLM session sub-cap", () => {
   it(`rejects LLM session routine after ${MAX_LLM_SESSION_ROUTINES} active LLM routines`, async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       for (let i = 0; i < MAX_LLM_SESSION_ROUTINES; i++) {
         await store.add({
@@ -495,7 +484,7 @@ describe("RoutinesStore v2 — LLM session sub-cap", () => {
   });
 
   it("notification-only routines are not affected by LLM sub-cap", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       // Fill LLM sub-cap
       for (let i = 0; i < MAX_LLM_SESSION_ROUTINES; i++) {
@@ -522,7 +511,7 @@ describe("RoutinesStore v2 — LLM session sub-cap", () => {
 
 describe("RoutinesStore v2 — advanceInterval far-past (no loop)", () => {
   it("advances far-past interval schedule in arithmetic time (no while loop)", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     // Create a routine with an at timestamp 1 year in the past.
     const farPastMs = Date.now() - 365 * 24 * 60 * 60 * 1000;
     const farPastIso = new Date(farPastMs).toISOString();
@@ -549,7 +538,7 @@ describe("RoutinesStore v2 — advanceInterval far-past (no loop)", () => {
 
 describe("RoutinesStore v2 — advanceMonthly UTC correctness (DST-independence)", () => {
   it("monthly clamp is unaffected by host timezone (TZ=America/Los_Angeles)", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await withTz("America/Los_Angeles", async () => {
         // Jan 31 in UTC — if advanceMonthly used local-time methods, LA timezone
@@ -583,7 +572,7 @@ describe("RoutinesStore v2 — advanceMonthly originalDay preservation (C-critic
     // Simulate Jan 31 far in the past so markFired multi-skips through 6 months.
     // Expected: originalDay=31 is clamped per-month (Feb→28/29, Apr→30, Jun→30)
     // but NEVER drifts below 28 after a Feb clamp (the pre-fix bug: 31→28→28→28...).
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       // Use Jan 31, 2020 — far enough back that markFired will advance 6+ months.
       const jan31 = new Date("2020-01-31T09:00:00Z");
@@ -618,7 +607,7 @@ describe("RoutinesStore v2 — advanceMonthly originalDay preservation (C-critic
   });
 
   it("Feb 28 → Mar preserves day 28 (originalDay < lastDay)", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const feb28 = new Date("2020-02-28T09:00:00Z");
       const r = await store.add({
@@ -640,7 +629,7 @@ describe("RoutinesStore v2 — advanceMonthly originalDay preservation (C-critic
 
 describe("RoutinesStore v2 — source marker", () => {
   it("persists the source marker through add() and a reload from disk", async () => {
-    const { store, dir, cleanup } = tempStore();
+    const { store, dir, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -661,7 +650,7 @@ describe("RoutinesStore v2 — source marker", () => {
   });
 
   it("leaves source unset when omitted (manual creation)", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -676,7 +665,7 @@ describe("RoutinesStore v2 — source marker", () => {
   });
 
   it("collapses an empty / whitespace-only source to unset", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -692,7 +681,7 @@ describe("RoutinesStore v2 — source marker", () => {
   });
 
   it("rejects a source longer than the cap", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await expect(
         store.add({
@@ -709,7 +698,7 @@ describe("RoutinesStore v2 — source marker", () => {
   });
 
   it("drops an on-disk record whose source exceeds the cap (tamper rejection)", async () => {
-    const { dir, cleanup } = tempStore();
+    const { dir, cleanup } = tempRoutinesStore();
     try {
       const filePath = join(dir, "routines.json");
       writeFileSync(
@@ -738,7 +727,7 @@ describe("RoutinesStore v2 — source marker", () => {
 
 describe("RoutinesStore workspace scope revocation", () => {
   it("atomically removes a canonical root and descendants and persists the shrink", async () => {
-    const { store, dir, cleanup } = tempStore();
+    const { store, dir, cleanup } = tempRoutinesStore();
     try {
       const removedRoot = join(dir, "workspace");
       const segmentSibling = join(dir, "workspace-sibling");
@@ -787,7 +776,7 @@ describe("RoutinesStore workspace scope revocation", () => {
     }
   });
   it("preserves routine directories owned by a separately registered child root", async () => {
-    const { store, dir, cleanup } = tempStore();
+    const { store, dir, cleanup } = tempRoutinesStore();
     try {
       const parentRoot = join(dir, "workspace");
       const preservedChild = join(parentRoot, "child");
@@ -835,7 +824,7 @@ describe("RoutinesStore workspace scope revocation", () => {
 
 
   it("is a no-op when no routine scope is covered", async () => {
-    const { store, dir, cleanup } = tempStore();
+    const { store, dir, cleanup } = tempRoutinesStore();
     try {
       await store.add({
         trigger: "schedule",
