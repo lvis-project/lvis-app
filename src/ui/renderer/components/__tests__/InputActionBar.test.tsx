@@ -7,6 +7,7 @@ import { InputActionBar } from "../InputActionBar.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../../shared/assistant-context-menu.js";
 import type { InputStatusRow } from "../../hooks/use-input-status-row.js";
+import { getVendorOption } from "../../constants.js";
 
 const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "" };
 const codingPreset: RolePreset = { id: "coding", name: "코딩", systemPromptAdd: "Code carefully." };
@@ -309,7 +310,7 @@ describe("InputActionBar (unified bar)", () => {
     const { getByTestId } = renderBar();
     const row = getByTestId("iab-status-row");
     expect(row).toBeTruthy();
-    expect(getByTestId("iab-status-model").textContent).toContain("OpenAI · gpt-5.4");
+    expect(getByTestId("iab-status-model").textContent).toContain("gpt-5.4");
     expect(getByTestId("iab-status-model").querySelector("svg")).toBeTruthy();
     // The TokenProgressRing widget now lives in the status row.
     const ringHost = getByTestId("iab-status-ring");
@@ -321,12 +322,14 @@ describe("InputActionBar (unified bar)", () => {
     expect(row.querySelector("[data-testid='iab-status-context']")).toBeNull();
   });
 
-  it("hides the vendor prefix from the model cell in chat mode", () => {
-    const { getByTestId } = renderBar({ appMode: "chat" });
+  it("names the model alone in the status row, and keeps the vendor in the accessible name", () => {
+    const { getByTestId } = renderBar();
     const model = getByTestId("iab-status-model");
     expect(model.textContent).toContain("gpt-5.4");
     expect(model.textContent).not.toContain("OpenAI");
+    // Hover and screen reader still get the whole route.
     expect(model.getAttribute("title")).toBe("OpenAI · gpt-5.4");
+    expect(model.getAttribute("aria-label")).toBe("OpenAI · gpt-5.4");
   });
 
   it("colors the permission text per mode (no pill/outline)", () => {
@@ -421,6 +424,17 @@ describe("model card (status-row model cell)", () => {
     subscriptionUseApiForChat.mockClear();
     getSettings.mockResolvedValue(settingsWithPins());
     updateSettings.mockResolvedValue({});
+  });
+
+  it("names the vendor in the card, where the status row no longer says it", async () => {
+    const vendorLabel = getVendorOption("openai-compatible").label;
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    await waitFor(() => expect(card.querySelectorAll("[role='option']").length).toBe(2));
+    const current = card.querySelector("[role='option'][aria-selected='true']");
+    expect(current?.textContent).toContain(vendorLabel);
+    expect(current?.textContent).toContain("qwen3.8-27b-gguf");
   });
 
   it("opens the card instead of leaving for Settings", async () => {

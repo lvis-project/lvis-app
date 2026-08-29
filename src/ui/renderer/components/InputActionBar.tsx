@@ -13,7 +13,7 @@
  * the composer is empty, and reverts to "send" the moment anything is typed.
  *
  *   STATUS SUB-ROW (bottom, compact single line):
- *     [● active] · [vendor · model] · [permission — per-mode TEXT color] · [ring]
+ *     [● active] · [model] · [permission — per-mode TEXT color] · [ring]
  *
  * The window StatusBar is notifications-only after this change; the persistent
  * model / permission / active cells moved here. The TokenProgressRing widget
@@ -99,8 +99,6 @@ export interface InputActionBarProps {
   // Status sub-row.
   /** Resolved model / permission / active fields (from useInputStatusRow). */
   statusRow: InputStatusRow;
-  /** Workspace mode controls compact status-row model labeling. */
-  appMode?: "chat" | "work";
   /** Opens Settings → LLM — the model card's way to the full catalogue. */
   onOpenModelSettings: () => void;
   /** Opens Settings → Permissions when the permission cell is clicked. */
@@ -172,7 +170,6 @@ export function InputActionBar({
   reasoningAvailable = true,
   onToggleThinking,
   statusRow,
-  appMode = "work",
   onOpenModelSettings,
   onOpenPermissions,
   onOpenApprovalQueue,
@@ -337,7 +334,6 @@ export function InputActionBar({
       {/* ── STATUS SUB-ROW ──────────────────────────────────────────── */}
       <StatusSubRow
         statusRow={statusRow}
-        appMode={appMode}
         ringSlot={ringSlot}
         onOpenModelSettings={onOpenModelSettings}
         onOpenPermissions={onOpenPermissions}
@@ -352,7 +348,7 @@ export function InputActionBar({
 
 /**
  * Status sub-row — compact single line at the bottom of the unified bar:
- *   [● active] · [vendor · model] · [permission — per-mode text color] · [ring]
+ *   [● active] · [model] · [permission — per-mode text color] · [ring]
  *
  * Permission is plain text colored per-mode (no pill/outline). The
  * TokenProgressRing widget sits at the END (after permission); the usage % /
@@ -361,7 +357,6 @@ export function InputActionBar({
  */
 function StatusSubRow({
   statusRow,
-  appMode,
   ringSlot,
   onOpenModelSettings,
   onOpenPermissions,
@@ -371,7 +366,6 @@ function StatusSubRow({
   onToggleThinking,
 }: {
   statusRow: InputStatusRow;
-  appMode: "chat" | "work";
   ringSlot: ReactNode;
   onOpenModelSettings: () => void;
   onOpenPermissions?: () => void;
@@ -385,7 +379,10 @@ function StatusSubRow({
   // Mode label ONLY — the pending-approval count is now its own separate
   // button before the permission cell (no longer appended to the label text).
   const permissionLabel = t(PERMISSION_LABEL_KEYS[permissionMode]);
-  const displayModel = appMode === "chat" ? stripVendorPrefix(vendorModel) : vendorModel;
+  // The row names the model only. Which vendor serves it is a detail of the
+  // route, not of the sentence the person is about to send — it belongs in
+  // the model card the cell opens, next to the models they can switch to.
+  const displayModel = stripVendorPrefix(vendorModel);
 
   return (
     <div
@@ -458,11 +455,12 @@ function StatusSubRow({
 
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
-        {/* Model — brain icon + compact label; chat mode hides vendor prefix.
+        {/* Model — brain icon + the model name alone. Which vendor serves it
+            shows in the card this opens, beside the model it belongs to.
             Clicking it, or the reasoning chip after it, opens the model card:
-            the pinned models, the reasoning level, and the way to the full
-            catalogue. Settings is one more click away, not the first thing a
-            model click does. */}
+            the models (the current one among them, marked), the reasoning
+            level, and the way to the full catalogue. Settings is one more
+            click away, not the first thing a model click does. */}
         <ModelQuickPicker
           vendorModel={vendorModel}
           displayModel={displayModel}
@@ -576,6 +574,11 @@ function ModelQuickPicker({
         <button
           type="button"
           data-testid="iab-status-model"
+          // The visible text is the model alone, so the vendor would be lost to
+          // anyone who cannot hover for the tooltip. The accessible name carries
+          // the whole route; it still contains the visible text, so name-in-label
+          // holds and voice control can still say the model.
+          aria-label={vendorModel}
           onClick={() => { openedByChipRef.current = false; }}
           className="inline-flex min-w-0 shrink items-center gap-1 text-left transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
           title={vendorModel}

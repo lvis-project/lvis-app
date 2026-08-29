@@ -20,7 +20,6 @@ import type { QuickAction } from "./CommandPopover.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import type { ViewModeState } from "./ViewModeBanner.js";
 import type { RolePreset } from "../../../data/role-presets.js";
-import type { AppMode } from "../MainToolbar.js";
 import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import { ComposerProjectSelector } from "./ComposerProjectSelector.js";
 import type { ProjectErrorReporter } from "../hooks/use-add-project-folder.js";
@@ -86,7 +85,6 @@ export interface ChatComposerDockProps {
   reasoningAvailable?: boolean;
   onToggleThinking: (v: boolean) => Promise<void> | void;
   inputStatusRow: InputStatusRow;
-  appMode?: AppMode;
   onOpenModelSettings: () => void;
   onOpenPermissions: () => void;
   onOpenApprovalQueue?: () => void;
@@ -163,7 +161,6 @@ export function ChatComposerDock({
   reasoningAvailable,
   onToggleThinking,
   inputStatusRow,
-  appMode,
   onOpenModelSettings,
   onOpenPermissions,
   onOpenApprovalQueue,
@@ -419,7 +416,6 @@ export function ChatComposerDock({
           reasoningAvailable={reasoningAvailable}
           onToggleThinking={onToggleThinking}
           statusRow={inputStatusRow}
-          appMode={appMode}
           onOpenModelSettings={onOpenModelSettings}
           onOpenPermissions={onOpenPermissions}
           onOpenApprovalQueue={onOpenApprovalQueue}
