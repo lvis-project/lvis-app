@@ -55,7 +55,7 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
       // effect runs after the queue has rendered but before paint.
       useLayoutEffect(() => {
         if (queue[0]?.id === "req-layout") {
-          void decide("allow-once");
+          void decide("req-layout", "allow-once");
         }
       }, [queue, decide]);
       return null;
@@ -126,8 +126,8 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
     let first!: Promise<void>;
     let second!: Promise<void>;
     act(() => {
-      first = result.current.decide("allow-once");
-      second = result.current.decide("allow-once");
+      first = result.current.decide(result.current.queue[0]!.id, "allow-once");
+      second = result.current.decide(result.current.queue[0]!.id, "allow-once");
     });
 
     // Only one respond should have been issued for req-1 — the second decide
@@ -148,7 +148,7 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
     // The next decide should now go through for req-2 (not dropped).
     let third!: Promise<void>;
     act(() => {
-      third = result.current.decide("allow-once");
+      third = result.current.decide(result.current.queue[0]!.id, "allow-once");
     });
     expect(respond).toHaveBeenCalledTimes(2);
     expect(respond.mock.calls[1]?.[0]).toMatchObject({ requestId: "req-2" });
@@ -189,7 +189,7 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
 
     let first!: Promise<void>;
     act(() => {
-      first = result.current.decide("allow-once");
+      first = result.current.decide(result.current.queue[0]!.id, "allow-once");
     });
 
     expect(respond).toHaveBeenCalledTimes(1);
@@ -207,7 +207,7 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
 
     let second!: Promise<void>;
     act(() => {
-      second = result.current.decide("allow-once");
+      second = result.current.decide(result.current.queue[0]!.id, "allow-once");
     });
 
     expect(respond).toHaveBeenCalledTimes(2);
@@ -253,12 +253,13 @@ describe("useApproval — requests parked before this renderer mounted", () => {
 
     let deciding!: Promise<void>;
     act(() => {
-      deciding = result.current.decide("allow-once");
+      deciding = result.current.decide(result.current.queue[0]!.id, "allow-once");
     });
     expect(respond).toHaveBeenCalledTimes(1);
 
-    // The head is being acknowledged: dropping it would make the pending
-    // positional shift remove req-2 instead. Only req-3 goes.
+    // The head is being acknowledged: it leaves when the host answers, not
+    // here — dropping it now would settle a card whose answer is in flight.
+    // Only req-3 goes.
     act(() => {
       result.current.dropSettled(["req-1", "req-3"]);
     });

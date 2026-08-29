@@ -24,6 +24,8 @@ import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { ApprovalRequest, LvisApi } from "./types.js";
+import { ApprovalDock } from "./components/permissions/ApprovalDock.js";
+import { useApprovalSurface } from "./hooks/use-approval.js";
 import type { SubAgentSpawn } from "./subagents/types.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
@@ -97,6 +99,11 @@ export interface ChatViewProps {
    * The approvals THIS conversation's turn is parked on. The window shows the
    * approval card once; the tile that is waiting says so above its composer.
    */
+  /**
+   * The requests this conversation (or a sub-agent it spawned) is parked on,
+   * head first. Their card is drawn INSIDE this view, over its own composer;
+   * no other tile sees it.
+   */
   pendingApprovals: readonly ApprovalRequest[];
   /** Called when a card submits or is dismissed; removes it from `askQuestions`. */
   onResolveAskQuestion: (id: string) => void;
@@ -163,6 +170,8 @@ const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
 export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
+  const approvals = useApprovalSurface();
+  const approvalHead = pendingApprovals[0] ?? null;
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -670,6 +679,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
       <div
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [container-type:size]"
         data-testid="chat-main-column"
+        data-approval-scope
       >
       {/* Tool activity is derived HERE (only this view sees the transcript) but
           belongs to the group header, so the control is portaled up into the
@@ -851,6 +861,24 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         onProjectError={onProjectError}
         projectSelectorOpen={projectSelectorOpen}
         onProjectSelectorOpenChange={setProjectSelectorOpen}
+      />
+      {/* This conversation's approval card, floating over its own composer.
+          The column above is the dock's scope: the composer it covers goes
+          inert, the tile next door does not. */}
+      <ApprovalDock
+        queue={pendingApprovals}
+        conversationLabel={currentSessionTitle ?? t("mainToolbar.newChat")}
+        proposedChoice={
+          approvalHead !== null && approvals.proposal?.requestId === approvalHead.id
+            ? approvals.proposal.choice
+            : null
+        }
+        onDecide={(choice, pattern, extras) => {
+          if (approvalHead === null) return;
+          void approvals.decide(approvalHead.id, choice, pattern, extras);
+        }}
+        onOpenPermanentDeny={approvals.openPermanentDeny}
+        interactionLocked={approvalHead !== null && approvals.lockedRequestId === approvalHead.id}
       />
       </div>
       {dockedPanelPresent ? (() => {

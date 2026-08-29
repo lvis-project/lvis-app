@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LvisApi } from "../../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../../preview/preview-targets.js";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
+import { ApprovalSurfaceProvider } from "../../hooks/use-approval.js";
+import { approvalSurfaceStub } from "../../../../../test/renderer/helpers.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
@@ -51,12 +53,27 @@ function api(): LvisApi {
   } as unknown as LvisApi;
 }
 
-function renderPanel(ui: ReactElement) {
-  return render(
+/**
+ * The panel's providers. `rerender` re-applies them so a rerender keeps the
+ * same tree shape as the mount — a differently shaped tree remounts the
+ * harness and loses the state a test is checking survives.
+ */
+function withPanelProviders(ui: ReactElement) {
+  return (
     <TooltipProvider>
-      {ui}
-    </TooltipProvider>,
+      <ApprovalSurfaceProvider value={approvalSurfaceStub()}>
+        {ui}
+      </ApprovalSurfaceProvider>
+    </TooltipProvider>
   );
+}
+
+function renderPanel(ui: ReactElement) {
+  const result = render(withPanelProviders(ui));
+  return {
+    ...result,
+    rerender: (next: ReactElement) => result.rerender(withPanelProviders(next)),
+  };
 }
 
 /**
@@ -496,7 +513,6 @@ describe("ChatSidePanel", () => {
     // Unmount the panel (session switch / rail close) — the harness (store)
     // stays mounted, exactly like ChatView across the conditional render.
     rerender(
-      <TooltipProvider>
         <HarnessPanel
           api={api()}
           sessionId="session-2"
@@ -504,22 +520,19 @@ describe("ChatSidePanel", () => {
           files={files}
           initialSelectedId={null}
           panelMounted={false}
-        />
-      </TooltipProvider>,
+        />,
     );
     expect(screen.queryByTestId("chat-side-panel")).toBeNull();
 
     // Remount the panel — the added tab is still present (state survived).
     rerender(
-      <TooltipProvider>
         <HarnessPanel
           api={api()}
           sessionId="session-2"
           targets={targets}
           files={files}
           initialSelectedId={null}
-        />
-      </TooltipProvider>,
+        />,
     );
     expect(screen.getByTestId("chat-side-panel")).toBeTruthy();
     expect(screen.getAllByRole("tab")).toHaveLength(1);
@@ -1487,9 +1500,7 @@ describe("ChatSidePanel", () => {
       { spawnId: "c", title: "Agent C", status: "running", entries: [{ kind: "assistant", text: "Agent C transcript", streaming: false }], toolCallCount: 0 },
     ];
     rerender(
-      <TooltipProvider>
-        <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={reordered} />
-      </TooltipProvider>,
+        <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={reordered} />,
     );
     // The detail stays pinned to Agent B — no silent jump to the new top row.
     expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B transcript");

@@ -41,7 +41,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
   it("uses pre-supplied values and explicit choices without rendering typeable controls", () => {
     const onDecide = vi.fn();
     const { container } = render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeElicitationRequest()}
         onDecide={onDecide}
@@ -69,7 +69,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
   it("preserves optional boolean false in elicitation content", () => {
     const onDecide = vi.fn();
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeElicitationRequest()}
         onDecide={onDecide}
@@ -102,7 +102,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
       },
     };
     const { container } = render(
-      <ToolApprovalContent open request={request} onDecide={onDecide} />,
+      <ToolApprovalContent conversationLabel="conversation" open request={request} onDecide={onDecide} />,
     );
 
     expect(container.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]')).toBeNull();
@@ -121,7 +121,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
       elicitationId: "e1",
     };
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={request}
         onDecide={onDecide}
@@ -154,7 +154,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
         requestAndWait: async (gateRequest) => {
           let captured: { elicitationContent?: Record<string, unknown> } | undefined;
           render(
-            <ToolApprovalContent
+            <ToolApprovalContent conversationLabel="conversation"
               open
               request={{
                 id: gateRequest.id,
@@ -249,7 +249,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
       },
     };
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={request}
         onDecide={onDecide}

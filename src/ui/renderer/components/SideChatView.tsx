@@ -18,7 +18,7 @@
  * requests surface in the app-level ApprovalDock (shared global ApprovalGate),
  * never inside this tab.
  */
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Send, Square, Plus } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
@@ -27,11 +27,23 @@ import { TranscriptRenderer } from "./TranscriptRenderer.js";
 import { useSideChat } from "../hooks/use-side-chat.js";
 import type { LvisApi } from "../types.js";
 import { useOptionalChatContext } from "../context/ChatContext.js";
+import { useApprovalSurface } from "../hooks/use-approval.js";
+import { ApprovalDock } from "./permissions/ApprovalDock.js";
 
 export function SideChatView({ api }: { api: LvisApi }) {
   const { t } = useTranslation();
   const { entries, turnSummaryByTurnStart, isStreaming, sessionId, send, newSession, abort } = useSideChat(api);
   const chatContext = useOptionalChatContext();
+  // A side chat runs its own session; its approval cards belong in this panel,
+  // not in the tile beside it and not in the window. The panel claims the
+  // session once the loop has one, and draws the card over its own composer.
+  const approvals = useApprovalSurface();
+  useEffect(() => {
+    if (sessionId === null) return undefined;
+    return approvals.claims.claim(`side-chat:${sessionId}`, (id) => id === sessionId);
+  }, [approvals.claims, sessionId]);
+  const pendingApprovals = approvals.queue.filter((req) => req.sessionId === sessionId);
+  const approvalHead = pendingApprovals[0] ?? null;
   const subscriptionPending = chatContext?.subscriptionRuntimePolicy
     ? chatContext.subscriptionRuntimePolicy.chatPending
     : chatContext?.subscriptionPendingProvider !== undefined;
@@ -83,7 +95,7 @@ export function SideChatView({ api }: { api: LvisApi }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="side-chat-view">
+    <div className="relative flex h-full min-h-0 flex-col" data-testid="side-chat-view" data-approval-scope>
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-1.5">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {t("chatPreviewRail.sideChat.title")}
@@ -186,6 +198,16 @@ export function SideChatView({ api }: { api: LvisApi }) {
           )}
         </div>
       </div>
+      <ApprovalDock
+        queue={pendingApprovals}
+        conversationLabel={t("chatPreviewRail.sideChat.title")}
+        onDecide={(choice, pattern, extras) => {
+          if (approvalHead === null) return;
+          void approvals.decide(approvalHead.id, choice, pattern, extras);
+        }}
+        onOpenPermanentDeny={approvals.openPermanentDeny}
+        interactionLocked={approvalHead !== null && approvals.lockedRequestId === approvalHead.id}
+      />
     </div>
   );
 }

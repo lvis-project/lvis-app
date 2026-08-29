@@ -6,7 +6,25 @@ import type { MessageQueueStore } from "../../src/ui/renderer/state/message-queu
 import { SETTINGS_TABS } from "../../src/shared/settings-tabs.js";
 import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
 import type { ActionPanelActivityState } from "../../src/ui/renderer/components/ActionPanel.js";
+import { ApprovalSurfaceClaims, type ApprovalSurfaceContextValue } from "../../src/ui/renderer/hooks/use-approval.js";
+import { vi } from "vitest";
 export { relativeLuminance } from "../contrast-helpers.js";
+
+/**
+ * An approval surface with nothing pending, for components that draw their
+ * own approval dock (SideChatView, ChatView) rendered outside App.
+ */
+export function approvalSurfaceStub(): ApprovalSurfaceContextValue {
+  return {
+    queue: [],
+    decide: vi.fn(async () => undefined),
+    dropSettled: vi.fn(),
+    claims: new ApprovalSurfaceClaims(),
+    openPermanentDeny: vi.fn(),
+    lockedRequestId: null,
+    proposal: null,
+  };
+}
 
 /**
  * Submits a chat message by typing into the main composer textarea and
@@ -59,20 +77,39 @@ export function collectTiles(container: HTMLElement): RenderedTile[] {
  * so the SECOND tile is the focused one on return.
  */
 export async function splitIntoTwoTiles(container: HTMLElement): Promise<RenderedTile[]> {
-  const split = container.querySelector<HTMLButtonElement>('[data-testid="chat-group-split"]');
+  return splitWith(container, container, 2);
+}
+
+/**
+ * Split twice — the window, then the tile the first split focused — and hand
+ * back all three, in layout order. Three conversations, three session ids.
+ */
+export async function splitIntoThreeTiles(container: HTMLElement): Promise<RenderedTile[]> {
+  const [, second] = await splitIntoTwoTiles(container);
+  return splitWith(container, second!.element, 3);
+}
+
+async function splitWith(
+  container: HTMLElement,
+  holder: HTMLElement,
+  expectedTiles: number,
+): Promise<RenderedTile[]> {
+  const split = holder.querySelector<HTMLButtonElement>('[data-testid="chat-group-split"]');
   if (!split) throw new Error("no chat-group split control");
   await act(async () => {
     fireEvent.click(split);
   });
   // The split control opens a direction choice (portaled, so it is looked up
-  // on the document); either direction yields two tiles.
+  // on the document); either direction yields one more tile.
   const sideBySide = document.querySelector<HTMLButtonElement>('[data-testid="chat-group-split-row"]');
   if (!sideBySide) throw new Error("no split direction choice");
   await act(async () => {
     fireEvent.click(sideBySide);
   });
   const tiles = collectTiles(container);
-  if (tiles.length !== 2) throw new Error(`expected 2 tiles, got ${tiles.length}`);
+  if (tiles.length !== expectedTiles) {
+    throw new Error(`expected ${expectedTiles} tiles, got ${tiles.length}`);
+  }
   return tiles;
 }
 

@@ -59,14 +59,14 @@ describe("ApprovalDock", () => {
 
   it("renders without crashing with empty queue", () => {
     const { container } = render(
-      <ApprovalDock queue={[]} onDecide={vi.fn()} />,
+      <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />,
     );
     expect(container).toBeTruthy();
   });
 
   it("renders one named non-modal approval dock with request identity", async () => {
     render(
-      <ApprovalDock queue={[makeRequest()]} onDecide={vi.fn()} />,
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={vi.fn()} />,
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
@@ -87,7 +87,7 @@ describe("ApprovalDock", () => {
   it("never exposes untrusted generic request identity for rationale approvals", () => {
     const rawToolName = "untrusted-request-tool";
     const { container } = render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           id: "rationale-1",
           kind: "rationale",
@@ -126,7 +126,7 @@ describe("ApprovalDock", () => {
 
   it("labels agent-action approval requests separately from tool execution", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[
           makeRequest({
             category: "agent-action",
@@ -151,7 +151,7 @@ describe("ApprovalDock", () => {
 
   it("warns when approval trust origin is missing", async () => {
     render(
-      <ApprovalDock queue={[makeRequest()]} onDecide={vi.fn()} />,
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={vi.fn()} />,
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("출처 미확인");
@@ -162,7 +162,7 @@ describe("ApprovalDock", () => {
   it("calls onDecide when 허용 button clicked", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
@@ -177,7 +177,7 @@ describe("ApprovalDock", () => {
   it("does not convert Enter on a focused deny button into allow-once", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock queue={[makeRequest({
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest({
         toolName: "bash",
         toolCategory: "shell",
         reviewerVerdict: { level: "low", reason: "test fixture — exercise A/D shortcut path, not R-4 HIGH NL gate" },
@@ -202,7 +202,7 @@ describe("ApprovalDock", () => {
   it("keeps advertised A/D shortcuts active when an action button has focus", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock queue={[makeRequest({
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest({
         toolName: "bash",
         toolCategory: "shell",
         reviewerVerdict: { level: "low", reason: "test fixture — exercise A/D shortcut path, not R-4 HIGH NL gate" },
@@ -229,7 +229,7 @@ describe("ApprovalDock", () => {
 
   it("moves across the three decision buttons with Left and Right arrows", async () => {
     render(
-      <ApprovalDock queue={[makeRequest()]} onDecide={vi.fn()} />,
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={vi.fn()} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
 
@@ -250,7 +250,7 @@ describe("ApprovalDock", () => {
 
   it("skips a disabled Always allow decision during arrow navigation", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -278,7 +278,7 @@ describe("ApprovalDock", () => {
     const { container } = render(
       <main data-testid="background-route">
         <button type="button" data-testid="background-action">Background action</button>
-        <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />
+        <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={onDecide} />
       </main>,
     );
 
@@ -304,7 +304,7 @@ describe("ApprovalDock", () => {
   it("renders HIGH approval without any typeable approval control", async () => {
     const onDecide = vi.fn();
     const { container } = render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -327,18 +327,18 @@ describe("ApprovalDock", () => {
     const first = makeRequest({ id: "req-focus-1" });
     const second = makeRequest({ id: "req-focus-2", toolName: "write_file" });
     const { container, rerender } = render(
-      <main>
+      <main data-approval-scope>
         <button type="button" data-testid="return-target">Return target</button>
-        <ApprovalDock queue={[]} onDecide={onDecide} />
+        <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={onDecide} />
       </main>,
     );
     const returnTarget = container.querySelector<HTMLButtonElement>('[data-testid="return-target"]')!;
     returnTarget.focus();
 
     rerender(
-      <main>
+      <main data-approval-scope>
         <button type="button" data-testid="return-target">Return target</button>
-        <ApprovalDock queue={[first, second]} onDecide={onDecide} />
+        <ApprovalDock conversationLabel="conversation" queue={[first, second]} onDecide={onDecide} />
       </main>,
     );
     await waitFor(() => {
@@ -349,9 +349,9 @@ describe("ApprovalDock", () => {
 
     container.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!.focus();
     rerender(
-      <main>
+      <main data-approval-scope>
         <button type="button" data-testid="return-target">Return target</button>
-        <ApprovalDock queue={[second]} onDecide={onDecide} />
+        <ApprovalDock conversationLabel="conversation" queue={[second]} onDecide={onDecide} />
       </main>,
     );
     await waitFor(() => {
@@ -362,9 +362,9 @@ describe("ApprovalDock", () => {
     expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
 
     rerender(
-      <main>
+      <main data-approval-scope>
         <button type="button" data-testid="return-target">Return target</button>
-        <ApprovalDock queue={[]} onDecide={onDecide} />
+        <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={onDecide} />
       </main>,
     );
     await waitFor(() => expect(document.activeElement).toBe(returnTarget));
@@ -373,12 +373,12 @@ describe("ApprovalDock", () => {
   it("obscures only the covered composer and restores it with focus after approval", async () => {
     const request = makeRequest({ id: "req-covered-composer" });
     const { container, rerender } = render(
-      <main data-testid="route-canvas">
+      <main data-testid="route-canvas" data-approval-scope>
         <button type="button" data-testid="background-action">Background action</button>
         <div data-composer-placement="bottom">
           <textarea data-testid="composer-textarea" />
         </div>
-        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+        <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />
       </main>,
     );
     const composer = container.querySelector<HTMLElement>('[data-composer-placement]')!;
@@ -387,12 +387,12 @@ describe("ApprovalDock", () => {
     textarea.focus();
 
     rerender(
-      <main data-testid="route-canvas">
+      <main data-testid="route-canvas" data-approval-scope>
         <button type="button" data-testid="background-action">Background action</button>
         <div data-composer-placement="bottom">
           <textarea data-testid="composer-textarea" />
         </div>
-        <ApprovalDock queue={[request]} onDecide={vi.fn()} />
+        <ApprovalDock conversationLabel="conversation" queue={[request]} onDecide={vi.fn()} />
       </main>,
     );
     await waitFor(() => {
@@ -404,12 +404,12 @@ describe("ApprovalDock", () => {
     expect(background).not.toHaveAttribute("aria-hidden");
 
     rerender(
-      <main data-testid="route-canvas">
+      <main data-testid="route-canvas" data-approval-scope>
         <button type="button" data-testid="background-action">Background action</button>
         <div data-composer-placement="bottom">
           <textarea data-testid="composer-textarea" />
         </div>
-        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+        <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />
       </main>,
     );
     await waitFor(() => {
@@ -422,18 +422,18 @@ describe("ApprovalDock", () => {
   it("hands focus to a question that arrived beneath the approval overlay", async () => {
     const request = makeRequest({ id: "req-question-focus-handoff" });
     const { container, rerender } = render(
-      <main data-testid="route-canvas">
+      <main data-testid="route-canvas" data-approval-scope>
         <div data-composer-placement="bottom">
           <textarea data-testid="composer-textarea" />
         </div>
-        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+        <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />
       </main>,
     );
     const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="composer-textarea"]')!;
     textarea.focus();
 
     rerender(
-      <main data-testid="route-canvas">
+      <main data-testid="route-canvas" data-approval-scope>
         <div data-composer-placement="bottom">
           <textarea data-testid="composer-textarea" />
           <div data-testid="question-overlay">
@@ -442,7 +442,7 @@ describe("ApprovalDock", () => {
             </button>
           </div>
         </div>
-        <ApprovalDock queue={[request]} onDecide={vi.fn()} />
+        <ApprovalDock conversationLabel="conversation" queue={[request]} onDecide={vi.fn()} />
       </main>,
     );
     await waitFor(() => {
@@ -450,7 +450,7 @@ describe("ApprovalDock", () => {
     });
 
     rerender(
-      <main data-testid="route-canvas">
+      <main data-testid="route-canvas" data-approval-scope>
         <div data-composer-placement="bottom">
           <textarea data-testid="composer-textarea" />
           <div data-testid="question-overlay">
@@ -459,13 +459,13 @@ describe("ApprovalDock", () => {
             </button>
           </div>
         </div>
-        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+        <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />
       </main>,
     );
     // Real IPC resolution can cause a second empty-queue render before the
     // browser's next frame; that rerender must not cancel the focus handoff.
     rerender(
-      <main data-testid="route-canvas">
+      <main data-testid="route-canvas" data-approval-scope>
         <div data-composer-placement="bottom">
           <textarea data-testid="composer-textarea" />
           <div data-testid="question-overlay">
@@ -474,7 +474,7 @@ describe("ApprovalDock", () => {
             </button>
           </div>
         </div>
-        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+        <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />
       </main>,
     );
 
@@ -486,7 +486,7 @@ describe("ApprovalDock", () => {
 
   it("keeps Reject as the sole tab stop when approval is invalid", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           kind: "rationale",
           toolCategory: "shell",
@@ -508,7 +508,7 @@ describe("ApprovalDock", () => {
 
   it("does not show tool name when queue is empty", () => {
     render(
-      <ApprovalDock queue={[]} onDecide={vi.fn()} />,
+      <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />,
     );
     expect(document.body.textContent).not.toContain("read_file");
   });
@@ -519,7 +519,7 @@ describe("ApprovalDock", () => {
       makeRequest({ id: "req-2", toolName: "write_file", toolCategory: "write" }),
     ];
     render(
-      <ApprovalDock queue={queue} onDecide={vi.fn()} />,
+      <ApprovalDock conversationLabel="conversation" queue={queue} onDecide={vi.fn()} />,
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
@@ -532,7 +532,7 @@ describe("ApprovalDock", () => {
 
   it("renders the sandbox capability row with ⚠ when kind=none (#691 round-1 user request)", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -559,7 +559,7 @@ describe("ApprovalDock", () => {
 
   it("renders the sandbox capability row WITHOUT ⚠ when kind=asrt + confidence=verified", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -585,7 +585,7 @@ describe("ApprovalDock", () => {
 
   it("renders ⚠ weak when kind=partial (HIGH-1 SOT consumer regression guard)", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -611,7 +611,7 @@ describe("ApprovalDock", () => {
 
   it("renders ℹ fs-only label when kind=fs-only + confidence=verified", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -637,7 +637,7 @@ describe("ApprovalDock", () => {
 
   it("omits the sandbox row entirely when sandboxCapability is undefined", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({ toolName: "read_file", toolCategory: "read" })]}
         onDecide={vi.fn()}
       />,
@@ -649,7 +649,7 @@ describe("ApprovalDock", () => {
 
   it("surfaces captured permission evaluation context instead of reconstructing sandbox details from args", async () => {
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "powershell",
           toolCategory: "shell",
@@ -680,7 +680,7 @@ describe("ApprovalDock", () => {
     const onDecide = vi.fn();
     const onOpenPermanentDeny = vi.fn();
     const { container } = render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[
           makeRequest({
             kind: "out-of-allowed-dir",
@@ -719,7 +719,7 @@ describe("ApprovalDock", () => {
   it("uses the host fallback verdict for a shell out-of-dir exact deny", async () => {
     const onOpenPermanentDeny = vi.fn();
     const { container } = render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           kind: "out-of-allowed-dir",
           toolName: "bash",
@@ -750,7 +750,7 @@ describe("ApprovalDock", () => {
   it("shows a read-only HIGH reason from the originating request and enables explicit approval", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -784,7 +784,7 @@ describe("ApprovalDock", () => {
   it("uses the permission-audit reason for HIGH without asking the user to type", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -815,7 +815,7 @@ describe("ApprovalDock", () => {
   it("does not treat tool input as a user-provided HIGH reason", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolName: "plugin_send",
           toolCategory: "network",
@@ -848,7 +848,7 @@ describe("ApprovalDock", () => {
     // that drops the spread won't pass via TypeScript-only optional shape.
     const onDecide = vi.fn();
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({ trustOrigin: "user-keyboard", approvalCacheKey: "test-key-r5" })]}
         onDecide={onDecide}
       />,
@@ -882,7 +882,7 @@ describe("ApprovalDock", () => {
   it("Allow once never writes exact decision memory", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
@@ -895,7 +895,7 @@ describe("ApprovalDock", () => {
     const onOpenPermanentDeny = vi.fn();
     const onDecide = vi.fn();
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest({
           toolCategory: "write",
           reason: "user confirmation required (category: write, trust: medium)",
@@ -925,7 +925,7 @@ describe("ApprovalDock", () => {
   it("'항상 허용' records a persistent grant", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     const alwaysBtn = Array.from(document.body.querySelectorAll("button")).find(
@@ -948,7 +948,7 @@ describe("ApprovalDock", () => {
     const onDecide = vi.fn();
     const onOpenPermanentDeny = vi.fn();
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest()]}
         onDecide={onDecide}
         onOpenPermanentDeny={onOpenPermanentDeny}
@@ -975,7 +975,7 @@ describe("ApprovalDock", () => {
     const onDecide = vi.fn();
     const onOpenPermanentDeny = vi.fn();
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[makeRequest()]}
         onDecide={onDecide}
         onOpenPermanentDeny={onOpenPermanentDeny}
@@ -1013,11 +1013,11 @@ describe("ApprovalDock", () => {
     const onDecide = vi.fn();
     const first = makeRequest({ id: "req-old" });
     const next = makeRequest({ id: "req-next", toolName: "write_file", args: { path: "/tmp/next" } });
-    const { rerender } = render(<ApprovalDock queue={[first]} onDecide={onDecide} />);
+    const { rerender } = render(<ApprovalDock conversationLabel="conversation" queue={[first]} onDecide={onDecide} />);
 
     fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!);
     await waitFor(() => expect(record).toHaveBeenCalledTimes(1));
-    rerender(<ApprovalDock queue={[next]} onDecide={onDecide} />);
+    rerender(<ApprovalDock conversationLabel="conversation" queue={[next]} onDecide={onDecide} />);
     expect(document.body.querySelector('[data-testid="approval-dock"]'))
       .toHaveAttribute("data-approval-request-id", "req-next");
 
@@ -1028,12 +1028,12 @@ describe("ApprovalDock", () => {
   it("starts every FIFO head with review details collapsed", async () => {
     const first = makeRequest({ id: "req-details-1" });
     const next = makeRequest({ id: "req-details-2", toolName: "write_file" });
-    const { rerender } = render(<ApprovalDock queue={[first]} onDecide={vi.fn()} />);
+    const { rerender } = render(<ApprovalDock conversationLabel="conversation" queue={[first]} onDecide={vi.fn()} />);
     const firstDetails = document.body.querySelector<HTMLDetailsElement>('[data-testid="approval-review-details"]')!;
     fireEvent.click(firstDetails.querySelector("summary")!);
     expect(firstDetails.open).toBe(true);
 
-    rerender(<ApprovalDock queue={[next]} onDecide={vi.fn()} />);
+    rerender(<ApprovalDock conversationLabel="conversation" queue={[next]} onDecide={vi.fn()} />);
     expect(document.body.querySelector<HTMLDetailsElement>('[data-testid="approval-review-details"]')?.open)
       .toBe(false);
   });
@@ -1042,7 +1042,7 @@ describe("ApprovalDock", () => {
     const onDecide = vi.fn();
     const record = window.lvis.userApproval.record as ReturnType<typeof vi.fn>;
     record.mockResolvedValueOnce({ ok: false, error: "managed", message: "disk unavailable" });
-    render(<ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />);
+    render(<ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={onDecide} />);
 
     fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!);
 
@@ -1057,7 +1057,7 @@ describe("ApprovalDock", () => {
   it("keeps Always allow visible but disabled for HIGH verdicts", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock
+      <ApprovalDock conversationLabel="conversation"
         queue={[
           makeRequest({
             reviewerVerdict: { level: "high", reason: "destructive write" },
@@ -1080,7 +1080,7 @@ describe("ApprovalDock", () => {
   it("deny choices never write Store B (no record IPC)", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     const denyBtn = Array.from(document.body.querySelectorAll("button")).find(

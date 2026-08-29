@@ -32,7 +32,7 @@ describe("ToolApprovalContent external agent-action affordances", () => {
   it("keeps the three decisions visible but disables persistence for local-api actions", () => {
     const onDecide = vi.fn();
     const { container } = render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeAgentActionRequest("local-api")}
         onDecide={onDecide}
@@ -54,7 +54,7 @@ describe("ToolApprovalContent external agent-action affordances", () => {
 
   it("keeps persistence visible but disabled for user-keyboard agent actions", () => {
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeAgentActionRequest("user-keyboard")}
         onDecide={vi.fn()}
@@ -73,7 +73,7 @@ describe("ToolApprovalContent external agent-action affordances", () => {
   ] as const)("forces one-shot approval for remote-wire agent actions with %s", (_label, source) => {
     const onDecide = vi.fn();
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeAgentActionRequest("a2a-remote-wire", "a2a-send", source)}
         onDecide={onDecide}
@@ -91,7 +91,7 @@ describe("ToolApprovalContent external agent-action affordances", () => {
   it("keeps persistence visible but disabled for plugin agent actions", () => {
     const onDecide = vi.fn();
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeAgentActionRequest("a2a-remote-wire", "a2a-send", "plugin")}
         onDecide={onDecide}

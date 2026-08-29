@@ -1,5 +1,6 @@
 /**
- * What belongs to a TILE and what belongs to the WINDOW, with two tiles open.
+ * What belongs to a TILE and what belongs to the WINDOW, with two or three
+ * tiles open.
  *
  * Main pushes several surfaces at the renderer that predate tiled chat groups.
  * Each one has to answer the same question — is this news about one
@@ -14,6 +15,7 @@ import {
   collectTiles,
   focusTile,
   forceOverflowingSummaries,
+  splitIntoThreeTiles,
   splitIntoTwoTiles,
   submitChatMessage,
   toggleTileMaximized,
@@ -394,10 +396,10 @@ describe("a turn parked on an approval, with two tiles", () => {
   });
   const band = (tile: { element: HTMLElement }) =>
     tile.element.querySelector('[data-testid="approval-waiting-band"]');
-  const dock = (container: HTMLElement) =>
-    container.querySelectorAll('[data-testid="approval-dock"]');
+  const dock = (within: HTMLElement) =>
+    within.querySelectorAll('[data-testid="approval-dock"]');
 
-  it("says so in the tile holding the session that asked, and nowhere else, until the card is answered", async () => {
+  it("draws the card and the waiting band in the tile holding the session that asked, and nowhere else, until the card is answered", async () => {
     const { container, emitApproval } = await renderApp({ hasApiKey: true });
     const [primary, second] = await splitIntoTwoTiles(container);
 
@@ -405,13 +407,14 @@ describe("a turn parked on an approval, with two tiles", () => {
       emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
     });
 
+    await waitFor(() => expect(dock(second!.element)).toHaveLength(1));
+    expect(dock(primary!.element)).toHaveLength(0);
+    expect(dock(container)).toHaveLength(1);
     await waitFor(() => expect(band(second!)).not.toBeNull());
     expect(band(second!)!.getAttribute("data-tool-names")).toBe("read_file");
     expect(band(primary!)).toBeNull();
-    // The card itself is the window's, shown once.
-    expect(dock(container)).toHaveLength(1);
 
-    const deny = container.querySelector<HTMLButtonElement>('[data-testid="deny-button"]');
+    const deny = second!.element.querySelector<HTMLButtonElement>('[data-testid="deny-button"]');
     expect(deny).not.toBeNull();
     await act(async () => {
       fireEvent.click(deny!);
@@ -419,6 +422,23 @@ describe("a turn parked on an approval, with two tiles", () => {
 
     await waitFor(() => expect(band(second!)).toBeNull());
     await waitFor(() => expect(dock(container)).toHaveLength(0));
+  });
+
+  it("calls the conversation by its title on the card, and keeps the id for the review details", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+
+    await waitFor(() => expect(dock(second!.element)).toHaveLength(1));
+    const label = second!.element.querySelector('[data-testid="approval-conversation"]');
+    expect(label?.textContent).not.toContain(`session-${second!.chatGroupId}`);
+    expect(label?.textContent?.trim().length).toBeGreaterThan(0);
+    expect(
+      second!.element.querySelector('[data-testid="approval-conversation-id"]')?.textContent,
+    ).toContain(`session-${second!.chatGroupId}`);
   });
 
   it("tells the waiting tile that its queued messages are held by the approval", async () => {
@@ -484,6 +504,114 @@ describe("a turn parked on an approval, with two tiles", () => {
     const [primary] = collectTiles(container);
     await waitFor(() => expect(band(primary!)).not.toBeNull());
     expect(band(primary!)!.getAttribute("data-tool-names")).toBe("read_file");
+    await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
+  });
+
+  it("leaves a request that names no conversation to the window's own dock, outside every tile", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ id: "req-host" }));
+    });
+
     await waitFor(() => expect(dock(container)).toHaveLength(1));
+    expect(dock(primary!.element)).toHaveLength(0);
+    expect(dock(second!.element)).toHaveLength(0);
+    expect(band(primary!)).toBeNull();
+    expect(band(second!)).toBeNull();
+  });
+});
+
+describe("cards raised by one of three tiles", () => {
+  const request = (overrides: Record<string, unknown>) => ({
+    id: "req-middle-tile",
+    category: "tool",
+    toolName: "write_file",
+    toolCategory: "write",
+    args: { path: "/tmp/out.md" },
+    reason: "write the summary",
+    createdAt: Date.now(),
+    requireExplicit: false,
+    nonce: "nonce-middle-tile",
+    hmac: "hmac-middle-tile",
+    ...overrides,
+  });
+  const dock = (within: HTMLElement) =>
+    within.querySelectorAll('[data-testid="approval-dock"]');
+  const composer = (tile: { element: HTMLElement }) =>
+    tile.element.querySelector<HTMLElement>('[data-composer-placement]');
+  const textarea = (tile: { element: HTMLElement }) =>
+    tile.element.querySelector<HTMLTextAreaElement>("textarea");
+
+  it("shows the approval card in the tile that asked, while the other two keep their composers, their focus, and their turns", async () => {
+    const { container, api, emitApproval } = await renderApp({ hasApiKey: true });
+    const [first, middle, third] = await splitIntoThreeTiles(container);
+
+    // The user is typing in the first tile when the middle tile's turn asks.
+    await focusTile(first!);
+    await act(async () => {
+      textarea(first!)!.focus();
+    });
+    expect(document.activeElement).toBe(textarea(first!));
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${middle!.chatGroupId}` }));
+    });
+
+    await waitFor(() => expect(dock(middle!.element)).toHaveLength(1));
+    expect(dock(first!.element)).toHaveLength(0);
+    expect(dock(third!.element)).toHaveLength(0);
+    expect(dock(container)).toHaveLength(1);
+
+    // No focus steal: the caret stays where the user was typing.
+    expect(document.activeElement).toBe(textarea(first!));
+    // Only the covered composer is inert; the other two accept input.
+    expect(composer(middle!)).toHaveAttribute("inert");
+    expect(composer(first!)).not.toHaveAttribute("inert");
+    expect(composer(third!)).not.toHaveAttribute("inert");
+
+    // Both neighbours run a turn while the middle tile waits.
+    await submitChatMessage(first!.element, "첫 타일 질문");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
+    await focusTile(third!);
+    await submitChatMessage(third!.element, "셋째 타일 질문");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(2));
+    expect(dock(middle!.element)).toHaveLength(1);
+
+    // Answering in the middle tile clears its card and frees its composer.
+    const approve = middle!.element.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    expect(approve).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(approve!);
+    });
+    await waitFor(() => expect(dock(container)).toHaveLength(0));
+    await waitFor(() => expect(composer(middle!)).not.toHaveAttribute("inert"));
+  });
+
+  it("shows a user-question card in the tile that asked, and only there, while another tile runs a turn", async () => {
+    const { container, api, emitAskUserQuestion } = await renderApp({ hasApiKey: true });
+    const [first, middle, third] = await splitIntoThreeTiles(container);
+
+    await act(async () => {
+      emitAskUserQuestion({
+        id: "ask-middle",
+        sessionId: `session-${middle!.chatGroupId}`,
+        questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
+        createdAt: Date.now(),
+      });
+    });
+
+    const question = (tile: { element: HTMLElement }) =>
+      tile.element.querySelector('[data-testid="question-overlay"]');
+    await waitFor(() => expect(question(middle!)).not.toBeNull());
+    expect(question(first!)).toBeNull();
+    expect(question(third!)).toBeNull();
+
+    await focusTile(first!);
+    await submitChatMessage(first!.element, "첫 타일은 계속 진행");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
+    expect(question(middle!)).not.toBeNull();
+    expect(question(first!)).toBeNull();
   });
 });

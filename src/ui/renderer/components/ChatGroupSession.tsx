@@ -4,11 +4,13 @@ import { ChatContextProvider, type ChatContextValue } from "../context/ChatConte
 import { ChatView } from "../ChatView.js";
 import { chatGroupApi } from "./ChatGroupFrame.js";
 import {
+  sessionOwnedBy,
   tileDrawsSession,
   useRegisterChatGroupSession,
   type ChatGroupSessionRegistry,
   type OverlayCardPlacement,
 } from "./chat-group-session-registry.js";
+import { useApprovalSurface } from "../hooks/use-approval.js";
 import { useChatState } from "../hooks/use-chat-state.js";
 import { useChatStatusIndicators } from "../hooks/use-chat-status-indicators.js";
 import { useContextBudget } from "../hooks/use-context-budget.js";
@@ -25,7 +27,7 @@ import { formatIpcError } from "../format-ipc-error.js";
 import { lookupBillablePricingOptional } from "../../../shared/pricing-data.js";
 import { McpPromptArgsDialog } from "../dialogs/McpPromptArgsDialog.js";
 import type { Attachment } from "../types/attachments.js";
-import type { ApprovalRequest, LvisApi } from "../types.js";
+import type { LvisApi } from "../types.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
@@ -120,15 +122,6 @@ export interface ChatGroupEnvironment {
   onPluginPrimaryAction: (id: string, chatGroupId: string) => void;
   onRoutineAcknowledge: React.ComponentProps<typeof ChatView>["onRoutineAcknowledge"];
   approvalSentenceInterceptSubmit: React.ComponentProps<typeof ChatView>["approvalSentenceInterceptSubmit"];
-  /**
-   * The window's approval queue. The card for its head is shown once for the
-   * window; each tile reads the queue for the requests its OWN conversation
-   * (or a sub-agent it spawned) is parked on, so the wait is explained in the
-   * tile that is waiting and in no other.
-   */
-  approvalQueue: readonly ApprovalRequest[];
-  /** Forget requests the host settled without an answer from this window. */
-  dropSettledApprovals: (ids: readonly string[]) => void;
 
   // project binding
   activeProject: React.ComponentProps<typeof ChatView>["activeProject"];
@@ -192,7 +185,7 @@ export function ChatGroupSession({
   const ownedChildSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const ownsSession = useCallback(
     (sessionId: string) =>
-      sessionId === currentSessionIdRef.current || ownedChildSessionIdsRef.current.has(sessionId),
+      sessionOwnedBy(currentSessionIdRef.current, ownedChildSessionIdsRef.current, sessionId),
     [],
   );
   const focusedRef = useRef(focused);
@@ -218,15 +211,19 @@ export function ChatGroupSession({
   useLayoutEffect(() => {
     focusedRef.current = focused;
   }, [focused]);
-  // Same commit-time discipline as the session id below: the listener reads the
-  // ref from an IPC callback, so it must never see a render that was discarded.
-  useLayoutEffect(() => {
-    ownedChildSessionIdsRef.current = new Set(
+  const ownedChildSessionIds = useMemo(
+    () => new Set(
       subAgentSpawns
         .map((spawn) => spawn.childSessionId)
         .filter((childSessionId): childSessionId is string => Boolean(childSessionId)),
-    );
-  }, [subAgentSpawns]);
+    ),
+    [subAgentSpawns],
+  );
+  // Same commit-time discipline as the session id below: the listener reads the
+  // ref from an IPC callback, so it must never see a render that was discarded.
+  useLayoutEffect(() => {
+    ownedChildSessionIdsRef.current = ownedChildSessionIds;
+  }, [ownedChildSessionIds]);
 
   const {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted,
@@ -555,15 +552,24 @@ export function ChatGroupSession({
 
   // ── the approvals this tile's turn is parked on ────────────────────────────
 
+  // The approval card is drawn where the conversation that asked is shown.
+  // This tile claims the sessions it owns (its own, and its sub-agents'), so
+  // the window leaves their cards to it; the cards render inside this tile's
+  // conversation column (ChatView) and nowhere else.
+  const approvals = useApprovalSurface();
+  useEffect(
+    () => approvals.claims.claim(chatGroupId, ownsSession),
+    [approvals.claims, chatGroupId, ownsSession],
+  );
   // A request names the session that asked. A sub-agent's ask names the
   // child's session, which the tile that spawned it also owns — its turn is
-  // the one waiting on the answer.
+  // the one waiting on the answer. Read from state, not from the refs the
+  // predicate above uses: those are written at commit, one render later.
   const pendingApprovals = useMemo(
-    () => env.approvalQueue.filter((req) =>
+    () => approvals.queue.filter((req) =>
       req.sessionId !== undefined
-        && (req.sessionId === currentSessionId
-          || subAgentSpawns.some((spawn) => spawn.childSessionId === req.sessionId))),
-    [env.approvalQueue, currentSessionId, subAgentSpawns],
+        && sessionOwnedBy(currentSessionId, ownedChildSessionIds, req.sessionId)),
+    [approvals.queue, currentSessionId, ownedChildSessionIds],
   );
 
   // A turn that ends while an ask of ITS OWN session is still parked here ended
@@ -573,11 +579,11 @@ export function ChatGroupSession({
   // reach anything. A child's ask is not this turn's to close: a sub-agent can
   // outlive its parent's turn, and `agent-action` asks are not turn-bound.
   const turnEndApprovalsRef = useRef({
-    pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: env.dropSettledApprovals, t,
+    pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: approvals.dropSettled, t,
   });
   useLayoutEffect(() => {
     turnEndApprovalsRef.current = {
-      pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: env.dropSettledApprovals, t,
+      pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: approvals.dropSettled, t,
     };
   });
   useEffect(() => api.onChatStream((ev) => {

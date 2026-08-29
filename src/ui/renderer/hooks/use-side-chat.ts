@@ -22,11 +22,12 @@
  * lightweight hook; they gate on `event.streamId` (a number) BEFORE any reducer
  * runs, so they are orthogonal to the entry shape.
  *
- * Tool APPROVAL is NOT handled here: the side loop shares the
- * host's global ApprovalGate, which broadcasts on the app-global
- * `lvis:approval:request` channel and surfaces in the main app-level
- * route-independent ApprovalDock (App.tsx `useApproval`). Only the informational
- * `permission_review` STATUS card flows through this transcript.
+ * Tool APPROVAL is NOT handled here: the side loop shares the host's global
+ * ApprovalGate, which broadcasts on the app-global `lvis:approval:request`
+ * channel into the window's one queue (App.tsx `useApproval`). SideChatView
+ * claims this loop's `sessionId` there and draws the card inside its own
+ * panel. Only the informational `permission_review` STATUS card flows through
+ * this transcript.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../../i18n/runtime.js";
