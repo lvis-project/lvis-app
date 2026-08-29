@@ -528,7 +528,7 @@ Official deployment references: [Tailscale Serve](https://tailscale.com/docs/fea
 - `src/api/__tests__/tailnet-web-session-store.test.ts`
 - `src/main/__tests__/tailnet-sharing-owner-service.test.ts`
 - `src/ipc/domains/__tests__/tailnet-sharing.test.ts`
-- `src/ui/renderer/tabs/__tests__/TailnetAccessTab.test.tsx`
+- `src/ui/renderer/tabs/__tests__/TailnetAccessContent.test.tsx`
 - `src/main/__tests__/tailnet-surface-server.test.ts`
 - `src/api/__tests__/tailnet-controller-receipt-store.test.ts`
 - `src/permissions/__tests__/permission-manager.test.ts`
