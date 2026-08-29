@@ -31,7 +31,7 @@ export interface McpServerApproval {
   revokedAt?: string;
 
 
-  transport: McpTransport;
+  transport: McpTransportKind;
 
   allowedCommands?: string[];
 
@@ -114,7 +114,7 @@ export interface McpGlobalRules {
  *                (validation path); runtime client is not implemented — prefer `http`.
  * - `websocket`: not implemented at the client layer — governance validation only.
  */
-export type McpTransport = "stdio" | "http" | "sse" | "websocket";
+type McpTransportKind = "stdio" | "http" | "sse" | "websocket";
 export type McpCapability = "tools" | "resources" | "prompts";
 
 // ─── Config: discriminated union on `transport` ────
