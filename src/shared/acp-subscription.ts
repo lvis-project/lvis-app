@@ -10,6 +10,8 @@
  * providers.
  */
 
+import { isRecord } from "./is-record.js";
+
 export const ACP_SUBSCRIPTION_PROVIDER_IDS = ["kimi-code", "grok-build"] as const;
 
 export type AcpSubscriptionProviderId = (typeof ACP_SUBSCRIPTION_PROVIDER_IDS)[number];
@@ -46,10 +48,6 @@ export const DEFAULT_ACP_SUBSCRIPTION_PROMPT_CAPABILITIES: AcpSubscriptionPrompt
   image: false,
   embeddedContext: false,
 });
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** Parse only the stable ACP initialize capability shape, fail closed otherwise. */
 export function acpSubscriptionPromptCapabilitiesFromInitialize(

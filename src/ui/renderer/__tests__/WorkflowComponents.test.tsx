@@ -628,6 +628,25 @@ describe("SessionTodoPanel", () => {
     expect(queryByTestId("session-todo-panel")).toBeNull();
   });
 
+  it("ignores an array push payload (an array is not a record)", async () => {
+    let pushPayload: ((p: unknown) => void) | null = null;
+    const api = fakeApi({
+      listSessionTodos: () => Promise.resolve([]),
+      onSessionTodoChanged: ((handler: (p: unknown) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { queryByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-strict" />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      pushPayload!([{ id: "ghost", content: "array payload", status: "pending" }]);
+    });
+    expect(queryByTestId("session-todo-panel")).toBeNull();
+  });
+
   it("ignores push events until the active chat session id is known", async () => {
     let pushPayload: ((p: {
       sessionId: string;

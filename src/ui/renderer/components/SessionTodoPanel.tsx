@@ -18,6 +18,7 @@ import {
   type SessionTodoStatus,
 } from "../../../shared/session-todo.js";
 import type { LvisApi } from "../types.js";
+import { isRecord } from "../../../shared/is-record.js";
 
 const STATUS_BADGE: Record<SessionTodoStatus, { labelKey: string; cls: string; dot: string }> = {
   pending: {
@@ -36,10 +37,6 @@ const STATUS_BADGE: Record<SessionTodoStatus, { labelKey: string; cls: string; d
     dot: "bg-success",
   },
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function isSessionTodoItemArray(value: unknown): value is SessionTodoItem[] {
   if (!Array.isArray(value)) return false;

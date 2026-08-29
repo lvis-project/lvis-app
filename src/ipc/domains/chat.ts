@@ -58,7 +58,6 @@ import {
   handleChatSessions,
   handleChatGetHistory,
   handleChatSessionHistory,
-  isSafeSessionId,
   personaPromptIdFromUserMessage,
   resolvePersonaRolePrompt,
   sanitizeOutgoingTurnContent,
@@ -1215,7 +1214,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.chat.sessionResume, async (e, sessionId: string, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.sessionResume, e); return UNAUTHORIZED_FRAME; }
-    if (!isSafeSessionId(sessionId)) {
+    if (!isValidSessionId(sessionId)) {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
     const group = groupOf(chatGroupId);
@@ -2050,7 +2049,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       }
       const group = groupOf(chatGroupId);
       const p = (payload ?? {}) as Record<string, unknown>;
-      const originSessionId = typeof p.originSessionId === "string" && isSafeSessionId(p.originSessionId)
+      const originSessionId = typeof p.originSessionId === "string" && isValidSessionId(p.originSessionId)
         ? p.originSessionId
         : "";
       if (!originSessionId) return { ok: false, error: "invalid-origin-session-id" };
@@ -2059,7 +2058,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       }
       const runner = deps.getSubAgentRunner?.();
       if (!runner) return { ok: false, error: "sub-agent runner not configured" };
-      const childSessionId = typeof p.childSessionId === "string" && isSafeSessionId(p.childSessionId)
+      const childSessionId = typeof p.childSessionId === "string" && isValidSessionId(p.childSessionId)
         ? p.childSessionId
         : undefined;
       if (!childSessionId) return { ok: false, error: "invalid-child-session-id" };

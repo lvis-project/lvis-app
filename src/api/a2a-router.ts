@@ -25,6 +25,7 @@ import {
 } from "../shared/a2a-wire.js";
 import { parseA2AStrictJson } from "./a2a-strict-json.js";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
+import { isRecord } from "../shared/is-record.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -109,10 +110,6 @@ export interface CreateA2AHttpRouterOptions {
   advertisedOrigin?: string;
   audit?: (event: A2AHttpRouterAuditEvent) => void;
   log?: (message: string) => void;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const CORE_A2A_RESPONSE_HEADERS = new Set(["content-type", "a2a-version"]);

@@ -7,9 +7,9 @@ export const en = {
     "execution='llm-session' starts an LLM conversation at the specified time; " +
     "'notification-only' sends an OS notification only. " +
     "Repeat modes: none/daily/weekly/monthly/interval/cron. " +
-    "If only a date is provided for schedule.at (YYYY-MM-DD), the default time 09:00 KST is used. " +
+    "If only a date is provided for schedule.at (YYYY-MM-DD), the default time is 09:00 in the host's local time zone. " +
     "Example: daily 9 AM report → execution:'llm-session', " +
-    "schedule:{at:'2026-05-09T09:00:00+09:00', repeat:{kind:'daily'}}, " +
+    "schedule:{at:'2026-05-09T09:00:00', repeat:{kind:'daily'}}, " +
     "prePrompt:'Write today\\'s daily report'",
   "be_routineSchedule.executionDescription":
     "Execution mode. llm-session=start LLM conversation, notification-only=notification only",
@@ -18,7 +18,7 @@ export const en = {
     "repeat.kind: none|daily|weekly|monthly|interval|cron. " +
     "cron type requires only repeat.expression (5-field cron).",
   "be_routineSchedule.atDescription":
-    "ISO 8601 datetime (e.g. '2026-05-09T09:00:00+09:00') or YYYY-MM-DD",
+    "ISO 8601 datetime (e.g. '2026-05-09T09:00:00') or YYYY-MM-DD",
   "be_routineSchedule.intervalMsDescription": "interval type only: interval in ms",
   "be_routineSchedule.expressionDescription": "cron type only: 5-field cron expression",
   "be_routineSchedule.prePromptDescription":
@@ -41,9 +41,9 @@ export const ko: Record<keyof typeof en, string> = {
     "execution='llm-session'이면 지정 시각에 LLM 대화를 시작하고, " +
     "'notification-only'이면 OS 알림만 발송합니다. " +
     "반복 방식: none/daily/weekly/monthly/interval/cron. " +
-    "schedule.at 에 날짜만 제공(YYYY-MM-DD)하면 기본 시각 09:00 KST 로 처리됩니다. " +
+    "schedule.at 에 날짜만 제공(YYYY-MM-DD)하면 호스트 로컬 시간대의 09:00 으로 처리됩니다. " +
     "예: 매일 오전 9시 데일리 리포트 → execution:'llm-session', " +
-    "schedule:{at:'2026-05-09T09:00:00+09:00', repeat:{kind:'daily'}}, " +
+    "schedule:{at:'2026-05-09T09:00:00', repeat:{kind:'daily'}}, " +
     "prePrompt:'오늘의 데일리 리포트 작성'",
   "be_routineSchedule.executionDescription":
     "실행 모드. llm-session=LLM 대화 시작, notification-only=알림만",
@@ -52,7 +52,7 @@ export const ko: Record<keyof typeof en, string> = {
     "repeat.kind: none|daily|weekly|monthly|interval|cron. " +
     "cron 타입은 repeat.expression(5필드)만 필요.",
   "be_routineSchedule.atDescription":
-    "ISO 8601 datetime (예: '2026-05-09T09:00:00+09:00') 또는 YYYY-MM-DD",
+    "ISO 8601 datetime (예: '2026-05-09T09:00:00') 또는 YYYY-MM-DD",
   "be_routineSchedule.intervalMsDescription": "interval 타입 전용: ms 단위 간격",
   "be_routineSchedule.expressionDescription": "cron 타입 전용: 5필드 cron 표현식",
   "be_routineSchedule.prePromptDescription":

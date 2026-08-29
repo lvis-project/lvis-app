@@ -11,7 +11,7 @@
  * qualifier with the per-dimension breakdown. Display-only — the relaxation
  * control (sandboxRelaxesCategory) is untouched.
  *
- * Locale is pinned to Korean for renderer tests (vitest-locale-ko.ts), so the
+ * Locale is pinned to Korean for renderer tests (vitest-ambient-intl.ts), so the
  * assertions match the Korean catalog.
  */
 import "../../../../../test/renderer/setup.js";

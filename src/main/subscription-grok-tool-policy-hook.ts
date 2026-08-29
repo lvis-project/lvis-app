@@ -25,7 +25,16 @@ const DENY: GrokPreToolPolicyDecision = Object.freeze({
   reason: "LVIS routes tools through its governed host bridge.",
 });
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+/**
+ * Stricter than the shared `isRecord`: a class instance is rejected, not just
+ * `null` and arrays. This is input validation on a policy boundary — the value
+ * is a hook event parsed from another process's stdout, so the only shape this
+ * hook should ever accept is a plain JSON object. Anything carrying a custom
+ * prototype arrived by a route this hook does not model, and the hook denies
+ * rather than reading `toolName` off it. Kept local because it is the one
+ * caller and this file is a standalone process entry point.
+ */
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
@@ -39,7 +48,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Native tools and other MCP servers deny by default.
  */
 export function decideGrokPreToolUse(value: unknown): GrokPreToolPolicyDecision {
-  if (!isRecord(value)) return DENY;
+  if (!isPlainObjectRecord(value)) return DENY;
   const toolName = value.toolName;
   return typeof toolName === "string"
     && (toolName === MCP_CATALOG_SEARCH_TOOL || ALLOWED_BRIDGE_TOOL.test(toolName))

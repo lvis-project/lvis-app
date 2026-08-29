@@ -48,6 +48,7 @@ import {
   SubscriptionAttachmentTransportError,
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
+import { isRecord } from "../shared/is-record.js";
 
 const MAX_RPC_LINE_BYTES = 1_000_000;
 /** Native image cap that always fits the ACP JSONL transport with room for text. */
@@ -327,10 +328,6 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
       this.waiter = { resolve: resolveWaiter, reject: rejectWaiter };
     });
   }
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function boundedString(value: unknown, maxLength: number): string | null {

@@ -55,6 +55,7 @@ import {
   type ElicitationEnumValue,
   type ElicitationFieldKind as ElicitationSchemaFieldKind,
 } from "../../../shared/mcp-elicitation-schema.js";
+import { isRecord } from "../../../shared/is-record.js";
 
 type ElicitationFieldKind = ElicitationSchemaFieldKind;
 type ElicitationFormValue = string | boolean;
@@ -89,10 +90,6 @@ const INTEGER_INPUT_RE = /^[+-]?\d+$/;
 const EMPTY_ENUM_OPTION_LABEL = '""';
 
 const UNSUPPORTED_ELICITATION_SCHEMA: ElicitationSchemaParseResult = { supported: false, fields: [] };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function isBoilerplateApprovalReason(value: string): boolean {
   const normalized = value.trim();

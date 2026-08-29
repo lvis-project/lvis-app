@@ -15,6 +15,8 @@
  * concerns (labels) on top; it must never re-decide support.
  */
 
+import { isRecord } from "./is-record.js";
+
 /** Field types the host can render and validate. */
 export type ElicitationFieldKind = "string" | "number" | "integer" | "boolean";
 
@@ -42,10 +44,6 @@ export type ParsedElicitationSchema = {
 const MAX_ELICITATION_FIELDS = 12;
 
 const ELICITATION_FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function isElicitationEnumValue(value: unknown): value is ElicitationEnumValue {
   if (value === null) return true;

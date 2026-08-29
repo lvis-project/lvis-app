@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { SandboxCapability } from "./sandbox-capability.js";
 import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
+import { isRecord } from "../shared/is-record.js";
 
 export const HOST_SHELL_EXECUTION_PLAN_VERSION = "host-shell-execution-plan/v2" as const;
 
@@ -321,10 +322,6 @@ export interface ParsedHostShellExecutionInput {
   readonly command: string;
   readonly cwd: string | undefined;
   readonly timeoutSeconds: number;
-}
-
-function isRecord(input: unknown): input is Record<string, unknown> {
-  return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
 /**

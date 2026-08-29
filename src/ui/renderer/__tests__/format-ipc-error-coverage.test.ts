@@ -133,7 +133,7 @@ describe("formatIpcError — full IPC error code coverage", () => {
   it("every common IPC error code resolves to a non-empty localized message", () => {
     // After the i18n migration, COMMON_IPC_ERROR_MESSAGES maps each code to a
     // translation KEY; formatIpcError resolves it through t(). This suite runs
-    // under the Korean test locale (see vitest-locale-ko setup), so every code
+    // under the Korean test locale (see vitest-ambient-intl setup), so every code
     // must resolve to a non-empty Korean message — the same invariant the old
     // "values are Korean" assertion enforced, now through the translation layer.
     for (const code of Object.keys(COMMON_IPC_ERROR_MESSAGES)) {

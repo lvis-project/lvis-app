@@ -214,6 +214,13 @@ function stampCreatedAt(message: GenericMessage): GenericMessage {
 /**
  * Give the row a durable identity if it does not already carry one.
  *
+ * Owns every row that exists in memory: appended live, or restored into this
+ * history. The id is random because nothing else ever has to reproduce it —
+ * this history is the only thing holding the row. The other minter,
+ * `legacyRowId` in memory/memory-manager.ts, owns rows that predate ids in a
+ * session *file*, where two independent readers must derive the same name, so
+ * it hashes (session, position) instead of drawing a uuid.
+ *
  * Idempotent by design: a caller that minted the id before the append (so it
  * could announce the row on the timeline in the same breath) keeps its own,
  * and compaction clones keep theirs. DLP-safe because the id is persisted and

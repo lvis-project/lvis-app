@@ -13,6 +13,7 @@ import { maskA2AMessage } from "../engine/a2a-subagent-message-codec.js";
 import { A2A_EXACT_SEND_REPLAY_RETENTION_MS } from "./a2a-remote-contracts.js";
 import type { A2AOsEncryption } from "./a2a-remote-store.js";
 import { canonicalizeA2ARemoteTask } from "./a2a-task-store.js";
+import { isRecord } from "../shared/is-record.js";
 
 const STORE_VERSION = 2;
 const DEFAULT_FILE = "exact-send-replay.json";
@@ -84,10 +85,6 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validRecord(value: unknown): value is ReplayRecord {

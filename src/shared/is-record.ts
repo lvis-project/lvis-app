@@ -3,10 +3,11 @@
  *
  * Arrays are `typeof === "object"` in JS, so a guard that only checks
  * `typeof value === "object" && value !== null` admits them. Callers asking
- * "is this a record" want a keyed object and must not treat an array as one —
- * otherwise the same input is a record to one guard and not-a-record to the ~38
- * sibling copies that already exclude arrays, and a JSON array (common in
- * LLM/provider response bodies) slips into a record-only branch.
+ * "is this a record" want a keyed object and must not treat an array as one, or
+ * a JSON array (common in LLM/provider response bodies) slips into a
+ * record-only branch. This is the single home for that guard: every caller
+ * imports it so one input cannot be a record to one call site and not to
+ * another.
  *
  * This intentionally does NOT add a prototype check: class instances (e.g. the
  * AI SDK's `APICallError`, a plain `Error`) must still count as records, because

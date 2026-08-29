@@ -10,6 +10,8 @@
  * the renderer-writable settings store.
  */
 
+import { isRecord } from "./is-record.js";
+
 /** Where a key's effective value came from. */
 type TailnetObserverConfigSourceView = "file" | "env-override" | "unset";
 
@@ -90,10 +92,6 @@ export interface TailnetObserverConfigApi {
 }
 
 export const DEFAULT_TAILNET_OBSERVER_VIEW_PORT = 46_173;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** Validate a config view crossing a trust boundary in either direction. */
 export function parseTailnetObserverConfigView(

@@ -14,7 +14,7 @@ import { lookupBillablePricingOptional } from "../../../shared/pricing-data.js";
 import { highlightText } from "../utils/html-preview.js";
 import { trustOriginLabel } from "../utils/trust-origin-label.js";
 import { classifyTurnEntries, isTurnStartEntry } from "../utils/classify-turn-entries.js";
-import { formatHhMmKst } from "../utils/format-time.js";
+import { formatHhMm } from "../../../shared/format-time.js";
 import { entryRenderRevision } from "../utils/chat-entry-revision.js";
 import { AssistantCard } from "./AssistantCard.js";
 import { UserMessageEditor } from "./UserMessageEditor.js";
@@ -307,7 +307,7 @@ export function TranscriptRenderer({
           !viewMode && (!!setEditingEntryIdx || !!onFork || !!onReturnHere);
         // The send time is persisted on the message, so it is shown as recorded
         // or not at all — a card with no recorded time must not invent one.
-        const sentAtLabel = formatHhMmKst(entry.createdAt);
+        const sentAtLabel = formatHhMm(entry.createdAt);
         rendered.push(
           <div
             key={idx}

@@ -23,6 +23,8 @@ import {
 } from "../utils/tool-input-paths.js";
 import { displaySafeLabel } from "../../../shared/display-safe-text.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../../../shared/mcp-resource-bounds.js";
+import { isRecord } from "../../../shared/is-record.js";
+import { formatBytes } from "../../../lib/turn-summary-format.js";
 
 type ToolItem = Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
 
@@ -179,10 +181,6 @@ function compactDetail(path: string): string {
   const parts = normalized.split("/").filter(Boolean);
   if (parts.length <= 3) return path;
   return `${parts[0]}/.../${parts.slice(-2).join("/")}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isLikelyPath(value: string): boolean {
@@ -459,7 +457,7 @@ export function collectChatPreviewModel({
         id: targetId,
         kind: "image",
         title: attachment.path ? basename(attachment.path) : `Image #${attachment.n}`,
-        subtitle: `${attachment.width}x${attachment.height} · ${Math.round(attachment.bytes / 1024)} KB`,
+        subtitle: `${attachment.width}x${attachment.height} · ${formatBytes(attachment.bytes)}`,
         sourceLabel: "attachment",
         createdOrder: order++,
         path: attachment.path,
@@ -486,7 +484,7 @@ export function collectChatPreviewModel({
         id: targetId,
         kind: "file",
         title: attachment.name,
-        subtitle: `${attachment.ext.toUpperCase()} · ${Math.round(attachment.bytes / 1024)} KB`,
+        subtitle: `${attachment.ext.toUpperCase()} · ${formatBytes(attachment.bytes)}`,
         sourceLabel: "attachment",
         createdOrder: order++,
         path: attachment.path,

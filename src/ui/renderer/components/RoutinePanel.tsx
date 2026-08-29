@@ -25,6 +25,7 @@ import type { LvisApi, PluginCardSummary } from "../types.js";
 import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, RoutineSchedule } from "../../../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;
@@ -55,7 +56,7 @@ function describeSchedule(routine: RoutineRecord): string {
   const s = routine.schedule;
   if (!s) return routine.trigger === "shutdown" ? t("routinePanel.onShutdown") : t("routinePanel.noSchedule");
   const repeatKind = s.repeat?.kind;
-  const atStr = s.at ? new Date(s.at).toLocaleString("ko-KR") : "";
+  const atStr = s.at ? formatMediumDateTime(s.at) : "";
   if (repeatKind === "cron") {
     const expr = (s.repeat as { kind: "cron"; expression: string }).expression;
     return t("routinePanel.cronSchedule", { expr });
@@ -156,10 +157,15 @@ function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListIte
   );
 }
 
+/**
+ * `firedAt` is read back off disk, so an unparseable value is possible and
+ * shows raw rather than as "Invalid Date". The formatting itself is the
+ * shared one — this wrapper owns only that fallback.
+ */
 function formatSessionTime(firedAt: string): string {
   const parsed = new Date(firedAt);
   if (Number.isNaN(parsed.getTime())) return firedAt;
-  return parsed.toLocaleString("ko-KR");
+  return formatMediumDateTime(parsed.getTime());
 }
 
 // ─── Add Routine Modal ────────────────────────────────────────────────────────

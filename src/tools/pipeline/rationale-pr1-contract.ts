@@ -16,6 +16,7 @@ import {
   type HostAnchorRoundReservationReceipt,
   type TriggeringBatchDisposition,
 } from "./rationale-control.js";
+import { isRecord } from "../../shared/is-record.js";
 
 /** Frozen PR(1) contracts only. This module grants no execution authority. */
 export type ReviewerReevaluationOutcome = Exclude<ReviewerDispatchOutcome, "cache" | "approval-memory" | "host-determined">;
@@ -60,10 +61,6 @@ const SCOPE_ALIGNMENTS: readonly Exclude<ReviewerScopeAlignment, "unknown">[] = 
   "aligned", "unclear", "outside",
 ];
 
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function exact(value: object, expected: readonly string[], label: string): void {
   const actual = Object.keys(value).sort();

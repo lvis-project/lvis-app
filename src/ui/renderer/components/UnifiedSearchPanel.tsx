@@ -14,6 +14,7 @@ import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { highlightText } from "../utils/html-preview.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatMediumDateTime } from "../../../shared/format-time.js";
 
 type ConversationMatch = {
   entryIndex: number;
@@ -289,7 +290,7 @@ export function UnifiedSearchPanel({
               {sessionResults.map((session) => (
                 <SearchResultButton
                   key={`memory-session:${session.sessionId}:${session.timestamp}`}
-                  label={t("unifiedSearchPanel.labelConversationContent", { date: new Date(session.timestamp).toLocaleString() })}
+                  label={t("unifiedSearchPanel.labelConversationContent", { date: formatMediumDateTime(session.timestamp) })}
                   meta={session.sessionId.slice(0, 8)}
                   onClick={() => handleLoadSession(session.sessionId)}
                 >
@@ -300,7 +301,7 @@ export function UnifiedSearchPanel({
                 <SearchResultButton
                   key={`session-title:${session.id}`}
                   label={t("unifiedSearchPanel.labelSessionTitle")}
-                  meta={new Date(session.modifiedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
+                  meta={formatMediumDateTime(session.modifiedAt)}
                   onClick={() => handleLoadSession(session.id)}
                 >
                   {highlightText(session.title || t("unifiedSearchPanel.untitledSession"), trimmedQuery, { caseSensitive }) ?? (session.title || t("unifiedSearchPanel.untitledSession"))}
@@ -317,7 +318,7 @@ export function UnifiedSearchPanel({
                 <SearchResultButton
                   key={`starred:${item.id}`}
                   label={item.messageIndex === -1 ? t("unifiedSearchPanel.labelSessionStarred") : t("unifiedSearchPanel.labelMessageStarred")}
-                  meta={new Date(item.starredAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
+                  meta={formatMediumDateTime(item.starredAt)}
                   onClick={() => handleLoadSession(item.sessionId)}
                 >
                   {highlightText(previewText(item.text), trimmedQuery, { caseSensitive }) ?? previewText(item.text)}
@@ -335,7 +336,7 @@ export function UnifiedSearchPanel({
                 <SearchResultButton
                   key={`routine:${routine.id}`}
                   label={routine.execution === "llm-session" ? t("unifiedSearchPanel.labelLlmRoutine") : t("unifiedSearchPanel.labelNotificationRoutine")}
-                  meta={routine.lastFiredAt ? new Date(routine.lastFiredAt).toLocaleString("ko-KR") : routine.id.slice(0, 8)}
+                  meta={routine.lastFiredAt ? formatMediumDateTime(routine.lastFiredAt) : routine.id.slice(0, 8)}
                   onClick={onOpenRoutinesView}
                 >
                   <span className="font-medium">{highlightText(routineTitle(routine), trimmedQuery, { caseSensitive }) ?? routineTitle(routine)}</span>
@@ -358,7 +359,7 @@ export function UnifiedSearchPanel({
                 <SearchResultButton
                   key={`note:${note.title}:${index}`}
                   label={note.title}
-                  meta={note.updatedAt ? new Date(note.updatedAt).toLocaleString() : t("unifiedSearchPanel.metaMemory")}
+                  meta={note.updatedAt ? formatMediumDateTime(note.updatedAt) : t("unifiedSearchPanel.metaMemory")}
                   onClick={onOpenMemoryView}
                 >
                   {highlightText(previewText(note.excerpt ?? ""), trimmedQuery, { caseSensitive }) ?? previewText(note.excerpt ?? "")}

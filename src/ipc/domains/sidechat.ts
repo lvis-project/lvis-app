@@ -42,7 +42,8 @@ import {
   STREAM_TURN_OPTIONS,
   type ConversationStreamEventSink,
 } from "../handlers/chat-stream.js";
-import { isSafeSessionId, sanitizeOutgoingTurnContent, validateUserContentParts } from "../handlers/chat.js";
+import { isValidSessionId } from "../../memory/memory-manager.js";
+import { sanitizeOutgoingTurnContent, validateUserContentParts } from "../handlers/chat.js";
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("sidechat");
@@ -169,7 +170,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.sidechat.load, async (e, sessionId: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.load, e); return { ok: false as const, error: "unauthorized-frame", messages: [] }; }
-    if (!isSafeSessionId(sessionId)) {
+    if (!isValidSessionId(sessionId)) {
       return { ok: false as const, error: "invalid-session-id", messages: [] };
     }
     // Abort any in-flight turn first so its remaining frames never leak into the

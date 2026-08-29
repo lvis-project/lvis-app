@@ -61,6 +61,7 @@ import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { BootContext } from "../context.js";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
 import { captureRationalePolicyEpoch } from "../../tools/pipeline/rationale-policy-epoch.js";
+import { localDateKey } from "../../shared/local-date.js";
 import type { RationaleCoordinatorFactory } from "../../engine/turn/rationale-conversation-orchestration.js";
 
 const log = createLogger("lvis");
@@ -671,7 +672,7 @@ export async function wireConversation(
     // hard line cap; the engine fires this swallow-on-error so it never fails a run.
     onRunComplete: ({ itemId, title, projectRoot }) =>
       appendMemory(workBoardStorage, [
-        `${new Date().toISOString().slice(0, 10)}: autonomous run completed — #${itemId} ${title}`,
+        `${localDateKey(new Date())}: autonomous run completed — #${itemId} ${title}`,
         ],
         projectRoot ? { projectRoot } : undefined,
       ),

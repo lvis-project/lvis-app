@@ -4,17 +4,15 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { StarredView } from "../StarredView.js";
 
-const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Asia/Seoul",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function koreaDateKey(date: Date): string {
-  const parts = KOREA_DATE_KEY_FORMATTER.formatToParts(date);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
+/**
+ * The view buckets by the HOST's civil day. Derived here from `Date`'s local
+ * getters rather than imported from `local-date.ts`, so these expectations are
+ * an independent statement of the day rather than a restatement of the code
+ * under test — and so they hold on a runner in any zone.
+ */
+function hostDateKey(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 describe("StarredView", () => {
@@ -66,7 +64,7 @@ describe("StarredView", () => {
 
   it("renders an LLM-generated daily summary when the usage summary API is available", async () => {
     const now = new Date().toISOString();
-    const selectedKey = koreaDateKey(new Date(now));
+    const selectedKey = hostDateKey(new Date(now));
     const api = {
       starredRemove: vi.fn(async () => ({ ok: true })),
       getUsageRange: vi.fn(async () => ({
@@ -126,7 +124,7 @@ describe("StarredView", () => {
 
   it("labels the heatmap and links audit usage to its conversation without recent session metadata", async () => {
     const now = new Date().toISOString();
-    const selectedKey = koreaDateKey(new Date(now));
+    const selectedKey = hostDateKey(new Date(now));
     const api = {
       starredRemove: vi.fn(async () => ({ ok: true })),
       getUsageRange: vi.fn(async (range: { dateFrom: string; dateTo: string }) => ({
@@ -187,7 +185,7 @@ describe("StarredView", () => {
   });
 
   it("shows provider and model usage for the displayed month without mixing subscription pricing", async () => {
-    const todayKey = koreaDateKey(new Date());
+    const todayKey = hostDateKey(new Date());
     const monthKey = todayKey.slice(0, 7);
     const [year, month] = monthKey.split("-").map(Number);
     const monthRange = {
@@ -266,8 +264,8 @@ describe("StarredView", () => {
     const now = new Date();
     const inactive = new Date(now);
     inactive.setDate(inactive.getDate() - 1);
-    const activeKey = koreaDateKey(now);
-    const inactiveKey = koreaDateKey(inactive);
+    const activeKey = hostDateKey(now);
+    const inactiveKey = hostDateKey(inactive);
     const api = {
       starredRemove: vi.fn(async () => ({ ok: true })),
     } as unknown as Parameters<typeof StarredView>[0]["api"];
@@ -400,4 +398,34 @@ describe("StarredView", () => {
 
     await waitFor(() => expect(onActivateHome).not.toHaveBeenCalled());
   });
+
+  it("renders past a session whose stored timestamp is not a date", async () => {
+    // `modifiedAt` is read off disk, so a truncated record can carry a string
+    // `Date` cannot parse. Before it was rejected at the key boundary it became
+    // the pseudo-key "0NaN-NaN-NaN" and reached the calendar's day parser.
+    const api = {
+      starredRemove: vi.fn(async () => ({ ok: true })),
+    } as unknown as Parameters<typeof StarredView>[0]["api"];
+
+    const { findByText } = render(
+      <StarredView
+        api={api}
+        starred={[]}
+        sessions={[
+          { id: "broken", modifiedAt: "not-a-timestamp", title: "깨진 대화", sessionKind: "main" },
+          { id: "fine", modifiedAt: new Date().toISOString(), title: "정상 대화", sessionKind: "main" },
+        ]}
+        workspaceProjects={[]}
+        currentSessionId=""
+        refreshStarred={vi.fn()}
+        onJumpToSession={vi.fn()}
+        onActivateHome={vi.fn()}
+      />,
+    );
+
+    // The good row still renders — the bad one is dropped from the day index
+    // rather than taking the view down with it.
+    expect(await findByText("정상 대화")).toBeTruthy();
+  });
+
 });

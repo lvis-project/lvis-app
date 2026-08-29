@@ -13,6 +13,7 @@ import {
 } from "./turn/guidance-limits.js";
 import { t } from "../i18n/index.js";
 import { hasControlChars } from "../shared/display-safe-text.js";
+import { isRecord } from "../shared/is-record.js";
 
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
 const MESSAGE_KEYS = new Set([
@@ -35,10 +36,6 @@ const PART_KEYS = new Set([
   "mediaType",
 ]);
 const PART_CONTENT_KEYS = ["text", "raw", "url", "data"] as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => allowed.has(key));

@@ -49,6 +49,7 @@ import {
   type TailnetWebSessionAuthorization,
   type TailnetWebSessionStore,
 } from "./tailnet-web-session-store.js";
+import { isRecord } from "../shared/is-record.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
@@ -2908,10 +2909,6 @@ function isCapabilityKey(value: string): boolean {
     // A capability key is a token spliced into grant strings, so a SPACE in one
     // would split it in two. Stricter than the shared class on purpose.
     && !value.includes(" ");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function positiveInteger(value: number, label: string): number {

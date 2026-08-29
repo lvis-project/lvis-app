@@ -44,6 +44,7 @@ import {
   type RationaleTerminalReason,
   type RationaleTicketStateRecord,
 } from "./rationale-ticket-lifecycle.js";
+import { isRecord } from "../../shared/is-record.js";
 
 function seal<T>(value: T, label: string): T {
   return cloneRationaleCanonicalJson(value, label) as T;
@@ -51,10 +52,6 @@ function seal<T>(value: T, label: string): T {
 
 function equal(a: unknown, b: unknown): boolean {
   return canonicalStringify(a) === canonicalStringify(b);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function exact(value: object, expected: readonly string[], label: string): void {
