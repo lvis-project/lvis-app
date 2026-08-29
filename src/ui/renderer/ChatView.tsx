@@ -840,7 +840,6 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         reasoningAvailable={reasoningAvailable}
         onToggleThinking={toggleThinking}
         inputStatusRow={inputStatusRow}
-        appMode={appMode}
         onOpenModelSettings={onOpenModelSettings}
         onOpenPermissions={onOpenInputPermissions}
         onOpenApprovalQueue={onOpenApprovalQueue}
