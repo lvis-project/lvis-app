@@ -18,6 +18,7 @@ import {
   HOST_SECRET_READ_MAX_ITEMS,
   findHostSecretReadListViolation,
   isAllowedHostSecretKey,
+  isValidIsoTimestamp,
 } from "../../shared/marketplace-package-assets.js";
 
 /** Per-plugin grant entry. */
@@ -50,13 +51,6 @@ export type WhitelistSignatureEnvelope = SignatureEnvelope;
 // about what a well-formed host-secret key is. Its collection-level counterpart
 // `findHostSecretReadListViolation` (same module) carries the `maxItems` /
 // `uniqueItems` bounds for the same reason.
-
-/** ISO-8601 — accept the subset Date.parse round-trips correctly. */
-function isValidIsoTimestamp(value: unknown): value is string {
-  if (typeof value !== "string" || value.length === 0) return false;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed);
-}
 
 /** Hex sha-256 = 64 lowercase hex digits. */
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
