@@ -1420,11 +1420,6 @@
     {
       "type": "types",
       "file": "src/audit/audit-schema.ts",
-      "name": "PermissionMode"
-    },
-    {
-      "type": "types",
-      "file": "src/audit/audit-schema.ts",
       "name": "RiskVerdict"
     },
     {
@@ -2741,11 +2736,6 @@
       "type": "types",
       "file": "src/ui/renderer/components/mcp-app-host-context.ts",
       "name": "McpUiTheme"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/components/permissions/PermissionModeBadge.tsx",
-      "name": "ModeBadgeVariant"
     },
     {
       "type": "types",

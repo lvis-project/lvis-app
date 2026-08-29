@@ -14,6 +14,7 @@ import {
 } from "../shared/subscription-runtime.js";
 import { isExternalSurfaceInputOrigin } from "../shared/chat-origin.js";
 import { t } from "../i18n/index.js";
+import type { ExecutionMode } from "../shared/permission-mode.js";
 
 export type TokenUsageSegment = {
   vendorProvider: LLMVendor;
@@ -109,7 +110,7 @@ export type StreamEvent = {
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
   /** Permission mode changed by slash command; renderer fans this into the badge event bus. */
-  mode?: "default" | "strict" | "auto" | "allow";
+  mode?: ExecutionMode;
   /** LLM call status events emitted before first stream content arrives. */
   phase?: "attempt" | "retry" | "fallback";
   label?: string;

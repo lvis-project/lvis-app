@@ -17,13 +17,12 @@
  * events without seeing telemetry noise.
  */
 import type { ToolCategory, ToolSource } from "../tools/types.js";
-import type { ExecutionMode } from "../permissions/permission-manager.js";
+import type { ExecutionMode } from "../shared/permission-mode.js";
 import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import type { DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
 
 export type TrustOrigin = HookTrustOrigin;
-export type PermissionMode = ExecutionMode;
 
 /**
  * Layer 5 reviewer agent verdict — kept structurally compatible with
@@ -270,8 +269,8 @@ export interface AuditDeferredResolve extends AuditCommon {
  */
 export interface AuditModeChange extends AuditCommon {
   decision: "mode_change";
-  fromMode: PermissionMode;
-  toMode: PermissionMode;
+  fromMode: ExecutionMode;
+  toMode: ExecutionMode;
   durable: boolean;
   /**
    * Present when an explicit user action is the confirmation surface for a

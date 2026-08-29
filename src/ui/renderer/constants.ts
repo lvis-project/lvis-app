@@ -22,7 +22,7 @@ export const DEFAULT_TOAST_TTL_MS = 4000;
  */
 export const LONG_TOAST_TTL_MS = 5000;
 
-import type { ExecMode } from "./types.js";
+import type { ExecutionMode } from "./types.js";
 import {
   DEFAULT_VISIBLE_LLM_VENDOR_IDS,
   LLM_VENDOR_DEFAULTS,
@@ -177,7 +177,7 @@ export function budgetToEffortIndex(budget: number): number {
 
 // auto-wired from this mode (handleModeChange), so this is the only permission
 // axis the user sets.
-export const EXEC_MODE_OPTIONS: { value: ExecMode; readonly label: string; readonly description: string }[] = [
+export const EXEC_MODE_OPTIONS: { value: ExecutionMode; readonly label: string; readonly description: string }[] = [
   {
     value: "strict",
     get label() { return t("constants.execModeStrictLabel"); },

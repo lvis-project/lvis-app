@@ -90,6 +90,7 @@ import type {
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
 export type { PermissionEvaluationContext } from "../../permissions/evaluation-context.js";
+export type { ExecutionMode } from "../../shared/permission-mode.js";
 
 // Re-export checkpoint types for renderer-side consumers (type-only, no main-process runtime).
 export type { CheckpointTrigger, Checkpoint } from "../../memory/memory-manager.js";
@@ -2160,8 +2161,6 @@ export type LvisMcpApi = {
   /** #885 b3 — subscribe to the server-disconnected broadcast; returns an unsubscribe fn. */
   onServerDisconnected: (handler: (serverId: string) => void) => () => void;
 };
-
-export type ExecMode = "default" | "strict" | "auto" | "allow";
 
 export type RenderHtmlPayload = {
   kind: "lvis.render_html";

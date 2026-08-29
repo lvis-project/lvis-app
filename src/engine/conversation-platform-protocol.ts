@@ -36,6 +36,7 @@ import {
   toSafeTurnFailureSummary,
   type TurnFailureSummary,
 } from "./turn-failure-summary.js";
+import type { ExecutionMode } from "../shared/permission-mode.js";
 
 /** Version of the semantic platform event contract. */
 export const PLATFORM_CONVERSATION_PROTOCOL_VERSION = 1 as const;
@@ -169,7 +170,7 @@ export type PlatformConversationEvent =
       readonly systemNotice?: "context-error" | "stream-error";
     };
   }
-  | { readonly kind: "permission.mode.changed"; readonly mode: "default" | "strict" | "auto" | "allow" }
+  | { readonly kind: "permission.mode.changed"; readonly mode: ExecutionMode }
   | {
     readonly kind: "compaction.started";
     readonly triggerSource: Parameters<NonNullable<TurnCallbacks["onCompactStarted"]>>[0]["triggerSource"];
