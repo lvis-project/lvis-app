@@ -1698,7 +1698,11 @@ export function Sidebar({
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
-        "absolute left-[8px] bottom-[12px] z-30 flex min-h-0 flex-col",
+        // The card's air, from the same `--shell-card-inset*` tokens the docked
+        // side panel's wrapper uses — the two cards are the same shape and have
+        // to sit on the same lines, and the chat group's bottom edge is lined up
+        // against this one.
+        "absolute left-(--shell-card-inset) bottom-(--shell-card-inset-bottom) z-30 flex min-h-0 flex-col",
         darwinTopClearance ? "top-[4px]" : "top-[6px]",
         collapsed && "pointer-events-none",
       ].join(" ")}

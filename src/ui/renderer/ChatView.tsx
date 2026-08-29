@@ -864,10 +864,13 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
           className={[
             // The card's air — the floating sidebar's own insets — lives on this
             // wrapper in both modes, so the reserve the transcript is pushed by
-            // and the box the card floats in are the same width. In px, not
-            // rem: the reserve (`SIDE_PANEL_CARD_INSET`) is a pixel count the
-            // main process also uses, and the user's font scale must not move it.
-            "z-40 flex min-w-0 shrink-0 origin-right justify-end pt-[8px] pr-[8px] pb-[12px] pl-[8px] will-change-[width,opacity,transform]",
+            // and the box the card floats in are the same width. It reads the
+            // `--shell-card-inset*` tokens the sidebar card is inset by, which
+            // is what keeps the two cards' edges on the same lines; those are
+            // px, not rem, because the reserve (`SIDE_PANEL_CARD_INSET`) is a
+            // pixel count the main process also uses and the user's font scale
+            // must not move it.
+            "z-40 flex min-w-0 shrink-0 origin-right justify-end pt-(--shell-card-inset) pr-(--shell-card-inset) pb-(--shell-card-inset-bottom) pl-(--shell-card-inset) will-change-[width,opacity,transform]",
             panelLayout.mode === "overlay"
               ? "absolute inset-y-0 right-0"
               : "relative self-stretch",

@@ -9,15 +9,19 @@
  * `SIDE_PANEL_MIN_WIDTH`, and the renderer clamps the drag handle to the same
  * floor. 448px == 28rem.
  */
+import { SHELL_GUTTER } from "./shell-geometry.js";
+
 export const SIDE_PANEL_MIN_WIDTH = 448;
 /**
  * The panel is a raised card inside its tile — the floating sidebar's own
- * shape — with 8px of air on each side. What a tile reserves for it, and what
- * `sidePanelWidth` persists, is the card plus that air; while a tile can hold
- * the reserve the card itself never drops under `SIDE_PANEL_MIN_WIDTH`, and a
- * tile narrower than that gives the card all of itself but the air.
+ * shape — with one `SHELL_GUTTER` of air on each side, which is why the inset
+ * is that gutter doubled rather than a 16 of its own. What a tile reserves for
+ * it, and what `sidePanelWidth` persists, is the card plus that air; while a
+ * tile can hold the reserve the card itself never drops under
+ * `SIDE_PANEL_MIN_WIDTH`, and a tile narrower than that gives the card all of
+ * itself but the air.
  */
-const SIDE_PANEL_CARD_INSET = 16;
+const SIDE_PANEL_CARD_INSET = SHELL_GUTTER * 2;
 export const SIDE_PANEL_MIN_RESERVE = SIDE_PANEL_MIN_WIDTH + SIDE_PANEL_CARD_INSET;
 /** The reserve with no width persisted: the card at its floor. */
 export const SIDE_PANEL_DEFAULT_WIDTH = SIDE_PANEL_MIN_WIDTH + SIDE_PANEL_CARD_INSET;
@@ -26,10 +30,11 @@ export const SIDE_PANEL_DEFAULT_WIDTH = SIDE_PANEL_MIN_WIDTH + SIDE_PANEL_CARD_I
  * Primary (left) navigation sidebar width geometry. The sidebar is a floating
  * card whose expanded width is user-adjustable via a drag handle on its inner
  * edge; the value is persisted under `SystemSettings.sidebarWidth` (same durable
- * shell-preference family as `sidePanelWidth`). The default 232px matches the
- * historical `<main>` left-padding reserve (pl-[14.5rem]); the card itself is
- * inset ~8px from the window edge, so the padding tracks `sidebarWidth`
- * directly. Collapsed rail width is fixed and not covered by these bounds.
+ * shell-preference family as `sidePanelWidth`). This is the CARD's width; the
+ * card is inset one `SHELL_GUTTER` from the window edge and wants another
+ * between itself and the content, so `<main>`'s left padding is
+ * `sidebarWidth + SHELL_GUTTER` — the width plus the gutter, not the width
+ * alone. Collapsed rail width is fixed and not covered by these bounds.
  */
 export const SIDEBAR_MIN_WIDTH = 200;
 export const SIDEBAR_MAX_WIDTH = 480;
