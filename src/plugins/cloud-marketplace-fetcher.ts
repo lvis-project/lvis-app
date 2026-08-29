@@ -48,6 +48,7 @@ import {
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
 
+import { SHA256_HEX } from "../lib/hex-digest-equal.js";
 /**
  * Allowlist for npm package identifiers. Matches scoped (@scope/name) and
  * unscoped (name) package names. Rejects path traversal, CLI flags,
@@ -696,8 +697,10 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
         artifact_sha256?: unknown;
       };
       if (typeof version !== "string" || version.length === 0) continue;
-      if (typeof sha !== "string" || !/^[a-f0-9]{64}$/i.test(sha)) continue;
-      map[version] = sha.toLowerCase();
+      if (typeof sha !== "string") continue;
+      const digest = sha.toLowerCase();
+      if (!SHA256_HEX.test(digest)) continue;
+      map[version] = digest;
     }
     return Object.keys(map).length > 0 ? Object.freeze(map) : undefined;
   }
@@ -827,8 +830,9 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
 
     // Expose version and channel for update detection
     if (version) item.version = version;
-    if (typeof row.latest_artifact_sha256 === "string" && /^[a-f0-9]{64}$/i.test(row.latest_artifact_sha256)) {
-      item.artifactSha256 = row.latest_artifact_sha256.toLowerCase();
+    if (typeof row.latest_artifact_sha256 === "string") {
+      const digest = row.latest_artifact_sha256.toLowerCase();
+      if (SHA256_HEX.test(digest)) item.artifactSha256 = digest;
     }
     const byVersion = this.artifactHashesByVersion(row);
     if (byVersion !== undefined) {
@@ -927,8 +931,8 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     const artifactSha256 = this.requireResolverString(
       resolved.artifact_sha256,
       `resolved_artifact.artifact_sha256 for "${catalogId}"`,
-    );
-    if (!/^[a-f0-9]{64}$/i.test(artifactSha256)) {
+    ).toLowerCase();
+    if (!SHA256_HEX.test(artifactSha256)) {
       throw new Error(
         `resolved_artifact.artifact_sha256 for "${catalogId}" must be a SHA-256 hex digest`,
       );

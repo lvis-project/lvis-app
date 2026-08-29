@@ -32,6 +32,7 @@ import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-i
 import { isRecord } from "../shared/is-record.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
 import { dlpSafeCandidate } from "../shared/dlp-safe-id.js";
+import { SHA256_HEX } from "../lib/hex-digest-equal.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
@@ -831,16 +832,19 @@ function normalizeMemoryCapture(value: unknown): MemoryCaptureV1 | null {
     || value.method !== "llm-refined"
     || !MEMORY_CAPTURE_TRIGGERS.has(value.trigger as MemoryCaptureTrigger)
     || typeof value.sourceDigest !== "string"
-    || !/^[a-f0-9]{64}$/i.test(value.sourceDigest)
     || !isValidMemoryTimestamp(value.capturedAt)
   ) {
     return null;
   }
+  // Caller-supplied provenance: normalise the digest here, then hold it to the
+  // strict lowercase shape every digest this app mints already has.
+  const sourceDigest = value.sourceDigest.toLowerCase();
+  if (!SHA256_HEX.test(sourceDigest)) return null;
   return {
     v: 1,
     method: "llm-refined",
     trigger: value.trigger as MemoryCaptureTrigger,
-    sourceDigest: value.sourceDigest.toLowerCase(),
+    sourceDigest,
     capturedAt: value.capturedAt,
   };
 }
@@ -884,15 +888,17 @@ function decodeMemoryMetadata(encoded: string): MemoryMetadataV1 | null {
       || raw.derivation.v !== 1
       || raw.derivation.type !== "consolidated-overview"
       || typeof raw.derivation.sourceFingerprint !== "string"
-      || !/^[a-f0-9]{64}$/i.test(raw.derivation.sourceFingerprint)
       || !isValidMemoryTimestamp(raw.derivation.generatedAt)
     ) {
       return null;
     }
+    // On-disk frontmatter: normalise at the read boundary, then strict.
+    const sourceFingerprint = raw.derivation.sourceFingerprint.toLowerCase();
+    if (!SHA256_HEX.test(sourceFingerprint)) return null;
     derivation = {
       v: 1,
       type: "consolidated-overview",
-      sourceFingerprint: raw.derivation.sourceFingerprint.toLowerCase(),
+      sourceFingerprint,
       generatedAt: raw.derivation.generatedAt,
     };
   }
@@ -3557,7 +3563,7 @@ export class MemoryManager {
       && this.isValidConsolidationScope(snapshot.scope)
       && Array.isArray(snapshot.sources)
       && typeof snapshot.sourceFingerprint === "string"
-      && /^[a-f0-9]{64}$/i.test(snapshot.sourceFingerprint);
+      && SHA256_HEX.test(snapshot.sourceFingerprint);
   }
 
   private getConsolidationSnapshotForScope(scope: MemoryScope): MemoryConsolidationSnapshot {

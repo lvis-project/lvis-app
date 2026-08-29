@@ -35,8 +35,15 @@
 import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 
-/** Lowercase hex encoding of a 32-byte digest — SHA-256, or an HMAC over it. */
-const SHA256_HEX = /^[0-9a-f]{64}$/;
+/**
+ * Lowercase hex encoding of a 32-byte digest — SHA-256, or an HMAC over it.
+ *
+ * Strict on case: every digest this app mints is lowercase (`digest("hex")`),
+ * so an uppercase value is not one of ours and is refused as such. A caller
+ * that accepts a digest from an external party normalises it with
+ * `.toLowerCase()` at that boundary and then checks it against this pattern.
+ */
+export const SHA256_HEX = /^[0-9a-f]{64}$/;
 
 /**
  * Whether `left` and `right` are the same SHA-256 hex digest, compared without

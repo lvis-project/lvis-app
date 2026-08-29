@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { timingSafeEqualHexDigest } from "../hex-digest-equal.js";
+import { SHA256_HEX, timingSafeEqualHexDigest } from "../hex-digest-equal.js";
 
 const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 
@@ -56,5 +56,16 @@ describe("timingSafeEqualHexDigest", () => {
 
   it("never throws on a length mismatch the way timingSafeEqual does", () => {
     expect(timingSafeEqualHexDigest(sha256("a"), "ab")).toBe(false);
+  });
+});
+
+describe("SHA256_HEX", () => {
+  it("is the one strict shape: 64 lowercase hex characters, nothing else", () => {
+    const good = sha256("a");
+    expect(SHA256_HEX.test(good)).toBe(true);
+    expect(SHA256_HEX.test(good.toUpperCase())).toBe(false);
+    expect(SHA256_HEX.test(good.slice(0, 63))).toBe(false);
+    expect(SHA256_HEX.test(`${good}0`)).toBe(false);
+    expect(SHA256_HEX.test(`${good.slice(0, 63)}g`)).toBe(false);
   });
 });
