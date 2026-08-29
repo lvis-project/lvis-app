@@ -16,7 +16,7 @@
  */
 import { BrowserWindow as ElectronBrowserWindow } from "electron";
 import type { BrowserWindow } from "electron";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../../main/host-allow-list.js";
 import type { AuthRedirectCatchers } from "../../../main/auth-redirect-catcher.js";
 import { pickFoldersForPlugin } from "../../../main/host-api/pick-folders.js";
@@ -104,6 +104,7 @@ import {
   triggerDenyAuditThrottle,
 } from "./trigger-gate.js";
 import type { LateBindingRefs } from "../plugin-runtime.js";
+import { sha256Hex } from "../../../lib/hex-digest-equal.js";
 
 const log = createLogger("lvis");
 
@@ -435,7 +436,7 @@ export function createHostApiFactory(
       // object as `{}`, so distinct manifests collapse onto near-identical
       // digests and the Tier-3 pin stops discriminating.
       const canonical = canonicalJSON(manifest);
-      const manifestSha256 = createHash("sha256").update(canonical).digest("hex");
+      const manifestSha256 = sha256Hex(canonical);
       // Structural effect observability — wrap the whole hostApi so EVERY method
       // (and any future-added one) auto-records its host-observed effect on the
       // ambient per-invocation ledger, looked up by method PATH in the

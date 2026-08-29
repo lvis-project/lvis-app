@@ -129,3 +129,13 @@ export interface PluginMarketplaceItem {
   /** Safe login metadata surfaced by lvis-marketplace for MCP entries. */
   mcpAuth?: McpAuthMetadata;
 }
+
+/**
+ * A signed registry document after envelope verification, together with where
+ * it was read from. The whitelist, admission and revocation registries all
+ * cache exactly this pair.
+ */
+export interface ResolvedSignedSnapshot<Doc, Source extends string> {
+  doc: Doc;
+  source: Source;
+}

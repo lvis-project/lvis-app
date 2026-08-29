@@ -9,8 +9,8 @@
  */
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
 import { isPlainRecord } from "../shared/is-record.js";
+
 const MAX_INPUT_BYTES = 256 * 1024;
 const ALLOWED_BRIDGE_TOOL = /^lvis-host-tools__[A-Za-z][A-Za-z0-9_-]{0,127}$/u;
 const MCP_CATALOG_SEARCH_TOOL = "search_tool";

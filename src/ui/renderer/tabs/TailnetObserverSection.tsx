@@ -16,7 +16,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Switch } from "../../../components/ui/switch.js";
-import { SettingsSection } from "../components/PageShell.js";
+import { SettingsSection, type SettingsSectionFeedback } from "../components/PageShell.js";
 import {
   TAILNET_OBSERVER_CONFIG_KEYS,
   type TailnetObserverConfigKeyView,
@@ -28,8 +28,6 @@ import type { LvisApi } from "../types.js";
 export interface TailnetObserverSectionProps {
   api: Pick<LvisApi, "tailnetObserver">;
 }
-
-type Feedback = { tone: "error" | "success"; text: string } | null;
 
 /**
  * Kebab-case codes from the host, rendered as localized text.
@@ -78,7 +76,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
   const [draft, setDraft] = useState<TailnetObserverConfigView | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [feedback, setFeedback] = useState<SettingsSectionFeedback>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);

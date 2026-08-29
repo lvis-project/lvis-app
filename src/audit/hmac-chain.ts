@@ -45,8 +45,9 @@ import {
 import { join } from "node:path";
 import { platform } from "node:process";
 import { lvisHome } from "../shared/lvis-home.js";
-
+import { isMissingPathError } from "../lib/atomic-file.js";
 import { SHA256_HEX } from "../lib/hex-digest-equal.js";
+
 export const GENESIS_MARKER = "genesis";
 const AUDIT_HMAC_SECRET_NAME = "audit-hmac.key";
 const SAFE_STORAGE_SECRET_PREFIX = "safe:v1:";
@@ -127,8 +128,7 @@ function readSecretFileUtf8Bounded(
     try {
       fd = openSync(filePath, flags);
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      if (isMissingPathError(error)) return null;
       throw error;
     }
     const before = fstatSync(fd, { bigint: true });

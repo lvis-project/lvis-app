@@ -22,7 +22,7 @@
  */
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
-import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
+import { hasUserKeyboardIntentPayload, USER_KEYBOARD_REQUIRED } from "../../shared/chat-origin.js";
 import {
   isAwayAuthorityArmInput,
   isAwayAuthorityIntentOnlyInput,
@@ -33,7 +33,6 @@ import {
 import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 
-import { isRecord } from "../../shared/is-record.js";
 const DISABLED = Object.freeze({
   ok: false as const,
   error: "away-authority-disabled" as const,
@@ -42,7 +41,6 @@ const INPUT_INVALID = Object.freeze({
   ok: false as const,
   error: "away-authority-input-invalid" as const,
 });
-const KEYBOARD_REQUIRED = Object.freeze({ ok: false as const, error: "user-keyboard-required" as const });
 const OPERATION_REJECTED = Object.freeze({
   ok: false as const,
   error: "away-authority-operation-rejected" as const,
@@ -79,10 +77,6 @@ const MODE_CATEGORIES: Record<AwayAuthorityMode, readonly string[]> = {
   "read-only": ["read"],
   "read-write": ["read", "write"],
 };
-
-function hasIntent(payload: unknown): boolean {
-  return isRecord(payload) && hasUserKeyboardIntent(payload.intent);
-}
 
 export function registerAwayAuthorityHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.awayAuthority.status, (event) => {
@@ -122,7 +116,7 @@ export function registerAwayAuthorityHandlers(deps: IpcDeps): void {
     }
     const gate = deps.approvalGate;
     if (!gate) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isAwayAuthorityArmInput(payload)) return INPUT_INVALID;
     try {
       // The conversation is read here, never received: the renderer says which
@@ -154,7 +148,7 @@ export function registerAwayAuthorityHandlers(deps: IpcDeps): void {
     }
     const gate = deps.approvalGate;
     if (!gate) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     if (!isAwayAuthorityIntentOnlyInput(payload)) return INPUT_INVALID;
     try {
       // `false` means there was nothing armed, which is the state the caller

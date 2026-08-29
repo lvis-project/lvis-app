@@ -2,10 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
 import {
-  DEFAULT_LLM_VENDOR,
   getLlmVendorSettings,
-  isLLMVendor,
-  type LLMVendor,
+  narrowLlmVendor,
 } from "../../../shared/llm-vendor-defaults.js";
 import { DEPTH_BUDGET } from "./ThinkingButton.js";
 
@@ -22,10 +20,6 @@ function budgetToDepth(budget: number): Depth {
     if (delta < bestDelta) { best = d; bestDelta = delta; }
   }
   return best;
-}
-
-function narrowVendor(raw: unknown): LLMVendor {
-  return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
 }
 
 export interface ReasoningLevelOptions {
@@ -56,7 +50,7 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
   useEffect(() => {
     let cancelled = false;
     const seed = (llm: { provider: unknown; vendors: Parameters<typeof getLlmVendorSettings>[0] }) => {
-      const budget = getLlmVendorSettings(llm.vendors, narrowVendor(llm.provider)).thinkingBudgetTokens;
+      const budget = getLlmVendorSettings(llm.vendors, narrowLlmVendor(llm.provider)).thinkingBudgetTokens;
       if (!cancelled && typeof budget === "number") setDepth(budgetToDepth(budget));
     };
     let unsubscribe = () => {};
@@ -74,7 +68,7 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
     try {
       const api = getApi();
       const s = await api.getSettings();
-      const provider = narrowVendor(s.llm.provider);
+      const provider = narrowLlmVendor(s.llm.provider);
       await api.updateSettings({
         llm: { vendors: { [provider]: { thinkingBudgetTokens: DEPTH_BUDGET[next] } } },
       });

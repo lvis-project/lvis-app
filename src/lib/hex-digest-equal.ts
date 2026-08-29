@@ -33,7 +33,7 @@
  * that makes that argument true rather than assumed.
  */
 import { Buffer } from "node:buffer";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 /**
  * Lowercase hex encoding of a 32-byte digest — SHA-256, or an HMAC over it.
@@ -44,6 +44,19 @@ import { timingSafeEqual } from "node:crypto";
  * `.toLowerCase()` at that boundary and then checks it against this pattern.
  */
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * SHA-256 of `input` as 64 lowercase hex characters — the encoding
+ * {@link SHA256_HEX} describes and {@link timingSafeEqualHexDigest} compares.
+ *
+ * Strings are hashed as UTF-8, which is also what `Hash#update` does when no
+ * encoding is given; bytes are hashed as-is. Twelve modules carried their own
+ * `sha256`/`hash`/`digest` one-liner, differing only in the input type they
+ * happened to accept.
+ */
+export function sha256Hex(input: string | Uint8Array): string {
+  return createHash("sha256").update(input).digest("hex");
+}
 
 /**
  * Whether `left` and `right` are the same SHA-256 hex digest, compared without

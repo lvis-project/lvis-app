@@ -6,13 +6,14 @@ import {
   normalizeProviderToolAliasName,
   normalizeProviderToolAliasText,
 } from "./tool-name-aliases.js";
+import type { ToolCategory, ToolSource } from "./permission-review-status.js";
 
 export type SerializedHistoryToolCall = {
   id: string;
   name: string;
   input?: Record<string, unknown>;
-  source?: "builtin" | "plugin" | "mcp";
-  category?: "read" | "write" | "shell" | "network" | "meta";
+  source?: ToolSource;
+  category?: ToolCategory;
   pluginId?: string;
   mcpServerId?: string;
 };

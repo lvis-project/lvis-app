@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { canonicalStringify } from "../../permissions/user-approval-store.js";
 import { assertValidToolUseId } from "../../shared/tool-use-id.js";
 import {
@@ -18,6 +18,7 @@ import {
   type ReviewerReevaluationFailureOutcome,
   type ReviewerReevaluationOutcome,
 } from "./rationale-pr1-contract.js";
+import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 function seal<T>(value: T, label: string): T {
   return cloneRationaleCanonicalJson(value, label) as T;
@@ -143,7 +144,8 @@ const STATUS_NAMES: readonly RationaleStatus[] = [
   "not-requested", "pending", "ready", "failed",
 ];
 
-const TERMINAL_STATES: readonly RationaleTicketState[] = [
+/** States a rationale ticket never leaves. */
+export const RATIONALE_TICKET_TERMINAL_STATES: readonly RationaleTicketState[] = [
   "allowed_once", "denied", "cancelled", "expired", "rejected",
 ];
 
@@ -292,7 +294,7 @@ export function validateRationaleTicketRecord(record: RationaleTicketStateRecord
     throw new TypeError("authorization terminal requires a reviewed rationale status");
   }
 
-  if (TERMINAL_STATES.includes(record.state) &&
+  if (RATIONALE_TICKET_TERMINAL_STATES.includes(record.state) &&
       !reasonByState[record.state]?.includes(record.terminalReason as RationaleTerminalReason)) {
     throw new TypeError("terminal state/reason mismatch");
   }
@@ -366,7 +368,7 @@ export function transitionRationaleTicket(
         (event.generationOutcome !== null || event.reevaluationOutcome !== null))) {
     throw new Error("ticket event/outcome binding mismatch");
   }
-  if (TERMINAL_STATES.includes(record.state)) {
+  if (RATIONALE_TICKET_TERMINAL_STATES.includes(record.state)) {
     throw new Error("terminal rationale ticket rejects every event");
   }
   switch (event.event) {
@@ -531,7 +533,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function invocationRecordDigest(record: InvocationAuditRecord): string {
-  return createHash("sha256").update(canonicalStringify(record)).digest("hex");
+  return sha256Hex(canonicalStringify(record));
 }
 
 export function validateInvocationAuditRecord(record: InvocationAuditRecord): void {

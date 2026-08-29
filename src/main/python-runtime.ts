@@ -12,7 +12,6 @@
  */
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isResolvedPathWithin } from "../plugins/plugin-storage-containment.js";
@@ -29,6 +28,7 @@ import {
   trackManagedChildProcess,
 } from "./managed-child-processes.js";
 import { resolveBundledUvBinaryPath } from "./uv-runtime.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("python-runtime");
 
 
@@ -435,7 +435,7 @@ export class PythonRuntimeBootstrapper {
   private async runtimeDirForLockFile(lockFilePath: string): Promise<string> {
     const lockFile = await fs.readFile(lockFilePath);
     const lockBytes = Buffer.isBuffer(lockFile) ? lockFile : Buffer.from(lockFile);
-    const lockHash = createHash("sha256").update(lockBytes).digest("hex").slice(0, 24);
+    const lockHash = sha256Hex(lockBytes).slice(0, 24);
     const uvTarget = this.getCurrentUvTarget();
     return path.join(LVIS_RUNTIME_DIR, "python-envs", `${uvTarget.dir}-py312-${lockHash}`);
   }

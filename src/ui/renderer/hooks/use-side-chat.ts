@@ -40,7 +40,7 @@ import {
   upsertStreamingAssistant,
   upsertStreamingReasoning,
   type ChatEntry,
-  type StreamEvent,
+  type ChatStreamEvent,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
@@ -128,7 +128,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
   // before any reducer, so it stays orthogonal to the richer frame set.
   useEffect(() => {
     if (!api.sideChat) return;
-    const handleSideStreamEvent = (event: StreamEvent) => {
+    const handleSideStreamEvent = (event: ChatStreamEvent) => {
       const streamId = typeof event.streamId === "number" ? event.streamId : null;
       if (streamId !== null) {
         if (activeStreamIdRef.current === null) {
@@ -454,7 +454,7 @@ function dropPendingStreamingAssistant(entries: ChatEntry[]): ChatEntry[] {
   return entries;
 }
 
-function parseTurnSummaryEvent(ev: StreamEvent): Pick<
+function parseTurnSummaryEvent(ev: ChatStreamEvent): Pick<
   Extract<ChatEntry, { kind: "turn_summary" }>,
   | "turnDurationMs"
   | "toolCount"

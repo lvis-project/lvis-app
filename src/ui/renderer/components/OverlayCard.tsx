@@ -32,7 +32,7 @@ import {
   TooltipTrigger,
 } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { formatMediumDateTime } from "../../../shared/format-time.js";
+import { formatMediumDateTime, formatRelativeTime, type RelativeTimeLabels } from "../../../shared/format-time.js";
 
 export interface OverlayCardProps {
   /** Card title — routine name or plugin-supplied title */
@@ -78,22 +78,14 @@ export interface OverlayCardProps {
   kind?: "routine" | "plugin" | "app";
 }
 
-function relativeTime(isoString: string, t: (key: string, vars?: Record<string, string | number>) => string): string {
-  try {
-    const ts = new Date(isoString).getTime();
-    if (!Number.isFinite(ts)) return "";
-    const diffMs = Date.now() - ts;
-    if (diffMs < 0) return t("overlayCard.justNow"); // future timestamp (clock skew) — clamp
-    const diffSec = Math.floor(diffMs / 1000);
-    if (diffSec < 60) return t("overlayCard.secondsAgo", { count: diffSec });
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return t("overlayCard.minutesAgo", { count: diffMin });
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return t("overlayCard.hoursAgo", { count: diffHr });
-    return t("overlayCard.daysAgo", { count: Math.floor(diffHr / 24) });
-  } catch {
-    return "";
-  }
+function relativeTimeLabels(t: (key: string, vars?: Record<string, string | number>) => string): RelativeTimeLabels {
+  return {
+    justNow: () => t("overlayCard.justNow"),
+    secondsAgo: (count) => t("overlayCard.secondsAgo", { count }),
+    minutesAgo: (count) => t("overlayCard.minutesAgo", { count }),
+    hoursAgo: (count) => t("overlayCard.hoursAgo", { count }),
+    daysAgo: (count) => t("overlayCard.daysAgo", { count }),
+  };
 }
 
 export function OverlayCard({
@@ -116,7 +108,7 @@ export function OverlayCard({
   const { t } = useTranslation();
   const [isOverflowing, setIsOverflowing] = useState(false);
   const summaryRef = useRef<HTMLParagraphElement | null>(null);
-  const relTime = useMemo(() => relativeTime(firedAt, t), [firedAt, t]);
+  const relTime = useMemo(() => formatRelativeTime(firedAt, relativeTimeLabels(t)), [firedAt, t]);
 
 
 

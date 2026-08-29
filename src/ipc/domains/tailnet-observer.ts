@@ -9,15 +9,15 @@
  */
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
-import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
+import { hasUserKeyboardIntentPayload, USER_KEYBOARD_REQUIRED } from "../../shared/chat-origin.js";
 import {
   parseTailnetObserverConfigView,
   parseTailnetObserverSnapshot,
 } from "../../shared/tailnet-observer-config.js";
 import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } from "../gated.js";
 import type { IpcDeps } from "../types.js";
-
 import { isRecord } from "../../shared/is-record.js";
+
 const DISABLED = Object.freeze({
   ok: false as const,
   error: "tailnet-observer-unavailable" as const,
@@ -26,15 +26,10 @@ const INPUT_INVALID = Object.freeze({
   ok: false as const,
   error: "tailnet-observer-input-invalid" as const,
 });
-const KEYBOARD_REQUIRED = Object.freeze({ ok: false as const, error: "user-keyboard-required" as const });
 const UNAVAILABLE = Object.freeze({
   ok: false as const,
   error: "tailnet-observer-unavailable" as const,
 });
-
-function hasIntent(payload: unknown): boolean {
-  return isRecord(payload) && hasUserKeyboardIntent(payload.intent);
-}
 
 /**
  * The resolver's own kebab-case codes reach the renderer verbatim.
@@ -75,7 +70,7 @@ export function registerTailnetObserverHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!service) return DISABLED;
-    if (!hasIntent(payload)) return KEYBOARD_REQUIRED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
     const config = isRecord(payload) ? parseTailnetObserverConfigView(payload.config) : null;
     if (config === null) return INPUT_INVALID;
     try {

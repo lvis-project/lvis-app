@@ -33,8 +33,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../shared/subscription-runtime.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
-
+import { hasExactKeys } from "../shared/is-record.js";
 import { isPlainRecord } from "../shared/is-record.js";
+
 const BRIDGE_URL_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.urlEnv;
 const BRIDGE_TOKEN_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.tokenEnv;
 const BRIDGE_HOST = "127.0.0.1";
@@ -81,7 +82,6 @@ function isSafeString(value: unknown, maxLength: number, allowEmpty = false): va
   return isBoundedText(value, maxLength, allowEmpty)
     && !CONTROL_CHARACTERS.test(value);
 }
-
 
 function isBoundedText(value: unknown, maxLength: number, allowEmpty = false): value is string {
   return typeof value === "string"
@@ -140,11 +140,6 @@ export function readSubscriptionToolMcpServerConfig(
   return Object.freeze({ bridgeUrl, token });
 }
 
-function hasOnlyKeys(record: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(record);
-  return keys.length === expected.length && keys.every((key) => expected.includes(key));
-}
-
 function sanitizeJsonValue(
   value: unknown,
   depth = 0,
@@ -198,7 +193,7 @@ function serializedJsonBytes(value: unknown): number | null {
 }
 
 function sanitizeTool(value: unknown): SubscriptionMcpTool | null {
-  if (!isPlainRecord(value) || !hasOnlyKeys(value, ["name", "description", "inputSchema"])) {
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["name", "description", "inputSchema"])) {
     return null;
   }
   const name = ownValue(value, "name");
@@ -225,7 +220,7 @@ function sanitizeTool(value: unknown): SubscriptionMcpTool | null {
     ...(rawSchemaDialect === undefined ? [] : ["$schema"]),
   ];
   if (
-    !hasOnlyKeys(rawInputSchema, allowedSchemaKeys)
+    !hasExactKeys(rawInputSchema, allowedSchemaKeys)
     || schemaType !== "object"
     || !isPlainRecord(rawProperties)
     || (rawAdditionalProperties !== undefined && typeof rawAdditionalProperties !== "boolean")
@@ -265,7 +260,7 @@ function sanitizeTool(value: unknown): SubscriptionMcpTool | null {
 }
 
 function sanitizeToolList(value: unknown): SubscriptionMcpTool[] | null {
-  if (!isPlainRecord(value) || !hasOnlyKeys(value, ["tools"])) return null;
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["tools"])) return null;
   const rawTools = ownValue(value, "tools");
   if (!Array.isArray(rawTools) || rawTools.length > MAX_TOOL_COUNT) return null;
   const tools: SubscriptionMcpTool[] = [];
@@ -282,12 +277,12 @@ function sanitizeToolList(value: unknown): SubscriptionMcpTool[] | null {
 }
 
 function sanitizeCallResult(value: unknown): BridgeCallResult | null {
-  if (!isPlainRecord(value) || !hasOnlyKeys(value, ["content", "isError"])) return null;
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["content", "isError"])) return null;
   const content = ownValue(value, "content");
   const isError = ownValue(value, "isError");
   if (!Array.isArray(content) || content.length !== 1 || typeof isError !== "boolean") return null;
   const first = content[0];
-  if (!isPlainRecord(first) || !hasOnlyKeys(first, ["type", "text"])) return null;
+  if (!isPlainRecord(first) || !hasExactKeys(first, ["type", "text"])) return null;
   const type = ownValue(first, "type");
   const text = ownValue(first, "text");
   if (type !== "text" || !isBoundedText(text, MAX_RESULT_TEXT_LENGTH, true)) return null;

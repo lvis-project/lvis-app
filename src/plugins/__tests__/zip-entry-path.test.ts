@@ -4,6 +4,36 @@ import {
   sanitizeZipEntryPath,
 } from "../zip-entry-path.js";
 
+/**
+ * A published artifact may not ship the plugin's own runtime directories. The
+ * install swap carries the LIVE `data/` into the promoted root as its last
+ * step, so a payload arriving with one leaves two candidates for one state and
+ * no way to merge them — and `run/`/`sockets/` would arrive on top of the
+ * host's and the plugin's socket directories.
+ */
+describe("sanitizeZipEntryPath — reserved runtime directories", () => {
+  it.each([
+    "data/state.json",
+    "data/",
+    "data",
+    "run/worker/control.sock",
+    "sockets/egress.sock",
+    // Case-folded on macOS and Windows, where the payload would land on the
+    // live directory even though the names differ byte for byte.
+    "Data/state.json",
+    "SOCKETS/egress.sock",
+  ])("refuses %s", (entryName) => {
+    expect(() => sanitizeZipEntryPath("ep-api", entryName)).toThrow(
+      /reserved plugin runtime directory name/,
+    );
+  });
+
+  it("keeps the same names when they are nested inside the payload", () => {
+    expect(sanitizeZipEntryPath("ep-api", "dist/data/seed.json")).toBe("dist/data/seed.json");
+    expect(sanitizeZipEntryPath("ep-api", "database/schema.sql")).toBe("database/schema.sql");
+  });
+});
+
 describe("sanitizeZipEntryPath", () => {
   it("preserves an unambiguous relative POSIX member name", () => {
     expect(sanitizeZipEntryPath("ep-api", "skills/attendance/SKILL.md")).toBe(

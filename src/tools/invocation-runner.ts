@@ -122,6 +122,7 @@ import {
 import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
 import type { HostPluginGenerationState } from "../plugins/plugin-host-generation.js";
 import type { PluginGenerationLease } from "../plugins/plugin-generation-coordinator.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("executor");
 
@@ -244,7 +245,7 @@ export async function runToolInvocation(
       } catch (error) {
         const durationMs = Date.now() - startTime;
         const reason = `Plugin generation admission denied: ${
-          error instanceof Error ? error.message : String(error)
+          errorMessage(error)
         }`;
         const denied: PermissionCheckResult = {
           decision: "deny",
@@ -582,7 +583,7 @@ export async function runToolInvocation(
           throw new Error("host-derived operation identity is missing");
         }
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
+        const reason = errorMessage(error);
         const msg = `Plugin operation denied: ${reason}`;
         const durationMs = Date.now() - startTime;
         const denied: PermissionCheckResult = {
@@ -758,7 +759,7 @@ export async function runToolInvocation(
         hostShellExecutionPlanAudit,
       );
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
+      const detail = errorMessage(err);
       const msg = t("be_executor.invalidToolInput", {
         name: toolUse.name,
         error: detail,
@@ -813,7 +814,7 @@ export async function runToolInvocation(
       } catch (err) {
         log.warn(
           "exact permission decision lookup failed; blocking invocation: %s",
-          err instanceof Error ? err.message : String(err),
+          errorMessage(err),
         );
         exactDecisionBlockReason = "exact permission decision store unavailable";
       }
@@ -963,7 +964,7 @@ export async function runToolInvocation(
           reason: approvalReasonPrefix
             ? `${approvalReasonPrefix} ${dirLayerResult.reason}`
             : dirLayerResult.reason,
-          source: source as "builtin" | "plugin" | "mcp",
+          source: source as ToolSource,
           createdAt: Date.now(),
           target: { filePath: outOfAllowedTarget.filePath },
           isReadOnly: deriveApprovalIsReadOnly({
@@ -1022,7 +1023,7 @@ export async function runToolInvocation(
             ...(abortSignal === undefined ? {} : { abortSignal }),
           });
         } catch (approvalErr) {
-          const msg = t("be_executor.dirPolicyError", { name: toolUse.name, error: approvalErr instanceof Error ? approvalErr.message : String(approvalErr) });
+          const msg = t("be_executor.dirPolicyError", { name: toolUse.name, error: errorMessage(approvalErr) });
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);

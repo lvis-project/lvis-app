@@ -13,7 +13,6 @@ import {
   composeOutgoing as composeOutgoingUtil,
 } from "../utils/compose.js";
 import type { getApi } from "../api-client.js";
-import type { useTranslation } from "../../../i18n/react.js";
 import type {
   ChatSendInputOrigin,
   UserKeyboardIntentSnapshot,
@@ -27,9 +26,9 @@ import {
   SESSION_ID_PREFIX_LOOKUP_QUERY,
   findSessionByIdPrefix,
 } from "../../../shared/session-lookup.js";
+import type { TranslateFn } from "../../../i18n/translate.js";
 
 type Api = ReturnType<typeof getApi>;
-type TFn = ReturnType<typeof useTranslation>["t"];
 type ChatState = ReturnType<typeof useChatState>;
 type Sessions = ReturnType<typeof useCurrentSession>;
 type Settings = ReturnType<typeof useSettings>;
@@ -58,7 +57,7 @@ class ChatSendRefusedError extends Error {
 
 export interface UseSendMessageDeps {
   api: Api;
-  t: TFn;
+  t: TranslateFn;
   streaming: boolean;
   checkApiKey: () => Promise<boolean>;
   composeOutgoing: ComposeOutgoingFn;

@@ -38,6 +38,7 @@ import { MCP_RESOURCE_URI_MAX_CHARS } from "../shared/mcp-resource-bounds.js";
 import { MAX_TOOL_RESULT_TOKENS } from "../shared/tool-result-trim.js";
 import { estimateTokens } from "../shared/token-estimate.js";
 import type { McpResourceSummary } from "../mcp/types.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -379,7 +380,7 @@ export function createMcpResourceReadTool(getAccess: McpResourceAccessResolver):
         log.warn(
           `mcp_resource_read failed server=${serverId.slice(0, 64)} `
             + `uri=${uri.slice(0, 256)}: `
-            + scrubShortError(err instanceof Error ? err.message : String(err)),
+            + scrubShortError(errorMessage(err)),
         );
         return errorResult(t("be_mcpResourceTools.readFailed"));
       }

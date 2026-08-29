@@ -21,7 +21,7 @@ import type {
   ToolCategory,
   ToolDecisionOverride,
   ToolExecutionContext,
-  ToolResult,
+  ToolExecutionResult,
 } from "./types.js";
 import type { PluginToolOperationPolicy } from "./plugin-operation-governance.js";
 
@@ -37,7 +37,7 @@ export type {
   ToolCategory,
   ToolDecisionOverride,
   ToolExecutionContext,
-  ToolResult,
+  ToolExecutionResult,
 } from "./types.js";
 
 /**
@@ -178,11 +178,11 @@ export interface Tool {
 
   /**
    * Validate + execute. Implementations parse `rawInput` to whatever
-   * typed shape they need. Returns a {@link ToolResult} (with isError
+   * typed shape they need. Returns a {@link ToolExecutionResult} (with isError
    * for downstream pipeline steps) instead of throwing for normal
    * failures.
    */
-  execute(rawInput: unknown, ctx: ToolExecutionContext): Promise<ToolResult>;
+  execute(rawInput: unknown, ctx: ToolExecutionContext): Promise<ToolExecutionResult>;
 }
 
 /**
@@ -237,7 +237,7 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
   async execute(
     rawInput: unknown,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const parsed = this.inputSchema.parse(rawInput) as z.infer<TSchema>;
     return this.executeTyped(parsed, ctx);
   }
@@ -250,7 +250,7 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
   protected abstract executeTyped(
     input: z.infer<TSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult>;
+  ): Promise<ToolExecutionResult>;
 }
 
 /**
@@ -292,7 +292,7 @@ export interface DynamicToolSpec {
   execute: (
     rawInput: unknown,
     ctx: ToolExecutionContext,
-  ) => Promise<ToolResult>;
+  ) => Promise<ToolExecutionResult>;
   isReadOnly?: (input: unknown) => boolean;
 }
 

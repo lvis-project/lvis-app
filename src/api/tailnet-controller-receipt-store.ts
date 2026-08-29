@@ -2,8 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { hasExactKeys, isRecord } from "../shared/is-record.js";
+import { isNonNegativeSafeInteger } from "../shared/safe-integer.js";
 
-import { isRecord } from "../shared/is-record.js";
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "command-receipts.json";
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -62,16 +63,6 @@ function initialState(): ReceiptStateFile {
   return { version: STORE_VERSION, receipts: [] };
 }
 
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
-function validTimestamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 function validRecord(value: unknown, ttlMs: number): value is ReceiptRecord {
   if (!isRecord(value) || (value.state !== "reserved" && value.state !== "terminal")) return false;
   const expectedKeys = value.state === "reserved"
@@ -79,7 +70,7 @@ function validRecord(value: unknown, ttlMs: number): value is ReceiptRecord {
     : ["keyDigest", "intentDigest", "conversationDigest", "acceptedAt", "expiresAt", "state"];
   if (!hasExactKeys(value, expectedKeys)) return false;
   if (![value.keyDigest, value.intentDigest, value.conversationDigest].every((entry) => typeof entry === "string" && SHA256_HEX.test(entry))) return false;
-  if (!validTimestamp(value.acceptedAt) || !validTimestamp(value.expiresAt) || value.expiresAt <= value.acceptedAt || value.expiresAt - value.acceptedAt !== ttlMs) return false;
+  if (!isNonNegativeSafeInteger(value.acceptedAt) || !isNonNegativeSafeInteger(value.expiresAt) || value.expiresAt <= value.acceptedAt || value.expiresAt - value.acceptedAt !== ttlMs) return false;
   return value.state !== "reserved" || (typeof value.ownerId === "string" && UUID.test(value.ownerId));
 }
 
@@ -201,7 +192,7 @@ export class TailnetControllerReceiptStore {
   private loadAndPrune(): ReceiptStateFile {
     const state = this.load();
     const now = this.now();
-    if (!validTimestamp(now)) throw invalidStoreError();
+    if (!isNonNegativeSafeInteger(now)) throw invalidStoreError();
     // A reserved record means this process may be waiting indefinitely for a
     // local-only decision or an in-flight model/tool turn. Pruning it would
     // turn an idempotent retry into a second remote submission. Only a known
@@ -229,7 +220,7 @@ export class TailnetControllerReceiptStore {
 
   private nextReceiptWindow(): Pick<ReceiptRecord, "acceptedAt" | "expiresAt"> {
     const acceptedAt = this.now();
-    if (!validTimestamp(acceptedAt) || acceptedAt > Number.MAX_SAFE_INTEGER - this.ttlMs) {
+    if (!isNonNegativeSafeInteger(acceptedAt) || acceptedAt > Number.MAX_SAFE_INTEGER - this.ttlMs) {
       throw invalidStoreError();
     }
     return { acceptedAt, expiresAt: acceptedAt + this.ttlMs };

@@ -83,17 +83,36 @@ export function resolveRealEntryPath(entryPath: string): string {
 
 
 /**
- * Compute and ensure the plugin's writable data directory at
- * `<pluginsRoot>/<pluginId>/data/`. Falls back to `<pluginRoot>/data` when
- * `pluginsRoot` is not configured (test harnesses, isolated installs).
+ * Where the plugin's writable data directory IS: `<pluginsRoot>/<pluginId>/data/`,
+ * or `<pluginRoot>/data` when `pluginsRoot` is not configured (test harnesses,
+ * isolated installs).
+ *
+ * Pure. Separate from {@link ensurePluginDataDir} because most callers only
+ * need to know the path, and the ones that CREATE it are a closed set: plugin
+ * load and prepared-artifact activation, both of which run inside the
+ * generation lifecycle. Creating it anywhere else — notably per storage
+ * request — puts a `mkdir` in the window where an install swap has the plugin
+ * root renamed aside, which is how an empty `data/` used to appear at a
+ * promoted root and wedge the carry.
+ */
+export function resolvePluginDataDir(
+  pluginId: string,
+  pluginRoot: string,
+  pluginsRoot: string | undefined,
+): string {
+  const baseRoot = pluginsRoot ?? dirname(pluginRoot);
+  return resolve(baseRoot, pluginId, PLUGIN_DATA_DIR_NAME);
+}
+
+/**
+ * Compute and ensure the plugin's writable data directory.
  */
 export function ensurePluginDataDir(
   pluginId: string,
   pluginRoot: string,
   pluginsRoot: string | undefined,
 ): string {
-  const baseRoot = pluginsRoot ?? dirname(pluginRoot);
-  const dataDir = resolve(baseRoot, pluginId, PLUGIN_DATA_DIR_NAME);
+  const dataDir = resolvePluginDataDir(pluginId, pluginRoot, pluginsRoot);
   mkdirSync(dataDir, { recursive: true });
   // The socket directory beside it, made HERE because this is the one function
   // that owns "bring this plugin's directories into existence" — and because

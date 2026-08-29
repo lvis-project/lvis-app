@@ -12,7 +12,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { collectStreamEvents as collect } from "./test-helpers.js";
 import type { LLMProvider, StreamEvent } from "../../types.js";
 import { FallbackProvider, streamWithFallback } from "../fallback-chain.js";
-import type { FallbackEntry, ProviderFactory } from "../fallback-chain.js";
+import type { FallbackChainEntry, ProviderFactory } from "../fallback-chain.js";
 
 // ─── helpers ────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ const BASE_PARAMS = {
   messages: [{ role: "user" as const, content: "hi" }],
 };
 
-const CHAIN: FallbackEntry[] = [
+const CHAIN: FallbackChainEntry[] = [
   { provider: "openai", model: "fallback-model" },
 ];
 
@@ -201,7 +201,7 @@ describe("(b) primary transient error → fallback succeeds", () => {
     };
     const fallbackProvider = makeProvider("azure-foundry", GOOD_EVENTS);
     const factory: ProviderFactory = vi.fn(() => fallbackProvider);
-    const chain: FallbackEntry[] = [{
+    const chain: FallbackChainEntry[] = [{
       provider: "azure-foundry",
       model: "gpt-5.4-nano",
       baseUrl: "https://example.openai.azure.com/openai/deployments/gpt/",

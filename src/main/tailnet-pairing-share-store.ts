@@ -6,17 +6,19 @@
  * share for one exact current conversation. The persisted state contains no
  * raw Tailnet login, invite code, or conversation id.
  */
-import { createHash, randomBytes as nodeRandomBytes, randomUUID as nodeRandomUuid } from "node:crypto";
+import { randomBytes as nodeRandomBytes, randomUUID as nodeRandomUuid } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
-import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
+import { timingSafeEqualHexDigest, sha256Hex } from "../lib/hex-digest-equal.js";
 import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
+import { hasExactKeys, isRecord } from "../shared/is-record.js";
+import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 
-import { isRecord } from "../shared/is-record.js";
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "pairing-share.json";
 const DEFAULT_INVITE_TTL_MS = 10 * 60 * 1_000;
@@ -135,20 +137,6 @@ function initialState(): StoreState {
   return { version: STORE_VERSION, invitations: [], pairings: [], shares: [] };
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
-function timestamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function epoch(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
-}
-
 function uuid(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
 }
@@ -163,11 +151,11 @@ function digest(value: unknown): value is string {
 
 function validInvitation(value: unknown): value is StoredInvitation {
   return isRecord(value)
-    && exactKeys(value, ["id", "codeDigest", "createdAt", "expiresAt", "state", "pairingId"])
+    && hasExactKeys(value, ["id", "codeDigest", "createdAt", "expiresAt", "state", "pairingId"])
     && uuid(value.id)
     && digest(value.codeDigest)
-    && timestamp(value.createdAt)
-    && timestamp(value.expiresAt)
+    && isNonNegativeSafeInteger(value.createdAt)
+    && isNonNegativeSafeInteger(value.expiresAt)
     && value.expiresAt > value.createdAt
     && (value.state === "open" || value.state === "claimed")
     && ((value.state === "open" && value.pairingId === null)
@@ -177,72 +165,72 @@ function validInvitation(value: unknown): value is StoredInvitation {
 function validPairing(value: unknown): value is StoredPairing {
   if (
     !isRecord(value)
-    || !exactKeys(value, [
+    || !hasExactKeys(value, [
       "id", "actorId", "invitationId", "createdAt", "state", "epoch",
       "expiresAt", "activatedAt", "terminalAt",
     ])
     || !uuid(value.id)
     || !actorId(value.actorId)
     || !uuid(value.invitationId)
-    || !timestamp(value.createdAt)
-    || !epoch(value.epoch)
+    || !isNonNegativeSafeInteger(value.createdAt)
+    || !isPositiveSafeInteger(value.epoch)
     || !["pending", "active", "revoked", "expired"].includes(String(value.state))
-    || !(value.expiresAt === null || timestamp(value.expiresAt))
-    || !(value.activatedAt === null || timestamp(value.activatedAt))
-    || !(value.terminalAt === null || timestamp(value.terminalAt))
+    || !(value.expiresAt === null || isNonNegativeSafeInteger(value.expiresAt))
+    || !(value.activatedAt === null || isNonNegativeSafeInteger(value.activatedAt))
+    || !(value.terminalAt === null || isNonNegativeSafeInteger(value.terminalAt))
   ) {
     return false;
   }
   if (value.state === "pending") {
-    return timestamp(value.expiresAt)
+    return isNonNegativeSafeInteger(value.expiresAt)
       && value.expiresAt > value.createdAt
       && value.activatedAt === null
       && value.terminalAt === null;
   }
   if (value.state === "active") {
     return value.expiresAt === null
-      && timestamp(value.activatedAt)
+      && isNonNegativeSafeInteger(value.activatedAt)
       && value.activatedAt >= value.createdAt
       && value.terminalAt === null;
   }
   return value.expiresAt === null
     && value.activatedAt === null
-    && timestamp(value.terminalAt)
+    && isNonNegativeSafeInteger(value.terminalAt)
     && value.terminalAt >= value.createdAt;
 }
 
 function validShare(value: unknown): value is StoredShare {
   if (
     !isRecord(value)
-    || !exactKeys(value, [
+    || !hasExactKeys(value, [
       "id", "pairingId", "actorId", "pairingEpoch", "conversationDigest",
       "scope", "permission", "createdAt", "expiresAt", "state", "epoch", "terminalAt",
     ])
     || !uuid(value.id)
     || !uuid(value.pairingId)
     || !actorId(value.actorId)
-    || !epoch(value.pairingEpoch)
+    || !isPositiveSafeInteger(value.pairingEpoch)
     || !digest(value.conversationDigest)
     || !uuid(value.scope)
     || (value.permission !== "observe" && value.permission !== "control")
-    || !timestamp(value.createdAt)
-    || !timestamp(value.expiresAt)
+    || !isNonNegativeSafeInteger(value.createdAt)
+    || !isNonNegativeSafeInteger(value.expiresAt)
     || value.expiresAt <= value.createdAt
     || !["active", "revoked", "expired"].includes(String(value.state))
-    || !epoch(value.epoch)
-    || !(value.terminalAt === null || timestamp(value.terminalAt))
+    || !isPositiveSafeInteger(value.epoch)
+    || !(value.terminalAt === null || isNonNegativeSafeInteger(value.terminalAt))
   ) {
     return false;
   }
   return value.state === "active"
     ? value.terminalAt === null
-    : timestamp(value.terminalAt) && value.terminalAt >= value.createdAt;
+    : isNonNegativeSafeInteger(value.terminalAt) && value.terminalAt >= value.createdAt;
 }
 
 function validState(value: unknown): value is StoreState {
   if (
     !isRecord(value)
-    || !exactKeys(value, ["version", "invitations", "pairings", "shares"])
+    || !hasExactKeys(value, ["version", "invitations", "pairings", "shares"])
     || value.version !== STORE_VERSION
     || !Array.isArray(value.invitations)
     || !Array.isArray(value.pairings)
@@ -293,16 +281,12 @@ function capacity(): Error {
   return new Error("tailnet-pairing-share-store-capacity-reached");
 }
 
-function hash(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
 function inviteDigest(code: string): string {
-  return hash("tailnet-pairing-invite-v1\0" + code);
+  return sha256Hex("tailnet-pairing-invite-v1\0" + code);
 }
 
 function conversationDigest(value: string): string {
-  return hash("tailnet-share-conversation-v1\0" + value);
+  return sha256Hex("tailnet-share-conversation-v1\0" + value);
 }
 
 function permits(granted: TailnetSharePermission, required: TailnetSharePermission): boolean {
@@ -319,7 +303,7 @@ function addDuration(now: number, duration: number): number {
 }
 
 function nextEpoch(value: number): number {
-  if (!epoch(value) || value === Number.MAX_SAFE_INTEGER) throw fail();
+  if (!isPositiveSafeInteger(value) || value === Number.MAX_SAFE_INTEGER) throw fail();
   return value + 1;
 }
 
@@ -347,11 +331,11 @@ function binding(pairing: StoredPairing, share: StoredShare): TailnetPairingShar
 
 function validBinding(value: unknown): value is TailnetPairingShareBinding {
   return isRecord(value)
-    && exactKeys(value, ["pairingId", "pairingEpoch", "shareId", "shareEpoch", "scope"])
+    && hasExactKeys(value, ["pairingId", "pairingEpoch", "shareId", "shareEpoch", "scope"])
     && uuid(value.pairingId)
-    && epoch(value.pairingEpoch)
+    && isPositiveSafeInteger(value.pairingEpoch)
     && uuid(value.shareId)
-    && epoch(value.shareEpoch)
+    && isPositiveSafeInteger(value.shareEpoch)
     && uuid(value.scope);
 }
 
@@ -493,7 +477,7 @@ export class TailnetPairingShareStore {
       try {
         raw = await readFile(join(this.namespace.dir, this.fileName), "utf8");
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if (isMissingPathError(error)) {
           this.state = initialState();
           return;
         }
@@ -822,7 +806,7 @@ export class TailnetPairingShareStore {
 
   private checkedNow(): number {
     const value = this.now();
-    if (!timestamp(value)) throw fail();
+    if (!isNonNegativeSafeInteger(value)) throw fail();
     return value;
   }
 

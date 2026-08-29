@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import type { getApi } from "../api-client.js";
-import type { useTranslation } from "../../../i18n/react.js";
 import type { RoutineFiredPayload } from "../../../shared/routines-types.js";
 import type {
   OverlayContextValue,
@@ -10,9 +9,9 @@ import {
   tileHoldingSession,
   type ChatGroupSessionRegistry,
 } from "../components/chat-group-session-registry.js";
+import type { TranslateFn } from "../../../i18n/translate.js";
 
 type Api = ReturnType<typeof getApi>;
-type TFn = ReturnType<typeof useTranslation>["t"];
 
 export interface UseRoutineOverlayResult {
   /**
@@ -47,7 +46,7 @@ export function useRoutineOverlay({
   registry,
 }: {
   api: Api;
-  t: TFn;
+  t: TranslateFn;
   registry: ChatGroupSessionRegistry;
 }): UseRoutineOverlayResult {
   // runningRoutines tracks in-flight LLM sessions.

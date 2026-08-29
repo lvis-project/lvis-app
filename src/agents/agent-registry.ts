@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
+import { isMissingPathError } from "../lib/atomic-file.js";
 
 export interface AgentRegistryEntry {
   id: string;
@@ -24,7 +25,7 @@ export async function readAgentRegistry(registryPath: string): Promise<AgentRegi
   try {
     raw = await readFile(registryPath, "utf-8");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isMissingPathError(err)) {
       return { version: 1, agents: [] };
     }
     throw err;

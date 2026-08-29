@@ -1405,22 +1405,12 @@
     {
       "type": "types",
       "file": "src/audit/audit-schema.ts",
-      "name": "PermissionMode"
-    },
-    {
-      "type": "types",
-      "file": "src/audit/audit-schema.ts",
       "name": "RiskVerdict"
     },
     {
       "type": "types",
       "file": "src/audit/audit-schema.ts",
       "name": "RoutineScopeSnapshot"
-    },
-    {
-      "type": "types",
-      "file": "src/audit/audit-schema.ts",
-      "name": "TrustOrigin"
     },
     {
       "type": "types",
@@ -1714,11 +1704,6 @@
     },
     {
       "type": "types",
-      "file": "src/engine/usage-stats.ts",
-      "name": "UsageTotals"
-    },
-    {
-      "type": "types",
       "file": "src/hooks/hook-discovery.ts",
       "name": "LockfileEntry"
     },
@@ -1979,11 +1964,6 @@
     },
     {
       "type": "types",
-      "file": "src/main/remote-a2a-action-controller.ts",
-      "name": "RemoteA2AActionStatus"
-    },
-    {
-      "type": "types",
       "file": "src/main/routines-scheduler.ts",
       "name": "RoutineFiredEvent"
     },
@@ -2061,11 +2041,6 @@
       "type": "types",
       "file": "src/mcp/types.ts",
       "name": "McpOAuthConfig"
-    },
-    {
-      "type": "types",
-      "file": "src/mcp/types.ts",
-      "name": "McpTransport"
     },
     {
       "type": "types",
@@ -2585,11 +2560,6 @@
     {
       "type": "types",
       "file": "src/shared/rationale-approval-display.ts",
-      "name": "RationaleApprovalDisplayRiskLevel"
-    },
-    {
-      "type": "types",
-      "file": "src/shared/rationale-approval-display.ts",
       "name": "RationaleApprovalDisplayScopeAlignment"
     },
     {
@@ -2734,11 +2704,6 @@
     },
     {
       "type": "types",
-      "file": "src/ui/renderer/components/permissions/PermissionModeBadge.tsx",
-      "name": "ModeBadgeVariant"
-    },
-    {
-      "type": "types",
       "file": "src/ui/renderer/components/StarredView.tsx",
       "name": "StarredItem"
     },
@@ -2860,17 +2825,7 @@
     {
       "type": "types",
       "file": "src/ui/renderer/theme/index.ts",
-      "name": "BundleId"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/theme/index.ts",
       "name": "BundleTokens"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/theme/index.ts",
-      "name": "ResolvedShell"
     },
     {
       "type": "types",
@@ -2890,22 +2845,12 @@
     {
       "type": "types",
       "file": "src/ui/renderer/types.ts",
-      "name": "ApprovalKind"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
       "name": "Checkpoint"
     },
     {
       "type": "types",
       "file": "src/ui/renderer/types.ts",
       "name": "CheckpointTrigger"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
-      "name": "HostShellExecutionPlanAuditProjection"
     },
     {
       "type": "types",
@@ -3020,22 +2965,7 @@
     {
       "type": "types",
       "file": "src/ui/renderer/types.ts",
-      "name": "UsageDailySummaryInput"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
-      "name": "UsageDailySummaryResult"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
       "name": "UsagePerX"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
-      "name": "UsageTotals"
     },
     {
       "type": "types",

@@ -1,13 +1,9 @@
-import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
-import {
-  PLUGIN_DATA_DIR_NAME,
-  PLUGIN_OWN_SOCKET_DIR_NAME,
-  PLUGIN_WORKER_RUN_DIR_NAME,
-} from "./plugin-storage-layout.js";
+import { PLUGIN_RUNTIME_DIR_NAMES } from "./plugin-storage-layout.js";
 import { createLogger } from "../lib/logger.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const log = createLogger("plugin-install-receipt");
 
@@ -103,7 +99,7 @@ export async function hashReceiptFiles(
     const bytes = await readFile(absPath);
     out.push({
       path: relPath,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
+      sha256: sha256Hex(bytes),
     });
   }
   return out;
@@ -299,7 +295,7 @@ export async function verifyInstallReceiptRaw(
     let actual: string;
     try {
       const bytes = await readFile(absPath);
-      actual = createHash("sha256").update(bytes).digest("hex");
+      actual = sha256Hex(bytes);
     } catch (err) {
       return { ok: false, reason: `receipt file unreadable: ${relPath}: ${(err as Error).message}` };
     }
@@ -332,32 +328,6 @@ export async function verifyInstallReceiptRaw(
   return { ok: true, receipt };
 }
 
-/**
- * Top-level directory names under a plugin root that hold runtime state, not
- * installed payload, and are therefore excluded from receipt validation:
- *
- *  - `data/` — the plugin's writable state, created by `ensurePluginDataDir`
- *    (runtime/sandbox.ts) and the sole region the OS write-jail grants it.
- *  - `run/` — HOST-allocated worker control sockets
- *    (`run/<workerId>/control.sock`, permissions/worker-spawn.ts). A worker
- *    that dies without cleanup leaves the socket behind; without this
- *    exclusion the next boot's payload scan hits a non-regular file and
- *    refuses to load an otherwise-intact plugin.
- *  - `sockets/` — sockets the PLUGIN ITSELF binds
- *    (`plugin-storage-layout.ts`, {@link PLUGIN_OWN_SOCKET_DIR_NAME}). Exactly
- *    the same argument as `run/`, and it was missed because the two are
- *    deliberately separate directories: the host owns one and the plugin owns
- *    the other, so a rule written for one does not carry to the other on its
- *    own. local-indexer's egress broker binds `sockets/egress.sock`; a quit
- *    that leaves it behind made the NEXT boot refuse the plugin with
- *    "installed payload contains unsupported entry: sockets/egress.sock" —
- *    seen the first time the plugin got far enough to keep its broker alive.
- */
-const PLUGIN_RUNTIME_DIR_NAMES: ReadonlySet<string> = new Set([
-  PLUGIN_DATA_DIR_NAME,
-  PLUGIN_WORKER_RUN_DIR_NAME,
-  PLUGIN_OWN_SOCKET_DIR_NAME,
-]);
 
 export async function listFilesRecursive(
   root: string,

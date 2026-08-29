@@ -17,13 +17,11 @@
  * events without seeing telemetry noise.
  */
 import type { ToolCategory, ToolSource } from "../tools/types.js";
-import type { ExecutionMode } from "../permissions/permission-manager.js";
-import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
+import type { ExecutionMode } from "../shared/permission-mode.js";
+import type { HookTrustOrigin, ScriptHookType } from "../hooks/script-hook-types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
-import type { DeferredGrantScope } from "../permissions/reviewer/deferred-queue.js";
+import type { DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
 
-export type TrustOrigin = HookTrustOrigin;
-export type PermissionMode = ExecutionMode;
 
 /**
  * Layer 5 reviewer agent verdict — kept structurally compatible with
@@ -31,7 +29,7 @@ export type PermissionMode = ExecutionMode;
  * can pass the runtime verdict in directly.
  */
 export interface RiskVerdict {
-  level: "low" | "medium" | "high";
+  level: RiskLevel;
   reason: string;
 }
 
@@ -51,7 +49,7 @@ export interface HookResult {
    * Narrow pre|post|perm projection — derived alias of {@link event}. Kept
    * required so back-compat readers that key on `hookType` never see `undefined`.
    */
-  hookType: "pre" | "post" | "perm";
+  hookType: ScriptHookType;
   action: "allow" | "deny";
   reason: string;
   durationMs: number;
@@ -59,7 +57,7 @@ export interface HookResult {
    * Closed-set lifecycle event (design §5). Today equals `hookType`; widens to
    * the full event surface (Stop / UserPromptSubmit / …) in later milestones.
    */
-  event?: "pre" | "post" | "perm";
+  event?: ScriptHookType;
   /** The configured glob matcher that selected this hook (absent ⇒ match-all). */
   matcher?: string;
   /** Handler type — `"command"` today; http/mcp/prompt/agent in later phases. */
@@ -129,7 +127,7 @@ export interface AuditCommon {
   };
 
   /** Trust origin propagated through the eval pipeline. */
-  trustOrigin: TrustOrigin;
+  trustOrigin: HookTrustOrigin;
   /**
    * Hex-encoded HMAC over the previous line's serialized form.
    * For the first entry of the file this is HMAC(secret, "genesis").
@@ -270,8 +268,8 @@ export interface AuditDeferredResolve extends AuditCommon {
  */
 export interface AuditModeChange extends AuditCommon {
   decision: "mode_change";
-  fromMode: PermissionMode;
-  toMode: PermissionMode;
+  fromMode: ExecutionMode;
+  toMode: ExecutionMode;
   durable: boolean;
   /**
    * Present when an explicit user action is the confirmation surface for a

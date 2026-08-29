@@ -74,6 +74,7 @@ import {
 import { shellQuote } from "../lib/shell-resolver.js";
 import { scrubShortError } from "../shared/dlp.js";
 import { t } from "../i18n/index.js";
+import { sleep } from "../shared/abortable-deadline.js";
 const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
@@ -383,7 +384,9 @@ import {
   RPC_MISSING_REQUIRED_CLIENT_CAPABILITY,
   RPC_UNSUPPORTED_PROTOCOL_VERSION,
 } from "./protocol-constants.js";
+import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
+
 const CLIENT_INFO = { name: "lvis-app", version: getLvisAppVersion() } as const;
 
 /** MCP Apps extension key (§8 `io.modelcontextprotocol/ui`, 2026-01-26 snapshot). */
@@ -470,11 +473,8 @@ export interface McpTransport {
   onActivity?(handler: () => void): void;
 }
 
-interface PendingRequest {
-  resolve: (value: unknown) => void;
-  reject: (reason: Error) => void;
-  /** Null for the one deliberately-unbounded request (`subscriptions/listen`). */
-  timer: NodeJS.Timeout | null;
+/** Timer is null for the one deliberately-unbounded request (`subscriptions/listen`). */
+interface PendingRequest extends PendingJsonRpcRequest<NodeJS.Timeout | null> {
   /** Per-chunk activity window — gets reset by `resetPendingTimers` when SSE
    *  data flows so a long-running streaming response isn't killed mid-flight. */
   timeoutMs: number;
@@ -1345,10 +1345,6 @@ export class McpClient {
     };
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   /**
    * Drive a `CreateTaskResult` to a terminal status (§8 Tasks). Polls `tasks/get`
    * at the server's `pollIntervalMs` (clamped) until `completed` (→ render the
@@ -1392,7 +1388,7 @@ export class McpClient {
 
       polls += 1;
       const interval = Math.max(MIN_TASK_POLL_INTERVAL_MS, task.pollIntervalMs ?? DEFAULT_TASK_POLL_INTERVAL_MS);
-      await this.delay(Math.min(interval, Math.max(0, deadline - Date.now())));
+      await sleep(Math.min(interval, Math.max(0, deadline - Date.now())));
       current = await this.sendRequest<McpToolCallResult>("tasks/get", { taskId: task.taskId }, timeoutMs);
       task = this.extractTaskState(current, name);
     }

@@ -17,6 +17,7 @@ import {
 } from "./storage/feature-namespace.js";
 
 import { isPlainRecord } from "../shared/is-record.js";
+
 const CONFIG_FILE = "config.json";
 const CONFIG_VERSION = 1;
 const MAX_EXECUTABLE_PATH_LENGTH = 4_096;

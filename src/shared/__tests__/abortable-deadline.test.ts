@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runWithAbortableDeadline } from "../abortable-deadline.js";
+import { runWithAbortableDeadline, sleep } from "../abortable-deadline.js";
 
 describe("runWithAbortableDeadline", () => {
   beforeEach(() => {
@@ -81,6 +81,52 @@ describe("runWithAbortableDeadline", () => {
       ok: false,
       reason: "caller-abort",
     });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("sleep", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("resolves once the timer elapses", async () => {
+    let settled = false;
+    const wait = sleep(50).then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(49);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await wait;
+    expect(settled).toBe(true);
+  });
+
+  it("rejects with the signal's reason when aborted mid-wait, and clears the timer", async () => {
+    const controller = new AbortController();
+    const wait = sleep(1_000, controller.signal);
+    const reason = new Error("cancelled");
+    controller.abort(reason);
+    await expect(wait).rejects.toBe(reason);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects immediately when the signal is already aborted on entry", async () => {
+    const controller = new AbortController();
+    controller.abort("stop");
+    await expect(sleep(1_000, controller.signal)).rejects.toThrow("stop");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("drops its abort listener after the timer fires", async () => {
+    const controller = new AbortController();
+    const wait = sleep(10, controller.signal);
+    await vi.advanceTimersByTimeAsync(10);
+    await wait;
+    // A later abort must not surface as an unhandled rejection from a stale listener.
+    controller.abort();
     expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -26,7 +26,7 @@ function renderWebTab(api = installApi()) {
   return render(
     <WebTab
       api={api}
-      webProvider="none"
+      webProvider="duckduckgo"
       setWebProvider={() => {}}
       hasWebKey={false}
       setHasWebKey={() => {}}

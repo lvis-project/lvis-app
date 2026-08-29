@@ -14,6 +14,9 @@
  * Non-numeric *core* segments fall back to lexical compare. Good enough for
  * picking "latest" and for `>=` gates without pulling in the `semver` package.
  */
+/** Loose semver core — `major.minor.patch` prefix, pre-release/build suffix allowed. */
+export const SEMVER_CORE_PATTERN = /^\d+\.\d+\.\d+/;
+
 export function compareSemver(a: string, b: string): number {
   const parse = (v: string): { core: string[]; pre: string[] } => {
     const noBuild = v.split("+", 1)[0] ?? v;

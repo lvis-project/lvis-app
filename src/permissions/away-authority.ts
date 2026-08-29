@@ -68,6 +68,7 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
 } from "./sensitive-paths.js";
+import type { ToolSource } from "../shared/permission-review-status.js";
 
 /**
  * The only tool categories a desk gesture may arm, as a compile-checked subset
@@ -152,7 +153,7 @@ export interface AwayAuthorityCandidate {
   /** The live authority object; the only non-forgeable evidence of the turn. */
   readonly remoteControllerAuthority: RemoteControllerAuthority | undefined;
   readonly sessionId: string | undefined;
-  readonly source: "builtin" | "plugin" | "mcp" | undefined;
+  readonly source: ToolSource | undefined;
   readonly kind: ApprovalKind | undefined;
   readonly category: "tool" | "agent-action";
   readonly toolCategory: ToolCategory | undefined;

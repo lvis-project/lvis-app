@@ -50,12 +50,9 @@ import {
   showMainWindow,
 } from "./main-window.js";
 import { activateInlineSettings } from "./app-menu.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("lvis");
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 function requirePluginCleanupServices(services: AppServices): {
   pluginPaths: NonNullable<AppServices["pluginPaths"]>;

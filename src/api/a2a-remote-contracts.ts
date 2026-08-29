@@ -4,9 +4,10 @@ import type {
   A2AJsonRpcId,
 } from "../shared/a2a-wire.js";
 import { isIP } from "node:net";
-import { createHash } from "node:crypto";
 import { A2AJsonRpcMethod } from "../shared/a2a-wire.js";
-import { isRecord } from "../shared/is-record.js";
+import { isRecord, hasExactKeys } from "../shared/is-record.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 export const A2A_EXACT_SEND_REPLAY_URI =
   "urn:uuid:383a1d70-5c3b-42d9-a65d-9f084b7a1a44" as const;
@@ -321,12 +322,6 @@ export interface A2ARemoteRequestEnvelope {
   params: A2AJsonObject;
 }
 
-function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
-}
-
 function boundedId(value: unknown): value is string {
   return typeof value === "string" && SAFE_ID.test(value);
 }
@@ -337,10 +332,6 @@ function digest(value: unknown): value is string {
 
 function timestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
-}
-
-function positiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 export function parseA2ARouteSnapshot(
@@ -377,7 +368,7 @@ export function parseA2ARouteSnapshot(
     "remote_server_lock_digest_sha256", "a2a_tck_lock_digest_sha256",
     "a2a_specification_uri",
   ];
-  if (!exactKeys(value, required)) throw new Error("a2a-route-snapshot-fields-invalid");
+  if (!hasExactKeys(value, required)) throw new Error("a2a-route-snapshot-fields-invalid");
   const idFields = [
     value.snapshot_id, value.operation_id, value.attempt_id, value.caller_generation_id,
     value.credential_provider, value.credential_external_version,
@@ -393,7 +384,7 @@ export function parseA2ARouteSnapshot(
     ...(expected.predecessorCredentialRevisionId === undefined
       ? [] : [value.predecessor_credential_revision_id]),
   ];
-  if (!numericIds.every(positiveSafeInteger)) {
+  if (!numericIds.every(isPositiveSafeInteger)) {
     throw new Error("a2a-route-snapshot-version-invalid");
   }
   if (
@@ -568,5 +559,5 @@ export function sameA2ARemoteLineage(
 }
 
 export function a2aRemoteLineageDigestSha256(lineage: Readonly<A2ARemoteLineage>): string {
-  return createHash("sha256").update(JSON.stringify({ targetAgentId: lineage.targetAgentId, interfaceUrl: lineage.interfaceUrl, agentCardDigestSha256: lineage.agentCardDigestSha256, trustKeyId: lineage.trustKeyId, credentialBindingId: lineage.credentialBindingId, callerGenerationId: lineage.callerGenerationId, routePolicyVersion: lineage.routePolicyVersion, routePolicyDigestSha256: lineage.routePolicyDigestSha256, extensionSpecDigestSha256: lineage.extensionSpecDigestSha256 })).digest("hex");
+  return sha256Hex(JSON.stringify({ targetAgentId: lineage.targetAgentId, interfaceUrl: lineage.interfaceUrl, agentCardDigestSha256: lineage.agentCardDigestSha256, trustKeyId: lineage.trustKeyId, credentialBindingId: lineage.credentialBindingId, callerGenerationId: lineage.callerGenerationId, routePolicyVersion: lineage.routePolicyVersion, routePolicyDigestSha256: lineage.routePolicyDigestSha256, extensionSpecDigestSha256: lineage.extensionSpecDigestSha256 }));
 }

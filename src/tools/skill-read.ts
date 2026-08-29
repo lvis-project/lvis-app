@@ -28,6 +28,7 @@ import type { SkillStore } from "../main/skill-store.js";
 import { SKILL_SELECTOR_ALLOWLIST } from "../main/skill-store.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
 import { createLogger } from "../lib/logger.js";
+import { errorMessage } from "../shared/error-message.js";
 const log = createLogger("lvis");
 
 export interface SkillReadToolDeps {
@@ -156,7 +157,7 @@ export function createSkillReadTool(deps: SkillReadToolDeps): Tool {
           isError: false,
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         log.warn(`skill_read rejected ${skillName}/${resourcePath}: %s`, message);
         return errorResult(message);
       }
