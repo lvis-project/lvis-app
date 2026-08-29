@@ -73,7 +73,16 @@ function SideChatSession({
   sideChat: NonNullable<LvisApi["sideChat"]>;
 }) {
   const { t } = useTranslation();
-  const { entries, turnSummaryByTurnStart, isStreaming, sessionId, send, newSession, abort } = useSideChat(api);
+  const {
+    entries,
+    turnSummaryByTurnStart,
+    isStreaming,
+    sessionId,
+    send,
+    newSession,
+    abort,
+    isCurrentTurnEvent,
+  } = useSideChat(api);
   const chatContext = useOptionalChatContext();
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -160,6 +169,11 @@ function SideChatSession({
     setAttachments,
     onAsk: handleAsk,
     onAbort: abort,
+    // Same verdict the transcript uses. An interrupted turn's trailing `done`
+    // reaches this channel after the replacement turn has started; without the
+    // shared guard the queue would read it as "the turn ended" and drain a row
+    // onto the live turn.
+    isCurrentTurnEvent,
   });
 
   const handleBottomSend = useCallback(() => {
@@ -220,7 +234,14 @@ function SideChatSession({
         )}
       </div>
 
-      <div className="shrink-0 border-t px-2 pb-2 pt-1.5" data-testid="side-chat-composer-dock">
+      {/* `data-composer-surface` marks the whole dock subtree, matching the
+          main dock: the queue panel, the field, and the action row below all
+          carry test ids the main dock also renders. */}
+      <div
+        className="shrink-0 border-t px-2 pb-2 pt-1.5"
+        data-testid="side-chat-composer-dock"
+        data-composer-surface="side"
+      >
         <MessageQueuePanel
           store={messageQueueStore}
           onSendNow={handleMessageQueueSendNow}

@@ -43,6 +43,21 @@ export interface UseMessageQueueParams {
    */
   subscribeStream: (handler: (event: StreamEvent) => void) => () => void;
   /**
+   * Does this frame belong to the turn currently on screen? A surface whose
+   * stream carries a turn id (side chat's monotonic `streamId`) supplies its
+   * OWN verdict here so this queue and that surface's transcript agree.
+   *
+   * Without it, an aborted turn's trailing `done` — `runStreamedTurn` emits
+   * `turn.completed` on every return, abort included — drains a queued row
+   * into a `queue-auto` send. That send skips the interrupt (a drain must not
+   * stop the turn that follows it), so it lands on top of the turn the user's
+   * interrupt just started: two turns on one ConversationLoop.
+   *
+   * Omitted by a surface whose host serializes turns for itself and whose
+   * frames carry no turn id to judge by; every frame then counts as current.
+   */
+  isCurrentTurnEvent?: (event: StreamEvent) => boolean;
+  /**
    * The composer whose textarea the window-level shortcuts (⌘⏎, Esc) act on.
    * Several composers are mounted at once — one per tile, plus the side chat
    * — and every one of them carries the same test id, so ownership is decided
@@ -102,6 +117,7 @@ export function useMessageQueue({
   guide,
   onAbort,
   interceptSubmit,
+  isCurrentTurnEvent,
 }: UseMessageQueueParams): UseMessageQueueResult {
   const { t } = useTranslation();
 
@@ -222,6 +238,10 @@ export function useMessageQueue({
 
   useEffect(() => {
     const unsub = subscribeStream((ev) => {
+      // A frame from a superseded turn drives nothing here: not the
+      // brake-point hand-off, not the delivery bookkeeping, and above all not
+      // the end-of-turn drain.
+      if (isCurrentTurnEvent && !isCurrentTurnEvent(ev)) return;
       if (ev.type === "tool_end") {
         // mid-turn brake-point — 엔진 round boundary 에 합류 (onGuide).
         flushQueueViaGuide();
@@ -240,6 +260,13 @@ export function useMessageQueue({
         // user's again so the end-of-turn drain below picks them up — the
         // `done` that follows this event does exactly that.
         messageQueueStore.releaseHandedOff();
+        return;
+      }
+      if (ev.type === "error") {
+        // A turn that ends in an error has still ended, and `done` does not
+        // always follow. Release the block here too, or one refused hand-off
+        // would keep suppressing brake points for every turn after it.
+        guideFlushBlockedRef.current = false;
         return;
       }
       if (ev.type === "done") {
@@ -271,7 +298,7 @@ export function useMessageQueue({
       }
     });
     return unsub;
-  }, [subscribeStream, flushQueueViaGuide, messageQueueStore, onAsk]);
+  }, [subscribeStream, flushQueueViaGuide, messageQueueStore, onAsk, isCurrentTurnEvent]);
 
   // streaming false 전이 fallback 폐기 (2026-05-15 사용자 피드백):
   // AskUserQuestion 카드 깜박임 등으로 streaming 이 일시 false → true 로
