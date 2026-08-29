@@ -129,17 +129,103 @@ export interface ProviderCredentialSave {
 
 
 
-const MODEL_LIST_SYNC_DEBOUNCE_MS = 350;
+/**
+ * When a provider's model list is fetched — the whole policy, in one place.
+ *
+ * A model list is a catalogue, not live data: it changes on the provider's
+ * release schedule, not between two clicks. So it is PERSISTED
+ * (`llm.modelListCache`), every card and the chooser render straight from that
+ * cache without waiting on anything, and a request goes out on exactly three
+ * occasions:
+ *
+ *   1. the row has no catalogue under its current key — and a key is built
+ *      from the vendor, the endpoint and the credential scope, so changing an
+ *      endpoint or moving to another preset makes a new key and re-syncs once;
+ *   2. once per app launch per key, so a catalogue that moved since the last
+ *      session is picked up without the user having to ask;
+ *   3. the user presses that row's refresh control.
+ *
+ * (1) and (2) are one test, not two: a key that has not been asked yet THIS
+ * LAUNCH is asked, whether or not a cache entry already stands behind it.
+ * Nothing else asks — not a settings broadcast, not a tab remount, not another
+ * row's edit. Those were what turned one unreachable endpoint into a request
+ * per settings write, and a card into a spinner on every visit.
+ *
+ * The marker lives in this module rather than in component state or in
+ * settings, because those two lifetimes are both wrong: component state dies
+ * when the settings tab unmounts, which must NOT re-ask, and a persisted
+ * record would survive an app restart, which MUST. A renderer module lives
+ * exactly as long as its window, which is the launch boundary this policy
+ * means.
+ */
+/** Whether two model-list states say the same thing about the same row. */
+function sameModelListState(
+  a: ModelListState | undefined,
+  b: ModelListState,
+): boolean {
+  if (!a || a.status !== b.status) return false;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  return (["error", "endpoint", "fetchedAt", "source", "persistError", "options", "entries"] as const)
+    .every((field) => left[field] === right[field]);
+}
 
-/** Whether two vendor-block maps say the same thing about every row. */
+const modelListRefreshedThisLaunch = new Set<string>();
+
+/**
+ * Cross that launch boundary deliberately.
+ *
+ * Nothing in the app calls this — a launch ends when the window goes — but a
+ * test has to be able to say "and then the app started again", and a module
+ * that keeps the marker private cannot be asked to forget it.
+ */
+export function forgetModelListLaunchRefreshes(): void {
+  modelListRefreshedThisLaunch.clear();
+}
+
+/**
+ * Forget one row's launch refresh.
+ *
+ * The key is built from vendor, endpoint and scope — not from the credential —
+ * so storing a working key over a broken one changes nothing the key can see,
+ * and the launch marker would hold the row on its old failure until the window
+ * reloaded. A credential save IS a change to that row's inputs, so it earns the
+ * row its one request again.
+ */
+function forgetModelListLaunchRefresh(key: string): void {
+  modelListRefreshedThisLaunch.delete(key);
+}
+
+/**
+ * Whether two vendor-block maps say the same thing about every row.
+ *
+ * Structural, not serialized: a block reaches this from two different writers
+ * (the store's normalizer and a broadcast payload), and key ORDER between them
+ * is not a promise anyone made — comparing serialized text would report a
+ * reordered but identical block as news, which is exactly the churn this
+ * exists to stop.
+ */
 function sameSavedVendorBlocks(
   a: Readonly<Record<string, unknown>>,
   b: Readonly<Record<string, unknown>>,
 ): boolean {
-  const keys = Object.keys(a);
-  if (keys.length !== Object.keys(b).length) return false;
+  return sameSettingsValue(a, b);
+}
+
+function sameSettingsValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => sameSettingsValue(item, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
   return keys.every((key) =>
-    key in b && JSON.stringify(a[key]) === JSON.stringify(b[key]));
+    Object.prototype.hasOwnProperty.call(right, key)
+    && sameSettingsValue(left[key], right[key]));
 }
 
 /** The credential form's element id. One form is open at a time, so the button
@@ -1093,6 +1179,11 @@ export function LlmTab(props: LlmTabProps) {
   const modelListCacheRef = useRef<LlmModelListCache>({});
   const setModelListState = useCallback((key: string, state: ModelListState) => {
     setModelLists((current) => {
+      // Writing an identical state must not produce a new map: `connections`
+      // is derived from this, and a fresh identity re-runs the launch refresh,
+      // which would write the same state again. Payload fields are compared by
+      // reference because a fetch that actually landed always brings new ones.
+      if (sameModelListState(current[key], state)) return current;
       const next = { ...current, [key]: state };
       modelListsRef.current = next;
       return next;
@@ -1115,18 +1206,12 @@ export function LlmTab(props: LlmTabProps) {
         provider === "openai-compatible" ? options.credentialScope?.trim() ?? "" : "";
       const key = llmModelListCacheKey(provider, baseUrl, credentialScope);
       const existing = modelListsRef.current[key];
-      const persistedCacheHasKey = Object.prototype.hasOwnProperty.call(
-        modelListCacheRef.current,
-        key,
-      );
-      if (!options.force) {
-        if (existing && existing.source !== "cache" && persistedCacheHasKey) return;
-        // A failure is an answer too. Re-asking on every settings broadcast
-        // turned one unreachable endpoint into a request per write; the effect
-        // re-runs when the row's own inputs change, and the refresh control
-        // passes `force` when the user asks again deliberately.
-        if (existing?.status === "error") return;
-      }
+      // One request in flight per key. This is the only guard `force` does not
+      // lift: a second press while the first is still out would not produce a
+      // newer answer, only a second spinner.
+      if (existing?.status === "loading") return;
+      // See `modelListRefreshedThisLaunch` for the policy this enforces.
+      if (!options.force && modelListRefreshedThisLaunch.has(key)) return;
       // A fixed-endpoint vendor reaches its own /models with a stored key, so a
       // request with nothing stored could only come back 401 — and a red "sync
       // failed" on a card whose subscription is signed in and healthy says the
@@ -1135,10 +1220,13 @@ export function LlmTab(props: LlmTabProps) {
       if (!baseUrl && STANDARD_CATALOGUE_ENDPOINT_VENDORS.has(provider)) {
         const hasCredential = await api.hasApiKey(provider);
         if (!hasCredential) {
+          // Deliberately NOT marked as asked: nothing was. Storing a key later
+          // is a change to this row's inputs, and it gets its one request then.
           setModelListState(key, { status: "needs-credential" });
           return;
         }
       }
+      modelListRefreshedThisLaunch.add(key);
       setModelListState(key, existing?.options
         ? { ...existing, status: "loading" }
         : { status: "loading" });
@@ -1361,26 +1449,6 @@ export function LlmTab(props: LlmTabProps) {
     })();
     return () => { cancelled = true; };
   }, [api, credentialCandidateKey, settingsRevision]);
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    const timer = window.setTimeout(() => {
-      void requestModelList(vendor, {
-        baseUrl: activeModelListBaseUrl,
-        credentialScope: activeModelListCredentialScope,
-        ...(activeModelDiscoveryPolicy ? { modelDiscoveryPolicy: activeModelDiscoveryPolicy } : {}),
-      });
-    }, MODEL_LIST_SYNC_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [
-    activeModelListBaseUrl,
-    activeModelListCredentialScope,
-    activeModelDiscoveryPolicy,
-    // The credential gates the handshake, so storing one has to retry it.
-    hasKey,
-    requestModelList,
-    settingsLoaded,
-    vendor,
-  ]);
   const fallbackProviderKey = useMemo(
     () => [...new Set(fallbackChain.map((entry) => entry.provider).filter(Boolean))]
       .sort()
@@ -1390,8 +1458,10 @@ export function LlmTab(props: LlmTabProps) {
   useEffect(() => {
     if (!settingsLoaded || !fallbackOpen) return;
     for (const provider of fallbackProviderKey.split("\n").filter(Boolean)) {
-      // With its own address, so the catalogue is filed under the endpoint it
-      // came from — the same key the provider's row reads.
+      // A fallback entry need not have a row of its own, so this is the only
+      // thing that would ever ask for its catalogue. It rides the same
+      // once-per-launch marker as everything else, so opening the panel twice
+      // asks once.
       const baseUrl = rowModelListBaseUrl(provider, undefined);
       void requestModelList(provider, { ...(baseUrl ? { baseUrl } : {}) });
     }
@@ -1425,6 +1495,72 @@ export function LlmTab(props: LlmTabProps) {
     [marketplaceProviderPresets],
   );
 
+  /** The id this row's secret is stored under. */
+  const rowCredentialId = (row: ProviderConnection): string =>
+    row.presetId ? marketplaceProviderPresetSecretId(row.presetId) : row.apiVendorId!;
+
+  /** Whether this row's credential form has to ask for a key at all. */
+  const rowRequiresApiKey = useCallback((row: ProviderConnection): boolean => {
+    const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
+    if (preset) return preset.requiresApiKey !== false;
+    const vendorId = row.apiVendorId ?? "";
+    return !(isLLMVendor(vendorId) && canUseLlmVendorWithoutApiKey(vendorId, {
+      baseUrl: savedVendorBlocks[vendorId]?.baseUrl ?? "",
+    }));
+  }, [installedPresetById, savedVendorBlocks]);
+
+  /**
+   * Where a plain vendor's catalogue is filed.
+   *
+   * The write and the read have to agree, and they only do if they build the
+   * key the same way: a preset vendor ships its own address, so its catalogue
+   * lands under `vendor\n<address>\n` and reading `vendor\n\n` finds nothing —
+   * the fallback dropdown then showed only the saved model, as if the endpoint
+   * had never answered.
+   */
+  const vendorModelListKey = useCallback(
+    (vendorId: string): string =>
+      llmModelListCacheKey(vendorId, rowModelListBaseUrl(vendorId, undefined), ""),
+    [rowModelListBaseUrl],
+  );
+
+  /**
+   * The catalogue request this row's own key names, or null when the row has
+   * no catalogue to ask anyone for.
+   *
+   * Read back OUT of `modelListKey` rather than rebuilt from the row's parts,
+   * so the answer can only land where the row is already looking. The launch
+   * refresh and the card's refresh control both go through here, which is what
+   * makes "the button refreshes THIS card" true by construction.
+   */
+  const rowModelListRequest = useCallback((row: ProviderConnection): {
+    vendorId: string;
+    options: {
+      baseUrl?: string;
+      credentialScope?: string;
+      modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy;
+    };
+  } | null => {
+    if (!row.apiVendorId || !row.modelListKey) return null;
+    const [vendorId, baseUrl, credentialScope] = row.modelListKey.split("\n");
+    if (!vendorId) return null;
+    const preset = credentialScope ? installedPresetById.get(credentialScope) : undefined;
+    const modelDiscoveryPolicy = preset?.modelDiscoveryPolicy;
+    if (!shouldSyncModelList(vendorId, baseUrl, modelDiscoveryPolicy)) return null;
+    // A route reached with no credential can only come back 401. There is
+    // nothing to ask yet and nothing to refresh, so the card says what is
+    // missing (`rowChatBlocker`) instead of showing a control that would fail.
+    if (rowRequiresApiKey(row) && !credentialedProviderIds.has(rowCredentialId(row))) return null;
+    return {
+      vendorId,
+      options: {
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(credentialScope ? { credentialScope } : {}),
+        ...(modelDiscoveryPolicy ? { modelDiscoveryPolicy } : {}),
+      },
+    };
+  }, [credentialedProviderIds, installedPresetById, rowRequiresApiKey]);
+
   const configuredApiRoutes = useMemo<readonly ConfiguredApiRoute[]>(() => {
     const routes = new Map<string, ConfiguredApiRoute>();
     const add = (route: ConfiguredApiRoute) => {
@@ -1442,24 +1578,22 @@ export function LlmTab(props: LlmTabProps) {
         modelListKey: activeModelListKey,
       });
     }
-    // Whatever key a route's handshake was filed under, whether or not it
-    // succeeded — so a credentialed row can still point at its own status line
-    // when that status is a failure.
-    const keyByRow = new Map<string, string>();
-    for (const cacheKey of Object.keys(modelLists)) {
-      const [cachedVendor, , scope] = cacheKey.split("\n");
-      if (!cachedVendor) continue;
-      const rowId = scope ? marketplaceProviderPresetSecretId(scope) : cachedVendor;
-      if (!keyByRow.has(rowId)) keyByRow.set(rowId, cacheKey);
-    }
     for (const [cacheKey, state] of Object.entries(modelLists)) {
       // A handshake that only STARTED is not evidence of configuration. A bare
       // `loading` key used to be enough to draw a "connected" row for a
       // provider with nothing stored; only a catalogue that actually landed
       // counts, and a later failure does not un-configure what already did.
       if (state.status !== "ready" && !hasUsableModelListOptions(state)) continue;
-      const [cachedVendor, , scope] = cacheKey.split("\n");
+      const [cachedVendor, cachedBaseUrl, scope] = cacheKey.split("\n");
       if (!cachedVendor) continue;
+      const preset = scope ? installedPresetById.get(scope) : undefined;
+      if (scope && !preset) continue;
+      // The key a persisted entry is filed under names the address it was
+      // fetched from. If that is not the address this row is configured for
+      // now, the entry describes a route that no longer exists — and binding
+      // the row to it would leave the row reading a key nothing writes,
+      // holding an old catalogue that can never refresh.
+      if ((cachedBaseUrl ?? "") !== rowModelListBaseUrl(cachedVendor, preset)) continue;
       add({ vendorId: cachedVendor, ...(scope ? { presetId: scope } : {}), modelListKey: cacheKey });
     }
     // And a stored key is a configuration in its own right. This is the half
@@ -1471,18 +1605,17 @@ export function LlmTab(props: LlmTabProps) {
       const preset = presetId ? installedPresetById.get(presetId) : undefined;
       if (presetId && !preset) continue;
       const vendorId = presetId ? "openai-compatible" : providerId;
+      const rowAddress = preset?.baseUrl ?? rowModelListBaseUrl(vendorId, undefined);
       add({
         vendorId,
         ...(presetId ? { presetId } : {}),
-        // The row's OWN endpoint, which is where its handshake will be filed:
-        // a key built with an empty address would never match what the sync
-        // writes, and the row would read its own catalogue as missing.
-        modelListKey: keyByRow.get(providerId)
-          ?? llmModelListCacheKey(
-            vendorId,
-            preset?.baseUrl ?? rowModelListBaseUrl(vendorId, undefined),
-            presetId ?? "",
-          ),
+        // Built from the row's CURRENT address, never resolved by searching
+        // what happens to be in the cache. That search matched on vendor and
+        // scope alone and took the first hit, so an entry written by an older
+        // build under a different address could bind the row to a key nothing
+        // writes any more — a catalogue that could never refresh. Entries that
+        // no row's address names are simply never read.
+        modelListKey: llmModelListCacheKey(vendorId, rowAddress, presetId ?? ""),
       });
     }
     return [...routes.values()];
@@ -1546,41 +1679,6 @@ export function LlmTab(props: LlmTabProps) {
     [addedRowIds, draftRowId],
   );
 
-  // A configured provider that is not the active one still has to be
-  // choosable, and the debounced sync above only covers the active route — so
-  // a row whose catalogue is its endpoint's word would have nothing to offer
-  // and could never be picked.
-  //
-  // Each such row is synced against its OWN address, which is the whole reason
-  // this exists: nobody else knows it. `rowModelListRoute` decides which rows
-  // those are, and it is the only thing that decides — a row without a route
-  // is not asked at all, rather than asked and then having its answer ignored.
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    // Debounced on the same window as the active row's sync: several settings
-    // writes can land in a burst, and a row's endpoint should be asked once
-    // the dust settles rather than once per write.
-    const timer = window.setTimeout(() => {
-      for (const providerId of credentialedProviderIds) {
-        if (providerId === activeApiRowId) continue;
-        const presetId = marketplaceProviderPresetIdFromSecretId(providerId);
-        const preset = presetId ? installedPresetById.get(presetId) : undefined;
-        if (presetId && !preset) continue;
-        const rowBaseUrl = rowModelListBaseUrl(preset ? "openai-compatible" : providerId, preset);
-        void requestModelList(preset ? "openai-compatible" : providerId, {
-          ...(rowBaseUrl ? { baseUrl: rowBaseUrl } : {}),
-          ...(preset ? { credentialScope: preset.providerId } : {}),
-          ...(preset?.modelDiscoveryPolicy
-            ? { modelDiscoveryPolicy: preset.modelDiscoveryPolicy }
-            : {}),
-        });
-      }
-    }, MODEL_LIST_SYNC_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [
-    activeApiRowId, credentialedProviderIds, installedPresetById,
-    requestModelList, rowModelListBaseUrl, settingsLoaded,
-  ]);
 
   const connections = useMemo<ProviderConnection[]>(() => {
     const claimed = new Set<string>();
@@ -1673,6 +1771,23 @@ export function LlmTab(props: LlmTabProps) {
     }
     return rows;
   }, [connections, pinnedRowIds]);
+  // The launch refresh (see `modelListRefreshedThisLaunch`). An effect runs
+  // after the commit, and this one additionally waits for the first settings
+  // apply — so every card and the chooser have already painted from the
+  // persisted cache before anything is asked, and nothing here can delay what
+  // the user sees. Re-runs are free: `requestModelList` decides per key whether
+  // this launch has asked yet.
+  useEffect(() => {
+    if (!settingsLoaded || settingsRevision === 0) return;
+    for (const row of connections) {
+      const request = rowModelListRequest(row);
+      if (!request) continue;
+      void requestModelList(request.vendorId, request.options);
+    }
+  }, [
+    connections, requestModelList, rowModelListRequest, settingsLoaded, settingsRevision,
+  ]);
+
   const visibleRowKey = visibleRows.map((row) => row.id).join("\n");
   // Everything else goes behind "add a provider". The catalogue keeps growing
   // with marketplace presets, so the list's length has to track the number of
@@ -1706,20 +1821,6 @@ export function LlmTab(props: LlmTabProps) {
       && (row.presetId ?? "") === marketplaceProviderPresetId,
     [vendor, marketplaceProviderPresetId],
   );
-
-  /** The id this row's secret is stored under. */
-  const rowCredentialId = (row: ProviderConnection): string =>
-    row.presetId ? marketplaceProviderPresetSecretId(row.presetId) : row.apiVendorId!;
-
-  /** Whether this row's credential form has to ask for a key at all. */
-  const rowRequiresApiKey = useCallback((row: ProviderConnection): boolean => {
-    const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
-    if (preset) return preset.requiresApiKey !== false;
-    const vendorId = row.apiVendorId ?? "";
-    return !(isLLMVendor(vendorId) && canUseLlmVendorWithoutApiKey(vendorId, {
-      baseUrl: savedVendorBlocks[vendorId]?.baseUrl ?? "",
-    }));
-  }, [installedPresetById, savedVendorBlocks]);
 
   /**
    * The model this row has stored — its own, never another row's.
@@ -2052,6 +2153,9 @@ export function LlmTab(props: LlmTabProps) {
     // credential store directly rather than waiting on a broadcast that a
     // secret-only save never sends.
     setSettingsRevision((current) => current + 1);
+    // ...and let this row ask its endpoint again with the credential it now
+    // holds, whether the last answer was a failure or nothing at all.
+    if (row.modelListKey) forgetModelListLaunchRefresh(row.modelListKey);
     // The card stays open on what it just committed, minus the key it no
     // longer holds. Dropping the draft here would collapse the form under a
     // header still drawn as expanded.
@@ -2362,6 +2466,43 @@ export function LlmTab(props: LlmTabProps) {
   };
 
   /**
+   * This card's own refresh.
+   *
+   * Every card whose catalogue is fetchable gets one, because the launch
+   * refresh is the only automatic one there is — when a provider ships a model
+   * mid-session, this is how the user picks it up without restarting. A card
+   * with no catalogue route (Azure AI Foundry, Claude, Gemini: their lists are
+   * curated here) has nothing to refresh and shows no control.
+   */
+  const rowRefreshControl = (row: ProviderConnection) => {
+    const request = rowModelListRequest(row);
+    if (!request) return null;
+    const loading = row.modelListKey
+      ? modelLists[row.modelListKey]?.status === "loading"
+      : false;
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 shrink-0 p-0"
+        aria-label={t("llmTab.modelSync")}
+        title={t("llmTab.modelSync")}
+        data-testid={`llm-tab:connection-refresh:${row.id}`}
+        disabled={loading}
+        onClick={() => void requestModelList(request.vendorId, {
+          ...request.options,
+          force: true,
+        })}
+      >
+        {loading
+          ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
+          : <RefreshCw className="h-3.5 w-3.5" aria-hidden={true} />}
+      </Button>
+    );
+  };
+
+  /**
    * Says that a collapsed card is still holding input.
    *
    * Collapsing is allowed — trapping a card open is worse — but a card that
@@ -2412,7 +2553,7 @@ export function LlmTab(props: LlmTabProps) {
           actions={subscription.props.actions}
           leading={<>{statusChip(row)}{modeBadge(row)}{unsavedBadge(row)}</>}
           subline={<>{connectionSubline(row)}{chatAvailabilityNote(row)}{pickModelGuidance(row)}</>}
-          authAction={apiKeyChip(row)}
+          authAction={<>{apiKeyChip(row)}{rowRefreshControl(row)}</>}
           {...(rowFormOpen(row) ? { trailing: credentialFormFor(row) } : {})}
         />
       ) : (
@@ -2423,7 +2564,10 @@ export function LlmTab(props: LlmTabProps) {
           data-testid={`llm-tab:connection:${row.id}`}
         >
           {/* The whole head is the disclosure: the row IS the provider, so
-              managing it should not require finding a particular control on it. */}
+              managing it should not require finding a particular control on it.
+              The refresh sits BESIDE it, never inside — a button nested in a
+              button is not a control the browser can give anyone. */}
+          <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
             className="flex w-full min-w-0 items-center gap-2 text-left"
@@ -2463,6 +2607,8 @@ export function LlmTab(props: LlmTabProps) {
               aria-hidden={true}
             />
           </button>
+          {rowRefreshControl(row)}
+          </div>
           {chatAvailabilityNote(row)}
           {pickModelGuidance(row)}
           {rowFormOpen(row) ? credentialFormFor(row) : null}
@@ -2747,7 +2893,7 @@ export function LlmTab(props: LlmTabProps) {
                 const fallbackModelValue = trimmedFallbackModel && !isRetiredLlmModel(trimmedFallbackModel)
                   ? trimmedFallbackModel
                   : fallbackVendorInfo.defaultModel;
-                const fallbackModelList = modelLists[llmModelListCacheKey(entry.provider)];
+                const fallbackModelList = modelLists[vendorModelListKey(entry.provider)];
                 const fallbackModelOptions = modelOptionsFor(
                   entry.provider,
                   fallbackModelValue,

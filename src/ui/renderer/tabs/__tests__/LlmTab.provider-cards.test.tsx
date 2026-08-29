@@ -17,7 +17,7 @@ vi.mock("../SubscriptionProvidersController.js", () => ({
   useSubscriptionProviders: useSubscriptionProvidersMock,
 }));
 
-const { LlmTab } = await import("../LlmTab.js");
+const { LlmTab, forgetModelListLaunchRefreshes } = await import("../LlmTab.js");
 type ProviderCredentialDraft =
   import("../LlmTab.js").ProviderCredentialDraft;
 type ProviderCredentialSave =
@@ -110,6 +110,84 @@ function makeApi(overrides: MockApi = {}): MockApi {
 /** A credential store holding keys for exactly these providers. */
 function storedKeysFor(...providerIds: string[]) {
   return vi.fn(async (providerId: string) => providerIds.includes(providerId));
+}
+
+interface Profile {
+  vendors?: Record<string, unknown>;
+  installedProviderIds?: string[];
+  installedProviderPresets?: readonly MarketplaceInstalledProviderPreset[];
+  modelListCache?: Record<string, unknown>;
+}
+
+/**
+ * An api whose settings store answers a write with the profile under test.
+ *
+ * The shared mock keeps its own default profile, so a row persisting the
+ * catalogue it just fetched would broadcast a settings object holding none of
+ * this test's providers — and cards would vanish, or lose the endpoint they
+ * are configured for, mid-test and for a reason no user ever meets.
+ */
+function profileApi(profile: Profile, rest: MockApi = {}) {
+  let settings: { llm: Record<string, unknown>; marketplace: Record<string, unknown> } = {
+    llm: {
+      pinnedModels: [],
+      vendors: profile.vendors ?? {},
+      modelListCache: profile.modelListCache ?? {},
+    },
+    marketplace: {
+      installedProviderIds: profile.installedProviderIds ?? [],
+      installedProviderPresets: profile.installedProviderPresets ?? [],
+    },
+  };
+  const listeners = new Set<(next: unknown) => void>();
+  const publish = () => {
+    for (const listener of listeners) listener(settings);
+  };
+  const api = makeApi({
+    getSettings: vi.fn(async () => settings),
+    updateSettings: vi.fn(async (patch: { llm?: Record<string, unknown> }) => {
+      settings = { ...settings, llm: { ...settings.llm, ...(patch.llm ?? {}) } };
+      publish();
+      return settings;
+    }),
+    onSettingsUpdated: vi.fn((listener: (next: unknown) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }),
+    ...rest,
+  });
+  return {
+    api,
+    /** A settings write landing from elsewhere, as every save broadcasts. */
+    broadcast: async (vendors: Record<string, unknown>) => {
+      settings = { ...settings, llm: { ...settings.llm, vendors } };
+      await act(async () => {
+        publish();
+        await Promise.resolve();
+      });
+      // A second act, so the effects the broadcast queued are mounted before
+      // this one waits on them — inside a single act they would not be.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+    },
+  };
+}
+
+/** The generic custom provider: one stored key, one endpoint of its own. */
+function genericRowApi(
+  listLlmModels: MockApi["listLlmModels"] | undefined,
+  baseUrl = CUSTOM_ENDPOINT,
+  rest: MockApi = {},
+): MockApi {
+  return profileApi(
+    { vendors: { "openai-compatible": baseUrl ? { baseUrl } : {} } },
+    {
+      hasApiKey: storedKeysFor("openai-compatible"),
+      ...(listLlmModels ? { listLlmModels } : {}),
+      ...rest,
+    },
+  ).api;
 }
 
 /** `getSettings` carrying a model-list cache, so a handshake can be pre-landed. */
@@ -300,6 +378,11 @@ beforeEach(() => {
   vi.useRealTimers();
   useSubscriptionProvidersMock.mockReset();
   installSubscription([]);
+  // Each test is its own app launch. The once-per-launch marker lives in the
+  // module, so without this the second test in the file would inherit the
+  // first one's "already asked" and every catalogue assertion after it would
+  // be measuring the wrong run.
+  forgetModelListLaunchRefreshes();
 });
 
 describe("LlmTab provider cards", () => {
@@ -721,26 +804,13 @@ describe("LlmTab rows that are not the active one", () => {
   const acme = preset("acme-gw", "Acme Gateway", "https://acme.example/v1");
   const zenith = preset("zenith-gw", "Zenith Gateway", "https://zenith.example/v1");
 
-  function genericRowSettings() {
-    return vi.fn().mockResolvedValue({
-      llm: {
-        pinnedModels: [],
-        modelListCache: {},
-        vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
-      },
-      marketplace: { installedProviderIds: [], installedProviderPresets: [] },
-    });
-  }
-
   it("syncs a credentialed row against its OWN endpoint and offers what it answers", async () => {
     // The regression: the catalogue sync only ever carried the ACTIVE route's
     // address, so a configured generic custom provider that was not the active
     // one synced against nothing — its models could never land, and a provider
     // the user had fully set up was absent from the only switch there is.
-    const api = makeApi({
-      hasApiKey: storedKeysFor("claude", "openai-compatible"),
-      getSettings: genericRowSettings(),
-      listLlmModels: vi.fn(async (request: { vendor: string; baseUrl?: string }) =>
+    const api = genericRowApi(
+      vi.fn(async (request: { vendor: string; baseUrl?: string }) =>
         request.vendor === "openai-compatible" && request.baseUrl === CUSTOM_ENDPOINT
           ? {
             ok: true,
@@ -750,7 +820,9 @@ describe("LlmTab rows that are not the active one", () => {
             fetchedAt: "2026-01-01T00:00:00.000Z",
           } satisfies LlmModelListResult
           : FETCH_FAILED),
-    });
+      CUSTOM_ENDPOINT,
+      { hasApiKey: storedKeysFor("claude", "openai-compatible") },
+    );
     await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
 
     await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledWith(
@@ -762,11 +834,11 @@ describe("LlmTab rows that are not the active one", () => {
   });
 
   it("says a credentialed row has nothing to choose until its endpoint answers", async () => {
-    const api = makeApi({
-      hasApiKey: storedKeysFor("claude", "openai-compatible"),
-      getSettings: genericRowSettings(),
-      listLlmModels: vi.fn(() => new Promise<LlmModelListResult>(() => {})),
-    });
+    const api = genericRowApi(
+      vi.fn(() => new Promise<LlmModelListResult>(() => {})),
+      CUSTOM_ENDPOINT,
+      { hasApiKey: storedKeysFor("claude", "openai-compatible") },
+    );
     await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
 
     // The card says why it is not in the list, rather than looking ready while
@@ -987,23 +1059,7 @@ describe("LlmTab says which kind of nothing a row has", () => {
   const EMPTY = /비어|empty|leere|vacía|vide|空/i;
   const FAILED = /못했습니다|Could not|konnte nicht|No se pudo|Impossible|できませんでした|无法/i;
 
-  function genericRow(
-    listLlmModels: MockApi["listLlmModels"] | undefined,
-    baseUrl = CUSTOM_ENDPOINT,
-  ) {
-    return makeApi({
-      hasApiKey: storedKeysFor("openai-compatible"),
-      getSettings: vi.fn().mockResolvedValue({
-        llm: {
-          pinnedModels: [],
-          modelListCache: {},
-          vendors: { "openai-compatible": baseUrl ? { baseUrl } : {} },
-        },
-        marketplace: { installedProviderIds: [], installedProviderPresets: [] },
-      }),
-      ...(listLlmModels ? { listLlmModels } : {}),
-    });
-  }
+  const genericRow = genericRowApi;
 
   async function blockerText(): Promise<string> {
     const note = await screen.findByTestId("llm-tab:connection-blocked:openai-compatible");
@@ -1142,6 +1198,279 @@ describe("LlmTab says which kind of nothing a row has", () => {
   });
 });
 
+describe("LlmTab model lists are cached, not re-fetched", () => {
+  const gateway = preset("acme-gw", "Acme Gateway", "https://acme.example/v1");
+  const GATEWAY_SECRET = "marketplace-provider:acme-gw";
+  const CACHED_MODEL = "cached-from-the-endpoint";
+  const genericKey = ["openai-compatible", CUSTOM_ENDPOINT, ""].join("\n");
+  const AZURE_ENDPOINT = "https://example-resource.example/deployments/gpt";
+
+  /** This block's profile, with its gateway preset installed throughout. */
+  const presetProfile = (profile: Profile, rest: MockApi = {}) =>
+    profileApi({ ...profile, installedProviderPresets: [gateway] }, rest);
+
+  function cacheEntry(baseUrl: string, models: string[], credentialScope?: string) {
+    return {
+      vendor: "openai-compatible",
+      baseUrl,
+      ...(credentialScope ? { credentialScope } : {}),
+      endpoint: `${baseUrl}/models`,
+      models,
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+    };
+  }
+
+  /** An endpoint that answers, so a request can be told from a cache read. */
+  function answering(models: string[]) {
+    return vi.fn(async (request: { vendor: string; baseUrl?: string }) => ({
+      ok: true,
+      vendor: request.vendor,
+      endpoint: `${request.baseUrl ?? ""}/models`,
+      models,
+      fetchedAt: "2026-02-02T00:00:00.000Z",
+    } satisfies LlmModelListResult));
+  }
+
+  function askedCount(api: MockApi): number {
+    return (api.listLlmModels as Mock).mock.calls.length;
+  }
+
+  function askedAddresses(api: MockApi): string[] {
+    return (api.listLlmModels as Mock).mock.calls
+      .map(([request]) => (request as { baseUrl?: string }).baseUrl ?? "");
+  }
+
+  it("renders the cached catalogue without waiting on a request", async () => {
+    // A model list is a catalogue, not live data. A chooser that blanks itself
+    // until a network call returns is what this policy exists to remove: the
+    // request below never resolves, and the list is still there.
+    const { api } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+      modelListCache: { [genericKey]: cacheEntry(CUSTOM_ENDPOINT, [CACHED_MODEL]) },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible"),
+      listLlmModels: vi.fn(() => new Promise<LlmModelListResult>(() => {})),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    expect(await chooserModelIds()).toContain(CACHED_MODEL);
+  });
+
+  it("asks nothing when the settings tab is opened again in the same launch", async () => {
+    const { api } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+      modelListCache: { [genericKey]: cacheEntry(CUSTOM_ENDPOINT, [CACHED_MODEL]) },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible"),
+      listLlmModels: answering([CACHED_MODEL]),
+    });
+    const first = await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+    await waitFor(() => expect(askedCount(api)).toBe(1));
+    first.unmount();
+
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    // Leaving the settings tab and coming back is not a new launch.
+    expect(askedCount(api)).toBe(1);
+  });
+
+  it("asks each routed row exactly once when the app runs again", async () => {
+    const { api } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT }, "azure-foundry": { baseUrl: AZURE_ENDPOINT } },
+      installedProviderIds: ["azure-foundry"],
+      modelListCache: {
+        [genericKey]: cacheEntry(CUSTOM_ENDPOINT, [CACHED_MODEL]),
+        [["openai-compatible", gateway.baseUrl, gateway.providerId].join("\n")]:
+          cacheEntry(gateway.baseUrl, ["gateway-model"], gateway.providerId),
+      },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible", GATEWAY_SECRET, "azure-foundry"),
+      listLlmModels: answering([CACHED_MODEL]),
+    });
+    // The marker is per launch and lives in the module, so a test crosses that
+    // boundary by forgetting it — which is the whole of what a restart does.
+    forgetModelListLaunchRefreshes();
+    await renderTab(api, {
+      vendor: "claude",
+      model: "claude-sonnet-4-6",
+      marketplaceProviderPresets: [gateway],
+    });
+
+    await waitFor(() => expect(askedCount(api)).toBe(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    // The two routed rows, once each — and never Foundry, whose list is
+    // curated here however its endpoint is configured.
+    expect(askedAddresses(api).sort()).toEqual([CUSTOM_ENDPOINT, gateway.baseUrl].sort());
+  });
+
+  it("asks once more when a row's endpoint moves", async () => {
+    const MOVED = "http://localhost:31000/v1";
+    const { api, broadcast } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+      modelListCache: { [genericKey]: cacheEntry(CUSTOM_ENDPOINT, [CACHED_MODEL]) },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible"),
+      listLlmModels: answering([CACHED_MODEL]),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+    await waitFor(() => expect(askedCount(api)).toBe(1));
+
+    await broadcast({ "openai-compatible": { baseUrl: MOVED } });
+
+    // A different address is a different catalogue, and no cache entry names
+    // this one yet.
+    await waitFor(() => expect(askedCount(api)).toBe(2));
+    expect((api.listLlmModels as Mock).mock.calls.at(-1)?.[0]).toMatchObject({ baseUrl: MOVED });
+  });
+
+  it("asks nothing when a broadcast says the same thing in a different order", async () => {
+    const { api, broadcast } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT, enableThinking: true } },
+      modelListCache: { [genericKey]: cacheEntry(CUSTOM_ENDPOINT, [CACHED_MODEL]) },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible"),
+      listLlmModels: answering([CACHED_MODEL]),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+    await waitFor(() => expect(askedCount(api)).toBe(1));
+
+    // The same block with its keys written the other way round: identical
+    // settings, which a serialized comparison would have called news.
+    await broadcast({ "openai-compatible": { enableThinking: true, baseUrl: CUSTOM_ENDPOINT } });
+
+    expect(askedCount(api)).toBe(1);
+  });
+
+  it("asks again when the card's refresh is pressed, cached or not", async () => {
+    const { api } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+      modelListCache: { [genericKey]: cacheEntry(CUSTOM_ENDPOINT, [CACHED_MODEL]) },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible"),
+      listLlmModels: answering([CACHED_MODEL, "and-a-new-one"]),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+    await waitFor(() => expect(askedCount(api)).toBe(1));
+
+    fireEvent.click(screen.getByTestId("llm-tab:connection-refresh:openai-compatible"));
+
+    // The press is the one thing that lifts both the cache and the marker.
+    await waitFor(() => expect(askedCount(api)).toBe(2));
+    expect(await chooserModelIds()).toContain("and-a-new-one");
+  });
+
+  it("offers a refresh only on the cards that have a list to refresh", async () => {
+    const { api } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT }, "azure-foundry": { baseUrl: AZURE_ENDPOINT } },
+      installedProviderIds: ["azure-foundry"],
+      modelListCache: { [genericKey]: cacheEntry(CUSTOM_ENDPOINT, [CACHED_MODEL]) },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible", "azure-foundry", "claude"),
+      listLlmModels: answering([CACHED_MODEL]),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await screen.findByTestId("llm-tab:connection:azure-foundry");
+    expect(screen.getByTestId("llm-tab:connection-refresh:openai-compatible")).toBeInTheDocument();
+    // A curated list has no endpoint to ask, so there is nothing to offer.
+    expect(screen.queryByTestId("llm-tab:connection-refresh:azure-foundry")).toBeNull();
+    expect(screen.queryByTestId("llm-tab:connection-refresh:claude")).toBeNull();
+  });
+
+  it("asks a row again once its credential is replaced", async () => {
+    // The cache key is built from vendor, address and scope — never from the
+    // credential — so a key stored over a broken one changes nothing the key
+    // can see, and the launch marker alone would hold the row on its failure.
+    let answer: LlmModelListResult = FETCH_FAILED;
+    const { api } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible"),
+      listLlmModels: vi.fn(async () => answer),
+    });
+    const { hooks } = await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-subline:openai-compatible"))
+      .toHaveAttribute("data-provider-sync-status", "error"));
+    expect(askedCount(api)).toBe(1);
+
+    answer = {
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: `${CUSTOM_ENDPOINT}/models`,
+      models: ["works-now"],
+      fetchedAt: "2026-03-03T00:00:00.000Z",
+    };
+    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    fireEvent.change(screen.getByTestId("llm-api-key-input"), { target: { value: "sk-fixed" } });
+    await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("llm-tab:save-providers"));
+
+    await waitFor(() => expect(hooks.onSaveProviderCredential).toHaveBeenCalled());
+    await waitFor(() => expect(askedCount(api)).toBe(2));
+    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-subline:openai-compatible"))
+      .toHaveAttribute("data-provider-sync-status", "ready"));
+  });
+
+  it("lands a fetched list where the fallback chain reads it", async () => {
+    // The write went to `vendor\n<address>\n` and the read looked under
+    // `vendor\n\n`, so a vendor with an address of its own offered the
+    // fallback dropdown nothing however well its endpoint had answered.
+    const { api } = presetProfile({
+      installedProviderIds: ["openrouter"],
+    }, {
+      hasApiKey: storedKeysFor("openrouter"),
+      listLlmModels: answering(["router/one", "router/two"]),
+    });
+    await renderTab(api, {
+      vendor: "claude",
+      model: "claude-sonnet-4-6",
+      fallbackOpen: true,
+      fallbackChain: [{ provider: "openrouter", model: "router/one" }],
+    });
+
+    await waitFor(() => expect(askedCount(api)).toBeGreaterThan(0));
+    const section = screen.getByTestId("fallback-chain-section");
+    const triggers = [...section.querySelectorAll<HTMLElement>("[role='combobox']")];
+    openMenu(triggers[triggers.length - 1]!);
+
+    await waitFor(() => {
+      const offered = [...document.querySelectorAll<HTMLElement>("[role='option'] [data-model-id]")]
+        .map((node) => node.getAttribute("data-model-id"));
+      expect(offered).toContain("router/two");
+    });
+  });
+
+  it("ignores a cache entry filed under an address the row no longer uses", async () => {
+    // An older build filed this vendor's catalogue under a different address.
+    // Binding the row to that entry left it reading a key nothing writes any
+    // more — an old catalogue with no way to refresh.
+    const { api } = presetProfile({
+      vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+      modelListCache: {
+        [["openai-compatible", "http://stale.invalid/v1", ""].join("\n")]:
+          cacheEntry("http://stale.invalid/v1", ["from-the-old-address"]),
+      },
+    }, {
+      hasApiKey: storedKeysFor("openai-compatible"),
+      listLlmModels: answering(["from-the-current-address"]),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(() => expect(askedCount(api)).toBeGreaterThan(0));
+    expect(askedAddresses(api)).toContain(CUSTOM_ENDPOINT);
+    expect(askedAddresses(api)).not.toContain("http://stale.invalid/v1");
+    const offered = await chooserModelIds();
+    expect(offered).toContain("from-the-current-address");
+    expect(offered).not.toContain("from-the-old-address");
+  });
+});
+
 describe("LlmTab marketplace preset rows", () => {
   const presets = [
     preset("acme-gw", "Acme Gateway", "https://acme.example/v1"),
@@ -1182,6 +1511,16 @@ describe("LlmTab marketplace preset rows", () => {
 
   it("reports each preset's handshake on its own card", async () => {
     const api = makeApi({
+      // The launch refresh confirms the cached catalogue, so the endpoint
+      // answers here; a failure would leave the row on its cached list and say
+      // so, which is a different test.
+      listLlmModels: vi.fn(async () => ({
+        ok: true,
+        vendor: "openai-compatible",
+        endpoint: "https://acme.example/v1/models",
+        models: ["acme-1", "acme-2"],
+        fetchedAt: "2026-01-02T00:00:00.000Z",
+      } satisfies LlmModelListResult)),
       getSettings: settingsWithCache({
         [["openai-compatible", "https://acme.example/v1", "acme-gw"].join("\n")]: {
           vendor: "openai-compatible",
@@ -1332,23 +1671,6 @@ describe("LlmTab OpenAI model catalogue", () => {
     expect(screen.queryByTestId("llm-tab:connection-blocked:codex")).toBeNull();
     // And no second, API-side OpenAI row conjured out of the attempt.
     expect(rowOrder()).toEqual(["codex"]);
-  });
-
-  it("keeps a provider with a stored key on screen without a handshake of its own", async () => {
-    // The credential alone puts this row on the page — the form is pointed at
-    // a DIFFERENT provider and no catalogue has landed. What it must NOT do is
-    // report a failure: this vendor's `/models` is fixed and is fetched when it
-    // is the active route, and the card here is the Codex runtime's.
-    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
-    installSubscription([codexView()]);
-    await renderTab(api, { vendor: "claude", model: "", hasKey: false });
-
-    // The pairing carries it: one OpenAI row on the Codex runtime, not a
-    // second plain card beside it.
-    await waitFor(() => expect(rowOrder()).toEqual(["codex"]));
-    expect(api.listLlmModels).not.toHaveBeenCalled();
-    // No handshake, so no sync line at all — and above all no red one.
-    expect(screen.queryByTestId("llm-tab:connection-subline:codex")).toBeNull();
   });
 
   it("keeps the stored key replaceable on a row whose handshake failed", async () => {
