@@ -136,7 +136,7 @@ export function loadHookConfig(
   const anchors = collectScriptAnchors(parsed.entries);
   for (const anchorPath of anchors) {
     hasher.update("\0");
-    hasher.update(anchorPath);
+    hasher.update(trustAnchorKey(anchorPath));
     hasher.update("\0");
     try {
       hasher.update(readFileSync(anchorPath));
@@ -153,6 +153,19 @@ export function loadHookConfig(
     errors: parsed.errors,
     trustHash: hasher.digest("hex"),
   };
+}
+
+/**
+ * The form of a script anchor that is folded into the trust hash.
+ *
+ * Separator-stable on purpose: the anchor comes back from `expandLeadingTilde`
+ * through `path.resolve`, so on win32 the same script is spelled with `\`
+ * where it was once spelled with `/`. The hash must name the script, not the
+ * spelling, or a platform's path style — and any future change to how the
+ * anchor is resolved — silently re-quarantines every `~/`-anchored hook.
+ */
+export function trustAnchorKey(anchorPath: string): string {
+  return anchorPath.replaceAll("\\", "/");
 }
 
 function hashBytesOnly(raw: Buffer): string {
