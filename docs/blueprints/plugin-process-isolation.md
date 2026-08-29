@@ -988,7 +988,8 @@ shim and it does not need the No-Fallback exemption, because it is not a runtime
 degradation path: no call ever falls back from one to the other, and nothing is
 silently retried in-process when the child fails — a failed child fails the call.
 It is a per-plugin routing decision made from a host-owned SOT, which is the same
-mechanism `LOOPBACK_MIGRATED_PLUGIN_IDS` used to land the loopback migration and
+mechanism (`OUT_OF_PROCESS_PLUGIN_IDS`, the host-owned census in
+`plugins/isolation/out-of-process-plugins.ts`) used to land the loopback migration and
 the same hybrid the architecture already ratifies.
 
 The one genuine contract break in this plan is `getSecret` in Stage 4, and it is
