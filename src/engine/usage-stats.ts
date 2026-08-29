@@ -7,7 +7,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { iterateJsonlLines, withAuditSnapshotLock } from "../audit/jsonl-reader.js";
-import { kstDateKey, kstMonthStartKey, kstWeekStartKey, shiftKstDateKey } from "../shared/kst-date.js";
+import { kstDateKey, kstMonthStartKey, kstMondayWeekStartKey, shiftKstDateKey } from "../shared/kst-date.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import {
   normalizeSubscriptionUsageTelemetry,
@@ -436,7 +436,7 @@ export function computeUsageSummary(
   pricingOverrides: readonly PricingOverride[] = [],
 ): UsageSummary {
   const todayKey = kstDateKey(now);
-  const weekKey = kstWeekStartKey(now);
+  const weekKey = kstMondayWeekStartKey(now);
   const monthKey = kstMonthStartKey(now);
 
   const today = emptyTotals();

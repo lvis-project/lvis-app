@@ -25,7 +25,8 @@ import {
 } from "./work-memory.js";
 import { readActivity, type ActivityStorage } from "./activity-log.js";
 import { workBoardProjectStorageKey } from "./project-storage.js";
-import { isoWeekFor, kstDay, kstDayBounds, sundayWeekBoundsKst } from "./schedule.js";
+import { kstDateKey } from "../shared/kst-date.js";
+import { isoWeekFor, kstDayBounds, sundayWeekBoundsKst } from "./schedule.js";
 import type { WorkBoardStorage } from "./storage.js";
 import type {
   WorkItemListResult,
@@ -151,7 +152,7 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
   }
 
   async function generateDaily(input?: DailyReportInput): Promise<ReportResult> {
-    const period = input?.date ?? kstDay(nowMs());
+    const period = input?.date ?? kstDateKey(new Date(nowMs()));
     const bounds = kstDayBounds(period);
     if (!bounds) {
       return { status: "empty", kind: "daily", period, reason: "invalid date — expected YYYY-MM-DD" };

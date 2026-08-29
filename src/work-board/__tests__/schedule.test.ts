@@ -1,22 +1,15 @@
 /**
- * KST calendar helpers for reports. The fixed instant 2026-06-16T00:00:00Z is
- * 2026-06-16 09:00 KST (a Tuesday), so day/week projections are checkable by
- * hand against the KST wall clock.
+ * KST report bounds. The fixed instant 2026-06-16T00:00:00Z is 2026-06-16
+ * 09:00 KST (a Tuesday), so day/week projections are checkable by hand against
+ * the KST wall clock. The day *key* projection is covered by
+ * `shared/__tests__/kst-date.test.ts`, which now owns it.
  */
 import { describe, it, expect } from "vitest";
-import { kstDay, kstDayBounds, sundayWeekBoundsKst, isoWeekFor } from "../schedule.js";
+import { kstDayBounds, sundayWeekBoundsKst, isoWeekFor } from "../schedule.js";
 
 const UTC_MIDNIGHT_JUN16 = Date.parse("2026-06-16T00:00:00.000Z"); // 09:00 KST, Tue
 
 describe("schedule (KST helpers)", () => {
-  it("kstDay projects to the KST calendar day", () => {
-    expect(kstDay(UTC_MIDNIGHT_JUN16)).toBe("2026-06-16");
-    // 2026-06-15T16:00Z = 2026-06-16 01:00 KST → still the 16th in KST.
-    expect(kstDay(Date.parse("2026-06-15T16:00:00.000Z"))).toBe("2026-06-16");
-    // 2026-06-15T14:00Z = 2026-06-15 23:00 KST → the 15th.
-    expect(kstDay(Date.parse("2026-06-15T14:00:00.000Z"))).toBe("2026-06-15");
-  });
-
   it("kstDayBounds spans exactly one KST day in UTC", () => {
     const b = kstDayBounds("2026-06-16");
     expect(b).not.toBeNull();
