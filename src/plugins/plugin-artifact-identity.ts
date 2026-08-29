@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { errorMessage } from "../shared/error-message.js";
 
 type ReceiptFileIdentity = Readonly<{
   path: string;
@@ -23,7 +24,7 @@ export function pluginArtifactGenerationId(manifestRaw: string, receiptRaw: stri
   } catch (error) {
     throw new Error(
       "cannot derive plugin artifact identity from an invalid install receipt: "
-      + (error instanceof Error ? error.message : String(error)),
+      + errorMessage(error),
     );
   }
   if (!parsedReceipt || typeof parsedReceipt !== "object" || Array.isArray(parsedReceipt)) {

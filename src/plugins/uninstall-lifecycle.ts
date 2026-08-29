@@ -14,6 +14,7 @@ import {
   type PluginUninstallCleanupPhase,
   type PluginUninstallCleanupRecord,
 } from "./plugin-uninstall-cleanup-journal.js";
+import { errorMessage } from "../shared/error-message.js";
 
 type WarnLogger = { warn: (message: string, ...args: unknown[]) => void };
 
@@ -135,10 +136,6 @@ function cleanupJournal(
   const journal = new PluginUninstallCleanupJournal(path);
   cleanupJournals.set(path, journal);
   return journal;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 async function cleanupRecordedPluginState(

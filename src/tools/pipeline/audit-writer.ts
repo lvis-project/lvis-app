@@ -32,6 +32,7 @@ import {
   permissionAuditAskEntryFromToolCall,
   permissionAuditEntryFromToolCall,
 } from "./audit-entries.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("executor");
 
@@ -144,7 +145,7 @@ export class AuditWriter {
         "permission grant audit append failed for %s (%s): %s",
         args.toolName,
         args.grantLifetime,
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     }
   }
@@ -193,7 +194,7 @@ export class AuditWriter {
       log.warn(
         "permission ask audit append failed for %s: %s",
         toolName,
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     }
   }
@@ -278,7 +279,7 @@ export class AuditWriter {
       log.warn(
         "general tool audit failed for %s: %s",
         toolName,
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     }
     if (!category || !cwd) {
@@ -314,7 +315,7 @@ export class AuditWriter {
       log.warn(
         "permission audit append failed for %s: %s",
         toolName,
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     }
   }

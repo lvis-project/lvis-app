@@ -59,6 +59,7 @@ import {
   RPC_INVALID_PARAMS,
   RPC_METHOD_NOT_FOUND,
 } from "../../mcp/protocol-constants.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 /** JSON-RPC internal error, the code `StdioServerLoop` uses for a throwing handler. */
 const RPC_INTERNAL_ERROR = -32603;
@@ -236,7 +237,7 @@ export function servePluginChild(
             replyError(
               id,
               RPC_INTERNAL_ERROR,
-              error instanceof Error ? error.message : String(error),
+              errorMessage(error),
             ),
         );
         return;

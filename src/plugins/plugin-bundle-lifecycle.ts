@@ -40,6 +40,7 @@ import {
   pluginGenerationHealthJournalPath,
   type PluginGenerationHealthFault,
 } from "./plugin-generation-health-journal.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("plugin-bundle-lifecycle");
 const MAX_RETIREMENT_ATTEMPTS = 3;
@@ -1008,7 +1009,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       } catch (error) {
         log.error(
           `plugin generation retirement failed (${generation.pluginId}:${generation.generationId}, attempt ${attempt}): %s`,
-          error instanceof Error ? error.message : String(error),
+          errorMessage(error),
         );
         if (attempt >= MAX_RETIREMENT_ATTEMPTS) throw error;
         await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, attempt * 100));

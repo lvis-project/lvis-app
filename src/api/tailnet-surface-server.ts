@@ -50,6 +50,7 @@ import {
   type TailnetWebSessionStore,
 } from "./tailnet-web-session-store.js";
 import { isRecord } from "../shared/is-record.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
@@ -96,7 +97,6 @@ export interface TailnetWebOptions {
   readonly origin: string;
   readonly sessions?: TailnetWebSessionStore;
 }
-
 
 export interface TailnetSurfaceServerOptions {
   /** Must be the literal 127.0.0.1; a Tailnet IP is never a direct bind. */
@@ -232,7 +232,6 @@ interface TailnetStreamSessionGuard {
   readonly checks: Set<() => void>;
 }
 
-
 interface TailnetWebRequestAuthorization {
   readonly login: string;
   /** Request-local only; never stored or returned by the server. */
@@ -248,7 +247,6 @@ interface TailnetWebPageState {
   readonly csrfToken: string;
   readonly canControl: boolean;
 }
-
 
 /** Testable header validator for the Tailscale Serve observer contract. */
 export function isAuthorizedTailnetObserver(
@@ -318,7 +316,6 @@ export function isTailnetWebOrigin(value: unknown): value is string {
   }
 }
 
-
 /** Start the dedicated literal-loopback Tailnet observer listener. */
 export function startTailnetSurfaceServer(
   options: TailnetSurfaceServerOptions,
@@ -366,7 +363,6 @@ export function startTailnetSurfaceServer(
         origin: options.web.origin,
         sessions: options.web.sessions ?? createTailnetWebSessionStore(),
       });
-
 
   const maxConnections = positiveInteger(options.maxConnections ?? DEFAULT_MAX_CONNECTIONS, "maxConnections");
   const maxStreamLifetimeMs = positiveInteger(
@@ -1591,9 +1587,6 @@ function renderTailnetWebDocument(nonce: string, state: TailnetWebPageState): st
   ].join("\n");
 }
 
-
-
-
 /**
  * Narrow native-controller ingress. Browser control deliberately waits for a
  * separate same-origin UI + CSRF session; accepting an Origin header here
@@ -2014,8 +2007,6 @@ async function routePairingClaim(
   });
 }
 
-
-
 type DecodedTailnetControllerCommand =
   | { readonly ok: true; readonly command: TailnetControllerCommand }
   | {
@@ -2163,8 +2154,6 @@ async function readTailnetPairingClaim(
 function isPairingInvitationCode(value: unknown): value is string {
   return typeof value === "string" && /^lvis-pair-v1\.[A-Za-z0-9_-]{43}$/.test(value);
 }
-
-
 
 function parseTailnetControllerCommand(value: unknown): TailnetControllerCommand | undefined {
   if (!isRecord(value) || !isControllerCommandId(value.id)) return undefined;
@@ -2522,7 +2511,6 @@ function controllerReceiptKeyDigest(actorId: string, commandId: string): string 
   return createHash("sha256").update(`${actorId}\u0000${commandId}`, "utf8").digest("hex");
 }
 
-
 function tailnetPublicTurnId(actorId: string, commandId: string): string {
   const digest = controllerReceiptKeyDigest(actorId, commandId);
   return "tailnet-turn_" + Buffer.from(digest, "hex").toString("base64url");
@@ -2563,8 +2551,6 @@ function isTailnetWebSessionStore(value: unknown): value is TailnetWebSessionSto
 function isJsonContentType(value: string | undefined): boolean {
   return value?.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
 }
-
-
 
 /** Exact image media types only; parameters belong to neither the wire nor the SOT normalizer. */
 function tailnetAttachmentMimeType(value: string | undefined): string | undefined {
@@ -2687,7 +2673,6 @@ function handleEvents(
     endStream();
     return true;
   };
-
 
   const resyncIfScopeChanged = (): boolean => {
     let latest: TailnetObserverScope;
@@ -2879,7 +2864,6 @@ function hasHeader(headers: IncomingHttpHeaders, name: string): boolean {
   return Object.keys(headers).some((key) => key.toLowerCase() === name);
 }
 
-
 function singleHeader(headers: IncomingHttpHeaders, name: string): string | undefined {
   let found: string | undefined;
   for (const [key, value] of Object.entries(headers)) {
@@ -2916,8 +2900,4 @@ function positiveInteger(value: number, label: string): number {
     throw new RangeError(`${label} must be a positive safe integer.`);
   }
   return value;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

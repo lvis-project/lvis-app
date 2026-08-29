@@ -39,6 +39,7 @@ import {
   findHostSecretReadListViolation,
   isAllowedHostSecretKey } from "../../shared/marketplace-package-assets.js";
 import { resolvePluginContributionDeclarations } from "../plugin-contributions.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
@@ -304,7 +305,7 @@ export async function parsePluginJson(
       } catch (err) {
         fail(
           "networkAccess.allowedDomains",
-          err instanceof Error ? err.message : String(err),
+          errorMessage(err),
           `"networkAccess": { "allowedDomains": ["api.example.com"], "reasoning": "Why this plugin needs host-mediated egress." }`,
         );
       }

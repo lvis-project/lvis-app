@@ -12,6 +12,7 @@ import type { PluginRegistryEntry } from "./types.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import { pendingOwnedBackupPaths } from "./marketplace-update-recovery.js";
 import { isRecord } from "../shared/is-record.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const TRANSACTION_ROOT = "+transactions+";
 const REMOVAL_SUBDIR = "removals";
@@ -142,10 +143,6 @@ async function assertOwnedTransactionDirectory(paths: PluginPaths, transactionId
 function assertOnlyKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
   const allowed = new Set(expected);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error(`Invalid ${label} keys`);
-}
-
-function errorReason(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function cloneEntry(entry: PluginRegistryEntry): PluginRegistryEntry {
@@ -419,7 +416,7 @@ export async function reconcileRemovalTransactions(paths: PluginPaths, options: 
     ids = await readdir(transactionRoot(paths));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return result;
-    result.unresolved.push({ transactionId: "<removal-root>", reason: errorReason(error) });
+    result.unresolved.push({ transactionId: "<removal-root>", reason: errorMessage(error) });
     return result;
   }
   for (const id of ids) {
@@ -434,7 +431,7 @@ export async function reconcileRemovalTransactions(paths: PluginPaths, options: 
         result[outcome].push(id);
       }
     } catch (error) {
-      result.unresolved.push({ transactionId: id, reason: errorReason(error) });
+      result.unresolved.push({ transactionId: id, reason: errorMessage(error) });
     }
   }
   return result;

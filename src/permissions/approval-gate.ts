@@ -61,6 +61,7 @@ import {
   parseHostShellExecutionInput,
   type HostShellExecutionPlanAuditProjection,
 } from "./host-shell-execution-plan.js";
+import { errorMessage } from "../shared/error-message.js";
 
 // ─── Args DLP masking ────────────────────────────────
 
@@ -2681,7 +2682,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
-          output: `[approval:seal-failed] ${fullReq.id} toolName=${fullReq.toolName} error=${sealErr instanceof Error ? sealErr.message : String(sealErr)} → deny-once`,
+          output: `[approval:seal-failed] ${fullReq.id} toolName=${fullReq.toolName} error=${errorMessage(sealErr)} → deny-once`,
         });
         settle(
           markHostApprovalRejectedDecision({
@@ -2710,7 +2711,7 @@ export class ApprovalGate {
           timestamp: new Date().toISOString(),
           sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
-          output: `[approval:send-failed] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
+          output: `[approval:send-failed] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} error=${errorMessage(sendErr)} → deny-once`,
         });
         settle(
           markHostApprovalRejectedDecision({

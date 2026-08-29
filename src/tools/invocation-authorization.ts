@@ -60,6 +60,7 @@ import type {
 } from "./invocation-runner.js";
 import type { ResolvedPluginOperation } from "./plugin-operation-governance.js";
 import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("executor");
 
@@ -1208,7 +1209,7 @@ export async function authorizeToolInvocation(
         } catch (error) {
           return returnRationaleResumeBlock(
             "permission ask audit failed: " +
-              (error instanceof Error ? error.message : String(error)),
+              errorMessage(error),
             finalInput,
             permissionResult,
           );
@@ -1453,9 +1454,7 @@ export async function authorizeToolInvocation(
           const msg = t("be_executor.approvalGateError", {
             name: toolUse.name,
             error:
-              approvalErr instanceof Error
-                ? approvalErr.message
-                : String(approvalErr),
+              errorMessage(approvalErr),
           });
           const durationMs = Date.now() - startTime;
           // finalInput keeps audit/UI consistent with the args shown to the
@@ -1481,7 +1480,7 @@ export async function authorizeToolInvocation(
             {
               ...permissionResult,
               decision: "deny",
-              reason: `approval gate error: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`,
+              reason: `approval gate error: ${errorMessage(approvalErr)}`,
             },
             Infinity,
             invocationPermissionContext,

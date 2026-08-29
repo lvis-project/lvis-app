@@ -1,5 +1,6 @@
 import { createDynamicTool, type Tool } from "./base.js";
 import type { GenericMessage } from "../engine/llm/types.js";
+import { errorMessage } from "../shared/error-message.js";
 
 export const READ_TOOL_RESULT_CHUNK_TOOL = "read_tool_result_chunk";
 export const TOOL_RESULT_CHUNK_READER_METADATA_KEY = "toolResultChunkReader";
@@ -109,7 +110,7 @@ export function createReadToolResultChunkTool(): Tool {
           "maxChars",
         );
       } catch (err) {
-        return unavailable(err instanceof Error ? err.message : String(err));
+        return unavailable(errorMessage(err));
       }
 
       const reader = getReader(ctx.metadata);

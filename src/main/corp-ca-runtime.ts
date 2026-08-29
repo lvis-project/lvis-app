@@ -19,6 +19,7 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { countCertificates, extractCorporateCa } from "./corp-ca-extract.js";
 import { resolveCorpCaConfig, type CorpCaConfig } from "../shared/corp-ca-config.js";
+import { errorMessage } from "../shared/error-message.js";
 const caLog = createLogger("corp-ca");
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -53,8 +54,6 @@ function cachePathFor(commonName: string): string {
   const digest = createHash("sha256").update(commonName).digest("hex").slice(0, 16);
   return join(CACHE_DIR, `corp-ca-${digest}.pem`);
 }
-
-
 
 function readCacheIfFresh(cachePath: string): string | null {
   let fd: number | null = null;
@@ -149,10 +148,6 @@ export async function ensureCorporateCa(
 // ─── Process-wide TLS injection ───────────────────────────────────────────────
 
 const log = createLogger("lvis");
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 async function injectCorporateCa(config: CorpCaConfig) {
   try {

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { errorMessage } from "../shared/error-message.js";
 
 export interface PluginRetirementRecord {
   pluginId: string;
@@ -69,7 +70,7 @@ export class PluginRetirementJournal {
       recordedAt: previous?.recordedAt ?? new Date().toISOString(),
       attempts: (previous?.attempts ?? 0) + 1,
       ...(error !== undefined
-        ? { lastError: (error instanceof Error ? error.message : String(error)).slice(0, 1000) }
+        ? { lastError: errorMessage(error).slice(0, 1000) }
         : previous?.lastError ? { lastError: previous.lastError } : {}),
       ...(previous?.completedPhases
         ? { completedPhases: Object.freeze([...previous.completedPhases]) }
