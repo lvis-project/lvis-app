@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { hasExactKeys } from "../shared/is-record.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "command-receipts.json";
@@ -63,12 +64,6 @@ function initialState(): ReceiptStateFile {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
 }
 
 function validTimestamp(value: unknown): value is number {

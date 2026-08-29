@@ -47,6 +47,7 @@ import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
+import { hasExactKeys } from "../shared/is-record.js";
 
 const STORE_VERSION = 1;
 /** Same namespace the bridge already uses for `command-receipts.json`. */
@@ -334,12 +335,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
 function timestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
@@ -376,7 +371,7 @@ function nextEpoch(value: number): number {
 
 function validPendingCode(value: unknown): value is StoredPendingCode {
   return record(value)
-    && exactKeys(value, ["id", "codeDigest", "expiresAt", "attemptsRemaining"])
+    && hasExactKeys(value, ["id", "codeDigest", "expiresAt", "attemptsRemaining"])
     && isTelegramConnectionId(value.id)
     && digest(value.codeDigest)
     && timestamp(value.expiresAt)
@@ -390,7 +385,7 @@ function validPendingCode(value: unknown): value is StoredPendingCode {
 
 function validPairing(value: unknown): value is StoredPairing {
   return record(value)
-    && exactKeys(value, ["id", "actorDigest", "state", "epoch", "createdAt"])
+    && hasExactKeys(value, ["id", "actorDigest", "state", "epoch", "createdAt"])
     && isTelegramConnectionId(value.id)
     && digest(value.actorDigest)
     && (value.state === "active" || value.state === "revoked" || value.state === "unrecognized")
@@ -400,7 +395,7 @@ function validPairing(value: unknown): value is StoredPairing {
 
 function validApproval(value: unknown): value is StoredApproval {
   return record(value)
-    && exactKeys(value, [
+    && hasExactKeys(value, [
       "id", "pairingId", "pairingEpoch", "conversationId", "conversationDigest", "scope",
       "state", "epoch", "createdAt", "expiresAt",
     ])
@@ -428,7 +423,7 @@ function validApproval(value: unknown): value is StoredApproval {
 function validDocument(value: unknown): value is StoreDocument {
   if (
     !record(value)
-    || !exactKeys(value, [
+    || !hasExactKeys(value, [
       "version", "receiptOwnerId", "activationEpoch", "desiredState", "botFingerprint",
       "actorKeyDigest", "pollOffset", "pendingCode", "pairing", "approvals", "lastErrorCode",
     ])

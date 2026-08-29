@@ -5,7 +5,7 @@ import type {
 } from "../shared/a2a-wire.js";
 import { isIP } from "node:net";
 import { A2AJsonRpcMethod } from "../shared/a2a-wire.js";
-import { isRecord } from "../shared/is-record.js";
+import { isRecord, hasExactKeys } from "../shared/is-record.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 export const A2A_EXACT_SEND_REPLAY_URI =
@@ -321,12 +321,6 @@ export interface A2ARemoteRequestEnvelope {
   params: A2AJsonObject;
 }
 
-function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
-}
-
 function boundedId(value: unknown): value is string {
   return typeof value === "string" && SAFE_ID.test(value);
 }
@@ -377,7 +371,7 @@ export function parseA2ARouteSnapshot(
     "remote_server_lock_digest_sha256", "a2a_tck_lock_digest_sha256",
     "a2a_specification_uri",
   ];
-  if (!exactKeys(value, required)) throw new Error("a2a-route-snapshot-fields-invalid");
+  if (!hasExactKeys(value, required)) throw new Error("a2a-route-snapshot-fields-invalid");
   const idFields = [
     value.snapshot_id, value.operation_id, value.attempt_id, value.caller_generation_id,
     value.credential_provider, value.credential_external_version,

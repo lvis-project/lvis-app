@@ -6,7 +6,7 @@
  * main process HMAC-binds this exact display object to the one-shot approval
  * request before it crosses the renderer boundary.
  */
-import { isRecord } from "./is-record.js";
+import { isRecord, hasExactKeys } from "./is-record.js";
 
 export const RATIONALE_APPROVAL_DISPLAY_VERSION = 1 as const;
 export const RATIONALE_APPROVAL_DISPLAY_KIND =
@@ -98,15 +98,6 @@ export function normalizeRationaleApprovalDisplayText(value: string): string {
 
 function hasUnsafeRationaleApprovalDisplayUnicode(value: string): boolean {
   return HAS_UNSAFE_RATIONALE_APPROVAL_DISPLAY_UNICODE.test(value);
-}
-
-function hasExactKeys(value: object, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return (
-    actual.length === wanted.length &&
-    actual.every((key, index) => key === wanted[index])
-  );
 }
 
 /**

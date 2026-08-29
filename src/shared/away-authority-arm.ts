@@ -20,6 +20,7 @@
  * place that names those literals.
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
+import { hasExactKeys } from "./is-record.js";
 
 /**
  * Offered lifetimes. The longest is the ceiling `parseAwayAuthorityGrant`
@@ -143,12 +144,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
 function timestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
@@ -184,7 +179,7 @@ function isDirectoryList(value: unknown): value is readonly string[] {
  */
 export function isAwayAuthorityArmInput(value: unknown): value is AwayAuthorityArmInputPayload {
   return record(value)
-    && exactKeys(value, ["budget", "chatGroupId", "directories", "duration", "intent", "mode"])
+    && hasExactKeys(value, ["budget", "chatGroupId", "directories", "duration", "intent", "mode"])
     && hasUserKeyboardIntent(value.intent)
     && typeof value.chatGroupId === "string"
     && value.chatGroupId.trim().length > 0
@@ -198,7 +193,7 @@ export function isAwayAuthorityArmInput(value: unknown): value is AwayAuthorityA
 export function isAwayAuthorityIntentOnlyInput(
   value: unknown,
 ): value is AwayAuthorityIntentOnlyInput {
-  return record(value) && exactKeys(value, ["intent"]) && hasUserKeyboardIntent(value.intent);
+  return record(value) && hasExactKeys(value, ["intent"]) && hasUserKeyboardIntent(value.intent);
 }
 
 function isAwayAuthorityErrorCode(value: unknown): value is AwayAuthorityErrorCode {
@@ -208,7 +203,7 @@ function isAwayAuthorityErrorCode(value: unknown): value is AwayAuthorityErrorCo
 
 export function parseAwayAuthorityStatus(value: unknown): AwayAuthorityStatus | null {
   if (!record(value)
-    || !exactKeys(value, ["directories", "expiresAt", "remaining", "writable"])
+    || !hasExactKeys(value, ["directories", "expiresAt", "remaining", "writable"])
     || typeof value.writable !== "boolean"
     || !Array.isArray(value.directories)
     || value.directories.length > AWAY_AUTHORITY_MAX_DIRECTORIES
@@ -228,7 +223,7 @@ export function parseAwayAuthorityStatus(value: unknown): AwayAuthorityStatus | 
 }
 
 function parseAwayAuthorityFailure(value: unknown): AwayAuthorityFailure | null {
-  if (!record(value) || !exactKeys(value, ["error", "ok"])
+  if (!record(value) || !hasExactKeys(value, ["error", "ok"])
     || value.ok !== false || !isAwayAuthorityErrorCode(value.error)) {
     return null;
   }
@@ -241,14 +236,14 @@ export function parseAwayAuthorityMutationResult(
 ): AwayAuthorityMutationResult | null {
   const failure = parseAwayAuthorityFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !exactKeys(value, ["ok"]) || value.ok !== true) return null;
+  if (!record(value) || !hasExactKeys(value, ["ok"]) || value.ok !== true) return null;
   return Object.freeze({ ok: true });
 }
 
 export function parseAwayAuthorityStatusResult(value: unknown): AwayAuthorityStatusResult | null {
   const failure = parseAwayAuthorityFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !exactKeys(value, ["ok", "status"]) || value.ok !== true) return null;
+  if (!record(value) || !hasExactKeys(value, ["ok", "status"]) || value.ok !== true) return null;
   if (value.status === null) return Object.freeze({ ok: true, status: null });
   const status = parseAwayAuthorityStatus(value.status);
   return status === null ? null : Object.freeze({ ok: true, status });

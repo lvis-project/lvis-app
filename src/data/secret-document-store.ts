@@ -14,7 +14,7 @@ import { basename, dirname, resolve } from "node:path";
 import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
-import { isRecord } from "../shared/is-record.js";
+import { isRecord, hasOnlyKeys } from "../shared/is-record.js";
 
 const DOCUMENT_VERSION = 1;
 const FILE_MODE = 0o600;
@@ -243,11 +243,6 @@ function validateSecretKey(key: string): void {
     || key.includes("\0")) {
     throw new SecretDocumentValidationError("Secret document contains an invalid key");
   }
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const allowed = new Set(expected);
-  return Object.keys(value).every((key) => allowed.has(key));
 }
 
 function isCanonicalBase64(value: string): boolean {

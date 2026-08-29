@@ -16,3 +16,26 @@
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/**
+ * Whether `value` has exactly the own enumerable string keys in `expected`
+ * (order-insensitive). The shape check every on-disk record parser runs
+ * before trusting field types: an extra key is as much a rejection as a
+ * missing one, because a stored document with a field this build does not
+ * know is a document another build wrote.
+ */
+export function hasExactKeys(value: object, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+/**
+ * Whether every own enumerable string key of `value` is in `allowed`. The
+ * looser shape check for inputs where fields are optional: unknown keys are
+ * rejected, missing ones are for the caller to judge.
+ */
+export function hasOnlyKeys(value: object, allowed: ReadonlySet<string> | readonly string[]): boolean {
+  const permitted = allowed instanceof Set ? allowed : new Set(allowed);
+  return Object.keys(value).every((key) => permitted.has(key));
+}

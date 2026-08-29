@@ -31,7 +31,7 @@ import {
 } from "./rationale-ticket-lifecycle.js";
 import type { RationaleRequiredControl } from "./rationale-control.js";
 import { timingSafeEqualHexDigest, sha256Hex } from "../../lib/hex-digest-equal.js";
-import { isRecord } from "../../shared/is-record.js";
+import { isRecord, hasExactKeys } from "../../shared/is-record.js";
 
 const JOURNAL_SCHEMA_VERSION = 1 as const;
 const MAX_JOURNAL_BYTES = 16 * 1024 * 1024;
@@ -152,15 +152,12 @@ export type RecoveryInvocationAuditSink = (
   record: InvocationAuditRecord,
 ) => Promise<void> | void;
 
-function exactKeys(
+function assertExactKeys(
   value: Record<string, unknown>,
   keys: readonly string[],
   label: string,
 ): void {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  if (actual.length !== expected.length ||
-      actual.some((key, index) => key !== expected[index])) {
+  if (!hasExactKeys(value, keys)) {
     throw new Error(`${label} contains unexpected or missing fields`);
   }
 }
@@ -257,7 +254,7 @@ function validateEntry(
   value: unknown,
 ): asserts value is InvocationJournalEntry {
   if (!isRecord(value)) throw new Error("invocation journal entry must be an object");
-  exactKeys(value, [
+  assertExactKeys(value, [
     "authorized",
     "authorizationExpiresAt",
     "controlDigest",
@@ -332,7 +329,7 @@ function validateEntry(
 
 function validateSnapshot(value: unknown): asserts value is InvocationJournalSnapshot {
   if (!isRecord(value)) throw new Error("invocation journal must be an object");
-  exactKeys(value, ["schemaVersion", "revision", "entries"], "invocation journal");
+  assertExactKeys(value, ["schemaVersion", "revision", "entries"], "invocation journal");
   if (value.schemaVersion !== JOURNAL_SCHEMA_VERSION) {
     throw new Error("unsupported invocation journal schema");
   }
@@ -388,7 +385,7 @@ function parseEnvelope(
   if (!isRecord(decoded)) {
     throw new Error("invocation journal envelope must be an object");
   }
-  exactKeys(decoded, [
+  assertExactKeys(decoded, [
     "schemaVersion",
     "kind",
     "previousMac",
@@ -454,7 +451,7 @@ function parseCheckpoint(
   if (!isRecord(decoded)) {
     throw new Error("invocation journal checkpoint must be an object");
   }
-  exactKeys(decoded, [
+  assertExactKeys(decoded, [
     "schemaVersion",
     "kind",
     "slot",
@@ -521,7 +518,7 @@ function parseHead(raw: string, secret: string): InvocationJournalHead {
   if (!isRecord(decoded)) {
     throw new Error("invocation journal head must be an object");
   }
-  exactKeys(decoded, [
+  assertExactKeys(decoded, [
     "schemaVersion",
     "kind",
     "generation",

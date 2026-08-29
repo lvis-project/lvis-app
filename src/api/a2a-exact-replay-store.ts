@@ -12,7 +12,7 @@ import { maskA2AMessage } from "../engine/a2a-subagent-message-codec.js";
 import { A2A_EXACT_SEND_REPLAY_RETENTION_MS } from "./a2a-remote-contracts.js";
 import type { A2AOsEncryption } from "./a2a-remote-store.js";
 import { canonicalizeA2ARemoteTask } from "./a2a-task-store.js";
-import { isRecord } from "../shared/is-record.js";
+import { isRecord, hasExactKeys } from "../shared/is-record.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const STORE_VERSION = 2;
@@ -77,18 +77,12 @@ function initialState(): ReplayStateFile {
   return { version: STORE_VERSION, records: [] };
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
 function validRecord(value: unknown): value is ReplayRecord {
   if (!isRecord(value) || !["in-progress", "completed", "outcome-unknown", "RETENTION_EXPIRED"].includes(String(value.state))) return false;
   const common = ["keyToken", "callerToken", "messageToken", "bodySha256", "intentSha256", "firstAcceptedAt", "expiresAt", "state"];
   const stateKeys = value.state === "in-progress" ? ["ownerTokenHmac"]
     : value.state === "completed" ? ["resultCiphertext", "resultIv", "resultAuthTag", "resultCiphertextSha256"] : [];
-  if (!exactKeys(value, [...common, ...stateKeys])) return false;
+  if (!hasExactKeys(value, [...common, ...stateKeys])) return false;
   if (![value.keyToken, value.callerToken, value.messageToken, value.bodySha256, value.intentSha256].every((entry) => typeof entry === "string" && DIGEST.test(entry))) return false;
   if (typeof value.firstAcceptedAt !== "string" || !Number.isFinite(Date.parse(value.firstAcceptedAt)) || typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt))) return false;
   if (value.state === "in-progress" && (typeof value.ownerTokenHmac !== "string" || !DIGEST.test(value.ownerTokenHmac))) return false;
@@ -99,7 +93,7 @@ function validRecord(value: unknown): value is ReplayRecord {
 function validState(value: unknown): value is ReplayStateFile {
   if (!isRecord(value)) return false;
   const keys = value.encryptedDataKey === undefined ? ["version", "records"] : ["version", "encryptedDataKey", "records"];
-  return exactKeys(value, keys) && value.version === STORE_VERSION
+  return hasExactKeys(value, keys) && value.version === STORE_VERSION
     && (value.encryptedDataKey === undefined || typeof value.encryptedDataKey === "string")
     && Array.isArray(value.records) && value.records.every(validRecord);
 }

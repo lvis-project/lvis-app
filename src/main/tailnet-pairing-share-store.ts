@@ -16,6 +16,7 @@ import {
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
+import { hasExactKeys } from "../shared/is-record.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "pairing-share.json";
@@ -139,12 +140,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
 function timestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
@@ -167,7 +162,7 @@ function digest(value: unknown): value is string {
 
 function validInvitation(value: unknown): value is StoredInvitation {
   return record(value)
-    && exactKeys(value, ["id", "codeDigest", "createdAt", "expiresAt", "state", "pairingId"])
+    && hasExactKeys(value, ["id", "codeDigest", "createdAt", "expiresAt", "state", "pairingId"])
     && uuid(value.id)
     && digest(value.codeDigest)
     && timestamp(value.createdAt)
@@ -181,7 +176,7 @@ function validInvitation(value: unknown): value is StoredInvitation {
 function validPairing(value: unknown): value is StoredPairing {
   if (
     !record(value)
-    || !exactKeys(value, [
+    || !hasExactKeys(value, [
       "id", "actorId", "invitationId", "createdAt", "state", "epoch",
       "expiresAt", "activatedAt", "terminalAt",
     ])
@@ -218,7 +213,7 @@ function validPairing(value: unknown): value is StoredPairing {
 function validShare(value: unknown): value is StoredShare {
   if (
     !record(value)
-    || !exactKeys(value, [
+    || !hasExactKeys(value, [
       "id", "pairingId", "actorId", "pairingEpoch", "conversationDigest",
       "scope", "permission", "createdAt", "expiresAt", "state", "epoch", "terminalAt",
     ])
@@ -246,7 +241,7 @@ function validShare(value: unknown): value is StoredShare {
 function validState(value: unknown): value is StoreState {
   if (
     !record(value)
-    || !exactKeys(value, ["version", "invitations", "pairings", "shares"])
+    || !hasExactKeys(value, ["version", "invitations", "pairings", "shares"])
     || value.version !== STORE_VERSION
     || !Array.isArray(value.invitations)
     || !Array.isArray(value.pairings)
@@ -347,7 +342,7 @@ function binding(pairing: StoredPairing, share: StoredShare): TailnetPairingShar
 
 function validBinding(value: unknown): value is TailnetPairingShareBinding {
   return record(value)
-    && exactKeys(value, ["pairingId", "pairingEpoch", "shareId", "shareEpoch", "scope"])
+    && hasExactKeys(value, ["pairingId", "pairingEpoch", "shareId", "shareEpoch", "scope"])
     && uuid(value.pairingId)
     && epoch(value.pairingEpoch)
     && uuid(value.shareId)
