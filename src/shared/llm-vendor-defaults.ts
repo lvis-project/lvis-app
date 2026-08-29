@@ -606,6 +606,17 @@ export interface LLMVendorSettings {
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
+  /**
+   * The model each marketplace provider preset runs on, keyed by preset id.
+   *
+   * A preset is a provider in its own right that is merely REACHED through the
+   * `openai-compatible` vendor, so it cannot share this block's single `model`
+   * slot with the generic custom-provider row, nor with another preset: the row
+   * picked last would silently overwrite every other row's model. Only the
+   * `openai-compatible` block carries this — it is the only vendor presets are
+   * reached through. Read it through {@link llmRouteModel}, never directly.
+   */
+  presetModels?: Record<string, string>;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
 }
@@ -758,6 +769,37 @@ export const LLM_VENDOR_DEFAULTS: Readonly<Record<LLMVendor, LLMVendorSettings>>
     >,
   );
 
+/** Longest preset id / model id accepted into a persisted `presetModels` map. */
+const MAX_PRESET_MODEL_ENTRY_LENGTH = 256;
+
+/**
+ * The per-preset model map, or undefined when it holds nothing usable.
+ *
+ * Undefined rather than `{}` on purpose: an empty map has to be
+ * indistinguishable from an absent one, or a block carrying only an empty map
+ * would read as user-customized and survive pruning forever.
+ */
+function normalizeLlmPresetModels(
+  vendor: LLMVendor,
+  value: unknown,
+): Record<string, string> | undefined {
+  // Presets are reached through this vendor and no other, so a map on any
+  // other block is stale data, not configuration.
+  if (vendor !== "openai-compatible") return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const models: Record<string, string> = {};
+  for (const [presetId, model] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof model !== "string") continue;
+    const id = presetId.trim();
+    const modelId = model.trim();
+    if (!id || !modelId) continue;
+    if (id.length > MAX_PRESET_MODEL_ENTRY_LENGTH) continue;
+    if (modelId.length > MAX_PRESET_MODEL_ENTRY_LENGTH) continue;
+    models[id] = modelId;
+  }
+  return Object.keys(models).length > 0 ? models : undefined;
+}
+
 export function getLlmVendorSettings(
   vendors: LLMVendorSettingsMap | undefined,
   vendor: LLMVendor,
@@ -768,7 +810,8 @@ export function getLlmVendorSettings(
     typeof stored?.model === "string"
       ? normalizeLlmVendorModel(vendor, stored.model)
       : defaults.model;
-  return {
+  const presetModels = normalizeLlmPresetModels(vendor, stored?.presetModels);
+  const block: LLMVendorSettings = {
     ...defaults,
     ...stored,
     model,
@@ -782,7 +825,50 @@ export function getLlmVendorSettings(
         ? stored.thinkingBudgetTokens
         : defaults.thinkingBudgetTokens,
   };
+  if (presetModels) block.presetModels = presetModels;
+  else delete block.presetModels;
+  return block;
 }
+
+/**
+ * The model one route runs on: a marketplace preset's own, or the vendor
+ * block's when the route is the vendor itself.
+ *
+ * The single reader of {@link LLMVendorSettings.presetModels}. Everything that
+ * asks "what model is this route on" has to come through here, or the answer
+ * differs by caller — which is exactly how the generic custom-provider row and
+ * every preset ended up overwriting one another's model.
+ */
+export function llmRouteModel(
+  block: Pick<LLMVendorSettings, "model" | "presetModels">,
+  marketplaceProviderPresetId?: string,
+): string {
+  const presetId = marketplaceProviderPresetId?.trim();
+  if (!presetId) return block.model;
+  return block.presetModels?.[presetId] ?? "";
+}
+
+/** That same question asked of the settings as a whole. */
+export function activeLlmRouteModel(llm: {
+  provider: string;
+  vendors: LLMVendorSettingsMap;
+  marketplaceProviderPresetId?: string;
+}): string {
+  const presetId = llm.provider === "openai-compatible"
+    ? llm.marketplaceProviderPresetId
+    : undefined;
+  if (isLLMVendor(llm.provider)) {
+    return llmRouteModel(getLlmVendorSettings(llm.vendors, llm.provider), presetId);
+  }
+  // A settings file written by another build can name a provider this one has
+  // never heard of — there are no defaults to read for it, but a caller asking
+  // what the route runs on (a diagnostics bundle above all) must get an answer
+  // rather than a crash on a missing defaults entry.
+  const stored = Object.entries(llm.vendors)
+    .find(([vendorId]) => vendorId === llm.provider)?.[1];
+  return stored ? llmRouteModel(stored, presetId) : "";
+}
+
 
 export function freshVendorBlocks(
   vendorIds: readonly LLMVendor[] = DEFAULT_VISIBLE_LLM_VENDOR_IDS,

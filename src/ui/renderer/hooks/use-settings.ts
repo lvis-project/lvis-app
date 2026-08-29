@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVendorOption } from "../constants.js";
+import { llmRouteModel } from "../../../shared/llm-vendor-defaults.js";
 import type { AppSettings, LvisApi } from "../types.js";
 import {
   canUseLlmVendorWithoutApiKey,
@@ -137,7 +138,10 @@ export function useSettings(api: LvisApi): UseSettingsResult {
       const provider = narrowVendor(settings.llm.provider);
       const block = getLlmVendorSettings(settings.llm.vendors, provider);
       setLlmVendor(provider);
-      setLlmModel(block.model);
+      setLlmModel(llmRouteModel(
+        block,
+        provider === "openai-compatible" ? settings.llm.marketplaceProviderPresetId : undefined,
+      ));
       setEnableThinkingChat(block.enableThinking);
       setLlmReadyWithoutApiKey(canUseSettingsWithoutApiKey(settings, provider));
       const nextSubscriptionRuntime = activeSubscriptionRuntimeFromSettings(settings);
@@ -332,11 +336,19 @@ export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
     models.add(vendor);
   };
   const active = llm.provider;
-  for (const modelId of getVendorOption(active).modelOptions) offer(active, modelId);
+  // Synced catalogues first: a model a provider actually answered with belongs
+  // to THAT provider, and `offered` keeps insertion order — offering the active
+  // vendor's bundled line first made a pin resolve to whichever vendor happens
+  // to be active rather than to the one serving it.
   for (const entry of Object.values(llm.modelListCache ?? {})) {
     for (const modelId of entry.models) offer(entry.vendor, modelId);
   }
-  const currentModel = llm.vendors[active]?.model;
+  for (const modelId of getVendorOption(active).modelOptions) offer(active, modelId);
+  const activeBlock = llm.vendors[active];
+  const currentModel = activeBlock && llmRouteModel(
+    activeBlock,
+    active === "openai-compatible" ? llm.marketplaceProviderPresetId : undefined,
+  );
   const choices: ModelCardChoice[] = [];
   for (const modelId of pinned) {
     for (const vendor of offered.get(modelId) ?? []) {

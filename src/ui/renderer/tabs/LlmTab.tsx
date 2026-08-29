@@ -37,6 +37,7 @@ import {
   isOpenAICompatibleVendor,
   isRetiredLlmModel,
   isSelfHostedTrustedNetworkVendor,
+  llmRouteModel,
 } from "../../../shared/llm-vendor-defaults.js";
 import {
   llmModelListCacheKey,
@@ -149,6 +150,7 @@ const CREDENTIAL_FORM_ID = "llm-provider-credential-form";
 const CHAT_BLOCKER_MESSAGE_KEYS = {
   "needs-api-key": "llmTab.chatNeedsApiKey",
   "needs-gcp-project": "llmTab.chatNeedsGcpProject",
+  "awaiting-catalogue": "llmTab.chatAwaitingCatalogue",
 } as const;
 
 type ChatBlocker = keyof typeof CHAT_BLOCKER_MESSAGE_KEYS;
@@ -1019,6 +1021,7 @@ export function LlmTab(props: LlmTabProps) {
   const [savedVendorBlocks, setSavedVendorBlocks] = useState<
     Readonly<Record<string, {
       model?: string;
+      presetModels?: Record<string, string>;
       baseUrl?: string;
       vertexProject?: string;
       vertexLocation?: string;
@@ -1035,6 +1038,9 @@ export function LlmTab(props: LlmTabProps) {
   const [credentialedProviderIds, setCredentialedProviderIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
+  /** The row whose credential was saved on this screen, if any. Saving never
+   *  moves the chat route, so that row may need telling where the switch is. */
+  const [credentialSavedRowId, setCredentialSavedRowId] = useState<string | null>(null);
   /** Bumped on every settings broadcast; `setApiKey`/`deleteApiKey` send one,
    *  so this is what re-asks the credential store. */
   const [settingsRevision, setSettingsRevision] = useState(0);
@@ -1411,14 +1417,21 @@ export function LlmTab(props: LlmTabProps) {
       add({
         vendorId,
         ...(presetId ? { presetId } : {}),
+        // The row's OWN endpoint, which is where its handshake will be filed:
+        // a key built with an empty address would never match what the sync
+        // writes, and the row would read its own catalogue as missing.
         modelListKey: keyByRow.get(providerId)
-          ?? llmModelListCacheKey(vendorId, preset?.baseUrl ?? "", presetId ?? ""),
+          ?? llmModelListCacheKey(
+            vendorId,
+            preset?.baseUrl ?? savedVendorBlocks[vendorId]?.baseUrl ?? "",
+            presetId ?? "",
+          ),
       });
     }
     return [...routes.values()];
   }, [
     modelLists, apiPathConfigured, vendor, marketplaceProviderPresetId, activeModelListKey,
-    credentialedProviderIds, installedPresetById,
+    credentialedProviderIds, installedPresetById, savedVendorBlocks,
   ]);
 
   const configuredRowIds = useMemo(
@@ -1481,6 +1494,11 @@ export function LlmTab(props: LlmTabProps) {
   // provider being edited, so without this a configured provider that is not
   // the open one shows a name and nothing else — including the one whose key
   // has gone stale, which is exactly the row that needs to say so.
+  //
+  // Each row is synced against its OWN saved endpoint. Reading the address off
+  // the active route instead left every non-active user-supplied endpoint
+  // (the generic custom provider above all) syncing against nothing, so its
+  // catalogue could never land and it could never be chosen.
   useEffect(() => {
     if (!settingsLoaded) return;
     for (const providerId of credentialedProviderIds) {
@@ -1488,8 +1506,12 @@ export function LlmTab(props: LlmTabProps) {
       const presetId = marketplaceProviderPresetIdFromSecretId(providerId);
       const preset = presetId ? installedPresetById.get(presetId) : undefined;
       if (presetId && !preset) continue;
+      const rowBaseUrl = preset
+        ? preset.baseUrl
+        : savedVendorBlocks[providerId]?.baseUrl?.trim() ?? "";
       void requestModelList(preset ? "openai-compatible" : providerId, {
-        ...(preset ? { baseUrl: preset.baseUrl, credentialScope: preset.providerId } : {}),
+        ...(rowBaseUrl ? { baseUrl: rowBaseUrl } : {}),
+        ...(preset ? { credentialScope: preset.providerId } : {}),
         ...(preset?.modelDiscoveryPolicy
           ? { modelDiscoveryPolicy: preset.modelDiscoveryPolicy }
           : {}),
@@ -1497,7 +1519,7 @@ export function LlmTab(props: LlmTabProps) {
     }
   }, [
     activeApiRowId, credentialedProviderIds, installedPresetById,
-    requestModelList, settingsLoaded,
+    requestModelList, savedVendorBlocks, settingsLoaded,
   ]);
 
   const connections = useMemo<ProviderConnection[]>(() => {
@@ -1561,7 +1583,7 @@ export function LlmTab(props: LlmTabProps) {
         ...(preset ? { presetId: preset.providerId } : {}),
         modelListKey: preset
           ? llmModelListCacheKey("openai-compatible", preset.baseUrl, preset.providerId)
-          : llmModelListCacheKey(rowId, "", ""),
+          : llmModelListCacheKey(rowId, savedVendorBlocks[rowId]?.baseUrl ?? "", ""),
         apiConfigured: false,
         connected: false,
       });
@@ -1569,7 +1591,7 @@ export function LlmTab(props: LlmTabProps) {
     return rows;
   }, [
     subscription.providers, configuredApiRoutes, pinnedRowIds, providerSelectOptions,
-    marketplaceProviderPresets, installedPresetById,
+    marketplaceProviderPresets, installedPresetById, savedVendorBlocks,
   ]);
 
   // The order the user built the list in: everything already connected, then
@@ -1640,6 +1662,47 @@ export function LlmTab(props: LlmTabProps) {
   }, [installedPresetById, savedVendorBlocks]);
 
   /**
+   * The model this row has stored — its own, never another row's.
+   *
+   * A preset is a provider reached through the openai-compatible vendor, so
+   * its model lives in that block's per-preset map rather than the block's
+   * single `model`, which belongs to the generic custom-provider row.
+   */
+  const rowSavedModel = useCallback((row: ProviderConnection): string => {
+    const block = savedVendorBlocks[row.apiVendorId ?? ""];
+    if (!block) return "";
+    return llmRouteModel(
+      { model: block.model ?? "", ...(block.presetModels ? { presetModels: block.presetModels } : {}) },
+      row.presetId,
+    );
+  }, [savedVendorBlocks]);
+
+  /**
+   * What this row can be asked for right now.
+   *
+   * The one computation behind both the chooser's options and the card's
+   * status line, so the two can never disagree about whether a provider has
+   * anything to offer. The active row's selection is live state; every other
+   * row's is what it has stored, so a configured provider always shows its own
+   * saved model even when its endpoint has said nothing yet.
+   */
+  const rowModelIds = useCallback((row: ProviderConnection): readonly string[] => {
+    const vendorId = row.apiVendorId ?? "";
+    if (!vendorId) return [];
+    const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
+    const rowInfo = preset ? providerOptionFromPreset(preset) : getVendorInfo(vendorId);
+    const discoveryPolicy = preset?.modelDiscoveryPolicy;
+    const state = row.modelListKey ? modelLists[row.modelListKey] : undefined;
+    const synced = modelDiscoveryPolicyUsesSeededOptions(discoveryPolicy)
+      ? undefined
+      : optionsFromModelListState(state);
+    const selectedModel = rowCredentialId(row) === activeApiRowId
+      ? activeModelValue
+      : rowSavedModel(row);
+    return modelOptionsFor(vendorId, selectedModel, synced, rowInfo, discoveryPolicy);
+  }, [activeApiRowId, activeModelValue, installedPresetById, modelLists, rowSavedModel]);
+
+  /**
    * What stops this row's API route from answering a chat turn, or null.
    *
    * "Configured" is not one uniform question. An API-key vendor needs a stored
@@ -1647,19 +1710,27 @@ export function LlmTab(props: LlmTabProps) {
    * id and it stores no key at all. Asking only the key question left the
    * Vertex card permanently unusable — it could never look ready, because the
    * thing it was being asked for is not the thing it uses.
+   *
+   * A credentialed row with nothing to offer is the third case, and it is not
+   * a failure: a provider whose catalogue is the endpoint's word has nothing
+   * choosable until the endpoint answers. Deriving it from `rowModelIds` — the
+   * chooser's own list — is what keeps the card from claiming readiness for a
+   * provider the chooser is not offering.
    */
   const rowChatBlocker = useCallback((row: ProviderConnection): ChatBlocker | null => {
     const vendorId = row.apiVendorId ?? "";
-    if (vendorId === "vertex-ai") {
-      return savedVendorBlocks[vendorId]?.vertexProject?.trim()
-        ? null
-        : "needs-gcp-project";
+    if (vendorId === "vertex-ai" && !savedVendorBlocks[vendorId]?.vertexProject?.trim()) {
+      return "needs-gcp-project";
     }
-    if (!rowRequiresApiKey(row)) return null;
-    return credentialedProviderIds.has(rowCredentialId(row))
-      ? null
-      : "needs-api-key";
-  }, [credentialedProviderIds, rowRequiresApiKey, savedVendorBlocks]);
+    if (
+      vendorId !== "vertex-ai"
+      && rowRequiresApiKey(row)
+      && !credentialedProviderIds.has(rowCredentialId(row))
+    ) {
+      return "needs-api-key";
+    }
+    return rowModelIds(row).length > 0 ? null : "awaiting-catalogue";
+  }, [credentialedProviderIds, rowModelIds, rowRequiresApiKey, savedVendorBlocks]);
 
   /**
    * Every model a connected provider can be asked for, in ONE list.
@@ -1669,15 +1740,12 @@ export function LlmTab(props: LlmTabProps) {
    * the page — which means the list has to be complete, or a provider the user
    * configured would be unreachable.
    *
-   * A row contributes exactly when it could answer a turn: the same
-   * `rowChatBlocker` question the card's status line asks, so the two can
-   * never disagree about whether a provider is ready. What it contributes is
-   * `modelOptionsFor`'s answer and nothing else — the synced catalogue once a
-   * handshake has landed, a curated vendor's bundled line when it has one, and
-   * nothing at all for a vendor whose catalogue is the endpoint's word and has
-   * not answered yet. Do not add a second key-based gate on top of that: two
-   * policies answering the same question is how a vendor ends up with an empty
-   * chooser while its catalogue is right there.
+   * A row contributes exactly what `rowModelIds` says it has, and exactly when
+   * `rowChatBlocker` says it can answer — both derived from that one list, so
+   * the chooser and the card's status line cannot disagree about whether a
+   * provider is ready. Do not add a second key-based gate on top: two policies
+   * answering the same question is how a vendor ends up with an empty chooser
+   * while its catalogue is right there.
    */
   const unifiedOptions = useMemo<UnifiedModelOption[]>(() => {
     const options: UnifiedModelOption[] = [];
@@ -1686,29 +1754,10 @@ export function LlmTab(props: LlmTabProps) {
       if (!row.apiVendorId) continue;
       if (rowChatBlocker(row) !== null) continue;
       const rowId = rowCredentialId(row);
-      const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
-      const rowInfo = preset ? providerOptionFromPreset(preset) : getVendorInfo(row.apiVendorId);
-      const discoveryPolicy = preset?.modelDiscoveryPolicy;
       const state = row.modelListKey ? modelLists[row.modelListKey] : undefined;
-      const synced = modelDiscoveryPolicyUsesSeededOptions(discoveryPolicy)
-        ? undefined
-        : optionsFromModelListState(state);
       const isActiveRow = rowId === activeApiRowId;
-      // The active row's selection is live state; every other row's is what it
-      // has stored, so a configured provider always shows its own saved model
-      // even when its endpoint has said nothing yet.
-      const selectedModel = isActiveRow
-        ? activeModelValue
-        : savedVendorBlocks[row.apiVendorId]?.model ?? "";
       const entries = modelEntryMap(state?.entries);
-      const modelIds = modelOptionsFor(
-        row.apiVendorId,
-        selectedModel,
-        synced,
-        rowInfo,
-        discoveryPolicy,
-      );
-      for (const modelId of modelIds) {
+      for (const modelId of rowModelIds(row)) {
         // Keyed by the ROW, not the vendor: two marketplace presets are two
         // providers reached through one vendor, and a pick has to say which.
         const value = unifiedValue(apiProviderId(rowId), modelId);
@@ -1760,8 +1809,8 @@ export function LlmTab(props: LlmTabProps) {
     }
     return options;
   }, [
-    connections, rowChatBlocker, installedPresetById, modelLists, activeApiRowId,
-    activeModelValue, savedVendorBlocks, unlistedModel, subscription.providers, t,
+    connections, rowChatBlocker, rowModelIds, modelLists, activeApiRowId,
+    unlistedModel, subscription.providers, t,
   ]);
 
   const selectedUnifiedValue = subscription.activeRuntime.kind === "subscription"
@@ -1926,6 +1975,7 @@ export function LlmTab(props: LlmTabProps) {
       ...(vendorBlock ? { vendorBlock } : {}),
     });
     if (!saved) return;
+    setCredentialSavedRowId(row.id);
     // Storing a key is not a settings write on every path, so re-ask the
     // credential store directly rather than waiting on a broadcast that a
     // secret-only save never sends.
@@ -2092,6 +2142,34 @@ export function LlmTab(props: LlmTabProps) {
    * owns the missing piece says what it is, in the same words the list would
    * have needed.
    */
+  /**
+   * Whether the route chat is on right now can actually answer a turn.
+   *
+   * Saving a credential deliberately does NOT adopt the provider it belongs
+   * to — the model list is the one switch, and a save silently moving the
+   * route would make it two. What a save does owe the user is the pointer:
+   * this is what says the key landed but chat is still elsewhere.
+   */
+  const activeRouteCanChat = useMemo(() => {
+    if (subscription.activeRuntime.kind === "subscription") return true;
+    const active = connections.find(
+      (row) => row.apiVendorId && rowCredentialId(row) === activeApiRowId,
+    );
+    return Boolean(active) && rowChatBlocker(active!) === null;
+  }, [activeApiRowId, connections, rowChatBlocker, subscription.activeRuntime.kind]);
+
+  const pickModelGuidance = (row: ProviderConnection) => {
+    if (credentialSavedRowId !== row.id || activeRouteCanChat) return null;
+    return (
+      <p
+        className="text-[11px] text-muted-foreground"
+        data-testid={`llm-tab:connection-pick-model:${row.id}`}
+      >
+        {t("llmTab.pickModelToUse")}
+      </p>
+    );
+  };
+
   const chatAvailabilityNote = (row: ProviderConnection) => {
     if (!row.apiVendorId) return null;
     const blocker = rowChatBlocker(row);
@@ -2255,7 +2333,7 @@ export function LlmTab(props: LlmTabProps) {
           chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
           actions={subscription.props.actions}
           leading={<>{statusChip(row)}{modeBadge(row)}{unsavedBadge(row)}</>}
-          subline={<>{connectionSubline(row)}{chatAvailabilityNote(row)}</>}
+          subline={<>{connectionSubline(row)}{chatAvailabilityNote(row)}{pickModelGuidance(row)}</>}
           authAction={apiKeyChip(row)}
           {...(rowFormOpen(row) ? { trailing: credentialFormFor(row) } : {})}
         />
@@ -2308,6 +2386,7 @@ export function LlmTab(props: LlmTabProps) {
             />
           </button>
           {chatAvailabilityNote(row)}
+          {pickModelGuidance(row)}
           {rowFormOpen(row) ? credentialFormFor(row) : null}
         </div>
       ))}

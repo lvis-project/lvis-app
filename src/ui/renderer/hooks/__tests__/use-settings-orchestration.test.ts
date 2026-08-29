@@ -242,10 +242,20 @@ describe("useSettingsOrchestration", () => {
         provider: "openai-compatible",
         marketplaceProviderPresetId: "future-router",
         vendors: {
-          "openai-compatible": expect.objectContaining({ model: "future/free" }),
+          // The preset's own slot, and NOT the block's `model` — that one is
+          // the generic custom-provider row's, and a preset writing it is how
+          // the two rows used to overwrite each other.
+          "openai-compatible": expect.objectContaining({
+            presetModels: { "future-router": "future/free" },
+          }),
         },
       }),
     }));
+    const savedBlock = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => call[0] as { llm?: { vendors?: Record<string, { model?: string }> } })
+      .filter((call) => Boolean(call.llm?.vendors))
+      .at(-1)?.llm?.vendors?.["openai-compatible"];
+    expect(savedBlock).not.toHaveProperty("model");
     // The preset's address is the registry's, never the generic row's block:
     // writing it here is what used to revert the generic card's own endpoint.
     const presetSave = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls
@@ -430,4 +440,64 @@ describe("useSettingsOrchestration", () => {
 
     await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
     expect(result.current.subAgentAutonomousWake).toBe(true);
+  });
+
+  it("keeps every openai-compatible row's model to itself", async () => {
+    // Three rows are reached through one vendor — the generic custom provider
+    // and two marketplace presets — and each has its own model. They used to
+    // share the block's single `model`, so choosing on one row silently
+    // rewrote the others.
+    const alpha = {
+      providerId: "alpha-gw",
+      label: "Alpha Gateway",
+      baseUrl: "https://alpha.example/v1",
+      defaultModel: "alpha/seed",
+      modelOptions: ["alpha/seed"],
+      requiresApiKey: true,
+    };
+    const beta = { ...alpha, providerId: "beta-gw", label: "Beta Gateway", baseUrl: "https://beta.example/v1", defaultModel: "beta/seed", modelOptions: ["beta/seed"] };
+    const settings = makeSettings();
+    settings.llm.vendors["openai-compatible"] = {
+      model: "local-model",
+      baseUrl: "http://localhost:8001/v1",
+      presetModels: { "beta-gw": "beta/chosen" },
+      enableThinking: true,
+      thinkingBudgetTokens: 10_000,
+    };
+    settings.marketplace = {
+      ...settings.marketplace,
+      installedProviderPresets: [alpha, beta],
+    };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => ({ ok: true })),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
+    );
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+
+    act(() => { result.current.selectMarketplaceProviderPreset(alpha); });
+    await waitFor(() => expect(result.current.marketplaceProviderPresetId).toBe("alpha-gw"));
+    act(() => { result.current.setModel("alpha/chosen"); });
+    await act(async () => { await result.current.save("llm"); });
+
+    const block = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => call[0] as { llm?: { vendors?: Record<string, {
+        model?: string; presetModels?: Record<string, string>;
+      }> } })
+      .filter((call) => Boolean(call.llm?.vendors))
+      .at(-1)?.llm?.vendors?.["openai-compatible"];
+    // Alpha's pick lands in alpha's slot; beta's stays exactly as stored, and
+    // the generic row's `model` is not written at all, so it survives the merge.
+    expect(block?.presetModels).toEqual({ "beta-gw": "beta/chosen", "alpha-gw": "alpha/chosen" });
+    expect(block).not.toHaveProperty("model");
+
+    // Switching rows restores what each row was last set to.
+    act(() => { result.current.selectMarketplaceProviderPreset(beta); });
+    await waitFor(() => expect(result.current.model).toBe("beta/chosen"));
+    act(() => { result.current.clearMarketplaceProviderPreset(); });
+    await waitFor(() => expect(result.current.model).toBe("local-model"));
   });});

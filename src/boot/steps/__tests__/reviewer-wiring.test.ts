@@ -758,7 +758,9 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
             marketplaceProviderPresetId: "future-router",
             vendors: {
               "openai-compatible": {
-                model: "future/free",
+                // The preset's own slot: the block's `model` is the generic
+                // custom-provider row's, and the reviewer follows the route.
+                presetModels: { "future-router": "future/free" },
                 baseUrl: "https://stale.example/v1",
               },
             },

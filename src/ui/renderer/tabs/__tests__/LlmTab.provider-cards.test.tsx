@@ -48,7 +48,7 @@ function preset(
     apiKeyPlaceholder: "sk-...",
     requiresApiKey: true,
     ...(modelDiscoveryPolicy ? { modelDiscoveryPolicy } : {}),
-  } as MarketplaceInstalledProviderPreset;
+  };
 }
 
 function codexView(
@@ -71,7 +71,7 @@ function codexView(
     busyAction: null,
     refreshPending: false,
     ...overrides,
-  } as SubscriptionProviderView;
+  };
 }
 
 function installSubscription(
@@ -366,7 +366,7 @@ describe("LlmTab provider cards", () => {
   it("appends an added provider below every existing card", async () => {
     installSubscription([codexView({
       status: { runtime: "ready", connection: "connected", models: [] },
-    } as Partial<SubscriptionProviderView>)]);
+    })]);
     await renderTab(makeApi());
 
     openMenu(screen.getByTestId("llm-tab:add-provider"));
@@ -557,7 +557,7 @@ describe("LlmTab model chooser is the whole switch", () => {
           connection: "connected",
           models: [{ id: "codex-mini", label: "codex-mini" }],
         },
-      } as Partial<SubscriptionProviderView>)],
+      })],
       { useForChat, useApiForChat: vi.fn() },
     );
     await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), {
@@ -714,6 +714,129 @@ describe("LlmTab chat-route availability", () => {
     pickChooserOption("gemini-2.5-flash");
     await waitFor(() => expect(hooks.selectApiVendorModel)
       .toHaveBeenCalledWith("vertex-ai", "gemini-2.5-flash"));
+  });
+});
+
+describe("LlmTab rows that are not the active one", () => {
+  const acme = preset("acme-gw", "Acme Gateway", "https://acme.example/v1");
+  const zenith = preset("zenith-gw", "Zenith Gateway", "https://zenith.example/v1");
+
+  function genericRowSettings() {
+    return vi.fn().mockResolvedValue({
+      llm: {
+        pinnedModels: [],
+        modelListCache: {},
+        vendors: { "openai-compatible": { baseUrl: CUSTOM_ENDPOINT } },
+      },
+      marketplace: { installedProviderIds: [], installedProviderPresets: [] },
+    });
+  }
+
+  it("syncs a credentialed row against its OWN endpoint and offers what it answers", async () => {
+    // The regression: the catalogue sync only ever carried the ACTIVE route's
+    // address, so a configured generic custom provider that was not the active
+    // one synced against nothing — its models could never land, and a provider
+    // the user had fully set up was absent from the only switch there is.
+    const api = makeApi({
+      hasApiKey: storedKeysFor("claude", "openai-compatible"),
+      getSettings: genericRowSettings(),
+      listLlmModels: vi.fn(async (request: { vendor: string; baseUrl?: string }) =>
+        request.vendor === "openai-compatible" && request.baseUrl === CUSTOM_ENDPOINT
+          ? {
+            ok: true,
+            vendor: "openai-compatible",
+            endpoint: `${CUSTOM_ENDPOINT}/models`,
+            models: ["served-by-the-endpoint"],
+            fetchedAt: "2026-01-01T00:00:00.000Z",
+          } satisfies LlmModelListResult
+          : FETCH_FAILED),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledWith(
+      expect.objectContaining({ vendor: "openai-compatible", baseUrl: CUSTOM_ENDPOINT }),
+    ));
+    await waitFor(async () =>
+      expect(await chooserModelIds()).toContain("served-by-the-endpoint"));
+    expect(chooserGroupText("served-by-the-endpoint")).not.toMatch(/Claude/);
+  });
+
+  it("says a credentialed row has nothing to choose until its endpoint answers", async () => {
+    const api = makeApi({
+      hasApiKey: storedKeysFor("claude", "openai-compatible"),
+      getSettings: genericRowSettings(),
+      listLlmModels: vi.fn(() => new Promise<LlmModelListResult>(() => {})),
+    });
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    // The card says why it is not in the list, rather than looking ready while
+    // the chooser silently omits it.
+    const note = await screen.findByTestId("llm-tab:connection-blocked:openai-compatible");
+    expect(note.textContent?.trim()).not.toBe("");
+    expect((await chooserModelIds()).every((id) => id.startsWith("claude"))).toBe(true);
+  });
+
+  it("reads each preset row's own stored model, never another row's", async () => {
+    // Every one of these rows is reached through the openai-compatible vendor.
+    // They used to share that block's single `model`, so the chooser showed the
+    // same id under all three names.
+    const api = makeApi({
+      hasApiKey: storedKeysFor(
+        "claude",
+        "marketplace-provider:acme-gw",
+        "marketplace-provider:zenith-gw",
+        "openai-compatible",
+      ),
+      getSettings: vi.fn().mockResolvedValue({
+        llm: {
+          pinnedModels: [],
+          modelListCache: {},
+          vendors: {
+            "openai-compatible": {
+              baseUrl: CUSTOM_ENDPOINT,
+              model: "generic-own-model",
+              presetModels: { "acme-gw": "acme/chosen", "zenith-gw": "zenith/chosen" },
+            },
+          },
+        },
+        marketplace: { installedProviderIds: [], installedProviderPresets: [acme, zenith] },
+      }),
+      listLlmModels: vi.fn(() => new Promise<LlmModelListResult>(() => {})),
+    });
+    await renderTab(api, {
+      vendor: "claude",
+      model: "claude-sonnet-4-6",
+      marketplaceProviderPresets: [acme, zenith],
+    });
+
+    await screen.findByTestId("llm-tab:connection:marketplace-provider:acme-gw");
+    const offered = await chooserModelIds();
+    expect(offered).toContain("acme/chosen");
+    expect(offered).toContain("zenith/chosen");
+    expect(offered).toContain("generic-own-model");
+    expect(chooserGroupText("acme/chosen")).toMatch(/Acme Gateway/);
+    expect(chooserGroupText("zenith/chosen")).toMatch(/Zenith Gateway/);
+  });
+
+  it("points at the model list after a save instead of switching to what was saved", async () => {
+    // The user's decision: saving a credential never moves the conversation,
+    // not even when the provider it is on cannot answer. What the save owes is
+    // the pointer to the one switch there is.
+    const api = makeApi({ hasApiKey: storedKeysFor() });
+    const { hooks } = await renderTab(api, { vendor: "openai", hasKey: false, model: "" });
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
+    fireEvent.change(screen.getByTestId("llm-api-key-input"), {
+      target: { value: "sk-ant-new" },
+    });
+    await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("llm-tab:save-providers"));
+
+    await screen.findByTestId("llm-tab:connection-pick-model:claude");
+    expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
+    expect(hooks.onSelectMarketplaceProviderPreset).not.toHaveBeenCalled();
+    expect(hooks.onImmediateChange).not.toHaveBeenCalled();
   });
 });
 
@@ -894,7 +1017,7 @@ describe("LlmTab OpenAI model catalogue", () => {
     const api = makeApi();
     installSubscription([codexView({
       status: { runtime: "ready", connection: "connected", models: [] },
-    } as Partial<SubscriptionProviderView>)]);
+    })]);
     await renderTab(api, { model: "", hasKey: false });
 
     await waitFor(() => expect(api.hasApiKey).toHaveBeenCalledWith("openai"));

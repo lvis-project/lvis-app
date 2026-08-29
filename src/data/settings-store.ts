@@ -76,6 +76,7 @@ import {
   normalizeProjectLabels,
   pruneLazyLlmVendorBlocks,
   withoutMirroredMarketplaceProviderPresetEndpoint,
+  withMarketplaceProviderPresetModelSlot,
   SIDE_PANEL_SPLIT_KEYS,
   normalizeSystem,
   isWebViewPreferredFlow,
@@ -108,6 +109,13 @@ const SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION = "subagent-autonomous-wake-default-f
  */
 const PROVIDER_PRESET_ENDPOINT_UNMIRROR_MIGRATION =
   "marketplace-provider-preset-endpoint-unmirror";
+/**
+ * One-time split of the openai-compatible block's single `model` between the
+ * generic custom-provider row and the selected marketplace preset. See
+ * {@link withMarketplaceProviderPresetModelSlot}.
+ */
+const PROVIDER_PRESET_MODEL_SLOT_MIGRATION =
+  "marketplace-provider-preset-model-slot";
 
 /**
  * Every one-time migration this build knows. Fresh-install and
@@ -119,6 +127,7 @@ const PROVIDER_PRESET_ENDPOINT_UNMIRROR_MIGRATION =
 const KNOWN_MIGRATIONS: readonly string[] = [
   SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION,
   PROVIDER_PRESET_ENDPOINT_UNMIRROR_MIGRATION,
+  PROVIDER_PRESET_MODEL_SLOT_MIGRATION,
 ];
 
 export type { LLMVendor, LLMVendorSettings };
@@ -1492,6 +1501,16 @@ export class SettingsService {
           marketplace.installedProviderPresets,
         );
         appliedMigrations.push(PROVIDER_PRESET_ENDPOINT_UNMIRROR_MIGRATION);
+        migrationWriteBack = true;
+      }
+
+      // One-time split: the openai-compatible block's single `model` used to be
+      // shared by the generic custom-provider row and every marketplace preset
+      // reached through that vendor. The stored value belongs to whichever row
+      // this install is actually on.
+      if (!appliedMigrations.includes(PROVIDER_PRESET_MODEL_SLOT_MIGRATION)) {
+        llm = withMarketplaceProviderPresetModelSlot(llm);
+        appliedMigrations.push(PROVIDER_PRESET_MODEL_SLOT_MIGRATION);
         migrationWriteBack = true;
       }
 

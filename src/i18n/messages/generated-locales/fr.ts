@@ -1572,6 +1572,8 @@ export const frMessages: Record<string, string> = {
   "llmTab.modelSyncFailedUsingCache": "Impossible de synchroniser la liste des modèles ; le dernier catalogue reçu est affiché.",
   "llmTab.modelSyncNeedsApiKey": "Renseignez une clé API pour synchroniser la liste des modèles.",
   "llmTab.unsavedChanges": "Non enregistré",
+  "llmTab.chatAwaitingCatalogue": "Aucun modèle pour l’instant : ce point de terminaison n’a pas envoyé sa liste de modèles.",
+  "llmTab.pickModelToUse": "Enregistré. Choisissez un de ses modèles dans la liste des modèles pour discuter avec lui.",
   "llmTab.chatNeedsApiKey": "Enregistrez une clé et ses modèles apparaîtront dans la liste des modèles.",
   "llmTab.chatNeedsGcpProject": "Enregistrez un ID de projet GCP et ses modèles apparaîtront dans la liste des modèles.",
   "llmTab.openRouterFreeBadge": "Gratuit",

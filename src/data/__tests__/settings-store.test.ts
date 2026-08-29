@@ -578,6 +578,111 @@ describe("SettingsService marketplace defaults", () => {
       .toBe("http://localhost:8001/v1");
   });
 
+  it("leaves an installed preset's address alone when that preset is not the selected one", () => {
+    // Only the SELECTED preset's address can be a mirror — that is the only
+    // one the old code ever wrote here. This block holds another installed
+    // preset's URL, which nothing but the user could have typed.
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai-compatible",
+          marketplaceProviderPresetId: "future-router",
+          vendors: {
+            "openai-compatible": { model: "local", baseUrl: "https://other.example/v1" },
+          },
+        },
+        marketplace: {
+          installedProviderPresets: [
+            {
+              providerId: "future-router",
+              label: "Future Router",
+              baseUrl: "https://future.example/v1",
+              defaultModel: "future/free",
+              modelOptions: ["future/free"],
+              requiresApiKey: true,
+            },
+            {
+              providerId: "other-router",
+              label: "Other Router",
+              baseUrl: "https://other.example/v1",
+              defaultModel: "other/free",
+              modelOptions: ["other/free"],
+              requiresApiKey: true,
+            },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+
+    const llm = new SettingsService({ userDataPath }).get("llm");
+
+    expect(getLlmVendorSettings(llm.vendors, "openai-compatible").baseUrl)
+      .toBe("https://other.example/v1");
+  });
+
+  it("gives the selected preset the shared model slot it used to fight over", () => {
+    // One `model` served the generic custom-provider row and every preset
+    // reached through the same vendor, so the row picked last overwrote the
+    // rest. The stored value belongs to the row this install is actually on.
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai-compatible",
+          marketplaceProviderPresetId: "future-router",
+          vendors: {
+            "openai-compatible": { model: "future/free", baseUrl: "http://localhost:8001/v1" },
+          },
+        },
+        marketplace: {
+          installedProviderPresets: [{
+            providerId: "future-router",
+            label: "Future Router",
+            baseUrl: "https://future.example/v1",
+            defaultModel: "future/free",
+            modelOptions: ["future/free"],
+            requiresApiKey: true,
+          }],
+        },
+      }),
+      "utf-8",
+    );
+
+    const llm = new SettingsService({ userDataPath }).get("llm");
+    const block = getLlmVendorSettings(llm.vendors, "openai-compatible");
+
+    expect(block.presetModels).toEqual({ "future-router": "future/free" });
+    // The generic row starts empty, so its chooser shows what its OWN endpoint
+    // answers rather than a model borrowed from a gateway.
+    expect(block.model).toBe("");
+    expect(block.baseUrl).toBe("http://localhost:8001/v1");
+  });
+
+  it("leaves the model with the generic row when no preset is selected", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai-compatible",
+          vendors: {
+            "openai-compatible": { model: "local-model", baseUrl: "http://localhost:8001/v1" },
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const block = getLlmVendorSettings(
+      new SettingsService({ userDataPath }).get("llm").vendors,
+      "openai-compatible",
+    );
+
+    expect(block.model).toBe("local-model");
+    expect(block.presetModels).toBeUndefined();
+  });
+
   it("drops a whitespace-only legacy realCloudBaseUrl and falls back to the default", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),

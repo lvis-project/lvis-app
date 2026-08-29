@@ -251,6 +251,8 @@ export type LLMVendorSettingsRenderer = {
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
+  /** Mirrors `LLMVendorSettings.presetModels` — read via `llmRouteModel`. */
+  presetModels?: Record<string, string>;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
 };

@@ -22,6 +22,7 @@ import {
   DEFAULT_LLM_VENDOR,
   getLlmVendorSettings,
   isLLMVendor,
+  llmRouteModel,
 } from "../../../shared/llm-vendor-defaults.js";
 import {
   marketplaceProviderPresetSecretId,
@@ -211,7 +212,7 @@ export function useSettingsOrchestration(
       setVendor(provider);
       setMarketplaceProviderPresetId(providerPresetId);
       setMarketplaceProviderPresets(s.marketplace?.installedProviderPresets ?? []);
-      hydrateVendorBlock(block);
+      hydrateVendorBlock(block, providerPresetId);
       setStreamSmoothing(s.llm.streamSmoothing);
       setAutoCompact(s.chat.autoCompact ?? true);
       setHasKey(apiKeySet);
@@ -270,12 +271,23 @@ export function useSettingsOrchestration(
     const block = isLLMVendor(vendor)
       ? getLlmVendorSettings(settingsSnapshot?.llm.vendors, vendor)
       : null;
-    if (block) hydrateVendorBlock(block);
+    if (block) {
+      hydrateVendorBlock(
+        block,
+        vendor === "openai-compatible" ? marketplaceProviderPresetId : "",
+      );
+    }
     return () => { cancelled = true; };
-  }, [vendor, api, settingsLoaded, settingsSnapshot, activeCredentialProviderId]);
+  }, [
+    vendor, api, settingsLoaded, settingsSnapshot, activeCredentialProviderId,
+    marketplaceProviderPresetId,
+  ]);
 
-  function hydrateVendorBlock(block: AppSettings["llm"]["vendors"][string]): void {
-    setModel(block.model);
+  function hydrateVendorBlock(
+    block: AppSettings["llm"]["vendors"][string],
+    marketplaceProviderPresetIdForBlock = "",
+  ): void {
+    setModel(llmRouteModel(block, marketplaceProviderPresetIdForBlock));
     setBaseUrl(block.baseUrl ?? "");
     setVertexProject(block.vertexProject ?? "");
     setVertexLocation(block.vertexLocation ?? "");
@@ -296,7 +308,7 @@ export function useSettingsOrchestration(
     setVendor(nextVendor);
     setMarketplaceProviderPresetId(providerPresetId);
     setMarketplaceProviderPresets(next.marketplace?.installedProviderPresets ?? []);
-    hydrateVendorBlock(block);
+    hydrateVendorBlock(block, providerPresetId);
     setStreamSmoothing(next.llm.streamSmoothing);
     setFallbackChain(next.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
   }
@@ -343,7 +355,11 @@ export function useSettingsOrchestration(
     hydratedVendorRef.current = "openai-compatible";
     setMarketplaceProviderPresetId(preset.providerId);
     setVendor("openai-compatible");
-    setModel(preset.defaultModel);
+    // This preset's own stored model, so switching between two presets restores
+    // what each was last set to rather than resetting both to a seed.
+    setModel(
+      llmRouteModel(openaiCompatibleDefaults, preset.providerId) || preset.defaultModel,
+    );
     // NOT `preset.baseUrl`: this field is the generic custom provider row's
     // stored endpoint and is written back on every save, so parking the
     // preset's address in it is how the two rows used to overwrite each other.
@@ -457,8 +473,23 @@ export function useSettingsOrchestration(
         const trimmedBaseUrl = baseUrl.trim();
         const trimmedVertexProject = vertexProject.trim();
         const trimmedVertexLocation = vertexLocation.trim();
-        const activeBlock: AppSettings["llm"]["vendors"][string] = {
-          model: model.trim() || vendorInfo.defaultModel,
+        // A marketplace preset's model goes in its own slot, keyed by preset,
+        // and the block's single `model` is left untouched — that one belongs
+        // to the generic custom-provider row, which is a different row reached
+        // through the same vendor. Omitting a key leaves the stored value
+        // intact, so the row not being edited keeps its model.
+        const activePresetId = vendor === "openai-compatible"
+          ? marketplaceProviderPresetId
+          : "";
+        const routeModel = model.trim() || vendorInfo.defaultModel;
+        const storedPresetModels = getLlmVendorSettings(
+          settingsSnapshot?.llm.vendors,
+          "openai-compatible",
+        ).presetModels;
+        const activeBlock: DeepPartial<AppSettings["llm"]["vendors"][string]> = {
+          ...(activePresetId
+            ? { presetModels: { ...storedPresetModels, [activePresetId]: routeModel } }
+            : { model: routeModel }),
           baseUrl: trimmedBaseUrl || undefined,
           vertexProject: trimmedVertexProject || undefined,
           vertexLocation: trimmedVertexLocation || undefined,

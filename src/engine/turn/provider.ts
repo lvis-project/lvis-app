@@ -13,6 +13,8 @@ import type { SettingsService } from "../../data/settings-store.js";
 import {
   canUseLlmVendorWithoutApiKey,
   getLlmVendorSettings,
+  llmRouteModel,
+  activeLlmRouteModel,
   isOpenAICompatibleVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
@@ -191,7 +193,9 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
     // an empty model as "not configured" so we never send a fabricated/seed id
     // the endpoint does not serve — the user selects a model from the live
     // /models handshake list first.
-    const effectiveModel = (deps.modelOverride ?? block.model ?? "").trim();
+    const effectiveModel = (
+      deps.modelOverride ?? llmRouteModel(block, marketplaceProviderPreset?.providerId)
+    ).trim();
     if (!effectiveModel && isOpenAICompatibleVendor(vendor)) {
       return null;
     }
@@ -283,10 +287,9 @@ export async function generateText(
       : abortSignal;
     let outputLimitReached = false;
     let text = "";
-    const block = getLlmVendorSettings(llm.vendors, llm.provider);
     const model = provider.subscriptionRuntime
       ? provider.subscriptionRuntime.model ?? "default"
-      : block.model;
+      : activeLlmRouteModel(llm);
     try {
     for await (const ev of provider.streamTurn({
       systemPrompt,
@@ -341,7 +344,7 @@ export async function pingProvider(
       : llm.provider;
     const model = subscription
       ? subscription.model || "default"
-      : getLlmVendorSettings(llm.vendors, llm.provider).model;
+      : activeLlmRouteModel(llm);
     if (!provider || !providerMatchesActiveChatRuntime(provider, llm.activeChatRuntime)) {
       return {
         configured: false,

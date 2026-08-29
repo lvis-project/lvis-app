@@ -487,12 +487,12 @@ function candidateMemoryActionFailure(error: unknown): { ok: false; error: "inva
 }
 
 /**
- * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable
- * ). Reads the same shared helper settings.ts does, so the two domains cannot
- * disagree about which endpoints count — a local copy already drifted once,
- * missing the marketplace preset address that no vendor block holds. Used to
- * guard ASRT sandbox live-refresh calls so the refresh fires only when an
- * endpoint actually changed.
+ * Stable signature of every endpoint the active LLM settings can reach, in a
+ * fixed order. Reads the same shared helper settings.ts does, so the two
+ * domains cannot disagree about which endpoints count — a local copy already
+ * drifted once, missing the marketplace preset address that no vendor block
+ * holds. Used to guard ASRT sandbox live-refresh calls so the refresh fires
+ * only when an endpoint actually changed.
  */
 function vendorBaseUrlSignature(
   llm: LLMSettings,
@@ -1439,10 +1439,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const prevLlm = settingsService.get("llm");
       const provider = prevLlm.provider;
       const prevBlock = getLlmVendorSettings(prevLlm.vendors, provider);
-      const prevVendorBaseUrlSig = vendorBaseUrlSignature(
-        prevLlm,
+      // Re-read at each call: the point is to compare the settings BEFORE and
+      // AFTER the patch, and both halves have to be taken the same way.
+      const currentVendorBaseUrlSig = () => vendorBaseUrlSignature(
+        settingsService.get("llm"),
         settingsService.get("marketplace").installedProviderPresets,
       );
+      const prevVendorBaseUrlSig = currentVendorBaseUrlSig();
       await settingsService.patch({
         llm: {
           vendors: {
@@ -1457,10 +1460,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // ASRT choke-point: the spread includes prevBlock.baseUrl if set, so if
       // a baseUrl was present it remains unchanged and the guard is a no-op.
       // Included for completeness in case future patches extend this handler.
-      if (vendorBaseUrlSignature(
-        settingsService.get("llm"),
-        settingsService.get("marketplace").installedProviderPresets,
-      ) !== prevVendorBaseUrlSig) {
+      if (currentVendorBaseUrlSig() !== prevVendorBaseUrlSig) {
         void deps.refreshSandboxNetworkConfig?.();
       }
       group.loop.refreshProvider();
@@ -1476,10 +1476,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         // Restore path: if the forward patch triggered a sandbox refresh but
         // the restore brings baseUrl back to the same value, the guard here is
         // also a no-op (prevBlock was the original, sig matches original).
-        if (vendorBaseUrlSignature(
-        settingsService.get("llm"),
-        settingsService.get("marketplace").installedProviderPresets,
-      ) !== prevVendorBaseUrlSig) {
+        if (currentVendorBaseUrlSig() !== prevVendorBaseUrlSig) {
           void deps.refreshSandboxNetworkConfig?.();
         }
         group.loop.refreshProvider();
