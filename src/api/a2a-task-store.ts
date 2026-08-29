@@ -24,18 +24,22 @@ import {
   GUIDE_MAX_ENTRIES,
 } from "../engine/turn/guidance-limits.js";
 import { isRecord } from "../shared/is-record.js";
+import { isSafeStructuralId } from "../shared/dlp-safe-id.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "tasks.json";
 const HANDLER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /**
- * Wire-level shape rules shared with the A2A subagent handler. Both modules
- * validate the same ids off the same wire, so they must reject the same
- * strings — exported here because this module owns the persisted task record
- * those ids are keys into.
+ * Wire-level shape rule shared with the A2A subagent handler. Both modules
+ * validate the same child-session ids off the same wire, so they must reject
+ * the same strings — exported here because this module owns the persisted
+ * task record those ids are keys into. The structural ids (context, task,
+ * artifact) go through `isSafeStructuralId` in `shared/dlp-safe-id.ts` for
+ * the same reason.
  */
 export const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
-export const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
+/** Metadata object keys may not carry C0 controls or DEL. */
+const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 const MESSAGE_KEYS = new Set([
   "messageId",
   "contextId",
@@ -72,14 +76,6 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string
 
 function hasOwn(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-function isSafeStructuralId(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 256
-    && !CONTROL_CHAR.test(value)
-    && maskSensitiveData(value).detections.length === 0;
 }
 
 const RFC3339_TIMESTAMP = /^(\d{4})-(0[1-9]|1[0-2])-([0-2]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;

@@ -44,11 +44,17 @@ import { join } from "node:path";
  * doubles it into the reserve the main process sizes the window by. It is
  * written in CSS as an alias (`var(--chrome-gap)`) rather than a literal, which
  * is why this gate resolves one level of `var()` instead of only reading px.
+ *
+ * `--shell-collapsed-rail-reserve` is here because the content surface pads by
+ * the token while the title band reads `COLLAPSED_RAIL_RESERVE` to put its
+ * path on the collapsed content title. The two drifting apart is exactly the
+ * band-to-title offset this pair closed.
  */
 const MIRRORS = [
   { css: "--chrome-gap", ts: "SHELL_GUTTER" },
   { css: "--chrome-gap-tight", ts: "CHROME_GAP_TIGHT" },
   { css: "--shell-card-inset", ts: "SHELL_GUTTER" },
+  { css: "--shell-collapsed-rail-reserve", ts: "COLLAPSED_RAIL_RESERVE" },
 ];
 
 const CSS_REL = join("src", "styles.css");
