@@ -15,6 +15,8 @@
  * fail-closed on any unknown shape — a malformed document must never be
  * silently treated as "nothing revoked".
  */
+import { SEMVER_CORE_PATTERN } from "../../shared/semver-compare.js";
+import { isValidIsoTimestamp } from "../../shared/marketplace-package-assets.js";
 
 /** One explicitly blocked `slug@version` — always requires a human-readable reason. */
 export interface RevocationBlockedEntry {
@@ -42,16 +44,6 @@ export interface RevocationDocument {
   /** Explicit `slug@version` blocks — independent of `minVersions`. */
   blocked: RevocationBlockedEntry[];
 }
-
-/** ISO-8601 — accept the subset Date.parse round-trips correctly. */
-function isValidIsoTimestamp(value: unknown): value is string {
-  if (typeof value !== "string" || value.length === 0) return false;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed);
-}
-
-/** Loose semver core check — `major.minor.patch` prefix, optional pre-release/build. */
-const SEMVER_CORE_PATTERN = /^\d+\.\d+\.\d+/;
 
 function isValidPluginId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256;

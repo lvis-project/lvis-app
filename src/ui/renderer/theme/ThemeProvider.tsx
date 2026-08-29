@@ -12,7 +12,7 @@ import type { ThemeBundle } from "./bundles/index.js";
 import { applyBundleToDocument, resolveSystemPair } from "./resolve-theme.js";
 import { bundleToPluginTokens } from "./plugin-token-map.js";
 export { bundleToPluginTokens };
-import type { ThemeContextValue, BundleId, ResolvedShell } from "./types.js";
+import type { ThemeContextValue, UnvalidatedBundleId, ResolvedShell } from "./types.js";
 import { VIOLET_PAIR_IDS } from "./types.js";
 import type { InitialThemePrime } from "../../../shared/initial-theme.js";
 
@@ -36,13 +36,13 @@ declare global {
   }
 }
 
-function readGlobalInitialBundleId(): BundleId | undefined {
+function readGlobalInitialBundleId(): UnvalidatedBundleId | undefined {
   if (typeof window === "undefined") return undefined;
   const initial = window.__lvisInitialTheme;
   if (!initial || typeof initial !== "object") return undefined;
   const id = initial.bundleId;
   if (typeof id !== "string") return undefined;
-  return isBundleId(id) ? (id as BundleId) : undefined;
+  return isBundleId(id) ? (id as UnvalidatedBundleId) : undefined;
 }
 
 /**
@@ -50,7 +50,7 @@ function readGlobalInitialBundleId(): BundleId | undefined {
  * both by the initial settings hydrate and by the `SETTINGS.updated`
  * cross-window broadcast handler so the two paths share one normalizer.
  */
-function resolveAppearanceSettings(settings: AppSettings): { bundleId: BundleId; followSystem: boolean } {
+function resolveAppearanceSettings(settings: AppSettings): { bundleId: UnvalidatedBundleId; followSystem: boolean } {
   const appearance = settings.appearance as { schemaVersion?: number; bundleId?: string; followSystem?: boolean } | undefined;
   const rawId = (appearance?.schemaVersion === 2 && typeof appearance.bundleId === "string")
     ? appearance.bundleId
@@ -65,7 +65,7 @@ function resolveAppearanceSettings(settings: AppSettings): { bundleId: BundleId;
 export interface ThemeProviderProps {
   api?: LvisApi;
   /** Initial bundle id — lets tests skip async hydrate. */
-  initialBundleId?: BundleId;
+  initialBundleId?: UnvalidatedBundleId;
   /** Initial followSystem — lets tests skip async hydrate. */
   initialFollowSystem?: boolean;
   children: ReactNode;
@@ -87,7 +87,7 @@ export function ThemeProvider({
   initialFollowSystem = false,
   children,
 }: ThemeProviderProps) {
-  const resolveBundle = useCallback((id: BundleId): ThemeBundle => {
+  const resolveBundle = useCallback((id: UnvalidatedBundleId): ThemeBundle => {
     return findBundle(id) ?? findBundle(DEFAULT_BUNDLE_ID)!;
   }, []);
 
@@ -97,7 +97,7 @@ export function ThemeProvider({
   //       via `webPreferences.additionalArguments` so frame-0 paint already
   //       matches this bundle id (architecture.md §6.7.1)
   //   (3) DEFAULT_BUNDLE_ID — true cold boot, no global, no prop
-  const [bundleId, setBundleIdState] = useState<BundleId>(
+  const [bundleId, setBundleIdState] = useState<UnvalidatedBundleId>(
     () => initialBundleId ?? readGlobalInitialBundleId() ?? DEFAULT_BUNDLE_ID,
   );
   const [followSystem, setFollowSystemState] = useState<boolean>(initialFollowSystem);
@@ -173,7 +173,7 @@ export function ThemeProvider({
   // Derive the effective bundle — when followSystem is active and the bundleId
   // is part of the violet pair, override with the OS-resolved variant.
   // osTick is included so any OS scheme change triggers a re-evaluation.
-  const effectiveBundleId: BundleId = useMemo(() => {
+  const effectiveBundleId: UnvalidatedBundleId = useMemo(() => {
     if (followSystem && VIOLET_PAIR_IDS.includes(bundleId)) {
       return resolveSystemPair();
     }
@@ -254,7 +254,7 @@ export function ThemeProvider({
   }, [followSystem, bundleId]);
 
   const persistAppearance = useCallback(
-    (patch: { bundleId?: BundleId; followSystem?: boolean }) => {
+    (patch: { bundleId?: UnvalidatedBundleId; followSystem?: boolean }) => {
       if (!api) return;
       void api
         .updateSettings({ appearance: { schemaVersion: 2, ...patch } })
@@ -264,7 +264,7 @@ export function ThemeProvider({
   );
 
   const setBundle = useCallback(
-    (id: BundleId) => {
+    (id: UnvalidatedBundleId) => {
       userTouchedRef.current = true;
       const safeId = isBundleId(id) ? id : DEFAULT_BUNDLE_ID;
       setBundleIdState(safeId);

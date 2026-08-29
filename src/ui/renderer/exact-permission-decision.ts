@@ -1,4 +1,5 @@
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
+import type { ToolSource } from "../../shared/permission-review-status.js";
 
 /**
  * Unsaved Settings draft derived from one live, host-sealed approval request.
@@ -9,7 +10,7 @@ export interface ExactDenyDraft {
   requestId: string;
   toolName: string;
   args: unknown;
-  source: "builtin" | "plugin" | "mcp";
+  source: ToolSource;
   trustOrigin?: string;
   approvalCacheKey?: string;
   verdictAtApproval: UserApprovalVerdict;

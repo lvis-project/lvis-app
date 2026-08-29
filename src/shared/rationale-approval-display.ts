@@ -6,14 +6,14 @@
  * main process HMAC-binds this exact display object to the one-shot approval
  * request before it crosses the renderer boundary.
  */
-import { isRecord } from "./is-record.js";
+import { isRecord, hasExactKeys } from "./is-record.js";
+import type { RiskLevel } from "./permission-review-status.js";
 
 export const RATIONALE_APPROVAL_DISPLAY_VERSION = 1 as const;
 export const RATIONALE_APPROVAL_DISPLAY_KIND =
   "rationale-approval-display" as const;
 
 export type RationaleApprovalDisplayStatus = "ready" | "failed";
-export type RationaleApprovalDisplayRiskLevel = "low" | "medium" | "high";
 export type RationaleApprovalDisplayScopeAlignment =
   | "aligned"
   | "unclear"
@@ -29,7 +29,7 @@ export interface RationaleApprovalDisplay {
   readonly affectedResources: readonly string[];
   readonly requiredAuthority: string;
   readonly effectiveVerdict: Readonly<{
-    level: RationaleApprovalDisplayRiskLevel;
+    level: RiskLevel;
     reason: string;
   }>;
   readonly scopeAlignment: RationaleApprovalDisplayScopeAlignment;
@@ -46,7 +46,7 @@ export interface RationaleApprovalDisplayInput {
   readonly affectedResources: readonly string[];
   readonly requiredAuthority: string;
   readonly effectiveVerdict: Readonly<{
-    level: RationaleApprovalDisplayRiskLevel;
+    level: RiskLevel;
     reason: string;
   }>;
   readonly scopeAlignment: RationaleApprovalDisplayScopeAlignment;
@@ -56,7 +56,7 @@ export interface RationaleApprovalDisplayInput {
   readonly modalFallbackRequired: boolean;
 }
 
-const RISK_LEVELS = new Set<RationaleApprovalDisplayRiskLevel>([
+const RISK_LEVELS = new Set<RiskLevel>([
   "low",
   "medium",
   "high",
@@ -98,15 +98,6 @@ export function normalizeRationaleApprovalDisplayText(value: string): string {
 
 function hasUnsafeRationaleApprovalDisplayUnicode(value: string): boolean {
   return HAS_UNSAFE_RATIONALE_APPROVAL_DISPLAY_UNICODE.test(value);
-}
-
-function hasExactKeys(value: object, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return (
-    actual.length === wanted.length &&
-    actual.every((key, index) => key === wanted[index])
-  );
 }
 
 /**
@@ -187,7 +178,7 @@ export function parseRationaleApprovalDisplay(
     !isDisplayText(value.requiredAuthority, RATIONALE_DISPLAY_CAPS.authorityLength) ||
     !isRecord(verdict) ||
     !hasExactKeys(verdict, ["level", "reason"]) ||
-    !RISK_LEVELS.has(verdict.level as RationaleApprovalDisplayRiskLevel) ||
+    !RISK_LEVELS.has(verdict.level as RiskLevel) ||
     !isDisplayText(verdict.reason, RATIONALE_DISPLAY_CAPS.reasonLength) ||
     !SCOPE_ALIGNMENTS.has(
       value.scopeAlignment as RationaleApprovalDisplayScopeAlignment,
@@ -224,7 +215,7 @@ export function parseRationaleApprovalDisplay(
     affectedResources: Object.freeze([...value.affectedResources]),
     requiredAuthority: value.requiredAuthority,
     effectiveVerdict: Object.freeze({
-      level: verdict.level as RationaleApprovalDisplayRiskLevel,
+      level: verdict.level as RiskLevel,
       reason: verdict.reason as string,
     }),
     scopeAlignment:

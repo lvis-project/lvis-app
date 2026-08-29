@@ -12,7 +12,7 @@
  */
 
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { Readable } from "node:stream";
@@ -25,7 +25,7 @@ import {
   type Tool,
   type ToolCategory,
   type ToolExecutionContext,
-  type ToolResult,
+  type ToolExecutionResult,
 } from "./base.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
 import { terminateChildProcess } from "./terminate-child-process.js";
@@ -59,6 +59,7 @@ import {
   assertManagedChildProcessAdmissionOpen,
   trackManagedChildProcess,
 } from "../main/managed-child-processes.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -365,15 +366,13 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
 
   approvalCacheKey(input: unknown): string {
     const parsed = BashToolInputSchema.parse(input);
-    return createHash("sha256")
-      .update(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }))
-      .digest("hex");
+    return sha256Hex(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }));
   }
 
   protected async executeTyped(
     input: z.infer<typeof BashToolInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     // Preflight: interactive scaffolds would hang on stdin.
     const preflightError = preflightInteractiveCommand(input.command);
     if (preflightError !== null) {
@@ -1130,15 +1129,13 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
 
   approvalCacheKey(input: unknown): string {
     const parsed = PowerShellToolInputSchema.parse(input);
-    return createHash("sha256")
-      .update(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }))
-      .digest("hex");
+    return sha256Hex(JSON.stringify({ command: parsed.command, cwd: parsed.cwd ?? null }));
   }
 
   protected async executeTyped(
     input: z.infer<typeof PowerShellToolInputSchema>,
     ctx: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const resolvedCwd = resolveHostShellWorkingDirectory(ctx.cwd, input.cwd);
     const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
     if (cwdViolation) {
@@ -1488,7 +1485,7 @@ async function spawnPowerShellWithSandbox(
   cwd: string,
   writePaths: readonly string[],
   timeoutSeconds: number,
-): Promise<ToolResult> {
+): Promise<ToolExecutionResult> {
   // Resolve before allocating the temporary profile so a missing PowerShell
   // executable cannot leave an orphaned sandbox HOME behind.
   const executable = resolvePowerShellExecutable();
@@ -1580,7 +1577,7 @@ async function spawnPowerShellWithSandbox(
   // leaks (ASRT changed nothing in process.env). Secrets stay stripped on both.
   const childEnv = buildSandboxedChildEnv(wrapped.env, { ...sandboxHome.env });
 
-  return await new Promise<ToolResult>((resolveResult) => {
+  return await new Promise<ToolExecutionResult>((resolveResult) => {
     let child: PipedChild;
     try {
       assertManagedChildProcessAdmissionOpen("tool:powershell:asrt");
@@ -1661,7 +1658,7 @@ async function spawnPowerShell(
   command: string,
   cwd: string,
   timeoutSeconds: number,
-): Promise<ToolResult> {
+): Promise<ToolExecutionResult> {
   return new Promise((resolve) => {
     const executable = resolvePowerShellExecutable();
     assertManagedChildProcessAdmissionOpen("tool:powershell");

@@ -669,8 +669,24 @@ export function createAgentStatusTool(deps: Pick<AgentSpawnToolDeps, "getRunner"
     // after the call, stated where the model reads before making it.
     description: t("be_agentSpawn.statusToolDescription"),
     source: "builtin",
-    category: "meta",
-    decisionOverride: "always-allow-with-audit",
+    // A read, declared as one — same as its sibling `agent_list`. It returns
+    // host-owned sub-agent bookkeeping scoped by the HOST-supplied origin
+    // session id; its single optional `id` is a lookup key, it takes no path,
+    // command, or network argument, and it mutates nothing.
+    //
+    // It used to declare `meta` + `decisionOverride: "always-allow-with-audit"`,
+    // which reads as the same permission (allow, with audit) and is not: `meta`
+    // is the host's control-flow category, and the gates downstream treat it as
+    // one. A turn carrying cross-agent provenance re-elevates every call that is
+    // not a builtin `read` to a modal (`invocation-authorization.ts`), so a
+    // parent woken by its own child's report blocked on a human for each status
+    // poll — and because the always-allow branch never consults the reviewer,
+    // the card carried no verdict and `resolveUserApprovalVerdict` labelled a
+    // verdict-less `meta` ask MEDIUM. Declaring the category truthfully is what
+    // makes every one of those gates agree; the alternative was teaching each of
+    // them a name-scoped exception.
+    category: "read",
+    isReadOnly: () => true,
     jsonSchema: {
       type: "object",
       properties: {

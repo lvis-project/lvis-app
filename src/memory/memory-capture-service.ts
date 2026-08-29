@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { MemoryCaptureMode } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
 import { maskSensitiveData, scrubSecretsForLLM } from "../shared/dlp.js";
@@ -14,17 +13,15 @@ import type {
   NoteEntry,
   ProjectScopedMemoryOptions,
 } from "./memory-manager.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { MAX_MEMORY_SOURCE_CHARS, MEMORY_KINDS } from "./memory-manager.js";
 
 const log = createLogger("memory-capture");
 
 const MAX_PENDING_CAPTURES = 24;
-const MAX_SOURCE_CHARS = 4_000;
 const MAX_TITLE_CHARS = 120;
 const MAX_CONTENT_CHARS = 1_200;
 const MAX_EVIDENCE_CHARS = 320;
-const MEMORY_KINDS = new Set<MemoryKind>([
-  "preference", "constraint", "fact", "goal", "reference", "note",
-]);
 
 /** Reasons that make a turn ineligible as an automatic long-term-memory source. */
 export type MemoryCaptureTaintReason =
@@ -130,7 +127,7 @@ export class MemoryCaptureService implements AutomaticMemoryCaptureSubmitter {
       return;
     }
 
-    const sourceDigest = digest(source);
+    const sourceDigest = sha256Hex(source);
     if (this.pending.some((item) =>
       item.trigger === "automatic"
       && item.sessionId === request.sessionId
@@ -168,7 +165,7 @@ export class MemoryCaptureService implements AutomaticMemoryCaptureSubmitter {
     return this.reviewAndStore({
       scope: copyProjectScope(request),
       source,
-      sourceDigest: digest(source),
+      sourceDigest: sha256Hex(source),
       trigger: "explicit",
       ...(requestedTitle ? { requestedTitle } : {}),
     });
@@ -297,7 +294,7 @@ function automaticCaptureIneligibility(
   if (request.stopReason !== "end_turn") return "incomplete-turn";
   if (request.taintReasons && request.taintReasons.length > 0) return request.taintReasons[0] ?? "tainted";
   if (!source) return "empty-input";
-  if (source.length > MAX_SOURCE_CHARS) return "input-too-large";
+  if (source.length > MAX_MEMORY_SOURCE_CHARS) return "input-too-large";
   return null;
 }
 
@@ -306,7 +303,7 @@ function explicitCaptureIneligibility(
   requestedTitle: string | undefined | null,
 ): string | null {
   if (!source) return "empty-input";
-  if (source.length > MAX_SOURCE_CHARS) return "input-too-large";
+  if (source.length > MAX_MEMORY_SOURCE_CHARS) return "input-too-large";
   if (requestedTitle === null) return "invalid-title";
   return null;
 }
@@ -389,8 +386,4 @@ function copyProjectScope(options: ProjectScopedMemoryOptions): ProjectScopedMem
 
 function normalizeEvidence(value: string): string {
   return value.normalize("NFKC").replace(/\s+/g, " ").trim();
-}
-
-function digest(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }

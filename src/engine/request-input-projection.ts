@@ -6,6 +6,7 @@ import type {
   ToolSchema,
 } from "./llm/types.js";
 import { estimateMessagesTokens, estimateTokens } from "./auto-compact.js";
+import { isNonNegativeSafeInteger } from "../shared/safe-integer.js";
 
 export interface RequestInputProjection extends ProviderRequestInputProjection {
   /** Full provider request input projection: system prompt + wire messages + exposed tool schemas. */
@@ -19,10 +20,6 @@ export interface RequestInputProjectionInput extends ProviderRequestInputProject
   systemPrompt: string;
   messages: GenericMessage[];
   toolSchemas: ToolSchema[];
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isValidProviderRequestInputProjection(value: unknown): value is RequestInputProjection {

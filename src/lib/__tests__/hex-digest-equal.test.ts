@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { timingSafeEqualHexDigest } from "../hex-digest-equal.js";
+import { sha256Hex, timingSafeEqualHexDigest } from "../hex-digest-equal.js";
 
 const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 
@@ -56,5 +56,21 @@ describe("timingSafeEqualHexDigest", () => {
 
   it("never throws on a length mismatch the way timingSafeEqual does", () => {
     expect(timingSafeEqualHexDigest(sha256("a"), "ab")).toBe(false);
+  });
+});
+
+describe("sha256Hex", () => {
+  it("hashes a string as UTF-8 and bytes as-is, to 64 lowercase hex characters", () => {
+    const text = "héllo";
+    const expected = createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex");
+    expect(sha256Hex(text)).toBe(expected);
+    expect(sha256Hex(Buffer.from(text, "utf8"))).toBe(expected);
+    expect(sha256Hex(new TextEncoder().encode(text))).toBe(expected);
+    expect(sha256Hex(text)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("produces the digest the comparator accepts", () => {
+    expect(timingSafeEqualHexDigest(sha256Hex("a"), sha256Hex("a"))).toBe(true);
+    expect(timingSafeEqualHexDigest(sha256Hex("a"), sha256Hex("b"))).toBe(false);
   });
 });

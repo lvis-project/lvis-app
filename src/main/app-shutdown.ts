@@ -34,12 +34,9 @@ import {
   setAppShutdownStarted,
 } from "./app-state.js";
 import { peekFloatingDock } from "../boot/steps/plugin-runtime/host-api-factory.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("lvis");
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /**
  * Drain the pino transport queue before `app.exit(0)` hard-terminates.

@@ -37,6 +37,7 @@ import type {
   LLMSettings,
   MarketplaceSettings,
   ShortcutSettings,
+  AppSettings,
 } from "../../data/settings-store.js";
 import type {
   CodexSubscriptionActionResult,
@@ -214,10 +215,15 @@ function normalizeSubscriptionModel(value: unknown): string | undefined | null {
     : null;
 }
 
-/** Authoritative remote route lineage is main-only and never projected to the renderer. */
-function rendererSettingsSnapshot(snapshot: ReturnType<IpcDeps["settingsService"]["getAll"]>) {
-  const projected = structuredClone(snapshot) as Partial<typeof snapshot>;
-  delete projected.a2aRemote;
+/**
+ * The settings shape the renderer sees. Authoritative remote route lineage
+ * (`a2aRemote`) is main-only and never projected to the renderer; every other
+ * field crosses as-is, so the renderer's `AppSettings` is exactly this type.
+ */
+export type RendererSettingsSnapshot = Omit<AppSettings, "a2aRemote">;
+
+function rendererSettingsSnapshot(snapshot: AppSettings): RendererSettingsSnapshot {
+  const { a2aRemote: _mainOnly, ...projected } = structuredClone(snapshot);
   return projected;
 }
 
@@ -750,6 +756,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.update, e); return UNAUTHORIZED_FRAME; }
     if (partial && typeof partial === "object" && Object.prototype.hasOwnProperty.call(partial, "a2aRemote")) {
       return { ok: false, error: "a2a-remote-settings-main-owned" };
+    }
+    // Readable in the renderer snapshot, written only by `loadSettings`: a
+    // patch naming it is refused whole, the same way as `a2aRemote`.
+    if (partial && typeof partial === "object" && Object.prototype.hasOwnProperty.call(partial, "appliedMigrations")) {
+      return { ok: false, error: "applied-migrations-main-owned" };
     }
     const llmPatch = (partial as Record<string, unknown> | null | undefined)
       ?.llm as Record<string, unknown> | undefined;

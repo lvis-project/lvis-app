@@ -64,6 +64,7 @@ import {
 } from "./telegram-pairing-code.js";
 import type { ConversationCommandPort } from "./conversation-command-port.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
+import { TELEGRAM_BRIDGE_FEATURE } from "./telegram-connection-store.js";
 
 // ─── Outbound long-poll ingress ───────────────────────────────────────────────
 
@@ -619,7 +620,6 @@ function defaultWait(ms: number, signal: AbortSignal): Promise<void> {
 
 // ─── Bridge lifecycle ─────────────────────────────────────────────────────────
 
-const TELEGRAM_BRIDGE_FEATURE = "telegram-bridge";
 const TELEGRAM_RECEIPT_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 const TELEGRAM_MAX_RAW_BODY_BYTES = 64 * 1024;
 /**

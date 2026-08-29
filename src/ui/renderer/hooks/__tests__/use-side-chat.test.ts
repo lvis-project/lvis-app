@@ -3,7 +3,7 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSideChat } from "../use-side-chat.js";
-import type { StreamEvent, ChatEntry } from "../../../../lib/chat-stream-state.js";
+import type { ChatStreamEvent, ChatEntry } from "../../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../../types.js";
 
 /**
@@ -12,7 +12,7 @@ import type { LvisApi } from "../../types.js";
  * plus spies for the invoke channels.
  */
 function makeApi() {
-  let handler: ((e: StreamEvent) => void) | null = null;
+  let handler: ((e: ChatStreamEvent) => void) | null = null;
   const abort = vi.fn(async () => ({ ok: true as const }));
   const send = vi.fn(async () => ({ ok: true as const, result: {} }));
   const newSession = vi.fn(async () => ({ ok: true as const, sessionId: "side-2" }));
@@ -25,7 +25,7 @@ function makeApi() {
       load,
       list,
       abort,
-      onStream: (h: (e: StreamEvent) => void) => {
+      onStream: (h: (e: ChatStreamEvent) => void) => {
         handler = h;
         return () => {
           handler = null;
@@ -36,7 +36,7 @@ function makeApi() {
   } as unknown as LvisApi;
   return {
     api,
-    emit: (e: StreamEvent) => act(() => handler?.(e)),
+    emit: (e: ChatStreamEvent) => act(() => handler?.(e)),
     spies: { abort, send, newSession, load, list },
   };
 }

@@ -72,6 +72,7 @@ import { getApi } from "../api-client.js";
 // The card's ORIGIN chat session — the second binding `onmessage` needs (see below).
 // Optional: this component also mounts outside the chat subtree.
 import { useOptionalChatContext } from "../context/ChatContext.js";
+import { hostTimeZone } from "../../../shared/format-time.js";
 
 /** Extract the `?t=<token>` proxy-session token from a `lvis-mcp-app://` URL. */
 function tokenFromProxyUrl(proxyUrl: string): string | null {
@@ -295,10 +296,7 @@ export function McpAppView({
   }, [mountDisplayMode]);
 
   // Host IANA time zone — stable for the app's lifetime; read once.
-  const timeZone = useMemo(
-    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
-    [],
-  );
+  const timeZone = useMemo(() => hostTimeZone(), []);
 
   // Build the STANDARD `McpUiHostContext` from the current host theme + locale +
   // time zone. `findBundle` may return undefined mid lazy-load — fall back to the

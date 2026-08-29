@@ -10,11 +10,12 @@
  * ToolExecutor, PermissionManager, audit, plugins, and MCP policy remain the
  * sole execution authority.
  */
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { ToolSchema } from "../engine/llm/types.js";
 import { mainDir } from "./main-paths.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 
 const MAX_TOOL_COUNT = 256;
 const MAX_SOURCE_TOOL_NAME_LENGTH = 256;
@@ -150,7 +151,7 @@ interface BridgedToolSchema {
 function remoteToolName(originalName: string, occupied: ReadonlyMap<string, BridgedToolSchema>): string {
   const base = SAFE_REMOTE_TOOL_NAME.test(originalName)
     ? originalName
-    : `lvis_${createHash("sha256").update(originalName, "utf8").digest("hex").slice(0, 48)}`;
+    : `lvis_${sha256Hex(originalName).slice(0, 48)}`;
   if (!occupied.has(base)) return base;
   for (let suffix = 1; suffix <= MAX_TOOL_COUNT; suffix += 1) {
     const serial = String(suffix);

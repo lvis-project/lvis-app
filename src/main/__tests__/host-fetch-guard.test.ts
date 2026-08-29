@@ -8,6 +8,7 @@
  * at a private / loopback / link-local address and the decision is asserted.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { REDIRECT_STATUSES } from "../host-fetch-guard.js";
 
 // ─── dns mock — configurable per test via `lookupMock` ──────────────
 const lookupMock = vi.fn<
@@ -876,5 +877,12 @@ describe("runHostFetchHops — session-cookie injection", () => {
     const { options } = hopOptions(first, { headers: { cookie: "PLUGIN=own" } }, transport);
     await runHostFetchHops(options);
     expect(calls[0]?.headers.cookie).toBe("PLUGIN=own");
+  });
+});
+
+describe("REDIRECT_STATUSES", () => {
+  it("names exactly the statuses that point elsewhere", () => {
+    expect([...REDIRECT_STATUSES].sort()).toEqual([301, 302, 303, 307, 308]);
+    expect(REDIRECT_STATUSES.has(304)).toBe(false);
   });
 });

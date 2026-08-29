@@ -36,6 +36,7 @@ import type {
   ToolExecutorCallbacks,
 } from "../executor.js";
 import { emitPermissionReview, summarizeInputForDeferred } from "./display-mask.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 export async function dispatchReviewerForHeadless(
   permissionManager: PermissionManager | undefined,
@@ -274,7 +275,7 @@ export async function dispatchReviewerForInteractiveAuto(
       toolCategory: category,
       source,
       ...meta,
-      reason: err instanceof Error ? err.message : String(err),
+      reason: errorMessage(err),
       ...(approvalPurpose ? { approvalPurpose } : {}),
     });
     throw err;

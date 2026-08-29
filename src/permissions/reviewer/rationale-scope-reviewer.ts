@@ -13,11 +13,9 @@ import {
   type ReviewerScopeAlignment,
   type ReviewerScopeReevaluation,
 } from "../../tools/pipeline/rationale-pr1-contract.js";
-import type {
-  LlmReviewerProvider,
-  RiskLevel,
-  RiskVerdict,
-} from "./risk-classifier.js";
+import type { LlmReviewerProvider, RiskVerdict } from "./risk-classifier.js";
+import type { RiskLevel } from "../../shared/permission-review-status.js";
+import { HTML_TAG_RE, UNTRUSTED_TEXT_CONTROL_RE } from "./approval-sentence-selector.js";
 
 export const RATIONALE_SCOPE_REVIEWER_SYSTEM_PROMPT = [
   "You are a permission scope reviewer.",
@@ -52,9 +50,6 @@ const ALIGNMENTS = new Set<Exclude<ReviewerScopeAlignment, "unknown">>([
   "outside",
 ]);
 const MAX_SCOPE_REVIEW_OUTPUT_CHARS = 4_096;
-const UNTRUSTED_TEXT_CONTROL_RE =
-  /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
-const HTML_TAG_RE = /<[^>]*>/g;
 
 /**
  * Reduce a model-authored string to inert plain text.

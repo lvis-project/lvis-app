@@ -14,6 +14,7 @@ import { useNotifySaved } from "../context/SavedToastContext.js";
 import { SettingsPageHeader } from "../components/PageShell.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatDateTime } from "../../../shared/format-time.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
 
@@ -471,7 +472,7 @@ export function McpTab() {
                         )}
                         {st?.connectedAt && (
                           <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            {t("mcpTab.connectedAtLabel")} {new Date(st.connectedAt).toLocaleString()}
+                            {t("mcpTab.connectedAtLabel")} {formatDateTime(st.connectedAt)}
                           </p>
                         )}
                         {cfg?.transport === "stdio" && cfg.command && (

@@ -31,7 +31,6 @@ import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
 } from "../shared/subagent-policy.js";
-import { createHash } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
 import { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
@@ -130,6 +129,7 @@ import type {
   SubAgentRunStatus,
   SubAgentSuspension,
 } from "../shared/subagent-events.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("lvis");
 
 function maskSubAgentText(text: string): string {
@@ -406,7 +406,7 @@ interface SubAgentExecutionPolicy {
 }
 
 function buildA2AWireInternalOrigin(handlerId: string): string {
-  const handlerTag = createHash("sha256").update(handlerId).digest("hex").slice(0, 8);
+  const handlerTag = sha256Hex(handlerId).slice(0, 8);
   return createDlpSafeUuid(`a2a-wire-${handlerTag}`);
 }
 
@@ -943,7 +943,7 @@ function buildChildSessionId(originSessionId?: string): string {
 }
 
 function originSessionTag(originSessionId: string): string {
-  return createHash("sha256").update(originSessionId).digest("hex").slice(0, 8);
+  return sha256Hex(originSessionId).slice(0, 8);
 }
 
 /**
@@ -3857,7 +3857,7 @@ export class SubAgentRunner {
       const tagged = /^sub-([0-9a-f]{8})-[0-9a-f]{8}-/.exec(resumeId);
       const idTag = tagged?.[1] ?? "";
       const expectedTag = originSessionId
-        ? createHash("sha256").update(originSessionId).digest("hex").slice(0, 8)
+        ? sha256Hex(originSessionId).slice(0, 8)
         : "";
       if (idTag !== expectedTag) {
         return refuseStructurally(

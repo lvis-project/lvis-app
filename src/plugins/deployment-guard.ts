@@ -4,11 +4,8 @@ import { readPluginRegistry } from "./registry.js";
 import { flattenAgentPluginsManifest } from "./public-contract.js";
 import type { InstallPolicy } from "./types.js";
 import { createLogger } from "../lib/logger.js";
+import { normalizeInstallPolicy } from "./runtime/manifest-validation.js";
 const log = createLogger("deployment-guard");
-
-
-
-
 
 export type Actor = "user" | "it-admin";
 
@@ -29,15 +26,6 @@ export class PluginDeploymentDeniedError extends Error {
     super(reason);
     this.name = "PluginDeploymentDeniedError";
   }
-}
-
-function normalizeInstallPolicy(value: {
-  installPolicy?: InstallPolicy;
-} | null | undefined): InstallPolicy {
-  if (value?.installPolicy === "admin") {
-    return "admin";
-  }
-  return "user";
 }
 
 export interface DeploymentGuardOptions {

@@ -23,6 +23,29 @@ function errorFrom(value: unknown, fallback: string): Error {
 }
 
 /**
+ * Resolve after `ms`, or reject with the signal's reason as soon as `signal`
+ * aborts — including when it is already aborted on entry. The timer is
+ * cleared on abort and the listener removed on expiry, so neither outlives
+ * the other. Every retry loop and cooldown in the app waits through this;
+ * the abort-aware contract comes from the marketplace artifact download,
+ * whose retries must stop the moment the install is cancelled.
+ */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(errorFrom(signal.reason, "aborted"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(errorFrom(signal?.reason, "aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
  * Run one task under a caller-linked, hard wall-clock deadline. The linked
  * signal lets cooperative work stop; Promise.race also bounds work that ignores
  * AbortSignal. Boundary causes are typed instead of inferred from error text.

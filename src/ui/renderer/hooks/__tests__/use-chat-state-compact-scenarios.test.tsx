@@ -24,12 +24,12 @@ import { describe, it, expect, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useChatState } from "../use-chat-state.js";
 import type { LvisApi } from "../../types.js";
-import type { StreamEvent } from "../../../../lib/chat-stream-state.js";
+import type { ChatStreamEvent } from "../../../../lib/chat-stream-state.js";
 import type { ChatEntry } from "../../../../lib/chat-stream-state.js";
 
 // ─── Test harness ─────────────────────────────────────────────────────────────
 
-type StreamHandler = (ev: StreamEvent) => void;
+type StreamHandler = (ev: ChatStreamEvent) => void;
 
 interface CapturedApi {
   api: LvisApi;
@@ -56,7 +56,7 @@ function makeCapturedApi(): CapturedApi {
   return { api, streamHandler };
 }
 
-function dispatchEvent(streamHandler: { current: StreamHandler | null }, ev: StreamEvent): void {
+function dispatchEvent(streamHandler: { current: StreamHandler | null }, ev: ChatStreamEvent): void {
   expect(streamHandler.current).not.toBeNull();
   act(() => {
     streamHandler.current?.(ev);
@@ -77,7 +77,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       triggerSource: "estimate",
       estimatedBefore: 90_000,
       preflight: 88_000,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.isCompacting).toBe(true);
   });
@@ -86,7 +86,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
 
-    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     dispatchEvent(streamHandler, {
       type: "compact_notice",
       removedMessages: 12,
@@ -94,7 +94,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       estimatedAfter: 50_000,
       trigger: "auto-compact",
       compactNum: 1,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.isCompacting).toBe(false);
 
@@ -133,7 +133,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       removedMessages: 5,
       freedTokens: 3_000,
       // estimatedAfter intentionally omitted
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.entries.length).toBe(before + 1);
     expect(result.current.entries.at(-1)).toMatchObject({
@@ -165,7 +165,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       type: "compact_notice",
       removedMessages: 0,
       freedTokens: 0,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     // Exactly one new entry — the checkpoint. No synthetic context_usage
     // that would overwrite the existing turn_summary signal.
@@ -187,7 +187,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
 
-    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     expect(result.current.isCompacting).toBe(true);
 
     act(() => {
@@ -212,7 +212,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       ]);
     });
 
-    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     expect(result.current.isCompacting).toBe(true);
 
     act(() => {
@@ -226,7 +226,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
 
-    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     expect(result.current.isCompacting).toBe(true);
 
     act(() => {
@@ -241,8 +241,8 @@ describe("useChatState — compact lifecycle scenarios", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
 
-    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
-    dispatchEvent(streamHandler, { type: "done" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
+    dispatchEvent(streamHandler, { type: "done" } as ChatStreamEvent);
 
     expect(result.current.isCompacting).toBe(false);
   });
@@ -251,8 +251,8 @@ describe("useChatState — compact lifecycle scenarios", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
 
-    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
-    dispatchEvent(streamHandler, { type: "error", error: "boom" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
+    dispatchEvent(streamHandler, { type: "error", error: "boom" } as ChatStreamEvent);
 
     expect(result.current.isCompacting).toBe(false);
   });
@@ -265,7 +265,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       type: "error",
       error: "Resource not found",
       systemNotice: "stream-error",
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     const assistant = result.current.entries.at(-1);
     expect(assistant).toMatchObject({
@@ -291,7 +291,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       cacheWriteTokens: 100,
       vendorProvider: "claude",
       vendorModel: "claude-opus-4-6",
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.entries.at(-1)).toMatchObject({
       kind: "turn_summary",
@@ -311,7 +311,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       cumulativeToolMs: 0,
       tokensIn: 2000,
       tokensOut: 50,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.entries.filter((entry) => entry.kind === "turn_summary")).toHaveLength(1);
   });
@@ -349,7 +349,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
           rawProviderPayload: { secret: "must-not-cross-renderer-boundary" },
         },
       ],
-    } as unknown as StreamEvent);
+    } as unknown as ChatStreamEvent);
 
     const summary = result.current.entries.at(-1);
     expect(summary).toMatchObject({
@@ -374,7 +374,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     }));
     const { result } = renderHook(() => useChatState(api));
 
-    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     await act(async () => {
       const handled = await result.current.handleCompactCommand("/compact");
       expect(handled).toBe(true);
@@ -412,7 +412,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       triggerSource: "force-recover",
       estimatedBefore: 90_000,
       preflight: 88_000,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.isCompacting).toBe(true);
     expect(result.current.compactTriggerSource).toBe("force-recover");
@@ -427,7 +427,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       triggerSource: "rate-limit",
       estimatedBefore: 45_096,
       preflight: 0,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.isCompacting).toBe(true);
     expect(result.current.compactTriggerSource).toBe("rate-limit");
@@ -442,7 +442,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       triggerSource: "force-recover",
       estimatedBefore: 90_000,
       preflight: 88_000,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.compactTriggerSource).toBe("force-recover");
 
@@ -450,7 +450,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       type: "compact_notice",
       removedMessages: 10,
       freedTokens: 5_000,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.isCompacting).toBe(false);
     expect(result.current.compactTriggerSource).toBeNull();
@@ -463,11 +463,11 @@ describe("useChatState — compact lifecycle scenarios", () => {
     dispatchEvent(streamHandler, {
       type: "compact_started",
       triggerSource: "force-recover",
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.compactTriggerSource).toBe("force-recover");
 
-    dispatchEvent(streamHandler, { type: "done" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "done" } as ChatStreamEvent);
 
     expect(result.current.compactTriggerSource).toBeNull();
   });
@@ -481,11 +481,11 @@ describe("useChatState — compact lifecycle scenarios", () => {
       triggerSource: "rate-limit",
       estimatedBefore: 45_096,
       preflight: 0,
-    } as StreamEvent);
+    } as ChatStreamEvent);
 
     expect(result.current.compactTriggerSource).toBe("rate-limit");
 
-    dispatchEvent(streamHandler, { type: "error", error: "compact failed" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "error", error: "compact failed" } as ChatStreamEvent);
 
     expect(result.current.isCompacting).toBe(false);
     expect(result.current.compactTriggerSource).toBeNull();
@@ -499,7 +499,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
     expect(result.current.isRecoveryExhausted).toBe(false);
 
-    dispatchEvent(streamHandler, { type: "recovery_exhausted" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "recovery_exhausted" } as ChatStreamEvent);
 
     expect(result.current.isRecoveryExhausted).toBe(true);
   });
@@ -508,7 +508,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
 
-    dispatchEvent(streamHandler, { type: "recovery_exhausted" } as StreamEvent);
+    dispatchEvent(streamHandler, { type: "recovery_exhausted" } as ChatStreamEvent);
     expect(result.current.isRecoveryExhausted).toBe(true);
 
     act(() => {
@@ -525,7 +525,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     dispatchEvent(streamHandler, {
       type: "compact_started",
       triggerSource: "force-recover",
-    } as StreamEvent);
+    } as ChatStreamEvent);
     expect(result.current.compactTriggerSource).toBe("force-recover");
 
     act(() => {

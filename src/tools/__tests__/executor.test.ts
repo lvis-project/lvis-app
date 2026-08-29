@@ -36,7 +36,11 @@ import {
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
 import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
-import type { RiskClassifier } from "../../permissions/reviewer/risk-classifier.js";
+import {
+  RuleBasedRiskClassifier,
+  type RiskClassifier,
+} from "../../permissions/reviewer/risk-classifier.js";
+import { createAgentStatusTool } from "../agent-spawn.js";
 import { HookRunner } from "../../hooks/hook-runner.js";
 import { BashAstValidator } from "../../main/bash-ast-validator.js";
 import { AuditLogger } from "../../audit/audit-logger.js";
@@ -1822,6 +1826,73 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       }),
     );
   });
+
+  it("never blocks an A2A-prefixed turn on a human for the real agent_status poll", async () => {
+    // Issue #2323. The observed run: a parent woken by its child's report
+    // polls `agent_status`, and the poll raises a modal the turn then sits on.
+    // The audit row for it is `decision:"ask", layer:6` carrying the LAYER-6
+    // ALLOW's own reason — the cross-agent lane flipping an already-allowed
+    // call, not a risk judgement about the call.
+    //
+    // The whole invocation runs against the REAL tool, PermissionManager and
+    // rule classifier: the defect lived in what `agent_status` DECLARES, so a
+    // probe that re-declares it would have tested the fixture instead.
+    const dir = mkdtempSync(join(tmpdir(), "lvis-agent-status-a2a-"));
+    const listRunStatuses = vi.fn(() => [
+      { spawnId: "spawn-1", childSessionId: "child-1", status: "running" },
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(
+      createAgentStatusTool({
+        getRunner: () =>
+          ({
+            listRunStatuses,
+            getRunStatus: () => null,
+            listPersistedSpawnsForOrigin: () => [],
+          }) as never,
+      }),
+    );
+
+    const permMgr = new PermissionManager(join(dir, "permissions.json"));
+    permMgr.setMode("auto");
+    permMgr.setInteractiveAutoApprove("medium");
+    permMgr.setReviewer({
+      classifier: new RuleBasedRiskClassifier(),
+      cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+      deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+    });
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-once" as const,
+      })),
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      approvalGate as never,
+    );
+
+    try {
+      const results = await executor.executeAll(
+        [{ id: "tu-agent-status-a2a", name: "agent_status", input: {} }],
+        {
+          sessionId: "sess-agent-status-a2a",
+          approvalReasonPrefix: "[Sub-Agent: researcher]",
+          permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+        },
+      );
+
+      expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+      expect(results[0].is_error).toBeUndefined();
+      expect(listRunStatuses).toHaveBeenCalledWith("sess-agent-status-a2a");
+    } finally {
+      await cleanupTmpDir(dir);
+    }
+  });
+
   it("preserves receiver deny rules for sub-agent message tool calls", async () => {
     const executeSpy = vi.fn(async () => "should-not-run");
     const registry = new ToolRegistry();

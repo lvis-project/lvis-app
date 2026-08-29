@@ -9,8 +9,8 @@ import {
   detectApprovalIntent,
   type ApprovalIntent,
 } from "../../../permissions/approval-intent.js";
-import type { DeferredGrantScope, DeferredQueueEntry } from "../types.js";
-import { NARROWEST_DEFERRED_SCOPE } from "../types.js";
+import type { DeferredQueueEntry } from "../types.js";
+import { NARROWEST_DEFERRED_SCOPE, type DeferredGrantScope } from "../../../shared/permission-review-status.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface DeferredApprovalChipProps {

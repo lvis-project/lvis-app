@@ -33,11 +33,9 @@ import { createRequire } from "node:module";
 import { createLogger } from "../lib/logger.js";
 import type { SessionKind } from "./memory-manager.js";
 import type BetterSqlite3 from "better-sqlite3";
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "../lib/atomic-file.js";
 
 const log = createLogger("session-search-index");
-
-const DIR_MODE = 0o700;
-const FILE_MODE = 0o600;
 
 /**
  * Lazy, cached SYNCHRONOUS load of the native (asarUnpack'd) better-sqlite3
@@ -178,9 +176,9 @@ export function escapeLikePattern(raw: string): string {
 }
 
 function ensureDirSync(dir: string): void {
-  mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
   try {
-    chmodSync(dir, DIR_MODE);
+    chmodSync(dir, PRIVATE_DIR_MODE);
   } catch {
     /* best effort — pre-existing dir may already be 0o755 on some hosts */
   }
@@ -256,7 +254,7 @@ export class SessionSearchIndex {
       );
       this.db = db;
       try {
-        chmodSync(this.dbPath, FILE_MODE);
+        chmodSync(this.dbPath, PRIVATE_FILE_MODE);
       } catch (chmodErr) {
         // Stays best-effort/non-fatal (Windows ignores mode bits; a pre-existing
         // file may already be correct) — but on POSIX a real chmod failure means

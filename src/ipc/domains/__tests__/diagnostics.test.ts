@@ -277,4 +277,25 @@ describe("lvis:diagnostics:export", () => {
     // Destination path is recorded (redacted) for forensics.
     expect(typeof payload.path).toBe("string");
   });
+
+  it("rejects a malformed day key rather than exporting a bundle with its audit section missing", async () => {
+    // The bundle builder catches a throwing audit section so an unreadable
+    // store cannot fail the whole export — which means an invalid key reaching
+    // it costs the bundle its audit trail while the export still reports ok.
+    // The key is validated here at the boundary, through the same function
+    // `lvis:audit:search` validates with.
+    const out = join(tmp, "bundle-bad-date.zip");
+    showSaveDialog.mockResolvedValue({ canceled: false, filePath: out });
+    await expect(
+      invokeRegisteredHandlerWithEvent(handlers, CHANNELS.diagnostics.export, ACCEPT_EVENT, {
+        dateFrom: "2026-6-1",
+      }),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      invokeRegisteredHandlerWithEvent(handlers, CHANNELS.diagnostics.export, ACCEPT_EVENT, {
+        dateTo: "2026-02-30",
+      }),
+    ).rejects.toThrow(TypeError);
+    expect(existsSync(out)).toBe(false);
+  });
 });

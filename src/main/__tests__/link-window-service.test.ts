@@ -72,3 +72,19 @@ describe("jsonForScriptBlock — script-block injection safety", () => {
     expect(JSON.parse(jsonForScriptBlock(url))).toBe(url);
   });
 });
+
+describe("buildLinkWindowShellHtml — title sinks", () => {
+  it("HTML-escapes the <title> element but hands the script sinks the verbatim string", async () => {
+    const { buildLinkWindowShellHtml } = await import("../link-window-service.js");
+    const title = 'Say "hi" & <go>';
+    const html = buildLinkWindowShellHtml({ url: "https://example.com/", title, platform: "darwin" });
+    expect(html).toContain("<title>Say &quot;hi&quot; &amp; &lt;go&gt;</title>");
+    // document.title / textContent do not decode entities: the literal must be the raw title.
+    const assignments = [...html.matchAll(/(?:document\.title|titleEl\.textContent) = ("(?:[^"\\]|\\.)*");/g)];
+    expect(assignments).toHaveLength(2);
+    for (const [, literal] of assignments) {
+      expect(JSON.parse(literal.replace(/\\u003c/g, "<").replace(/\\u003e/g, ">"))).toBe(title);
+      expect(literal).not.toContain("&quot;");
+    }
+  });
+});

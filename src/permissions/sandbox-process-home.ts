@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, win32 } from "node:path";
 
 import { createLogger } from "../lib/logger.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("sandbox-process-home");
 const SANDBOX_HOME_PREFIX = "lvis-sandbox-home-";
@@ -164,7 +165,7 @@ export function createSandboxProcessHome(
     } catch (err) {
       failedAttempts += 1;
       log.warn(
-        { homePath, err: err instanceof Error ? err.message : String(err) },
+        { homePath, err: errorMessage(err) },
         "sandbox process HOME cleanup failed",
       );
       const delay = CLEANUP_RETRY_DELAYS_MS[failedAttempts - 1];

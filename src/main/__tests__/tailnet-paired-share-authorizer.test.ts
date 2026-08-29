@@ -6,6 +6,8 @@ import {
   ensureTailnetPairedShareActorSecret,
   TAILNET_PAIRED_SHARE_ACTOR_SECRET_NAME,
   type TailnetPairedShareStore,
+  ACTOR_SECRET_BYTES,
+  ACTOR_SECRET_PATTERN,
 } from "../tailnet-paired-share-authorizer.js";
 
 const BINDING = Object.freeze({
@@ -106,3 +108,11 @@ function inertStore(): TailnetPairedShareStore {
     isAuthorityCurrent: () => false,
   };
 }
+
+describe("actor secret shape", () => {
+  it("is 32 random bytes as unpadded base64url — 43 characters", () => {
+    expect(ACTOR_SECRET_BYTES).toBe(32);
+    expect(ACTOR_SECRET_PATTERN.test(Buffer.alloc(ACTOR_SECRET_BYTES, 7).toString("base64url"))).toBe(true);
+    expect(ACTOR_SECRET_PATTERN.test(Buffer.alloc(ACTOR_SECRET_BYTES, 7).toString("base64"))).toBe(false);
+  });
+});

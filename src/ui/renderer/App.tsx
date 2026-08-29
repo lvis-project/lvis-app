@@ -32,7 +32,7 @@ import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
-import { SHELL_GUTTER } from "../../shared/shell-geometry.js";
+import { COLLAPSED_RAIL_RESERVE, CONTENT_TITLE_INSET, SHELL_GUTTER } from "../../shared/shell-geometry.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
@@ -96,35 +96,6 @@ import { formatIpcError } from "./format-ipc-error.js";
 import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
 
 // ─── App ────────────────────────────────────────────
-
-/**
- * Card edge -> where a content title starts.
- *
- * The main surface sits one gutter past the sidebar card and carries another of
- * its own leading padding, so every view's title — a plugin's name, the chat
- * group's conversation title — begins two gutters in. The band's path is the
- * same label one row up, and a path that stopped at the card edge read as
- * belonging to the sidebar rather than to the thing it names.
- */
-const CONTENT_TITLE_INSET = SHELL_GUTTER * 2;
-
-/**
- * What the BAND assumes `<main>` reserves on its leading edge for the collapsed
- * icon rail. The content surface's own reserve is
- * `--shell-collapsed-rail-reserve` (4rem), and the two do not agree: the app
- * ships at a 0.875 font scale (`FONT_SIZE_SCALE_DEFAULT`), so 4rem resolves to
- * 56px while this reads 64. The band's path therefore starts 8px to the right
- * of the content it names whenever the sidebar is collapsed.
- *
- * That gap predates this constant being named — it was a bare 64 against a
- * bare `pl-[4rem]`, which is why nobody had noticed the units differ. It is
- * left as-is here rather than silently "fixed", because closing it is a visual
- * change and this pass is behaviour-preserving. The band genuinely may not
- * follow the type scale (it shares the traffic lights' line, drawn in device
- * px), so the fix is to decide which number is right and make the content
- * surface px too — tracked as follow-up, not done here.
- */
-const COLLAPSED_RAIL_LEAD_RESERVE = 64;
 
 /** The per-turn output ceiling the cost projection assumes. */
 const MAX_OUTPUT_TOKENS = 4096;
@@ -1194,7 +1165,7 @@ export function App() {
                   where a title starts: the gutter between the card and the
                   content, plus the content surface's own leading padding. */}
               <CustomTitleBar
-                leadClearance={(sidebarCollapsed ? COLLAPSED_RAIL_LEAD_RESERVE : sidebarWidth + SHELL_GUTTER) + CONTENT_TITLE_INSET}
+                leadClearance={(sidebarCollapsed ? COLLAPSED_RAIL_RESERVE : sidebarWidth + SHELL_GUTTER) + CONTENT_TITLE_INSET}
               >
                 <MainToolbar
                   viewNav={viewNav}

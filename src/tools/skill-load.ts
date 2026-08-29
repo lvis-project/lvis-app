@@ -21,7 +21,7 @@
  *     by {@link SkillStore} — see `skill-store.ts` for the file-side
  *     defenses.
  */
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SkillStore } from "../main/skill-store.js";
@@ -31,6 +31,7 @@ import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { createLogger } from "../lib/logger.js";
+import { sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("lvis");
 
 export interface SkillLoadEvent {
@@ -70,8 +71,7 @@ function approvalMaterial(skill: { body: string; resources: readonly { path: str
     .map((resource) => `${resource.path}:${resource.bytes}`)
     .sort()
     .join("\n");
-  const digest = (value: string): string => createHash("sha256").update(value, "utf-8").digest("hex");
-  return `${digest(skill.body)}|${digest(manifest)}`;
+  return `${sha256Hex(skill.body)}|${sha256Hex(manifest)}`;
 }
 
 /**
