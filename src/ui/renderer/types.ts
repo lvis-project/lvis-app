@@ -7,7 +7,7 @@ import type {
   PluginInstallResultPayload,
   SkillInstallResultPayload,
 } from "../../contract/app-contract.js";
-import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
+import type { ChatStreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
@@ -548,7 +548,7 @@ export type LvisApi = {
       sessions: Array<{ id: string; modifiedAt: string; title: string }>;
     }>;
     abort: () => Promise<{ ok: true } | { ok: false; error: string }>;
-    onStream: (handler: (event: StreamEvent) => void) => () => void;
+    onStream: (handler: (event: ChatStreamEvent) => void) => () => void;
     onFallback: (handler: (payload: { from: string; to: string }) => void) => () => void;
   };
   /**
@@ -659,7 +659,7 @@ export type LvisApi = {
     { ok: true } | { ok: false; error: string }
   >;
   chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
-  onChatStream: (h: (e: StreamEvent) => void) => () => void;
+  onChatStream: (h: (e: ChatStreamEvent) => void) => () => void;
   /**
    * One tiled chat group's view of the per-conversation channels.
    *

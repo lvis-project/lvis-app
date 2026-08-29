@@ -34,7 +34,7 @@ export type CheckpointTrigger = "auto-compact" | "manual";
 
 export const EMPTY_ASSISTANT_RESPONSE_TEXT = t("be_chatStreamState.emptyAssistantResponse");
 
-export type StreamEvent = {
+export type ChatStreamEvent = {
   type: string;
   streamId?: number;
   text?: string;
