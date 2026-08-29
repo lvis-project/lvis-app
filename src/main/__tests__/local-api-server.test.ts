@@ -29,6 +29,7 @@ import {
   LOCAL_API_INFO_FILE,
   type A2ARouterRuntime,
   type LocalApiServerInfoFile,
+  LOCAL_API_FEATURE,
 } from "../local-api-server.js";
 import { makeDeepProxy } from "../../__tests__/support/deep-proxy.js";
 import type { AppServices } from "../../boot.js";
@@ -740,5 +741,11 @@ describe("local-api-server", () => {
       expect(await res.json()).toEqual({ ok: false, error: EXTERNAL_MUTATION_DENIED });
       expect(requestAndWait).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("LOCAL_API_FEATURE", () => {
+  it("is the feature namespace the CLI and the server share", () => {
+    expect(LOCAL_API_FEATURE).toBe("local-api");
   });
 });
