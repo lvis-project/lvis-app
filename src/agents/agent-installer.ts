@@ -8,10 +8,9 @@ import {
 } from "../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../plugins/marketplace-fetcher.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
+import { MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES, throwIfMarketplaceInstallAborted } from "../plugins/marketplace-installer.js";
 import { AGENT_NAME_ALLOWLIST, parseAgentFrontmatter } from "../main/agent-profile-store.js";
 import { updateAgentRegistry } from "./agent-registry.js";
-
-const MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES = 1024 * 1024;
 
 export interface InstallAgentPackageOptions {
   fetcher: MarketplaceFetcher;
@@ -74,7 +73,7 @@ export async function installAgentPackageFromMarketplace(
       if (body.trim().length === 0) {
         throw new Error(`agent package "${slug}" has an empty AGENTS.md body`);
       }
-      throwIfMarketplaceInstallAborted(opts.signal, slug);
+      throwIfMarketplaceInstallAborted(opts.signal, "agent package", slug);
 
       const files = await opts.store.extractZip(slug, verified.zipBuffer);
       const installDir = opts.store.installDirFor(slug);
@@ -136,12 +135,4 @@ export async function uninstallAgentPackage(
   }
   await rm(target, { recursive: true, force: true });
   return { agentId: slug, slug, uninstalled: true };
-}
-
-
-function throwIfMarketplaceInstallAborted(signal: AbortSignal | undefined, slug: string): void {
-  if (!signal?.aborted) return;
-  const error = new Error(`agent package install aborted before promotion: ${slug}`);
-  error.name = "AbortError";
-  throw error;
 }

@@ -163,6 +163,25 @@ const MAX_DOWNLOAD_RETRY_ELAPSED_MS = 90_000;
  * Using a byte-preserving hex encoding avoids path separators and traversal
  * segments while keeping the mapping deterministic and collision-free.
  */
+/** Longest root text file (manifest, AGENTS.md, SKILL.md) an assistant package may carry. */
+export const MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES = 1024 * 1024;
+
+/**
+ * Stop an install at its last safe point before promotion. `subject` names
+ * what was being installed ("agent package", "marketplace plugin"); the
+ * error is an `AbortError` so callers can tell cancellation from failure.
+ */
+export function throwIfMarketplaceInstallAborted(
+  signal: AbortSignal | undefined,
+  subject: string,
+  slug: string,
+): void {
+  if (!signal?.aborted) return;
+  const error = new Error(`${subject} install aborted before promotion: ${slug}`);
+  error.name = "AbortError";
+  throw error;
+}
+
 export function encodeMarketplaceVersionForFilename(version: string): string {
   const encoded = Buffer.from(version, "utf8").toString("hex");
   return encoded.length > 0 ? encoded : "empty";

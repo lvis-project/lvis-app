@@ -22,6 +22,7 @@ import {
 } from "./update-condition.js";
 import { getCachedCatalog, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
+import { throwIfMarketplaceInstallAborted } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import {
   ArtifactRollbackError,
@@ -269,16 +270,6 @@ function shaOfManifest(manifest: unknown): string {
  */
 function shaOfCatalogItem(item: PluginMarketplaceItem): string {
   return sha256Hex(canonicalJSON(item));
-}
-
-function throwIfMarketplaceInstallAborted(
-  signal: AbortSignal | undefined,
-  pluginId: string,
-): void {
-  if (!signal?.aborted) return;
-  const error = new Error(`marketplace plugin install aborted before promotion: ${pluginId}`);
-  error.name = "AbortError";
-  throw error;
 }
 
 function findRuntimeCapabilityMismatches(
@@ -2328,7 +2319,7 @@ export class PluginMarketplaceService {
         let preparedManifest: PluginManifest | undefined;
         let preparedDocument: unknown;
         try {
-          throwIfMarketplaceInstallAborted(opts.signal, plugin.id);
+          throwIfMarketplaceInstallAborted(opts.signal, "marketplace plugin", plugin.id);
           const transaction = await this.artifactStore.extractZipWithCommit(
             plugin.id,
             verified.zipBuffer,
