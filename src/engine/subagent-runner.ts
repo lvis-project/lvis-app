@@ -608,16 +608,20 @@ interface TrackedSubAgentRun {
    * The completion step's result actually LANDED on this run — the summary,
    * error, and transcript a reader gets back are the ones the report carries.
    *
-   * Not the same as "the task state is terminal". `interruptRun` and the
-   * workspace-revocation cancel publish CANCELED the instant an abort is
-   * requested, and `persistFinalResult` claims the terminal commit before its
-   * awaits, so a run can read as terminal while its result is still missing.
-   * Worse, once CANCELED is written the A2A state machine refuses
-   * CANCELED -> COMPLETED, so a child that finished while the interrupt was in
-   * flight NEVER puts its summary into the snapshot. Marking such a snapshot
-   * "read" would retire the mailbox copy and lose the child's answer outright.
+   * Not the same as "the task state is terminal", which is what makes it worth
+   * a separate flag. `interruptRun` and the workspace-revocation cancel write
+   * CANCELED the instant an abort is REQUESTED, and `persistFinalResult`
+   * claims the terminal commit before its awaits — so while a run unwinds it
+   * reads as terminal with no summary and no error attached. A snapshot in
+   * that shape has told the parent nothing, and retiring the mailbox copy
+   * against it would lose the child's answer.
+   *
    * `updateRun` is the arbiter: this flips only when the patch it was handed
-   * survived that check.
+   * survived its transition check. That also covers a result the A2A state
+   * machine refuses outright — CANCELED -> COMPLETED — which is defence in
+   * depth rather than a live path: both run loops normalize an aborted run's
+   * result to `interrupted` before finalizing, so a COMPLETED result cannot
+   * arrive behind a CANCELED state today.
    */
   terminalReportPublished?: boolean;
   /**
@@ -2181,10 +2185,11 @@ export class SubAgentRunner {
    * parent's next turn with a steering row repeating work it already answered.
    *
    * Gated on `terminalReportPublished`, NOT on the task state reading terminal.
-   * A run can read terminal with no result attached — an interrupt writes
-   * CANCELED immediately, and the state machine then refuses the completed
-   * result that arrives behind it — and a snapshot with no summary in it has
-   * told the parent nothing. Only a landed result may retire the mailbox copy.
+   * A run reads terminal from the moment an abort is requested and from the
+   * moment `persistFinalResult` claims the commit, both of which happen while
+   * the result is still missing; a snapshot with no summary and no error in it
+   * has told the parent nothing. Only a landed result may retire the queued
+   * copy.
    *
    * Order between this and the delivery does not matter: the parent may poll
    * the finished run before the report is even enqueued (that is the reported
@@ -2412,11 +2417,12 @@ export class SubAgentRunner {
     delete run.abort;
     this.updateRun(run, patch);
     run.terminalCommitClaimed = isA2ATerminalTaskState(run.taskState);
-    // Ask `updateRun` whether it took the patch. It refuses a transition the
-    // A2A state machine rejects — an interrupt that already wrote CANCELED
-    // blocks the COMPLETED result racing in behind it — and on refusal the
-    // summary, error, and transcript above never reached the run either. Only
-    // a landed result is a report a reader can be told it has already seen.
+    // Ask `updateRun` whether it took the patch: on refusal the summary, error,
+    // and transcript above never reached the run either, and only a landed
+    // result is a report a reader can be told it has already seen. This is also
+    // what separates a finished run from one that merely READS terminal while
+    // it unwinds — an abort request and the pre-await terminal claim both get
+    // there first.
     if (run.taskState === taskState) run.terminalReportPublished = true;
     // The renderer frame leaves from HERE, inside the step that publishes the
     // terminal state, and never from the caller that later awaits the run.

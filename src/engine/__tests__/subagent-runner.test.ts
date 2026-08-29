@@ -2800,17 +2800,17 @@ describe("SubAgentRunner completion mailbox single-shot", () => {
   });
 
   it("does not count a snapshot whose result the state machine refused as a read report", async () => {
-    // An abort request publishes CANCELED with no result attached, and the A2A
-    // state machine then refuses CANCELED -> COMPLETED — so a child that
-    // finished behind the interrupt never gets its summary into the snapshot,
-    // while the mailbox copy carries it in full. Reading a snapshot in that
-    // shape must not retire the mailbox copy, or the parent loses the child's
-    // answer outright.
+    // Reading terminal is not the test the guard can use: `interruptRun` writes
+    // CANCELED the instant an abort is requested, and `persistFinalResult`
+    // claims the terminal commit before its awaits, so a run reads terminal
+    // while its summary and error are still missing. The guard asks the
+    // narrower question — did the completion step's patch actually land — and
+    // a refused transition is the sharpest way to drive it.
     //
-    // Reading terminal is not the test the guard can use: `interruptRun` and
-    // `persistFinalResult` both publish terminal facts before any result
-    // exists. The guard asks the narrower question — did the completion step's
-    // patch actually land — and this drives exactly that refusal.
+    // The refusal itself is defence in depth: both run loops normalize an
+    // aborted run's result to `interrupted` before finalizing, so a COMPLETED
+    // result cannot reach `finalizeRun` behind a CANCELED state at runtime.
+    // Driving it directly is what makes the guard observable.
     const fixture = completionMailboxFixture();
     let releaseTurn: () => void = () => {};
     const turnParked = new Promise<void>((resolve) => {

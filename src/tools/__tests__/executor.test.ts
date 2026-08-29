@@ -1887,7 +1887,15 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
       expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
       expect(results[0].is_error).toBeUndefined();
-      expect(listRunStatuses).toHaveBeenCalledWith("sess-agent-status-a2a");
+      // The origin the runner is scoped by is the HOST-supplied session id, not
+      // anything the model handed in. The read options beside it say the poll
+      // hands the parent the snapshot in full, which is what retires the
+      // queued mailbox copy of the same report — a read that auto-approves in
+      // this lane and still consumes the report exactly once.
+      expect(listRunStatuses).toHaveBeenCalledWith(
+        "sess-agent-status-a2a",
+        { deliversReportToParent: true },
+      );
     } finally {
       await cleanupTmpDir(dir);
     }

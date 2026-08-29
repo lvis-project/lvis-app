@@ -720,6 +720,12 @@ export function createAgentStatusTool(deps: Pick<AgentSpawnToolDeps, "getRunner"
       // the parent LLM, which is the sub-agent's completion report in full. The
       // flag says so, and the runner uses it to retire the queued mailbox copy
       // of that same report rather than replay it as steering on the next turn.
+      //
+      // This does not cost the tool its `read` declaration above. What it
+      // records is bookkeeping ABOUT the read — that the parent has now been
+      // shown this report — not an effect on anything outside the host's own
+      // run tracking. The one durable write it leads to belongs to the next
+      // turn's mailbox fold, which is where that write is declared and audited.
       if (id) {
         const run = runner.getRunStatus(id, originSessionId, {
           deliversReportToParent: true,
