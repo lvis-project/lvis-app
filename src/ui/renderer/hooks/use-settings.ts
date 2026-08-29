@@ -7,6 +7,7 @@ import {
   DEFAULT_LLM_VENDOR,
   getLlmVendorSettings,
   narrowLlmVendor,
+  isLLMVendor,
   type LLMVendor,
 } from "../../../shared/llm-vendor-defaults.js";
 import {
