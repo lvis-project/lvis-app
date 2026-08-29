@@ -14,6 +14,25 @@ export type SubscriptionRuntimeId = (typeof SUBSCRIPTION_RUNTIME_IDS)[number];
 export const MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH = 200;
 
 /**
+ * Wire contract of the loopback tool bridge between the main process and the
+ * stdio MCP shim it spawns for ACP runtimes. Both ends validate the same
+ * payloads — the bridge bounds the tool set it publishes, the shim bounds the
+ * `tools/list` and `tools/call` bodies it reads back — so the bounds and the
+ * environment handoff keys are declared once and imported by both, and one
+ * side cannot accept what the other refuses.
+ */
+export const SUBSCRIPTION_TOOL_BRIDGE_CONTRACT = Object.freeze({
+  urlEnv: "LVIS_SUBSCRIPTION_TOOL_BRIDGE_URL",
+  tokenEnv: "LVIS_SUBSCRIPTION_TOOL_BRIDGE_TOKEN",
+  maxToolCount: 256,
+  maxSchemaBytes: 64 * 1024,
+  maxJsonDepth: 16,
+  maxJsonKeys: 1_024,
+  maxJsonArrayItems: 1_024,
+  maxJsonStringLength: 64 * 1024,
+} as const);
+
+/**
  * Provenance of a subscription-runtime token segment.
  *
  * This is deliberately separate from `TokenUsage`: API-key usage is a
