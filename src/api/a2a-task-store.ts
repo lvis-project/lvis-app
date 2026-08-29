@@ -28,8 +28,14 @@ import { isRecord } from "../shared/is-record.js";
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "tasks.json";
 const HANDLER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
-const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
+/**
+ * Wire-level shape rules shared with the A2A subagent handler. Both modules
+ * validate the same ids off the same wire, so they must reject the same
+ * strings — exported here because this module owns the persisted task record
+ * those ids are keys into.
+ */
+export const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+export const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 const MESSAGE_KEYS = new Set([
   "messageId",
   "contextId",

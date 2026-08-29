@@ -39,6 +39,8 @@ import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { A2AHandlerError, type A2ARequestHandler } from "./a2a-router.js";
 import {
   A2ATaskStore,
+  CHILD_SESSION_ID_PATTERN,
+  CONTROL_CHAR,
   isA2ARfc3339Timestamp,
   type A2ATaskCreateResult,
   type A2ATaskContinuationResult,
@@ -47,8 +49,6 @@ import {
 import { isRecord } from "../shared/is-record.js";
 
 const TEXT_MODE = "text/plain";
-const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
-const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 /**
  * Upper bound on remembered disclosure grants. The receiver is long-lived, so
  * the ledger evicts oldest-first rather than growing with the task store.
