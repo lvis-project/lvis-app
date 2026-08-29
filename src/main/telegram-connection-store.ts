@@ -51,8 +51,8 @@ import { hasExactKeys } from "../shared/is-record.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 const STORE_VERSION = 1;
-/** Same namespace the bridge already uses for `command-receipts.json`. */
-const TELEGRAM_BRIDGE_FEATURE = "telegram-bridge";
+/** Feature namespace shared by the connection store and the bridge server (`command-receipts.json`). */
+export const TELEGRAM_BRIDGE_FEATURE = "telegram-bridge";
 const DEFAULT_FILE_NAME = "connection.json";
 const DEFAULT_PENDING_CODE_ATTEMPTS = 5;
 const MAX_PENDING_CODE_ATTEMPTS = 16;
