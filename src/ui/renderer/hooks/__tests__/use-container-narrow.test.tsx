@@ -18,7 +18,7 @@ import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { DOCK_ENTER_WIDTH, DOCK_EXIT_WIDTH, MIN_DOCKED_TRANSCRIPT_WIDTH, useContainerNarrow, sidePanelLayout } from "../use-container-narrow.js";
 import { SIDE_PANEL_MIN_RESERVE, SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
-import { MAIN_WINDOW_MIN_WIDTH } from "../../../../main/main-window-bounds.js";
+import { MAIN_WINDOW_MIN_WIDTH } from "../../../../shared/shell-geometry.js";
 
 /**
  * A controllable ResizeObserver stub: capture the callback so a test can push

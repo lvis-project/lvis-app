@@ -116,7 +116,7 @@ export function ViewHistoryNav({
  * window is.
  *
  * Collapsed below `md` — a window at `MAIN_WINDOW_MIN_WIDTH`
- * (`main/main-window-bounds.ts`), which is the chat band, has no room for a
+ * (`shared/shell-geometry.ts`), which is the chat band, has no room for a
  * readable path, and a two-character stub is not one. The history buttons live elsewhere now
  * and are unaffected, so the way back survives even at widths where the label
  * cannot. `min-w-0` plus per-crumb truncation keeps a long path from pushing

@@ -38,9 +38,8 @@ import { readPersistedAppModeSync } from "./persisted-app-mode.js";
 import {
   computeInitialMainWindowBounds,
   computeWorkModeBounds,
-  MAIN_WINDOW_MIN_HEIGHT,
-  MAIN_WINDOW_MIN_WIDTH,
 } from "./main-window-bounds.js";
+import { MAIN_WINDOW_MIN_HEIGHT, MAIN_WINDOW_MIN_WIDTH } from "../shared/shell-geometry.js";
 import { isAppUpdateInstallRequested } from "./app-update-install-intent.js";
 import { BOOTSTRAP_SPLASH, markBootstrapSplashShown } from "./bootstrap-splash.js";
 import { requestNativeChromeRefresh } from "./native-window-coordinator.js";

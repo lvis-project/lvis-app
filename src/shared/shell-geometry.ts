@@ -20,6 +20,27 @@
  */
 
 /**
+ * The main window's own size, in px.
+ *
+ * `WIDTH` / `HEIGHT` are what the shell OPENS at; `MIN_*` are what it may be
+ * dragged down to. Width's two values are the same number today — the shell
+ * opens at a single chat column with nothing to give back — but they answer
+ * different questions and must stay separately settable: a wider default must
+ * not widen the minimum.
+ *
+ * These live here rather than in `main/main-window-bounds.ts`, which owns
+ * where the window GOES given a work area, because the renderer reasons about
+ * them too: the breadcrumb collapses below the width the chat band opens at,
+ * and the side-panel docking threshold has to stay under it. A renderer module
+ * reaching into `main/` for a number is a layering leak; the number itself is
+ * shell geometry, which is what this file is.
+ */
+export const MAIN_WINDOW_WIDTH = 460;
+export const MAIN_WINDOW_HEIGHT = 840;
+export const MAIN_WINDOW_MIN_WIDTH = 460;
+export const MAIN_WINDOW_MIN_HEIGHT = 640;
+
+/**
  * Where macOS positions the traffic-light cluster inside the `hiddenInset`
  * title bar, in window coordinates.
  *

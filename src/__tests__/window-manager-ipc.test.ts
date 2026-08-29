@@ -40,7 +40,8 @@ vi.mock("electron", () => ({
 // ── Module imports (after mock) ────────────────────────────────────────────
 
 import { UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
-import { CHAT_SIDE_PANEL_WIDTH, MAIN_WINDOW_WIDTH } from "../main/main-window-bounds.js";
+import { CHAT_SIDE_PANEL_WIDTH } from "../main/main-window-bounds.js";
+import { MAIN_WINDOW_WIDTH } from "../shared/shell-geometry.js";
 import { hostFrameEvent } from "./test-helpers.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────

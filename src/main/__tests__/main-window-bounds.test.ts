@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CHAT_SIDE_PANEL_WIDTH, MAIN_WINDOW_WIDTH, computeChatModeSidePanelBounds, computeInitialMainWindowBounds } from "../main-window-bounds.js";
+import { CHAT_SIDE_PANEL_WIDTH, computeChatModeSidePanelBounds, computeInitialMainWindowBounds } from "../main-window-bounds.js";
+import { MAIN_WINDOW_WIDTH } from "../../shared/shell-geometry.js";
 
 describe("computeInitialMainWindowBounds", () => {
   it("keeps the default macOS placement at the upper-right of the work area", () => {
