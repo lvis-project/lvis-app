@@ -26,6 +26,7 @@ import {
 import type { RationaleTicketStoreAuditEvent } from "../tools/pipeline/rationale-ticket-store.js";
 import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 
+import { isPlainRecord } from "../shared/is-record.js";
 export const RATIONALE_AUDIT_SCHEMA_VERSION = 1 as const;
 export const RATIONALE_AUDIT_MAX_DAILY_BYTES = 64 * 1024 * 1024;
 export const RATIONALE_AUDIT_MAX_DAILY_LINES = 100_000;
@@ -174,11 +175,6 @@ function assertSessionId(sessionId: string): void {
 function dateFor(at: number): string {
   assertTime(at);
   return new Date(at).toISOString().slice(0, 10);
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) &&
-    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 }
 
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {

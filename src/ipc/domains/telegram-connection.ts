@@ -27,6 +27,7 @@ import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } fro
 import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
 
+import { isRecord } from "../../shared/is-record.js";
 const DISABLED = Object.freeze({
   ok: false as const,
   error: "telegram-connection-disabled" as const,
@@ -45,12 +46,8 @@ const UNAVAILABLE = Object.freeze({
   error: "telegram-connection-unavailable" as const,
 });
 
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function hasIntent(payload: unknown): boolean {
-  return record(payload) && hasUserKeyboardIntent(payload.intent);
+  return isRecord(payload) && hasUserKeyboardIntent(payload.intent);
 }
 
 /**

@@ -34,6 +34,7 @@ import {
 import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../shared/subscription-runtime.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
+import { isPlainRecord } from "../shared/is-record.js";
 const BRIDGE_URL_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.urlEnv;
 const BRIDGE_TOKEN_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.tokenEnv;
 const BRIDGE_HOST = "127.0.0.1";
@@ -70,12 +71,6 @@ export interface SubscriptionToolMcpServerConfig {
 type SubscriptionMcpTool = Pick<Tool, "name" | "description" | "inputSchema">;
 
 type BridgeCallResult = CallToolResult;
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
 function ownValue(record: Record<string, unknown>, key: string): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(record, key);

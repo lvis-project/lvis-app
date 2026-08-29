@@ -40,6 +40,7 @@ import {
   type HookEvent,
 } from "./script-hook-types.js";
 
+import { isRecord } from "../shared/is-record.js";
 /**
  * A normalized declarative hook entry parsed from `hooks.json`. This is the
  * config-origin half of the unified registry (`hook-registry.ts`); legacy `.sh`
@@ -111,10 +112,6 @@ const EVENT_KEY_TO_TYPE: Readonly<Record<string, HookEvent>> = {
   // design §5): a `deny` REFUSES the turn before queryLoop runs.
   UserPromptSubmit: "UserPromptSubmit",
 };
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === "object" && !Array.isArray(v);
-}
 
 /**
  * Normalize a command field into an argv array. Accepts either a pre-split argv
@@ -200,7 +197,7 @@ export function parseHookConfig(raw: unknown): ParsedHookConfig {
   if (raw === undefined || raw === null) {
     return { entries, warnings, errors };
   }
-  if (!isPlainObject(raw)) {
+  if (!isRecord(raw)) {
     warnings.push("hooks.json: top-level value is not an object — ignored");
     return { entries, warnings, errors };
   }
@@ -210,7 +207,7 @@ export function parseHookConfig(raw: unknown): ParsedHookConfig {
     // `{ version: 1 }` with no hooks is a valid empty config.
     return { entries, warnings, errors };
   }
-  if (!isPlainObject(hooksByEvent)) {
+  if (!isRecord(hooksByEvent)) {
     warnings.push('hooks.json: "hooks" is not an object — ignored');
     return { entries, warnings, errors };
   }
@@ -228,7 +225,7 @@ export function parseHookConfig(raw: unknown): ParsedHookConfig {
     }
 
     group.forEach((matcherBlock, blockIdx) => {
-      if (!isPlainObject(matcherBlock)) {
+      if (!isRecord(matcherBlock)) {
         warnings.push(
           `hooks.json: ${eventKey}[${blockIdx}] is not an object — ignored`,
         );
@@ -261,7 +258,7 @@ export function parseHookConfig(raw: unknown): ParsedHookConfig {
 
       handlers.forEach((handler, handlerIdx) => {
         const id = `${eventKey}#${blockIdx}.${handlerIdx}`;
-        if (!isPlainObject(handler)) {
+        if (!isRecord(handler)) {
           errors.push(`hooks.json: ${id} handler is not an object — rejected`);
           return;
         }

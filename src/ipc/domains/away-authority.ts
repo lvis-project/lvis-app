@@ -33,6 +33,7 @@ import {
 import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 
+import { isRecord } from "../../shared/is-record.js";
 const DISABLED = Object.freeze({
   ok: false as const,
   error: "away-authority-disabled" as const,
@@ -79,12 +80,8 @@ const MODE_CATEGORIES: Record<AwayAuthorityMode, readonly string[]> = {
   "read-write": ["read", "write"],
 };
 
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function hasIntent(payload: unknown): boolean {
-  return record(payload) && hasUserKeyboardIntent(payload.intent);
+  return isRecord(payload) && hasUserKeyboardIntent(payload.intent);
 }
 
 export function registerAwayAuthorityHandlers(deps: IpcDeps): void {

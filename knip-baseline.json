@@ -790,11 +790,6 @@
     {
       "type": "exports",
       "file": "src/shared/plugin-config.ts",
-      "name": "isPlainObject"
-    },
-    {
-      "type": "exports",
-      "file": "src/shared/plugin-config.ts",
       "name": "PLUGIN_CONFIG_RESERVED_KEYS"
     },
     {

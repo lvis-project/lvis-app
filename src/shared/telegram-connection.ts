@@ -12,6 +12,7 @@
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
 
+import { isRecord } from "./is-record.js";
 /** How long an unredeemed pairing code stays valid. */
 export const TELEGRAM_PAIRING_CODE_TTL_MS = 10 * 60 * 1_000;
 
@@ -215,10 +216,6 @@ const BOT_TOKEN = /^[0-9]{5,20}:[A-Za-z0-9_-]{20,220}$/;
 const MAX_CONVERSATION_CHARS = 4_096;
 const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
@@ -291,30 +288,30 @@ function hasIntent(value: Record<string, unknown>): boolean {
 }
 
 export function isTelegramConnectInput(value: unknown): value is TelegramConnectInput {
-  return record(value) && exactKeys(value, ["botToken", "intent"])
+  return isRecord(value) && exactKeys(value, ["botToken", "intent"])
     && hasIntent(value) && isTelegramBotToken(value.botToken);
 }
 
 export function isTelegramIntentOnlyInput(value: unknown): value is TelegramIntentOnlyInput {
-  return record(value) && exactKeys(value, ["intent"]) && hasIntent(value);
+  return isRecord(value) && exactKeys(value, ["intent"]) && hasIntent(value);
 }
 
 export function isTelegramApproveCurrentConversationInput(
   value: unknown,
 ): value is TelegramApproveCurrentConversationInput {
-  if (!record(value) || !hasIntent(value)) return false;
+  if (!isRecord(value) || !hasIntent(value)) return false;
   if (exactKeys(value, ["intent"])) return true;
   return exactKeys(value, ["duration", "intent"])
     && isTelegramApprovalDurationPreset(value.duration);
 }
 
 export function isTelegramRevokeInput(value: unknown): value is TelegramRevokeInput {
-  return record(value) && exactKeys(value, ["id", "intent"])
+  return isRecord(value) && exactKeys(value, ["id", "intent"])
     && hasIntent(value) && isTelegramConnectionId(value.id);
 }
 
 function parsePairingSummary(value: unknown): TelegramPairingSummary | null {
-  if (!record(value) || !exactKeys(value, ["accountFingerprint", "id"])
+  if (!isRecord(value) || !exactKeys(value, ["accountFingerprint", "id"])
     || !isTelegramConnectionId(value.id)
     || typeof value.accountFingerprint !== "string"
     || !ACCOUNT_FINGERPRINT.test(value.accountFingerprint)) {
@@ -324,7 +321,7 @@ function parsePairingSummary(value: unknown): TelegramPairingSummary | null {
 }
 
 function parseApprovalSummary(value: unknown): TelegramApprovalSummary | null {
-  if (!record(value) || !exactKeys(value, ["expiresAt", "id", "matchesCurrentConversation"])
+  if (!isRecord(value) || !exactKeys(value, ["expiresAt", "id", "matchesCurrentConversation"])
     || !isTelegramConnectionId(value.id)
     || !timestamp(value.expiresAt)
     || typeof value.matchesCurrentConversation !== "boolean") {
@@ -338,7 +335,7 @@ function parseApprovalSummary(value: unknown): TelegramApprovalSummary | null {
 }
 
 function parsePendingCodeSummary(value: unknown): TelegramPendingCodeSummary | null {
-  if (!record(value) || !exactKeys(value, ["attemptsRemaining", "expiresAt", "id"])
+  if (!isRecord(value) || !exactKeys(value, ["attemptsRemaining", "expiresAt", "id"])
     || !isTelegramConnectionId(value.id)
     || !timestamp(value.expiresAt)
     || !counter(value.attemptsRemaining)) {
@@ -359,7 +356,7 @@ function parsePendingCodeSummary(value: unknown): TelegramPendingCodeSummary | n
 export function parseTelegramConnectionSnapshot(
   value: unknown,
 ): TelegramConnectionSnapshot | null {
-  if (!record(value)
+  if (!isRecord(value)
     || !exactKeys(value, ["approval", "botUsername", "lastErrorCode", "pairing", "pendingCode", "state"])
     || !isTelegramConnectionState(value.state)
     || (value.botUsername !== null && !isTelegramBotUsername(value.botUsername))
@@ -387,7 +384,7 @@ export function parseTelegramConnectionSnapshot(
 export function parseTelegramCreatedPairingCode(
   value: unknown,
 ): TelegramCreatedPairingCode | null {
-  if (!record(value) || !exactKeys(value, ["botUsername", "code", "expiresAt", "id"])
+  if (!isRecord(value) || !exactKeys(value, ["botUsername", "code", "expiresAt", "id"])
     || !isTelegramConnectionId(value.id)
     || !isTelegramPairingCode(value.code)
     || !isTelegramBotUsername(value.botUsername)
@@ -403,7 +400,7 @@ export function parseTelegramCreatedPairingCode(
 }
 
 function parseFailure(value: unknown): TelegramConnectionFailure | null {
-  if (!record(value) || !exactKeys(value, ["error", "ok"])
+  if (!isRecord(value) || !exactKeys(value, ["error", "ok"])
     || value.ok !== false || !isTelegramConnectionErrorCode(value.error)) {
     return null;
   }
@@ -416,7 +413,7 @@ export function parseTelegramConnectionMutationResult(
 ): TelegramConnectionMutationResult | null {
   const failure = parseFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !exactKeys(value, ["ok"]) || value.ok !== true) return null;
+  if (!isRecord(value) || !exactKeys(value, ["ok"]) || value.ok !== true) return null;
   return Object.freeze({ ok: true });
 }
 
@@ -425,7 +422,7 @@ export function parseTelegramConnectionSnapshotResult(
 ): TelegramConnectionSnapshotResult | null {
   const failure = parseFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !exactKeys(value, ["ok", "snapshot"]) || value.ok !== true) return null;
+  if (!isRecord(value) || !exactKeys(value, ["ok", "snapshot"]) || value.ok !== true) return null;
   const snapshot = parseTelegramConnectionSnapshot(value.snapshot);
   return snapshot === null ? null : Object.freeze({ ok: true, snapshot });
 }
@@ -435,7 +432,7 @@ export function parseTelegramCreatePairingCodeResult(
 ): TelegramCreatePairingCodeResult | null {
   const failure = parseFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !exactKeys(value, ["ok", "pairingCode"]) || value.ok !== true) return null;
+  if (!isRecord(value) || !exactKeys(value, ["ok", "pairingCode"]) || value.ok !== true) return null;
   const pairingCode = parseTelegramCreatedPairingCode(value.pairingCode);
   return pairingCode === null ? null : Object.freeze({ ok: true, pairingCode });
 }

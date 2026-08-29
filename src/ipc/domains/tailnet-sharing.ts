@@ -21,6 +21,7 @@ import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } fro
 import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
 
+import { isRecord } from "../../shared/is-record.js";
 const DISABLED = Object.freeze({ ok: false as const, error: "tailnet-sharing-disabled" as const });
 const INPUT_INVALID = Object.freeze({ ok: false as const, error: "tailnet-sharing-input-invalid" as const });
 const KEYBOARD_REQUIRED = Object.freeze({ ok: false as const, error: "user-keyboard-required" as const });
@@ -30,12 +31,8 @@ const OPERATION_REJECTED = Object.freeze({
 });
 const UNAVAILABLE = Object.freeze({ ok: false as const, error: "tailnet-sharing-unavailable" as const });
 
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function hasIntent(payload: unknown): boolean {
-  return record(payload) && hasUserKeyboardIntent(payload.intent);
+  return isRecord(payload) && hasUserKeyboardIntent(payload.intent);
 }
 
 /**

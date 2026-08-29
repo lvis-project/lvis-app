@@ -17,6 +17,7 @@ import type { ToolSchema } from "../engine/llm/types.js";
 import { mainDir } from "./main-paths.js";
 
 import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../shared/subscription-runtime.js";
+import { isPlainRecord } from "../shared/is-record.js";
 const MAX_TOOL_COUNT = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount;
 const MAX_SOURCE_TOOL_NAME_LENGTH = 256;
 const MAX_REMOTE_TOOL_NAME_LENGTH = 128;
@@ -70,12 +71,6 @@ export interface SubscriptionToolBridgeMcpOptions {
   readonly command?: string;
   /** Test seam; production points at the bundled standalone MCP helper. */
   readonly args?: readonly string[];
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function isSafeJsonValue(
