@@ -9,6 +9,8 @@ import {
   canonicalizeAgentMessage,
   canonicalizeInboundA2ASubAgentMessage,
   wrapChildReportForParentJudgment,
+  A2A_MESSAGE_KEYS,
+  A2A_PART_KEYS,
 } from "../a2a-subagent-message-codec.js";
 import {
   GUIDE_MAX_CHARS,
@@ -312,5 +314,13 @@ describe("canonicalizeAgentMessage — parent-facing body", () => {
     const wrapped = wrapChildReportForParentJudgment(result.formattedText);
     expect(result.formattedText).not.toBe(wrapped);
     expect(wrapped.endsWith(result.formattedText)).toBe(true);
+  });
+});
+describe("shared wire-shape guards", () => {
+  it("publishes the Message and Part own-key allow-lists the store and handler validate against", () => {
+    expect([...A2A_MESSAGE_KEYS]).toEqual([
+      "messageId", "contextId", "taskId", "role", "parts", "metadata", "extensions", "referenceTaskIds",
+    ]);
+    expect([...A2A_PART_KEYS]).toEqual(["text", "raw", "url", "data", "metadata", "filename", "mediaType"]);
   });
 });

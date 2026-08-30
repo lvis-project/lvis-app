@@ -10,14 +10,14 @@ import { randomBytes as nodeRandomBytes, randomUUID as nodeRandomUuid } from "no
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
-import { timingSafeEqualHexDigest, sha256Hex } from "../lib/hex-digest-equal.js";
+import { SHA256_HEX, sha256Hex, timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
 import { UUID_PATTERN } from "../shared/uuid.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
-import { hasExactKeys } from "../shared/is-record.js";
+import { hasExactKeys, isRecord } from "../shared/is-record.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 const STORE_VERSION = 1;
@@ -31,7 +31,7 @@ const TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAX_INVITATIONS = 64;
 const MAX_PAIRINGS = 128;
 const MAX_SHARES = 256;
-const SHA256_HEX = /^[a-f0-9]{64}$/;
+
 const ACTOR_ID = /^tailnet:[a-f0-9]{64}$/;
 
 const TAILNET_SHARING_FEATURE = "tailnet-sharing";
@@ -137,10 +137,6 @@ function initialState(): StoreState {
   return { version: STORE_VERSION, invitations: [], pairings: [], shares: [] };
 }
 
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function uuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
@@ -154,7 +150,7 @@ function digest(value: unknown): value is string {
 }
 
 function validInvitation(value: unknown): value is StoredInvitation {
-  return record(value)
+  return isRecord(value)
     && hasExactKeys(value, ["id", "codeDigest", "createdAt", "expiresAt", "state", "pairingId"])
     && uuid(value.id)
     && digest(value.codeDigest)
@@ -168,7 +164,7 @@ function validInvitation(value: unknown): value is StoredInvitation {
 
 function validPairing(value: unknown): value is StoredPairing {
   if (
-    !record(value)
+    !isRecord(value)
     || !hasExactKeys(value, [
       "id", "actorId", "invitationId", "createdAt", "state", "epoch",
       "expiresAt", "activatedAt", "terminalAt",
@@ -205,7 +201,7 @@ function validPairing(value: unknown): value is StoredPairing {
 
 function validShare(value: unknown): value is StoredShare {
   if (
-    !record(value)
+    !isRecord(value)
     || !hasExactKeys(value, [
       "id", "pairingId", "actorId", "pairingEpoch", "conversationDigest",
       "scope", "permission", "createdAt", "expiresAt", "state", "epoch", "terminalAt",
@@ -233,7 +229,7 @@ function validShare(value: unknown): value is StoredShare {
 
 function validState(value: unknown): value is StoreState {
   if (
-    !record(value)
+    !isRecord(value)
     || !hasExactKeys(value, ["version", "invitations", "pairings", "shares"])
     || value.version !== STORE_VERSION
     || !Array.isArray(value.invitations)
@@ -334,7 +330,7 @@ function binding(pairing: StoredPairing, share: StoredShare): TailnetPairingShar
 }
 
 function validBinding(value: unknown): value is TailnetPairingShareBinding {
-  return record(value)
+  return isRecord(value)
     && hasExactKeys(value, ["pairingId", "pairingEpoch", "shareId", "shareEpoch", "scope"])
     && uuid(value.pairingId)
     && isPositiveSafeInteger(value.pairingEpoch)

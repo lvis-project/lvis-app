@@ -16,23 +16,25 @@ import { join } from "node:path";
 import type { ToolSchema } from "../engine/llm/types.js";
 import { mainDir } from "./main-paths.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../shared/subscription-runtime.js";
+import { isPlainRecord } from "../shared/is-record.js";
 
-const MAX_TOOL_COUNT = 256;
+const MAX_TOOL_COUNT = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount;
 const MAX_SOURCE_TOOL_NAME_LENGTH = 256;
 const MAX_REMOTE_TOOL_NAME_LENGTH = 128;
 const MAX_DESCRIPTION_CHARACTERS = 1_024;
 const MAX_DESCRIPTION_BYTES = 64 * 1024;
-const MAX_SCHEMA_BYTES = 64 * 1024;
+const MAX_SCHEMA_BYTES = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxSchemaBytes;
 const MAX_ARGUMENT_BYTES = 128 * 1024;
 const MAX_HTTP_BODY_BYTES = 128 * 1024;
-const MAX_JSON_DEPTH = 16;
-const MAX_JSON_KEYS = 1_024;
-const MAX_JSON_ARRAY_ITEMS = 1_024;
-const MAX_JSON_STRING_LENGTH = 64 * 1024;
+const MAX_JSON_DEPTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonDepth;
+const MAX_JSON_KEYS = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonKeys;
+const MAX_JSON_ARRAY_ITEMS = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonArrayItems;
+const MAX_JSON_STRING_LENGTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonStringLength;
 const MCP_SERVER_NAME = "lvis-host-tools";
 const MCP_CHILD_ENV = "ELECTRON_RUN_AS_NODE";
-const BRIDGE_URL_ENV = "LVIS_SUBSCRIPTION_TOOL_BRIDGE_URL";
-const BRIDGE_TOKEN_ENV = "LVIS_SUBSCRIPTION_TOOL_BRIDGE_TOKEN";
+const BRIDGE_URL_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.urlEnv;
+const BRIDGE_TOKEN_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.tokenEnv;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const DESCRIPTION_CONTROL_CHARACTERS = /[\u0000\u007f]/;
 const SAFE_REMOTE_TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
@@ -70,12 +72,6 @@ export interface SubscriptionToolBridgeMcpOptions {
   readonly command?: string;
   /** Test seam; production points at the bundled standalone MCP helper. */
   readonly args?: readonly string[];
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function isSafeJsonValue(

@@ -40,7 +40,7 @@ Discovery: `src/hooks/hook-discovery.ts` resolves `~/.config/lvis/hooks/`, globs
 ### 1.3 Execution model
 
 - **Runner**: `src/hooks/script-hook-runner.ts:runOneHookScript`. Input = single-line JSON on **stdin** (`ScriptHookStdin`); output = stdout JSON (`ScriptHookStdout = { action: "allow"|"deny", reason }`).
-- **Timeout**: `DEFAULT_HOOK_TIMEOUT_MS = 5_000` (`src/hooks/script-hook-types.ts:103`) — **separate** from `TOOL_TIMEOUT_POLICY`'s 120 s global ceiling. Enforced via `SIGKILL` of the detached process group.
+- **Timeout**: `DEFAULT_HOOK_TIMEOUT_MS = 5_000` (`src/hooks/script-hook-types.ts`) — **separate** from `TOOL_TIMEOUT_POLICY`'s 120 s global ceiling. Enforced via `SIGKILL` of the detached process group.
 - **Env allowlist**: `buildSafeChildEnv` (`src/tools/safe-env.ts`) forwards only a generic non-secret allowlist (`FORWARD_ENV_KEYS`: `PATH`, `HOME`, `USER`, `USERNAME`, `LANG`, `LC_*`, `TZ`, …) plus the three injected `LVIS_HOOK_TYPE` / `LVIS_HOOK_TOOL_NAME` / `LVIS_HOOK_TRUST_ORIGIN` vars. Everything else — `LVIS_*`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_*`, `AWS_*`, `GITHUB_TOKEN`, future provider secrets — is stripped.
 - **Fail-closed**: non-zero exit, timeout, spawn error, or malformed stdout → **deny**.
 - **Composition**: deny precedence — a hook may downgrade an upstream `allow` to `deny`, never upgrade `deny` to `allow`. **No `modify`/`updatedInput` action exists in v1** (deferred pending signing).
@@ -170,7 +170,7 @@ Each proposed event below has a **verified existing fire point**. `Blocking` sta
 - All new/changed hooks (legacy or declarative) are quarantined by default; enrollment is user-keyboard-only via `/permission hooks accept <name>`.
 
 ### 6.2 Timeouts & environment
-- Per-handler `timeoutMs` is clamped to a hook ceiling (`DEFAULT_HOOK_TIMEOUT_MS`, raised to an explicit `HOOK_TIMEOUT_CEILING_MS` SOT if needed). Hooks remain on their **own** budget, independent of `TOOL_TIMEOUT_POLICY`. Document both ceilings so they don't drift.
+- Per-handler `timeoutMs` is clamped to the hook ceiling `DEFAULT_HOOK_TIMEOUT_MS` (the one SOT; `hook-config.ts` decision (d)). Hooks remain on their **own** budget, independent of `TOOL_TIMEOUT_POLICY`. Document both ceilings so they don't drift.
 - Env allowlist is unchanged and extended only with event-specific non-secret vars (`LVIS_HOOK_EVENT`, `LVIS_HOOK_MATCHER`). Secrets never pass through.
 
 ### 6.3 HTTP hooks (gated milestone)
@@ -240,5 +240,5 @@ behavior-based, not sequence numbers.
 ## 10. Open decisions
 1. **`hooks.json` trust unit**: per-file (whole config) vs per-entry hashing. Per-entry is finer-grained for trust review but more lockfile churn. *Recommendation: hash the whole `hooks.json` as one trust unit (mirrors a single `.sh` file) plus the sha256 of each referenced local script.*
 2. **`UserPromptSubmit` blocking**: should a deny refuse the turn outright, or strip/annotate the prompt? *Recommendation: deny = refuse turn (fail-closed); annotation requires the deferred `modify` capability.*
-3. **Hook ceiling vs tool ceiling**: keep the 5 s hook budget, or a separate raised ceiling for command hooks that shell out to interpreters? *Recommendation: keep 5 s default; add an explicit per-handler `timeoutMs` clamped to a documented `HOOK_TIMEOUT_CEILING_MS` SOT.*
+3. **Hook ceiling vs tool ceiling**: keep the 5 s hook budget, or a separate raised ceiling for command hooks that shell out to interpreters? *Recommendation: keep 5 s default; add an explicit per-handler `timeoutMs` clamped to `DEFAULT_HOOK_TIMEOUT_MS`, the documented ceiling SOT.*
 4. **Managed policy**: do enterprise deployments get a managed `hooks.json` (admin-pushed, non-removable) analogous to admin-policy plugins? Likely yes in a later phase; out of scope here.

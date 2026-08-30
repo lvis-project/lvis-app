@@ -5,6 +5,7 @@ import {
   SubscriptionToolBridgeClient,
   readSubscriptionToolMcpServerConfig,
 } from "../subscription-tool-mcp-server.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../../shared/subscription-runtime.js";
 
 interface BridgeRequest {
   readonly method: string | undefined;
@@ -122,6 +123,23 @@ describe("subscription tool MCP shim", () => {
       },
     }]);
     expect(harness.requests).toHaveLength(1);
+  });
+
+  it("refuses a tool list beyond the shared bridge contract and accepts one at the limit", async () => {
+    const tool = (index: number) => ({
+      name: `tool_${index}`,
+      description: "Bounded by the shared contract.",
+      inputSchema: { type: "object", properties: {} },
+    });
+    const limit = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount;
+    let count = limit + 1;
+    const harness = await createBridgeHarness((_request, response) => {
+      writeJson(response, 200, { tools: Array.from({ length: count }, (_, i) => tool(i)) });
+    });
+
+    await expect(clientFor(harness.bridgeUrl).listTools()).resolves.toEqual([]);
+    count = limit;
+    await expect(clientFor(harness.bridgeUrl).listTools()).resolves.toHaveLength(limit);
   });
 
   it("preserves the JSON Schema dialect when listing a bridged tool", async () => {

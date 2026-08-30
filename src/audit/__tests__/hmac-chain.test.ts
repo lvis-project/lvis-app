@@ -246,6 +246,14 @@ describe("computeLineHmac + verifyLineHmac", () => {
     const secret = "00".repeat(32);
     expect(verifyLineHmac(secret, "x", "deadbeef")).toBe(false);
   });
+
+  it("rejects an uppercase hash: every hash this chain mints is lowercase, so anything else is not ours", () => {
+    const secret = "00".repeat(32);
+    const line = '{"decision":"allow"}';
+    const hash = computeLineHmac(secret, line);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(verifyLineHmac(secret, line, hash.toUpperCase())).toBe(false);
+  });
 });
 
 describe("buildChainedEntries", () => {

@@ -385,7 +385,9 @@ import {
   RPC_UNSUPPORTED_PROTOCOL_VERSION,
 } from "./protocol-constants.js";
 import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
-const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
+import { getLvisAppVersion } from "../shared/app-version.js";
+
+const CLIENT_INFO = { name: "lvis-app", version: getLvisAppVersion() } as const;
 
 /** MCP Apps extension key (§8 `io.modelcontextprotocol/ui`, 2026-01-26 snapshot). */
 const MCP_APPS_UI_EXTENSION = "io.modelcontextprotocol/ui";

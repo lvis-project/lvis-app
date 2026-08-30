@@ -31,25 +31,27 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../shared/subscription-runtime.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { hasExactKeys } from "../shared/is-record.js";
+import { isPlainRecord } from "../shared/is-record.js";
 
-const BRIDGE_URL_ENV = "LVIS_SUBSCRIPTION_TOOL_BRIDGE_URL";
-const BRIDGE_TOKEN_ENV = "LVIS_SUBSCRIPTION_TOOL_BRIDGE_TOKEN";
+const BRIDGE_URL_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.urlEnv;
+const BRIDGE_TOKEN_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.tokenEnv;
 const BRIDGE_HOST = "127.0.0.1";
 const TOOLS_PATH = "/v1/tools";
 const TOOL_CALL_PATH = "/v1/tools/call";
 const MAX_BRIDGE_RESPONSE_BYTES = 512 * 1024;
 const MAX_TOOL_CALL_REQUEST_BYTES = 128 * 1024;
-const MAX_TOOL_COUNT = 512;
+const MAX_TOOL_COUNT = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount;
 const MAX_TOOL_NAME_LENGTH = 128;
 const MAX_TOOL_DESCRIPTION_LENGTH = 16 * 1024;
 const MAX_SCHEMA_DIALECT_LENGTH = 1_024;
-const MAX_SCHEMA_BYTES = 64 * 1024;
-const MAX_JSON_DEPTH = 16;
-const MAX_JSON_KEYS = 1_024;
-const MAX_JSON_ARRAY_ITEMS = 1_024;
-const MAX_JSON_STRING_LENGTH = 64 * 1024;
+const MAX_SCHEMA_BYTES = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxSchemaBytes;
+const MAX_JSON_DEPTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonDepth;
+const MAX_JSON_KEYS = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonKeys;
+const MAX_JSON_ARRAY_ITEMS = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonArrayItems;
+const MAX_JSON_STRING_LENGTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonStringLength;
 const MAX_RESULT_TEXT_LENGTH = 16 * 1024;
 const MAX_TOKEN_LENGTH = 512;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
@@ -70,12 +72,6 @@ export interface SubscriptionToolMcpServerConfig {
 type SubscriptionMcpTool = Pick<Tool, "name" | "description" | "inputSchema">;
 
 type BridgeCallResult = CallToolResult;
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
 function ownValue(record: Record<string, unknown>, key: string): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(record, key);

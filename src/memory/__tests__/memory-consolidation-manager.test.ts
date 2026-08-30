@@ -171,4 +171,17 @@ describe("MemoryManager long-term-memory consolidation", () => {
     expect(overview).toContain("PROJECT-OVERVIEW-MARKER");
     expect(estimateTokens(overview)).toBeLessThanOrEqual(400);
   });
+
+  it("rejects a snapshot whose fingerprint is not the lowercase digest this manager mints", async () => {
+    await memoryManager.saveMemory("Source", "Source detail.", {
+      projectRoot: DEFAULT_WORKSPACE_ROOT, projectName: "default", kind: "fact",
+    });
+    const snapshot = memoryManager.getConsolidationSnapshot();
+    expect(snapshot.sourceFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    const uppercase = { ...snapshot, sourceFingerprint: snapshot.sourceFingerprint.toUpperCase() };
+
+    expect(memoryManager.getConsolidatedMemoryOverview(uppercase)).toBeUndefined();
+    await expect(memoryManager.upsertConsolidatedMemoryIfUnchanged(uppercase, "OVERVIEW"))
+      .rejects.toThrow(/invalid snapshot/);
+  });
 });

@@ -18,6 +18,21 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The prototype-strict sibling of {@link isRecord}: a keyed object whose
+ * prototype is `Object.prototype` or `null` — what `JSON.parse` produces and
+ * nothing else. Use it where the input is a wire or on-disk payload that must
+ * be exactly plain data (a bridge request body, a persisted config document);
+ * a class instance arriving there came by a route the caller does not model
+ * and is refused rather than read. Kept beside the loose guard so the two
+ * meanings stay visibly distinct instead of drifting apart in separate copies.
+ */
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/**
  * Whether `value` has exactly the own enumerable string keys in `expected`
  * (order-insensitive). The shape check every on-disk record parser runs
  * before trusting field types: an extra key is as much a rejection as a
@@ -41,10 +56,21 @@ export function hasOnlyKeys(value: object, allowed: ReadonlySet<string> | readon
 }
 
 /**
- * Whether `value` is an array whose every element is a string. `every`
- * skips holes, so a sparse array passes; the inputs this guards are parsed
- * JSON and IPC payloads, which cannot carry holes.
+ * Whether `value` is an array whose every indexed element is a string, with
+ * no holes. The check walks `0..length-1` by index, which is what a consumer
+ * of a `string[]` does, so it refuses both shapes a looser check admits:
+ * a sparse array (`Array.prototype.every` skips holes and `[ , "a"]` would
+ * pass, then read back as `undefined`) and an array whose own
+ * `Symbol.iterator` yields strings while its indexed elements are not (a
+ * spread-then-`every` check sees only the iterator). Parsed JSON and IPC
+ * payloads can carry neither, so for them the verdict is the same as a bare
+ * `every`; the A2A codec validates in-memory objects, where both differences
+ * are real.
  */
 export function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  if (!Array.isArray(value)) return false;
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] !== "string") return false;
+  }
+  return true;
 }

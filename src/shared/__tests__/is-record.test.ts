@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-
-import { hasExactKeys, hasOnlyKeys, isRecord, isStringArray } from "../is-record.js";
+import { hasExactKeys, hasOnlyKeys, isPlainRecord, isRecord, isStringArray } from "../is-record.js";
 
 describe("isRecord", () => {
   it("accepts a plain keyed object", () => {
@@ -22,6 +21,29 @@ describe("isRecord", () => {
     expect(isRecord(undefined)).toBe(false);
     expect(isRecord("s")).toBe(false);
     expect(isRecord(1)).toBe(false);
+  });
+});
+
+describe("isPlainRecord", () => {
+  it("accepts what JSON.parse produces and a null-prototype object", () => {
+    expect(isPlainRecord({})).toBe(true);
+    expect(isPlainRecord(JSON.parse('{"a":1}'))).toBe(true);
+    expect(isPlainRecord(Object.create(null))).toBe(true);
+  });
+
+  it("refuses a class instance that the loose guard accepts", () => {
+    expect(isRecord(new Error("boom"))).toBe(true);
+    expect(isPlainRecord(new Error("boom"))).toBe(false);
+    expect(isPlainRecord(new (class Payload {})())).toBe(false);
+    expect(isPlainRecord(Object.create({ inherited: true }))).toBe(false);
+  });
+
+  it("refuses arrays, null and non-objects like the loose guard", () => {
+    expect(isPlainRecord([])).toBe(false);
+    expect(isPlainRecord(null)).toBe(false);
+    expect(isPlainRecord(undefined)).toBe(false);
+    expect(isPlainRecord("s")).toBe(false);
+    expect(isPlainRecord(1)).toBe(false);
   });
 });
 
@@ -67,5 +89,23 @@ describe("isStringArray", () => {
     expect(isStringArray(["a", 1])).toBe(false);
     expect(isStringArray([undefined])).toBe(false);
     expect(isStringArray(null)).toBe(false);
+  });
+
+  it("refuses a sparse array: a hole would surface as undefined in a string[]", () => {
+    const sparse = new Array<string>(1);
+    expect(isStringArray(sparse)).toBe(false);
+    const holeInTheMiddle: string[] = [];
+    holeInTheMiddle[0] = "a";
+    holeInTheMiddle[2] = "c";
+    expect(isStringArray(holeInTheMiddle)).toBe(false);
+  });
+
+  it("judges the indexed elements, not what an overridden iterator yields", () => {
+    const disguised: unknown[] = [{ not: "a string" }];
+    Object.defineProperty(disguised, Symbol.iterator, {
+      value: function* () { yield "looks fine"; },
+    });
+    expect([...(disguised as Iterable<unknown>)]).toEqual(["looks fine"]);
+    expect(isStringArray(disguised)).toBe(false);
   });
 });

@@ -1370,6 +1370,25 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
     await expect(fetcher.listPlugins()).rejects.toThrow(/manifest id mismatch/);
   });
 
+  it("normalises an uppercase resolved artifact digest at the network boundary", async () => {
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    });
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
+      slug: "upper-digest",
+      name: "Upper digest",
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0",
+        artifact_sha256: "F".repeat(64),
+        manifest: { id: "upper-digest", version: "1.0.0" },
+      },
+    }]));
+    const plugins = await fetcher.listPlugins();
+    expect(plugins[0]?.artifactSha256).toBe("f".repeat(64));
+  });
+
   it("does not fall back to outer MCP runtime/auth when the selected manifest is incomplete", async () => {
     mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
       slug: "missing-mcp-runtime",

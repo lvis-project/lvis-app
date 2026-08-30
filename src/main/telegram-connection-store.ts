@@ -35,7 +35,7 @@
 import { randomUUID as nodeRandomUuid } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
+import { SHA256_HEX, timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 import {
   TELEGRAM_PAIRING_CODE_TTL_MS,
   isTelegramConnectionErrorCode,
@@ -47,7 +47,7 @@ import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
-import { hasExactKeys } from "../shared/is-record.js";
+import { hasExactKeys, isRecord } from "../shared/is-record.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 const STORE_VERSION = 1;
@@ -67,7 +67,6 @@ const MAX_APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
  * exhaust.
  */
 const MAX_APPROVALS = 32;
-const SHA256_HEX = /^[a-f0-9]{64}$/;
 const FILE_NAME = /^[a-z0-9][a-z0-9._-]{0,127}\.json$/i;
 const ACCOUNT_FINGERPRINT_CHARS = 12;
 
@@ -332,10 +331,6 @@ function notOpen(): Error {
   return new Error("telegram-connection-store-not-open");
 }
 
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function epochValue(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 }
@@ -363,7 +358,7 @@ function nextEpoch(value: number): number {
 }
 
 function validPendingCode(value: unknown): value is StoredPendingCode {
-  return record(value)
+  return isRecord(value)
     && hasExactKeys(value, ["id", "codeDigest", "expiresAt", "attemptsRemaining"])
     && isTelegramConnectionId(value.id)
     && digest(value.codeDigest)
@@ -377,7 +372,7 @@ function validPendingCode(value: unknown): value is StoredPendingCode {
 }
 
 function validPairing(value: unknown): value is StoredPairing {
-  return record(value)
+  return isRecord(value)
     && hasExactKeys(value, ["id", "actorDigest", "state", "epoch", "createdAt"])
     && isTelegramConnectionId(value.id)
     && digest(value.actorDigest)
@@ -387,7 +382,7 @@ function validPairing(value: unknown): value is StoredPairing {
 }
 
 function validApproval(value: unknown): value is StoredApproval {
-  return record(value)
+  return isRecord(value)
     && hasExactKeys(value, [
       "id", "pairingId", "pairingEpoch", "conversationId", "conversationDigest", "scope",
       "state", "epoch", "createdAt", "expiresAt",
@@ -415,7 +410,7 @@ function validApproval(value: unknown): value is StoredApproval {
  */
 function validDocument(value: unknown): value is StoreDocument {
   if (
-    !record(value)
+    !isRecord(value)
     || !hasExactKeys(value, [
       "version", "receiptOwnerId", "activationEpoch", "desiredState", "botFingerprint",
       "actorKeyDigest", "pollOffset", "pendingCode", "pairing", "approvals", "lastErrorCode",
@@ -820,7 +815,7 @@ export function createTelegramConnectionStore(
   const createPendingCode = async (
     input: CreateTelegramPendingCodeInput,
   ): Promise<TelegramPendingCodeRecord> => {
-    if (!record(input) || !digest(input.codeDigest)) throw inputInvalid();
+    if (!isRecord(input) || !digest(input.codeDigest)) throw inputInvalid();
     const ttlMs = input.ttlMs ?? TELEGRAM_PAIRING_CODE_TTL_MS;
     const maxAttempts = input.maxAttempts ?? DEFAULT_PENDING_CODE_ATTEMPTS;
     if (
@@ -871,7 +866,7 @@ export function createTelegramConnectionStore(
   const completePairing = async (
     input: CompleteTelegramPairingInput,
   ): Promise<TelegramPairingRecord | null> => {
-    if (!record(input) || !digest(input.codeDigest) || !digest(input.actorDigest)) {
+    if (!isRecord(input) || !digest(input.codeDigest) || !digest(input.actorDigest)) {
       throw inputInvalid();
     }
     return await mutate((current, now) => {
@@ -924,7 +919,7 @@ export function createTelegramConnectionStore(
   const createApproval = async (
     input: CreateTelegramApprovalInput,
   ): Promise<TelegramApprovalAuthority | null> => {
-    if (!record(input)
+    if (!isRecord(input)
       || !isTelegramConversationId(input.conversationId)
       || !digest(input.conversationDigest)) {
       throw inputInvalid();

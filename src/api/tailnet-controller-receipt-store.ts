@@ -3,14 +3,14 @@ import { join, resolve } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { UUID_PATTERN } from "../shared/uuid.js";
-import { hasExactKeys } from "../shared/is-record.js";
+import { hasExactKeys, isRecord } from "../shared/is-record.js";
+import { SHA256_HEX } from "../lib/hex-digest-equal.js";
 import { isNonNegativeSafeInteger } from "../shared/safe-integer.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "command-receipts.json";
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RECEIPTS = 4_096;
-const SHA256_HEX = /^[a-f0-9]{64}$/;
 
 type ReceiptState = "reserved" | "terminal";
 
@@ -63,12 +63,8 @@ function initialState(): ReceiptStateFile {
   return { version: STORE_VERSION, receipts: [] };
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function validRecord(value: unknown, ttlMs: number): value is ReceiptRecord {
-  if (!isPlainRecord(value) || (value.state !== "reserved" && value.state !== "terminal")) return false;
+  if (!isRecord(value) || (value.state !== "reserved" && value.state !== "terminal")) return false;
   const expectedKeys = value.state === "reserved"
     ? ["keyDigest", "intentDigest", "conversationDigest", "acceptedAt", "expiresAt", "state", "ownerId"]
     : ["keyDigest", "intentDigest", "conversationDigest", "acceptedAt", "expiresAt", "state"];
@@ -79,7 +75,7 @@ function validRecord(value: unknown, ttlMs: number): value is ReceiptRecord {
 }
 
 function validState(value: unknown, ttlMs: number, maxReceipts: number): value is ReceiptStateFile {
-  if (!isPlainRecord(value) || !hasExactKeys(value, ["version", "receipts"]) || value.version !== STORE_VERSION || !Array.isArray(value.receipts) || value.receipts.length > maxReceipts || !value.receipts.every((record) => validRecord(record, ttlMs))) return false;
+  if (!isRecord(value) || !hasExactKeys(value, ["version", "receipts"]) || value.version !== STORE_VERSION || !Array.isArray(value.receipts) || value.receipts.length > maxReceipts || !value.receipts.every((record) => validRecord(record, ttlMs))) return false;
   const keys = new Set<string>();
   for (const record of value.receipts) {
     if (keys.has(record.keyDigest)) return false;

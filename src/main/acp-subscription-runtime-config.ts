@@ -16,6 +16,8 @@ import {
   writeFileAtomicAtPath,
 } from "./storage/feature-namespace.js";
 
+import { isPlainRecord } from "../shared/is-record.js";
+
 const CONFIG_FILE = "config.json";
 const CONFIG_VERSION = 1;
 const MAX_EXECUTABLE_PATH_LENGTH = 4_096;
@@ -110,12 +112,6 @@ export interface AcpSubscriptionMcpServerConfig {
   readonly command: string;
   readonly args: readonly string[];
   readonly env: Readonly<Record<string, string>>;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function ownValue(record: Record<string, unknown>, key: string): unknown {

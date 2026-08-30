@@ -21,7 +21,7 @@ import { type ComposerHandle } from "./components/Composer.js";
 import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
 import { hasActiveSuggestedReplies } from "./utils/composer-placeholder.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
-import type { QuickAction } from "./components/CommandPopover.js";
+import type { QuickAction } from "./components/command-actions.js";
 import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { ApprovalRequest, LvisApi } from "./types.js";
 import { ApprovalDock } from "./components/permissions/ApprovalDock.js";

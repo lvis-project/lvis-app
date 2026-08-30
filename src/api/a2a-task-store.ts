@@ -16,6 +16,8 @@ import {
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 import { maskSensitiveData } from "../shared/dlp.js";
 import {
+  A2A_MESSAGE_KEYS,
+  A2A_PART_KEYS,
   canonicalizeInboundA2ASubAgentMessage,
   isSafeA2AMessageId,
   maskA2AMessage,
@@ -24,7 +26,7 @@ import {
   GUIDE_MAX_CHARS,
   GUIDE_MAX_ENTRIES,
 } from "../engine/turn/guidance-limits.js";
-import { isRecord } from "../shared/is-record.js";
+import { hasOnlyKeys, isRecord, isStringArray } from "../shared/is-record.js";
 import { isSafeStructuralId } from "../shared/dlp-safe-id.js";
 
 const STORE_VERSION = 1;
@@ -40,25 +42,6 @@ const DEFAULT_FILE_NAME = "tasks.json";
 export const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 /** Metadata object keys may not carry C0 controls or DEL. */
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
-const MESSAGE_KEYS = new Set([
-  "messageId",
-  "contextId",
-  "taskId",
-  "role",
-  "parts",
-  "metadata",
-  "extensions",
-  "referenceTaskIds",
-]);
-const PART_KEYS = new Set([
-  "text",
-  "raw",
-  "url",
-  "data",
-  "metadata",
-  "filename",
-  "mediaType",
-]);
 const TASK_KEYS = new Set(["id", "contextId", "status", "history"]);
 const REMOTE_TASK_KEYS = new Set(["id", "contextId", "status", "artifacts", "history", "metadata"]);
 const ARTIFACT_KEYS = new Set(["artifactId", "name", "description", "parts", "metadata", "extensions"]);
@@ -69,14 +52,6 @@ const RECORD_KEYS = new Set([
   "updatedAt",
   "task",
 ]);
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
-  return Object.keys(value).every((key) => allowed.has(key));
-}
-
-function hasOwn(value: object, key: PropertyKey): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
 
 const RFC3339_TIMESTAMP = /^(\d{4})-(0[1-9]|1[0-2])-([0-2]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
@@ -89,10 +64,6 @@ export function isA2ARfc3339Timestamp(value: unknown): value is string {
   const month = Number(match[2]);
   const day = Number(match[3]);
   return year >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function isJsonLike(value: unknown, seen = new Set<object>(), depth = 0): boolean {
@@ -117,23 +88,23 @@ function isJsonLike(value: unknown, seen = new Set<object>(), depth = 0): boolea
 }
 
 function isValidPart(value: unknown): value is A2APart {
-  if (!isRecord(value) || !hasOnlyKeys(value, PART_KEYS)) return false;
-  const contentKeys = ["text", "raw", "url", "data"].filter((key) => hasOwn(value, key));
+  if (!isRecord(value) || !hasOnlyKeys(value, A2A_PART_KEYS)) return false;
+  const contentKeys = ["text", "raw", "url", "data"].filter((key) => Object.hasOwn(value, key));
   if (contentKeys.length !== 1 || contentKeys[0] === "raw") return false;
   const contentKey = contentKeys[0]!;
   if ((contentKey === "text" || contentKey === "url") && typeof value[contentKey] !== "string") {
     return false;
   }
   if (contentKey === "data" && !isJsonLike(value.data)) return false;
-  if (hasOwn(value, "metadata") && (!isRecord(value.metadata) || !isJsonLike(value.metadata))) {
+  if (Object.hasOwn(value, "metadata") && (!isRecord(value.metadata) || !isJsonLike(value.metadata))) {
     return false;
   }
-  return (!hasOwn(value, "filename") || typeof value.filename === "string")
-    && (!hasOwn(value, "mediaType") || typeof value.mediaType === "string");
+  return (!Object.hasOwn(value, "filename") || typeof value.filename === "string")
+    && (!Object.hasOwn(value, "mediaType") || typeof value.mediaType === "string");
 }
 
 function normalizeStoredMessage(value: unknown): A2AMessage | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, MESSAGE_KEYS)) return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, A2A_MESSAGE_KEYS)) return null;
   try {
     if (JSON.stringify(value).length > GUIDE_MAX_CHARS) return null;
   } catch {
@@ -150,11 +121,11 @@ function normalizeStoredMessage(value: unknown): A2AMessage | null {
   ) {
     return null;
   }
-  if (hasOwn(value, "metadata") && (!isRecord(value.metadata) || !isJsonLike(value.metadata))) {
+  if (Object.hasOwn(value, "metadata") && (!isRecord(value.metadata) || !isJsonLike(value.metadata))) {
     return null;
   }
   if (
-    hasOwn(value, "extensions")
+    Object.hasOwn(value, "extensions")
     && (
       !isStringArray(value.extensions)
       || value.extensions.length > GUIDE_MAX_ENTRIES
@@ -163,7 +134,7 @@ function normalizeStoredMessage(value: unknown): A2AMessage | null {
     return null;
   }
   if (
-    hasOwn(value, "referenceTaskIds")
+    Object.hasOwn(value, "referenceTaskIds")
     && (
       !isStringArray(value.referenceTaskIds)
       || value.referenceTaskIds.length > GUIDE_MAX_ENTRIES

@@ -46,6 +46,7 @@ import { join } from "node:path";
 import { platform } from "node:process";
 import { lvisHome } from "../shared/lvis-home.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
+import { SHA256_HEX } from "../lib/hex-digest-equal.js";
 
 export const GENESIS_MARKER = "genesis";
 const AUDIT_HMAC_SECRET_NAME = "audit-hmac.key";
@@ -407,7 +408,7 @@ export function verifyLineHmac(
   expectedPrevHash: string,
 ): boolean {
   const computed = computeLineHmac(secret, previousLine);
-  if (!/^[a-f0-9]{64}$/i.test(expectedPrevHash) || computed.length !== expectedPrevHash.length) return false;
+  if (!SHA256_HEX.test(expectedPrevHash) || computed.length !== expectedPrevHash.length) return false;
   return timingSafeEqual(
     Buffer.from(computed, "hex"),
     Buffer.from(expectedPrevHash, "hex"),

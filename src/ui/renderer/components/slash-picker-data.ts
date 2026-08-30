@@ -40,10 +40,7 @@ export interface SlashCommand {
   labelKey: string;
 }
 
-/**
- * The built-in slash commands. Mirrors the legacy CommandPopoverPanel list so
- * the unified picker keeps the exact same command surface.
- */
+/** The built-in slash commands — the one list the picker renders. */
 export const SLASH_COMMANDS: SlashCommand[] = [
   { cmd: "/new", labelKey: "commandPopoverPanel.cmdNew" },
   { cmd: "/sessions", labelKey: "commandPopoverPanel.cmdSessions" },

@@ -54,11 +54,6 @@
     },
     {
       "type": "duplicates",
-      "file": "src/ui/renderer/components/CommandPopoverPanel.tsx",
-      "name": "CommandPopoverPanel,default"
-    },
-    {
-      "type": "duplicates",
       "file": "src/ui/renderer/components/SlashPickerPanel.tsx",
       "name": "SlashPickerPanel,default"
     },
@@ -790,11 +785,6 @@
     {
       "type": "exports",
       "file": "src/shared/plugin-config.ts",
-      "name": "isPlainObject"
-    },
-    {
-      "type": "exports",
-      "file": "src/shared/plugin-config.ts",
       "name": "PLUGIN_CONFIG_RESERVED_KEYS"
     },
     {
@@ -966,11 +956,6 @@
       "type": "exports",
       "file": "src/ui/renderer/components/slash-picker-data.ts",
       "name": "normalizeSlashQuery"
-    },
-    {
-      "type": "exports",
-      "file": "src/ui/renderer/components/slash-picker-data.ts",
-      "name": "SLASH_COMMANDS"
     },
     {
       "type": "exports",

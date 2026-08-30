@@ -45,7 +45,7 @@ import {
   type A2ATaskContinuationResult,
   type A2ATaskRecord,
 } from "./a2a-task-store.js";
-import { isRecord } from "../shared/is-record.js";
+import { hasOnlyKeys, isRecord } from "../shared/is-record.js";
 import { MAX_TIMER_DELAY_MS } from "../shared/tool-timeout-policy.js";
 
 const TEXT_MODE = "text/plain";
@@ -79,16 +79,8 @@ const PROTO_INT32_MAX = 2_147_483_647;
 export const A2A_INPUT_REQUIRED_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS = 60_000;
 
-function hasOnlyKeys(value: Record<string, unknown>, keys: ReadonlySet<string>): boolean {
-  return Object.keys(value).every((key) => keys.has(key));
-}
-
-function hasOwn(value: object, key: PropertyKey): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
 function hasValidTenant(params: Record<string, unknown>): boolean {
-  return !hasOwn(params, "tenant") || params.tenant === "";
+  return !Object.hasOwn(params, "tenant") || params.tenant === "";
 }
 
 function isSafeChildSessionId(value: unknown): value is string {
@@ -131,15 +123,15 @@ interface ParsedSend {
 
 function parseSend(params: A2AJsonObject): ParsedSend {
   if (!hasOnlyKeys(params, SEND_KEYS) || !hasValidTenant(params)) invalidParams();
-  if (hasOwn(params, "metadata") && !isBoundedMetadata(params.metadata)) invalidParams();
+  if (Object.hasOwn(params, "metadata") && !isBoundedMetadata(params.metadata)) invalidParams();
   const configuration = params.configuration;
   if (configuration !== undefined && !isRecord(configuration)) invalidParams();
   if (configuration && !hasOnlyKeys(configuration, SEND_CONFIGURATION_KEYS)) invalidParams();
   if (
     configuration
     && (
-      hasOwn(configuration, "taskPushNotificationConfig")
-      || hasOwn(configuration, "task_push_notification_config")
+      Object.hasOwn(configuration, "taskPushNotificationConfig")
+      || Object.hasOwn(configuration, "task_push_notification_config")
     )
   ) {
     throw new A2AHandlerError(A2AJsonRpcErrorDefinition.PUSH_NOTIFICATION_NOT_SUPPORTED);
@@ -249,7 +241,7 @@ function parseList(params: A2AJsonObject): ParsedList {
 
 function parseCancel(params: A2AJsonObject): string {
   if (!hasOnlyKeys(params, CANCEL_KEYS) || !hasValidTenant(params)) invalidParams();
-  if (hasOwn(params, "metadata") && !isBoundedMetadata(params.metadata)) invalidParams();
+  if (Object.hasOwn(params, "metadata") && !isBoundedMetadata(params.metadata)) invalidParams();
   if (!isSafeChildSessionId(params.id)) {
     invalidParams();
   }
