@@ -103,7 +103,7 @@ conversation, and its items open the very tabs the picker offers.
 Which way a tile is halved is the user's call: the header's split control
 drops two buttons — beside the chat, under it — rather than guessing from the
 tile's shape, and a direction whose halves would fall under the tile floors
-(448px wide, 240px tall) is offered disabled — with a one-line reason when
+(448px wide, 280px tall) is offered disabled — with a one-line reason when
 neither fits — so the limit reads in the control instead of arriving as a
 rejection. Dropping a conversation on a tile's edge answers to the same floors:
 an edge that would not fit lands in the centre.
@@ -192,7 +192,7 @@ proportions, so a drag on one boundary never moves a boundary the user was not
 holding.
 
 The floors are pixels: 448px across — `SIDE_PANEL_MIN_WIDTH`, the narrowest
-width DESIGN.md holds any surface to — and 240px down. The tree only knows
+width DESIGN.md holds any surface to — and 280px down. The tree only knows
 shares, so the bar converts through the measured canvas. A pair that cannot
 hold two floors offers no bar at all, rather than a bar that snaps back on
 every drag.
@@ -323,8 +323,11 @@ still clear `CHAT_GROUP_MIN_HEIGHT` plus the cell inset and the tile row's
 bottom gutter — the floor a split or a gutter drag already holds it to — and the
 band gets what is left, down to `WINDOW_DOCK_MIN_HEIGHT`, below which the card
 scrolls inside itself instead of taking more. A fraction of the window would be
-comfortable above one tile and starve four: measured at 1243x768 with a 2x2, an
-uncapped band leaves 138px frames, and the cap holds them at 242px.
+comfortable above one tile and starve four: measured at 1243x768 with a 2x2
+holding an unclaimed request and a window card, an uncapped band grows to 590px
+and leaves 59px frames with no transcript at all, while the cap holds the band
+at 144px and the frames at 282px. The cap is a ceiling, not a size: with one
+short card the band settles at 112px on its own and the frames keep 298px.
 
 `CHAT_GROUP_MIN_HEIGHT` is the measured floor, not a round number: it is the
 frame height at which a tile still holds a header, a composer, AND one visible
