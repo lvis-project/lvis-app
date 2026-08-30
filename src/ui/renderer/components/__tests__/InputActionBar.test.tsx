@@ -513,7 +513,79 @@ describe("model card (status-row model cell)", () => {
       return el;
     });
     fireEvent.click(option);
+    expect(updateSettings).toHaveBeenCalledWith({
+      llm: {
+        provider: "openai-compatible",
+        vendors: { "openai-compatible": { model: "qwen3.8-27b-nvfp4" } },
+      },
+    });
     await waitFor(() => expect(subscriptionUseApiForChat).toHaveBeenCalledTimes(1));
+  });
+
+  it("checks the subscription provider — not an API model — while a subscription runtime is active", async () => {
+    getSettings.mockResolvedValue({
+      ...settingsWithPins(),
+      llm: { ...settingsWithPins().llm, activeChatRuntime: { kind: "subscription", provider: "codex" } },
+    });
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    await waitFor(() => expect(card.querySelectorAll("[role='option']").length).toBe(3));
+    const checked = card.querySelectorAll("[role='option'][aria-selected='true']");
+    expect(checked).toHaveLength(1);
+    expect(checked[0]?.querySelector("button")?.getAttribute("data-testid")).toBe("model-quick-picker-option:codex");
+    expect(checked[0]?.textContent).toContain("Codex");
+    // The API model that happens to share the settings the API path still
+    // holds (vendor "openai-compatible", model "qwen3.8-27b-gguf") is listed
+    // as an alternative, not marked as the route the chat is actually on.
+    expect(
+      card
+        .querySelector("[data-testid='model-quick-picker-option:openai-compatible:qwen3.8-27b-gguf']")
+        ?.closest("[role='option']")
+        ?.getAttribute("aria-selected"),
+    ).toBe("false");
+  });
+
+  it("disables the subscription row — it is a marker, not a pick, and stays out of the tab order", async () => {
+    getSettings.mockResolvedValue({
+      ...settingsWithPins(),
+      llm: { ...settingsWithPins().llm, activeChatRuntime: { kind: "subscription", provider: "codex" } },
+    });
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    const button = await waitFor(() => {
+      const el = card.querySelector<HTMLButtonElement>("[data-testid='model-quick-picker-option:codex']");
+      if (!el) throw new Error("not yet");
+      return el;
+    });
+    expect(button.disabled).toBe(true);
+    // A disabled button never dispatches a click — nothing to guard against
+    // in the pick handler.
+    fireEvent.click(button);
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(subscriptionUseApiForChat).not.toHaveBeenCalled();
+  });
+
+  it("names the subscription provider in the primary column when the runtime has no model of its own", async () => {
+    getSettings.mockResolvedValue({
+      ...settingsWithPins(),
+      llm: { ...settingsWithPins().llm, activeChatRuntime: { kind: "subscription", provider: "kimi-code" } },
+    });
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    const option = await waitFor(() => {
+      const el = card.querySelector<HTMLButtonElement>("[data-testid='model-quick-picker-option:kimi-code']");
+      if (!el) throw new Error("not yet");
+      return el;
+    });
+    const spans = option.querySelectorAll("span");
+    // The muted vendor column would otherwise be the only place the label
+    // appears, leaving the primary column visually empty — the label moves
+    // there instead when the runtime has no model of its own.
+    expect(spans[0]?.textContent).toBe("");
+    expect(spans[1]?.textContent).toBe("Kimi Code");
   });
 
   it("carries the reasoning control and the way to the full catalogue", async () => {
