@@ -28,11 +28,23 @@ function installMockNs() {
     return () => handlers.delete(cb);
   });
   const listPending = vi.fn(async () => [] as unknown[]);
-  const ns = { approval: { onRequest, respond, listPending }, permission: {}, policy: {} };
+  const settledHandlers = new Set<(payload: unknown) => void>();
+  const onSettled = vi.fn((cb: (payload: unknown) => void) => {
+    settledHandlers.add(cb);
+    return () => settledHandlers.delete(cb);
+  });
+  const ns = {
+    approval: { onRequest, onSettled, respond, listPending },
+    permission: {},
+    policy: {},
+  };
   vi.stubGlobal("lvis", ns);
   (window as unknown as { lvis: unknown }).lvis = ns;
   return {
     emit: (r: unknown) => handlers.forEach((h) => h(r)),
+    /** The host says this request is no longer answerable. */
+    emitSettled: (requestId: string) =>
+      settledHandlers.forEach((h) => h({ requestId })),
     respond,
     listPending,
     drainOne: () => resolvers.shift()?.({ ok: true }),
@@ -270,6 +282,110 @@ describe("useApproval — requests parked before this renderer mounted", () => {
       await deciding;
     });
     expect(result.current.queue.map((req) => req.id)).toEqual(["req-2"]);
+  });
+});
+
+/**
+ * The host can retire a parked request without the surface that asked ever
+ * seeing it happen — the tile closed, a navigation let go of it. The card
+ * then has nobody to take it down, so the host says so.
+ */
+describe("useApproval — the host retires a request nobody here answered", () => {
+  const parked = (id: string) => ({
+    id,
+    category: "tool" as const,
+    toolName: "read_file",
+    args: {},
+    reason: "r",
+    createdAt: 1,
+    requireExplicit: false,
+    nonce: `nonce-${id}`,
+    hmac: `hmac-${id}`,
+  });
+
+  it("takes the card down on the settlement announcement", async () => {
+    const { emit, emitSettled } = installMockNs();
+    const { result } = renderHook(() => useApproval());
+    act(() => {
+      emit(parked("req-closed"));
+      emit(parked("req-open"));
+    });
+    await waitFor(() => expect(result.current.queue).toHaveLength(2));
+
+    act(() => {
+      emitSettled("req-closed");
+    });
+
+    expect(result.current.queue.map((req) => req.id)).toEqual(["req-open"]);
+  });
+
+  it("leaves a request whose own answer is still in flight to that answer", async () => {
+    const { emit, emitSettled, respond, drainAll } = installMockNs();
+    const { result } = renderHook(() => useApproval());
+    act(() => {
+      emit(parked("req-answering"));
+    });
+    await waitFor(() => expect(result.current.queue).toHaveLength(1));
+
+    let deciding!: Promise<void>;
+    act(() => {
+      deciding = result.current.decide("req-answering", "allow-once");
+    });
+    expect(respond).toHaveBeenCalledTimes(1);
+
+    // The host settles the moment it takes the answer; the card must stay put
+    // until `respond` acknowledges, or a click landing in that window would
+    // look successful while answering nothing.
+    act(() => {
+      emitSettled("req-answering");
+    });
+    expect(result.current.queue.map((req) => req.id)).toEqual(["req-answering"]);
+
+    await act(async () => {
+      drainAll();
+      await deciding;
+    });
+    expect(result.current.queue).toHaveLength(0);
+  });
+
+  it("does not let the parked snapshot resurrect a request settled while it was in flight", async () => {
+    const { emitSettled, listPending } = installMockNs();
+    let releaseSnapshot!: (requests: unknown[]) => void;
+    listPending.mockImplementationOnce(
+      () => new Promise<unknown[]>((res) => {
+        releaseSnapshot = res;
+      }),
+    );
+
+    const { result } = renderHook(() => useApproval());
+    // The host took `req-gone` after the snapshot was taken and before it
+    // arrived here: the snapshot still names it, and it must not be drawn.
+    act(() => {
+      emitSettled("req-gone");
+    });
+    await act(async () => {
+      releaseSnapshot([parked("req-gone"), parked("req-live")]);
+    });
+
+    await waitFor(() => expect(result.current.queue.map((req) => req.id)).toEqual(["req-live"]));
+  });
+
+  it("reads the parked snapshot once, so retired ids stop being worth remembering after it", async () => {
+    const { emit, emitSettled, listPending } = installMockNs();
+    const { result } = renderHook(() => useApproval());
+    await waitFor(() => expect(listPending).toHaveBeenCalledTimes(1));
+
+    // The snapshot is the guard set's only reader, and it has now run. This
+    // is what makes releasing the set safe — and releasing it is what keeps a
+    // window that answers thousands of requests from remembering all of them.
+    for (let n = 0; n < 3; n += 1) {
+      act(() => {
+        emit(parked(`req-${n}`));
+        emitSettled(`req-${n}`);
+      });
+      expect(result.current.queue).toHaveLength(0);
+    }
+    expect(listPending).toHaveBeenCalledTimes(1);
   });
 });
 

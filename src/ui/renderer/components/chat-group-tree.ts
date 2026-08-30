@@ -178,6 +178,31 @@ export interface ChatGroupBox {
   height: number;
 }
 
+/**
+ * The canvas height below which the SHORTEST tile stops meeting `tileFloor`.
+ *
+ * Anything the window draws BESIDE the canvas — a band rather than a float —
+ * takes its height out of the grid, so it has to leave this much behind or the
+ * tiles are squeezed under the floor the split and resize rules already
+ * enforce, and their transcripts collapse to nothing.
+ *
+ * Read off the boxes rather than counted off the tree because a box carries
+ * its share: with an even split the shortest share is `1 / rows` and this is
+ * `rows * tileFloor`, and with an uneven one the short tile binds first and
+ * this is more. The boxes are also what is actually on screen, so a maximized
+ * tile and chat mode's single tile need no special case.
+ */
+export function minimumCanvasHeight(
+  boxes: readonly ChatGroupBox[],
+  tileFloor: number,
+): number {
+  // `box.height` is a PERCENTAGE of the canvas, as `areaStyle` writes it —
+  // seeding the fold with 100 keeps the units honest and makes "no tiles" mean
+  // one full-height tile rather than a division by a share nobody has.
+  const shortestPercent = boxes.reduce((least, box) => Math.min(least, box.height), 100);
+  return shortestPercent <= 0 ? tileFloor : Math.ceil((tileFloor * 100) / shortestPercent);
+}
+
 export function layoutBoxes(node: ChatGroupNode): ChatGroupBox[] {
   const walk = (
     current: ChatGroupNode,

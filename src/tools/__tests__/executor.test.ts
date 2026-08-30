@@ -29,7 +29,11 @@ import { createDynamicTool, type Tool } from "../base.js";
 import { BashTool, PowerShellTool } from "../shell-tools.js";
 import { ReadFileTool } from "../file-tools.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
-import { ApprovalGate, type ApprovalRequestInput } from "../../permissions/approval-gate.js";
+import {
+  ApprovalGate,
+  IPC_APPROVAL_REQUEST,
+  type ApprovalRequestInput,
+} from "../../permissions/approval-gate.js";
 import {
   __resetSessionStoreForTest,
   recordApproval,
@@ -62,7 +66,7 @@ import {
   setSandboxRequestedAtBoot,
 } from "../../permissions/sandbox-capability.js";
 import { getHostShellExecutionPlanAuditProjection } from "../../permissions/host-shell-execution-plan.js";
-import { makeMockWebContents } from "../../__tests__/test-helpers.js";
+import { makeMockWebContents, sentApprovalCards } from "../../__tests__/test-helpers.js";
 import { approvalCacheKeyFor } from "../pipeline/display-mask.js";
 
 // ─── Helpers ─────────────────────────────────────────
@@ -73,8 +77,8 @@ async function waitForApprovalPayload<T>(
 ): Promise<T> {
   const deadline = Date.now() + 4000;
   while (Date.now() < deadline) {
-    const payload = wc.send.mock.calls[index]?.[1];
-    if (payload) return payload as T;
+    const payload = sentApprovalCards<T>(wc)[index];
+    if (payload) return payload;
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error("approval request was not sent");
@@ -337,8 +341,8 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const wc = makeMockWebContents();
     const sent: import("../../permissions/approval-gate.js").ApprovalRequest[] = [];
     (wc.send as ReturnType<typeof vi.fn>).mockImplementation(
-      (_ch: string, req: import("../../permissions/approval-gate.js").ApprovalRequest) => {
-        sent.push(req);
+      (ch: string, req: import("../../permissions/approval-gate.js").ApprovalRequest) => {
+        if (ch === IPC_APPROVAL_REQUEST) sent.push(req);
       },
     );
     const gate = new ApprovalGate(wc as never);
@@ -2064,8 +2068,8 @@ describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
   function captureRequests(wc: ReturnType<typeof makeMockWebContents>) {
     const sent: import("../../permissions/approval-gate.js").ApprovalRequest[] = [];
     (wc.send as ReturnType<typeof vi.fn>).mockImplementation(
-      (_ch: string, req: import("../../permissions/approval-gate.js").ApprovalRequest) => {
-        sent.push(req);
+      (ch: string, req: import("../../permissions/approval-gate.js").ApprovalRequest) => {
+        if (ch === IPC_APPROVAL_REQUEST) sent.push(req);
       },
     );
     return sent;
@@ -3401,7 +3405,9 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       });
 
       const results = await callPromise;
-      expect(wc.send).toHaveBeenCalledTimes(1);
+      // One card for the whole call: the /dev/null operand is covered by the
+      // grant the user just gave, not asked about again.
+      expect(sentApprovalCards(wc)).toHaveLength(1);
       expect(results[0].is_error).toBeUndefined();
       expect(results[0].content).toContain("outside shell approved with null device");
     } finally {

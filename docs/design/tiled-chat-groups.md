@@ -295,13 +295,54 @@ The routing is one rule, `sessionOwnedBy`, applied by two readers:
 
 What no surface claims has one explicit home, the window's own dock: a
 request that names no conversation (a host or plugin ask), or a session no
-open surface holds (a headless routine's turn, a tile maximized away while its
-turn asked). That dock draws only unclaimed requests; it is those requests'
-home, not a catch-all behind the tiles. It is drawn over the route canvas from
-a `data-approval-scope` of its own, beside the tiles and an ancestor of none —
-so an unclaimed card covers no tile's composer and takes no tile's caret. The
-invariant, then: a `data-approval-scope` contains at most ONE composer, the one
-its dock may cover.
+open surface holds (a tile maximized away while its turn asked). That dock
+draws only unclaimed requests; it is those requests' home, not a catch-all
+behind the tiles. It has a `data-approval-scope` of its own, beside the tiles
+and an ancestor of none — so an unclaimed card covers no tile's composer and
+takes no tile's caret. The invariant, then: a `data-approval-scope` contains at
+most ONE composer, the one its dock may cover.
+
+The window's dock is a **band**, not a float: a flex sibling below the route
+canvas, so the space it takes is space the tile grid does not get. Over a
+conversation the float is right — the card covers that surface's own composer,
+which that surface inerts anyway. The window has no composer of its own and
+every composer on screen belongs to someone else, so floating there left `inert`
+and the caret correct while still winning the hit-test at a tile's textarea:
+keyboard-reachable, not mouse-clickable. Position follows the same rule the
+scope does — a surface may only take space from itself.
+
+Because a band takes its height out of the grid, its cap comes from the grid's
+own arithmetic rather than from a share of the viewport: the shortest tile must
+still clear `CHAT_GROUP_MIN_HEIGHT` plus the cell inset and the tile row's
+bottom gutter — the floor a split or a gutter drag already holds it to — and the
+band gets what is left, down to `WINDOW_DOCK_MIN_HEIGHT`, below which the card
+scrolls inside itself instead of taking more. A fraction of the window would be
+comfortable above one tile and starve four: measured at 1243x768 with a 2x2, an
+uncapped band leaves 138px frames, and the cap holds them at 242px.
+
+The floor is parity with the user's own gestures, not a promise of a readable
+tile: at `CHAT_GROUP_MIN_HEIGHT` the frame has no room left for a transcript in
+the current composer, with or without a band — dragging the window down to 540px
+tall reaches the same 240px frame and the same empty transcript with nothing
+docked at all. That is a property of the constant, not of the band.
+
+A headless or routine turn is **not** a source of cards here. It has no
+interactive approver by construction: the reviewer's headless lane answers
+`low → allow` and anything above it `deny` (`PermissionManager.resolveReviewerDecision`),
+so it never parks a request for a human. What actually populates the window's
+dock is therefore host and plugin asks that name no conversation, plus cards
+whose conversation left the screen while the ask was parked.
+
+The second kind used to stay forever. A card is normally taken down by the turn
+that asked it, and a tile that closes retires its parked ask host-side
+(`cause="tile closed"`) — but the surface that would have dropped the card has
+unmounted, so nothing renderer-side ever learned. The host therefore announces
+every settlement on `lvis:approval:settled`, and the window's one queue
+reconciles: a request that is no longer answerable leaves, wherever its card was
+drawn. Announced for every settlement rather than a chosen subset, because the
+renderer already dropped the ones it answered itself and a closed list of
+announced causes would be a second thing to keep in step with the gate's
+`settle`. A request whose own answer is in flight is left to that answer.
 
 The two unowned cases split on purpose. An unowned question is adopted by the
 focused tile at arrival: an answer needs a conversation to land in. An unowned
