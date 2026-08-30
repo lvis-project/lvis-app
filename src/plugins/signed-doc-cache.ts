@@ -118,17 +118,6 @@ async function safeReadTextFile(path: string): Promise<string | null> {
 }
 
 /**
- * This cache lives under `<userData>/` rather than `~/.lvis/`, but the write
- * contract is the one thing about it that is not location-specific: the copy
- * here staged to a random name and then neither locked the name with `O_EXCL`
- * nor fsynced anything, so a cached revocation document could be lost to a
- * power cut after the caller had been told it was written.
- */
-async function atomicWrite(path: string, content: string): Promise<void> {
-  await writeFileAtomicAtPath(path, content);
-}
-
-/**
  * Wraps the on-disk cache for one `<userData>/<subDir>/` directory.
  *
  * `docFilename` / `sigFilename` default to `document.json` / `document.json.sig`
@@ -178,9 +167,9 @@ export class SignedDocumentCache {
   async store(snapshot: SignedDocCacheSnapshot): Promise<void> {
     await mkdir(this.rootDir, { recursive: true });
     try {
-      await atomicWrite(this.bodyPath, snapshot.body);
-      await atomicWrite(this.sigPath, snapshot.signature);
-      await atomicWrite(this.metaPath, JSON.stringify(snapshot.meta, null, 2));
+      await writeFileAtomicAtPath(this.bodyPath, snapshot.body);
+      await writeFileAtomicAtPath(this.sigPath, snapshot.signature);
+      await writeFileAtomicAtPath(this.metaPath, JSON.stringify(snapshot.meta, null, 2));
     } catch (err) {
       log.warn(`store failed: %s`, (err as Error).message);
       throw err;
@@ -190,7 +179,7 @@ export class SignedDocumentCache {
   /** Persist just the meta record (used on 304 Not Modified path). */
   async storeMeta(meta: SignedDocCacheMeta): Promise<void> {
     await mkdir(this.rootDir, { recursive: true });
-    await atomicWrite(this.metaPath, JSON.stringify(meta, null, 2));
+    await writeFileAtomicAtPath(this.metaPath, JSON.stringify(meta, null, 2));
   }
 
   /**

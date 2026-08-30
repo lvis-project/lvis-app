@@ -510,7 +510,7 @@ RequestMetaObject {
 
 **Elicitation** `elicitation/create`: form `{mode?:"form", message, requestedSchema}` or url `{mode:"url", message, elicitationId, url}` → `ElicitResult { action: "accept"|"decline"|"cancel"; content? }`.
 
-**Errors (final numbering):** `-32021` `MISSING_REQUIRED_CLIENT_CAPABILITY` (`data.requiredCapabilities`; HTTP 400); `-32022` `UNSUPPORTED_PROTOCOL_VERSION` (`data.{supported,requested}`); `-32020` `HEADER_MISMATCH` (Streamable HTTP header/body mismatch, HTTP 400). Resource-not-found rides `-32602` (Invalid Params); the pre-final `-32002` is burned and MUST NOT be reused. **No "input-required" error code** — input-required is a success `resultType`. Method gated behind an unadvertised *server* capability ⇒ `-32601`.
+**Errors (final numbering, constants in `src/mcp/protocol-constants.ts`):** `-32021` `RPC_MISSING_REQUIRED_CLIENT_CAPABILITY` (`data.requiredCapabilities`; HTTP 400); `-32022` `RPC_UNSUPPORTED_PROTOCOL_VERSION` (`data.{supported,requested}`); `-32020` `RPC_HEADER_MISMATCH` (Streamable HTTP header/body mismatch, HTTP 400). Resource-not-found rides `-32602` (Invalid Params); the pre-final `-32002` is burned and MUST NOT be reused. **No "input-required" error code** — input-required is a success `resultType`. Method gated behind an unadvertised *server* capability ⇒ `-32601`.
 
 **Capabilities:** `ClientCapabilities { experimental?; roots?(dep); sampling?(dep); elicitation?{form?,url?}; extensions? }`; `ServerCapabilities { experimental?; logging?(dep); completions?; prompts?{listChanged?}; resources?{subscribe?,listChanged?}; tools?{listChanged?}; extensions? }`. `extensions` keys MUST be prefixed (e.g. `"io.modelcontextprotocol/tasks"`).
 

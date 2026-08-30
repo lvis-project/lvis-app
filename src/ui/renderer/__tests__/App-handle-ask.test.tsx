@@ -27,6 +27,7 @@ import { t } from "../../../i18n/runtime.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
 import { SESSION_LIST_MAX_LIMIT } from "../../../shared/session-lookup.js";
+import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
 /**
  * Submit a "/"-prefixed command through the composer. Typing "/foo" opens the
@@ -38,7 +39,7 @@ import { SESSION_LIST_MAX_LIMIT } from "../../../shared/session-lookup.js";
  */
 async function submitSlashCommand(container: HTMLElement, text: string): Promise<void> {
   const textarea = container.querySelector(
-    '[data-testid="composer-textarea"]',
+    testIdSelector(TEST_IDS.composerTextarea),
   ) as HTMLTextAreaElement | null;
   if (!textarea) throw new Error("composer textarea not found");
   await act(async () => {
@@ -291,7 +292,7 @@ describe("App.handleAsk — vision confirm gate on a text-only model", () => {
       expect(rendered.container.querySelector('[data-testid="attachment-chip"]')).not.toBeNull();
     });
     const textarea = rendered.container.querySelector(
-      '[data-testid="composer-textarea"]',
+      testIdSelector(TEST_IDS.composerTextarea),
     ) as HTMLTextAreaElement;
     expect(textarea.value).toContain("[Image #1]");
     return { ...rendered, textarea };

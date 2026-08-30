@@ -11,6 +11,7 @@ import {
   validateHostRendererSender,
 } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { utcDateKey } from "../../shared/local-date.js";
 
 const MAX_AUDIT_SEARCH_LIMIT = 500;
 const MAX_AUDIT_SEARCH_OFFSET = 1_000_000;
@@ -42,7 +43,7 @@ export function parseIsoDate(value: unknown, field: "dateFrom" | "dateTo"): stri
     throw invalidInput(`${field} must be an ISO date (YYYY-MM-DD)`);
   }
   const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+  if (!Number.isFinite(parsed.getTime()) || utcDateKey(parsed) !== value) {
     throw invalidInput(`${field} must be a real calendar date`);
   }
   return value;

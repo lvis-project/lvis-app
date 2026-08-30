@@ -15,6 +15,7 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { TokenCostBadge } from "../TokenCostBadge.js";
 import { computeCost, lookupPricing, type ModelPricing } from "../../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../../shared/llm-vendor-defaults.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 const sonnet: ModelPricing = { inputPer1M: 3, outputPer1M: 15, contextWindow: 200_000 };
 const gpt: ModelPricing = { inputPer1M: 2, outputPer1M: 8, contextWindow: 1_000_000 };
@@ -162,7 +163,7 @@ describe("TokenCostBadge — cost parity with shared computeCost", () => {
       </TooltipProvider>,
     );
 
-    const badge = screen.getByTestId("token-cost-badge");
+    const badge = screen.getByTestId(TEST_IDS.tokenCostBadge);
     expect(badge.getAttribute("data-usage-kind")).toBe("subscription");
     expect(badge.textContent).toContain("300");
     expect(badge.textContent).toContain("보고됨");
@@ -195,7 +196,7 @@ describe("TokenCostBadge \u2014 token counts come from the shared formatter", ()
       </TooltipProvider>,
     );
 
-    const headline = screen.getByTestId("token-cost-badge").querySelector("span");
+    const headline = screen.getByTestId(TEST_IDS.tokenCostBadge).querySelector("span");
     expect(headline?.textContent?.trim()).toBe(`\u{1FA99} ${rendered}`);
   });
 });

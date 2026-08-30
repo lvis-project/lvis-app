@@ -5,6 +5,7 @@ import { resolve as pathResolve } from "node:path";
 import { extractTargetFilePaths } from "../pipeline/path-extraction.js";
 import { DeleteFileTool, EditFileTool, WriteFileTool } from "../file-tools.js";
 import { expandLeadingTilde } from "../../shared/home-tilde.js";
+import { setProcessPlatform as setPlatform } from "../../__tests__/test-helpers.js";
 
 /**
  * The capability under test is AGREEMENT, so nothing here asserts on a helper
@@ -38,9 +39,6 @@ function toolTarget(tool: PathTool, input: object): string {
 }
 
 const realPlatform = process.platform;
-function setPlatform(value: NodeJS.Platform): void {
-  Object.defineProperty(process, "platform", { value, configurable: true });
-}
 afterEach(() => setPlatform(realPlatform));
 
 describe("tilde expansion — the permission target and the tool target are one string", () => {

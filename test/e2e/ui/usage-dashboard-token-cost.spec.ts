@@ -5,14 +5,11 @@ import { builtMainExists, launchSeededElectron, teardownSeededElectron,
 } from "./seeded-electron";
 import { closeInlineSettings, openInlineSettings } from "./inline-settings.js";
 import { makeTestT } from "./i18n";
+import { utcDateKey as todayKey } from "../../../src/shared/local-date.js";
 
 // This spec launches its own Electron via launchSeededElectron (default ko
 // settings), independent of the fixture's seedLocale, so bind `t` to that locale.
 const t = makeTestT("ko");
-
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function writeUsageAudit(lvisHome: string): void {
   const day = todayKey();

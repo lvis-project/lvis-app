@@ -58,15 +58,10 @@ vi.mock("../../audit/sandbox-audit-sink.js", async () => {
 });
 
 import { ToolExecutor } from "../executor.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { tryUserApprovalMemorySkip } from "../pipeline/approval-memory-skip.js";
-
-function userPermissionContext(
-  overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
-): import("../executor.js").ToolPermissionContext {
-  return { trustOrigin: "user-keyboard", ...overrides };
-}
 
 /** A permission manager whose checkDetailed returns a fixed result. */
 function pmReturning(result: ReturnType<PermissionManager["checkDetailed"]>): PermissionManager {

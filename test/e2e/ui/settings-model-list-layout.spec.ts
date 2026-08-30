@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.js';
 import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 /**
  * Settings → Model: the model dropdown's layout.
@@ -102,10 +103,10 @@ for (const bundleId of ['violet-light', 'violet-dark'] as const) {
         // The narrow shell is a 2-depth stack; drill into the Model category so
         // the model dropdown is on screen.
         await settingsPage.getByRole('tab', { name: /Model|모델/ }).first().click();
-        await expect(settingsPage.getByTestId('settings-mobile-back')).toBeVisible();
+        await expect(settingsPage.getByTestId(TEST_IDS.settingsMobileBack)).toBeVisible();
       }
 
-      const modelSelect = settingsPage.getByTestId('llm-model-select');
+      const modelSelect = settingsPage.getByTestId(TEST_IDS.llmModelSelect);
       await expect(modelSelect).toBeVisible({ timeout: 10_000 });
       // The seeded ids only reach the dropdown once the cache-hydration effect
       // has run; the sync status line reports the hydrated catalog size.

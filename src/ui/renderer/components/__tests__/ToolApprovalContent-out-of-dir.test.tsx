@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 const TARGET = "C:\\ProgramData\\lvis\\config.json";
 const PARENT = "C:\\ProgramData\\lvis";
@@ -61,11 +62,11 @@ describe("ToolApprovalContent out-of-allowed-dir — one frame, one decision row
     expect(screen.getByTestId("approval-tool-identity").textContent).toContain("read_file");
     expect(screen.getByTestId("approval-impact-summary").textContent)
       .toContain("허용된 디렉터리 밖을 읽으려 합니다");
-    expect(screen.getByTestId("approval-review-details")).toBeTruthy();
-    expect(screen.getByTestId("deny-button")).toHaveTextContent("거절");
-    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
-    expect(screen.getByTestId("approve-button")).toHaveTextContent("한 번만 허용");
-    expect(screen.getByTestId("open-permanent-deny-settings")).toBeTruthy();
+    expect(screen.getByTestId(TEST_IDS.approvalReviewDetails)).toBeTruthy();
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toHaveTextContent("거절");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId(TEST_IDS.approveButton)).toHaveTextContent("한 번만 허용");
+    expect(screen.getByTestId(TEST_IDS.openPermanentDenySettings)).toBeTruthy();
     // No second layout remains anywhere in the tree.
     expect(document.body.querySelector('[data-testid="docked-approval-panel"]')).toBeNull();
   });
@@ -74,17 +75,17 @@ describe("ToolApprovalContent out-of-allowed-dir — one frame, one decision row
     renderCard();
     // Fail-closed default selection is Reject, which grants nothing.
     expect(targetLine()).toContain("거부");
-    fireEvent.focus(screen.getByTestId("allow-always-button"));
+    fireEvent.focus(screen.getByTestId(TEST_IDS.allowAlwaysButton));
     expect(targetLine()).toContain(PARENT);
     expect(targetLine()).toContain("상위 폴더 전체");
-    fireEvent.focus(screen.getByTestId("approve-button"));
+    fireEvent.focus(screen.getByTestId(TEST_IDS.approveButton));
     expect(targetLine()).toContain(TARGET);
   });
 
   it("allow-always carries the host-resolved parent pattern and never writes the exact-args record", async () => {
     const { onDecide, record } = renderCard();
     await act(async () => {
-      fireEvent.click(screen.getByTestId("allow-always-button"));
+      fireEvent.click(screen.getByTestId(TEST_IDS.allowAlwaysButton));
     });
     expect(onDecide).toHaveBeenCalledWith("allow-always", PARENT);
     expect(record).not.toHaveBeenCalled();
@@ -93,10 +94,10 @@ describe("ToolApprovalContent out-of-allowed-dir — one frame, one decision row
   it("allow-once and deny stay narrow: no pattern, no record", async () => {
     const { onDecide, record } = renderCard();
     await act(async () => {
-      fireEvent.click(screen.getByTestId("approve-button"));
+      fireEvent.click(screen.getByTestId(TEST_IDS.approveButton));
     });
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
-    fireEvent.click(screen.getByTestId("deny-button"));
+    fireEvent.click(screen.getByTestId(TEST_IDS.denyButton));
     expect(onDecide).toHaveBeenCalledWith("deny-once");
     expect(record).not.toHaveBeenCalled();
   });
@@ -118,9 +119,9 @@ describe("ToolApprovalContent out-of-allowed-dir — one frame, one decision row
       },
     }));
     expect(screen.queryByTestId("approval-adjacency-warning")).toBeNull();
-    fireEvent.focus(screen.getByTestId("allow-always-button"));
+    fireEvent.focus(screen.getByTestId(TEST_IDS.allowAlwaysButton));
     expect(screen.getByTestId("approval-adjacency-warning").textContent).toContain(".git");
-    fireEvent.focus(screen.getByTestId("approve-button"));
+    fireEvent.focus(screen.getByTestId(TEST_IDS.approveButton));
     expect(screen.queryByTestId("approval-adjacency-warning")).toBeNull();
   });
 
@@ -133,17 +134,17 @@ describe("ToolApprovalContent out-of-allowed-dir — one frame, one decision row
         adjacencyWarnings: [],
       },
     }));
-    const always = screen.getByTestId("allow-always-button");
+    const always = screen.getByTestId(TEST_IDS.allowAlwaysButton);
     expect(always).toBeDisabled();
     expect(always).toHaveAttribute("title", "지속 허용할 안전한 검토 상위 폴더가 없습니다.");
     expect(screen.getByTestId("allow-always-unavailable-reason"))
       .toHaveTextContent("지속 허용할 안전한 검토 상위 폴더가 없습니다.");
-    expect(screen.getByTestId("deny-button")).toBeEnabled();
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toBeEnabled();
   });
 
   it("keeps host-forbidden persistence visible but disabled", () => {
     renderCard(makeRequest({ allowedChoices: ["allow-once", "deny-once"] }));
-    const always = screen.getByTestId("allow-always-button");
+    const always = screen.getByTestId(TEST_IDS.allowAlwaysButton);
     expect(always).toBeDisabled();
     expect(always).toHaveAttribute("title", "호스트가 이 요청을 일회성 결정으로 제한했습니다.");
     expect(screen.getByTestId("allow-always-unavailable-reason"))
@@ -155,7 +156,7 @@ describe("ToolApprovalContent out-of-allowed-dir — one frame, one decision row
     await act(async () => {
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     });
-    const always = screen.getByTestId("allow-always-button");
+    const always = screen.getByTestId(TEST_IDS.allowAlwaysButton);
     expect(always.dataset.proposed).toBe("true");
     expect(document.activeElement).toBe(always);
     expect(targetLine()).toContain(PARENT);
@@ -170,10 +171,10 @@ describe("ToolApprovalContent out-of-allowed-dir — one frame, one decision row
     await act(async () => {
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     });
-    const always = screen.getByTestId("allow-always-button");
+    const always = screen.getByTestId(TEST_IDS.allowAlwaysButton);
     expect(always).toBeDisabled();
     expect(always).not.toHaveAttribute("data-proposed");
-    expect(screen.getByTestId("deny-button").tabIndex).toBe(0);
+    expect(screen.getByTestId(TEST_IDS.denyButton).tabIndex).toBe(0);
   });
 
   it("Escape denies, unless the request requires an explicit choice", () => {
@@ -188,9 +189,9 @@ describe("ToolApprovalContent out-of-allowed-dir — one frame, one decision row
 
   it("locks every decision while an exact reject is being managed in Settings", () => {
     const { onDecide } = renderCard(makeRequest(), { interactionLocked: true });
-    expect(screen.getByTestId("deny-button")).toBeDisabled();
-    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
-    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toBeDisabled();
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
+    expect(screen.getByTestId(TEST_IDS.approveButton)).toBeDisabled();
     expect(screen.getByTestId("approval-decision-locked")).toBeTruthy();
     fireEvent.keyDown(panel(), { key: "Escape" });
     expect(onDecide).not.toHaveBeenCalled();

@@ -28,7 +28,13 @@ import { platform } from "node:process";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
-import { localDateKey, localDayRange, shiftLocalDateKey } from "../shared/local-date.js";
+import {
+  localDateKey,
+  localDayRange,
+  shiftLocalDateKey,
+  utcDateKey,
+  UTC_DATE_KEY_LENGTH,
+} from "../shared/local-date.js";
 import {
   computeDailySeal,
   computeLineHmac,
@@ -439,27 +445,12 @@ function normalizePositiveInteger(value: number | undefined, fallback: number): 
   return value;
 }
 
-/** Length of the `YYYY-MM-DD` prefix every partition file name starts with. */
-const UTC_DATE_KEY_LENGTH = 10;
-
 /**
  * Infix that marks a file as quarantined rows whose HMAC seal did not verify.
  * The naming is the whole signal `_filesOverlapping` has to keep them out of
  * reads, so both writers that quarantine a tail build their name from THIS.
  */
 const UNVERIFIED_QUARANTINE_MARKER = "-unverified-";
-
-/**
- * The UTC civil day `YYYY-MM-DD` that partitions entries written at `date`.
- *
- * Exported because the diagnostics bundle reads the SAME window twice — once as
- * audit rows through {@link AuditLogger.search}, once as log files named by the
- * UTC day they were written on — and the two must agree on which UTC days a
- * host-local range touches.
- */
-export function utcDateKey(date: Date): string {
-  return date.toISOString().slice(0, UTC_DATE_KEY_LENGTH);
-}
 
 /**
  * The instant an audit row was written, as epoch milliseconds (`NaN` when the

@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * Live checks the offline suites cannot make:
@@ -23,7 +24,7 @@ test.describe('live plugin + scope', () => {
   test('a real model calls a plugin tool', async ({ mainWindow }) => {
     test.skip(mode !== 'allow', 'needs LVIS_E2E_PERMISSION_MODE=allow');
 
-    const composer = mainWindow.locator('[data-testid="composer-textarea"]').first();
+    const composer = mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea)).first();
     await expect(composer).toBeEnabled({ timeout: 60_000 });
 
     // Prove the seeded mode actually took. A partial permissions.json is
@@ -62,7 +63,7 @@ test.describe('live plugin + scope', () => {
   test('a path outside the allowed directories reaches the scope review', async ({ mainWindow, t }) => {
     test.skip(mode !== 'default', 'needs LVIS_E2E_PERMISSION_MODE=default');
 
-    const composer = mainWindow.locator('[data-testid="composer-textarea"]').first();
+    const composer = mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea)).first();
     await expect(composer).toBeEnabled({ timeout: 60_000 });
 
     await composer.fill(

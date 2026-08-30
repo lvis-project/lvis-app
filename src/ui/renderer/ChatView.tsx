@@ -49,6 +49,7 @@ import { TranscriptRenderer, type TurnSummary } from "./components/TranscriptRen
 import { ChatTranscript } from "./components/ChatTranscript.js";
 import { ChatComposerDock } from "./components/ChatComposerDock.js";
 import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
+import { TEST_IDS } from "../../shared/test-ids.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -668,7 +669,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     <div
       ref={chatViewRootRef}
       className="relative flex min-h-0 min-w-0 w-full flex-1 flex-row overflow-hidden"
-      data-testid="chat-view-root"
+      data-testid={TEST_IDS.chatViewRoot}
     >
       <div
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [container-type:size]"

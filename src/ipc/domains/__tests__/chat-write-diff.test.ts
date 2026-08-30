@@ -157,14 +157,6 @@ async function setupHandlers(loop: ReturnType<typeof makeConversationLoop>) {
   return deps;
 }
 
-function invoke(channel: string, ...args: unknown[]): unknown {
-  return invokeRegisteredHandler(handlers, channel, ...args);
-}
-
-function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): unknown {
-  return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
-}
-
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("lvis:chat:get-write-diff", () => {
@@ -177,7 +169,7 @@ describe("lvis:chat:get-write-diff", () => {
     await setupHandlers(loop);
     mockReadDiffSidecar.mockResolvedValue({ before: "old content", after: "new content" });
 
-    const result = await invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: TOOL_USE_ID });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: TOOL_USE_ID });
     expect(result).toEqual({ before: "old content", after: "new content" });
     expect(mockReadDiffSidecar).toHaveBeenCalledWith(SESSION_ID, TOOL_USE_ID);
   });
@@ -187,7 +179,7 @@ describe("lvis:chat:get-write-diff", () => {
     await setupHandlers(loop);
     mockReadDiffSidecar.mockResolvedValue(null);
 
-    const result = await invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: TOOL_USE_ID });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: TOOL_USE_ID });
     expect(result).toBeNull();
   });
 
@@ -195,7 +187,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: "../../etc/passwd", toolUseId: TOOL_USE_ID });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "../../etc/passwd", toolUseId: TOOL_USE_ID });
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -204,7 +196,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "../evil" });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: SESSION_ID, toolUseId: "../evil" });
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -213,7 +205,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: "", toolUseId: TOOL_USE_ID });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "", toolUseId: TOOL_USE_ID });
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -222,7 +214,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: 123, toolUseId: null });
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: 123, toolUseId: null });
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -231,7 +223,7 @@ describe("lvis:chat:get-write-diff", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, null);
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, null);
     expect(result).toBeNull();
     expect(mockReadDiffSidecar).not.toHaveBeenCalled();
   });
@@ -242,7 +234,7 @@ describe("lvis:llm:ping", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:llm:ping",
       { senderFrame: { url: "https://evil.example/app" } },
     );
@@ -254,7 +246,7 @@ describe("lvis:llm:ping", () => {
     const loop = makeConversationLoop(SESSION_ID);
     await setupHandlers(loop);
 
-    const result = await invoke("lvis:llm:ping");
+    const result = await invokeRegisteredHandler(handlers, "lvis:llm:ping");
     expect(result).toMatchObject({ configured: true, online: true });
     expect(loop.pingProvider).toHaveBeenCalledOnce();
   });
@@ -286,7 +278,7 @@ describe("lvis:memory:long-term:refresh", () => {
     const { registerChatHandlers } = await import("../chat.js");
     registerChatHandlers(deps);
 
-    const result = await invokeWithEvent(CHANNEL, hostFrameEvent());
+    const result = await invokeRegisteredHandlerWithEvent(handlers, CHANNEL, hostFrameEvent());
 
     expect(result).toEqual({ ok: true, ...updated });
     expect(refresh).toHaveBeenCalledWith({
@@ -309,7 +301,7 @@ describe("lvis:memory:long-term:refresh", () => {
     const { registerChatHandlers } = await import("../chat.js");
     registerChatHandlers(deps);
 
-    await invokeWithEvent(CHANNEL, hostFrameEvent());
+    await invokeRegisteredHandlerWithEvent(handlers, CHANNEL, hostFrameEvent());
 
     expect(refresh).toHaveBeenCalledWith({ reason: "manual" });
     expect(loop.getSessionMemoryProjectContext).not.toHaveBeenCalled();
@@ -319,7 +311,7 @@ describe("lvis:memory:long-term:refresh", () => {
     const loop = makeConversationLoop(SESSION_ID);
     const unavailableDeps = await setupHandlers(loop) as any;
 
-    expect(await invokeWithEvent(CHANNEL, hostFrameEvent())).toEqual({
+    expect(await invokeRegisteredHandlerWithEvent(handlers, CHANNEL, hostFrameEvent())).toEqual({
       ok: false,
       error: "memory-consolidation-service-unavailable",
     });
@@ -332,7 +324,7 @@ describe("lvis:memory:long-term:refresh", () => {
     const { registerChatHandlers } = await import("../chat.js");
     registerChatHandlers(unavailableDeps);
 
-    expect(await invokeWithEvent(CHANNEL, hostFrameEvent())).toEqual({
+    expect(await invokeRegisteredHandlerWithEvent(handlers, CHANNEL, hostFrameEvent())).toEqual({
       ok: false,
       error: "memory-consolidation-failed",
     });
@@ -347,7 +339,7 @@ describe("lvis:memory:long-term:refresh", () => {
     const { registerChatHandlers } = await import("../chat.js");
     registerChatHandlers(deps);
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       CHANNEL,
       foreignFrameEvent("file:///Applications/Lvis.app/dist/plugin-ui-shell.html"),
     );
@@ -362,8 +354,8 @@ describe("lvis:memory:index:get project options", () => {
     const loop = makeConversationLoop(SESSION_ID);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:memory:index:get");
-    await invoke("lvis:memory:index:get", { projectRoot: process.cwd(), projectName: "spoofed-workspace-name" });
+    await invokeRegisteredHandler(handlers, "lvis:memory:index:get");
+    await invokeRegisteredHandler(handlers, "lvis:memory:index:get", { projectRoot: process.cwd(), projectName: "spoofed-workspace-name" });
 
     expect(deps.memoryManager.getMemoryIndex).toHaveBeenNthCalledWith(1, {});
     expect(deps.memoryManager.getMemoryIndex).toHaveBeenNthCalledWith(2, {
@@ -391,7 +383,7 @@ describe("lvis:memory:candidates lifecycle", () => {
     }];
     deps.memoryManager.listMemoryCandidates.mockReturnValue(candidates);
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:candidates:list", hostFrameEvent(),
     );
 
@@ -403,7 +395,7 @@ describe("lvis:memory:candidates lifecycle", () => {
     const loop = makeConversationLoop(SESSION_ID);
     const deps = await setupHandlers(loop);
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:candidates:list",
       foreignFrameEvent("file:///Applications/Lvis.app/dist/plugin-ui-shell.html"),
     );
@@ -424,7 +416,7 @@ describe("lvis:memory:candidates lifecycle", () => {
     };
     deps.memoryManager.activateMemoryCandidate.mockResolvedValue(activated);
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:candidates:activate",
       hostFrameEvent(),
       { id: CANDIDATE_ID },
@@ -438,7 +430,7 @@ describe("lvis:memory:candidates lifecycle", () => {
     const loop = makeConversationLoop(SESSION_ID);
     const deps = await setupHandlers(loop);
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:candidates:delete",
       foreignFrameEvent("file:///Applications/Lvis.app/dist/plugin-ui-shell.html"),
       { id: CANDIDATE_ID },
@@ -455,12 +447,12 @@ describe("lvis:memory:candidates lifecycle", () => {
       new Error("deleteMemoryCandidate: candidate not found"),
     );
 
-    const malformed = await invokeWithEvent(
+    const malformed = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:candidates:delete",
       hostFrameEvent(),
       { id: CANDIDATE_ID, unexpected: true },
     );
-    const missing = await invokeWithEvent(
+    const missing = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:candidates:delete",
       hostFrameEvent(),
       { id: CANDIDATE_ID },
@@ -475,13 +467,13 @@ describe("lvis:memory:candidates lifecycle", () => {
     const loop = makeConversationLoop(SESSION_ID);
     const deps = await setupHandlers(loop);
 
-    const rejected = await invokeWithEvent(
+    const rejected = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:entries:delete",
       hostFrameEvent(),
       "proposal.md",
       { projectRoot: "/not-an-authorized-workspace" },
     );
-    const deleted = await invokeWithEvent(
+    const deleted = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:memory:entries:delete",
       hostFrameEvent(),
       "proposal.md",
@@ -518,7 +510,7 @@ describe("lvis:memory:entries:save review gate", () => {
     deps.memoryCaptureService = { captureExplicit };
     await registerWithReviewer(deps);
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       CHANNEL,
       hostFrameEvent(),
       "Preferred style",
@@ -544,7 +536,7 @@ describe("lvis:memory:entries:save review gate", () => {
     deps.memoryCaptureService = { captureExplicit };
     await registerWithReviewer(deps);
 
-    await expect(invokeWithEvent(
+    await expect(invokeRegisteredHandlerWithEvent(handlers,
       CHANNEL,
       hostFrameEvent(),
       "Untrusted title",

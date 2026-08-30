@@ -14,6 +14,7 @@ import { resolve, join, relative, isAbsolute } from "node:path";
 import type { Dirent } from "node:fs";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { parseFrontmatterBlock, unquoteFrontmatterValue } from "./skill-store.js";
 
 const log = createLogger("lvis");
 
@@ -50,25 +51,16 @@ export function parseAgentFrontmatter(raw: string): {
   fm: AgentProfileFrontmatter;
   body: string;
 } {
-  const fmRegex = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/;
-  const match = raw.match(fmRegex);
-  if (!match) {
-    return { fm: { name: "" }, body: raw };
-  }
-  const [full, block] = match;
-  const body = raw.slice(full.length);
+  const { fields, body } = parseFrontmatterBlock(raw);
   const fm: AgentProfileFrontmatter = { name: "" };
-  for (const line of block.split(/\r?\n/)) {
-    const m = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1];
-    const val = m[2].trim().replace(/^["']|["']$/g, "");
+  for (const [key, rawValue] of fields) {
+    const val = unquoteFrontmatterValue(rawValue);
     if (key === "name") fm.name = val;
     else if (key === "description") fm.description = val;
     else if (key === "model") fm.model = val;
     else if (key === "mode") fm.mode = val;
-    else if (key === "tools") fm.tools = parseStringList(m[2]);
-    else if (key === "triggers") fm.triggers = parseStringList(m[2]);
+    else if (key === "tools") fm.tools = parseStringList(rawValue);
+    else if (key === "triggers") fm.triggers = parseStringList(rawValue);
   }
   return { fm, body };
 }
@@ -80,7 +72,7 @@ function parseStringList(raw: string): string[] {
     : trimmed;
   return inner
     .split(",")
-    .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+    .map(unquoteFrontmatterValue)
     .filter((s) => s.length > 0);
 }
 

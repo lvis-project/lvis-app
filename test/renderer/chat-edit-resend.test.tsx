@@ -17,6 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { renderApp } from "./render-app.js";
 import { clearQueueStoreHandle, deferred, getQueueStore, submitChatMessage } from "./helpers.js";
 import { MOCK_DEFAULT_SESSION_ID } from "./mock-lvis-api.js";
+import { TEST_IDS, testIdSelector } from "../../src/shared/test-ids.js";
 
 describe("Chat edit & resend (Phase 3.2 regression net)", () => {
   it("submitting a user message appends a user entry", async () => {
@@ -296,7 +297,7 @@ describe("Return here — rewind without resending", () => {
     });
 
   const composer = (container: HTMLElement) =>
-    container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement;
+    container.querySelector(testIdSelector(TEST_IDS.composerTextarea)) as HTMLTextAreaElement;
 
   it("cuts the persisted history at the message and drops everything after it", async () => {
     const { container, api } = await renderApp({ history: answeredTurn });

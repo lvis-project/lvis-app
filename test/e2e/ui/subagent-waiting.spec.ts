@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { AgentSpawnEvent } from "../../../src/shared/subagent-events.js";
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 
 test("budget-suspended sub-agent renders waiting in the workspace rail", async ({
@@ -7,7 +8,7 @@ test("budget-suspended sub-agent renders waiting in the workspace rail", async (
   mainWindow,
   t,
 }) => {
-  await expect(mainWindow.getByTestId("chat-view-root")).toBeVisible();
+  await expect(mainWindow.getByTestId(TEST_IDS.chatViewRoot)).toBeVisible();
 
   const events = [
     {

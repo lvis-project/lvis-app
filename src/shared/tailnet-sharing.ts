@@ -8,6 +8,7 @@
  * never appear in a snapshot or change event.
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
+import { UUID_PATTERN } from "./uuid.js";
 import { hasExactKeys } from "./is-record.js";
 import { isNonNegativeSafeInteger } from "./safe-integer.js";
 
@@ -130,7 +131,6 @@ export interface TailnetSharingOwnerApi {
   onChanged(handler: () => void): () => void;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACTOR_FINGERPRINT = /^[a-f0-9]{12}$/;
 const INVITATION_CODE = /^lvis-pair-v1\.[A-Za-z0-9_-]{43}$/;
 
@@ -139,7 +139,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 export function isTailnetSharingId(value: unknown): value is string {
-  return typeof value === "string" && UUID.test(value);
+  return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
 export function isTailnetInvitationDurationPreset(value: unknown): value is TailnetInvitationDurationPreset {

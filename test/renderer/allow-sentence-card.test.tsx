@@ -17,6 +17,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import { submitChatMessage } from "./helpers.js";
+import { TEST_IDS, testIdSelector } from "../../src/shared/test-ids.js";
 
 const TARGET = "/home/example/reports/q3.md";
 const PARENT = "/home/example/reports";
@@ -48,7 +49,7 @@ async function appWithPendingApproval() {
     app.emitApproval(approvalRequest());
   });
   await waitFor(() =>
-    expect(app.container.querySelector('[data-testid="approval-dock"]')).toBeTruthy(),
+    expect(app.container.querySelector(testIdSelector(TEST_IDS.approvalDock))).toBeTruthy(),
   );
   return app;
 }
@@ -101,7 +102,7 @@ describe("/allow — the sentence fills the form", () => {
 
     // THE point: nothing has been decided. The card is still up.
     expect(ns.approval.respond).not.toHaveBeenCalled();
-    expect(app.container.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
+    expect(app.container.querySelector(testIdSelector(TEST_IDS.approvalDock))).toBeTruthy();
 
     // Only the press decides.
     await act(async () => {
@@ -147,7 +148,7 @@ describe("/allow — the sentence fills the form", () => {
       );
     });
     await waitFor(() =>
-      expect(app.container.querySelector('[data-testid="approval-dock"]')).toBeTruthy(),
+      expect(app.container.querySelector(testIdSelector(TEST_IDS.approvalDock))).toBeTruthy(),
     );
     const ns = window.lvis as unknown as {
       approval: { selectSentence: ReturnType<typeof vi.fn>; respond: ReturnType<typeof vi.fn> };
@@ -194,7 +195,7 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
     expect(ns.approval.respond).not.toHaveBeenCalled();
     expect(app.api.chatSend).not.toHaveBeenCalled();
     expect(app.container.querySelector("[data-proposed]")).toBeNull();
-    expect(app.container.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
+    expect(app.container.querySelector(testIdSelector(TEST_IDS.approvalDock))).toBeTruthy();
   });
 
   it.each([
@@ -301,7 +302,7 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
     });
     await waitFor(() =>
       expect(
-        app.container.querySelector('[data-testid="approval-dock"]')
+        app.container.querySelector(testIdSelector(TEST_IDS.approvalDock))
           ?.getAttribute("data-approval-request-id"),
       ).toBe("req-allow-2"),
     );
@@ -312,7 +313,7 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
     expect(document.activeElement).toBe(choice(app.container, "deny-once"));
     expect(choice(app.container, "allow-always")?.tabIndex).toBe(-1);
     expect(
-      app.container.querySelector('[data-testid="approval-review-details"]')?.textContent,
+      app.container.querySelector(testIdSelector(TEST_IDS.approvalReviewDetails))?.textContent,
     ).toContain("/home/example/reports/q4.md");
     expect(ns.approval.respond).toHaveBeenCalledTimes(1);
   });

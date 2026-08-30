@@ -7,6 +7,7 @@ import { Composer, type ComposerHandle } from "../Composer.js";
 import type { Attachment } from "../../types/attachments.js";
 import type { QuickAction } from "../command-actions.js";
 import type { NativeContextMenuAction } from "../../../../shared/native-context-menu.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 const mockSave = vi.fn(async () => ({ ok: true }));
 
@@ -53,7 +54,7 @@ describe("inline / autocomplete in the composer", () => {
 
   it("opens the menu when typing a leading slash", () => {
     const { getByTestId, queryByTestId } = render(<Harness />);
-    const ta = getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     expect(queryByTestId("inline-slash-menu")).toBeNull();
     act(() => typeInto(ta, "/se"));
     expect(getByTestId("inline-slash-menu")).toBeTruthy();
@@ -61,7 +62,7 @@ describe("inline / autocomplete in the composer", () => {
 
   it("does NOT open the menu for a URL slash (https://)", () => {
     const { getByTestId, queryByTestId } = render(<Harness />);
-    const ta = getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     act(() => typeInto(ta, "see https://x"));
     expect(queryByTestId("inline-slash-menu")).toBeNull();
   });
@@ -69,7 +70,7 @@ describe("inline / autocomplete in the composer", () => {
   it("Enter accepts the highlighted command and inserts it (does not send)", () => {
     const onSendCb = vi.fn();
     const { getByTestId } = render(<Harness onSendCb={onSendCb} />);
-    const ta = getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     act(() => typeInto(ta, "/sess"));
     expect(getByTestId("inline-slash-menu")).toBeTruthy();
     act(() => {
@@ -82,7 +83,7 @@ describe("inline / autocomplete in the composer", () => {
 
   it("Escape dismisses the menu", () => {
     const { getByTestId, queryByTestId } = render(<Harness />);
-    const ta = getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     act(() => typeInto(ta, "/se"));
     expect(getByTestId("inline-slash-menu")).toBeTruthy();
     act(() => {
@@ -95,7 +96,7 @@ describe("inline / autocomplete in the composer", () => {
     const run = vi.fn();
     const actions: QuickAction[] = [{ id: "home", label: "홈으로", run }];
     const { getByTestId } = render(<Harness actions={actions} />);
-    const ta = getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     // Query that matches only the shortcut, not any built-in command.
     act(() => typeInto(ta, "/홈"));
     expect(getByTestId("inline-slash-menu")).toBeTruthy();
@@ -126,7 +127,7 @@ describe("inline / autocomplete in the composer", () => {
     });
 
     const { getByTestId } = render(<Harness />);
-    const ta = getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     act(() => typeInto(ta, "/"));
     const row = getByTestId("inline-slash-item-1");
     expect(row.textContent).toContain("/sessions");

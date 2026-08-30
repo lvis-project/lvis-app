@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * A real turn, driven through the real app.
@@ -22,7 +23,7 @@ test.describe('live model turn', () => {
   test.use({ seedRepositoryPlugins: false });
 
   test('answers a prompt end to end', async ({ mainWindow }) => {
-    const composer = mainWindow.locator('[data-testid="composer-textarea"]').first();
+    const composer = mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea)).first();
     await expect(composer).toBeVisible({ timeout: 60_000 });
 
     // A composer that is present but disabled is the failure this catches:

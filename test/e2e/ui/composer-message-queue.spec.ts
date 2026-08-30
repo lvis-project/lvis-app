@@ -14,6 +14,7 @@
  * - ApprovalQueueStatus floating chip 제거 (DOM 부재)
  */
 import { test, expect } from './fixtures';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * The side chat renders the SAME composer, queue panel, and turn control as the
@@ -27,11 +28,11 @@ const MAIN = '[data-composer-surface="main"] ';
 
 test('idle: composer input-bar contains textarea only (no Send/Stop/Guide buttons)', async ({ mainWindow }) => {
   // textarea 존재
-  const textarea = mainWindow.locator(MAIN + '[data-testid="composer-textarea"]');
+  const textarea = mainWindow.locator(MAIN + testIdSelector(TEST_IDS.composerTextarea));
   await expect(textarea).toBeVisible();
 
   // input-bar 안 v6 이전의 Send/Stop/Guide 버튼은 사라짐
-  const inputBar = mainWindow.locator(MAIN + '[data-testid="composer-input-bar"]');
+  const inputBar = mainWindow.locator(MAIN + testIdSelector(TEST_IDS.composerInputBar));
   await expect(inputBar).toBeVisible();
   // input-bar 직하 자식 button 0 (textarea 만)
   const buttonsInsideInputBar = inputBar.locator('> button');

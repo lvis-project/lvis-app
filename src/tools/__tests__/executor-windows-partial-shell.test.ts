@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDynamicTool, type Tool } from "../base.js";
 import { BashTool } from "../shell-tools.js";
-import { ToolExecutor, type ToolCallMeta, type ToolPermissionContext } from "../executor.js";
+import { ToolExecutor, type ToolCallMeta } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import {
@@ -28,12 +28,9 @@ import {
 import type { AuditEntry, AuditLogger } from "../../audit/audit-logger.js";
 import type { PermissionAuditEntryInput } from "../../audit/audit-schema.js";
 import { getHostShellExecutionPlanAuditProjection } from "../../permissions/host-shell-execution-plan.js";
+import { userPermissionContext as permissionContext } from "./tool-context-fixture.js";
 
 const ORIGINAL_PLATFORM = process.platform;
-
-function permissionContext(overrides: Partial<ToolPermissionContext> = {}): ToolPermissionContext {
-  return { trustOrigin: "user-keyboard", ...overrides };
-}
 
 function shellProbe(execute: (ctx: import("../types.js").ToolExecutionContext) => void): Tool {
   const tool = new BashTool();

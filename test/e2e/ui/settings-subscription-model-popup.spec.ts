@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures.js';
 import { openInlineSettings } from './inline-settings.js';
 import type { ElectronApplication, Page } from '@playwright/test';
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 /**
  * Settings → Model → subscription provider: the model dropdown's placement.
@@ -60,13 +61,13 @@ async function setWindowSize(app: ElectronApplication, w: number): Promise<void>
 async function gotoModelTab(w: Page): Promise<void> {
   const layout = await w.locator('[data-settings-layout]').getAttribute('data-settings-layout');
   if (layout === 'narrow') {
-    const back = w.getByTestId('settings-mobile-back');
+    const back = w.getByTestId(TEST_IDS.settingsMobileBack);
     if (await back.isVisible()) {
       await back.click();
       await w.waitForTimeout(300);
     }
     await w.getByRole('tab', { name: /Model|모델/ }).first().click();
-    await expect(w.getByTestId('settings-mobile-back')).toBeVisible();
+    await expect(w.getByTestId(TEST_IDS.settingsMobileBack)).toBeVisible();
   }
 }
 

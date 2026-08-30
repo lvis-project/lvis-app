@@ -18,6 +18,7 @@ import type {
   NativeContextMenuAction,
   NativeContextMenuPayload,
 } from "../../../../shared/native-context-menu.js";
+import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../../shared/test-ids.js";
 
 let nativeContextActionHandler: ((action: NativeContextMenuAction) => void) | null = null;
 let previousWindowLvis: unknown;
@@ -193,12 +194,12 @@ describe("ChatSidePanel", () => {
 
     // Six launcher items (side-chat is now a launcher item — its engine ships
     // in this PR).
-    expect(screen.getByTestId("chat-side-panel-launcher-preview")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-launcher-terminal")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-launcher-browser")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-launcher-file-browser")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-launcher-subagent")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-launcher-side-chat")).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("preview"))).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("terminal"))).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("browser"))).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("file-browser"))).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("subagent"))).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("side-chat"))).toBeTruthy();
 
     // Shortcut hints are displayed for the bound items.
     expect(screen.getByText("⌃⇧G")).toBeTruthy();
@@ -218,7 +219,7 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("browser")));
     // Launcher gone, a browser tab is active.
     expect(screen.queryByTestId("chat-side-panel-launcher")).toBeNull();
     expect(screen.getAllByRole("tab")).toHaveLength(1);
@@ -254,7 +255,7 @@ describe("ChatSidePanel", () => {
     );
 
     // Open one tab so the tab bar (and its actions) render.
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     // Single "+" button; the old per-kind add buttons are gone.
     expect(screen.getByTestId("chat-side-panel-add-tab")).toBeTruthy();
     expect(screen.queryByTestId("chat-side-panel-add-browser-tab")).toBeNull();
@@ -264,8 +265,8 @@ describe("ChatSidePanel", () => {
 
     // The "+" dropdown opens the same launcher items and creates a tab.
     openLauncherMenu();
-    expect(screen.getByTestId("chat-side-panel-launcher-menu-browser")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-menu-browser"));
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("menu-browser"))).toBeTruthy();
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("menu-browser")));
     expect(screen.getByTestId("chat-side-panel-tab-browser")).toBeTruthy();
     expect(screen.getAllByRole("tab").length).toBe(2);
   });
@@ -281,7 +282,7 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-terminal"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("terminal")));
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     // Every tab is closeable — click the close affordance.
     fireEvent.click(screen.getByLabelText(/Close tab|탭 닫기/i));
@@ -301,7 +302,7 @@ describe("ChatSidePanel", () => {
     );
 
     // A single browser tab: the label carries no meaningless "1".
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("browser")));
     let browserTabs = screen.getAllByTestId("chat-side-panel-tab-browser");
     expect(browserTabs).toHaveLength(1);
     expect(browserTabs[0].textContent).not.toMatch(/\d/);
@@ -345,7 +346,7 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-preview"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("preview")));
     const tab = screen.getByTestId("chat-side-panel-tab-preview");
     // Label shows content name + ordinal only — no "2" count of preview targets.
     expect(tab.textContent).not.toMatch(/2/);
@@ -419,7 +420,7 @@ describe("ChatSidePanel", () => {
 
     // Open a file-browser tab from the launcher; the top pane defaults to the
     // Directory source, so switch to the Session files segment to see artifacts.
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     fireEvent.click(screen.getByTestId("chat-side-panel-file-source-session"));
     expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
     // Each session file says why it is listed: the operation that put it there,
@@ -490,7 +491,7 @@ describe("ChatSidePanel", () => {
     // Empty at mount (launcher, no tabs).
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     // Add a browser tab via the launcher.
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("browser")));
     expect(screen.getAllByRole("tab")).toHaveLength(1);
 
     // Unmount the panel (session switch / rail close) — the harness (store)
@@ -507,7 +508,7 @@ describe("ChatSidePanel", () => {
         />
       </TooltipProvider>,
     );
-    expect(screen.queryByTestId("chat-side-panel")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.chatSidePanel)).toBeNull();
 
     // Remount the panel — the added tab is still present (state survived).
     rerender(
@@ -521,7 +522,7 @@ describe("ChatSidePanel", () => {
         />
       </TooltipProvider>,
     );
-    expect(screen.getByTestId("chat-side-panel")).toBeTruthy();
+    expect(screen.getByTestId(TEST_IDS.chatSidePanel)).toBeTruthy();
     expect(screen.getAllByRole("tab")).toHaveLength(1);
   });
 
@@ -570,7 +571,7 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-preview"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("preview")));
     await waitFor(() => {
       // The optional third value is an immutable loopback generation, not CSP.
       // Main derives CSP from the resource's own _meta.ui.csp that it just fetched.
@@ -593,7 +594,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     expect(screen.getByTestId("chat-side-panel-project-roots")).toBeTruthy();
     // The tab strip is the drag/scroll container (role=tablist with the ref).
     expect(screen.getByTestId("chat-side-panel-tab-scroll")).toBeTruthy();
@@ -623,7 +624,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     fireEvent.click(screen.getByTestId("chat-side-panel-add-root"));
     await waitFor(() => expect(pickRoot).toHaveBeenCalledTimes(1));
   });
@@ -657,7 +658,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const zone = screen.getByTestId("chat-side-panel-project-roots");
     const dataTransfer = { files: [{ name: "dropped-proj" }] as unknown as FileList, dropEffect: "" };
     fireEvent.drop(zone, { dataTransfer });
@@ -692,7 +693,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const zone = screen.getByTestId("chat-side-panel-project-roots");
     fireEvent.drop(zone, { dataTransfer: { files: [{ name: ".ssh" }] as unknown as FileList } });
 
@@ -727,7 +728,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const zone = screen.getByTestId("chat-side-panel-project-roots");
     fireEvent.drop(zone, { dataTransfer: { files: [{ name: "note.txt" }] as unknown as FileList } });
 
@@ -757,7 +758,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const zone = screen.getByTestId("chat-side-panel-project-roots");
     fireEvent.drop(zone, { dataTransfer: { files: [] as unknown as FileList } });
 
@@ -790,7 +791,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const fileRow = await screen.findByTestId("chat-side-panel-fs-file");
     fireEvent.click(fileRow);
     await waitFor(() => expect(readFile).toHaveBeenCalledWith("/ws/docs/architecture.md"));
@@ -815,7 +816,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
 
     // The failing active-root load surfaces an error and is NOT retried forever.
     await screen.findByTestId("chat-side-panel-fs-error");
@@ -862,7 +863,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     fireEvent.click(screen.getByTestId("chat-side-panel-add-root"));
 
     // Warning banner appears; the pick was NOT persisted (no ack yet).
@@ -943,7 +944,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const tree = await screen.findByRole("tree");
     const items = within(tree).getAllByRole("treeitem");
     expect(items.length).toBe(3);
@@ -960,7 +961,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const tree = await screen.findByRole("tree");
     fireEvent.keyDown(tree, { key: "ArrowDown" });
     const items = within(tree).getAllByRole("treeitem");
@@ -976,7 +977,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const tree = await screen.findByRole("tree");
     // First row is "alpha" (a directory) and is the active item.
     fireEvent.keyDown(tree, { key: "Enter" });
@@ -989,7 +990,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const tree = await screen.findByRole("tree");
     fireEvent.keyDown(tree, { key: "r" }); // -> readme.md
     const items = within(tree).getAllByRole("treeitem");
@@ -1001,7 +1002,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const fileRow = await screen.findByText("readme.md");
     fireEvent.contextMenu(fileRow.closest('[role="treeitem"]') ?? fileRow);
     expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
@@ -1022,7 +1023,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const fileRow = await screen.findByText("readme.md");
     fireEvent.contextMenu(fileRow.closest('[role="treeitem"]') ?? fileRow);
     emitLastNativeContextCommand("workspace.copy-path");
@@ -1034,7 +1035,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     // Default root active -> no remove button.
     await screen.findByTestId("chat-side-panel-add-root");
     expect(screen.queryByTestId("chat-side-panel-remove-root")).toBeNull();
@@ -1061,7 +1062,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const select = (await screen.findByTestId("chat-side-panel-root-select")) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "/ws/proj" } });
     fireEvent.click(await screen.findByTestId("chat-side-panel-remove-root"));
@@ -1094,7 +1095,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const select = (await screen.findByTestId("chat-side-panel-root-select")) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "/ws/proj" } });
     fireEvent.click(await screen.findByTestId("chat-side-panel-remove-root"));
@@ -1110,7 +1111,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const alpha = await screen.findByText("alpha");
     // Disabled while nothing is expanded.
     expect((screen.getByTestId("chat-side-panel-collapse-all") as HTMLButtonElement).disabled).toBe(true);
@@ -1128,7 +1129,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const beta = await screen.findByText("beta"); // /ws/beta lists []
     fireEvent.click(beta);
     await screen.findByTestId("chat-side-panel-fs-empty");
@@ -1150,7 +1151,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     await screen.findByTestId("chat-side-panel-fs-truncated");
   });
 
@@ -1159,7 +1160,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const tree = await screen.findByRole("tree");
     // Open readme.md — that is the SELECTION (opened file), not merely focus.
     fireEvent.click(await screen.findByText("readme.md"));
@@ -1183,7 +1184,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const select = (await screen.findByTestId("chat-side-panel-root-select")) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "/ws/proj" } });
     fireEvent.click(await screen.findByTestId("chat-side-panel-remove-root"));
@@ -1202,7 +1203,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const fileRow = await screen.findByText("readme.md");
     fireEvent.contextMenu(fileRow.closest('[role="treeitem"]') ?? fileRow);
     emitLastNativeContextCommand("workspace.reveal");
@@ -1213,7 +1214,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     const sessionSeg = screen.getByTestId("chat-side-panel-file-source-session") as HTMLButtonElement;
     expect(sessionSeg.disabled).toBe(true);
     expect(screen.getByTestId("chat-side-panel-file-source-session-count").textContent).toBe("0");
@@ -1231,7 +1232,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={targets} files={files} initialSelectedId="file-1" />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     // Default (directory) source does not list the session artifact.
     expect(screen.getByTestId("chat-side-panel-file-tree")).not.toHaveTextContent("report.md");
     const sessionSeg = screen.getByTestId("chat-side-panel-file-source-session") as HTMLButtonElement;
@@ -1245,7 +1246,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     // R3: the strip must not crowd the narrow file pane — 24px buttons + py-0.5.
     const strip = screen.getByTestId("chat-side-panel-file-source-segment");
     expect(strip.className).toContain("py-0.5");
@@ -1264,7 +1265,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={targets} files={files} initialSelectedId="file-1" />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     // Directory is the default source; the search box would be a no-op there
     // (ProjectRootsBrowser takes no query), so it is not rendered.
     expect(screen.queryByTestId("chat-preview-search")).toBeNull();
@@ -1281,7 +1282,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     const rows = screen.getAllByTestId("chat-side-panel-subagent-row");
     expect(rows).toHaveLength(2);
     // Running spawn sorts first and is auto-selected in the detail pane.
@@ -1307,7 +1308,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     // aria-selected is only valid inside a select container (listbox/grid/…).
     const listbox = screen.getByTestId("chat-side-panel-subagent-list");
     expect(listbox.getAttribute("role")).toBe("listbox");
@@ -1350,7 +1351,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     const detail = screen.getByTestId("chat-side-panel-subagent-detail");
     const workGroup = within(detail).getByTestId("work-group");
     expect(workGroup).toBeTruthy();
@@ -1404,7 +1405,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={apiMock} sessionId="parent-session-1" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     await waitFor(() => expect(apiMock.chatGetSubAgentTranscript).toHaveBeenCalledWith({
       originSessionId: "parent-session-1",
       childSessionId: "child-1",
@@ -1424,7 +1425,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     const row = screen.getByTestId("chat-side-panel-subagent-row");
     // Test locale is Korean: "완료" (statusDone), never the raw "done" enum.
     expect(row.textContent).toContain("완료");
@@ -1445,7 +1446,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     const row = screen.getByTestId("chat-side-panel-subagent-row");
     expect(row.textContent).toContain("대기 중");
     expect(within(row).getByText("대기 중").className).toContain("text-warning");
@@ -1459,7 +1460,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     const row = screen.getByTestId("chat-side-panel-subagent-row");
     expect(row.textContent).toContain("중단됨");
     expect(row.textContent).not.toContain("interrupted");
@@ -1476,7 +1477,7 @@ describe("ChatSidePanel", () => {
     const { rerender } = renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={initial} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     const rows = screen.getAllByTestId("chat-side-panel-subagent-row");
     fireEvent.click(rows[1]!); // select Agent B
     expect(screen.getByTestId("chat-side-panel-subagent-detail").textContent).toContain("Agent B transcript");
@@ -1521,7 +1522,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     // Exactly ONE row (the two segments collapsed into one logical agent).
     const rows = screen.getAllByTestId("chat-side-panel-subagent-row");
     expect(rows).toHaveLength(1);
@@ -1563,7 +1564,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={apiMock} sessionId="parent-session-1" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
 
     await waitFor(() => expect(apiMock.chatGetSubAgentTranscript).toHaveBeenCalledWith({
       originSessionId: "parent-session-1",
@@ -1605,7 +1606,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={apiMock} sessionId="parent-session-1" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={subAgentSpawns} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
 
     await waitFor(() => expect(apiMock.chatGetSubAgentTranscript).toHaveBeenCalledWith({
       originSessionId: "parent-session-1",
@@ -1620,7 +1621,7 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} subAgentSpawns={[]} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-subagent"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("subagent")));
     expect(screen.getByTestId("chat-side-panel-subagent-empty")).toBeTruthy();
   });
 
@@ -1628,19 +1629,19 @@ describe("ChatSidePanel", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    expect(screen.getByTestId("chat-side-panel-launcher-side-chat")).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("side-chat"))).toBeTruthy();
     // Present in the tab-bar "+" menu once a tab exists.
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
     openLauncherMenu();
-    expect(screen.getByTestId("chat-side-panel-launcher-menu-side-chat")).toBeTruthy();
-    expect(screen.getByTestId("chat-side-panel-launcher-menu-subagent")).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("menu-side-chat"))).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("menu-subagent"))).toBeTruthy();
   });
 
   it("opening the side-chat tab renders the SideChatView (not a placeholder)", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="s" targets={[]} files={[]} initialSelectedId={null} />,
     );
-    fireEvent.click(screen.getByTestId("chat-side-panel-launcher-side-chat"));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("side-chat")));
     expect(screen.getByTestId("side-chat-view")).toBeTruthy();
     expect(screen.queryByTestId("chat-side-panel-side-chat-placeholder")).toBeNull();
   });
@@ -1654,7 +1655,7 @@ describe("ChatSidePanel inside a chat group", () => {
         <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} onClose={onClose} />
       </ChatGroupFrame>,
     );
-    const panel = screen.getByTestId("chat-side-panel");
+    const panel = screen.getByTestId(TEST_IDS.chatSidePanel);
     expect(panel.className).toContain("rounded-2xl");
     expect(within(panel).getByTestId("chat-side-panel-tab-strip")).toBeTruthy();
     expect(
@@ -1686,7 +1687,7 @@ describe("ChatSidePanel inside a chat group", () => {
       />,
     );
     const launcher = screen.getByTestId("chat-side-panel-launcher");
-    expect(within(launcher).getByTestId("chat-side-panel-launcher-activity")).toBeTruthy();
+    expect(within(launcher).getByTestId(chatSidePanelLauncherTestId("activity"))).toBeTruthy();
     fireEvent.click(within(launcher).getByTestId("action-panel-activity-url:1"));
     expect(onOpenActivityItem).toHaveBeenCalledWith("https://example.com/a", true);
     unmount();
@@ -1694,6 +1695,6 @@ describe("ChatSidePanel inside a chat group", () => {
     renderPanel(
       <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} activity={emptyActionPanelActivity()} />,
     );
-    expect(screen.queryByTestId("chat-side-panel-launcher-activity")).toBeNull();
+    expect(screen.queryByTestId(chatSidePanelLauncherTestId("activity"))).toBeNull();
   });
 });

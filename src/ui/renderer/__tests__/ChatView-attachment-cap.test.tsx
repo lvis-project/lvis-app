@@ -15,6 +15,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { ATTACH_MAX_COUNT } from "../types/attachments.js";
+import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
 type AttachMock = {
   openFile: ReturnType<typeof vi.fn>;
@@ -70,7 +71,7 @@ describe("ChatView attachment 5-cap (handleAttach)", () => {
 
     // Markers #1..#5 landed in the composer body; the dropped 6th did not.
     const textarea = container.querySelector(
-      '[data-testid="composer-textarea"]',
+      testIdSelector(TEST_IDS.composerTextarea),
     ) as HTMLTextAreaElement;
     expect(textarea).toBeTruthy();
     for (let n = 1; n <= ATTACH_MAX_COUNT; n++) {
@@ -100,7 +101,7 @@ describe("ChatView attachment 5-cap (handleAttach)", () => {
     expect(badge.textContent).toContain("full");
 
     const textarea = container.querySelector(
-      '[data-testid="composer-textarea"]',
+      testIdSelector(TEST_IDS.composerTextarea),
     ) as HTMLTextAreaElement;
     expect(textarea.value).toContain(`[File #${ATTACH_MAX_COUNT}]`);
     expect(textarea.value).not.toContain(`[File #${ATTACH_MAX_COUNT + 1}]`);

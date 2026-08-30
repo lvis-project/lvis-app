@@ -1,12 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-
-const root = process.cwd();
-
-function readRepoFile(path: string): string {
-  return readFileSync(resolve(root, path), "utf8");
-}
+import { readRepoFile } from "./test-helpers.js";
 
 describe("chat Thinking toggle styles", () => {
   it("uses the shadcn/Radix checkbox component with a semantic unchecked square", () => {

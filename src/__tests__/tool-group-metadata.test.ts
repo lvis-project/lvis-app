@@ -31,8 +31,7 @@ vi.mock("../audit/dlp-filter.js", () => ({
 import { ToolExecutor } from "../tools/executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createDynamicTool } from "../tools/base.js";
-
-const userPermissionContext = { trustOrigin: "user-keyboard" as const };
+import { userPermissionContext } from "../tools/__tests__/tool-context-fixture.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -66,7 +65,7 @@ describe("ToolExecutor metadata", () => {
           onToolEnd: (_name, _result, _isError, meta) => endMetas.push(meta),
         },
         sessionId: "session-1",
-        permissionContext: userPermissionContext,
+        permissionContext: userPermissionContext(),
       },
     );
 
@@ -111,7 +110,7 @@ describe("ToolExecutor metadata", () => {
             callbackDurations.push(durationMs),
         },
         sessionId: "session-1",
-        permissionContext: userPermissionContext,
+        permissionContext: userPermissionContext(),
       },
     );
 
@@ -135,7 +134,7 @@ describe("ToolExecutor metadata", () => {
             callbackDurations.push(durationMs),
         },
         sessionId: "session-1",
-        permissionContext: userPermissionContext,
+        permissionContext: userPermissionContext(),
       },
     );
 

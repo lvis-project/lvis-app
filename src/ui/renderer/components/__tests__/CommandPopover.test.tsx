@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { CommandPopover, type QuickAction } from "../CommandPopover.js";
 import type { NativeContextMenuAction } from "../../../../shared/native-context-menu.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 const DEFAULT_ACTIONS: QuickAction[] = [
   { id: "home",     label: "홈으로 이동",   run: vi.fn() },
@@ -42,7 +43,7 @@ function renderPopover({
 describe("CommandPopover", () => {
   it("renders trigger button with data-testid=command-popover-trigger", () => {
     const { getByTestId } = renderPopover();
-    expect(getByTestId("command-popover-trigger")).toBeTruthy();
+    expect(getByTestId(TEST_IDS.commandPopoverTrigger)).toBeTruthy();
   });
 
   it("shows popover content when open=true", async () => {
@@ -194,7 +195,7 @@ describe("CommandPopover", () => {
     const { getByTestId } = renderPopover({ open: true, onOpenChange });
 
     // Click trigger to close
-    await act(async () => { await user.click(getByTestId("command-popover-trigger")); });
+    await act(async () => { await user.click(getByTestId(TEST_IDS.commandPopoverTrigger)); });
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

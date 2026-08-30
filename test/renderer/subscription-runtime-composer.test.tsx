@@ -5,6 +5,7 @@ import { renderApp } from "./render-app.js";
 import { submitChatMessage } from "./helpers.js";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
+import { TEST_IDS, testIdSelector } from "../../src/shared/test-ids.js";
 
 const CODEX_CHAT_READY = {
   ok: true,
@@ -77,7 +78,7 @@ describe("subscription runtime composer readiness", () => {
     // runtime is unknown until this promise resolves. Do not briefly present
     // those default pricing/context values as subscription usage.
     expect(container.querySelector('[data-testid="token-progress-ring"]')).toBeNull();
-    expect(container.querySelector('[data-testid="token-cost-badge"]')).toBeNull();
+    expect(container.querySelector(testIdSelector(TEST_IDS.tokenCostBadge))).toBeNull();
     // The persisted runtime might be a subscription, whose effort setting is
     // provider-owned. Do not briefly expose the API-only control before the
     // authoritative selection has loaded.
@@ -87,7 +88,7 @@ describe("subscription runtime composer readiness", () => {
     await waitFor(() => expect(api.subscriptionRuntimeStatus).toHaveBeenCalledWith("codex"));
     await waitFor(() => {
       expect(container.querySelector('[data-testid="token-progress-ring"]')).toBeNull();
-      expect(container.querySelector('[data-testid="token-cost-badge"]')).toBeNull();
+      expect(container.querySelector(testIdSelector(TEST_IDS.tokenCostBadge))).toBeNull();
       expect(container.querySelector('[data-testid="iab-status-reasoning"]')).toBeNull();
     });
   });
@@ -211,7 +212,7 @@ describe("subscription runtime composer readiness", () => {
     fireEvent.click(container.querySelector('[data-testid="iab-attach-button"]')!);
 
     await waitFor(() => {
-      const textarea = container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement;
+      const textarea = container.querySelector(testIdSelector(TEST_IDS.composerTextarea)) as HTMLTextAreaElement;
       expect(textarea.value).toContain("[File #1]");
       expect(textarea.value).not.toContain("[Image #");
     });
@@ -265,7 +266,7 @@ describe("subscription runtime composer readiness", () => {
     });
     fireEvent.click(container.querySelector('[data-testid="iab-attach-button"]')!);
 
-    const textarea = container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement;
+    const textarea = container.querySelector(testIdSelector(TEST_IDS.composerTextarea)) as HTMLTextAreaElement;
     await waitFor(() => expect(textarea.value).toContain("[Image #1]"));
     fireEvent.change(textarea, { target: { value: `Inspect this ${textarea.value}` } });
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });

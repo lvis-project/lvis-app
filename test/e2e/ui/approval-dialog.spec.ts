@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 /**
  * Compatibility filename: this used to exercise the foreground dialog; the
@@ -56,7 +57,7 @@ test('approval dock floats over the route without changing its layout', async ({
     });
   });
 
-  const dock = mainWindow.getByTestId('approval-dock').first();
+  const dock = mainWindow.getByTestId(TEST_IDS.approvalDock).first();
   await expect(dock).toBeVisible();
   await expect(dock).toHaveAttribute('role', 'region');
   await expect(dock).not.toHaveAttribute('aria-modal', 'true');
@@ -115,9 +116,9 @@ test('approval dock floats over the route without changing its layout', async ({
   expect(geometry.actionsClientWidth).toBeGreaterThan(0);
   expect(geometry.actionsScrollWidth).toBeLessThanOrEqual(geometry.actionsClientWidth);
 
-  const approve = dock.getByTestId('approve-button');
-  const deny = dock.getByTestId('deny-button');
-  const allowAlways = dock.getByTestId('allow-always-button');
+  const approve = dock.getByTestId(TEST_IDS.approveButton);
+  const deny = dock.getByTestId(TEST_IDS.denyButton);
+  const allowAlways = dock.getByTestId(TEST_IDS.allowAlwaysButton);
   await expect(approve).toBeVisible();
   await expect(deny).toBeVisible();
   await expect(allowAlways).toBeVisible();
@@ -127,10 +128,10 @@ test('approval dock floats over the route without changing its layout', async ({
     .toHaveCount(0);
   await expect(dock.getByTestId('approval-tool-identity')).toContainText('read_file');
   await expect(dock.getByTestId('approval-impact-summary')).toBeVisible();
-  await expect(dock.getByTestId('approval-review-details')).not.toHaveAttribute('open', '');
+  await expect(dock.getByTestId(TEST_IDS.approvalReviewDetails)).not.toHaveAttribute('open', '');
   await expect(dock.getByText(/Review details|검토 상세/)).toBeVisible();
   await expect(dock.getByText(/Click to expand|펼쳐서 확인/)).toBeVisible();
-  await expect(dock.getByTestId('open-permanent-deny-settings')).toBeVisible();
+  await expect(dock.getByTestId(TEST_IDS.openPermanentDenySettings)).toBeVisible();
 
   // Container-based wrapping must keep long translated action labels inside
   // the narrow card even when the expanded sidebar leaves very little room.
@@ -176,7 +177,7 @@ test('approval dock floats over the route without changing its layout', async ({
   await mainWindow.getByTestId('sidebar-home').click();
   await expect(workBoardPanel).toBeHidden();
   const composerDock = mainWindow.locator('[data-composer-placement]').first();
-  const composerInput = mainWindow.getByTestId('composer-input-bar').first();
+  const composerInput = mainWindow.getByTestId(TEST_IDS.composerInputBar).first();
   await expect(composerDock).toBeVisible();
   await expect(composerInput).toBeVisible();
   await expect(composerDock).toHaveAttribute('inert', '');
@@ -213,7 +214,7 @@ test('approval dock floats over the route without changing its layout', async ({
       }],
     });
   });
-  const questionOverlay = mainWindow.getByTestId('question-overlay');
+  const questionOverlay = mainWindow.getByTestId(TEST_IDS.questionOverlay);
   await expect(questionOverlay).toBeVisible();
   await expect(composerDock).toHaveAttribute('inert', '');
   await expect(composerDock).toHaveAttribute('aria-hidden', 'true');
@@ -286,7 +287,7 @@ test('approval dock floats over the route without changing its layout', async ({
     Math.abs(window.innerWidth - 460) <= 1
     && Math.abs(window.innerHeight - 640) <= 1
   ))).toBe(true);
-  const reviewDetails = dock.getByTestId('approval-review-details');
+  const reviewDetails = dock.getByTestId(TEST_IDS.approvalReviewDetails);
   await reviewDetails.locator('summary').click();
   await expect(reviewDetails).toHaveAttribute('open', '');
   const compactGeometry = await dock.evaluate((element) => {
@@ -365,9 +366,9 @@ test('approval dock floats over the route without changing its layout', async ({
     });
   });
   await expect(dock).toBeVisible();
-  const secondApprove = dock.getByTestId('approve-button');
-  const secondDeny = dock.getByTestId('deny-button');
-  const secondAlways = dock.getByTestId('allow-always-button');
+  const secondApprove = dock.getByTestId(TEST_IDS.approveButton);
+  const secondDeny = dock.getByTestId(TEST_IDS.denyButton);
+  const secondAlways = dock.getByTestId(TEST_IDS.allowAlwaysButton);
   await expect(secondDeny).toBeFocused();
   await secondDeny.press('ArrowRight');
   await expect(secondAlways).toBeFocused();

@@ -38,18 +38,22 @@ import type { StreamEventSource } from "./stream-broadcaster.js";
 const DEFAULT_HOST = "127.0.0.1";
 /** Ephemeral port — the OS assigns a free port; the actual value is read back. */
 const DEFAULT_PORT = 0;
-/** Request-body cap: 1 MiB. Over-cap bodies are rejected 413 + socket destroyed. */
-const MAX_BODY_BYTES = 1024 * 1024;
-/** JSON content type applied to every response. */
-const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
+/**
+ * Request-body cap: 1 MiB. Over-cap bodies are rejected 413 + socket destroyed.
+ * The A2A router reads bodies with the same cap; the tailnet surface applies
+ * its own tighter per-route caps through {@link readBody}'s parameter.
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;
+/** JSON content type applied to every response of every loopback HTTP surface. */
+export const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 /** The origin tag attached to every dispatch from this transport. */
 const HTTP_ORIGIN = "local-api" as const;
-/** SSE content type applied to the /v1/events response. */
-const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
+/** SSE content type applied to every event-stream response. */
+export const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
 /** SSE heartbeat interval: a `: ping` comment every 15s to defeat idle proxies. */
-const SSE_HEARTBEAT_MS = 15_000;
+export const SSE_HEARTBEAT_MS = 15_000;
 /** SSE reconnection hint (ms) sent once on connect so clients back off sanely. */
-const SSE_RETRY_MS = 3000;
+export const SSE_RETRY_MS = 3_000;
 /** Retry cap for OS-assigned ephemeral ports that Fetch clients cannot use. */
 const EPHEMERAL_PORT_RETRY_LIMIT = 20;
 /**
@@ -102,10 +106,19 @@ export interface LocalApiHttpServer {
   close(): Promise<void>;
 }
 
-/** Write a JSON envelope with the fixed content type and an explicit status. */
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+/**
+ * Write a JSON envelope with the fixed content type and an explicit status.
+ * `headers` are written first so a surface can add its own (cache-control,
+ * a protocol version) but never replace the content type.
+ */
+export function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Readonly<Record<string, string>> = {},
+): void {
   const payload = JSON.stringify(body);
-  res.writeHead(status, { "content-type": JSON_CONTENT_TYPE });
+  res.writeHead(status, { ...headers, "content-type": JSON_CONTENT_TYPE });
   res.end(payload);
 }
 
@@ -162,8 +175,15 @@ function isRouteFamilyPath(path: string, root: "/v1" | "/a2a"): boolean {
   return path === root || path.startsWith(`${root}/`);
 }
 
-/** Read the request body with a hard 1 MiB cap; resolves null when over-cap. */
-function readBody(req: IncomingMessage): Promise<string | null> {
+/**
+ * Read the request body with a hard byte cap; resolves null when over-cap.
+ * The stream is paused at the cap so a client streaming a huge body stops
+ * being read; the caller decides whether to also destroy the socket.
+ */
+export function readBody(
+  req: IncomingMessage,
+  maxBytes: number = MAX_BODY_BYTES,
+): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
@@ -171,16 +191,16 @@ function readBody(req: IncomingMessage): Promise<string | null> {
     req.on("data", (chunk: Buffer) => {
       if (overCap) return;
       total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
+      if (total > maxBytes) {
         overCap = true;
+        req.pause();
         resolve(null);
         return;
       }
       chunks.push(chunk);
     });
     req.on("end", () => {
-      if (overCap) return;
-      resolve(Buffer.concat(chunks).toString("utf8"));
+      if (!overCap) resolve(Buffer.concat(chunks));
     });
     req.on("error", reject);
   });
@@ -222,7 +242,7 @@ async function handleDispatch(
     req.socket.destroy();
     return;
   }
-  const parsed = parseDispatchBody(raw);
+  const parsed = parseDispatchBody(raw.toString("utf8"));
   if (parsed === null) {
     sendJson(res, 400, { ok: false, error: "invalid-request" });
     return;

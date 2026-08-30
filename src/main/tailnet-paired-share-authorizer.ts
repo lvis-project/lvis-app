@@ -17,6 +17,7 @@ import type {
   TailnetShareActorId,
   TailnetSharePermission,
 } from "./tailnet-pairing-share-store.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 import { isPositiveSafeInteger } from "../shared/safe-integer.js";
 
 export const TAILNET_PAIRED_SHARE_ACTOR_SECRET_NAME = "tailnet-paired-share-actor-v1.key";
@@ -199,7 +200,7 @@ function sameActor(left: TailnetShareActorId, right: TailnetShareActorId): boole
 
 function uuid(value: unknown): value is string {
   return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    && UUID_PATTERN.test(value);
 }
 
 function isPairedShareStore(value: unknown): value is TailnetPairedShareStore {

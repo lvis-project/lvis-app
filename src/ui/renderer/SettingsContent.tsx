@@ -44,6 +44,7 @@ import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab, SETTINGS_TAB_LABEL_KEYS, type SettingsTab } from "../../shared/settings-tabs.js";
 import type { MarketplacePackageFilter } from "../../shared/marketplace-package-sections.js";
 import type { ExactDenyDraft } from "./exact-permission-decision.js";
+import { TEST_IDS } from "../../shared/test-ids.js";
 
 type SettingsNavItem = { value: SettingsTab; icon: LucideIcon; labelKey: string };
 
@@ -523,7 +524,7 @@ export function SettingsContent({
             type="button"
             onClick={() => setMobileDepth("list")}
             aria-label={t("settingsContent.mobileBackAria")}
-            data-testid="settings-mobile-back"
+            data-testid={TEST_IDS.settingsMobileBack}
             className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/(--opacity-strong) hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
           >
             <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />

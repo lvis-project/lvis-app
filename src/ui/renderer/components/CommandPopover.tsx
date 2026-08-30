@@ -5,6 +5,7 @@ import { Popover, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { QuickAction } from "./command-actions.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 export type { QuickAction } from "./command-actions.js";
 
 const LazyCommandPopoverPanel = lazy(() => import("./CommandPopoverPanel.js"));
@@ -38,7 +39,7 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
               size="sm"
               className="h-7 w-7 shrink-0 bg-input-bar p-0"
               aria-label={t("commandPopover.ariaLabel")}
-              data-testid="command-popover-trigger"
+              data-testid={TEST_IDS.commandPopoverTrigger}
               // SpotlightTour anchor. Step 3
               // of `first-boot-essentials` highlights this ⌘K toggle, see
               // `default-tour-scenarios.ts`.

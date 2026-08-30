@@ -24,6 +24,7 @@ import { useTranslation } from "../../../i18n/react.js";
 export type { QuickAction } from "./command-actions.js";
 
 import type { McpPromptEntry } from "./slash-picker-data.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 const LazySlashPickerPanel = lazy(() => import("./SlashPickerPanel.js"));
 
@@ -64,7 +65,7 @@ export function SlashPicker({
               size="sm"
               className="h-7 w-7 shrink-0 bg-input-bar p-0"
               aria-label={t("commandPopover.ariaLabel")}
-              data-testid="command-popover-trigger"
+              data-testid={TEST_IDS.commandPopoverTrigger}
               // Tutorial-C SpotlightTour anchor. Step 3 of
               // `first-boot-essentials` highlights this picker toggle, see
               // `default-tour-scenarios.ts`. Kept on the unified picker so the

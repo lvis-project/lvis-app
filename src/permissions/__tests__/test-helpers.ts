@@ -12,10 +12,14 @@ import {
 } from "../asrt-sandbox.js";
 import { detectSandboxCapability } from "../sandbox-capability.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
+import { inspectHostRisk } from "../reviewer/host-risk-inspector.js";
 
-const DEFAULT_ALLOWED_DIRECTORIES = ["/Users/example/work", "/Users/example/.lvis"].map((dir) =>
-  caseFoldForMatch(canonicalizePathForMatch(dir)),
-);
+/** The comparison key the path-scope checks use: canonical form, then case-folded. */
+export function foldPathForMatch(raw: string): string {
+  return caseFoldForMatch(canonicalizePathForMatch(raw));
+}
+
+const DEFAULT_ALLOWED_DIRECTORIES = ["/Users/example/work", "/Users/example/.lvis"].map(foldPathForMatch);
 
 /**
  * The audit rows a gate wrote, in order, whichever field carried them.
@@ -156,4 +160,17 @@ export function makeRiskClassifierContext(
     sandboxCapability: detectSandboxCapability(),
     ...overrides,
   };
+}
+
+/** The first audit row whose text starts with `marker`, or undefined. */
+export function auditRowStartingWith(
+  auditLogger: { log: { mock: { calls: unknown[][] } } },
+  marker: string,
+): string | undefined {
+  return auditRowTexts(auditLogger).find((row) => row.startsWith(marker));
+}
+
+/** Classify a builtin shell command the way the host does before review. */
+export function inspectBuiltinCommandRisk(command: string) {
+  return inspectHostRisk({ source: "builtin", finalInput: { command } });
 }

@@ -20,11 +20,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { inspectHostRisk } from "../host-risk-inspector.js";
-
-function categoryOf(command: string) {
-  return inspectHostRisk({ source: "builtin", finalInput: { command } });
-}
+import { inspectBuiltinCommandRisk } from "../../__tests__/test-helpers.js";
 
 describe("git short flags with a glued value", () => {
   it.each([
@@ -35,21 +31,21 @@ describe("git short flags with a glued value", () => {
     ["git log -n5", "max count"],
     ["git diff -U5", "context lines — digits already ended the cluster"],
   ])("%s reads (%s)", (command) => {
-    expect(categoryOf(command)).toBe("read");
+    expect(inspectBuiltinCommandRisk(command)).toBe("read");
   });
 
   it("still escalates an unknown flag letter", () => {
     // The value-taking rule decides where a flag ENDS. It must not decide that
     // the flag is allowed: `-X` is not in the read-only letter set.
-    expect(categoryOf("git log -Xbogus")).toBe("shell");
+    expect(inspectBuiltinCommandRisk("git log -Xbogus")).toBe("shell");
   });
 
   it("still escalates a writing form of a read-only subcommand", () => {
-    expect(categoryOf("git log --output=/tmp/x")).toBe("shell");
+    expect(inspectBuiltinCommandRisk("git log --output=/tmp/x")).toBe("shell");
   });
 
   it("still escalates a mutating subcommand", () => {
-    expect(categoryOf("git commit -m x")).toBe("shell");
+    expect(inspectBuiltinCommandRisk("git commit -m x")).toBe("shell");
   });
 });
 
@@ -59,24 +55,24 @@ describe("dollar in an argument", () => {
     ["rg 'a$' src", "same, with a path operand"],
     ["grep 'foo$' file.txt", "the verb that always allowed it"],
   ])("%s reads (%s)", (command) => {
-    expect(categoryOf(command)).toBe("read");
+    expect(inspectBuiltinCommandRisk(command)).toBe("read");
   });
 
   it.each([
     ["sed $IFS-i f", "word-splits into -i after expansion"],
     ["rg $IFS--pre=evil p", "word-splits into --pre, which runs a program"],
   ])("%s stays shell (%s)", (command) => {
-    expect(categoryOf(command)).toBe("shell");
+    expect(inspectBuiltinCommandRisk(command)).toBe("shell");
   });
 
   it("keeps a double-quoted expansion out of read", () => {
     // Double quotes suppress word splitting but NOT expansion, and the expanded
     // value can be a flag in its entirety. Only single quotes prove the `$` is
     // literal, so only they earn the exemption.
-    expect(categoryOf('rg "$FLAG" p')).toBe("shell");
+    expect(inspectBuiltinCommandRisk('rg "$FLAG" p')).toBe("shell");
   });
 
   it("keeps a command substitution out of read regardless of quoting", () => {
-    expect(categoryOf("rg $(cat /tmp/p) f")).toBe("shell");
+    expect(inspectBuiltinCommandRisk("rg $(cat /tmp/p) f")).toBe("shell");
   });
 });

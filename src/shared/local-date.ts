@@ -52,7 +52,7 @@ export function shiftLocalDateKey(key: string, days: number): string {
   const shifted = new Date(Date.UTC(LEAP_SEED_YEAR, Number(match[2]) - 1, Number(match[3])));
   shifted.setUTCFullYear(Number(match[1]));
   shifted.setUTCDate(shifted.getUTCDate() + days);
-  return shifted.toISOString().slice(0, 10);
+  return utcDateKey(shifted);
 }
 
 /** Placeholder year for seeding a civil date: in range for `Date.UTC`, and a leap year. */
@@ -99,6 +99,21 @@ export function localDayStart(dayKey: string): Date | null {
 /** Key for the first day of the host-civil month containing `date`. */
 export function localMonthStartKey(date: Date): string {
   return `${padYear(date.getFullYear())}-${pad(date.getMonth() + 1)}-01`;
+}
+
+/** Length of a `YYYY-MM-DD` key; the prefix every UTC-partitioned file name starts with. */
+export const UTC_DATE_KEY_LENGTH = 10;
+
+/**
+ * The UTC calendar day of `instant` as `YYYY-MM-DD`.
+ *
+ * This is the key for the UTC-partitioned stores — audit rows and log file
+ * names — which deliberately do NOT follow the host's civil day, so that a
+ * partition never splits or merges when the machine changes zone. It is not a
+ * label: anything a person reads goes through {@link localDateKey}.
+ */
+export function utcDateKey(instant: Date = new Date()): string {
+  return instant.toISOString().slice(0, UTC_DATE_KEY_LENGTH);
 }
 
 /**

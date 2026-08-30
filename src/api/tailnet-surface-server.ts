@@ -50,15 +50,18 @@ import {
   type TailnetWebSessionStore,
 } from "./tailnet-web-session-store.js";
 import { isRecord } from "../shared/is-record.js";
+import {
+  SSE_CONTENT_TYPE,
+  SSE_HEARTBEAT_MS,
+  SSE_RETRY_MS,
+  sendJson as sendJsonResponse,
+} from "./http-server.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 import { errorMessage } from "../shared/error-message.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { requirePositiveInteger } from "../shared/safe-integer.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
-const SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
-const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
-const SSE_HEARTBEAT_MS = 15_000;
-const SSE_RETRY_MS = 3_000;
 const DEFAULT_SSE_MAX_LIFETIME_MS = 5 * 60_000;
 const DEFAULT_MAX_CONNECTIONS = 16;
 const MAX_CAPABILITY_HEADER_CHARS = 16 * 1024;
@@ -2578,7 +2581,7 @@ function isControllerCommandId(value: unknown): value is string {
 
 function isTailnetAttachmentId(value: unknown): value is string {
   return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    && UUID_PATTERN.test(value);
 }
 function isTailnetPublicTurnId(value: unknown): value is string {
   return typeof value === "string" && /^tailnet-turn_[A-Za-z0-9_-]{43}$/.test(value);
@@ -2807,14 +2810,13 @@ function sendSnapshotRequired(res: ServerResponse, scope: string, latestCursor: 
     latestCursor,
   });
 }
+/** The shared JSON envelope plus the no-store / nosniff headers every tailnet response carries. */
 function sendJson(res: ServerResponse, status: number, payload: unknown, extraHeaders: Readonly<Record<string, string>> = {}): void {
-  res.writeHead(status, {
-    "content-type": JSON_CONTENT_TYPE,
+  sendJsonResponse(res, status, payload, {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     ...extraHeaders,
   });
-  res.end(JSON.stringify(payload));
 }
 
 function resolveAfterCursor(
@@ -2830,7 +2832,7 @@ function resolveAfterCursor(
 
 function parseScope(raw: string | null): string | undefined | "invalid" {
   if (raw === null) return undefined;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)
+  return UUID_PATTERN.test(raw)
     ? raw
     : "invalid";
 }

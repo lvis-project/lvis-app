@@ -3,6 +3,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { BreadcrumbSegment, ViewLocation } from "../utils/view-location.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 /**
  * Where the main window is, in two pieces that no longer sit together.
@@ -80,7 +81,7 @@ export function ViewHistoryNav({
             onClick={onBack}
             aria-label={backText}
             title={backText}
-            data-testid="view-path-back"
+            data-testid={TEST_IDS.viewPathBack}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>

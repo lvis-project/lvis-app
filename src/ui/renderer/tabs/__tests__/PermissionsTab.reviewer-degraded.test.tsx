@@ -17,6 +17,7 @@ vi.mock("../../../../components/ui/scroll-area.js", () => ({
 }));
 
 import { PermissionsTab } from "../PermissionsTab.js";
+import { TEST_IDS, execModeTestId } from "../../../../shared/test-ids.js";
 
 function installApi(opts: { mode: "llm" | "rule"; degraded: boolean }) {
   const lvis = {
@@ -118,9 +119,9 @@ describe("PermissionsTab — reviewer prompt-only Settings UI", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeInTheDocument(),
     );
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
   });
 
@@ -130,9 +131,9 @@ describe("PermissionsTab — reviewer prompt-only Settings UI", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeInTheDocument(),
     );
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
   });
@@ -143,9 +144,9 @@ describe("PermissionsTab — reviewer prompt-only Settings UI", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeInTheDocument(),
     );
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
   });

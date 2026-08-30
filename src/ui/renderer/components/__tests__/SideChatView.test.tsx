@@ -7,6 +7,7 @@ import { SideChatView } from "../SideChatView.js";
 import type { ChatStreamEvent } from "../../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../../types.js";
 import { ChatContextProvider, type ChatContextValue } from "../../context/ChatContext.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 function makeApi() {
   // Two subscribers share the side stream — the transcript reducer and the
@@ -133,7 +134,7 @@ describe("SideChatView — New button gating during streaming", () => {
     } as ChatStreamEvent);
     emit({ type: "done", streamId: 1 });
 
-    expect(screen.queryByTestId("token-cost-badge")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.tokenCostBadge)).toBeNull();
   });
 });
 

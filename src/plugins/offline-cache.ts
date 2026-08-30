@@ -116,7 +116,7 @@ export async function setCachedCatalog(
   try {
     await mkdir(resolve(catalogFile, ".."), { recursive: true });
     const payload: CatalogCacheFile = { cachedAt: Date.now(), items };
-    await atomicWrite(catalogFile, JSON.stringify(payload, null, 2));
+    await writeFileAtomicAtPath(catalogFile, JSON.stringify(payload, null, 2));
   } catch (err) {
     log.warn("setCachedCatalog failed: %s", (err as Error).message);
   }
@@ -170,7 +170,7 @@ async function readIndex(indexFile: string): Promise<TarballIndex> {
 }
 
 async function writeIndex(indexFile: string, index: TarballIndex): Promise<void> {
-  await atomicWrite(indexFile, JSON.stringify(index, null, 2));
+  await writeFileAtomicAtPath(indexFile, JSON.stringify(index, null, 2));
 }
 
 /**
@@ -233,7 +233,7 @@ export async function setCachedTarball(
     );
 
     // Persist the tarball.
-    await atomicWrite(filePath, body);
+    await writeFileAtomicAtPath(filePath, body);
 
     // Verify actual size on disk.
     const { size } = await stat(filePath);
@@ -270,18 +270,4 @@ async function evictLru(
     const victimPath = resolve(tarballDir, victim.filename);
     await rm(victimPath, { force: true }).catch(() => undefined);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Atomic write helper
-// ---------------------------------------------------------------------------
-
-async function atomicWrite(dest: string, data: string | Buffer): Promise<void> {
-  // The EEXIST rm-then-rename recovery this used to carry is gone on purpose.
-  // `transient-fs-lock-retry.ts` -- the authority on which errno a file rename
-  // can actually produce -- states that EEXIST is directory-shaped and
-  // unreachable when renaming one file onto another. The branch never ran, and
-  // what it would have done if it had is delete the live file and then rename,
-  // which is the opposite of the atomic replace this function exists to give.
-  await writeFileAtomicAtPath(dest, data);
 }

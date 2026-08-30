@@ -14,6 +14,7 @@ import {
   makeMockPermissionManager,
   invokeRegisteredHandler,
   invokeRegisteredHandlerWithEvent,
+  untrustedEvent,
 } from "./test-helpers.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
@@ -133,22 +134,7 @@ async function setupHandlers(
 
 // ─── Invocation helpers ───────────────────────────────────────────────────────
 
-function invoke(channel: string, ...args: unknown[]): unknown {
-  return invokeRegisteredHandler(handlers, channel, ...args);
-}
-
-function invokeWithEvent(
-  channel: string,
-  event: unknown,
-  ...args: unknown[]
-): unknown {
-  return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
-}
-
 // Convenience: build a fake IpcMainInvokeEvent with an untrusted sender.
-function untrustedEvent() {
-  return { senderFrame: { url: "https://evil.example.com/" } };
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // lvis:runtime:counts
@@ -166,7 +152,7 @@ describe("lvis:runtime:counts", () => {
       ],
     });
 
-    const result = await invoke("lvis:runtime:counts") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:runtime:counts") as {
       tools: number;
       plugins: number;
       mcps: number;
@@ -181,7 +167,7 @@ describe("lvis:runtime:counts", () => {
   it("rejects unauthorized sender frames", async () => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:runtime:counts",
       untrustedEvent(),
     );
@@ -197,7 +183,7 @@ describe("lvis:runtime:env", () => {
   it("returns { platform, hostname, user } — no cwd, no release", async () => {
     await setupHandlers();
 
-    const result = await invoke("lvis:runtime:env") as Record<string, unknown>;
+    const result = await invokeRegisteredHandler(handlers, "lvis:runtime:env") as Record<string, unknown>;
 
     // Required fields.
     expect(typeof result.platform).toBe("string");
@@ -215,7 +201,7 @@ describe("lvis:runtime:env", () => {
   it("rejects unauthorized sender frames", async () => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:runtime:env",
       untrustedEvent(),
     );
@@ -233,7 +219,7 @@ describe("lvis:marketplace:ping", () => {
       marketplaceSettings: { backend: "mock" },
     });
 
-    const result = await invoke("lvis:marketplace:ping") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -250,7 +236,7 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const result = await invoke("lvis:marketplace:ping") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -261,7 +247,7 @@ describe("lvis:marketplace:ping", () => {
   it("rejects unauthorized sender frames", async () => {
     await setupHandlers();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       "lvis:marketplace:ping",
       untrustedEvent(),
     );
@@ -285,7 +271,7 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const result = await invoke("lvis:marketplace:ping") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -309,7 +295,7 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const result = await invoke("lvis:marketplace:ping") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -336,8 +322,8 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const first = invoke("lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
-    const second = invoke("lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
+    const first = invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
+    const second = invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     resolveFetch({ ok: true } as Response);
@@ -360,11 +346,11 @@ describe("lvis:marketplace:ping", () => {
       },
     });
 
-    const first = await invoke("lvis:marketplace:ping") as {
+    const first = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
-    const second = await invoke("lvis:marketplace:ping") as {
+    const second = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
       configured: boolean;
       online: boolean;
     };
@@ -393,7 +379,7 @@ describe("new runtime handlers — all reject unauthorized frames", () => {
 
   for (const channel of channels) {
     it(`${channel} returns UNAUTHORIZED_FRAME for a foreign origin`, async () => {
-      const result = await invokeWithEvent(channel, untrustedEvent());
+      const result = await invokeRegisteredHandlerWithEvent(handlers, channel, untrustedEvent());
       expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
     });
   }

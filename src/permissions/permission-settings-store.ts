@@ -37,6 +37,7 @@ import {
   PARENT_ADJUDICATION_TIMEOUT_MS_MIN,
 } from "../shared/parent-adjudication-bounds.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const log = createLogger("permission-settings");
 
@@ -662,7 +663,7 @@ function partitionPendingWorkspaceRootRemovals(
     const value = candidate as Record<string, unknown>;
     if (
       typeof value.operationId !== "string"
-      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.operationId)
+      || !UUID_PATTERN.test(value.operationId)
       || typeof value.storedPath !== "string"
       || value.storedPath.length === 0
       || typeof value.runtimePath !== "string"

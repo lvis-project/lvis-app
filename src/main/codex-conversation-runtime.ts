@@ -17,6 +17,7 @@ import {
   subscriptionImageExtension,
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
+import { UUID_SOURCE } from "../shared/uuid.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
 import type { PendingJsonRpcRequest } from "../lib/json-rpc-pending-request.js";
 
@@ -31,7 +32,7 @@ const MAX_DYNAMIC_TOOL_NAME_LENGTH = 128;
 const MAX_DYNAMIC_TOOL_NAMESPACE_LENGTH = 64;
 const MAX_DYNAMIC_TOOL_DESCRIPTION_LENGTH = 1_024;
 const MAX_DYNAMIC_TOOL_RESULT_BYTES = 750_000;
-const STAGED_IMAGE_FILE_NAME = /^lvis-subscription-image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpe?g|gif|webp|bmp)$/;
+const STAGED_IMAGE_FILE_NAME = new RegExp(`^lvis-subscription-image-${UUID_SOURCE}\\.(?:png|jpe?g|gif|webp|bmp)$`);
 // A new app process may remove only files that predate this module. Paths
 // registered by live runtimes are always excluded, even during an open/write
 // race in a concurrently starting session.

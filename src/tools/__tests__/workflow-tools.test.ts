@@ -7,6 +7,7 @@
  * `execute(rawInput, ctx)` contract directly — no Electron / IPC.
  */
 import { describe, expect, it, vi } from "vitest";
+import { withTz } from "../../__tests__/test-helpers.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
@@ -287,43 +288,39 @@ describe("routine_schedule tool", () => {
 
   it("accepts YYYY-MM-DD as 09:00 on the host's own calendar", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
-    const previousTz = process.env.TZ;
     try {
-      process.env.TZ = "Asia/Seoul";
-      const store = new RoutinesStore(join(tmp, "routines.json"));
-      const tool = createRoutineScheduleTool(store);
-      const r = await tool.execute(
-        { execution: "notification-only", schedule: { at: "2030-01-01" }, notificationTitle: "newyear" },
-        ctx(),
-      );
-      expect(r.isError).toBe(false);
-      const list = store.listActive();
-      // 09:00 on the 1st in Seoul is 2030-01-01T00:00Z.
-      expect(list[0].schedule?.at).toBe("2030-01-01T00:00:00.000Z");
+      await withTz("Asia/Seoul", async () => {
+        const store = new RoutinesStore(join(tmp, "routines.json"));
+        const tool = createRoutineScheduleTool(store);
+        const r = await tool.execute(
+          { execution: "notification-only", schedule: { at: "2030-01-01" }, notificationTitle: "newyear" },
+          ctx(),
+        );
+        expect(r.isError).toBe(false);
+        const list = store.listActive();
+        // 09:00 on the 1st in Seoul is 2030-01-01T00:00Z.
+        expect(list[0].schedule?.at).toBe("2030-01-01T00:00:00.000Z");
+      });
     } finally {
-      if (previousTz === undefined) delete process.env.TZ;
-      else process.env.TZ = previousTz;
       await cleanupTmpDir(tmp);
     }
   });
 
   it("moves that 09:00 with the host, rather than pinning it to one zone", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
-    const previousTz = process.env.TZ;
     try {
-      process.env.TZ = "UTC";
-      const store = new RoutinesStore(join(tmp, "routines.json"));
-      const tool = createRoutineScheduleTool(store);
-      const r = await tool.execute(
-        { execution: "notification-only", schedule: { at: "2030-01-01" }, notificationTitle: "newyear" },
-        ctx(),
-      );
-      expect(r.isError).toBe(false);
-      // Same input, different host: 09:00 UTC, not 09:00 in Seoul.
-      expect(store.listActive()[0].schedule?.at).toBe("2030-01-01T09:00:00.000Z");
+      await withTz("UTC", async () => {
+        const store = new RoutinesStore(join(tmp, "routines.json"));
+        const tool = createRoutineScheduleTool(store);
+        const r = await tool.execute(
+          { execution: "notification-only", schedule: { at: "2030-01-01" }, notificationTitle: "newyear" },
+          ctx(),
+        );
+        expect(r.isError).toBe(false);
+        // Same input, different host: 09:00 UTC, not 09:00 in Seoul.
+        expect(store.listActive()[0].schedule?.at).toBe("2030-01-01T09:00:00.000Z");
+      });
     } finally {
-      if (previousTz === undefined) delete process.env.TZ;
-      else process.env.TZ = previousTz;
       await cleanupTmpDir(tmp);
     }
   });

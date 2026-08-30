@@ -11,6 +11,7 @@ import type { Dirent } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import { openFeatureNamespace, writeFileAtomicAtPath } from "./storage/feature-namespace.js";
+import { parseFrontmatterBlock, unquoteFrontmatterValue } from "./skill-store.js";
 
 const log = createLogger("lvis");
 
@@ -40,19 +41,10 @@ export function parsePersonaPromptFrontmatter(raw: string): {
   fm: PersonaPromptFrontmatter;
   body: string;
 } {
-  const fmRegex = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/;
-  const match = raw.match(fmRegex);
-  if (!match) {
-    return { fm: { id: "", name: "" }, body: raw };
-  }
-  const [full, block] = match;
-  const body = raw.slice(full.length);
+  const { fields, body } = parseFrontmatterBlock(raw);
   const fm: PersonaPromptFrontmatter = { id: "", name: "" };
-  for (const line of block.split(/\r?\n/)) {
-    const m = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1];
-    const val = m[2].trim().replace(/^["']|["']$/g, "");
+  for (const [key, rawValue] of fields) {
+    const val = unquoteFrontmatterValue(rawValue);
     if (key === "id") fm.id = val;
     else if (key === "name") fm.name = val;
     else if (key === "description") fm.description = val;

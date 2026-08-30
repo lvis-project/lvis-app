@@ -24,7 +24,7 @@ import type {
 } from "../parent-adjudicator.js";
 import type { ReviewerParentAdjudicationBlock } from "../permission-settings-store.js";
 import { makeMockWebContents } from "../../__tests__/test-helpers.js";
-import { auditRowTexts } from "./test-helpers.js";
+import { auditRowStartingWith } from "./test-helpers.js";
 
 const CHILD_SESSION = "child-session-1";
 const PARENT_SESSION = "parent-session-1";
@@ -124,13 +124,6 @@ function makeChildRequest(
   };
 }
 
-function rowStartingWith(
-  auditLogger: { log: ReturnType<typeof vi.fn> },
-  marker: string,
-): string | undefined {
-  return auditRowTexts(auditLogger).find((row) => row.startsWith(marker));
-}
-
 function sentRequest(wc: ReturnType<typeof makeMockWebContents>): ApprovalRequest {
   expect(wc.send).toHaveBeenCalledTimes(1);
   return wc.send.mock.calls[0]?.[1] as ApprovalRequest;
@@ -157,7 +150,7 @@ describe("parent adjudication — the answer", () => {
       outcome: "allow-once",
       reason: "writing the report is the task I gave it",
     });
-    const row = rowStartingWith(auditLogger, "[approval:parent-adjudicated]");
+    const row = auditRowStartingWith(auditLogger, "[approval:parent-adjudicated]");
     expect(row).toContain("answeredBy=parent-agent");
     expect(row).toContain("→ allow-once");
   });
@@ -204,7 +197,7 @@ describe("parent adjudication — the answer", () => {
     expect(sent).not.toHaveProperty("childProvenance");
     expect(sent).not.toHaveProperty("parentAdjudicationEligible");
     expect(
-      rowStartingWith(auditLogger, "[approval:parent-escalated]"),
+      auditRowStartingWith(auditLogger, "[approval:parent-escalated]"),
     ).toContain("cause=parent-escalated");
   });
 
@@ -298,7 +291,7 @@ describe("parent adjudication — the answer", () => {
       }),
     );
 
-    expect(rowStartingWith(auditLogger, "[approval:args-dlp-masked]")).toContain(
+    expect(auditRowStartingWith(auditLogger, "[approval:args-dlp-masked]")).toContain(
       "lane=parent-adjudication",
     );
   });
@@ -313,7 +306,7 @@ describe("parent adjudication — the answer", () => {
     await gate.requestAndWait(makeChildRequest());
 
     expect(
-      rowStartingWith(auditLogger, "[approval:parent-adjudicated]"),
+      auditRowStartingWith(auditLogger, "[approval:parent-adjudicated]"),
     ).toContain(`parent=${PARENT_SESSION}`);
   });
 
@@ -617,7 +610,7 @@ describe("parent adjudication — a repeated denial reaches the user", () => {
 
     expect(sentRequest(wc).parentEscalation?.cause).toBe("repeated-denial");
     expect(
-      rowStartingWith(auditLogger, "[approval:parent-escalated]"),
+      auditRowStartingWith(auditLogger, "[approval:parent-escalated]"),
     ).toContain("cause=repeated-denial");
   });
 
@@ -665,7 +658,7 @@ describe("parent adjudication — the audit row", () => {
 
     await gate.requestAndWait(makeChildRequest());
 
-    const row = rowStartingWith(auditLogger, "[approval:parent-adjudicated]");
+    const row = auditRowStartingWith(auditLogger, "[approval:parent-adjudicated]");
     expect(row).toContain("reason=fine_choice_allow-always_answeredBy_desk");
     expect(row).not.toContain("choice=allow-always");
     expect(row?.match(/answeredBy=/g)).toHaveLength(1);

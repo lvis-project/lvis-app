@@ -7,6 +7,7 @@ import {
   teardownSeededElectron,
   type SeededElectronContext,
 } from "./seeded-electron";
+import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../src/shared/test-ids.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -240,7 +241,7 @@ test.describe("chat preview rail", () => {
         { timeout: 20_000 },
       );
 
-      const openButton = ctx.page.getByTestId("chat-group-panel-toggle");
+      const openButton = ctx.page.getByTestId(TEST_IDS.chatGroupPanelToggle);
       await expect(openButton).toBeVisible({ timeout: 20_000 });
       await expect(ctx.page.getByTestId("chat-preview-open")).toHaveCount(0);
       await expect(ctx.page.getByTestId("chat-preview-rail")).toHaveCount(0);
@@ -253,14 +254,14 @@ test.describe("chat preview rail", () => {
       expect(sidePanelButtonBox!.x).toBeGreaterThanOrEqual(modeToggleBox!.x + modeToggleBox!.width);
 
       await openButton.click();
-      const panel = ctx.page.getByTestId("chat-side-panel");
+      const panel = ctx.page.getByTestId(TEST_IDS.chatSidePanel);
       const rail = ctx.page.getByTestId("chat-preview-rail");
       await expect(panel).toBeVisible({ timeout: 10_000 });
       await expect(rail).toBeVisible({ timeout: 10_000 });
       // Redesigned rail opens EMPTY to the launcher (no default tabs, no mode
       // toggles). Open the file-browser surface from the launcher to review files.
       await expect(ctx.page.getByTestId("chat-side-panel-launcher")).toBeVisible();
-      await ctx.page.getByTestId("chat-side-panel-launcher-file-browser").click();
+      await ctx.page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
       await expect(ctx.page.getByTestId("chat-side-panel-tab-file-browser")).toBeVisible();
       // The top pane defaults to the Directory source; session artifacts live
       // behind the Session files segment. Switch to it to review report.md.
@@ -285,7 +286,7 @@ test.describe("chat preview rail", () => {
       const tabCountBefore = await ctx.page.getByRole("tab").count();
       const addTabTrigger = ctx.page.getByTestId("chat-side-panel-add-tab");
       await addTabTrigger.dispatchEvent("pointerdown");
-      await ctx.page.getByTestId("chat-side-panel-launcher-menu-browser").click();
+      await ctx.page.getByTestId(chatSidePanelLauncherTestId("menu-browser")).click();
       await expect(ctx.page.getByRole("tab")).toHaveCount(tabCountBefore + 1);
       await expect(ctx.page.getByTestId("chat-side-panel-tab-browser")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-tab-actions")).toBeVisible();
@@ -355,13 +356,13 @@ test.describe("chat preview rail", () => {
       // non-file targets only, so the html artifact + fetched host drop out.
       const addPreviewTrigger = ctx.page.getByTestId("chat-side-panel-add-tab");
       await addPreviewTrigger.dispatchEvent("pointerdown");
-      await ctx.page.getByTestId("chat-side-panel-launcher-menu-preview").click();
+      await ctx.page.getByTestId(chatSidePanelLauncherTestId("menu-preview")).click();
       await expect(ctx.page.getByTestId("chat-side-panel-tab-preview")).toBeVisible();
       await expect(rail).not.toContainText("Artifact dashboard");
       await expect(rail).not.toContainText(sideBrowserHost);
 
       const chatBox = await ctx.page.locator(".lvis-chat-scroll").boundingBox();
-      const rootBox = await ctx.page.getByTestId("chat-view-root").boundingBox();
+      const rootBox = await ctx.page.getByTestId(TEST_IDS.chatViewRoot).boundingBox();
       const mainColumnBox = await ctx.page.getByTestId("chat-main-column").boundingBox();
       const actionBarBox = await ctx.page.getByTestId("input-action-bar").boundingBox();
       const railBox = await panel.boundingBox();
