@@ -3,13 +3,13 @@ import { join, resolve } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { hasExactKeys, isRecord } from "../shared/is-record.js";
+import { SHA256_HEX } from "../lib/hex-digest-equal.js";
 import { isNonNegativeSafeInteger } from "../shared/safe-integer.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "command-receipts.json";
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RECEIPTS = 4_096;
-const SHA256_HEX = /^[a-f0-9]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ReceiptState = "reserved" | "terminal";

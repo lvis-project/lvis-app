@@ -18,10 +18,9 @@ import {
 import type { TailnetControllerReceiptStore } from "../api/tailnet-controller-receipt-store.js";
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
 import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
-import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { SHA256_HEX, sha256Hex } from "../lib/hex-digest-equal.js";
 import { requirePositiveInteger } from "../shared/safe-integer.js";
 
-const SHA256_HEX = /^[a-f0-9]{64}$/;
 /** Mirrors the receipt store's own owner grammar so both agree on validity. */
 const RECEIPT_OWNER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_MAX_RAW_BODY_BYTES = 64 * 1024;

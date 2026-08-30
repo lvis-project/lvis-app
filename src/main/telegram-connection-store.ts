@@ -35,7 +35,7 @@
 import { randomUUID as nodeRandomUuid } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
+import { SHA256_HEX, timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 import {
   TELEGRAM_PAIRING_CODE_TTL_MS,
   isTelegramConnectionErrorCode,
@@ -67,7 +67,6 @@ const MAX_APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
  * exhaust.
  */
 const MAX_APPROVALS = 32;
-const SHA256_HEX = /^[a-f0-9]{64}$/;
 const FILE_NAME = /^[a-z0-9][a-z0-9._-]{0,127}\.json$/i;
 const ACCOUNT_FINGERPRINT_CHARS = 12;
 

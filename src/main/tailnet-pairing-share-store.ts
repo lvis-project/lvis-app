@@ -10,7 +10,7 @@ import { randomBytes as nodeRandomBytes, randomUUID as nodeRandomUuid } from "no
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
-import { timingSafeEqualHexDigest, sha256Hex } from "../lib/hex-digest-equal.js";
+import { SHA256_HEX, sha256Hex, timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
@@ -30,7 +30,6 @@ const TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAX_INVITATIONS = 64;
 const MAX_PAIRINGS = 128;
 const MAX_SHARES = 256;
-const SHA256_HEX = /^[a-f0-9]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACTOR_ID = /^tailnet:[a-f0-9]{64}$/;
 
