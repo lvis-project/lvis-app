@@ -559,7 +559,12 @@ export function ChatGroupSession({
   const approvals = useApprovalSurface();
   useEffect(
     () => approvals.claims.claim(chatGroupId, ownsSession),
-    [approvals.claims, chatGroupId, ownsSession],
+    // `ownsSession` is stable and reads refs, so what this tile owns changes
+    // without the claim changing. Re-claiming on every such change is how
+    // the window learns to re-read the predicate; without it a request parked
+    // before this tile knew its session (a reload) stays on the window's
+    // dock beside the card this tile draws for the same request.
+    [approvals.claims, chatGroupId, ownsSession, currentSessionId, ownedChildSessionIds],
   );
   // A request names the session that asked. A sub-agent's ask names the
   // child's session, which the tile that spawned it also owns — its turn is

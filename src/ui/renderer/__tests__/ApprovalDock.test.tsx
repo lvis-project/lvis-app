@@ -8,7 +8,7 @@
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, fireEvent, waitFor } from "@testing-library/react";
-import { ApprovalDock } from "../components/permissions/ApprovalDock.js";
+import { ApprovalDock, blockingSurfaceCovers } from "../components/permissions/ApprovalDock.js";
 import type { ApprovalRequest, PermissionEvaluationContext } from "../types.js";
 import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
@@ -418,6 +418,35 @@ describe("ApprovalDock", () => {
       expect(composer).not.toHaveAttribute("aria-hidden");
       expect(document.activeElement).toBe(textarea);
     });
+  });
+
+  it("blockingSurfaceCovers: a card in the composer's own surface covers it, one in another surface does not, a modal always does", () => {
+    render(
+      <main data-testid={TEST_IDS.routeCanvas}>
+        <section data-approval-scope>
+          <div data-composer-placement="bottom"><textarea data-testid="composer-a" /></div>
+          <section data-testid="approval-dock" />
+        </section>
+        <section data-approval-scope>
+          <div data-composer-placement="bottom"><textarea data-testid="composer-b" /></div>
+        </section>
+      </main>,
+    );
+    const composerA = document.querySelector('[data-testid="composer-a"]');
+    const composerB = document.querySelector('[data-testid="composer-b"]');
+    expect(blockingSurfaceCovers(composerA)).toBe(true);
+    expect(blockingSurfaceCovers(composerB)).toBe(false);
+    expect(blockingSurfaceCovers(null)).toBe(true); // no surface of its own: the window is its surface
+
+    const modal = document.createElement("div");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("data-state", "open");
+    document.body.append(modal);
+    try {
+      expect(blockingSurfaceCovers(composerB)).toBe(true);
+    } finally {
+      modal.remove();
+    }
   });
 
   it("inerts only the composer inside its own scope; a dock whose scope holds no composer inerts none", async () => {

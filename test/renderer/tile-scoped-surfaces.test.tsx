@@ -508,6 +508,33 @@ describe("a turn parked on an approval, with two tiles", () => {
     await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
   });
 
+  it("draws a request parked before this tile knew its session once: in the tile, never beside it in the window", async () => {
+    // A reload: the request comes back from the host before the primary tile
+    // has loaded the session it names. Until then nothing owns it and the
+    // window's dock holds it; once the tile knows its session it claims the
+    // request, and the window's dock must let go of it.
+    let resolveHistory!: (history: { sessionId: string; messages: never[] }) => void;
+    const history = new Promise<{ sessionId: string; messages: never[] }>((resolve) => {
+      resolveHistory = resolve;
+    });
+    const { container } = await renderApp({
+      hasApiKey: true,
+      history,
+      pendingApprovals: [request({ sessionId: MOCK_DEFAULT_SESSION_ID })],
+    });
+    await waitFor(() => expect(dock(container)).toHaveLength(1));
+    expect(dock(container)[0]!.closest("[data-approval-scope]"))
+      .toHaveAttribute("data-testid", "window-approval-scope");
+
+    await act(async () => {
+      resolveHistory({ sessionId: MOCK_DEFAULT_SESSION_ID, messages: [] });
+    });
+    const [primary] = collectTiles(container);
+    await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
+    expect(dock(container)).toHaveLength(1);
+    expect(band(primary!)!.getAttribute("data-tool-names")).toBe("read_file");
+  });
+
   it("leaves a request that names no conversation to the window's own dock, outside every tile", async () => {
     const { container, emitApproval } = await renderApp({ hasApiKey: true });
     const [primary, second] = await splitIntoTwoTiles(container);
