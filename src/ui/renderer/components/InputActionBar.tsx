@@ -13,7 +13,7 @@
  * the composer is empty, and reverts to "send" the moment anything is typed.
  *
  *   STATUS SUB-ROW (bottom, compact single line):
- *     [● active] · [vendor · model] · [permission — per-mode TEXT color] · [ring]
+ *     [● active] · [model] · [permission — per-mode TEXT color] · [ring]
  *
  * The window StatusBar is notifications-only after this change; the persistent
  * model / permission / active cells moved here. The TokenProgressRing widget
@@ -99,8 +99,6 @@ export interface InputActionBarProps {
   // Status sub-row.
   /** Resolved model / permission / active fields (from useInputStatusRow). */
   statusRow: InputStatusRow;
-  /** Workspace mode controls compact status-row model labeling. */
-  appMode?: "chat" | "work";
   /** Opens Settings → LLM — the model card's way to the full catalogue. */
   onOpenModelSettings: () => void;
   /** Opens Settings → Permissions when the permission cell is clicked. */
@@ -172,22 +170,12 @@ export function InputActionBar({
   reasoningAvailable = true,
   onToggleThinking,
   statusRow,
-  appMode = "work",
   onOpenModelSettings,
   onOpenPermissions,
   onOpenApprovalQueue,
 }: InputActionBarProps) {
   const { t } = useTranslation();
   const assistantMenuRequestIdRef = useRef<string | null>(null);
-  const showStop = isBusy && !hasDraft;
-  const turnControlLabel = showStop
-    ? t("bottomActionRow.cancelButton")
-    : t("bottomActionRow.sendButton");
-  // Stop is always actionable; send is not whenever `isSendDisabled` says so —
-  // which covers BOTH "nothing to send" and the runtime blocks (no API key,
-  // runtime unavailable). One flag drives the `disabled` attribute and the
-  // quiet styling together, so the two can never disagree.
-  const turnControlInert = !showStop && isSendDisabled;
   const hasAssistantContext = !!activePreset && !activePreset.isDefault;
   const assistantTitle = [
     activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
@@ -264,21 +252,12 @@ export function InputActionBar({
             )}
           </Button>
 
-          {/* Single unified attach button — images, files, anything except the
-              deny-listed dangerous extensions. The chip count badge lives on
-              the inline composer chip (n/5), not here. */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void onAttach()}
+          <AttachButton
+            onAttach={onAttach}
             disabled={attachDisabled}
-            data-testid="iab-attach-button"
-            className="h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
-            title={attachButtonLabel(attachDisabled, attachDisabledReason, attachDisabledSubscriptionProvider)}
-            aria-label={attachButtonLabel(attachDisabled, attachDisabledReason, attachDisabledSubscriptionProvider)}
-          >
-            <Paperclip className="h-3.5 w-3.5" />
-          </Button>
+            disabledReason={attachDisabledReason}
+            disabledSubscriptionProvider={attachDisabledSubscriptionProvider}
+          />
         </div>
 
         {/* Trailing cluster — turn controls (? · thinking · send/stop). */}
@@ -288,56 +267,19 @@ export function InputActionBar({
         >
           <ShortcutsButton />
           {/* Reasoning control moved to the status sub-row (between model and dot). */}
-          {/* ONE turn-control button. The draft decides which verb it carries:
-              anything typed (or attached) means the user's next action is
-              "send", so it stays a send button even mid-run; an empty draft
-              during a run leaves "stop" as the only useful action. Idle with an
-              empty draft keeps the send glyph, disabled. ESC still cancels a
-              run regardless of what the button currently shows.
-              The label is the icon plus title/aria-label — the old
-              "전송 + ⏎ keycap" pair rendered the keycap as an empty box
-              (its background and its text both resolved to
-              `primary-foreground`, so the glyph disappeared into the chip). */}
-          <Button
-            type="button"
-            /* Quiet whenever it cannot act: a disabled SOLID button is a
-               near-black disc at 50% opacity, which reads as a broken grey
-               blob rather than "waiting". Inert it borrows the leading
-               cluster's outline treatment, so an idle composer shows one calm
-               row of controls; it goes solid the instant the button can
-               actually do something. */
-            variant={turnControlInert ? "outline" : "default"}
-            onClick={showStop ? onCancel : onSend}
-            disabled={turnControlInert}
-            data-testid={showStop ? "composer-cancel-button" : "composer-send-button"}
-            title={turnControlLabel}
-            aria-label={turnControlLabel}
-            className={
-              "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full p-0 transition-transform duration-(--motion-fast) ease-(--motion-ease-standard) active:scale-90 focus-visible:ring-input-bar-focus motion-reduce:transition-none motion-reduce:active:scale-100 " +
-              (turnControlInert
-                ? "border-input-bar-border bg-input-bar-subtle text-input-bar-action"
-                : "")
-            }
-          >
-            {/* Keyed so the send↔stop swap is a crossfade on the SAME button,
-                not an instant glyph substitution that reads as two buttons
-                trading places. */}
-            <span
-              key={showStop ? "stop" : "send"}
-              className="lvis-turn-control-glyph inline-flex items-center justify-center"
-            >
-              {showStop
-                ? <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
-                : <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />}
-            </span>
-          </Button>
+          <TurnControlButton
+            isBusy={isBusy}
+            hasDraft={hasDraft}
+            isSendDisabled={isSendDisabled}
+            onSend={onSend}
+            onCancel={onCancel}
+          />
         </div>
       </div>
 
       {/* ── STATUS SUB-ROW ──────────────────────────────────────────── */}
       <StatusSubRow
         statusRow={statusRow}
-        appMode={appMode}
         ringSlot={ringSlot}
         onOpenModelSettings={onOpenModelSettings}
         onOpenPermissions={onOpenPermissions}
@@ -350,9 +292,119 @@ export function InputActionBar({
   );
 }
 
+interface TurnControlButtonProps {
+  isBusy: boolean;
+  /** See {@link InputActionBarProps.hasDraft}. */
+  hasDraft: boolean;
+  isSendDisabled: boolean;
+  onSend: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * ONE turn-control button, shared by every composer surface. The draft decides
+ * which verb it carries: anything typed (or attached) means the user's next
+ * action is "send", so it stays a send button even mid-run; an empty draft
+ * during a run leaves "stop" as the only useful action. Idle with an empty
+ * draft keeps the send glyph, disabled. ESC still cancels a run regardless of
+ * what the button currently shows.
+ *
+ * The label is the icon plus title/aria-label — the old "전송 + ⏎ keycap" pair
+ * rendered the keycap as an empty box (its background and its text both
+ * resolved to `primary-foreground`, so the glyph disappeared into the chip).
+ */
+export function TurnControlButton({
+  isBusy,
+  hasDraft,
+  isSendDisabled,
+  onSend,
+  onCancel,
+}: TurnControlButtonProps) {
+  const { t } = useTranslation();
+  const showStop = isBusy && !hasDraft;
+  const turnControlLabel = showStop
+    ? t("bottomActionRow.cancelButton")
+    : t("bottomActionRow.sendButton");
+  // Stop is always actionable; send is not whenever `isSendDisabled` says so —
+  // which covers BOTH "nothing to send" and the runtime blocks (no API key,
+  // runtime unavailable). One flag drives the `disabled` attribute and the
+  // quiet styling together, so the two can never disagree.
+  const turnControlInert = !showStop && isSendDisabled;
+  return (
+    <Button
+      type="button"
+      /* Quiet whenever it cannot act: a disabled SOLID button is a
+         near-black disc at 50% opacity, which reads as a broken grey
+         blob rather than "waiting". Inert it borrows the leading
+         cluster's outline treatment, so an idle composer shows one calm
+         row of controls; it goes solid the instant the button can
+         actually do something. */
+      variant={turnControlInert ? "outline" : "default"}
+      onClick={showStop ? onCancel : onSend}
+      disabled={turnControlInert}
+      data-testid={showStop ? "composer-cancel-button" : "composer-send-button"}
+      title={turnControlLabel}
+      aria-label={turnControlLabel}
+      className={
+        "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full p-0 transition-transform duration-(--motion-fast) ease-(--motion-ease-standard) active:scale-90 focus-visible:ring-input-bar-focus motion-reduce:transition-none motion-reduce:active:scale-100 " +
+        (turnControlInert
+          ? "border-input-bar-border bg-input-bar-subtle text-input-bar-action"
+          : "")
+      }
+    >
+      {/* Keyed so the send↔stop swap is a crossfade on the SAME button,
+          not an instant glyph substitution that reads as two buttons
+          trading places. */}
+      <span
+        key={showStop ? "stop" : "send"}
+        className="lvis-turn-control-glyph inline-flex items-center justify-center"
+      >
+        {showStop
+          ? <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
+          : <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />}
+      </span>
+    </Button>
+  );
+}
+
+interface AttachButtonProps {
+  onAttach: () => void | Promise<void>;
+  disabled: boolean;
+  disabledReason?: "limit" | "no-api-key" | "subscription-unsupported" | "runtime-pending";
+  disabledSubscriptionProvider?: string;
+}
+
+/**
+ * Single unified attach button — images, files, anything except the
+ * deny-listed dangerous extensions. The chip count badge lives on the inline
+ * composer chip (n/5), not here. Shared by every composer surface.
+ */
+export function AttachButton({
+  onAttach,
+  disabled,
+  disabledReason = "limit",
+  disabledSubscriptionProvider,
+}: AttachButtonProps) {
+  const label = attachButtonLabel(disabled, disabledReason, disabledSubscriptionProvider);
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => void onAttach()}
+      disabled={disabled}
+      data-testid="iab-attach-button"
+      className="h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
+      title={label}
+      aria-label={label}
+    >
+      <Paperclip className="h-3.5 w-3.5" />
+    </Button>
+  );
+}
+
 /**
  * Status sub-row — compact single line at the bottom of the unified bar:
- *   [● active] · [vendor · model] · [permission — per-mode text color] · [ring]
+ *   [● active] · [model] · [permission — per-mode text color] · [ring]
  *
  * Permission is plain text colored per-mode (no pill/outline). The
  * TokenProgressRing widget sits at the END (after permission); the usage % /
@@ -361,7 +413,6 @@ export function InputActionBar({
  */
 function StatusSubRow({
   statusRow,
-  appMode,
   ringSlot,
   onOpenModelSettings,
   onOpenPermissions,
@@ -371,7 +422,6 @@ function StatusSubRow({
   onToggleThinking,
 }: {
   statusRow: InputStatusRow;
-  appMode: "chat" | "work";
   ringSlot: ReactNode;
   onOpenModelSettings: () => void;
   onOpenPermissions?: () => void;
@@ -385,7 +435,13 @@ function StatusSubRow({
   // Mode label ONLY — the pending-approval count is now its own separate
   // button before the permission cell (no longer appended to the label text).
   const permissionLabel = t(PERMISSION_LABEL_KEYS[permissionMode]);
-  const displayModel = appMode === "chat" ? stripVendorPrefix(vendorModel) : vendorModel;
+  // The row names the model only. Which vendor serves it is a detail of the
+  // route, not of the sentence the person is about to send — it belongs in
+  // the model card the cell opens, next to the models they can switch to.
+  // One case survives the strip whole: before a model is chosen the label is
+  // the vendor alone (or "not configured"), with no " · " to cut at — and that
+  // is right, because there is no model name yet to show instead.
+  const displayModel = stripVendorPrefix(vendorModel);
 
   return (
     <div
@@ -458,11 +514,12 @@ function StatusSubRow({
 
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
-        {/* Model — brain icon + compact label; chat mode hides vendor prefix.
+        {/* Model — brain icon + the model name alone. Which vendor serves it
+            shows in the card this opens, beside the model it belongs to.
             Clicking it, or the reasoning chip after it, opens the model card:
-            the pinned models, the reasoning level, and the way to the full
-            catalogue. Settings is one more click away, not the first thing a
-            model click does. */}
+            the models (the current one among them, marked), the reasoning
+            level, and the way to the full catalogue. Settings is one more
+            click away, not the first thing a model click does. */}
         <ModelQuickPicker
           vendorModel={vendorModel}
           displayModel={displayModel}
@@ -576,6 +633,11 @@ function ModelQuickPicker({
         <button
           type="button"
           data-testid="iab-status-model"
+          // The visible text is the model alone, so the vendor would be lost to
+          // anyone who cannot hover for the tooltip. The accessible name carries
+          // the whole route; it still contains the visible text, so name-in-label
+          // holds and voice control can still say the model.
+          aria-label={vendorModel}
           onClick={() => { openedByChipRef.current = false; }}
           className="inline-flex min-w-0 shrink items-center gap-1 text-left transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
           title={vendorModel}
@@ -697,7 +759,7 @@ export function makeBottomActionSendHandler(
  * tooltip; click opens a tidy popover listing every composer keybinding.
  * Fixed form (h-[26px] w-[26px]) keeps the action row layout stable.
  */
-function ShortcutsButton() {
+export function ShortcutsButton() {
   const { t } = useTranslation();
   const label = t("bottomActionRow.shortcuts");
   return (

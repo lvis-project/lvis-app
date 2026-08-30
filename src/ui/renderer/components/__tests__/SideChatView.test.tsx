@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
-import { fireEvent, render, screen, act } from "@testing-library/react";
+import { fireEvent, render, screen, act, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { SideChatView } from "../SideChatView.js";
@@ -11,9 +11,12 @@ import { ApprovalSurfaceProvider } from "../../hooks/use-approval.js";
 import { approvalSurfaceStub } from "../../../../../test/renderer/helpers.js";
 
 function makeApi() {
-  let handler: ((e: ChatStreamEvent) => void) | null = null;
+  // Two subscribers share the side stream — the transcript reducer and the
+  // message queue's drain — so the seam fans every frame out to all of them,
+  // in subscription order, exactly as the preload channel does.
+  const handlers = new Set<(e: ChatStreamEvent) => void>();
   const spies = {
-    send: vi.fn(async () => ({ ok: true as const, result: {} })),
+    send: vi.fn(async (_input: string, _attachments?: unknown[]) => ({ ok: true as const, result: {} })),
     new: vi.fn(async () => ({ ok: true as const, sessionId: "side-2" })),
     abort: vi.fn(async () => ({ ok: true as const })),
   };
@@ -23,15 +26,19 @@ function makeApi() {
       load: vi.fn(),
       list: vi.fn(),
       onStream: (h: (e: ChatStreamEvent) => void) => {
-        handler = h;
+        handlers.add(h);
         return () => {
-          handler = null;
+          handlers.delete(h);
         };
       },
       onFallback: () => () => {},
     },
   } as unknown as LvisApi;
-  return { api, emit: (e: ChatStreamEvent) => act(() => handler?.(e)), spies };
+  return {
+    api,
+    emit: (e: ChatStreamEvent) => act(() => { for (const h of handlers) h(e); }),
+    spies,
+  };
 }
 
 function renderView(api: LvisApi, chatContext?: Partial<ChatContextValue>) {
@@ -48,8 +55,25 @@ function renderView(api: LvisApi, chatContext?: Partial<ChatContextValue>) {
   );
 }
 
+/** The side chat's own composer field and turn control, scoped to its view. */
+function sideComposer() {
+  const view = within(screen.getByTestId("side-chat-view"));
+  return {
+    textarea: view.getByTestId("composer-textarea") as HTMLTextAreaElement,
+    sendButton: () => view.getByTestId("composer-send-button") as HTMLButtonElement,
+    view,
+  };
+}
+
+async function startTurn(text = "hello") {
+  const { textarea, sendButton } = sideComposer();
+  fireEvent.change(textarea, { target: { value: text } });
+  fireEvent.click(sendButton());
+  await act(async () => {});
+}
+
 describe("SideChatView — New button gating during streaming", () => {
-  it("disables the New button while a turn is streaming", () => {
+  it("disables the New button while a turn is streaming", async () => {
     const { api, emit } = makeApi();
     renderView(api);
 
@@ -57,11 +81,7 @@ describe("SideChatView — New button gating during streaming", () => {
     const newBtn = screen.getByTestId("side-chat-new") as HTMLButtonElement;
     expect(newBtn.disabled).toBe(false);
 
-    // Start a turn.
-    fireEvent.change(screen.getByTestId("side-chat-composer"), {
-      target: { value: "hello" },
-    });
-    fireEvent.click(screen.getByTestId("side-chat-send"));
+    await startTurn();
     emit({ type: "text_delta", text: "streaming…", streamId: 1 });
 
     // Streaming → New is disabled (no mid-stream session swap).
@@ -72,7 +92,7 @@ describe("SideChatView — New button gating during streaming", () => {
     expect((screen.getByTestId("side-chat-new") as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("uses the main runtime readiness gate before side-chat can send and preserves the draft", () => {
+  it("uses the main runtime readiness gate before side-chat can send and preserves the draft", async () => {
     const { api, spies } = makeApi();
     const onOpenSettings = vi.fn();
     renderView(api, {
@@ -81,28 +101,29 @@ describe("SideChatView — New button gating during streaming", () => {
       onOpenSettings,
     });
 
-    const composer = screen.getByTestId("side-chat-composer") as HTMLTextAreaElement;
-    fireEvent.change(composer, { target: { value: "keep this draft" } });
-    expect((screen.getByTestId("side-chat-send") as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.keyDown(composer, { key: "Enter" });
+    const { textarea, sendButton, view } = sideComposer();
+    fireEvent.change(textarea, { target: { value: "keep this draft" } });
+    expect(sendButton().disabled).toBe(true);
+    fireEvent.keyDown(textarea, { key: "Enter" });
     expect(spies.send).not.toHaveBeenCalled();
-    expect(composer.value).toBe("keep this draft");
+    expect(textarea.value).toBe("keep this draft");
 
-    const status = screen.getByTestId("side-chat-runtime-status");
-    const settings = status.querySelector("button") as HTMLButtonElement | null;
-    expect(settings).toBeTruthy();
-    fireEvent.click(settings!);
+    // The same no-credential chip the main dock shows, one click from settings.
+    fireEvent.click(view.getByTestId("composer-subscription-runtime-chip"));
+    const settings = await waitFor(() => {
+      const button = document.querySelector<HTMLElement>('[data-testid="composer-api-key-chip:settings"]');
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    fireEvent.click(settings);
     expect(onOpenSettings).toHaveBeenCalledWith("llm");
   });
 
-  it("does not render token or cost estimates for a subscription side-chat runtime", () => {
+  it("does not render token or cost estimates for a subscription side-chat runtime", async () => {
     const { api, emit } = makeApi();
     renderView(api, { hasApiKey: true, usageAvailable: false });
 
-    fireEvent.change(screen.getByTestId("side-chat-composer"), {
-      target: { value: "hello" },
-    });
-    fireEvent.click(screen.getByTestId("side-chat-send"));
+    await startTurn();
     emit({ type: "assistant_round", text: "answer", stopReason: "end_turn", streamId: 1 } as ChatStreamEvent);
     emit({
       type: "turn_summary",
@@ -117,5 +138,102 @@ describe("SideChatView — New button gating during streaming", () => {
     emit({ type: "done", streamId: 1 });
 
     expect(screen.queryByTestId("token-cost-badge")).toBeNull();
+  });
+});
+
+describe("SideChatView — the main composer's input system", () => {
+  it("renders the shared composer at the side surface, inside the shared frame", () => {
+    const { api } = makeApi();
+    renderView(api);
+    const { textarea, view } = sideComposer();
+    expect(textarea.getAttribute("data-composer-surface")).toBe("side");
+    expect(textarea.className).toContain("max-h-[112px]");
+    expect(textarea.className).toContain("text-body-sm");
+    expect(textarea.className).toContain("text-input-bar-foreground");
+    expect(textarea.getAttribute("rows")).toBeNull();
+    expect(textarea.hasAttribute("data-tour-anchor")).toBe(false);
+    expect(view.getByTestId("composer-frame")).toBeTruthy();
+    expect(view.getByTestId("iab-attach-button")).toBeTruthy();
+  });
+
+  it("queues a plain Enter while a turn runs and drains it as the next turn on done", async () => {
+    const { api, emit, spies } = makeApi();
+    renderView(api);
+    const { textarea, view } = sideComposer();
+
+    await startTurn("first");
+    emit({ type: "text_delta", text: "working…", streamId: 1 });
+    expect(spies.send).toHaveBeenCalledTimes(1);
+
+    // Enter mid-turn: queued, not sent — the field empties into the queue row.
+    fireEvent.change(textarea, { target: { value: "second" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(spies.send).toHaveBeenCalledTimes(1);
+    expect(textarea.value).toBe("");
+    expect(within(view.getByTestId("message-queue-panel")).getByText("second")).toBeTruthy();
+    expect(spies.abort).not.toHaveBeenCalled();
+
+    // The turn closes → the queue goes out as a fresh turn, without an abort.
+    emit({ type: "done", streamId: 1 });
+    await waitFor(() => expect(spies.send).toHaveBeenCalledTimes(2));
+    expect(spies.send.mock.calls[1][0]).toBe("second");
+    expect(spies.abort).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.queryByTestId("message-queue-panel")).toBeNull());
+  });
+
+  it("interrupts the running turn on ⌘⏎: abort settles first, then the new send goes out", async () => {
+    const { api, emit, spies } = makeApi();
+    renderView(api);
+    const { textarea } = sideComposer();
+
+    await startTurn("first");
+    emit({ type: "text_delta", text: "working…", streamId: 1 });
+
+    fireEvent.change(textarea, { target: { value: "now instead" } });
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+
+    await waitFor(() => expect(spies.send).toHaveBeenCalledTimes(2));
+    expect(spies.abort).toHaveBeenCalledTimes(1);
+    expect(spies.abort.mock.invocationCallOrder[0]).toBeLessThan(spies.send.mock.invocationCallOrder[1]);
+    expect(spies.send.mock.calls[1][0]).toBe("now instead");
+    expect(textarea.value).toBe("");
+  });
+
+  it("aborts the running turn on Esc inside the field when nothing is queued", async () => {
+    const { api, emit, spies } = makeApi();
+    renderView(api);
+    const { textarea } = sideComposer();
+
+    await startTurn("first");
+    emit({ type: "text_delta", text: "working…", streamId: 1 });
+
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    await waitFor(() => expect(spies.abort).toHaveBeenCalledTimes(1));
+    expect(spies.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send an Enter that commits an IME composition", () => {
+    const { api, spies } = makeApi();
+    renderView(api);
+    const { textarea } = sideComposer();
+
+    fireEvent.change(textarea, { target: { value: "한글" } });
+    fireEvent.compositionStart(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(spies.send).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("한글");
+  });
+
+  it("flips the turn control to stop while a turn runs with an empty draft", async () => {
+    const { api, emit } = makeApi();
+    renderView(api);
+    const { view } = sideComposer();
+
+    await startTurn("first");
+    emit({ type: "text_delta", text: "working…", streamId: 1 });
+    expect(view.getByTestId("composer-cancel-button")).toBeTruthy();
+
+    emit({ type: "done", streamId: 1 });
+    expect(view.getByTestId("composer-send-button")).toBeTruthy();
   });
 });

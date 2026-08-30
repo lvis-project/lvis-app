@@ -10,6 +10,15 @@
  */
 import { test, expect } from './fixtures.js';
 
+/**
+ * The side chat renders the SAME composer, queue panel, and turn control as the
+ * main dock, with the same test ids. Every locator that means "the main dock's
+ * X" is anchored on the dock's surface marker so it cannot resolve to the side
+ * chat's copy — and so a second match is a real failure rather than something
+ * `.first()` quietly hides.
+ */
+const MAIN = '[data-composer-surface="main"] ';
+
 /** Parse a computed `rgb(...)` / `rgba(...)` string into channels. */
 function parseRgb(value: string): [number, number, number] {
   const nums = value.match(/[\d.]+/g);
@@ -38,10 +47,10 @@ function contrastRatio(a: string, b: string): number {
 }
 
 test('idle composer: the turn control is a quiet, icon-only send button', async ({ mainWindow }) => {
-  const send = mainWindow.locator('[data-testid="composer-send-button"]');
+  const send = mainWindow.locator(MAIN + '[data-testid="composer-send-button"]');
   await expect(send).toBeVisible();
   // Send and stop are ONE button — no separate stop control exists at idle.
-  await expect(mainWindow.locator('[data-testid="composer-cancel-button"]')).toHaveCount(0);
+  await expect(mainWindow.locator(MAIN + '[data-testid="composer-cancel-button"]')).toHaveCount(0);
 
   const idle = await send.evaluate((el) => {
     const cs = getComputedStyle(el);
@@ -69,10 +78,10 @@ test('idle composer: the turn control is a quiet, icon-only send button', async 
 });
 
 test('typing turns the quiet control solid', async ({ mainWindow }) => {
-  const send = mainWindow.locator('[data-testid="composer-send-button"]');
+  const send = mainWindow.locator(MAIN + '[data-testid="composer-send-button"]');
   const before = await send.evaluate((el) => getComputedStyle(el).backgroundColor);
 
-  const textarea = mainWindow.locator('[data-testid="composer-textarea"]');
+  const textarea = mainWindow.locator(MAIN + '[data-testid="composer-textarea"]');
   await textarea.click();
   await textarea.fill('ep 세션 유지 시간 확인할 수 있나?');
 
@@ -91,9 +100,9 @@ test('message queue panel stays a full-bleed band and paints visible actions', a
     store?.add('계속 확인해봐');
   });
 
-  const panel = mainWindow.locator('[data-testid="message-queue-panel"]');
+  const panel = mainWindow.locator(MAIN + '[data-testid="message-queue-panel"]');
   await expect(panel).toBeVisible();
-  const inject = mainWindow.locator('[data-testid="message-queue-row-send-now-button"]').first();
+  const inject = mainWindow.locator(MAIN + '[data-testid="message-queue-row-send-now-button"]').first();
   await expect(inject).toBeVisible();
 
   const measured = await panel.evaluate((el) => {
@@ -141,10 +150,10 @@ test('message queue panel stays a full-bleed band and paints visible actions', a
 });
 
 test('edit bubble is a single frame with a readable save button', async ({ mainWindow }) => {
-  const textarea = mainWindow.locator('[data-testid="composer-textarea"]');
+  const textarea = mainWindow.locator(MAIN + '[data-testid="composer-textarea"]');
   await textarea.click();
   await textarea.fill('ep 세션 유지 시간 확인할 수 있나?');
-  await mainWindow.locator('[data-testid="composer-send-button"]').click();
+  await mainWindow.locator(MAIN + '[data-testid="composer-send-button"]').click();
 
   const actions = mainWindow.locator('[data-testid="user-message-actions"]').first();
   await expect(actions).toBeAttached({ timeout: 15_000 });

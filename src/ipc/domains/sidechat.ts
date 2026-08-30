@@ -110,10 +110,28 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.sidechat.send, async (e, payload: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.send, e); return UNAUTHORIZED_FRAME; }
     const p = (payload ?? {}) as { input?: unknown; attachments?: unknown };
-    if (typeof p.input !== "string" || p.input.trim().length === 0) {
-      return { ok: false as const, error: "empty-text" };
+    if (typeof p.input !== "string") {
+      return { ok: false as const, error: "invalid-input" };
     }
     const attachments = validateUserContentParts(p.attachments);
+    // An attachment-only send is a whole turn: a screenshot with no caption is
+    // the question. Main chat accepts it (`parseChatSendPayload` requires the
+    // input to be a string, never a non-empty one), and the shared composer now
+    // offers the same gesture on this surface, so the only send refused here is
+    // one carrying NOTHING — no text and no usable content part.
+    if (p.input.trim().length === 0 && (attachments?.length ?? 0) === 0) {
+      return { ok: false as const, error: "empty-text" };
+    }
+    // One turn at a time on the side loop. This handler calls `runStreamedTurn`
+    // directly, with no turn lease around it, so a second send arriving while a
+    // turn is in flight would run a CONCURRENT turn on the same
+    // ConversationLoop and the two would interleave into one history. Main chat
+    // refuses the same case with `streaming-active` (its lease returns null);
+    // the renderer's interrupt path aborts and awaits the turn first, so a user
+    // gesture still goes through.
+    if (activeSideStreamTurn) {
+      return { ok: false as const, error: "streaming-active" };
+    }
     const win = getMainWindow();
     const streamId = ++nextSideStreamId;
     const sink: ConversationStreamEventSink = createLegacyChatStreamEventSink(
