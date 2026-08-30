@@ -1067,6 +1067,16 @@ export function buildInternalApiSurface() {
       ipcRenderer.on(CHANNELS.approval.request, listener);
       return () => ipcRenderer.removeListener(CHANNELS.approval.request, listener);
     },
+    /**
+     * main→renderer: a request the host is no longer waiting on. Window-wide
+     * like `onRequest` — the queue it reconciles is the window's one FIFO,
+     * and the surface drawing the card is decided renderer-side.
+     */
+    onSettled: (cb: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => cb(payload);
+      ipcRenderer.on(CHANNELS.approval.settled, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.approval.settled, listener);
+    },
     /** 사용자 결정을 main으로 전송 */
     respond: async (decision: unknown) =>
       ipcRenderer.invoke(PERMISSIONS.approvalRespond, decision),

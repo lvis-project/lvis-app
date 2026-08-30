@@ -60,11 +60,17 @@ export const MODAL_DIALOG_SELECTOR =
   '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]';
 
 /**
- * Any open dialog, or the approval dock: the surfaces that make the rest of
- * the route inert. Message queueing, the onboarding tour and the spotlight all
- * pause while one is on screen. An approval card is scoped to the surface it
- * is drawn in — readers that answer for ONE composer ask `blockingSurfaceCovers`
+ * Any open dialog, the approval dock, or a user-question card: the surfaces
+ * that make the rest of the route inert. Message queueing, the onboarding tour
+ * and the spotlight all pause while one is on screen.
+ *
+ * The question card is in the set for the same reason the approval dock is:
+ * both are a turn waiting on an answer, and a tour backdrop painted over
+ * either one hides the thing the user has to act on before anything moves.
+ *
+ * An approval or question card is scoped to the surface it is drawn in —
+ * readers that answer for ONE composer ask `blockingSurfaceCovers`
  * (permissions/ApprovalDock) rather than the whole document.
  */
 export const BLOCKING_SURFACE_SELECTOR =
-  `${MODAL_DIALOG_SELECTOR}, ${testIdSelector(TEST_IDS.approvalDock)}`;
+  `${MODAL_DIALOG_SELECTOR}, ${testIdSelector(TEST_IDS.approvalDock)}, ${testIdSelector(TEST_IDS.questionOverlay)}`;
