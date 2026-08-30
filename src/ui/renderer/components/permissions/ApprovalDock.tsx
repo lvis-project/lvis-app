@@ -22,6 +22,17 @@ import { MODAL_DIALOG_SELECTOR, TEST_IDS, testIdSelector } from "../../../../sha
  */
 type ApprovalDockPlacement = "over-composer" | "window-chrome";
 
+/**
+ * The least the window's band may be squeezed to, in px.
+ *
+ * A band takes its height from the tile grid, so when the grid is at its own
+ * floor the band has to give. What it may not give up is the ability to answer:
+ * the card's header, the top of the ask, and the decision row. The body
+ * scrolls inside, so below this the card stops being usable rather than just
+ * cramped.
+ */
+export const WINDOW_DOCK_MIN_HEIGHT = 128;
+
 export interface ApprovalDockProps {
   /** The requests this surface draws, head first. */
   queue: readonly ApprovalRequest[];
@@ -303,15 +314,13 @@ export function ApprovalDock({
       style={
         inWindowChrome
           ? {
-            // In flow: the band around it owns the gutters, and the height it
-            // takes is height the tile grid does not get. 48dvh is fine for a
-            // card floating over one conversation and far too much for a band
-            // above three: measured at 1243x768 with three stacked tiles, the
-            // grid stops fitting its tiles between 33dvh and 40dvh. 30dvh
-            // keeps a margin under that and still gives the card its full
-            // 28rem on a tall window.
+            // In flow: the band around it owns the gutters AND the cap, which
+            // is derived from what the tile grid needs rather than from a
+            // share of the viewport — a fraction of the window that is
+            // comfortable above one tile starves four. The card fills what
+            // the band was given and scrolls inside it.
             marginBottom: "env(safe-area-inset-bottom, 0px)",
-            maxHeight: "min(30dvh, 28rem)",
+            maxHeight: "min(100%, 28rem)",
           }
           : {
             left: "max(0.75rem, env(safe-area-inset-left, 0px))",

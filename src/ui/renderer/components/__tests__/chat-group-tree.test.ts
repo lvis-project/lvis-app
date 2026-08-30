@@ -6,6 +6,7 @@ import {
   layoutGutters,
   leaf,
   leafIds,
+  minimumCanvasHeight,
   resizeGutter,
   splitLeaf,
   type ChatGroupNode,
@@ -160,5 +161,55 @@ describe("resizeGutter", () => {
     const boxes = layoutBoxes(resizeGutter(tree, { path: [], index: 0 }, 1.4));
     expect(boxes.find((b) => b.chatGroupId === "main")!.width).toBeCloseTo(100);
     expect(boxes.find((b) => b.chatGroupId === "group-2")!.width).toBeCloseTo(0);
+  });
+});
+
+describe("minimumCanvasHeight", () => {
+  // Boxes carry PERCENTAGES, the same numbers `areaStyle` writes into the DOM.
+  const box = (chatGroupId: string, top: number, height: number) => ({
+    chatGroupId,
+    left: 0,
+    top,
+    width: 100,
+    height,
+  });
+
+  it("is the tile floor itself when one tile has the whole canvas", () => {
+    expect(minimumCanvasHeight([box("main", 0, 100)], 250)).toBe(250);
+  });
+
+  it("reads the layout in percentages, not fractions", () => {
+    // The units are the trap: a fold seeded with 1 would answer 250 for every
+    // shape, which is the whole cap silently doing nothing.
+    expect(minimumCanvasHeight(layoutBoxes(splitLeaf(main, "main", "bottom", "group-2")), 250)).toBe(500);
+  });
+
+  it("multiplies by the rows an even split makes", () => {
+    expect(minimumCanvasHeight([box("main", 0, 50), box("group-2", 50, 50)], 250)).toBe(500);
+    expect(
+      minimumCanvasHeight(
+        [box("main", 0, 100 / 3), box("group-2", 100 / 3, 100 / 3), box("group-3", 200 / 3, 100 / 3)],
+        250,
+      ),
+    ).toBe(750);
+  });
+
+  it("takes the SHORTEST tile, not the count — an uneven split needs more", () => {
+    // A 70/30 drag leaves the short tile binding: 250 / 0.3, not 2 * 250.
+    expect(minimumCanvasHeight([box("main", 0, 70), box("group-2", 70, 30)], 250)).toBe(834);
+  });
+
+  it("ignores tiles side by side — they share one row's height", () => {
+    // A row split gives both children the full height of their row.
+    expect(
+      minimumCanvasHeight(
+        [box("main", 0, 50), box("group-2", 50, 50), box("group-3", 50, 50)],
+        250,
+      ),
+    ).toBe(500);
+  });
+
+  it("falls to one tile's floor when there are no boxes at all", () => {
+    expect(minimumCanvasHeight([], 250)).toBe(250);
   });
 });

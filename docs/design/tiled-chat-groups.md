@@ -311,6 +311,21 @@ and the caret correct while still winning the hit-test at a tile's textarea:
 keyboard-reachable, not mouse-clickable. Position follows the same rule the
 scope does — a surface may only take space from itself.
 
+Because a band takes its height out of the grid, its cap comes from the grid's
+own arithmetic rather than from a share of the viewport: the shortest tile must
+still clear `CHAT_GROUP_MIN_HEIGHT` plus the cell inset and the tile row's
+bottom gutter — the floor a split or a gutter drag already holds it to — and the
+band gets what is left, down to `WINDOW_DOCK_MIN_HEIGHT`, below which the card
+scrolls inside itself instead of taking more. A fraction of the window would be
+comfortable above one tile and starve four: measured at 1243x768 with a 2x2, an
+uncapped band leaves 138px frames, and the cap holds them at 242px.
+
+The floor is parity with the user's own gestures, not a promise of a readable
+tile: at `CHAT_GROUP_MIN_HEIGHT` the frame has no room left for a transcript in
+the current composer, with or without a band — dragging the window down to 540px
+tall reaches the same 240px frame and the same empty transcript with nothing
+docked at all. That is a property of the constant, not of the band.
+
 A headless or routine turn is **not** a source of cards here. It has no
 interactive approver by construction: the reviewer's headless lane answers
 `low → allow` and anything above it `deny` (`PermissionManager.resolveReviewerDecision`),

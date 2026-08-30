@@ -28,7 +28,8 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
+import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
+import { minimumCanvasHeight } from "./components/chat-group-tree.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
@@ -37,7 +38,7 @@ import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
-import { ApprovalDock } from "./components/permissions/ApprovalDock.js";
+import { ApprovalDock, WINDOW_DOCK_MIN_HEIGHT } from "./components/permissions/ApprovalDock.js";
 import type { ApprovalRequest } from "./types.js";
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
 import type { ExactDenyDraft } from "./exact-permission-decision.js";
@@ -273,6 +274,22 @@ export function App() {
     focusGroup(chatGroupId);
     return true;
   }, [focusGroup]);
+  // What the window's own band may take, in the layout's own terms: the room
+  // left once the shortest tile still clears the floor a split or a gutter drag
+  // would hold it to. A card that arrives must not be able to squeeze the grid
+  // past what the user's own gestures can. `SHELL_GUTTER` is the tile row's
+  // bottom air, which is canvas height the tiles never see.
+  //
+  // Expressed as a percentage of `<main>`, the flex parent the band and the
+  // route canvas share, so it tracks the window without measuring it.
+  const windowDockMaxHeight = useMemo(() => {
+    const reserved = minimumCanvasHeight(
+      chatGroups.groups.map((group) => group.box),
+      CHAT_GROUP_MIN_HEIGHT + CHAT_GROUP_CELL_INSET,
+    ) + SHELL_GUTTER;
+    return `max(${WINDOW_DOCK_MIN_HEIGHT}px, calc(100% - ${reserved}px))`;
+  }, [chatGroups.groups]);
+
   // Which tile shows an overlay card. Only the window can answer it: it needs
   // every tile's conversation and which one is focused.
   const overlayCardTileForWindow = useCallback(
@@ -1723,9 +1740,17 @@ export function App() {
                       left `inert` and the caret alone but still won the
                       hit-test at a tile composer's centre — keyboard-reachable,
                       not mouse-clickable. `empty:hidden` gives the band back
-                      when the dock draws nothing. */}
+                      when the dock draws nothing.
+
+                      Its cap is what the tile grid can spare, not a share of
+                      the viewport: the shortest tile still has to clear the
+                      floor the split and resize rules already hold it to, or
+                      every transcript on screen collapses to nothing. Below
+                      `WINDOW_DOCK_MIN_HEIGHT` the band stops giving and the
+                      card scrolls inside it instead. */}
                   <div
                     className="flex shrink-0 flex-col px-3 pb-3 empty:hidden"
+                    style={{ maxHeight: windowDockMaxHeight }}
                     data-approval-scope
                     data-testid={TEST_IDS.windowApprovalScope}
                   >

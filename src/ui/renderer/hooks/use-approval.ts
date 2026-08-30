@@ -135,6 +135,10 @@ export function useApproval(): ApprovalQueueApi {
 
   useEffect(() => {
     aliveRef.current = true;
+    // A remount asks the host for the parked set again, so the guard below has
+    // a reader again. Reset with `aliveRef`, not on its own: the two describe
+    // the same subscription's life.
+    parkedReconciledRef.current = false;
     // Surface preload init bugs explicitly. The approval queue is a
     // load-bearing UX path; silently no-op'ing here when `window.lvis` is
     // missing makes the bug present as "tools never resolve" instead of
