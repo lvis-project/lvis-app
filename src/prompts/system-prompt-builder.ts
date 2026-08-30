@@ -1082,7 +1082,20 @@ function renderSkillCatalogRecord(skill: SkillCatalogEntry): string {
     sanitizeSkillCatalogText(skill.description),
     MAX_SKILL_DESCRIPTION_CHARS,
   );
-  return JSON.stringify({ name, description: description || t("be_systemPromptBuilder.skillNoDescription") });
+  // The author's keyword hints. Dispatch metadata like the description, and
+  // bounded the same way: sanitized, truncated, and capped in count, so a
+  // skill cannot buy itself extra room in a budgeted catalog by listing
+  // hundreds of them.
+  const triggers = skill.triggers
+    .slice(0, MAX_SKILL_TRIGGERS)
+    .map((trigger) => truncateSkillCatalogText(sanitizeSkillCatalogText(trigger), MAX_SKILL_TRIGGER_CHARS))
+    .filter((trigger) => trigger.length > 0);
+  const record: { name: string; description: string; triggers?: string[] } = {
+    name,
+    description: description || t("be_systemPromptBuilder.skillNoDescription"),
+  };
+  if (triggers.length > 0) record.triggers = triggers;
+  return JSON.stringify(record);
 }
 
 // ─── Constants ──────────────────────────────────────
@@ -1102,3 +1115,5 @@ const MAX_MCP_GUIDANCE_SERVERS = 16;
 const MAX_MCP_GUIDANCE_CHARS = 8192;
 const MAX_SKILL_NAME_CHARS = 96;
 const MAX_SKILL_DESCRIPTION_CHARS = 320;
+const MAX_SKILL_TRIGGERS = 8;
+const MAX_SKILL_TRIGGER_CHARS = 48;

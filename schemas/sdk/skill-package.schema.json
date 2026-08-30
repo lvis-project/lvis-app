@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdk.lvisai.xyz/schemas/skill.schema.json",
+  "title": "LVIS Skill Package Manifest",
+  "description": "The plugin.json of a standalone skill package distributed through the LVIS marketplace. The package is a directory holding this manifest next to SKILL.md. The skill itself — what SKILL.md's front matter declares — is described once, in $defs/skillComponent, and that same definition governs a skill bundled inside an Agent Plugins 1.0.0 plugin through the manifest's skills[] directory declarations. The package manifest reuses the component's fields by $ref, so the standalone path and the bundled path cannot drift apart. This SDK owns the schema; the LVIS host never loads it, and the marketplace validates against a byte-identical snapshot of it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "version",
+    "description"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://sdk.lvisai.xyz/schemas/skill.schema.json",
+      "description": "Schema URI used to classify skill packages. Pinned to this schema's $id."
+    },
+    "id": {
+      "$ref": "#/$defs/skillComponent/properties/name"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable skill name shown in the catalog. Distinct from the component name, which is the slug."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+      "not": {
+        "pattern": "[\\r\\n]"
+      },
+      "description": "Stable semantic version string"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 280,
+      "description": "Short human-readable summary shown on the catalog card. Bounded tighter than the component description, which may run to the Agent Skills ceiling."
+    },
+    "installPolicy": {
+      "type": "string",
+      "enum": [
+        "admin",
+        "user"
+      ],
+      "description": "Install policy"
+    },
+    "author": {
+      "type": "string",
+      "description": "Package author name or email"
+    },
+    "triggers": {
+      "$ref": "#/$defs/skillComponent/properties/triggers"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$",
+        "not": {
+          "pattern": "[\\r\\n]"
+        }
+      },
+      "description": "Catalog capability tags"
+    }
+  },
+  "$defs": {
+    "skillComponent": {
+      "title": "LVIS Skill Component",
+      "description": "The YAML front matter of a SKILL.md file (Agent Skills specification, as adopted by Agent Plugins 1.0.0) plus the LVIS keyword triggers. One definition for both delivery paths: the SKILL.md at the root of a standalone skill package, and the SKILL.md inside every directory a plugin manifest declares under skills[].",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "not": {
+            "pattern": "[\\r\\n]"
+          },
+          "maxLength": 64,
+          "description": "Skill slug. Must equal the directory name the SKILL.md lives in; for a standalone package it is also the marketplace slug and install directory name. The charset and the 64-character ceiling are the host's: the slug becomes a path segment under the skills directory and a label in the picker, so a name must be path-safe and bounded. Beyond that the spelling is the author's — case, digits, underscores and hyphens are all theirs to choose."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "Short human-readable summary of what the skill does and when to use it"
+        },
+        "triggers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Keyword trigger hints"
+        },
+        "license": {
+          "type": "string",
+          "description": "License name or a reference to a bundled license file"
+        },
+        "compatibility": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Environment requirements such as intended products, system packages, or network access"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Arbitrary key-value map for additional properties; the Agent Skills specification assigns no shape to the values"
+        },
+        "allowed-tools": {
+          "type": "string",
+          "description": "Space-delimited list of tools the skill is pre-approved to use"
+        }
+      }
+    }
+  }
+}

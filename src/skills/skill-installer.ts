@@ -9,7 +9,7 @@ import {
 import type { MarketplaceFetcher } from "../plugins/marketplace-fetcher.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
 import { MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES, throwIfMarketplaceInstallAborted } from "../plugins/marketplace-installer.js";
-import { parseFrontmatter, SKILL_NAME_ALLOWLIST } from "../main/skill-store.js";
+import { isAllowedSkillName, parseFrontmatter } from "../main/skill-store.js";
 import { updateSkillRegistry } from "./skill-registry.js";
 
 export interface InstallSkillPackageOptions {
@@ -31,7 +31,7 @@ export async function installSkillPackageFromMarketplace(
   slug: string,
   opts: InstallSkillPackageOptions,
 ): Promise<InstallSkillPackageResult> {
-  if (!SKILL_NAME_ALLOWLIST.test(slug)) {
+  if (!isAllowedSkillName(slug)) {
     throw new Error(`skill package slug is not discoverable as a skill: ${slug}`);
   }
   const detail = await opts.fetcher.getPluginDetail(slug);
@@ -62,7 +62,7 @@ export async function installSkillPackageFromMarketplace(
       ]);
       const { fm, body } = parseFrontmatter(rootFiles["SKILL.md"]);
       const skillId = fm.name || slug;
-      if (!SKILL_NAME_ALLOWLIST.test(skillId)) {
+      if (!isAllowedSkillName(skillId)) {
         throw new Error(`skill package "${slug}" declares invalid skill name "${skillId}"`);
       }
       if (skillId !== slug) {
@@ -119,7 +119,7 @@ export async function uninstallSkillPackage(
   slug: string,
   opts: { installRoot: string; registryPath: string },
 ): Promise<{ skillId: string; slug: string; uninstalled: true }> {
-  if (!SKILL_NAME_ALLOWLIST.test(slug)) {
+  if (!isAllowedSkillName(slug)) {
     throw new Error(`invalid skill package id: ${slug}`);
   }
   let found = false;

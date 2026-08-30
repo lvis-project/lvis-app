@@ -14,7 +14,11 @@ import { resolve, join, relative, isAbsolute } from "node:path";
 import type { Dirent } from "node:fs";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import { parseFrontmatterBlock, unquoteFrontmatterValue } from "./skill-store.js";
+import {
+  parseFrontmatterBlock,
+  parseFrontmatterStringList,
+  unquoteFrontmatterValue,
+} from "./skill-store.js";
 
 const log = createLogger("lvis");
 
@@ -59,21 +63,10 @@ export function parseAgentFrontmatter(raw: string): {
     else if (key === "description") fm.description = val;
     else if (key === "model") fm.model = val;
     else if (key === "mode") fm.mode = val;
-    else if (key === "tools") fm.tools = parseStringList(rawValue);
-    else if (key === "triggers") fm.triggers = parseStringList(rawValue);
+    else if (key === "tools") fm.tools = parseFrontmatterStringList(rawValue);
+    else if (key === "triggers") fm.triggers = parseFrontmatterStringList(rawValue);
   }
   return { fm, body };
-}
-
-function parseStringList(raw: string): string[] {
-  const trimmed = raw.trim();
-  const inner = trimmed.startsWith("[") && trimmed.endsWith("]")
-    ? trimmed.slice(1, -1)
-    : trimmed;
-  return inner
-    .split(",")
-    .map(unquoteFrontmatterValue)
-    .filter((s) => s.length > 0);
 }
 
 export class AgentProfileStore {

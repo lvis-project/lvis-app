@@ -232,6 +232,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       expect(catalog).toEqual([{
         name: "brief",
         description: "Short brief",
+        triggers: [],
       }]);
       expect(JSON.stringify(catalog)).not.toContain("SECRET BODY");
     } finally {
@@ -249,7 +250,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       );
       const store = new SkillStore({ userDir: dir });
       const catalog = store.listCatalogSync();
-      expect(catalog).toEqual([{ name: "huge", description: "Huge but discoverable" }]);
+      expect(catalog).toEqual([{ name: "huge", description: "Huge but discoverable", triggers: [] }]);
       expect(JSON.stringify(catalog)).not.toContain("x".repeat(100));
     } finally {
       await cleanupTmpDir(dir);
