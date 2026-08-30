@@ -562,6 +562,53 @@ describe("a turn parked on an approval, with two tiles", () => {
       expect(document.activeElement).toBe(input);
     }
   });
+
+  it("keeps the window's dock out of the tile grid, in a band of its own", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ id: "req-host" }));
+    });
+    await waitFor(() => expect(dock(container)).toHaveLength(1));
+
+    const card = dock(container)[0]!;
+    const scope = card.closest<HTMLElement>("[data-approval-scope]")!;
+    const canvas = container.querySelector<HTMLElement>('[data-testid="route-canvas"]')!;
+
+    // Disjoint subtrees, both ways: the dock is not drawn over the canvas the
+    // tiles live in, and no tile is drawn inside the dock's band. `inert` and
+    // the caret were already left alone — what was not was the hit-test, and
+    // hit-testing follows the box, not the DOM courtesies.
+    expect(canvas.contains(scope)).toBe(false);
+    expect(scope.contains(canvas)).toBe(false);
+    for (const tile of [primary!, second!]) {
+      expect(scope.contains(tile.element)).toBe(false);
+    }
+    // Nothing for it to cover, so it covers nothing: the band holds no
+    // composer, and the card is in flow rather than floating over one.
+    expect(scope.querySelectorAll("[data-composer-placement]")).toHaveLength(0);
+    expect(card).toHaveAttribute("data-overlay-position", "window-chrome");
+  });
+
+  it("takes the unclaimed card down when the host retires the request", async () => {
+    const { container, emitApproval, emitApprovalSettled } = await renderApp({ hasApiKey: true });
+    await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ id: "req-host" }));
+    });
+    await waitFor(() => expect(dock(container)).toHaveLength(1));
+
+    // The tile that asked closed, so the host cancelled the ask. Nothing in
+    // this window watches that turn any more — the announcement is the only
+    // thing that can retire the card, and its deny would answer nothing.
+    await act(async () => {
+      emitApprovalSettled("req-host");
+    });
+
+    await waitFor(() => expect(dock(container)).toHaveLength(0));
+  });
 });
 
 describe("cards raised by one of three tiles", () => {

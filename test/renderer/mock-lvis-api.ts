@@ -757,6 +757,7 @@ type LvisNamespaceOverrides = {
 
 export function makeMockLvisNamespace(overrides: LvisNamespaceOverrides = {}) {
   const approvalHandlers = new Set<(r: unknown) => void>();
+  const approvalSettledHandlers = new Set<(payload: unknown) => void>();
   return {
     ns: {
       permission: {
@@ -772,6 +773,10 @@ export function makeMockLvisNamespace(overrides: LvisNamespaceOverrides = {}) {
         onRequest: vi.fn((cb: (r: unknown) => void) => {
           approvalHandlers.add(cb);
           return () => approvalHandlers.delete(cb);
+        }),
+        onSettled: vi.fn((cb: (payload: unknown) => void) => {
+          approvalSettledHandlers.add(cb);
+          return () => approvalSettledHandlers.delete(cb);
         }),
         respond: vi.fn(async () => ({ ok: true })),
         // Nothing parked on the host by default; a test that opens with a
@@ -815,5 +820,8 @@ export function makeMockLvisNamespace(overrides: LvisNamespaceOverrides = {}) {
       },
     },
     emitApproval: (r: unknown) => approvalHandlers.forEach((h) => h(r)),
+    /** The host retired a parked request — see `lvis:approval:settled`. */
+    emitApprovalSettled: (requestId: string) =>
+      approvalSettledHandlers.forEach((h) => h({ requestId })),
   };
 }

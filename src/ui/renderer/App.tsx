@@ -1710,41 +1710,49 @@ export function App() {
                         );
                       })()}
                     </ErrorBoundary>
-                    {/* The window's own dock: only requests no conversation
-                        surface claimed (see `unclaimedApprovals`). Its scope is
-                        this wrapper — beside the tiles, an ancestor of none —
-                        so the card covers no tile's composer and takes no
-                        tile's caret. `contents` keeps the dock positioned
-                        against the route canvas as before. */}
-                    <div
-                      className="contents"
-                      data-approval-scope
-                      data-testid={TEST_IDS.windowApprovalScope}
-                    >
-                      <ApprovalDock
-                        queue={unclaimedApprovals}
+                  </div>
+                  {/* The window's own dock: only requests no conversation
+                      surface claimed (see `unclaimedApprovals`). Its scope is
+                      this wrapper — beside the tiles, an ancestor of none —
+                      so the card covers no tile's composer and takes no
+                      tile's caret.
+
+                      It is a BAND, not a float: a flex sibling BELOW the route
+                      canvas, so the space it takes is space the tile grid does
+                      not get. An absolutely positioned dock over the canvas
+                      left `inert` and the caret alone but still won the
+                      hit-test at a tile composer's centre — keyboard-reachable,
+                      not mouse-clickable. `empty:hidden` gives the band back
+                      when the dock draws nothing. */}
+                  <div
+                    className="flex shrink-0 flex-col px-3 pb-3 empty:hidden"
+                    data-approval-scope
+                    data-testid={TEST_IDS.windowApprovalScope}
+                  >
+                    <ApprovalDock
+                      placement="window-chrome"
+                      queue={unclaimedApprovals}
                       conversationLabel={
-                          windowApprovalHead?.sessionId === undefined
-                            ? t("approvalAttribution.unattributed")
-                            : t("approvalAttribution.headlessSession")
-                        }
-                        proposedChoice={
-                          windowApprovalHead !== null
-                            && approvalProposal?.requestId === windowApprovalHead.id
-                            ? approvalProposal.choice
-                            : null
-                        }
-                        onDecide={(choice, pattern, extras) => {
-                          if (windowApprovalHead === null) return;
-                          void handleApprovalDecide(windowApprovalHead.id, choice, pattern, extras);
-                        }}
-                        onOpenPermanentDeny={handleOpenPermanentDeny}
-                        interactionLocked={
-                          windowApprovalHead !== null
-                            && exactDenyDraft?.requestId === windowApprovalHead.id
-                        }
-                      />
-                    </div>
+                        windowApprovalHead?.sessionId === undefined
+                          ? t("approvalAttribution.unattributed")
+                          : t("approvalAttribution.headlessSession")
+                      }
+                      proposedChoice={
+                        windowApprovalHead !== null
+                          && approvalProposal?.requestId === windowApprovalHead.id
+                          ? approvalProposal.choice
+                          : null
+                      }
+                      onDecide={(choice, pattern, extras) => {
+                        if (windowApprovalHead === null) return;
+                        void handleApprovalDecide(windowApprovalHead.id, choice, pattern, extras);
+                      }}
+                      onOpenPermanentDeny={handleOpenPermanentDeny}
+                      interactionLocked={
+                        windowApprovalHead !== null
+                          && exactDenyDraft?.requestId === windowApprovalHead.id
+                      }
+                    />
                   </div>
                   {/* StatusBar notifications render inside ChatView, directly above
                       the composer. The composer's own status sub-row keeps showing

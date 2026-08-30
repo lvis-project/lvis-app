@@ -89,8 +89,10 @@ export interface ApprovalQueueApi {
  *
  * Owns: the window's FIFO of pending requests (via approvalQueueReducer), the
  * window.lvis.approval.onRequest subscription, the one-time read of requests
- * parked before this renderer subscribed, the per-request in-flight guard on
- * `decide`, and the claims register the drawing surfaces attach to. A decided
+ * parked before this renderer subscribed, the settlement reconciliation that
+ * retires a card whose surface is no longer here to retire it, the
+ * per-request in-flight guard on `decide`, and the claims register the
+ * drawing surfaces attach to. A decided
  * request stays in the queue — and so on screen — until the host acknowledges
  * the answer, so every surfaced request is actionable exactly once.
  */
@@ -101,9 +103,22 @@ export function useApproval(): ApprovalQueueApi {
   // it leaves the queue, never earlier: releasing it on `respond()` settling
   // would let a click that lands before the drop commits answer it twice.
   const inFlightRequestIdsRef = useRef<Set<string>>(new Set());
-  // Every request this renderer has answered. A parked snapshot fetched before
-  // the host settled one of them must not draw its card again.
-  const answeredRequestIdsRef = useRef<Set<string>>(new Set());
+  // Requests that stopped being answerable while the parked snapshot below
+  // was in flight — answered here, or announced settled by the host. That
+  // snapshot is this set's ONE reader: it was taken before either happened,
+  // so without the set it would draw a dead card. Once it has been reconciled
+  // nothing reads the set again, so it is emptied there and never filled
+  // again (`parkedReconciledRef`) — bounded by construction to what a single
+  // mount window can retire, however long the window then lives.
+  const retiredRequestIdsRef = useRef<Set<string>>(new Set());
+  const parkedReconciledRef = useRef(false);
+  const rememberRetiredUntilReconciled = useCallback((requestId: string) => {
+    if (!parkedReconciledRef.current) retiredRequestIdsRef.current.add(requestId);
+  }, []);
+  const finishParkedReconciliation = useCallback(() => {
+    parkedReconciledRef.current = true;
+    retiredRequestIdsRef.current.clear();
+  }, []);
   // Guard late setQueue from async `respond()` callbacks resolving after
   // unmount.
   const aliveRef = useRef(true);
@@ -134,17 +149,30 @@ export function useApproval(): ApprovalQueueApi {
       if (!aliveRef.current) return;
       setQueue((q) => approvalQueueReducer(q, { type: "push", req }));
     });
+    // The host settled a request. Every surface that could take the card down
+    // itself does so from the turn that asked; this covers the requests whose
+    // surface is gone — a closed tile, a tile a navigation let go of — where
+    // nothing renderer-side would ever learn the ask had been retired. An id
+    // whose answer is in flight is left to `decide`.
+    const unsubSettled = window.lvis.approval.onSettled((payload) => {
+      if (!aliveRef.current) return;
+      const requestId = payload?.requestId;
+      if (typeof requestId !== "string" || requestId.length === 0) return;
+      rememberRetiredUntilReconciled(requestId);
+      if (inFlightRequestIdsRef.current.has(requestId)) return;
+      setQueue((q) => approvalQueueReducer(q, { type: "drop", ids: [requestId] }));
+    });
     // Requests parked before this renderer subscribed — a reload mid-approval.
     // Subscribed first, fetched second, so nothing can fall between the two;
     // a request that arrived both ways is kept once. Parked requests were
     // asked first, so they go ahead of anything that arrived meanwhile. One
-    // this renderer has already answered (an answer in flight, or settled
-    // after the snapshot was taken) is not a parked request any more.
+    // that retired while the snapshot was in flight — answered here, or
+    // announced settled by the host — is not a parked request any more.
     void window.lvis.approval.listPending().then(
       (parked) => {
         if (!aliveRef.current) return;
         const stillParked = parked.filter(
-          (req) => !inFlightRequestIdsRef.current.has(req.id) && !answeredRequestIdsRef.current.has(req.id),
+          (req) => !inFlightRequestIdsRef.current.has(req.id) && !retiredRequestIdsRef.current.has(req.id),
         );
         setQueue((q) =>
           [...stillParked, ...q].reduce<ApprovalRequest[]>(
@@ -155,16 +183,22 @@ export function useApproval(): ApprovalQueueApi {
             [],
           ),
         );
+        finishParkedReconciliation();
       },
       (err: unknown) => {
         console.warn("[use-approval] listPending failed:", (err as Error).message);
+        // Nothing will read the retired set now — the snapshot it guarded is
+        // never coming. Released here too, or a window whose one listPending
+        // failed would accumulate ids for the rest of its life.
+        finishParkedReconciliation();
       },
     );
     return () => {
       aliveRef.current = false;
       unsub();
+      unsubSettled();
     };
-  }, []);
+  }, [finishParkedReconciliation, rememberRetiredUntilReconciled]);
 
   /**
    * Forget requests the host has already settled without an answer from here
@@ -204,7 +238,7 @@ export function useApproval(): ApprovalQueueApi {
         return;
       }
       inFlightRequestIdsRef.current.add(requestId);
-      answeredRequestIdsRef.current.add(requestId);
+      rememberRetiredUntilReconciled(requestId);
 
       try {
         await window.lvis.approval.respond({
@@ -235,7 +269,7 @@ export function useApproval(): ApprovalQueueApi {
         }
       }
     },
-    [],
+    [rememberRetiredUntilReconciled],
   );
 
   return useMemo(() => ({ queue, decide, dropSettled, claims }), [queue, decide, dropSettled, claims]);

@@ -1231,6 +1231,12 @@ type ApprovalSentenceSelectResult =
 
   export type LvisApprovalApi = {
   onRequest: (cb: (req: ApprovalRequest) => void) => () => void;
+  /**
+   * One request stopped being answerable, whatever settled it host-side.
+   * The queue reconciles against it: a card the surface that asked can no
+   * longer take down (its tile closed, a navigation let go of it) goes here.
+   */
+  onSettled: (cb: (payload: { requestId: string }) => void) => () => void;
   respond: (decision: ApprovalDecision) => Promise<unknown>;
   /**
    * Requests the host is still waiting on, in the order they were asked.

@@ -7,9 +7,26 @@ import type { UserApprovalVerdict } from "../../../../shared/permissions-events.
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import { MODAL_DIALOG_SELECTOR, TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
 
+/**
+ * Where a dock sits inside its surface.
+ *
+ * `over-composer` is the conversation case: the card floats over the composer
+ * of the surface that raised it, and that surface inerts that composer while
+ * the card is up — one composer per `data-approval-scope`, so the cover is
+ * exact and wanted.
+ *
+ * `window-chrome` is the window's own dock. It has no composer of its own to
+ * cover, and every composer on screen belongs to some other surface, so it
+ * takes a band of layout instead of floating over one: a card that inerts
+ * nothing must not win the hit-test over a tile's textarea either.
+ */
+type ApprovalDockPlacement = "over-composer" | "window-chrome";
+
 export interface ApprovalDockProps {
   /** The requests this surface draws, head first. */
   queue: readonly ApprovalRequest[];
+  /** See {@link ApprovalDockPlacement}. Conversation surfaces keep the default. */
+  placement?: ApprovalDockPlacement;
   /** What the card calls the conversation that asked — the tile's title, not its id. */
   conversationLabel: string;
   proposedChoice?: ApprovalChoice | null;
@@ -24,8 +41,8 @@ export interface ApprovalDockProps {
 
 /**
  * The surface a dock belongs to: the nearest `data-approval-scope` ancestor —
- * a tile's conversation column, a side chat's panel, or the window's route
- * canvas for requests no conversation claims. Everything the dock does to
+ * a tile's conversation column, a side chat's panel, or the window's own band
+ * for requests no conversation claims. Everything the dock does to
  * its surroundings (inert the composer it covers, hand focus to a question
  * card) stays inside it, so a card raised by one tile is invisible to the
  * keyboard and the composer of every other.
@@ -74,20 +91,27 @@ function focusPendingQuestion(scope: HTMLElement | null): boolean {
 }
 
 /**
- * Bottom-floating foreground approval surface, one per drawing surface.
+ * Bottom foreground approval surface, one per drawing surface.
  *
- * The dock is deliberately an absolutely positioned sibling of the content
- * of the surface that draws it — a tile's conversation column, a side chat's
- * panel, or the window's route canvas for requests no conversation claims.
- * It never changes that content's measured height and it does not portal
- * over the viewport, so the user can keep reading and navigating around the
- * card, and a card in one tile leaves every other tile untouched: no
- * backdrop, no focus steal, no inert composer outside its own scope. All
- * ApprovalRequest variants share this one queue head and no approval surface
- * uses role=dialog, aria-modal, a backdrop, a focus trap, or body scroll lock.
+ * Over a conversation the dock is deliberately an absolutely positioned
+ * sibling of the content of the surface that draws it — a tile's conversation
+ * column or a side chat's panel. It never changes that content's measured
+ * height and it does not portal over the viewport, so the user can keep
+ * reading and navigating around the card, and a card in one tile leaves every
+ * other tile untouched: no backdrop, no focus steal, no inert composer
+ * outside its own scope.
+ *
+ * In the window's chrome (`placement="window-chrome"`) it is in flow instead,
+ * because there is no composer of its own beneath it and it must not cover
+ * anyone else's — see {@link ApprovalDockPlacement}.
+ *
+ * All ApprovalRequest variants share this one queue head and no approval
+ * surface uses role=dialog, aria-modal, a backdrop, a focus trap, or body
+ * scroll lock.
  */
 export function ApprovalDock({
   queue,
+  placement = "over-composer",
   conversationLabel,
   proposedChoice = null,
   onDecide,
@@ -247,6 +271,7 @@ export function ApprovalDock({
 
   if (!request) return null;
 
+  const inWindowChrome = placement === "window-chrome";
   const isRationale = request.kind === "rationale";
   const title = request.kind === "agent-action"
     ? t("toolApprovalDialog.agentActionTitle")
@@ -270,16 +295,34 @@ export function ApprovalDock({
   return (
     <section
       ref={rootRef}
-      className="pointer-events-auto absolute z-40 mx-auto flex min-w-0 max-w-(--reading-column-max) flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl"
-      style={{
-        left: "max(0.75rem, env(safe-area-inset-left, 0px))",
-        right: "max(0.75rem, env(safe-area-inset-right, 0px))",
-        width: "auto",
-        bottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))",
-        maxHeight: "min(48dvh, 28rem, max(8rem, calc(100% - max(0.75rem, env(safe-area-inset-bottom, 0px)) - 0.75rem)))",
-      }}
+      className={
+        inWindowChrome
+          ? "pointer-events-auto relative z-40 mx-auto flex w-full min-w-0 max-w-(--reading-column-max) shrink-0 flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl"
+          : "pointer-events-auto absolute z-40 mx-auto flex min-w-0 max-w-(--reading-column-max) flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl"
+      }
+      style={
+        inWindowChrome
+          ? {
+            // In flow: the band around it owns the gutters, and the height it
+            // takes is height the tile grid does not get. 48dvh is fine for a
+            // card floating over one conversation and far too much for a band
+            // above three: measured at 1243x768 with three stacked tiles, the
+            // grid stops fitting its tiles between 33dvh and 40dvh. 30dvh
+            // keeps a margin under that and still gives the card its full
+            // 28rem on a tall window.
+            marginBottom: "env(safe-area-inset-bottom, 0px)",
+            maxHeight: "min(30dvh, 28rem)",
+          }
+          : {
+            left: "max(0.75rem, env(safe-area-inset-left, 0px))",
+            right: "max(0.75rem, env(safe-area-inset-right, 0px))",
+            width: "auto",
+            bottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))",
+            maxHeight: "min(48dvh, 28rem, max(8rem, calc(100% - max(0.75rem, env(safe-area-inset-bottom, 0px)) - 0.75rem)))",
+          }
+      }
       data-testid={TEST_IDS.approvalDock}
-      data-overlay-position="bottom"
+      data-overlay-position={inWindowChrome ? "window-chrome" : "bottom"}
       data-approval-request-id={isRationale ? undefined : request.id}
       data-approval-tool-name={isRationale ? undefined : request.toolName}
       data-approval-args={isRationale ? undefined : canonicalStringify(request.args)}

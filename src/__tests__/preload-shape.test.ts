@@ -108,6 +108,7 @@ describe("preload contextBridge world shape lock", () => {
           "approval": [
             "listPending",
             "onRequest",
+            "onSettled",
             "respond",
             "selectSentence",
           ],
@@ -222,6 +223,7 @@ describe("preload contextBridge world shape lock", () => {
           "approval": [
             "listPending",
             "onRequest",
+            "onSettled",
             "respond",
             "selectSentence",
           ],

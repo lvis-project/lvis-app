@@ -295,13 +295,39 @@ The routing is one rule, `sessionOwnedBy`, applied by two readers:
 
 What no surface claims has one explicit home, the window's own dock: a
 request that names no conversation (a host or plugin ask), or a session no
-open surface holds (a headless routine's turn, a tile maximized away while its
-turn asked). That dock draws only unclaimed requests; it is those requests'
-home, not a catch-all behind the tiles. It is drawn over the route canvas from
-a `data-approval-scope` of its own, beside the tiles and an ancestor of none —
-so an unclaimed card covers no tile's composer and takes no tile's caret. The
-invariant, then: a `data-approval-scope` contains at most ONE composer, the one
-its dock may cover.
+open surface holds (a tile maximized away while its turn asked). That dock
+draws only unclaimed requests; it is those requests' home, not a catch-all
+behind the tiles. It has a `data-approval-scope` of its own, beside the tiles
+and an ancestor of none — so an unclaimed card covers no tile's composer and
+takes no tile's caret. The invariant, then: a `data-approval-scope` contains at
+most ONE composer, the one its dock may cover.
+
+The window's dock is a **band**, not a float: a flex sibling below the route
+canvas, so the space it takes is space the tile grid does not get. Over a
+conversation the float is right — the card covers that surface's own composer,
+which that surface inerts anyway. The window has no composer of its own and
+every composer on screen belongs to someone else, so floating there left `inert`
+and the caret correct while still winning the hit-test at a tile's textarea:
+keyboard-reachable, not mouse-clickable. Position follows the same rule the
+scope does — a surface may only take space from itself.
+
+A headless or routine turn is **not** a source of cards here. It has no
+interactive approver by construction: the reviewer's headless lane answers
+`low → allow` and anything above it `deny` (`PermissionManager.resolveReviewerDecision`),
+so it never parks a request for a human. What actually populates the window's
+dock is therefore host and plugin asks that name no conversation, plus cards
+whose conversation left the screen while the ask was parked.
+
+The second kind used to stay forever. A card is normally taken down by the turn
+that asked it, and a tile that closes retires its parked ask host-side
+(`cause="tile closed"`) — but the surface that would have dropped the card has
+unmounted, so nothing renderer-side ever learned. The host therefore announces
+every settlement on `lvis:approval:settled`, and the window's one queue
+reconciles: a request that is no longer answerable leaves, wherever its card was
+drawn. Announced for every settlement rather than a chosen subset, because the
+renderer already dropped the ones it answered itself and a closed list of
+announced causes would be a second thing to keep in step with the gate's
+`settle`. A request whose own answer is in flight is left to that answer.
 
 The two unowned cases split on purpose. An unowned question is adopted by the
 focused tile at arrival: an answer needs a conversation to land in. An unowned
