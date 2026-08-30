@@ -802,6 +802,18 @@ export interface ApprovalDecision {
 
 export const IPC_APPROVAL_REQUEST = "lvis:approval:request";
 export const IPC_APPROVAL_RESPOND = "lvis:approval:respond";
+/**
+ * main→renderer: one parked request is no longer answerable.
+ *
+ * A renderer takes its card down when the turn that asked ends, and that
+ * covers the case where the surface holding the turn is still on screen. It
+ * is not the only way a request ends: the host retires a parked ask when the
+ * tile that asked closes, when a navigation lets go of the tile, on timeout,
+ * on abort, on shutdown. In those the surface that would have dropped the
+ * card has already unmounted, and without this announcement the card outlives
+ * its request — answerable on screen, answering nothing.
+ */
+export const IPC_APPROVAL_SETTLED = "lvis:approval:settled";
 
 /** Host-only timeout provenance; renderer objects can never enter this set. */
 const hostTimeoutDecisions = new WeakSet<ApprovalDecision>();
@@ -1489,6 +1501,27 @@ export class ApprovalGate {
       } catch {
         // An observer failure must never alter approval flow.
       }
+    }
+  }
+
+  /**
+   * Tell the renderer one request is no longer answerable — see
+   * {@link IPC_APPROVAL_SETTLED}.
+   *
+   * Announced for EVERY settlement, including the renderer's own answer: an
+   * announcement the renderer has already acted on costs it a set lookup, and
+   * a closed list of "which settlements get announced" would be one more
+   * thing to keep in step with every caller of `settle`. The renderer
+   * reconciles rather than obeys — a request whose answer is in flight there
+   * is left to the answer.
+   */
+  private announceSettledToRenderer(requestId: string): void {
+    if (this.webContents.isDestroyed()) return;
+    try {
+      this.webContents.send(IPC_APPROVAL_SETTLED, { requestId });
+    } catch {
+      // A renderer that went away between the check above and the send has no
+      // card left to take down. Nothing else depends on this reaching it.
     }
   }
 
@@ -2564,9 +2597,10 @@ export class ApprovalGate {
         detachAbortListener = undefined;
         // Every way a PARKED request ends passes through here — desk answer,
         // remote answer, timeout, turn abort, cancel, shutdown sweep — so this
-        // is the one place an observer's card can be told the request is no
-        // longer answerable.
+        // is the one place an observer's card — and the renderer's — can be
+        // told the request is no longer answerable.
         this.notifyPendingSettled(fullReq.id, decision);
+        this.announceSettledToRenderer(fullReq.id);
         resolve(decision);
       };
       const timer = setTimeout(() => {

@@ -29,6 +29,7 @@ import type { AuditEntry, AuditLogger } from "../../audit/audit-logger.js";
 import type { PermissionAuditEntryInput } from "../../audit/audit-schema.js";
 import { getHostShellExecutionPlanAuditProjection } from "../../permissions/host-shell-execution-plan.js";
 import { userPermissionContext as permissionContext } from "./tool-context-fixture.js";
+import { sentApprovalCards } from "../../__tests__/test-helpers.js";
 
 const ORIGINAL_PLATFORM = process.platform;
 
@@ -296,8 +297,9 @@ describe("ToolExecutor — Windows partial shell Plan B", () => {
     );
     expect(permitConsumed).toBe(true);
 
-    expect(send).toHaveBeenCalledTimes(1);
-    const rendererApproval = send.mock.calls[0]?.[1] as ApprovalRequest;
+    const cards = sentApprovalCards<ApprovalRequest>({ send } as never);
+    expect(cards).toHaveLength(1);
+    const rendererApproval = cards[0]!;
     // Canonical host shells expose only the sealed, allowlist projection. The
     // raw capability carries a free-form host reason and must never cross IPC.
     expect(rendererApproval.sandboxCapability).toBeUndefined();
@@ -633,8 +635,9 @@ describe("ToolExecutor — Windows partial shell Plan B", () => {
         { sessionId: `requested-unavailable-allow-${platform}`, permissionContext: permissionContext() },
       );
 
-      expect(send).toHaveBeenCalledTimes(1);
-      const rendererApproval = send.mock.calls[0]?.[1] as ApprovalRequest;
+      const cards = sentApprovalCards<ApprovalRequest>({ send } as never);
+      expect(cards).toHaveLength(1);
+      const rendererApproval = cards[0]!;
       expect(rendererApproval.requireExplicit).toBe(true);
       expect(permitConsumed).toBe(true);
       expect(observedPlan).toMatchObject({

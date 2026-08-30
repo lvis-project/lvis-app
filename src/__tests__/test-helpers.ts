@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type { IpcMainInvokeEvent } from "electron";
+import { IPC_APPROVAL_REQUEST } from "../permissions/approval-gate.js";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 import type { ChatEntry } from "../lib/chat-stream-state.js";
 
@@ -12,6 +13,23 @@ export function makeMockWebContents() {
     send: vi.fn(),
     isDestroyed: vi.fn(() => false),
   };
+}
+
+/**
+ * The approval CARDS a gate sent to this renderer, in order.
+ *
+ * The same webContents also carries settlement announcements
+ * (`lvis:approval:settled`), so an index into the raw call log reads one of
+ * those as a card as soon as an earlier request ends. Suites that count or
+ * index the cards select them through here.
+ */
+export function sentApprovalCards<T>(
+  wc: ReturnType<typeof makeMockWebContents>,
+): T[] {
+  return wc.send.mock.calls
+    .map((call) => call as unknown as [string, T])
+    .filter(([channel]) => channel === IPC_APPROVAL_REQUEST)
+    .map(([, payload]) => payload);
 }
 
 /** The document the host renderer loads — `main-window.ts` loadFile(index.html). */

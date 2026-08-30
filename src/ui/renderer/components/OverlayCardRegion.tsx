@@ -69,6 +69,15 @@ export function OverlayCardRegion({
     [queue, overlayCardTile, chatGroupId],
   );
 
+  // Where this region sits decides its box. A tile's region hangs in the
+  // tile's floating lane at the lane's own width; the window's region is one
+  // occupant of the window band, so it takes the band's reading column the way
+  // the dock beside it does.
+  const inWindowBand = chatGroupId === null;
+  const regionClassName = inWindowBand
+    ? "pointer-events-none mx-auto w-full min-w-0 max-w-(--reading-column-max)"
+    : `pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`;
+
   const [activeIndex, setActiveIndex] = useState(0);
   // Clamped rather than corrected in an effect: the slice can shrink between
   // renders (a card dismissed, or one that followed focus to another tile),
@@ -102,9 +111,11 @@ export function OverlayCardRegion({
       <div
         data-testid="overlay-card-region"
         data-overlay-surface={chatGroupId ?? "window"}
-        // Position comes from `FloatingRightLane`, which is also what keeps the
-        // action-panel rail from landing on top of this card's controls.
-        className={`pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`}
+        // In a tile, position comes from `FloatingRightLane`, which is also what
+        // keeps the action-panel rail from landing on top of this card's
+        // controls. In the window band the card is in flow — see
+        // `regionClassName`.
+        className={regionClassName}
       >
         <div className="pointer-events-auto">
           <OverlayCard
@@ -154,9 +165,11 @@ export function OverlayCardRegion({
       <div
         data-testid="overlay-card-region"
         data-overlay-surface={chatGroupId ?? "window"}
-        // Position comes from `FloatingRightLane`, which is also what keeps the
-        // action-panel rail from landing on top of this card's controls.
-        className={`pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`}
+        // In a tile, position comes from `FloatingRightLane`, which is also what
+        // keeps the action-panel rail from landing on top of this card's
+        // controls. In the window band the card is in flow — see
+        // `regionClassName`.
+        className={regionClassName}
       >
         <div className="pointer-events-auto">
           <OverlayCard

@@ -6,6 +6,8 @@ import {
   ApprovalGate,
   approvalAnswererAuditToken,
   consumeHostApprovedOneShotExecutionBinding,
+  IPC_APPROVAL_REQUEST,
+  IPC_APPROVAL_SETTLED,
   isHostApprovalRejectedDecision,
   isHostApprovalTimeoutDecision,
   remoteControllerOriginAuditToken,
@@ -113,9 +115,33 @@ function lastSentNonceHmac(wc: ReturnType<typeof makeMockWebContents>): {
   nonce: string;
   hmac: string;
 } {
-  const calls = wc.send.mock.calls;
-  const last = calls[calls.length - 1] as [string, ApprovalRequest];
-  return { nonce: last[1].nonce as string, hmac: last[1].hmac as string };
+  const cards = sentApprovalRequests(wc);
+  const last = cards[cards.length - 1]!;
+  return { nonce: last.nonce as string, hmac: last.hmac as string };
+}
+
+/**
+ * The cards the gate sent, in order. Selected by channel: the same
+ * webContents also carries settlement announcements, and an index into the
+ * raw call log would read one of those as a card.
+ */
+function sentApprovalRequests(
+  wc: ReturnType<typeof makeMockWebContents>,
+): ApprovalRequest[] {
+  return wc.send.mock.calls
+    .map((call) => call as unknown as [string, ApprovalRequest])
+    .filter(([channel]) => channel === IPC_APPROVAL_REQUEST)
+    .map(([, payload]) => payload);
+}
+
+/** The request ids the gate announced as no longer answerable, in order. */
+function announcedSettledIds(
+  wc: ReturnType<typeof makeMockWebContents>,
+): string[] {
+  return wc.send.mock.calls
+    .map((call) => call as unknown as [string, { requestId: string }])
+    .filter(([channel]) => channel === IPC_APPROVAL_SETTLED)
+    .map(([, payload]) => payload.requestId);
 }
 
 /** The text of every audit row a gate wrote, in order. */
@@ -721,8 +747,7 @@ describe("ApprovalGate", () => {
     // 첫 번째 request — strict
     const req1 = makeRequest({ id: "req-before" });
     gate.requestAndWait(req1);
-    const [, payload1] = wc.send.mock.calls[0] as [string, ApprovalRequest];
-    expect(payload1.requireExplicit).toBe(true);
+    expect(sentApprovalRequests(wc)[0]!.requireExplicit).toBe(true);
     gate.resolve(req1.id, { requestId: req1.id, choice: "deny-once" });
 
     // policy 교체
@@ -732,8 +757,7 @@ describe("ApprovalGate", () => {
     // 두 번째 request — lenient
     const req2 = makeRequest({ id: "req-after" });
     gate.requestAndWait(req2);
-    const [, payload2] = wc.send.mock.calls[1] as [string, ApprovalRequest];
-    expect(payload2.requireExplicit).toBe(false);
+    expect(sentApprovalRequests(wc)[1]!.requireExplicit).toBe(false);
     gate.resolve(req2.id, { requestId: req2.id, choice: "allow-once" });
   });
 
@@ -2859,6 +2883,49 @@ describe("ApprovalGate", () => {
         row.startsWith("[approval:cancelled]"),
       );
       expect(cancelled).toContain('cause="renderer reload released the tile"');
+    });
+
+    it("tells the renderer a request it can no longer answer is over", async () => {
+      // The card for a released tile is drawn by a surface that has already
+      // unmounted, so nothing in the renderer will retire it on its own. The
+      // announcement is the only thing that can.
+      const { wc, gate } = makeAuditingGate();
+      const turn = new AbortController();
+      const parked = gate.requestAndWait(makeAbortableRequest(turn.signal));
+      expect(sentApprovalRequests(wc).map((req) => req.id)).toEqual(["abort-1"]);
+      expect(announcedSettledIds(wc)).toEqual([]);
+
+      turn.abort(new Error("tile closed"));
+      await parked;
+
+      expect(announcedSettledIds(wc)).toEqual(["abort-1"]);
+    });
+
+    it("announces a desk answer too, so one path covers every way a request ends", async () => {
+      // Announced for EVERY settlement rather than a chosen subset: the
+      // renderer has already dropped this one, and a closed list of announced
+      // causes would be a second thing to keep in step with `settle`.
+      const { wc, gate } = makeAuditingGate();
+      const parked = gate.requestAndWait(makeAbortableRequest());
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+
+      gate.resolve("abort-1", { requestId: "abort-1", choice: "allow-once", nonce, hmac });
+      expect((await parked).choice).toBe("allow-once");
+
+      expect(announcedSettledIds(wc)).toEqual(["abort-1"]);
+    });
+
+    it("says nothing to a renderer that is already gone", async () => {
+      const wc = makeMockWebContents({ isDestroyed: true });
+      const gate = new ApprovalGate(wc as never, undefined, 1_000);
+      const turn = new AbortController();
+
+      const decision = await gate.requestAndWait(makeAbortableRequest(turn.signal));
+
+      // The destroyed-renderer guard denies on the way in, so nothing is sent
+      // at all: there is no window left holding a card to take down.
+      expect(decision.choice).toBe("deny-once");
+      expect(wc.send).not.toHaveBeenCalled();
     });
 
     it("does not raise a modal for a turn that is already over", async () => {

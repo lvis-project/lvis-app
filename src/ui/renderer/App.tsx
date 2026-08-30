@@ -28,7 +28,8 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
+import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
+import { minimumCanvasHeight } from "./components/chat-group-tree.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
@@ -37,8 +38,7 @@ import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
-import { ApprovalDock } from "./components/permissions/ApprovalDock.js";
-import { FloatingRightLane } from "./components/FloatingRightLane.js";
+import { ApprovalDock, WINDOW_DOCK_MIN_HEIGHT } from "./components/permissions/ApprovalDock.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import type { ApprovalRequest } from "./types.js";
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
@@ -275,6 +275,25 @@ export function App() {
     focusGroup(chatGroupId);
     return true;
   }, [focusGroup]);
+  // What the window's own band may take, in the layout's own terms: the room
+  // left once the shortest tile still clears the floor a split or a gutter drag
+  // would hold it to. A card that arrives must not be able to squeeze the grid
+  // past what the user's own gestures can. `SHELL_GUTTER` is the tile row's
+  // bottom air, which is canvas height the tiles never see.
+  //
+  // One budget for everything the band holds — the dock and the window's own
+  // overlay cards stack inside it and share it.
+  //
+  // Expressed as a percentage of `<main>`, the flex parent the band and the
+  // route canvas share, so it tracks the window without measuring it.
+  const windowBandMaxHeight = useMemo(() => {
+    const reserved = minimumCanvasHeight(
+      chatGroups.groups.map((group) => group.box),
+      CHAT_GROUP_MIN_HEIGHT + CHAT_GROUP_CELL_INSET,
+    ) + SHELL_GUTTER;
+    return `max(${WINDOW_DOCK_MIN_HEIGHT}px, calc(100% - ${reserved}px))`;
+  }, [chatGroups.groups]);
+
   // Which surface shows an overlay card. Only the window can answer it: it
   // needs every tile's conversation to say whether any of them owns the card.
   const overlayCardTileForWindow = useCallback(
@@ -366,7 +385,7 @@ export function App() {
     projectLabel,
     setProjectLabel,
   } = useProjectPreferences(api);
-  const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
+  const [slashPickerOpen, setSlashPickerOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [workspaceProjects, setWorkspaceProjects] = useState<ProjectIdentity[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectIdentity | undefined>(undefined);
@@ -1040,19 +1059,19 @@ export function App() {
 
 
   // ─── Effects ──────────────────────────────────
-  const toggleCommandPopover = useCallback(() => {
+  const toggleSlashPicker = useCallback(() => {
     if (activeView !== "home") {
       setActiveView("home");
-      setCommandPopoverOpen(true);
+      setSlashPickerOpen(true);
     } else {
-      setCommandPopoverOpen((prev) => !prev);
+      setSlashPickerOpen((prev) => !prev);
     }
   }, [activeView]);
 
   useAppBootstrap({
     api, refreshViews, refreshCards: async () => { await refreshCards(); }, checkApiKey,
     setActiveView, onOpenSettings,
-    toggleCommandPopover,
+    toggleSlashPicker,
   });
   // Plugin/agent/skill lifecycle → catalog refresh. Owns the in-flight install
   // tracker + every IPC subscription that keeps plugin views/cards/marketplace
@@ -1060,10 +1079,10 @@ export function App() {
   // poll, agent/skill install results). See use-plugin-lifecycle-refresh.ts.
   usePluginLifecycleRefresh({ api, pluginCards, refreshViews, refreshCards, refreshMarketplace });
 
-  // Auto-close CommandPopover when navigating away from home — the popover
+  // Auto-close SlashPicker when navigating away from home — the popover
   // is only mounted on the home view so leaving it open causes stuck state.
   useEffect(() => {
-    if (activeView !== "home") setCommandPopoverOpen(false);
+    if (activeView !== "home") setSlashPickerOpen(false);
   }, [activeView]);
 
   const commandActions = useMemo(
@@ -1137,7 +1156,7 @@ export function App() {
     onSelectPlugin: handleViewSelectWithDoctor,
     appMode,
     onOpenApprovalQueue: () => setDeferredQueueOpen(true),
-    commandActions, commandPopoverOpen, onCommandPopoverOpenChange: setCommandPopoverOpen,
+    commandActions, slashPickerOpen, onSlashPickerOpenChange: setSlashPickerOpen,
     // The window answers where a card goes, because only it sees every tile.
     overlayCardTile: overlayCardTileForWindow,
     onPluginPrimaryAction: (id: string, chatGroupId: string) => {
@@ -1165,7 +1184,7 @@ export function App() {
     searchHighlight, searchChangeQuery, searchToggleCase, searchNext, searchPrev,
     searchCloseOverlay, searchToggleOverlay,
     handleExport, handleImport, pluginEntries, handleViewSelectWithDoctor, appMode,
-    commandActions, commandPopoverOpen, overlayCardTileForWindow,
+    commandActions, slashPickerOpen, overlayCardTileForWindow,
     handlePluginPrimaryAction, handleRoutineAcknowledge,
     interceptApprovalSentence,
     activeProject, defaultWorkspaceProject, workspaceProjects,
@@ -1712,61 +1731,77 @@ export function App() {
                         );
                       })()}
                     </ErrorBoundary>
-                    {/* The window's own overlay region: the cards no open
-                        conversation owns — a routine fire, a plugin event, one
-                        whose origin conversation has left the screen. Drawn
-                        once here rather than in whichever tile happens to be
-                        focused, which would say the card belongs to that
-                        conversation and would make it jump between tiles as
-                        focus moves. Its action names the focused conversation
-                        (`actionChatGroupId`), stated rather than inferred from
-                        where the card landed. */}
-                    <FloatingRightLane>
-                      <OverlayCardRegion
-                        chatGroupId={null}
-                        actionChatGroupId={chatGroups.focusedId}
-                        overlayCardTile={overlayCardTileForWindow}
-                        onPluginPrimaryAction={(id, chatGroupId) => {
-                          void handlePluginPrimaryAction(id, chatGroupId);
-                        }}
-                        onRoutineAcknowledge={handleRoutineAcknowledge}
-                      />
-                    </FloatingRightLane>
-                    {/* The window's own dock: only requests no conversation
-                        surface claimed (see `unclaimedApprovals`). Its scope is
-                        this wrapper — beside the tiles, an ancestor of none —
-                        so the card covers no tile's composer and takes no
-                        tile's caret. `contents` keeps the dock positioned
-                        against the route canvas as before. */}
-                    <div
-                      className="contents"
-                      data-approval-scope
-                      data-testid={TEST_IDS.windowApprovalScope}
-                    >
-                      <ApprovalDock
-                        queue={unclaimedApprovals}
+                  </div>
+                  {/* The window's own band: everything the window itself has to
+                      show, stacked in one strip beside the tiles rather than
+                      floating over them.
+
+                      Two occupants. The dock draws only the approval requests
+                      no conversation surface claimed (see `unclaimedApprovals`).
+                      The overlay region draws the cards no open conversation
+                      owns — a routine fire, a plugin event, one whose origin
+                      conversation has left the screen — once, rather than in
+                      whichever tile happens to be focused, which would say the
+                      card belongs to that conversation and would make it jump
+                      between tiles as focus moves.
+
+                      It is a BAND, not a float: a flex sibling BELOW the route
+                      canvas, so the space it takes is space the tile grid does
+                      not get, and nothing here can win a hit-test over a tile.
+                      An absolutely positioned surface over the canvas left
+                      `inert` and the caret alone and still took the click at a
+                      tile composer's centre — keyboard-reachable, not
+                      mouse-clickable. `empty:hidden` gives the band back when
+                      both occupants draw nothing.
+
+                      Its cap is what the tile grid can spare, not a share of
+                      the viewport: the shortest tile still has to clear the
+                      floor the split and resize rules already hold it to, or
+                      every transcript on screen collapses to nothing. Below
+                      `WINDOW_DOCK_MIN_HEIGHT` the band stops giving and its
+                      occupants scroll inside it instead — `overflow-y-auto`,
+                      because two occupants asking for more than the budget
+                      would otherwise paint outside the band and back over the
+                      tiles, which is the whole thing the band exists to stop. */}
+                  <div
+                    className="flex shrink-0 flex-col gap-2 overflow-y-auto overscroll-contain px-3 pb-3 empty:hidden"
+                    style={{ maxHeight: windowBandMaxHeight }}
+                    data-approval-scope
+                    data-testid={TEST_IDS.windowApprovalScope}
+                  >
+                    <OverlayCardRegion
+                      chatGroupId={null}
+                      actionChatGroupId={chatGroups.focusedId}
+                      overlayCardTile={overlayCardTileForWindow}
+                      onPluginPrimaryAction={(id, chatGroupId) => {
+                        void handlePluginPrimaryAction(id, chatGroupId);
+                      }}
+                      onRoutineAcknowledge={handleRoutineAcknowledge}
+                    />
+                    <ApprovalDock
+                      placement="window-chrome"
+                      queue={unclaimedApprovals}
                       conversationLabel={
-                          windowApprovalHead?.sessionId === undefined
-                            ? t("approvalAttribution.unattributed")
-                            : t("approvalAttribution.headlessSession")
-                        }
-                        proposedChoice={
-                          windowApprovalHead !== null
-                            && approvalProposal?.requestId === windowApprovalHead.id
-                            ? approvalProposal.choice
-                            : null
-                        }
-                        onDecide={(choice, pattern, extras) => {
-                          if (windowApprovalHead === null) return;
-                          void handleApprovalDecide(windowApprovalHead.id, choice, pattern, extras);
-                        }}
-                        onOpenPermanentDeny={handleOpenPermanentDeny}
-                        interactionLocked={
-                          windowApprovalHead !== null
-                            && exactDenyDraft?.requestId === windowApprovalHead.id
-                        }
-                      />
-                    </div>
+                        windowApprovalHead?.sessionId === undefined
+                          ? t("approvalAttribution.unattributed")
+                          : t("approvalAttribution.headlessSession")
+                      }
+                      proposedChoice={
+                        windowApprovalHead !== null
+                          && approvalProposal?.requestId === windowApprovalHead.id
+                          ? approvalProposal.choice
+                          : null
+                      }
+                      onDecide={(choice, pattern, extras) => {
+                        if (windowApprovalHead === null) return;
+                        void handleApprovalDecide(windowApprovalHead.id, choice, pattern, extras);
+                      }}
+                      onOpenPermanentDeny={handleOpenPermanentDeny}
+                      interactionLocked={
+                        windowApprovalHead !== null
+                          && exactDenyDraft?.requestId === windowApprovalHead.id
+                      }
+                    />
                   </div>
                   {/* StatusBar notifications render inside ChatView, directly above
                       the composer. The composer's own status sub-row keeps showing

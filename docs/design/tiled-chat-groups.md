@@ -295,13 +295,62 @@ The routing is one rule, `sessionOwnedBy`, applied by two readers:
 
 What no surface claims has one explicit home, the window's own dock: a
 request that names no conversation (a host or plugin ask), or a session no
-open surface holds (a headless routine's turn, a tile maximized away while its
-turn asked). That dock draws only unclaimed requests; it is those requests'
-home, not a catch-all behind the tiles. It is drawn over the route canvas from
-a `data-approval-scope` of its own, beside the tiles and an ancestor of none —
-so an unclaimed card covers no tile's composer and takes no tile's caret. The
-invariant, then: a `data-approval-scope` contains at most ONE composer, the one
-its dock may cover.
+open surface holds (a tile maximized away while its turn asked). That dock
+draws only unclaimed requests; it is those requests' home, not a catch-all
+behind the tiles. It has a `data-approval-scope` of its own, beside the tiles
+and an ancestor of none — so an unclaimed card covers no tile's composer and
+takes no tile's caret. The invariant, then: a `data-approval-scope` contains at
+most ONE composer, the one its dock may cover.
+
+The window's dock is a **band**, not a float: a flex sibling below the route
+canvas, so the space it takes is space the tile grid does not get. Over a
+conversation the float is right — the card covers that surface's own composer,
+which that surface inerts anyway. The window has no composer of its own and
+every composer on screen belongs to someone else, so floating there left `inert`
+and the caret correct while still winning the hit-test at a tile's textarea:
+keyboard-reachable, not mouse-clickable. Position follows the same rule the
+scope does — a surface may only take space from itself.
+
+That band is the window's whole surface, not the dock's alone: the unclaimed
+approval dock and the window's own overlay cards stack inside it and share one
+budget. Anything the window has to show has the same problem and takes the same
+answer — a second float, anchored top-right, would land on the rightmost tile's
+own lane and take clicks meant for it.
+
+Because a band takes its height out of the grid, its cap comes from the grid's
+own arithmetic rather than from a share of the viewport: the shortest tile must
+still clear `CHAT_GROUP_MIN_HEIGHT` plus the cell inset and the tile row's
+bottom gutter — the floor a split or a gutter drag already holds it to — and the
+band gets what is left, down to `WINDOW_DOCK_MIN_HEIGHT`, below which the card
+scrolls inside itself instead of taking more. A fraction of the window would be
+comfortable above one tile and starve four: measured at 1243x768 with a 2x2, an
+uncapped band leaves 138px frames, and the cap holds them at 242px.
+
+`CHAT_GROUP_MIN_HEIGHT` is the measured floor, not a round number: it is the
+frame height at which a tile still holds a header, a composer, AND one visible
+turn. Shrinking the window with one tile up, the turn goes first — at a 290px
+frame the transcript viewport is 11px, at 270px it is 0 and the composer starts
+overflowing its column. 280px is where all three still fit. The floor lives on
+what the tile contains, so it moves when the composer does rather than when the
+window does, and the band's cap moves with it.
+
+A headless or routine turn is **not** a source of cards here. It has no
+interactive approver by construction: the reviewer's headless lane answers
+`low → allow` and anything above it `deny` (`PermissionManager.resolveReviewerDecision`),
+so it never parks a request for a human. What actually populates the window's
+dock is therefore host and plugin asks that name no conversation, plus cards
+whose conversation left the screen while the ask was parked.
+
+The second kind used to stay forever. A card is normally taken down by the turn
+that asked it, and a tile that closes retires its parked ask host-side
+(`cause="tile closed"`) — but the surface that would have dropped the card has
+unmounted, so nothing renderer-side ever learned. The host therefore announces
+every settlement on `lvis:approval:settled`, and the window's one queue
+reconciles: a request that is no longer answerable leaves, wherever its card was
+drawn. Announced for every settlement rather than a chosen subset, because the
+renderer already dropped the ones it answered itself and a closed list of
+announced causes would be a second thing to keep in step with the gate's
+`settle`. A request whose own answer is in flight is left to that answer.
 
 The two unowned cases split on purpose. An unowned question is adopted by the
 focused tile at arrival: an answer needs a conversation to land in. An unowned
@@ -335,7 +384,10 @@ window? — and the answer decides where it is subscribed and who draws it.
 fallback toast (`lvis:chat:stream`, `lvis:chat:fallback`) are labelled with
 `chatGroupId` at the one main-side subscriber that owns those frames and
 filtered in the preload adapter each tile holds, so an unaddressed frame can
-only be a bug in one place. The skill badge (`lvis:skill-load:event`) is
+only be a bug in one place. The filter is fail-closed: an unlabelled frame
+reaches no surface at all. There is exactly one producer and it labels
+everything it sends, so fanning an unlabelled frame out would answer a producer
+bug by showing one conversation's tokens in every open tile. The skill badge (`lvis:skill-load:event`) is
 window-wide on the wire and carries the session the tool ran in; the tile that
 owns that session draws the badge, through the same `sessionOwnedBy` predicate
 its cards use. An MCP app's `ui/message` and `ui/update-model-context` resolve
@@ -356,9 +408,10 @@ conversation, resolved from the origin at click time rather than from the
 surface that drew the card.
 
 A card with no origin — a routine fire, a plugin event — and a card whose origin
-conversation has left the screen are drawn once in the window's own chrome. This
-is stated, not fallen back to, and it is the same home the window's approval
-dock gives an unclaimed request. The alternative, drawing it in whichever tile
+conversation has left the screen are drawn once in the window's own band, above
+the approval dock and inside the same height budget. This is stated, not fallen
+back to, and it is literally the same home the window's approval dock gives an
+unclaimed request. The alternative, drawing it in whichever tile
 is focused, says the card belongs to that conversation when it does not, and
 makes the card jump between tiles as focus moves. The window's region has no
 conversation of its own, so its action names the focused one explicitly

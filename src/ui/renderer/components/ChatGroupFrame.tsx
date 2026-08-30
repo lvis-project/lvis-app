@@ -49,12 +49,20 @@ import { TEST_IDS } from "../../../shared/test-ids.js";
  * The least a tile may be dragged down to, in px.
  *
  * Width is `SIDE_PANEL_MIN_WIDTH`: DESIGN.md's 448px is the narrowest any
- * surface must work at, and a tile is one more surface held to it. Height has
- * no documented floor; 240px is a header, a composer, and one visible turn,
- * below which a tile is a composer with no transcript above it.
+ * surface must work at, and a tile is one more surface held to it.
+ *
+ * Height has no documented floor, so it is the measured one: what the frame
+ * needs to be a header, a composer, and one visible turn, below which a tile is
+ * a composer with no transcript above it. Measured on the running app by
+ * shrinking the window with a single tile up and reading the transcript
+ * viewport, the turn goes first: at a 290px frame the viewport is 11px, at
+ * 270px it is 0 and the composer starts overflowing its column. 280px is the
+ * frame that still holds all three, and it is where this floor belongs — the
+ * number is what the tile CONTAINS, so it moves when the composer does, not
+ * when the window does.
  */
 export const CHAT_GROUP_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
-export const CHAT_GROUP_MIN_HEIGHT = 240;
+export const CHAT_GROUP_MIN_HEIGHT = 280;
 
 /** The 1px hairline the frame draws itself with, on each of its four sides. */
 const CHAT_GROUP_FRAME_BORDER = 1;

@@ -157,6 +157,48 @@ describe("overlay cards with two tiles", () => {
     expect(primary!.element.textContent).not.toContain("settle the invoice");
   });
 
+  it("runs an owned card's action in the conversation it came from, even after focus moves away", async () => {
+    const { container, emitOverlayShow } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    // Painted while its own tile is focused, so nothing about where it landed
+    // is ambiguous yet.
+    await focusTile(second!);
+    await act(async () => {
+      emitOverlayShow({
+        id: "app:invoices:e9",
+        source: { kind: "app", serverId: "invoices", eventId: "e9" },
+        originSessionId: `session-${second!.chatGroupId}`,
+        title: "invoices",
+        summary: "archive the invoice",
+        running: false,
+        pendingPrompt: '<app-message source="app:invoices">\narchive the invoice\n</app-message>',
+        createdAt: new Date().toISOString(),
+      });
+    });
+    const confirm = await waitFor(() => {
+      const button = second!.element.querySelector<HTMLButtonElement>(
+        '[data-testid="overlay-card-primary-action"]',
+      );
+      expect(button).not.toBeNull();
+      return button!;
+    });
+
+    // The user walks over to the other tile between the paint and the click.
+    // The target is resolved from the card's ORIGIN at click time, so the
+    // staged prompt still lands where it was staged for — resolving it from
+    // whatever has focus would put one conversation's prompt in another.
+    await focusTile(primary!);
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+
+    await waitFor(() => {
+      expect(second!.element.textContent).toContain("archive the invoice");
+    });
+    expect(primary!.element.textContent).not.toContain("archive the invoice");
+  });
+
   it("draws a routine card once in the window's chrome, and does not move it when focus moves", async () => {
     const { container, emitRoutineFired } = await renderApp({ hasApiKey: true });
     const [primary, second] = await splitIntoTwoTiles(container);
@@ -577,6 +619,53 @@ describe("a turn parked on an approval, with two tiles", () => {
       });
       expect(document.activeElement).toBe(input);
     }
+  });
+
+  it("keeps the window's dock out of the tile grid, in a band of its own", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ id: "req-host" }));
+    });
+    await waitFor(() => expect(dock(container)).toHaveLength(1));
+
+    const card = dock(container)[0]!;
+    const scope = card.closest<HTMLElement>("[data-approval-scope]")!;
+    const canvas = container.querySelector<HTMLElement>('[data-testid="route-canvas"]')!;
+
+    // Disjoint subtrees, both ways: the dock is not drawn over the canvas the
+    // tiles live in, and no tile is drawn inside the dock's band. `inert` and
+    // the caret were already left alone — what was not was the hit-test, and
+    // hit-testing follows the box, not the DOM courtesies.
+    expect(canvas.contains(scope)).toBe(false);
+    expect(scope.contains(canvas)).toBe(false);
+    for (const tile of [primary!, second!]) {
+      expect(scope.contains(tile.element)).toBe(false);
+    }
+    // Nothing for it to cover, so it covers nothing: the band holds no
+    // composer, and the card is in flow rather than floating over one.
+    expect(scope.querySelectorAll("[data-composer-placement]")).toHaveLength(0);
+    expect(card).toHaveAttribute("data-overlay-position", "window-chrome");
+  });
+
+  it("takes the unclaimed card down when the host retires the request", async () => {
+    const { container, emitApproval, emitApprovalSettled } = await renderApp({ hasApiKey: true });
+    await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ id: "req-host" }));
+    });
+    await waitFor(() => expect(dock(container)).toHaveLength(1));
+
+    // The tile that asked closed, so the host cancelled the ask. Nothing in
+    // this window watches that turn any more — the announcement is the only
+    // thing that can retire the card, and its deny would answer nothing.
+    await act(async () => {
+      emitApprovalSettled("req-host");
+    });
+
+    await waitFor(() => expect(dock(container)).toHaveLength(0));
   });
 });
 

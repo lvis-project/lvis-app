@@ -7,6 +7,7 @@
  * relying on `window.location.href`, which can be a splash-phase data: URL.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAIN_CHAT_GROUP_ID } from "../contract/app-contract.js";
 
 const exposed = new Map<string, unknown>();
 const mockInvoke = vi.fn();
@@ -570,19 +571,45 @@ describe("preload — per-tile chat push filtering", () => {
     expect(mockRemoveListener).toHaveBeenCalledWith(channel, listener);
   });
 
+  // These channels have ONE producer and it labels every frame it sends, so an
+  // unlabelled one is a producer bug. Fanning it out would answer that bug by
+  // putting one conversation's frames in every open tile at once.
   it.each([
     ["lvis:chat:stream", "onChatStream"],
     ["lvis:chat:fallback", "onChatFallback"],
-  ])("%s with no group label reaches the surface unchanged", async (channel, apiKey) => {
+  ])("%s with no group label reaches no surface at all", async (channel, apiKey) => {
+    const handler = vi.fn();
+    const { listener } = await subscribeOn(
+      channel,
+      (surface) => (surface[apiKey] as (cb: (payload: unknown) => void) => () => void)(handler),
+      "group-2",
+    );
+
+    listener({}, { from: "a", to: "b" });
+    listener({}, { from: "a", to: "b", chatGroupId: null });
+    listener({}, { from: "a", to: "b", chatGroupId: 2 });
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  // The window's own surface is the primary tile's, not a wildcard: it takes
+  // the frames addressed to `main` and no others.
+  it.each([
+    ["lvis:chat:stream", "onChatStream"],
+    ["lvis:chat:fallback", "onChatFallback"],
+  ])("%s reaches the root surface only when addressed to the primary tile", async (channel, apiKey) => {
     const handler = vi.fn();
     const { listener } = await subscribeOn(
       channel,
       (surface) => (surface[apiKey] as (cb: (payload: unknown) => void) => () => void)(handler),
     );
 
-    const unlabelled = { from: "a", to: "b" };
-    listener({}, unlabelled);
+    const mine = { from: "a", to: "b", chatGroupId: MAIN_CHAT_GROUP_ID };
+    listener({}, mine);
+    listener({}, { from: "a", to: "b", chatGroupId: "group-2" });
+    listener({}, { from: "a", to: "b" });
 
-    expect(handler).toHaveBeenCalledWith(unlabelled);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(mine);
   });
 });

@@ -45,6 +45,8 @@ export type RenderAppReturn = {
   emitViewActivate: (v: string, settingsTab?: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
   emitApproval: (r: unknown) => void;
+  /** The host retired a parked request — see `lvis:approval:settled`. */
+  emitApprovalSettled: (requestId: string) => void;
   emitPluginRuntimeUpdated: (payload: { pluginId: string }) => void;
   emitNotificationToast: (payload: unknown) => void;
   emitNotificationClicked: (payload: unknown) => void;
@@ -67,7 +69,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitNotificationToast,
     emitNotificationClicked,
   } = makeMockLvisApi(apiOpts);
-  const { ns, emitApproval } = makeMockLvisNamespace({ env: lvisEnv, pendingApprovals });
+  const { ns, emitApproval, emitApprovalSettled } = makeMockLvisNamespace({ env: lvisEnv, pendingApprovals });
 
   vi.stubGlobal("lvisApi", api);
   vi.stubGlobal("lvis", ns);
@@ -92,6 +94,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitViewActivate,
     emitAskUserQuestion,
     emitApproval,
+    emitApprovalSettled,
     emitPluginRuntimeUpdated,
     emitNotificationToast,
     emitNotificationClicked,

@@ -8,6 +8,7 @@ import {
 } from "../SpotlightTour.js";
 import type { TourScenario } from "../../onboarding/default-tour-scenarios.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 /**
  * Tutorial-C — SpotlightTour component tests.
@@ -227,6 +228,28 @@ describe("SpotlightTour", () => {
     const card = await findByTestId("spotlight-tour:card");
     expect(card.getAttribute("data-step-index")).toBe("0");
     document.body.removeChild(modal);
+  });
+
+  // A question card is a turn waiting on the user exactly as an approval card
+  // is. A tour backdrop over it hides the thing that has to be answered before
+  // anything else can move, so the tour queues behind one too.
+  it("queues tour.start while a user-question card is waiting for an answer", async () => {
+    const question = document.createElement("div");
+    question.setAttribute("data-testid", TEST_IDS.questionOverlay);
+    document.body.appendChild(question);
+    const { api, fireStart } = spotlightTourHarness();
+    const { queryByTestId, findByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    expect(queryByTestId("spotlight-tour:card")).toBeNull();
+
+    await act(async () => {
+      question.remove();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect((await findByTestId("spotlight-tour:card")).getAttribute("data-step-index")).toBe("0");
   });
 
   // U8 — auto-advance on declared completion trigger. Typing in the
