@@ -366,10 +366,13 @@ export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
     activeBlock,
     active === "openai-compatible" ? llm.marketplaceProviderPresetId : undefined,
   );
+  // `kind === "subscription"` alone decides the branch: an unrecognised
+  // provider id must still keep the card off the API model it would
+  // otherwise mismark as current. `isSubscriptionRuntimeId` below only
+  // chooses how to *label* that provider — it never re-admits the API
+  // branch.
   const activeRuntime = llm.activeChatRuntime;
-  const subscription = activeRuntime?.kind === "subscription" && isSubscriptionRuntimeId(activeRuntime.provider)
-    ? activeRuntime
-    : null;
+  const subscription = activeRuntime?.kind === "subscription" ? activeRuntime : null;
   const choices: ModelCardChoice[] = [];
   for (const modelId of pinned) {
     for (const vendor of offered.get(modelId) ?? []) {
@@ -390,10 +393,17 @@ export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
   }
   if (subscription) {
     const model = typeof subscription.model === "string" ? subscription.model.trim() : "";
+    // `subscriptionRuntimeDescriptor` falls back to its first entry for an id
+    // it does not recognise — fine for a lookup that only ever sees validated
+    // ids, wrong here: an unrecognised id must show as itself, never borrow
+    // another provider's label.
+    const vendorLabel = isSubscriptionRuntimeId(subscription.provider)
+      ? subscriptionRuntimeDescriptor(subscription.provider).label
+      : subscription.provider;
     choices.unshift({
       kind: "subscription",
       provider: subscription.provider,
-      vendorLabel: subscriptionRuntimeDescriptor(subscription.provider).label,
+      vendorLabel,
       modelId: model.length > 0 ? model : null,
       current: true,
     });

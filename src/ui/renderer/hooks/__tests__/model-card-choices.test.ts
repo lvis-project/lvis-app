@@ -72,4 +72,17 @@ describe("modelCardChoices", () => {
       expect.objectContaining({ kind: "subscription", provider: "kimi-code", vendorLabel: "Kimi Code", modelId: null, current: true }),
     ]);
   });
+
+  it("still checks the provider, and shows its raw id, for an unrecognised subscription id — never a borrowed descriptor", () => {
+    const choices = modelCardChoices(llm({
+      pinnedModels: ["gpt-5.4"],
+      activeChatRuntime: { kind: "subscription", provider: "unknown-runtime" } as never,
+    }));
+    expect(choices).toEqual([
+      // Not "Codex" — subscriptionRuntimeDescriptor's own fallback would
+      // hand back its first entry for an id it does not recognise.
+      expect.objectContaining({ kind: "subscription", provider: "unknown-runtime", vendorLabel: "unknown-runtime", modelId: null, current: true }),
+      expect.objectContaining({ kind: "api", vendor: "openai", modelId: "gpt-5.4", current: false }),
+    ]);
+  });
 });
