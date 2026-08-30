@@ -227,7 +227,8 @@ test.describe("chat layout overflow", () => {
     for (let i = 1; i < buttons; i++) {
       await workGroup.locator("button").nth(i).click();
     }
-    await page.locator(testIdSelector(TEST_IDS.composerTextarea)).fill(
+    // The main dock's field, not the side chat's — both render this test id.
+    await page.locator(`[data-composer-surface="main"] ${testIdSelector(TEST_IDS.composerTextarea)}`).fill(
       "긴 draft 입니다. `" + LONG_IDENTIFIER + "`",
     );
 

@@ -52,9 +52,40 @@ export interface ComposerHandle {
    * user is typing rather than always appending to the end of the body.
    */
   insertAtCursor(insertion: string): void;
+  /**
+   * The live textarea element. Window-level shortcuts (⌘⏎, Esc) are owned by
+   * the composer's keyboard hook, and several composers can be mounted at once
+   * — one per chat tile, plus the side chat — so an owner matches the event
+   * target against THIS element rather than against a test id every composer
+   * shares.
+   */
+  textarea(): HTMLTextAreaElement | null;
 }
 
+/**
+ * Which chat surface a composer serves. There is one composer implementation;
+ * the surface selects only the values the two placements legitimately differ
+ * on (the textarea's growth cap, the tour anchor). Everything the user does in
+ * the field — send, queue, interrupt, paste, attach, the inline menus, IME —
+ * is the same code on both.
+ */
+export type ComposerSurface = "main" | "side";
+
+/**
+ * Growth cap per surface. Both start at one line (`min-h-[40px]`: 24px line +
+ * 8px vertical padding on each side) and grow to a bound. The main column has
+ * room for five lines; the side rail is a narrow card whose transcript is the
+ * thing being read, so the field stops at four (16 + 4 × 24 = 112px) — the one
+ * value the issue that unified the two surfaces called out as worth differing.
+ */
+const TEXTAREA_MAX_HEIGHT_CLASS: Record<ComposerSurface, string> = {
+  main: "max-h-[144px]",
+  side: "max-h-[112px]",
+};
+
 export interface ComposerProps {
+  /** Placement — see {@link ComposerSurface}. */
+  surface?: ComposerSurface;
   text: string;
   onTextChange: (next: string) => void;
   attachments: Attachment[];
@@ -151,6 +182,7 @@ function clipboardContainsImage(event: ClipboardEvent): boolean {
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
   {
+    surface = "main",
     text,
     onTextChange,
     attachments,
@@ -373,6 +405,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     () => ({
       focus() { taRef.current?.focus(); },
       insertAtCursor(insertion: string) { insertAtCursor(insertion); },
+      textarea() { return taRef.current; },
     }),
     [insertAtCursor],
   );
@@ -868,11 +901,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         <Textarea
           ref={taRef}
           data-testid={TEST_IDS.composerTextarea}
-          // SpotlightTour anchor. The
-          // first-boot tour pins step 1 + step 4 to this textarea, so the
-          // attribute MUST remain stable. If it moves, update
+          data-composer-surface={surface}
+          // SpotlightTour anchor. The first-boot tour pins step 1 + step 4 to
+          // the MAIN textarea, so the attribute MUST remain stable there and
+          // must not appear on the side chat's field. If it moves, update
           // `default-tour-scenarios.ts` in the same commit.
-          data-tour-anchor="composer-input"
+          {...(surface === "main" ? { "data-tour-anchor": "composer-input" } : {})}
           value={text}
           onChange={(e) => {
             onTextChange(e.target.value);
@@ -899,19 +933,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             syncCaret();
           }}
           placeholder={placeholder ?? fallbackPlaceholder}
-
-
-
-          className="min-w-0 flex-1 resize-none min-h-[40px] max-h-[144px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none px-4 py-2 text-body-sm text-input-bar-foreground caret-input-bar-action placeholder:text-body-sm placeholder:text-input-bar-placeholder"
+          className={
+            "min-w-0 flex-1 resize-none min-h-[40px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none px-4 py-2 text-body-sm text-input-bar-foreground caret-input-bar-action placeholder:text-body-sm placeholder:text-input-bar-placeholder " +
+            TEXTAREA_MAX_HEIGHT_CLASS[surface]
+          }
         />
-
-
-
-
-
-
-
-
         <SuggestedRepliesGhost text={ghostBest} visible={ghostVisible} />
       </div>
       {isFull ? (
@@ -951,6 +977,24 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     </div>
   );
 });
+
+/**
+ * The input box every composer sits in: the raised card whose edge is an
+ * inset hairline, whose focus ring follows the field inside it, and whose
+ * `input-bar-*` tokens the borderless textarea inherits. The main dock and the
+ * side chat both draw this frame around `<Composer>` plus their action row —
+ * it lives here so the two cannot drift into different chrome.
+ */
+export function ComposerFrame({ children }: { children: React.ReactNode }): ReactElement {
+  return (
+    <div
+      data-testid="composer-frame"
+      className="lvis-surface-raised relative z-10 overflow-hidden rounded-xl border border-input-bar-border bg-input-bar text-input-bar-foreground transition-colors duration-[var(--motion-fast)] ease-[var(--motion-ease-standard)] focus-within:border-input-bar-focus focus-within:ring-1 focus-within:ring-input-bar-focus motion-reduce:transition-none"
+    >
+      {children}
+    </div>
+  );
+}
 
 // Ghost-text overlay rendered on top of the Composer textarea when (a) the
 // textarea body is empty, (b) a `best` suggested reply is available, and

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, fireEvent, screen, act, waitFor } from "@testing-library/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Composer, type ComposerHandle } from "../Composer.js";
+import { Composer, type ComposerHandle, type ComposerSurface } from "../Composer.js";
 import { t } from "../../../../i18n/runtime.js";
 import type {
   Attachment,
@@ -26,6 +26,13 @@ import { TEST_IDS } from "../../../../shared/test-ids.js";
 const STABLE_COMMAND_ACTIONS: QuickAction[] = [];
 const STABLE_PLUGINS: PluginEntry[] = [];
 const STABLE_SELECT_PLUGIN = () => {};
+
+// One composer serves both chat surfaces. The suite below runs once per
+// surface, so a behaviour that regresses on one placement only cannot hide
+// behind the other: the harness reads the surface the enclosing `describe.each`
+// selected.
+const SURFACES: ComposerSurface[] = ["main", "side"];
+let harnessSurface: ComposerSurface = "main";
 
 const mockSave = vi.fn(async () => ({
   ok: true,
@@ -96,6 +103,7 @@ function Harness({
   return (
     <Composer
       ref={composerRef}
+      surface={harnessSurface}
       text={text}
       onTextChange={setText}
       attachments={attachments}
@@ -144,7 +152,23 @@ function imageClipboardData(file: File | null = null): DataTransfer {
   } as unknown as DataTransfer;
 }
 
-describe("Composer", () => {
+describe.each(SURFACES)("Composer [%s]", (surface) => {
+  beforeEach(() => {
+    harnessSurface = surface;
+  });
+
+  it("caps the field's growth per surface and anchors the tour only on main", () => {
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    expect(ta.getAttribute("data-composer-surface")).toBe(surface);
+    expect(ta.className).toContain("min-h-[40px]");
+    expect(ta.className).toContain(surface === "main" ? "max-h-[144px]" : "max-h-[112px]");
+    expect(ta.className).toContain("text-body-sm");
+    expect(ta.className).toContain("placeholder:text-input-bar-placeholder");
+    expect(ta.getAttribute("rows")).toBeNull();
+    expect(ta.getAttribute("data-tour-anchor")).toBe(surface === "main" ? "composer-input" : null);
+  });
+
   it("renders empty composer with placeholder", () => {
     render(<Harness />);
     expect(screen.getByTestId(TEST_IDS.composer)).toBeTruthy();

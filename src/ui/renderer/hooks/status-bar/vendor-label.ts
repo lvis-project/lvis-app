@@ -1,10 +1,17 @@
 import { t } from "../../../../i18n/runtime.js";
 import { STATUS_BAR_VENDOR_EMOJIS } from "../../../../shared/status-bar-emojis.js";
+import { isLLMVendor } from "../../../../shared/llm-vendor-defaults.js";
+import { getVendorOption } from "../../constants.js";
 
 /**
  * Short vendor name shown in the status sub-row — kept under ~12 chars so the
- * full "vendor · model" string fits in narrow windows. Falls back to the raw
- * provider id for an unknown vendor (a future vendor not yet in this table).
+ * full "vendor · model" string fits in narrow windows.
+ *
+ * Only the long core names are shortened here. Every other known vendor takes
+ * the name the chooser and the composer's model card already give it, so the
+ * row's tooltip cannot call a provider something the card does not. A provider
+ * id this build has no metadata for — a newer vendor read back from persisted
+ * settings — is shown as the id itself rather than as some other vendor's name.
  */
 export function shortVendorLabel(provider: string): string {
   switch (provider) {
@@ -21,7 +28,8 @@ export function shortVendorLabel(provider: string): string {
     case "vertex-ai":
       return "Vertex";
     default:
-      return provider || t("useStatusBarVendor.notConfigured");
+      if (!provider) return t("useStatusBarVendor.notConfigured");
+      return isLLMVendor(provider) ? getVendorOption(provider).label : provider;
   }
 }
 
