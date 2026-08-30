@@ -4,6 +4,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 // Named import: the default export does not survive this tsconfig's interop settings.
 import { userEvent } from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 /**
  * Navigation reached through the `onViewActivate` IPC — the main process
@@ -23,7 +24,7 @@ describe("App — view key guard on the activate-view IPC", () => {
 
   it("navigates when the key names a real inline destination", async () => {
     const { emitViewActivate } = await renderApp();
-    await waitFor(() => expect(screen.getByTestId("chat-view-root")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy());
 
     act(() => emitViewActivate("memory"));
 
@@ -38,7 +39,7 @@ describe("App — view key guard on the activate-view IPC", () => {
   it("ignores a misspelled built-in key instead of rendering it as a plugin view", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { emitViewActivate } = await renderApp();
-    await waitFor(() => expect(screen.getByTestId("chat-view-root")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy());
 
     act(() => emitViewActivate("hom"));
 
@@ -46,7 +47,7 @@ describe("App — view key guard on the activate-view IPC", () => {
     await waitFor(() =>
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("'hom'")),
     );
-    expect(screen.getByTestId("chat-view-root")).toBeTruthy();
+    expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy();
     expect(screen.queryByTestId("main-content-unknown-view")).toBeNull();
   });
 
@@ -57,20 +58,20 @@ describe("App — view key guard on the activate-view IPC", () => {
     // render.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { emitViewActivate } = await renderApp();
-    await waitFor(() => expect(screen.getByTestId("chat-view-root")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy());
 
     act(() => emitViewActivate("mcp-app:6162:card-1"));
 
     await waitFor(() =>
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("'mcp-app:6162:card-1'")),
     );
-    expect(screen.getByTestId("chat-view-root")).toBeTruthy();
+    expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy();
   });
 
   it("ignores a malformed plugin key", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { emitViewActivate } = await renderApp();
-    await waitFor(() => expect(screen.getByTestId("chat-view-root")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy());
 
     // One segment: `startsWith("plugin:")` was true for this, which is how it
     // used to reach the plugin branch.
@@ -79,7 +80,7 @@ describe("App — view key guard on the activate-view IPC", () => {
     await waitFor(() =>
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("'plugin:token-plugin'")),
     );
-    expect(screen.getByTestId("chat-view-root")).toBeTruthy();
+    expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy();
   });
 
   it("refuses to navigate to a plugin view whose manifest yields a malformed key", async () => {
@@ -110,9 +111,9 @@ describe("App — view key guard on the activate-view IPC", () => {
         entryUrl: "file:///broken-plugin/dist/ui.js",
       }],
     });
-    await waitFor(() => expect(screen.getByTestId("chat-view-root")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy());
 
-    await user.click(screen.getByTestId("command-popover-trigger"));
+    await user.click(screen.getByTestId(TEST_IDS.commandPopoverTrigger));
     await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
     const group = await screen.findByTestId("slash-group-plugin");
     await user.click(await within(group).findByText("Broken View"));
@@ -120,6 +121,6 @@ describe("App — view key guard on the activate-view IPC", () => {
     await waitFor(() =>
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("'plugin:broken-plugin:'")),
     );
-    expect(screen.getByTestId("chat-view-root")).toBeTruthy();
+    expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy();
   });
 });

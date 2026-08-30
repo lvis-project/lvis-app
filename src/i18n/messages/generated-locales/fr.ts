@@ -12,6 +12,7 @@ export const frMessages: Record<string, string> = {
   ...telegramConnectionEn,
   ...tailnetAccessTabEn,
   ...awayAuthorityEn,
+  "approvalAttribution.headlessSession": "Conversation ouverte dans aucune tuile",
   "formatIpcError.invalidPath": "Ce chemin n'est pas valide.",
   "formatIpcError.cannotRemoveDefaultRoot": "Le dossier de projet par défaut ne peut pas être retiré.",
   "formatIpcError.notAnAdditionalRoot": "Ce dossier n'est pas un dossier de projet amovible.",

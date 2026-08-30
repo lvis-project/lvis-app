@@ -12,42 +12,39 @@ vi.mock("electron", () => ({
 }));
 
 import { validateSender } from "../ipc-bridge.js";
-
-function ev(url: string): IpcMainInvokeEvent {
-  return { senderFrame: { url } } as unknown as IpcMainInvokeEvent;
-}
+import { foreignFrameEvent } from "./test-helpers.js";
 
 describe("validateSender", () => {
   it("accepts file:// renderer", () => {
-    expect(validateSender(ev("file:///Applications/Lvis.app/dist/index.html"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("file:///Applications/Lvis.app/dist/index.html"))).toBe(true);
   });
 
   it("accepts http://localhost (dev server)", () => {
-    expect(validateSender(ev("http://localhost:5173/"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("http://localhost:5173/"))).toBe(true);
   });
 
   it("accepts http://127.0.0.1 (dev server)", () => {
-    expect(validateSender(ev("http://127.0.0.1:5173/"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("http://127.0.0.1:5173/"))).toBe(true);
   });
 
   it("rejects attacker host that starts with 'localhost'", () => {
-    expect(validateSender(ev("http://localhost.attacker.com/"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("http://localhost.attacker.com/"))).toBe(false);
   });
 
   it("rejects https://localhost.attacker.com", () => {
-    expect(validateSender(ev("https://localhost.attacker.com/"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("https://localhost.attacker.com/"))).toBe(false);
   });
 
   it("rejects https://localhost (non-http scheme not in allowlist)", () => {
-    expect(validateSender(ev("https://localhost/"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("https://localhost/"))).toBe(false);
   });
 
   it("rejects arbitrary remote origin", () => {
-    expect(validateSender(ev("https://evil.example.com/"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("https://evil.example.com/"))).toBe(false);
   });
 
   it("rejects malformed URL", () => {
-    expect(validateSender(ev("not-a-url"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("not-a-url"))).toBe(false);
   });
 
   it("refuses a missing senderFrame", () => {

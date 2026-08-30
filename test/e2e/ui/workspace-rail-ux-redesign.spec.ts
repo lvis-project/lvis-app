@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
 import type { AgentSpawnEvent } from "../../../src/shared/subagent-events.js";
+import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../src/shared/test-ids.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -77,9 +78,9 @@ test.describe("workspace rail UX redesign", () => {
 
   test("file tab: directory/session segment toggle (default directory, session disabled empty)", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
-    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
+    await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 
     // Directory is the default source; the project file is listed there.
     await expect(page.getByTestId("chat-side-panel-file-source-directory")).toHaveAttribute("aria-pressed", "true");
@@ -104,14 +105,14 @@ test.describe("workspace rail UX redesign", () => {
     // segment (ProjectRootsBrowser has no query wiring).
     await expect(page.getByTestId("chat-preview-search")).toHaveCount(0);
 
-    const shot = await page.getByTestId("chat-side-panel").screenshot();
+    const shot = await page.getByTestId(TEST_IDS.chatSidePanel).screenshot();
     await test.info().attach("file-source-segment.png", { contentType: "image/png", body: shot });
   });
 
   test("file tab: the vertical separator has a ≥20px drag hit zone (R1)", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 
     const splitter = page.getByTestId("chat-side-panel-file-splitter");
     await expect(splitter).toBeVisible();
@@ -121,14 +122,14 @@ test.describe("workspace rail UX redesign", () => {
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(20);
 
-    const shot = await page.getByTestId("chat-side-panel").screenshot();
+    const shot = await page.getByTestId(TEST_IDS.chatSidePanel).screenshot();
     await test.info().attach("separator-drag-zone.png", { contentType: "image/png", body: shot });
   });
 
   test("file tab: vertical splitter persists across restart", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 
     const splitLayout = page.getByTestId("chat-side-panel-file-split-layout");
     await expect(splitLayout).toBeVisible();
@@ -148,8 +149,8 @@ test.describe("workspace rail UX redesign", () => {
     await app.close();
     await launch();
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
     await expect
       .poll(async () =>
         page.getByTestId("chat-side-panel-file-split-layout").evaluate((el) => (el as HTMLElement).style.gridTemplateRows),
@@ -159,10 +160,10 @@ test.describe("workspace rail UX redesign", () => {
 
   test("browser tab: single address bar + floating search Popover (no duplicate bar)", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await page.getByTestId("chat-side-panel-launcher-browser").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(chatSidePanelLauncherTestId("browser")).click();
 
-    const panel = page.getByTestId("chat-side-panel");
+    const panel = page.getByTestId(TEST_IDS.chatSidePanel);
     // Exactly ONE address bar (the duplicated viewer header is suppressed).
     await expect(panel.getByTestId("chat-side-panel-browser-address")).toHaveCount(1);
     // The always-on search strip is gone; the search lives behind the 🔍 button.
@@ -177,18 +178,18 @@ test.describe("workspace rail UX redesign", () => {
 
   test("subagent tab: opens from the launcher and shows the empty state", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await expect(page.getByTestId("chat-side-panel-launcher-subagent")).toBeVisible();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await expect(page.getByTestId(chatSidePanelLauncherTestId("subagent"))).toBeVisible();
     // side-chat is a first-class launcher item alongside sub-agent — both are
     // live surfaces, both openable from the same empty-state picker.
-    await expect(page.getByTestId("chat-side-panel-launcher-side-chat")).toBeVisible();
+    await expect(page.getByTestId(chatSidePanelLauncherTestId("side-chat"))).toBeVisible();
 
-    await page.getByTestId("chat-side-panel-launcher-subagent").click();
+    await page.getByTestId(chatSidePanelLauncherTestId("subagent")).click();
     await expect(page.getByTestId("chat-side-panel-tab-subagent")).toBeVisible();
     // No spawns in a fresh session → empty state.
     await expect(page.getByTestId("chat-side-panel-subagent-empty")).toBeVisible();
 
-    const shot = await page.getByTestId("chat-side-panel").screenshot();
+    const shot = await page.getByTestId(TEST_IDS.chatSidePanel).screenshot();
     await test.info().attach("subagent-tab-empty.png", { contentType: "image/png", body: shot });
   });
 
@@ -200,8 +201,8 @@ test.describe("workspace rail UX redesign", () => {
     // that share ONE childSessionId — the viewer must unify them into a single
     // row whose transcript concatenates both segments.
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await page.getByTestId("chat-side-panel-launcher-subagent").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(chatSidePanelLauncherTestId("subagent")).click();
     await expect(page.getByTestId("chat-side-panel-tab-subagent")).toBeVisible();
 
     const sendSpawn = async (event: AgentSpawnEvent): Promise<void> => {
@@ -286,7 +287,7 @@ test.describe("workspace rail UX redesign", () => {
     // The row carries the ORIGINAL's title (one logical agent = one name).
     await expect(page.getByTestId("chat-side-panel-subagent-row")).toContainText("E2E research");
 
-    const shot = await page.getByTestId("chat-side-panel").screenshot();
+    const shot = await page.getByTestId(TEST_IDS.chatSidePanel).screenshot();
     await test.info().attach("subagent-tab-unified-resume.png", { contentType: "image/png", body: shot });
   });
 });

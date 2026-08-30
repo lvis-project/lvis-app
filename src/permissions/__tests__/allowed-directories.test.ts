@@ -27,13 +27,9 @@ import {
 } from "../allowed-directories.js";
 import {
   canonicalizePathForMatch,
-  caseFoldForMatch,
 } from "../sensitive-paths.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-
-function fold(raw: string): string {
-  return caseFoldForMatch(canonicalizePathForMatch(raw));
-}
+import { foldPathForMatch as fold } from "./test-helpers.js";
 
 function mountedVolumeNamespacePathFor(existingPath: string): string | null {
   if (process.platform !== "win32") return null;

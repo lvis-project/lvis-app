@@ -101,6 +101,9 @@ export function useApproval(): ApprovalQueueApi {
   // it leaves the queue, never earlier: releasing it on `respond()` settling
   // would let a click that lands before the drop commits answer it twice.
   const inFlightRequestIdsRef = useRef<Set<string>>(new Set());
+  // Every request this renderer has answered. A parked snapshot fetched before
+  // the host settled one of them must not draw its card again.
+  const answeredRequestIdsRef = useRef<Set<string>>(new Set());
   // Guard late setQueue from async `respond()` callbacks resolving after
   // unmount.
   const aliveRef = useRef(true);
@@ -134,12 +137,17 @@ export function useApproval(): ApprovalQueueApi {
     // Requests parked before this renderer subscribed — a reload mid-approval.
     // Subscribed first, fetched second, so nothing can fall between the two;
     // a request that arrived both ways is kept once. Parked requests were
-    // asked first, so they go ahead of anything that arrived meanwhile.
+    // asked first, so they go ahead of anything that arrived meanwhile. One
+    // this renderer has already answered (an answer in flight, or settled
+    // after the snapshot was taken) is not a parked request any more.
     void window.lvis.approval.listPending().then(
       (parked) => {
         if (!aliveRef.current) return;
+        const stillParked = parked.filter(
+          (req) => !inFlightRequestIdsRef.current.has(req.id) && !answeredRequestIdsRef.current.has(req.id),
+        );
         setQueue((q) =>
-          [...parked, ...q].reduce<ApprovalRequest[]>(
+          [...stillParked, ...q].reduce<ApprovalRequest[]>(
             (acc, req) =>
               acc.some((held) => held.id === req.id)
                 ? acc
@@ -196,6 +204,7 @@ export function useApproval(): ApprovalQueueApi {
         return;
       }
       inFlightRequestIdsRef.current.add(requestId);
+      answeredRequestIdsRef.current.add(requestId);
 
       try {
         await window.lvis.approval.respond({

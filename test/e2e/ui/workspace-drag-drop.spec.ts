@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
+import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../src/shared/test-ids.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -94,9 +95,9 @@ test.describe("workspace drag-drop add-root (#1458)", () => {
   /** Open the file-browser and return the drop-zone bounding box centre (px). */
   async function openRootsZone(): Promise<{ x: number; y: number }> {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
-    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
+    await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
     const zone = page.getByTestId("chat-side-panel-project-roots");
     await expect(zone).toBeVisible();
     const box = await zone.boundingBox();

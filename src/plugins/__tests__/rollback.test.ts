@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +11,7 @@ import {
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
-import { canonicalJSON } from "../whitelist/canonical-json.js";
+import { manifestSha } from "../../__tests__/support/sign-envelope-fixture.js";
 import { agentPluginsDocument } from "./test-helpers.js";
 
 /**
@@ -38,10 +37,6 @@ const SAMPLE_ITEM: PluginMarketplaceItem = {
 
 function sampleManifest(version: string) {
   return { id: "example-sample", version, entry: "./dist/index.js", tools: [] };
-}
-
-function manifestSha(manifest: unknown): string {
-  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
 }
 
 class StubFetcher implements MarketplaceFetcher {

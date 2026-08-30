@@ -12,6 +12,7 @@ export const jaMessages: Record<string, string> = {
   ...telegramConnectionEn,
   ...tailnetAccessTabEn,
   ...awayAuthorityEn,
+  "approvalAttribution.headlessSession": "どのタイルにも開かれていない会話",
   "actionPanel.closeAriaLabel": "ツールアクティビティパネルを閉じる",
   "actionPanel.closeTooltip": "ツールアクティビティパネルを閉じる",
   "actionPanel.copyPath": "パスをコピーする",

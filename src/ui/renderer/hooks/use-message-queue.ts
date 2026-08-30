@@ -8,6 +8,7 @@ import {
 } from "../state/message-queue-store.js";
 import type { Attachment } from "../types/attachments.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import { blockingSurfaceCovers } from "../components/permissions/ApprovalDock.js";
 import type { ChatStreamEvent } from "../../../lib/chat-stream-state.js";
 import type { ComposerHandle, ComposerSurface } from "../components/Composer.js";
 
@@ -400,13 +401,7 @@ export function useMessageQueue({
     if (!streaming) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (
-        document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
-        )
-      ) {
-        return;
-      }
+      if (blockingSurfaceCovers(e.target)) return;
       if (messageQueueStore.hasSelected()) {
         e.preventDefault();
         messageQueueStore.clearSelection();
@@ -433,13 +428,7 @@ export function useMessageQueue({
       // 한국어 IME composing 가드 제거 — composing 시 첫 ⌘⏎ 가 IME commit 으로
       // 소비되고 두 번째 ⌘⏎ 가 동작하는 회귀 (사용자 보고 2026-05-15).
       // 미확정 음절 손실은 마이너 — 사용자 의도 (인터럽트) 가 명확.
-      if (
-        document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
-        )
-      ) {
-        return;
-      }
+      if (blockingSurfaceCovers(e.target)) return;
       if (!ownsTarget(e.target)) return;
       e.preventDefault();
       handleImmediateInject();
@@ -455,13 +444,7 @@ export function useMessageQueue({
       if (e.key !== "k" && e.key !== "K") return;
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.isComposing) return;
-      if (
-        document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
-        )
-      ) {
-        return;
-      }
+      if (blockingSurfaceCovers(e.target)) return;
       const text = question.trim();
       if (text.length === 0) return;
       e.preventDefault();

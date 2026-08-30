@@ -15,6 +15,7 @@ import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
 } from "./storage/feature-namespace.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
 import { hasExactKeys } from "../shared/is-record.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
@@ -31,7 +32,6 @@ const MAX_INVITATIONS = 64;
 const MAX_PAIRINGS = 128;
 const MAX_SHARES = 256;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACTOR_ID = /^tailnet:[a-f0-9]{64}$/;
 
 const TAILNET_SHARING_FEATURE = "tailnet-sharing";
@@ -142,7 +142,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 function uuid(value: unknown): value is string {
-  return typeof value === "string" && UUID.test(value);
+  return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
 function actorId(value: unknown): value is TailnetShareActorId {

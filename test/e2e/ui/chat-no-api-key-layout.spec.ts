@@ -6,6 +6,7 @@ import {
   teardownSeededElectron,
   type SeededElectronContext,
 } from "./seeded-electron";
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * The no-API-key affordance used to be a transcript card claiming
@@ -41,7 +42,7 @@ test.describe("chat no-API-key layout", () => {
     await ctx.page.setViewportSize({ width: 1040, height: 360 });
 
     const chip = ctx.page.locator('[data-testid="composer-api-key-chip"]');
-    const composer = ctx.page.locator('[data-testid="composer-input-bar"]');
+    const composer = ctx.page.locator(testIdSelector(TEST_IDS.composerInputBar));
     const projectSelector = ctx.page.locator('[data-testid="composer-project-selector-slot"]');
     await expect(chip).toBeVisible();
     await expect(composer).toBeVisible();
@@ -110,7 +111,7 @@ test.describe("chat no-API-key layout", () => {
     await ctx.page.setViewportSize({ width: 1076, height: 798 });
 
     await expect(ctx.page.locator('[data-testid="composer-api-key-chip"]')).toBeVisible();
-    await expect(ctx.page.locator('[data-testid="composer-input-bar"]')).toBeVisible();
+    await expect(ctx.page.locator(testIdSelector(TEST_IDS.composerInputBar))).toBeVisible();
 
     // The dock animates its margin (`transition-[margin,transform] duration-300`),
     // and a viewport resize restarts that transition — sampling immediately reads

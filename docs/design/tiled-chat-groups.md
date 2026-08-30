@@ -293,11 +293,19 @@ The routing is one rule, `sessionOwnedBy`, applied by two readers:
   approvals (`agent_spawn` asks by contract), so the spawn card follows the
   same rule: it is drawn in the tile whose turn is spawning.
 
-What no surface claims has one explicit home, the window's own dock over the
-route canvas: a request that names no conversation (a host or plugin ask), or
-a session no open surface holds (a headless routine's turn, a conversation
-this window closed while its ask was parked). That dock draws only unclaimed
-requests; it is those requests' home, not a catch-all behind the tiles.
+What no surface claims has one explicit home, the window's own dock: a
+request that names no conversation (a host or plugin ask), or a session no
+open surface holds (a headless routine's turn, a tile maximized away while its
+turn asked). That dock draws only unclaimed requests; it is those requests'
+home, not a catch-all behind the tiles. It is drawn over the route canvas from
+a `data-approval-scope` of its own, beside the tiles and an ancestor of none —
+so an unclaimed card covers no tile's composer and takes no tile's caret. The
+invariant, then: a `data-approval-scope` contains at most ONE composer, the one
+its dock may cover.
+
+The two unowned cases split on purpose. An unowned question is adopted by the
+focused tile at arrival: an answer needs a conversation to land in. An unowned
+approval goes to the window's dock: its answer needs none.
 
 The card names the conversation by the surface's own label — the tile's title,
 "Side chat", "Conversation not open in any tile" — and keeps the raw session
@@ -309,7 +317,12 @@ approval. If the host settles the ask without an answer (timeout, cancel),
 the turn's `done` puts a system entry in that tile naming what was blocked and
 drops the dead card. A renderer reloaded mid-approval reads the parked
 requests back (`lvis:approval:pending`) and the card reappears in the tile
-holding that session.
+holding that session — the primary conversation's, whose turn a reload does
+not stop. Every other tile is let go of when the renderer navigates (the chat
+domain's renderer-lifetime watch), and letting go stops its turn, which
+retires the ask it was parked on: the audit row says `cause="renderer reload
+released the tile"`, and a card for a turn that no longer exists is never
+re-offered.
 
 ### The controls: split and drop
 

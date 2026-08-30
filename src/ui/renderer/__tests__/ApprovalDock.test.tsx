@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, fireEvent, waitFor } from "@testing-library/react";
 import { ApprovalDock } from "../components/permissions/ApprovalDock.js";
 import type { ApprovalRequest, PermissionEvaluationContext } from "../types.js";
+import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
 function makeEvaluationContext(overrides: Partial<PermissionEvaluationContext> = {}): PermissionEvaluationContext {
   return {
@@ -75,7 +76,7 @@ describe("ApprovalDock", () => {
       expect(document.body.textContent).toContain("읽기");
       expect(document.body.textContent).toContain("읽기 판단근거");
     });
-    const dock = document.body.querySelector('[data-testid="approval-dock"]');
+    const dock = document.body.querySelector(testIdSelector(TEST_IDS.approvalDock));
     expect(dock?.getAttribute("role")).toBe("region");
     expect(dock?.getAttribute("aria-modal")).toBeNull();
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
@@ -115,7 +116,7 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    const dock = container.querySelector('[data-testid="approval-dock"]');
+    const dock = container.querySelector(testIdSelector(TEST_IDS.approvalDock));
     expect(container.textContent).toContain("host-sealed-tool");
     expect(container.textContent).not.toContain(rawToolName);
     expect(container.textContent).not.toContain("UNTRUSTED request reason");
@@ -167,7 +168,7 @@ describe("ApprovalDock", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
-    const allowBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    const allowBtn = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.approveButton));
     expect(allowBtn).toBeTruthy();
     fireEvent.click(allowBtn!);
     expect(onDecide).toHaveBeenCalled();
@@ -233,9 +234,9 @@ describe("ApprovalDock", () => {
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
 
-    const deny = document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
-    const always = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!;
-    const once = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')!;
+    const deny = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.denyButton))!;
+    const always = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.allowAlwaysButton))!;
+    const once = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.approveButton))!;
 
     once.focus();
     fireEvent.keyDown(once, { key: "ArrowLeft" });
@@ -261,9 +262,9 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    const deny = document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
-    const always = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!;
-    const once = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')!;
+    const deny = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.denyButton))!;
+    const always = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.allowAlwaysButton))!;
+    const once = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.approveButton))!;
     expect(always).toBeDisabled();
 
     once.focus();
@@ -283,7 +284,7 @@ describe("ApprovalDock", () => {
     );
 
     const background = container.querySelector<HTMLButtonElement>('[data-testid="background-action"]')!;
-    const dock = container.querySelector<HTMLElement>('[data-testid="approval-dock"]')!;
+    const dock = container.querySelector<HTMLElement>(testIdSelector(TEST_IDS.approvalDock))!;
     const panel = container.querySelector<HTMLElement>('[data-testid="tool-approval-panel"]')!;
     expect(dock).toBeTruthy();
     expect(container.querySelector('[data-testid="background-route"]')?.hasAttribute("inert")).toBe(false);
@@ -343,11 +344,11 @@ describe("ApprovalDock", () => {
     );
     await waitFor(() => {
       expect(document.activeElement).toBe(
-        container.querySelector('[data-testid="deny-button"]'),
+        container.querySelector(testIdSelector(TEST_IDS.denyButton)),
       );
     });
 
-    container.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!.focus();
+    container.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.denyButton))!.focus();
     rerender(
       <main data-approval-scope>
         <button type="button" data-testid="return-target">Return target</button>
@@ -355,9 +356,9 @@ describe("ApprovalDock", () => {
       </main>,
     );
     await waitFor(() => {
-      expect(document.activeElement).toBe(container.querySelector('[data-testid="deny-button"]'));
+      expect(document.activeElement).toBe(container.querySelector(testIdSelector(TEST_IDS.denyButton)));
     });
-    const secondDecision = container.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
+    const secondDecision = container.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.denyButton))!;
     fireEvent.keyDown(secondDecision, { key: "d", code: "KeyD" });
     expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
 
@@ -373,24 +374,24 @@ describe("ApprovalDock", () => {
   it("obscures only the covered composer and restores it with focus after approval", async () => {
     const request = makeRequest({ id: "req-covered-composer" });
     const { container, rerender } = render(
-      <main data-testid="route-canvas" data-approval-scope>
+      <main data-testid={TEST_IDS.routeCanvas} data-approval-scope>
         <button type="button" data-testid="background-action">Background action</button>
         <div data-composer-placement="bottom">
-          <textarea data-testid="composer-textarea" />
+          <textarea data-testid={TEST_IDS.composerTextarea} />
         </div>
         <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />
       </main>,
     );
     const composer = container.querySelector<HTMLElement>('[data-composer-placement]')!;
-    const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="composer-textarea"]')!;
+    const textarea = container.querySelector<HTMLTextAreaElement>(testIdSelector(TEST_IDS.composerTextarea))!;
     const background = container.querySelector<HTMLElement>('[data-testid="background-action"]')!;
     textarea.focus();
 
     rerender(
-      <main data-testid="route-canvas" data-approval-scope>
+      <main data-testid={TEST_IDS.routeCanvas} data-approval-scope>
         <button type="button" data-testid="background-action">Background action</button>
         <div data-composer-placement="bottom">
-          <textarea data-testid="composer-textarea" />
+          <textarea data-testid={TEST_IDS.composerTextarea} />
         </div>
         <ApprovalDock conversationLabel="conversation" queue={[request]} onDecide={vi.fn()} />
       </main>,
@@ -398,16 +399,16 @@ describe("ApprovalDock", () => {
     await waitFor(() => {
       expect(composer).toHaveAttribute("inert");
       expect(composer).toHaveAttribute("aria-hidden", "true");
-      expect(document.activeElement).toBe(container.querySelector('[data-testid="deny-button"]'));
+      expect(document.activeElement).toBe(container.querySelector(testIdSelector(TEST_IDS.denyButton)));
     });
     expect(background).not.toHaveAttribute("inert");
     expect(background).not.toHaveAttribute("aria-hidden");
 
     rerender(
-      <main data-testid="route-canvas" data-approval-scope>
+      <main data-testid={TEST_IDS.routeCanvas} data-approval-scope>
         <button type="button" data-testid="background-action">Background action</button>
         <div data-composer-placement="bottom">
-          <textarea data-testid="composer-textarea" />
+          <textarea data-testid={TEST_IDS.composerTextarea} />
         </div>
         <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />
       </main>,
@@ -419,24 +420,68 @@ describe("ApprovalDock", () => {
     });
   });
 
+  it("inerts only the composer inside its own scope; a dock whose scope holds no composer inerts none", async () => {
+    // Two tiles under one route canvas, each its own scope, plus the window's
+    // scope beside them: the tile-2 card covers tile 2's composer only, and
+    // the unclaimed card in the window's scope covers neither.
+    const { container } = render(
+      <main data-testid={TEST_IDS.routeCanvas}>
+        <section data-approval-scope data-testid="tile-1">
+          <div data-composer-placement="bottom"><textarea data-testid="composer-1" /></div>
+        </section>
+        <section data-approval-scope data-testid="tile-2">
+          <div data-composer-placement="bottom"><textarea data-testid="composer-2" /></div>
+          <ApprovalDock conversationLabel="tile 2" queue={[makeRequest({ id: "req-tile-2" })]} onDecide={vi.fn()} />
+        </section>
+        <div data-approval-scope data-testid={TEST_IDS.windowApprovalScope}>
+          <ApprovalDock conversationLabel="window" queue={[makeRequest({ id: "req-unclaimed" })]} onDecide={vi.fn()} />
+        </div>
+      </main>,
+    );
+    const [first, second] = Array.from(container.querySelectorAll<HTMLElement>("[data-composer-placement]"));
+    expect(container.querySelectorAll(testIdSelector(TEST_IDS.approvalDock))).toHaveLength(2);
+    await waitFor(() => expect(second).toHaveAttribute("inert"));
+    expect(first).not.toHaveAttribute("inert");
+    expect(first).not.toHaveAttribute("aria-hidden");
+    // The window's card alone: with no tile card up, still no composer is touched.
+    const { container: alone } = render(
+      <main data-testid={TEST_IDS.routeCanvas}>
+        <section data-approval-scope>
+          <div data-composer-placement="bottom"><textarea /></div>
+        </section>
+        <section data-approval-scope>
+          <div data-composer-placement="bottom"><textarea /></div>
+        </section>
+        <div data-approval-scope data-testid={TEST_IDS.windowApprovalScope}>
+          <ApprovalDock conversationLabel="window" queue={[makeRequest({ id: "req-unclaimed-alone" })]} onDecide={vi.fn()} />
+        </div>
+      </main>,
+    );
+    await waitFor(() => expect(alone.querySelector(testIdSelector(TEST_IDS.approvalDock))).not.toBeNull());
+    for (const composer of alone.querySelectorAll("[data-composer-placement]")) {
+      expect(composer).not.toHaveAttribute("inert");
+      expect(composer).not.toHaveAttribute("aria-hidden");
+    }
+  });
+
   it("hands focus to a question that arrived beneath the approval overlay", async () => {
     const request = makeRequest({ id: "req-question-focus-handoff" });
     const { container, rerender } = render(
-      <main data-testid="route-canvas" data-approval-scope>
+      <main data-testid={TEST_IDS.routeCanvas} data-approval-scope>
         <div data-composer-placement="bottom">
-          <textarea data-testid="composer-textarea" />
+          <textarea data-testid={TEST_IDS.composerTextarea} />
         </div>
         <ApprovalDock conversationLabel="conversation" queue={[]} onDecide={vi.fn()} />
       </main>,
     );
-    const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="composer-textarea"]')!;
+    const textarea = container.querySelector<HTMLTextAreaElement>(testIdSelector(TEST_IDS.composerTextarea))!;
     textarea.focus();
 
     rerender(
-      <main data-testid="route-canvas" data-approval-scope>
+      <main data-testid={TEST_IDS.routeCanvas} data-approval-scope>
         <div data-composer-placement="bottom">
-          <textarea data-testid="composer-textarea" />
-          <div data-testid="question-overlay">
+          <textarea data-testid={TEST_IDS.composerTextarea} />
+          <div data-testid={TEST_IDS.questionOverlay}>
             <button type="button" role="option" tabIndex={0} data-testid="question-choice">
               Today
             </button>
@@ -446,14 +491,14 @@ describe("ApprovalDock", () => {
       </main>,
     );
     await waitFor(() => {
-      expect(document.activeElement).toBe(container.querySelector('[data-testid="deny-button"]'));
+      expect(document.activeElement).toBe(container.querySelector(testIdSelector(TEST_IDS.denyButton)));
     });
 
     rerender(
-      <main data-testid="route-canvas" data-approval-scope>
+      <main data-testid={TEST_IDS.routeCanvas} data-approval-scope>
         <div data-composer-placement="bottom">
-          <textarea data-testid="composer-textarea" />
-          <div data-testid="question-overlay">
+          <textarea data-testid={TEST_IDS.composerTextarea} />
+          <div data-testid={TEST_IDS.questionOverlay}>
             <button type="button" role="option" tabIndex={0} data-testid="question-choice">
               Today
             </button>
@@ -465,10 +510,10 @@ describe("ApprovalDock", () => {
     // Real IPC resolution can cause a second empty-queue render before the
     // browser's next frame; that rerender must not cancel the focus handoff.
     rerender(
-      <main data-testid="route-canvas" data-approval-scope>
+      <main data-testid={TEST_IDS.routeCanvas} data-approval-scope>
         <div data-composer-placement="bottom">
-          <textarea data-testid="composer-textarea" />
-          <div data-testid="question-overlay">
+          <textarea data-testid={TEST_IDS.composerTextarea} />
+          <div data-testid={TEST_IDS.questionOverlay}>
             <button type="button" role="option" tabIndex={0} data-testid="question-choice">
               Today
             </button>
@@ -496,13 +541,13 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    const deny = document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
+    const deny = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.denyButton))!;
     await waitFor(() => expect(deny.tabIndex).toBe(0));
     expect(deny).toBeEnabled();
     // Reject is the sole tab stop because it is the sole DECISION: the allow
     // options are not rendered at all for an unverifiable seal.
-    expect(document.body.querySelector('[data-testid="allow-always-button"]')).toBeNull();
-    expect(document.body.querySelector('[data-testid="approve-button"]')).toBeNull();
+    expect(document.body.querySelector(testIdSelector(TEST_IDS.allowAlwaysButton))).toBeNull();
+    expect(document.body.querySelector(testIdSelector(TEST_IDS.approveButton))).toBeNull();
     expect(document.activeElement).toBe(deny);
   });
 
@@ -524,7 +569,7 @@ describe("ApprovalDock", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
-    expect(document.body.querySelector('[data-testid="approval-queue-depth"]')?.textContent)
+    expect(document.body.querySelector(testIdSelector(TEST_IDS.approvalDockQueueDepth))?.textContent)
       .toContain("1 / 2");
     expect(document.body.textContent).toContain("대기 중 1개");
     expect(document.body.textContent).not.toContain("모두 허용");
@@ -700,15 +745,15 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    expect(container.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
+    expect(container.querySelector(testIdSelector(TEST_IDS.approvalDock))).toBeTruthy();
     expect(container.querySelector('[data-testid="tool-approval-panel"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="deny-button"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="allow-always-button"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="approve-button"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="approval-review-details"]')).toBeTruthy();
+    expect(container.querySelector(testIdSelector(TEST_IDS.denyButton))).toBeTruthy();
+    expect(container.querySelector(testIdSelector(TEST_IDS.allowAlwaysButton))).toBeTruthy();
+    expect(container.querySelector(testIdSelector(TEST_IDS.approveButton))).toBeTruthy();
+    expect(container.querySelector(testIdSelector(TEST_IDS.approvalReviewDetails))).toBeTruthy();
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(document.body.textContent).toContain("/Users/example/Documents/project/notes.md");
-    fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!);
+    fireEvent.click(container.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.openPermanentDenySettings))!);
     expect(onOpenPermanentDeny).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "out-of-allowed-dir", toolName: "read_file" }),
       "low",
@@ -739,7 +784,7 @@ describe("ApprovalDock", () => {
     );
 
     fireEvent.click(
-      container.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!,
+      container.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.openPermanentDenySettings))!,
     );
     expect(onOpenPermanentDeny).toHaveBeenCalledWith(
       expect.objectContaining({ toolName: "bash", toolCategory: "shell" }),
@@ -772,7 +817,7 @@ describe("ApprovalDock", () => {
     );
     expect(document.body.textContent).toContain("사용자 요청에서 가져온 사유");
 
-    const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    const approve = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.approveButton));
     expect(approve).toBeTruthy();
     expect(approve!.disabled).toBe(false);
     fireEvent.click(approve!);
@@ -804,7 +849,7 @@ describe("ApprovalDock", () => {
       "shell command",
     );
     expect(document.body.textContent).toContain("권한 감사 요약");
-    const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    const approve = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.approveButton));
     expect(approve?.disabled).toBe(false);
     fireEvent.click(approve!);
 
@@ -837,7 +882,7 @@ describe("ApprovalDock", () => {
     );
     expect(document.body.textContent).toContain("권한 감사 요약");
     expect(document.body.textContent).not.toContain("사용자 요청에서 가져온 사유");
-    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')).toBeEnabled();
+    expect(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.approveButton))).toBeEnabled();
   });
 
   it("Always allow records the exact host-bound tuple with canonical JSON args", async () => {
@@ -856,7 +901,7 @@ describe("ApprovalDock", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
-    const allowBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]');
+    const allowBtn = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.allowAlwaysButton));
     expect(allowBtn).toBeTruthy();
     fireEvent.click(allowBtn!);
     await waitFor(() => expect(onDecide).toHaveBeenCalled());
@@ -885,7 +930,7 @@ describe("ApprovalDock", () => {
       <ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
-    const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    const approve = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.approveButton));
     fireEvent.click(approve!);
     await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-once", undefined));
     expect(window.lvis.userApproval.record).not.toHaveBeenCalled();
@@ -910,11 +955,11 @@ describe("ApprovalDock", () => {
     expect(impact).not.toHaveTextContent("user confirmation required");
     expect(impact).not.toHaveTextContent("category: write");
     expect(document.body.textContent).toContain("쓰기");
-    const details = document.body.querySelector<HTMLDetailsElement>('[data-testid="approval-review-details"]');
+    const details = document.body.querySelector<HTMLDetailsElement>(testIdSelector(TEST_IDS.approvalReviewDetails));
     expect(details).toBeTruthy();
     expect(details!.open).toBe(false);
     expect(document.body.textContent).toContain("대상·영향·보호 조치·전체 입력을 펼쳐서 확인");
-    fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!);
+    fireEvent.click(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.openPermanentDenySettings))!);
     expect(onOpenPermanentDeny).toHaveBeenCalledWith(
       expect.objectContaining({ id: "req-1", toolName: "read_file" }),
       "medium",
@@ -955,10 +1000,10 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!);
+    fireEvent.click(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.allowAlwaysButton))!);
     await waitFor(() => {
-      expect(document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')).toBeDisabled();
-      expect(document.body.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')).toBeDisabled();
+      expect(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.denyButton))).toBeDisabled();
+      expect(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.openPermanentDenySettings))).toBeDisabled();
     });
     const panel = document.body.querySelector<HTMLElement>('[data-testid="tool-approval-panel"]')!;
     fireEvent.keyDown(panel, { key: "d" });
@@ -985,9 +1030,9 @@ describe("ApprovalDock", () => {
 
     expect(document.body.querySelector('[data-testid="approval-decision-locked"]'))
       .toHaveTextContent("설정에서 이 정확한 거절을 저장하거나 취소");
-    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')).toBeDisabled();
-    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')).toBeDisabled();
-    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')).toBeDisabled();
+    expect(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.denyButton))).toBeDisabled();
+    expect(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.allowAlwaysButton))).toBeDisabled();
+    expect(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.approveButton))).toBeDisabled();
 
     const panel = document.body.querySelector<HTMLElement>('[data-testid="tool-approval-panel"]')!;
     fireEvent.keyDown(panel, { key: "a" });
@@ -996,7 +1041,7 @@ describe("ApprovalDock", () => {
     expect(onDecide).not.toHaveBeenCalled();
 
     fireEvent.click(
-      document.body.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!,
+      document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.openPermanentDenySettings))!,
     );
     expect(onOpenPermanentDeny).toHaveBeenCalledWith(
       expect.objectContaining({ id: "req-1" }),
@@ -1015,10 +1060,10 @@ describe("ApprovalDock", () => {
     const next = makeRequest({ id: "req-next", toolName: "write_file", args: { path: "/tmp/next" } });
     const { rerender } = render(<ApprovalDock conversationLabel="conversation" queue={[first]} onDecide={onDecide} />);
 
-    fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!);
+    fireEvent.click(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.allowAlwaysButton))!);
     await waitFor(() => expect(record).toHaveBeenCalledTimes(1));
     rerender(<ApprovalDock conversationLabel="conversation" queue={[next]} onDecide={onDecide} />);
-    expect(document.body.querySelector('[data-testid="approval-dock"]'))
+    expect(document.body.querySelector(testIdSelector(TEST_IDS.approvalDock)))
       .toHaveAttribute("data-approval-request-id", "req-next");
 
     await act(async () => resolveRecord({ ok: true }));
@@ -1029,12 +1074,12 @@ describe("ApprovalDock", () => {
     const first = makeRequest({ id: "req-details-1" });
     const next = makeRequest({ id: "req-details-2", toolName: "write_file" });
     const { rerender } = render(<ApprovalDock conversationLabel="conversation" queue={[first]} onDecide={vi.fn()} />);
-    const firstDetails = document.body.querySelector<HTMLDetailsElement>('[data-testid="approval-review-details"]')!;
+    const firstDetails = document.body.querySelector<HTMLDetailsElement>(testIdSelector(TEST_IDS.approvalReviewDetails))!;
     fireEvent.click(firstDetails.querySelector("summary")!);
     expect(firstDetails.open).toBe(true);
 
     rerender(<ApprovalDock conversationLabel="conversation" queue={[next]} onDecide={vi.fn()} />);
-    expect(document.body.querySelector<HTMLDetailsElement>('[data-testid="approval-review-details"]')?.open)
+    expect(document.body.querySelector<HTMLDetailsElement>(testIdSelector(TEST_IDS.approvalReviewDetails))?.open)
       .toBe(false);
   });
 
@@ -1044,14 +1089,14 @@ describe("ApprovalDock", () => {
     record.mockResolvedValueOnce({ ok: false, error: "managed", message: "disk unavailable" });
     render(<ApprovalDock conversationLabel="conversation" queue={[makeRequest()]} onDecide={onDecide} />);
 
-    fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!);
+    fireEvent.click(document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.allowAlwaysButton))!);
 
     await waitFor(() => {
       expect(document.body.querySelector('[data-testid="exact-decision-save-error"]')?.textContent)
         .toContain("disk unavailable");
     });
     expect(onDecide).not.toHaveBeenCalled();
-    expect(document.body.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
+    expect(document.body.querySelector(testIdSelector(TEST_IDS.approvalDock))).toBeTruthy();
   });
 
   it("keeps Always allow visible but disabled for HIGH verdicts", async () => {
@@ -1067,7 +1112,7 @@ describe("ApprovalDock", () => {
       />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
-    const alwaysBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]');
+    const alwaysBtn = document.body.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.allowAlwaysButton));
     expect(alwaysBtn).toBeTruthy();
     expect(alwaysBtn!.disabled).toBe(true);
     expect(alwaysBtn!.title).toContain("세션마다 다시 검토");

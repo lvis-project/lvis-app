@@ -59,6 +59,7 @@ import sonicBoomDefault, {
 } from "sonic-boom";
 import { lvisHome } from "../shared/lvis-home.js";
 import { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
+import { utcDateKey } from "../shared/local-date.js";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./atomic-file.js";
 
 const SonicBoomCtor = sonicBoomDefault as unknown as {
@@ -99,11 +100,6 @@ export const LOG_MAX_FILES_PER_DAY = 20;
  * 200 MB. Single source of truth.
  */
 export const LOG_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
-
-/** `2026-07-05` — the UTC date component used in the log filename. */
-function todayDateStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /** Base name (no sequence) for a given date: `lvis-<date>.log`. */
 function baseFileName(dateStr: string): string {
@@ -369,7 +365,7 @@ export function createLogFileSink(options: LogFileSinkOptions = {}): LogFileSink
   // Enforce the per-day count + whole-tree byte caps AFTER date-retention prune.
   capLogTree(dir);
 
-  const dateStr = todayDateStr();
+  const dateStr = utcDateKey();
   let seq = resolveActiveSeq(dir, dateStr, maxBytes);
   let currentFile = join(dir, seqFileName(dateStr, seq));
 

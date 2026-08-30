@@ -12,6 +12,7 @@ export const zhMessages: Record<string, string> = {
   ...telegramConnectionEn,
   ...tailnetAccessTabEn,
   ...awayAuthorityEn,
+  "approvalAttribution.headlessSession": "未在任何分栏中打开的对话",
   "actionPanel.closeAriaLabel": "关闭工具活动面板",
   "actionPanel.closeTooltip": "关闭工具活动面板",
   "actionPanel.copyPath": "复制路径",

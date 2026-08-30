@@ -12,6 +12,7 @@ export const deMessages: Record<string, string> = {
   ...telegramConnectionEn,
   ...tailnetAccessTabEn,
   ...awayAuthorityEn,
+  "approvalAttribution.headlessSession": "Unterhaltung in keiner Kachel geöffnet",
   "formatIpcError.invalidPath": "Dieser Pfad ist ungültig.",
   "formatIpcError.cannotRemoveDefaultRoot": "Der Standard-Projektordner kann nicht entfernt werden.",
   "formatIpcError.notAnAdditionalRoot": "Dieser Ordner ist kein entfernbarer Projektordner.",

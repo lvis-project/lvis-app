@@ -1,14 +1,9 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
-import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { t } from "../../../../i18n/runtime.js";
 import { TokenProgressRing } from "../TokenProgressRing.js";
-
-function renderWithProvider(ui: React.ReactElement) {
-  return render(<TooltipProvider>{ui}</TooltipProvider>);
-}
+import { renderWithTooltipProvider as renderWithProvider } from "../../../../../test/renderer/helpers.js";
 
 describe("TokenProgressRing", () => {
   it("has tabIndex=0 for keyboard focusability", () => {

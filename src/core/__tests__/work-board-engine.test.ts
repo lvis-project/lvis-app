@@ -28,6 +28,7 @@ import type { WorkBoardRunEvent } from "../../shared/work-board-types.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import { readRunTranscript } from "../../work-board/run-transcript.js";
 import { memTranscriptStorage } from "../../work-board/__tests__/board-test-fixtures.js";
+import { assistantEntry } from "../../__tests__/test-helpers.js";
 
 function tempBoard() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-wbe-"));
@@ -253,9 +254,6 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
   // In-memory transcript storage (shared fixture) makes the persisted
   // (recorded) rows assertable — see board-test-fixtures.memTranscriptStorage.
 
-  function assistant(text: string): ChatEntry {
-    return { kind: "assistant", text, streaming: false };
-  }
   function streamingAssistant(text: string): ChatEntry {
     return { kind: "assistant", text, streaming: true };
   }
@@ -290,15 +288,15 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
         // still turn 0: assistant text is streaming (not finalized).
         fire([runningTool("g1"), streamingAssistant("thinking…")]);
         // round 1 completes.
-        fire([runningTool("g1"), assistant("round one")]);
+        fire([runningTool("g1"), assistantEntry("round one")]);
         // another tool starts WITHIN round 1 — turn count is still 1 (dupe risk).
-        fire([runningTool("g1"), assistant("round one"), runningTool("g2")]);
+        fire([runningTool("g1"), assistantEntry("round one"), runningTool("g2")]);
         // round 2 completes.
         fire([
           runningTool("g1"),
-          assistant("round one"),
+          assistantEntry("round one"),
           runningTool("g2"),
-          assistant("round two"),
+          assistantEntry("round two"),
         ]);
         return {
           summary: isPlan ? "PLAN: do A then B" : "OUTPUT: did A then B",

@@ -27,6 +27,7 @@ import {
   type SeededElectronContext,
 } from "./seeded-electron.js";
 import { closeInlineSettings, openInlineSettings } from "./inline-settings.js";
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
@@ -441,7 +442,7 @@ async function invokeGuestTool<T>(
   await expect.poll(terminalOrApproval, { timeout: 10_000 }).not.toBe("pending");
   if (await terminalOrApproval() === "approval") {
     if (options.approval === "forbid") {
-      const deny = approvalDialog.getByTestId("deny-button");
+      const deny = approvalDialog.getByTestId(TEST_IDS.denyButton);
       if (await deny.isVisible().catch(() => false)) await deny.click();
       throw new Error(`${toolName} reached a forbidden approval`);
     }
@@ -483,7 +484,7 @@ async function readGuestGrant(
 }
 
 function openApprovalDialog(page: Page) {
-  return page.locator('[data-testid="approval-dock"]');
+  return page.locator(testIdSelector(TEST_IDS.approvalDock));
 }
 
 function openApprovalDialogForRequestId(page: Page, requestId: string) {
@@ -544,7 +545,7 @@ async function denyEpAutoloadApprovalsAheadOfGrant(
     // waiting for the reusable element (or another same-name request) to hide.
     const exactDialog = openApprovalDialogForRequestId(page, requestId);
     await expect(exactDialog).toHaveCount(1);
-    const deny = exactDialog.getByTestId("deny-button");
+    const deny = exactDialog.getByTestId(TEST_IDS.denyButton);
     await expect(deny).toBeEnabled();
     await deny.click();
     await expect(exactDialog).toHaveCount(0, { timeout: 10_000 });
@@ -568,7 +569,7 @@ async function approveVisibleToolDialog(
   await expect(dialog).toHaveAttribute("data-approval-args", canonicalStringify(expectedArgs));
   await expect(dialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
     .toHaveCount(0);
-  const approve = dialog.getByTestId("approve-button");
+  const approve = dialog.getByTestId(TEST_IDS.approveButton);
   await expect(approve).toBeEnabled();
   await approve.click();
 }
@@ -632,7 +633,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       throw new Error("exact EP bundle manifest declares no networkAccess.allowedDomains");
     }
     for (const host of declaredEgressHosts) {
-      await expect(dialog.getByTestId("plugin-install-network-access"))
+      await expect(dialog.getByTestId(TEST_IDS.pluginInstallNetworkAccess))
         .toContainText(String(host));
     }
     const consent = dialog.getByRole("checkbox", {
@@ -850,7 +851,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
         providerEvidence: { verification: { verified: true } },
       },
     });
-    await expect(ctx.page.getByTestId("approval-dock")).toBeHidden();
+    await expect(ctx.page.getByTestId(TEST_IDS.approvalDock)).toBeHidden();
     expect(fake.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
 
     const after = await invokeGuestTool<{

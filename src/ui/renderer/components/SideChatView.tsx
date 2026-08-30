@@ -24,7 +24,7 @@
  * the panel claims its session, so its cards never reach the tile beside it
  * or the window's dock.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
@@ -44,6 +44,14 @@ import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js"
 import { useOptionalChatContext } from "../context/ChatContext.js";
 import { useApprovalSurface } from "../hooks/use-approval.js";
 import { ApprovalDock } from "./permissions/ApprovalDock.js";
+import { sessionOwnedBy } from "./chat-group-session-registry.js";
+
+/**
+ * The side loop's stream carries no sub-agent frames, so this panel learns of
+ * no child session: the set is empty by construction. It still claims through
+ * the tile's own rule (`sessionOwnedBy`) so the two readers cannot drift.
+ */
+const NO_CHILD_SESSIONS: ReadonlySet<string> = new Set();
 
 /** Stable empty lists: the composer's inline menu memoizes on their identity. */
 const NO_COMMAND_ACTIONS: never[] = [];
@@ -98,9 +106,18 @@ function SideChatSession({
   const approvals = useApprovalSurface();
   useEffect(() => {
     if (sessionId === null) return undefined;
-    return approvals.claims.claim(`side-chat:${sessionId}`, (id) => id === sessionId);
+    return approvals.claims.claim(
+      `side-chat:${sessionId}`,
+      (id) => sessionOwnedBy(sessionId, NO_CHILD_SESSIONS, id),
+    );
   }, [approvals.claims, sessionId]);
-  const pendingApprovals = approvals.queue.filter((req) => req.sessionId === sessionId);
+  const pendingApprovals = useMemo(
+    () => (sessionId === null
+      ? []
+      : approvals.queue.filter((req) =>
+        req.sessionId !== undefined && sessionOwnedBy(sessionId, NO_CHILD_SESSIONS, req.sessionId))),
+    [approvals.queue, sessionId],
+  );
   const approvalHead = pendingApprovals[0] ?? null;
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);

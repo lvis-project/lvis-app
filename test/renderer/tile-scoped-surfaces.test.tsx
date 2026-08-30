@@ -521,6 +521,19 @@ describe("a turn parked on an approval, with two tiles", () => {
     expect(dock(second!.element)).toHaveLength(0);
     expect(band(primary!)).toBeNull();
     expect(band(second!)).toBeNull();
+    // The window's dock has a scope of its own beside the tiles: no tile's
+    // composer goes inert, and both still take the keyboard.
+    expect(dock(container)[0]!.closest("[data-approval-scope]"))
+      .toHaveAttribute("data-testid", "window-approval-scope");
+    for (const tile of [primary!, second!]) {
+      const composer = tile.element.querySelector<HTMLElement>("[data-composer-placement]")!;
+      expect(composer).not.toHaveAttribute("inert");
+      const input = tile.element.querySelector<HTMLTextAreaElement>("textarea")!;
+      await act(async () => {
+        input.focus();
+      });
+      expect(document.activeElement).toBe(input);
+    }
   });
 });
 

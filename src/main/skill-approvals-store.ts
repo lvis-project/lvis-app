@@ -43,13 +43,11 @@
  * on-disk body is user-editable post-seed; hash-binding closes the
  * post-approval mutation TOCTOU window (see `skill-load.ts`).
  */
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
-import { adoptLegacyRootFileSync, writeFileAtomicAtPath } from "./storage/feature-namespace.js";
+import { adoptLegacyRootFileSync, readJsonFileOrEmpty, writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
-import { isMissingPathError } from "../lib/atomic-file.js";
 
 export interface SkillApprovalRecord {
   /** Record key from the caller — a skill name, or `<name>#bundled`. */
@@ -84,21 +82,24 @@ export function hashSkillMaterial(material: string): string {
   return sha256Hex(material);
 }
 
-async function readFileOrEmpty(filePath: string): Promise<SkillApprovalsFile> {
-  try {
-    const raw = await readFile(filePath, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<SkillApprovalsFile> & {
+function emptyApprovalsFile(): SkillApprovalsFile {
+  return { version: 2, approvedSkills: [] };
+}
+
+function readFileOrEmpty(filePath: string): Promise<SkillApprovalsFile> {
+  return readJsonFileOrEmpty(filePath, emptyApprovalsFile, (parsed) => {
+    const file = parsed as Partial<SkillApprovalsFile> & {
       version?: number;
       approvedSkills?: unknown;
     };
-    // R2-CR-3: only v2 records with a hash are honored. Older formats
-    // (v1 string array, or v2 without sha256) are silently dropped to force
-    // re-approval. Dev-stage acceptable; do NOT silently upgrade.
-    if (parsed.version !== 2 || !Array.isArray(parsed.approvedSkills)) {
-      return { version: 2, approvedSkills: [] };
+    // Only v2 records with a hash are honored. Older formats (v1 string
+    // array, or v2 without sha256) are dropped to force re-approval; do NOT
+    // silently upgrade.
+    if (file.version !== 2 || !Array.isArray(file.approvedSkills)) {
+      return emptyApprovalsFile();
     }
     const records: SkillApprovalRecord[] = [];
-    for (const r of parsed.approvedSkills) {
+    for (const r of file.approvedSkills) {
       if (
         r &&
         typeof r === "object" &&
@@ -110,12 +111,7 @@ async function readFileOrEmpty(filePath: string): Promise<SkillApprovalsFile> {
       }
     }
     return { version: 2, approvedSkills: records };
-  } catch (err) {
-    if (isMissingPathError(err)) {
-      return { version: 2, approvedSkills: [] };
-    }
-    throw err;
-  }
+  });
 }
 
 /**

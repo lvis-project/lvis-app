@@ -15,11 +15,11 @@ import {
   subscriptionAttachmentByteLength,
   type SubscriptionPromptAttachment,
 } from "../main/subscription-attachment-input.js";
+import { UUID_PATTERN } from "../shared/uuid.js";
 
 const DEFAULT_TTL_MS = 5 * 60_000;
 const DEFAULT_MAX_TOTAL_BYTES = MAX_SUBSCRIPTION_ATTACHMENT_BYTES * 2;
 const OWNER_KEY = /^[a-f0-9]{64}$/;
-const STAGED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 interface StagedAttachment {
   readonly id: string;
@@ -150,7 +150,7 @@ export function createTailnetAttachmentStagingStore(
         return null;
       }
       const id = randomUuid();
-      if (!STAGED_ID.test(id) || entries.has(id)) {
+      if (!UUID_PATTERN.test(id) || entries.has(id)) {
         throw new Error("tailnet-attachment-staging-id-invalid");
       }
       const timestamp = checkedNow();
@@ -186,7 +186,7 @@ export function createTailnetAttachmentStagingStore(
         selected.push(entry);
       }
       const reservationId = randomUuid();
-      if (!STAGED_ID.test(reservationId)) {
+      if (!UUID_PATTERN.test(reservationId)) {
         throw new Error("tailnet-attachment-staging-id-invalid");
       }
       for (const entry of selected) entry.reservationId = reservationId;
@@ -237,10 +237,10 @@ function validAttachmentIds(value: readonly string[]): boolean {
   return Array.isArray(value)
     && value.length > 0
     && value.length <= MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS
-    && value.every((id) => STAGED_ID.test(id))
+    && value.every((id) => UUID_PATTERN.test(id))
     && new Set(value).size === value.length;
 }
 
 function validClaim(value: TailnetAttachmentClaim): boolean {
-  return STAGED_ID.test(value.reservationId) && validAttachmentIds(value.attachmentIds);
+  return UUID_PATTERN.test(value.reservationId) && validAttachmentIds(value.attachmentIds);
 }

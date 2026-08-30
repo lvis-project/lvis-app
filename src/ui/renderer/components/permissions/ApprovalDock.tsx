@@ -5,6 +5,7 @@ import type { ApprovalDecisionExtras } from "../../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import type { UserApprovalVerdict } from "../../../../shared/permissions-events.js";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
+import { MODAL_DIALOG_SELECTOR, TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
 
 export interface ApprovalDockProps {
   /** The requests this surface draws, head first. */
@@ -29,8 +30,20 @@ export interface ApprovalDockProps {
  * card) stays inside it, so a card raised by one tile is invisible to the
  * keyboard and the composer of every other.
  */
-function approvalScopeOf(root: HTMLElement | null): HTMLElement | null {
+function approvalScopeOf(root: Element | null): HTMLElement | null {
   return root?.closest<HTMLElement>("[data-approval-scope]") ?? null;
+}
+
+/**
+ * Is a surface that takes over `target`'s composer on screen? A modal dialog
+ * anywhere — it is portaled to the body — or an approval card inside the
+ * composer's own surface. A card in the tile next door is not one: that
+ * tile's keys keep working. A composer in no surface has the window for one.
+ */
+export function blockingSurfaceCovers(target: EventTarget | null): boolean {
+  if (document.querySelector(MODAL_DIALOG_SELECTOR) !== null) return true;
+  const scope = target instanceof Element ? approvalScopeOf(target) : null;
+  return (scope ?? document).querySelector(testIdSelector(TEST_IDS.approvalDock)) !== null;
 }
 
 /**
@@ -46,7 +59,7 @@ export function focusIsFreeFor(root: HTMLElement | null): boolean {
 }
 
 function pendingQuestionIn(scope: HTMLElement | null): HTMLElement | null {
-  return scope?.querySelector<HTMLElement>('[data-testid="question-overlay"]') ?? null;
+  return scope?.querySelector<HTMLElement>(testIdSelector(TEST_IDS.questionOverlay)) ?? null;
 }
 
 function focusPendingQuestion(scope: HTMLElement | null): boolean {
@@ -107,9 +120,9 @@ export function ApprovalDock({
     if (!root) return;
     // One decision row for every request kind — fail-closed Reject first.
     const selectors = [
-      '[data-testid="deny-button"]:not(:disabled)',
-      '[data-testid="approve-button"]:not(:disabled)',
-      '[data-testid="allow-always-button"]:not(:disabled)',
+      `${testIdSelector(TEST_IDS.denyButton)}:not(:disabled)`,
+      `${testIdSelector(TEST_IDS.approveButton)}:not(:disabled)`,
+      `${testIdSelector(TEST_IDS.allowAlwaysButton)}:not(:disabled)`,
     ];
     for (const selector of selectors) {
       const target = root.querySelector<HTMLElement>(selector);
@@ -265,7 +278,7 @@ export function ApprovalDock({
         bottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))",
         maxHeight: "min(48dvh, 28rem, max(8rem, calc(100% - max(0.75rem, env(safe-area-inset-bottom, 0px)) - 0.75rem)))",
       }}
-      data-testid="approval-dock"
+      data-testid={TEST_IDS.approvalDock}
       data-overlay-position="bottom"
       data-approval-request-id={isRationale ? undefined : request.id}
       data-approval-tool-name={isRationale ? undefined : request.toolName}
@@ -283,7 +296,7 @@ export function ApprovalDock({
         {remaining > 0 ? (
           <span
             className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
-            data-testid="approval-queue-depth"
+            data-testid={TEST_IDS.approvalDockQueueDepth}
             aria-label={t("toolApprovalDialog.pendingCount", { count: remaining })}
           >
             1 / {queue.length}

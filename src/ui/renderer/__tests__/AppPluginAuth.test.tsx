@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 describe("App plugin auth routing", () => {
   // #1311 (input-area relayout) removed the standalone plugin-grid button from
@@ -21,7 +22,7 @@ describe("App plugin auth routing", () => {
   type PickerUser = ReturnType<typeof makeUser>;
 
   const openPluginCategory = async (user: PickerUser) => {
-    await user.click(screen.getByTestId("command-popover-trigger"));
+    await user.click(screen.getByTestId(TEST_IDS.commandPopoverTrigger));
     await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
   };
   const selectPluginView = async (user: PickerUser, label: string) => {
@@ -284,7 +285,7 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.listPluginUiExtensions).toHaveBeenCalled();
     });
-    await user.click(screen.getByTestId("command-popover-trigger"));
+    await user.click(screen.getByTestId(TEST_IDS.commandPopoverTrigger));
     // The unified SlashPicker opens on a category drill-down; the plugin-view
     // QuickAction ("…열기") lives under the 바로가기/shortcut group. Drill into
     // it, then select the action.

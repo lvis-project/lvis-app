@@ -94,6 +94,7 @@ import {
 } from "../../shared/project-identity.js";
 import { formatIpcError } from "./format-ipc-error.js";
 import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
+import { TEST_IDS } from "../../shared/test-ids.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -1437,8 +1438,7 @@ export function App() {
                       flex space away from the active route. */}
                   <div
                     className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-                    data-testid="route-canvas"
-                    data-approval-scope
+                    data-testid={TEST_IDS.routeCanvas}
                   >
                     {/* Inner ErrorBoundary scoped to the routed main content so a
                         single failing plugin (e.g. stale manifest schema mismatch —
@@ -1711,30 +1711,40 @@ export function App() {
                       })()}
                     </ErrorBoundary>
                     {/* The window's own dock: only requests no conversation
-                        surface claimed (see `unclaimedApprovals`). */}
-                    <ApprovalDock
-                      queue={unclaimedApprovals}
+                        surface claimed (see `unclaimedApprovals`). Its scope is
+                        this wrapper — beside the tiles, an ancestor of none —
+                        so the card covers no tile's composer and takes no
+                        tile's caret. `contents` keeps the dock positioned
+                        against the route canvas as before. */}
+                    <div
+                      className="contents"
+                      data-approval-scope
+                      data-testid={TEST_IDS.windowApprovalScope}
+                    >
+                      <ApprovalDock
+                        queue={unclaimedApprovals}
                       conversationLabel={
-                        windowApprovalHead?.sessionId === undefined
-                          ? t("approvalAttribution.unattributed")
-                          : t("approvalAttribution.headlessSession")
-                      }
-                      proposedChoice={
-                        windowApprovalHead !== null
-                          && approvalProposal?.requestId === windowApprovalHead.id
-                          ? approvalProposal.choice
-                          : null
-                      }
-                      onDecide={(choice, pattern, extras) => {
-                        if (windowApprovalHead === null) return;
-                        void handleApprovalDecide(windowApprovalHead.id, choice, pattern, extras);
-                      }}
-                      onOpenPermanentDeny={handleOpenPermanentDeny}
-                      interactionLocked={
-                        windowApprovalHead !== null
-                          && exactDenyDraft?.requestId === windowApprovalHead.id
-                      }
-                    />
+                          windowApprovalHead?.sessionId === undefined
+                            ? t("approvalAttribution.unattributed")
+                            : t("approvalAttribution.headlessSession")
+                        }
+                        proposedChoice={
+                          windowApprovalHead !== null
+                            && approvalProposal?.requestId === windowApprovalHead.id
+                            ? approvalProposal.choice
+                            : null
+                        }
+                        onDecide={(choice, pattern, extras) => {
+                          if (windowApprovalHead === null) return;
+                          void handleApprovalDecide(windowApprovalHead.id, choice, pattern, extras);
+                        }}
+                        onOpenPermanentDeny={handleOpenPermanentDeny}
+                        interactionLocked={
+                          windowApprovalHead !== null
+                            && exactDenyDraft?.requestId === windowApprovalHead.id
+                        }
+                      />
+                    </div>
                   </div>
                   {/* StatusBar notifications render inside ChatView, directly above
                       the composer. The composer's own status sub-row keeps showing

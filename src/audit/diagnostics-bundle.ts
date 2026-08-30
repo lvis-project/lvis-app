@@ -49,7 +49,8 @@ import { localDateKey, localDayRange, shiftLocalDateKey } from "../shared/local-
 import { parseLogFileDate } from "../lib/log-file-sink.js";
 import type { AppSettings } from "../data/settings-store.js";
 import { activeLlmRouteModel } from "../shared/llm-vendor-defaults.js";
-import { utcDateKey, type AuditLogger, type AuditEntry } from "./audit-logger.js";
+import type { AuditLogger, AuditEntry } from "./audit-logger.js";
+import { utcDateKey } from "../shared/local-date.js";
 
 /** Bundle schema version — bump on a structural change to the ZIP layout. */
 export const DIAGNOSTICS_BUNDLE_SCHEMA_VERSION = 1;

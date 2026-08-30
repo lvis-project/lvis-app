@@ -28,6 +28,7 @@ import {
   DEFAULT_TOUR_SCENARIOS,
   getTourScenario,
 } from "../../onboarding/default-tour-scenarios.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "" };
 
@@ -53,7 +54,7 @@ function ComposerHarness() {
 describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
   it("Composer textarea carries data-tour-anchor=composer-input", () => {
     const { getByTestId } = render(<ComposerHarness />);
-    const ta = getByTestId("composer-textarea") as HTMLTextAreaElement;
+    const ta = getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     expect(ta.getAttribute("data-tour-anchor")).toBe("composer-input");
   });
 
@@ -106,7 +107,7 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       </TooltipProvider>,
     );
     expect(
-      getByTestId("command-popover-trigger").getAttribute("data-tour-anchor"),
+      getByTestId(TEST_IDS.commandPopoverTrigger).getAttribute("data-tour-anchor"),
     ).toBe("command-palette-toggle");
   });
 

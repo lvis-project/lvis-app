@@ -13,8 +13,9 @@ import {
   readFileSync,
   existsSync,
   symlinkSync,
+  readdirSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { SkillApprovalsStore, hashSkillMaterial } from "../skill-approvals-store.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
@@ -162,5 +163,20 @@ describe("SkillApprovalsStore — atomic-write convergence (feature-namespace au
     }
     expect(existsSync(file)).toBe(true);
     expect(observer.calls()).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("SkillApprovalsStore — corrupt file recovery", () => {
+  it("backs up corrupt JSON as .corrupt-<ts>-<random>.bak and starts empty", async () => {
+    const file = tmpFile();
+    writeFileSync(file, "{ this is not json", "utf-8");
+    const store = new SkillApprovalsStore(file);
+
+    expect(await store.isApproved("report-writing", "body-v1")).toBe(false);
+    await store.approve("report-writing", "body-v1");
+    expect(await store.isApproved("report-writing", "body-v1")).toBe(true);
+
+    const backups = readdirSync(dirname(file)).filter((f) => /\.corrupt-\d+-[0-9a-f]{8}\.bak$/.test(f));
+    expect(backups).toHaveLength(1);
   });
 });

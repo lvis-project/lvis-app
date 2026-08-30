@@ -11,6 +11,7 @@
  */
 import { createHash, sign, type KeyObject } from "node:crypto";
 import type { SignatureEnvelope } from "../../plugins/types.js";
+import { canonicalJSON } from "../../plugins/whitelist/canonical-json.js";
 
 /**
  * Sign `body` (utf-8) with `privateKey`, returning the JSON-stringified
@@ -38,4 +39,13 @@ export function signEnvelopeFixture(
     ],
   };
   return JSON.stringify(envelope);
+}
+
+/**
+ * The manifest digest an install receipt / rollback record carries:
+ * sha256 over the canonical-JSON form, hex. Three plugin suites computed it
+ * inline; the canonical form is the part that must not drift.
+ */
+export function manifestSha(manifest: unknown): string {
+  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
 }

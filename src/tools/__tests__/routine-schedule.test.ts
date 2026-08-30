@@ -6,31 +6,16 @@
  * that the length cap is enforced at the tool boundary.
  */
 import { describe, it, expect } from "vitest";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 import { createRoutineScheduleTool } from "../routine-schedule.js";
-import { RoutinesStore, MAX_ROUTINE_SOURCE_LENGTH } from "../../main/routines-store.js";
-import type { ToolExecutionContext } from "../base.js";
+import { MAX_ROUTINE_SOURCE_LENGTH } from "../../main/routines-store.js";
+import { futureIso, tempRoutinesStore } from "../../main/__tests__/routines-fixture.js";
+import { toolExecutionContext as ctx } from "./tool-context-fixture.js";
 
-const ctx = (): ToolExecutionContext => ({ cwd: "/tmp", extraAllowedDirectories: [], metadata: {} });
-
-function tempStore() {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-routine-tool-"));
-  const store = new RoutinesStore(join(dir, "routines.json"));
-  const cleanup = () => cleanupTmpDir(dir);
-  return { store, cleanup };
-}
-
-function futureIso(offsetMs = 60_000): string {
-  return new Date(Date.now() + offsetMs).toISOString();
-}
 
 describe("routine_schedule tool — source marker", () => {
   it("stamps the source marker onto the persisted routine", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const tool = createRoutineScheduleTool(store);
       const result = await tool.execute(
@@ -52,7 +37,7 @@ describe("routine_schedule tool — source marker", () => {
   });
 
   it("leaves source unset when omitted", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const tool = createRoutineScheduleTool(store);
       const result = await tool.execute(
@@ -72,7 +57,7 @@ describe("routine_schedule tool — source marker", () => {
   });
 
   it("rejects a source longer than the cap with a clean tool error", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const tool = createRoutineScheduleTool(store);
       const result = await tool.execute(

@@ -75,6 +75,7 @@ import {
   SubscriptionProviderRow,
   type SubscriptionProviderView,
 } from "./SubscriptionProvidersSection.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface FallbackEntry {
   provider: LLMVendor;
@@ -1007,7 +1008,7 @@ function UnifiedModelSelect({
 
   return (
     <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger id="model-select" className="w-full" data-testid="llm-model-select">
+      <SelectTrigger id="model-select" className="w-full" data-testid={TEST_IDS.llmModelSelect}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent className={popupClassName}>

@@ -4,7 +4,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
-import { BLOCKING_SURFACE_SELECTOR } from "../../../shared/test-ids.js";
 import {
   DEFAULT_TOUR_SCENARIOS,
   getTourScenario,
@@ -12,6 +11,7 @@ import {
   type TourScenario,
   type TourStep,
 } from "../onboarding/default-tour-scenarios.js";
+import { BLOCKING_SURFACE_SELECTOR } from "../../../shared/test-ids.js";
 
 /**
  * Narrow API surface this component needs. Declared structurally so the
@@ -103,14 +103,18 @@ function readRect(selector: string): SpotlightRect | null {
 }
 
 /**
- * Detect whether a surface that takes over a composer — a modal Dialog /
- * AlertDialog, an approval card, a question card — is currently mounted. If
- * so, the SpotlightTour must NOT paint its backdrop on top: the user would see
- * the violet ring float above a still-visible card.
+ * U6 — Detect whether another modal Dialog / AlertDialog is currently
+ * mounted. If true, the SpotlightTour must NOT paint its backdrop on
+ * top because the user would see the violet ring float above a still-
+ * visible Radix Dialog (the bug from the 2026-05-19 screenshot).
  */
 function anyBlockingSurfaceOpen(): boolean {
   if (typeof document === "undefined") return false;
-  return Boolean(document.querySelector(BLOCKING_SURFACE_SELECTOR));
+  return Boolean(
+    document.querySelector(
+      BLOCKING_SURFACE_SELECTOR,
+    ),
+  );
 }
 
 /**

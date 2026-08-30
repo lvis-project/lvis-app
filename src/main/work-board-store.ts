@@ -20,11 +20,11 @@
  * read — an item is `overdue` when its stored status is `planned`/`in_progress`
  * AND its `due_at` is strictly in the past — so consumers never re-derive it.
  */
-import { readFile, rename } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import {
   openFeatureNamespace,
+  readJsonFileOrEmpty,
   writeFileAtomicAtPath,
 } from "./storage/feature-namespace.js";
 import { createDirStorage, type WorkBoardStorage } from "../work-board/storage.js";
@@ -37,7 +37,6 @@ import {
 import { appendActivity } from "../work-board/activity-log.js";
 import { projectRootEquals } from "../shared/project-identity.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
-import { isMissingPathError } from "../lib/atomic-file.js";
 
 const log = createLogger("lvis");
 
@@ -176,21 +175,13 @@ function emptyBoard(): BoardFile {
  * `nextId` is repaired to exceed every surviving id so a corrupted counter
  * cannot collide ids.
  */
-async function readFileOrEmpty(filePath: string): Promise<BoardFile> {
-  try {
-    const raw = await readFile(filePath, "utf-8");
-    let parsed: BoardFile;
-    try {
-      parsed = JSON.parse(raw) as BoardFile;
-    } catch {
-      log.warn("[work-board-store] corrupt JSON, treating as empty + backup");
-      await rename(filePath, `${filePath}.corrupt-${Date.now()}.bak`);
+function readFileOrEmpty(filePath: string): Promise<BoardFile> {
+  return readJsonFileOrEmpty(filePath, emptyBoard, (parsed) => {
+    const file = parsed as BoardFile;
+    if (!Array.isArray(file.items)) {
       return emptyBoard();
     }
-    if (!Array.isArray(parsed.items)) {
-      return emptyBoard();
-    }
-    const valid = parsed.items.filter(isValidRecord);
+    const valid = file.items.filter(isValidRecord);
     // One-time re-anchoring of due dates stamped as midnight in a fixed zone,
     // back when the board was KST-anchored. Idempotent by its own rule, so it
     // runs on every load and converges; nothing marks it done.
@@ -203,20 +194,15 @@ async function readFileOrEmpty(filePath: string): Promise<BoardFile> {
     }
     const maxId = items.reduce((m, it) => Math.max(m, it.id), 0);
     const nextId =
-      typeof parsed.nextId === "number" && Number.isInteger(parsed.nextId) && parsed.nextId > maxId
-        ? parsed.nextId
+      typeof file.nextId === "number" && Number.isInteger(file.nextId) && file.nextId > maxId
+        ? file.nextId
         : maxId + 1;
     return {
       version: BOARD_VERSION,
       nextId,
       items,
     };
-  } catch (err) {
-    if (isMissingPathError(err)) {
-      return emptyBoard();
-    }
-    throw err;
-  }
+  });
 }
 
 async function writeFileAtomic(filePath: string, data: BoardFile): Promise<void> {

@@ -1,10 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { readBootWiring } from "../__tests__/support/boot-wiring-source.js";
-
-async function readSource(relative: string): Promise<string> {
-  return readFile(new URL(relative, import.meta.url), "utf8");
-}
+import { readRepoFile } from "./test-helpers.js";
 
 describe("boot LLM fetch wiring regression guards", () => {
   it("uses the safe Electron fetch wrapper instead of raw net.fetch", async () => {
@@ -25,10 +21,8 @@ describe("boot LLM fetch wiring regression guards", () => {
     // fetch selection to the shared selectProviderRuntimeFetch (cluster M1
     // hoist). The azure-foundry Electron-fetch scoping is the single SOT inside
     // that selector, so guard it there rather than at each former inline ladder.
-    const providerSource = await readSource("../engine/turn/provider.ts");
-    const fetchSelectorSource = await readSource(
-      "../engine/llm/marketplace-provider-fetch.ts",
-    );
+    const providerSource = readRepoFile("src/engine/turn/provider.ts");
+    const fetchSelectorSource = readRepoFile("src/engine/llm/marketplace-provider-fetch.ts");
 
     // Single SOT: only azure-foundry receives the Electron main-process llmFetch.
     expect(fetchSelectorSource).toContain('vendor === "azure-foundry"');
@@ -54,8 +48,8 @@ describe("boot LLM fetch wiring regression guards", () => {
   });
 
   it("keeps builtin web_fetch on the injected Electron network fetch", async () => {
-    const bootToolsSource = await readSource("../boot/tools.ts");
-    const webFetchSource = await readSource("../tools/web-fetch.ts");
+    const bootToolsSource = readRepoFile("src/boot/tools.ts");
+    const webFetchSource = readRepoFile("src/tools/web-fetch.ts");
 
     // Boot injects the Electron network-stack fetch into the tool factory…
     expect(bootToolsSource).toContain("createWebFetchTool(networkFetch)");

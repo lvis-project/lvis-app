@@ -51,6 +51,7 @@ import { TranscriptRenderer, type TurnSummary } from "./components/TranscriptRen
 import { ChatTranscript } from "./components/ChatTranscript.js";
 import { ChatComposerDock } from "./components/ChatComposerDock.js";
 import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
+import { TEST_IDS } from "../../shared/test-ids.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -95,10 +96,6 @@ export interface ChatViewProps {
   askQuestions: AskUserQuestionRequest[];
   /** App-owned `/allow` interceptor; approval UI itself lives beside routed content. */
   approvalSentenceInterceptSubmit?: (text: string) => boolean;
-  /**
-   * The approvals THIS conversation's turn is parked on. The window shows the
-   * approval card once; the tile that is waiting says so above its composer.
-   */
   /**
    * The requests this conversation (or a sub-agent it spawned) is parked on,
    * head first. Their card is drawn INSIDE this view, over its own composer;
@@ -682,7 +679,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     <div
       ref={chatViewRootRef}
       className="relative flex min-h-0 min-w-0 w-full flex-1 flex-row overflow-hidden"
-      data-testid="chat-view-root"
+      data-testid={TEST_IDS.chatViewRoot}
     >
       <div
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [container-type:size]"

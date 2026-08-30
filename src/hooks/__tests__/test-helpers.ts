@@ -46,3 +46,29 @@ export function fixtureHook(
     size: 0,
   };
 }
+
+export interface HookDirLayout {
+  hooksDir: string;
+  disabledDir: string;
+  lockfilePath: string;
+}
+
+/** The on-disk layout the hook system expects under a scratch root. */
+export function hookDirLayout(tmpDir: string): HookDirLayout {
+  const hooksDir = join(tmpDir, "hooks");
+  return {
+    hooksDir,
+    disabledDir: join(hooksDir, ".disabled"),
+    lockfilePath: join(hooksDir, ".lockfile.json"),
+  };
+}
+
+const REPO_HOOK_FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
+
+/** A {@link fixtureHook} rooted at the repo's checked-in `test/fixtures/hooks`. */
+export function repoFixtureHook(
+  fileName: string,
+  type: "pre" | "post" | "perm" = "pre",
+): DiscoveredHook {
+  return fixtureHook(REPO_HOOK_FIXTURE_ROOT, fileName, type);
+}

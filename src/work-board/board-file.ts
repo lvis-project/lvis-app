@@ -16,7 +16,7 @@ import type {
   WorkItem,
   WorkItemStatusResolved,
 } from "../shared/work-board-types.js";
-import { localDayStart } from "../shared/local-date.js";
+import { localDayStart, utcDateKey } from "../shared/local-date.js";
 
 /** On-disk shape of `board.json`. */
 export interface BoardFile {
@@ -109,7 +109,7 @@ export function normalizeDueAt(dueAt: string): string {
     && asWritten.getUTCMilliseconds() === 0;
   if (!isMidnightThere) return dueAt;
 
-  const pickedDay = asWritten.toISOString().slice(0, 10);
+  const pickedDay = utcDateKey(asWritten);
   return localDayStart(pickedDay)?.toISOString() ?? dueAt;
 }
 

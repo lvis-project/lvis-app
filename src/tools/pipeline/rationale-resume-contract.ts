@@ -45,6 +45,7 @@ import {
   type RationaleTicketStateRecord,
 } from "./rationale-ticket-lifecycle.js";
 import { isRecord } from "../../shared/is-record.js";
+import { UUID_PATTERN } from "../../shared/uuid.js";
 
 function seal<T>(value: T, label: string): T {
   return cloneRationaleCanonicalJson(value, label) as T;
@@ -125,8 +126,6 @@ const PROJECTION_TERMINAL_REASONS: readonly RationaleTerminalReason[] = [
   "stale-replay",
   "expired",
 ];
-const PROJECTION_UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 function sanitizeProjectionDisplayText(value: string, maxLength: number): string {
   // The renderer display contract rejects angle brackets outright. The
@@ -198,9 +197,9 @@ export function validateRationaleUiAuditProjection(
       value.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
       value.projection !== "rationale-ui-audit" ||
       typeof value.ticketId !== "string" ||
-      !PROJECTION_UUID_RE.test(value.ticketId) ||
+      !UUID_PATTERN.test(value.ticketId) ||
       typeof value.anchorId !== "string" ||
-      !PROJECTION_UUID_RE.test(value.anchorId) ||
+      !UUID_PATTERN.test(value.anchorId) ||
       typeof value.actionDigest !== "string" ||
       !/^[0-9a-f]{64}$/u.test(value.actionDigest) ||
       value.round !== 1 ||

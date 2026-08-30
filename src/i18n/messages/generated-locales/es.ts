@@ -12,6 +12,7 @@ export const esMessages: Record<string, string> = {
   ...telegramConnectionEn,
   ...tailnetAccessTabEn,
   ...awayAuthorityEn,
+  "approvalAttribution.headlessSession": "Conversación no abierta en ningún panel",
   "formatIpcError.invalidPath": "Esa ruta no es válida.",
   "formatIpcError.cannotRemoveDefaultRoot": "No se puede quitar la carpeta de proyecto predeterminada.",
   "formatIpcError.notAnAdditionalRoot": "Esa carpeta no es una carpeta de proyecto que se pueda quitar.",

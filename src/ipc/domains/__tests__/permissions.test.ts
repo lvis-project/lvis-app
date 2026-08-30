@@ -10,6 +10,7 @@ import {
   foreignFrameEvent,
   framelessEvent,
   hostFrameEvent,
+  invokeRegisteredHandlerWithEvent,
   pluginShellFrameEvent,
 } from "../../../__tests__/test-helpers.js";
 
@@ -236,7 +237,7 @@ describe("permissions IPC handlers", () => {
   it("setMode rejects a foreign/invalid sender frame with UNAUTHORIZED_FRAME", async () => {
     const { permissionManager } = await setup({ approvalChoice: "allow-once" });
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       PERMISSIONS.setMode,
       makeForeignEvent(),
       { mode: "auto", intent: USER_INTENT },
@@ -1036,12 +1037,6 @@ function makeForeignEvent(url = "https://attacker.example.com/pwn") {
   return foreignFrameEvent(url);
 }
 
-function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(event as never, ...args);
-}
-
 // ─── MAJOR-4: reviewerProviderHasKey returns UNAUTHORIZED_FRAME ───────────────
 
 describe("policyGet exposes host-derived editability", () => {
@@ -1072,7 +1067,7 @@ describe("policyGet exposes host-derived editability", () => {
 describe("MAJOR-4: reviewerProviderHasKey returns UNAUTHORIZED_FRAME on invalid sender", () => {
   it("returns UNAUTHORIZED_FRAME (not bare false) when sender is a foreign frame", async () => {
     await setup();
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       PERMISSIONS.reviewerProviderHasKey,
       makeForeignEvent(),
       "openai",
@@ -1357,7 +1352,7 @@ describe("state-mutating permission channels refuse non-host frames", () => {
   it.each(MUTATING)("%s refuses a plugin-ui-shell frame", async (channel, payload) => {
     const { deps, permissionManager } = await setup();
 
-    const result = await invokeWithEvent(channel, pluginShellFrameEvent(), payload);
+    const result = await invokeRegisteredHandlerWithEvent(handlers, channel, pluginShellFrameEvent(), payload);
 
     expect(result).toEqual(UNAUTHORIZED_FRAME);
     expect(permissionManager.setModePersist).not.toHaveBeenCalled();
@@ -1370,7 +1365,7 @@ describe("state-mutating permission channels refuse non-host frames", () => {
   it.each(MUTATING)("%s refuses an event whose sender frame is gone", async (channel, payload) => {
     const { permissionManager } = await setup();
 
-    const result = await invokeWithEvent(channel, framelessEvent(), payload);
+    const result = await invokeRegisteredHandlerWithEvent(handlers, channel, framelessEvent(), payload);
 
     expect(result).toEqual(UNAUTHORIZED_FRAME);
     expect(permissionManager.setModePersist).not.toHaveBeenCalled();
@@ -1381,7 +1376,7 @@ describe("state-mutating permission channels refuse non-host frames", () => {
   it("still accepts the host renderer frame on the same channels", async () => {
     const { permissionManager } = await setup();
 
-    const result = await invokeWithEvent(
+    const result = await invokeRegisteredHandlerWithEvent(handlers,
       PERMISSIONS.setMode,
       hostFrameEvent(),
       { mode: "auto", intent: USER_INTENT },

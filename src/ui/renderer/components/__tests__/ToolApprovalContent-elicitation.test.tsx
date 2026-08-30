@@ -8,6 +8,7 @@ import {
   createElicitationResolverFactory,
   type ElicitResult,
 } from "../../../../mcp/mcp-elicitation-resolver.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 function makeElicitationRequest(): ApprovalRequest {
   return {
@@ -48,7 +49,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
       />,
     );
 
-    const approve = screen.getByTestId("approve-button");
+    const approve = screen.getByTestId(TEST_IDS.approveButton);
     expect(container.querySelector('input:not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"], [role="textbox"]')).toBeNull();
     expect(screen.getByTestId("mcp-elicitation-field-date")).toHaveTextContent("2026-07-01");
     expect(screen.getByTestId("mcp-elicitation-field-count")).toHaveTextContent("2");
@@ -76,7 +77,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("approve-button"));
+    fireEvent.click(screen.getByTestId(TEST_IDS.approveButton));
 
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined, {
       elicitationContent: {
@@ -107,8 +108,8 @@ describe("ToolApprovalContent MCP elicitation form", () => {
 
     expect(container.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]')).toBeNull();
     expect(screen.getByTestId("mcp-elicitation-input-unavailable")).toBeVisible();
-    expect(screen.getByTestId("approve-button")).toBeDisabled();
-    fireEvent.click(screen.getByTestId("approve-button"));
+    expect(screen.getByTestId(TEST_IDS.approveButton)).toBeDisabled();
+    fireEvent.click(screen.getByTestId(TEST_IDS.approveButton));
     expect(onDecide).not.toHaveBeenCalled();
   });
 
@@ -128,11 +129,11 @@ describe("ToolApprovalContent MCP elicitation form", () => {
       />,
     );
 
-    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
-    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
     expect(screen.queryByTestId("mcp-elicitation-form")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("approve-button"));
+    fireEvent.click(screen.getByTestId(TEST_IDS.approveButton));
 
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
@@ -175,7 +176,7 @@ describe("ToolApprovalContent MCP elicitation form", () => {
           );
           sawUnsupportedNotice = screen.queryByTestId("mcp-elicitation-unsupported") !== null;
           answer();
-          const approve = screen.getByTestId("approve-button") as HTMLButtonElement;
+          const approve = screen.getByTestId(TEST_IDS.approveButton) as HTMLButtonElement;
           approveWasDisabled = approve.disabled;
           fireEvent.click(approve);
           return {
@@ -258,6 +259,6 @@ describe("ToolApprovalContent MCP elicitation form", () => {
 
     expect(screen.queryByTestId("mcp-elicitation-form")).not.toBeInTheDocument();
     expect(screen.getByTestId("mcp-elicitation-unsupported")).toBeTruthy();
-    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    expect(screen.getByTestId(TEST_IDS.approveButton)).toBeDisabled();
   });
 });

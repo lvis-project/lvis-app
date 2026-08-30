@@ -8,7 +8,8 @@
  * at 17:00 in Los Angeles — one instant, two civil days, which is the whole
  * thing these helpers decide.
  */
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it } from "vitest";
+import { withTz } from "../../__tests__/test-helpers.js";
 
 import {
   localDateKey,
@@ -20,21 +21,6 @@ import {
 } from "../local-date.js";
 
 const TUE_JUN16_09_SEOUL = Date.parse("2026-06-16T00:00:00.000Z");
-let previousTz: string | undefined;
-
-function withTz<T>(zone: string, run: () => T): T {
-  process.env.TZ = zone;
-  return run();
-}
-
-beforeEach(() => {
-  previousTz = process.env.TZ;
-});
-
-afterEach(() => {
-  if (previousTz === undefined) delete process.env.TZ;
-  else process.env.TZ = previousTz;
-});
 
 describe("localDateKey", () => {
   it("projects an instant onto the host's civil day, not a fixed zone's", () => {

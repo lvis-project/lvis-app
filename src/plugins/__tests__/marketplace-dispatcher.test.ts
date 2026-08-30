@@ -33,7 +33,7 @@ import {
   preparedActivationOptionsForTest,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
-import { canonicalJSON } from "../whitelist/canonical-json.js";
+import { manifestSha } from "../../__tests__/support/sign-envelope-fixture.js";
 import { flattenAgentPluginsManifest } from "../public-contract.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
@@ -50,10 +50,6 @@ function makePluginZip(manifest: Record<string, unknown>, files: Record<string, 
     zip.addFile(path, Buffer.from(content, "utf-8"));
   }
   return zip.toBuffer();
-}
-
-function manifestSha(manifest: unknown): string {
-  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
 }
 
 function freshEd25519() {

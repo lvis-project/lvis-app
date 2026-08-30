@@ -23,11 +23,13 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
+import { withTz, userEntry } from "../../../__tests__/test-helpers.js";
 import { fireEvent, render } from "@testing-library/react";
 import type React from "react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { TranscriptRenderer, type TurnSummary } from "../components/TranscriptRenderer.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 // Radix Tooltip (used by WorkGroup / TurnActionBar primitives) requires a
 // provider in the tree — the real app mounts it in App.tsx. Wrap the
@@ -35,7 +37,6 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 const renderCore = (ui: React.ReactElement) =>
   render(<TooltipProvider>{ui}</TooltipProvider>);
 
-const user = (text: string): ChatEntry => ({ kind: "user", text });
 const assistant = (
   text: string,
   extra: Partial<Extract<ChatEntry, { kind: "assistant" }>> = {},
@@ -66,7 +67,7 @@ const completedTurnSummary = (): Map<number, TurnSummary> => new Map([[
 ]]);
 
 describe("TranscriptRenderer — minimal (required-only) contract", () => {
-  const minimal = [user("q"), assistant("a")];
+  const minimal = [userEntry("q"), assistant("a")];
 
   it("renders without crashing when only entries/streaming/currentSessionId are passed", () => {
     const { container } = renderCore(
@@ -92,7 +93,7 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
   });
 
   it("still collapses mid-turn work into a WorkGroup", () => {
-    const entries = [user("q"), toolGroup(), assistant("done")];
+    const entries = [userEntry("q"), toolGroup(), assistant("done")];
     const { getAllByTestId } = renderCore(
       <TranscriptRenderer entries={entries} streaming={false} currentSessionId="s1" />,
     );
@@ -103,7 +104,7 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
   });
 
   it("can force historical WorkGroups open for read-only companion surfaces", () => {
-    const entries = [user("q"), toolGroup("forced-tool"), assistant("done")];
+    const entries = [userEntry("q"), toolGroup("forced-tool"), assistant("done")];
     const { getByTestId } = renderCore(
       <TranscriptRenderer
         entries={entries}
@@ -118,14 +119,14 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
   it("hides token and cost estimates when the active runtime has no verified usage contract", () => {
     const { queryByTestId } = renderCore(
       <TranscriptRenderer
-        entries={[user("q"), assistant("a")]}
+        entries={[userEntry("q"), assistant("a")]}
         streaming={false}
         currentSessionId="s1"
         turnSummaryByTurnStart={completedTurnSummary()}
         showTokenCostBadge={false}
       />,
     );
-    expect(queryByTestId("token-cost-badge")).toBeNull();
+    expect(queryByTestId(TEST_IDS.tokenCostBadge)).toBeNull();
   });
 
   it("keeps non-billable subscription telemetry visible when API pricing is gated off", () => {
@@ -144,21 +145,21 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
 
     const { getByTestId } = renderCore(
       <TranscriptRenderer
-        entries={[user("q"), assistant("a")]}
+        entries={[userEntry("q"), assistant("a")]}
         streaming={false}
         currentSessionId="s1"
         turnSummaryByTurnStart={summary}
         showTokenCostBadge={false}
       />,
     );
-    expect(getByTestId("token-cost-badge").getAttribute("data-usage-kind")).toBe("subscription");
+    expect(getByTestId(TEST_IDS.tokenCostBadge).getAttribute("data-usage-kind")).toBe("subscription");
   });
 
   it("continues to show token and cost estimates by default for runtimes with a usage contract", () => {
     const { getByTestId } = renderCore(
-      <TranscriptRenderer entries={[user("q"), assistant("a")]} streaming={false} currentSessionId="s1" turnSummaryByTurnStart={completedTurnSummary()} />,
+      <TranscriptRenderer entries={[userEntry("q"), assistant("a")]} streaming={false} currentSessionId="s1" turnSummaryByTurnStart={completedTurnSummary()} />,
     );
-    expect(getByTestId("token-cost-badge")).toBeTruthy();
+    expect(getByTestId(TEST_IDS.tokenCostBadge)).toBeTruthy();
   });
 });
 
@@ -178,7 +179,7 @@ describe("TranscriptRenderer — permission review attaches to its tool row", ()
   });
 
   it("renders the verdict inside the tool row when the tool call exists", () => {
-    const entries = [user("q"), review("t1"), toolGroup("t1"), assistant("done")];
+    const entries = [userEntry("q"), review("t1"), toolGroup("t1"), assistant("done")];
     const { getByTestId } = renderCore(
       <TranscriptRenderer
         entries={entries}
@@ -195,7 +196,7 @@ describe("TranscriptRenderer — permission review attaches to its tool row", ()
   });
 
   it("keeps the standalone card while no tool row carries that tool call", () => {
-    const entries = [user("q"), review("pending", { status: "needs_approval" }), assistant("done")];
+    const entries = [userEntry("q"), review("pending", { status: "needs_approval" }), assistant("done")];
     const { getByTestId } = renderCore(
       <TranscriptRenderer
         entries={entries}
@@ -211,7 +212,7 @@ describe("TranscriptRenderer — permission review attaches to its tool row", ()
 
   it("attaches only the verdict whose tool call is present", () => {
     const entries = [
-      user("q"),
+      userEntry("q"),
       review("t1"),
       review("orphan", { status: "failed" }),
       toolGroup("t1"),
@@ -235,7 +236,7 @@ describe("TranscriptRenderer — permission review attaches to its tool row", ()
     // No dock ever showed these calls. A collapsed group would leave the only
     // record of a decision made without the user folded away by default.
     for (const status of ["parent_approved", "parent_denied"] as const) {
-      const entries = [user("q"), review("t1", { status }), toolGroup("t1"), assistant("done")];
+      const entries = [userEntry("q"), review("t1", { status }), toolGroup("t1"), assistant("done")];
       const { getByTestId, unmount } = renderCore(
         <TranscriptRenderer entries={entries} streaming={false} currentSessionId="s1" />,
       );
@@ -252,7 +253,7 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
     const onRetryEffort = vi.fn();
     const { queryByTitle } = renderCore(
       <TranscriptRenderer
-        entries={[user("q"), assistant("a")]}
+        entries={[userEntry("q"), assistant("a")]}
         streaming={false}
         currentSessionId="s1"
         actions={{ onRetryEffort }}
@@ -264,7 +265,7 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
   it("offers no pin control on the user card — pinning is a conversation-level action", () => {
     const { getByTestId, queryByTitle } = renderCore(
       <TranscriptRenderer
-        entries={[user("question"), assistant("answer")]}
+        entries={[userEntry("question"), assistant("answer")]}
         streaming={false}
         currentSessionId="s1"
         actions={{
@@ -285,7 +286,7 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
     const onReturnHere = vi.fn();
     const { getAllByTitle } = renderCore(
       <TranscriptRenderer
-        entries={[user("first"), assistant("answer"), user("second")]}
+        entries={[userEntry("first"), assistant("answer"), userEntry("second")]}
         streaming={false}
         currentSessionId="s1"
         actions={{ onReturnHere }}
@@ -302,7 +303,7 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
     const onReturnHere = vi.fn();
     const { getAllByTitle } = renderCore(
       <TranscriptRenderer
-        entries={[user("first"), assistant("answering", { streaming: true })]}
+        entries={[userEntry("first"), assistant("answering", { streaming: true })]}
         streaming
         currentSessionId="s1"
         actions={{ onReturnHere }}
@@ -318,9 +319,7 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
   it("shows the send time recorded on a user message, in the host time zone", () => {
     // `formatHhMm` renders in the host zone, so pin it — otherwise this asserts
     // nothing more than "whatever zone the machine running the suite is in".
-    const previousTz = process.env.TZ;
-    process.env.TZ = "UTC";
-    try {
+    withTz("UTC", () => {
       const { getByTestId } = renderCore(
         <TranscriptRenderer
           entries={[{ kind: "user", text: "timed", createdAt: Date.UTC(2026, 0, 2, 4, 26) }]}
@@ -330,16 +329,13 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
       );
 
       expect(getByTestId("user-message-time").textContent).toContain("04:26");
-    } finally {
-      if (previousTz === undefined) delete process.env.TZ;
-      else process.env.TZ = previousTz;
-    }
+    });
   });
 
   it("shows no time on a message that never recorded one", () => {
     const { queryByTestId } = renderCore(
       <TranscriptRenderer
-        entries={[user("untimed")]}
+        entries={[userEntry("untimed")]}
         streaming={false}
         currentSessionId="s1"
       />,
@@ -426,7 +422,7 @@ describe("TranscriptRenderer — external-surface origin badge", () => {
 
   it("shows no origin badge on an ordinary local user bubble", () => {
     const { queryByTestId } = renderCore(
-      <TranscriptRenderer entries={[user("로컬 질문")]} streaming={false} currentSessionId="s1" />,
+      <TranscriptRenderer entries={[userEntry("로컬 질문")]} streaming={false} currentSessionId="s1" />,
     );
     expect(queryByTestId("user-message-origin-badge")).toBeNull();
   });

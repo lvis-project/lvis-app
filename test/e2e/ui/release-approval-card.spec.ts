@@ -21,6 +21,7 @@ import {
   buildE2eBaseSettings,
   buildIsolatedElectronEnv,
 } from "./seeded-electron.js";
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 const OUT_OF_DIR_REQUEST = {
   id: "release-check-1",
@@ -129,7 +130,7 @@ test.describe("release check — docked approval card", () => {
       });
     });
 
-    const overlay = page.getByTestId("approval-dock");
+    const overlay = page.getByTestId(TEST_IDS.approvalDock);
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await app.evaluate(({ BrowserWindow }, payload) => {
         const win = BrowserWindow.getAllWindows()[0];
@@ -167,7 +168,7 @@ test.describe("release check — docked approval card", () => {
       }), { timeout: 5_000 })
       .toBe(true);
 
-    await page.getByTestId("approve-button").focus();
+    await page.getByTestId(TEST_IDS.approveButton).focus();
 
     // Arrowing must move focus AND rewrite the target line. This is the
     // property the design rests on: what will be granted is always on screen.

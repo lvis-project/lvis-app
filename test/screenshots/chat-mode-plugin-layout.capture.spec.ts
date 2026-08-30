@@ -31,6 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect, REPO_ROOT } from "./fixtures.js";
 import type { ElectronApplication, Page } from "playwright";
+import { TEST_IDS, testIdSelector } from "../../src/shared/test-ids.js";
 
 test.use({ installPlugins: ["meeting", "local-indexer"] });
 
@@ -72,7 +73,7 @@ interface OpenResult {
  */
 async function openPlugin(page: Page, label: string): Promise<OpenResult> {
   const out: OpenResult = { pickerOpened: false, pickerRows: [], rowFound: false, clicked: false };
-  const composer = page.locator('[data-testid="composer-textarea"]').first();
+  const composer = page.locator(testIdSelector(TEST_IDS.composerTextarea)).first();
   await composer.waitFor({ state: "visible", timeout: 15_000 });
   await composer.click();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
@@ -114,11 +115,11 @@ async function openPlugin(page: Page, label: string): Promise<OpenResult> {
  * Returns the number of docks cleared.
  */
 async function clearMountApprovalDocks(page: Page): Promise<number> {
-  const dock = page.locator('[data-testid="approval-dock"]').first();
+  const dock = page.locator(testIdSelector(TEST_IDS.approvalDock)).first();
   let cleared = 0;
   for (let i = 0; i < 12; i++) {
     if (!(await dock.count()) || !(await dock.isVisible().catch(() => false))) break;
-    const approve = dock.locator('[data-testid="approve-button"]').first();
+    const approve = dock.locator(testIdSelector(TEST_IDS.approveButton)).first();
     if (await approve.count()) {
       await approve.click().catch(() => {});
     } else {

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MarketplaceUpdateBanner } from "../MarketplaceUpdateBanner.js";
 import type { PluginUpdateInfo } from "../../hooks/use-marketplace-updates.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 describe("MarketplaceUpdateBanner", () => {
   afterEach(() => cleanup());
@@ -62,7 +63,7 @@ describe("MarketplaceUpdateBanner", () => {
     );
 
     screen.getByTestId("marketplace-update-action").click();
-    await vi.waitFor(() => expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("Needs API access"));
+    await vi.waitFor(() => expect(screen.getByTestId(TEST_IDS.pluginInstallNetworkAccess).textContent).toContain("Needs API access"));
     expect(onUpdate).not.toHaveBeenCalled();
 
     screen.getByRole("button", { name: "설치" }).click();

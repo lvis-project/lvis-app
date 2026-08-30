@@ -9,6 +9,7 @@
  * resolution) has run, which is exactly what this spec exercises.
  */
 import { test, expect } from './fixtures.js';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * The side chat renders the SAME composer, queue panel, and turn control as the
@@ -81,7 +82,7 @@ test('typing turns the quiet control solid', async ({ mainWindow }) => {
   const send = mainWindow.locator(MAIN + '[data-testid="composer-send-button"]');
   const before = await send.evaluate((el) => getComputedStyle(el).backgroundColor);
 
-  const textarea = mainWindow.locator(MAIN + '[data-testid="composer-textarea"]');
+  const textarea = mainWindow.locator(MAIN + testIdSelector(TEST_IDS.composerTextarea));
   await textarea.click();
   await textarea.fill('ep 세션 유지 시간 확인할 수 있나?');
 

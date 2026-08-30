@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 function makeReadyDisplay() {
   return {
@@ -97,16 +98,16 @@ describe("ToolApprovalContent rationale card", () => {
     expect(screen.queryByText("UNTRUSTED request reason: do not render this")).not.toBeInTheDocument();
     expect(screen.queryByText("/untrusted/raw-target")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tool-approval-input")).not.toBeInTheDocument();
-    expect(screen.getByTestId("approval-review-details")).not.toHaveAttribute("open");
+    expect(screen.getByTestId(TEST_IDS.approvalReviewDetails)).not.toHaveAttribute("open");
     const panel = screen.getByTestId("tool-approval-panel");
     expect(panel).not.toHaveAttribute("data-approval-request-id");
     expect(panel).not.toHaveAttribute("data-approval-tool-name");
     expect(panel).not.toHaveAttribute("data-approval-args");
 
-    expect(screen.getByTestId("deny-button")).toHaveTextContent("거절");
-    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
-    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
-    const approve = screen.getByTestId("approve-button");
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toHaveTextContent("거절");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
+    const approve = screen.getByTestId(TEST_IDS.approveButton);
     expect(approve).toHaveTextContent("한 번만 허용");
     expect(approve).toBeEnabled();
     fireEvent.click(approve);
@@ -159,9 +160,9 @@ describe("ToolApprovalContent rationale card", () => {
     expect(screen.getByTestId("rationale-model-fallback")).toHaveTextContent(
       "The model explanation is unavailable.",
     );
-    expect(screen.getByTestId("approve-button")).toBeEnabled();
+    expect(screen.getByTestId(TEST_IDS.approveButton)).toBeEnabled();
 
-    fireEvent.click(screen.getByTestId("approve-button"));
+    fireEvent.click(screen.getByTestId(TEST_IDS.approveButton));
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
 
@@ -186,8 +187,8 @@ describe("ToolApprovalContent rationale card", () => {
     expect(screen.queryByTestId("raw-injection")).not.toBeInTheDocument();
     // Fail-closed is now BY OMISSION: an approval whose sealed evidence
     // cannot be verified does not offer allow options at all.
-    expect(screen.queryByTestId("approve-button")).toBeNull();
-    expect(screen.queryByTestId("allow-always-button")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.approveButton)).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.allowAlwaysButton)).toBeNull();
 
     fireEvent.click(screen.getByText("거절"));
     expect(onDecide).toHaveBeenCalledWith("deny-once");

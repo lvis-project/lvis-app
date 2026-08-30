@@ -18,6 +18,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
+import { foreignFrameEvent } from "../../__tests__/test-helpers.js";
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
 
@@ -35,10 +36,6 @@ const { PERMISSIONS } = await import("../../shared/ipc-channels.js");
 
 const PLUGIN_SHELL = "file:///dist/src/plugin-ui-shell.html";
 const HOST_RENDERER = "file:///dist/src/index.html";
-
-function ev(url: string): IpcMainInvokeEvent {
-  return { senderFrame: { url } } as unknown as IpcMainInvokeEvent;
-}
 
 /**
  * Read-only, and each discloses something a plugin can act on. `args` are the
@@ -85,7 +82,7 @@ describe("sensitive read-only permission channels", () => {
     async (_name, channel, args) => {
       const handler = handleMap.get(channel);
       expect(handler, `${channel} was never registered`).toBeDefined();
-      const result = await handler!(ev(PLUGIN_SHELL), ...args);
+      const result = await handler!(foreignFrameEvent(PLUGIN_SHELL), ...args);
       expect(result).toMatchObject({ ok: false, error: "unauthorized-frame" });
     },
   );
@@ -97,7 +94,7 @@ describe("sensitive read-only permission channels", () => {
       // legitimately uses it — a test that only pinned the refusal would pass
       // just as well if the channel refused everyone.
       const handler = handleMap.get(channel);
-      const result = await handler!(ev(HOST_RENDERER), ...args);
+      const result = await handler!(foreignFrameEvent(HOST_RENDERER), ...args);
       expect(result).not.toMatchObject({ error: "unauthorized-frame" });
     },
   );

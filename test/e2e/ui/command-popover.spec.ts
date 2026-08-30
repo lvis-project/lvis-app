@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * E2E tests for the unified SlashPicker command surface.
@@ -12,7 +13,7 @@ import { test, expect } from './fixtures';
 test('command popover: Cmd/Ctrl+K opens and closes the popover', async ({ mainWindow }) => {
   // Wait for the InputActionBar to appear (signals full React boot).
   // 60 s timeout matches CI worst-case boot — failure to load is a real regression.
-  const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
+  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.commandPopoverTrigger));
   await expect(trigger).toBeVisible({ timeout: 60_000 });
 
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -28,7 +29,7 @@ test('command popover: Cmd/Ctrl+K opens and closes the popover', async ({ mainWi
 });
 
 test('command popover: command and shortcut categories are visible when open', async ({ mainWindow }) => {
-  const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
+  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.commandPopoverTrigger));
   await expect(trigger).toBeVisible({ timeout: 20_000 });
 
   await trigger.click();
@@ -39,7 +40,7 @@ test('command popover: command and shortcut categories are visible when open', a
 });
 
 test('command popover: search filters items and hides empty group', async ({ mainWindow }) => {
-  const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
+  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.commandPopoverTrigger));
   const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
     .then(() => true)
     .catch(() => false);
@@ -56,7 +57,7 @@ test('command popover: search filters items and hides empty group', async ({ mai
 });
 
 test('command popover: list has max-h constraint and is scrollable when items overflow', async ({ mainWindow }) => {
-  const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
+  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.commandPopoverTrigger));
   await expect(trigger).toBeVisible({ timeout: 20_000 });
 
   await trigger.click();
@@ -76,7 +77,7 @@ test('command popover: list has max-h constraint and is scrollable when items ov
 });
 
 test('command popover: slash command click inserts text and closes popover', async ({ mainWindow }) => {
-  const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
+  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.commandPopoverTrigger));
   const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
     .then(() => true)
     .catch(() => false);
@@ -104,7 +105,7 @@ test('command popover: top ⌘ toolbar button is absent', async ({ mainWindow, t
   // Wait for the InputActionBar to appear (signals full React boot) before
   // asserting absence — prevents the negative assertion from passing before
   // the UI has had a chance to mount.
-  const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
+  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.commandPopoverTrigger));
   const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
     .then(() => true)
     .catch(() => false);

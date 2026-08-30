@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -123,16 +124,16 @@ test.describe("Sandbox approval flow", () => {
     }, buildApprovalRequest({ reviewerVerdict: { level: "high", reason: "shell destructive verb" } }));
 
     // Dialog should appear
-    const dialog = page.getByTestId("approval-dock");
+    const dialog = page.getByTestId(TEST_IDS.approvalDock);
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // HIGH uses the host/reviewer reason and never asks the user to type in
     // the approval surface. The explicit one-shot decision is immediately
     // available while durable allow stays unavailable.
-    const approveBtn = page.getByTestId("approve-button");
+    const approveBtn = page.getByTestId(TEST_IDS.approveButton);
     await expect(approveBtn).toBeEnabled();
     await expect(approveBtn).toHaveText(t("toolApprovalDialog.allowOnce"));
-    await expect(dialog.getByTestId("allow-always-button")).toBeDisabled();
+    await expect(dialog.getByTestId(TEST_IDS.allowAlwaysButton)).toBeDisabled();
     await expect(dialog.getByTestId("high-risk-audit-reason"))
       .toContainText("shell destructive verb");
     await expect(dialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
@@ -151,7 +152,7 @@ test.describe("Sandbox approval flow", () => {
       reviewerVerdict: { level: "low", reason: "read inside allowed dirs" },
     }));
 
-    const dialog = page.getByTestId("approval-dock");
+    const dialog = page.getByTestId(TEST_IDS.approvalDock);
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // No approval verdict renders a typeable field.
@@ -159,13 +160,13 @@ test.describe("Sandbox approval flow", () => {
       .toHaveCount(0);
 
     // Approve button should be enabled immediately
-    const approveBtn = page.getByTestId("approve-button");
+    const approveBtn = page.getByTestId(TEST_IDS.approveButton);
     await expect(approveBtn).toBeEnabled();
 
     // The obsolete scope selector is replaced by three explicit decisions.
-    await expect(page.getByTestId("deny-button")).toHaveText(t("toolApprovalDialog.denyOnce"));
-    await expect(page.getByTestId("allow-always-button")).toHaveText(t("toolApprovalDialog.allowAlways"));
-    await expect(page.getByTestId("approve-button")).toHaveText(t("toolApprovalDialog.allowOnce"));
+    await expect(page.getByTestId(TEST_IDS.denyButton)).toHaveText(t("toolApprovalDialog.denyOnce"));
+    await expect(page.getByTestId(TEST_IDS.allowAlwaysButton)).toHaveText(t("toolApprovalDialog.allowAlways"));
+    await expect(page.getByTestId(TEST_IDS.approveButton)).toHaveText(t("toolApprovalDialog.allowOnce"));
   });
 
   test("partial sandbox shows correct Korean label in approval dock", async () => {
@@ -184,7 +185,7 @@ test.describe("Sandbox approval flow", () => {
       },
     }));
 
-    const dialog = page.getByTestId("approval-dock");
+    const dialog = page.getByTestId(TEST_IDS.approvalDock);
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // Sandbox row should show partial isolation label

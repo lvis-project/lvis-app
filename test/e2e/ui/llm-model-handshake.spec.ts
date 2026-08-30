@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 /**
  * Handshake-only OpenAI-compatible model list.
@@ -35,7 +36,7 @@ test('openai-compatible model dropdown shows no hardcoded seed before an endpoin
   await expect(baseUrl).toHaveValue('');
 
   // Open the model dropdown: the former hardcoded LVIS-cluster seed must be gone.
-  await settingsPage.getByTestId('llm-model-select').click();
+  await settingsPage.getByTestId(TEST_IDS.llmModelSelect).click();
   await expect(settingsPage.getByText('Qwen3.6-35B-A3B-NVFP4')).toHaveCount(0);
   await expect(settingsPage.getByText('Nemotron-3-Nano-30B-A3B-FP8')).toHaveCount(0);
 

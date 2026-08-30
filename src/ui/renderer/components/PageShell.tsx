@@ -15,6 +15,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "../../../components/ui/popover.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface SettingsHelpPopoverProps {
   children: ReactNode;
@@ -143,7 +144,7 @@ export function SettingsPageHeader({ title, description }: SettingsPageHeaderPro
         <h2
           tabIndex={-1}
           className="min-w-0 truncate rounded-sm text-xl font-semibold leading-9 tracking-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          data-testid="settings-page-title"
+          data-testid={TEST_IDS.settingsPageTitle}
         >
           {title}
         </h2>

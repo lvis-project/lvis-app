@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.js';
 import { closeInlineSettings } from './inline-settings.js';
+import { TEST_IDS, execModeTestId } from "../../../src/shared/test-ids.js";
 
 type WindowBounds = { x: number; y: number; width: number; height: number };
 
@@ -279,19 +280,19 @@ test('Work to Chat opens Settings as a two-depth narrow list without a forced re
     const root = mainWindow.locator('[data-settings-layout]');
     await expect.poll(() => root.getAttribute('data-settings-layout'), { timeout: 5_000 }).toBe('narrow');
     await expect(mainWindow.getByTestId('settings-mobile-list')).toBeVisible();
-    await expect(mainWindow.getByTestId('settings-mobile-back')).not.toBeVisible();
+    await expect(mainWindow.getByTestId(TEST_IDS.settingsMobileBack)).not.toBeVisible();
 
     await root.getByRole('tab').first().click();
-    await expect(mainWindow.getByTestId('settings-mobile-back')).toBeVisible();
+    await expect(mainWindow.getByTestId(TEST_IDS.settingsMobileBack)).toBeVisible();
     await expect(mainWindow.getByTestId('settings-mobile-list')).not.toBeVisible();
     await expectNoHorizontalOverflow(mainWindow, 'Chat settings detail');
 
-    await mainWindow.getByTestId('settings-mobile-back').click();
+    await mainWindow.getByTestId(TEST_IDS.settingsMobileBack).click();
     await expect(mainWindow.getByTestId('settings-mobile-list')).toBeVisible();
     await expect(mainWindow.getByTestId('settings-close')).toHaveCount(0);
     await expect(mainWindow.getByTestId('settings-mobile-close')).toHaveCount(0);
 
-    await mainWindow.getByTestId('view-path-back').click();
+    await mainWindow.getByTestId(TEST_IDS.viewPathBack).click();
     await expect(root).toHaveCount(0);
   } finally {
     if (await mainWindow.locator('[data-settings-layout]').count()) {
@@ -324,12 +325,12 @@ test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)',
   await activateSettingsWithoutResize(app, 'llm');
   await expect(mainWindow.getByTestId('settings-close')).toHaveCount(0);
   await expect(mainWindow.getByTestId('settings-mobile-close')).toHaveCount(0);
-  await expect(mainWindow.getByTestId('view-path-back')).toBeEnabled();
+  await expect(mainWindow.getByTestId(TEST_IDS.viewPathBack)).toBeEnabled();
 
   const root = mainWindow.locator('[data-settings-layout]');
   await expect.poll(async () => root.getAttribute('data-settings-layout'), { timeout: 5_000 }).toBe('narrow');
 
-  const back = mainWindow.getByTestId('settings-mobile-back');
+  const back = mainWindow.getByTestId(TEST_IDS.settingsMobileBack);
   if (await back.isVisible()) await back.click();
   await expect(mainWindow.getByTestId('settings-mobile-list')).toBeVisible();
 
@@ -426,8 +427,8 @@ test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)',
       await expectNoHorizontalOverflow(mainWindow, `${label}: fallback editor`);
     }
 
-    if (await mainWindow.getByTestId('exec-mode-auto').count()) {
-      await mainWindow.getByTestId('exec-mode-auto').click();
+    if (await mainWindow.getByTestId(execModeTestId("auto")).count()) {
+      await mainWindow.getByTestId(execModeTestId("auto")).click();
       const autoApprove = mainWindow.getByTestId('interactive-auto-approve-control');
       await expect(autoApprove).toBeVisible();
       await expectNoHorizontalOverflow(mainWindow, `${label}: auto-verify`);
@@ -441,7 +442,7 @@ test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)',
 
   await root.getByRole('tab').first().click();
   await expect(mainWindow.getByTestId('settings-mobile-close')).toHaveCount(0);
-  await expect(mainWindow.getByTestId('settings-mobile-back')).toBeVisible();
+  await expect(mainWindow.getByTestId(TEST_IDS.settingsMobileBack)).toBeVisible();
   await closeInlineSettings(app, mainWindow);
   await expect(root).toHaveCount(0);
 });

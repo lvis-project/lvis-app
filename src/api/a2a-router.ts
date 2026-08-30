@@ -25,11 +25,10 @@ import {
 import { parseA2AStrictJson } from "./a2a-strict-json.js";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import { isRecord } from "../shared/is-record.js";
+import { JSON_CONTENT_TYPE, MAX_BODY_BYTES, readBody, sendJson as sendJsonResponse } from "./http-server.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { A2A_HANDLER_ID_PATTERN } from "../shared/a2a.js";
 
-const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
-const MAX_BODY_BYTES = 1024 * 1024;
 const A2A_ROOT_PATTERN = /^\/a2a\/([a-z0-9][a-z0-9-]{0,63})\/?$/;
 const A2A_CARD_PATTERN =
   /^\/a2a\/([a-z0-9][a-z0-9-]{0,63})\/\.well-known\/agent-card\.json$/;
@@ -120,41 +119,14 @@ function hasCoreA2AResponseHeader(headers: Readonly<Record<string, string>> | un
   );
 }
 
+/** Every A2A response carries the protocol version alongside the shared JSON envelope. */
 function sendJson(
   res: ServerResponse,
   status: number,
   body: unknown,
   headers: Record<string, string> = {},
 ): void {
-  res.writeHead(status, {
-    ...headers,
-    "content-type": JSON_CONTENT_TYPE,
-    "a2a-version": A2A_PROTOCOL_VERSION,
-  });
-  res.end(JSON.stringify(body));
-}
-
-function readBody(req: IncomingMessage): Promise<Buffer | null> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    let overCap = false;
-    req.on("data", (chunk: Buffer) => {
-      if (overCap) return;
-      total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
-        overCap = true;
-        req.pause();
-        resolve(null);
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      if (!overCap) resolve(Buffer.concat(chunks));
-    });
-    req.on("error", reject);
-  });
+  sendJsonResponse(res, status, body, { ...headers, "a2a-version": A2A_PROTOCOL_VERSION });
 }
 
 function isValidRequestId(value: unknown): value is A2AJsonRpcId {

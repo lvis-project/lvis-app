@@ -10,6 +10,7 @@ import type {
   MarketplaceProviderModelDiscoveryPolicy,
 } from "../../../../shared/marketplace-package-assets.js";
 import type { SubscriptionProviderView } from "../SubscriptionProvidersSection.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 const useSubscriptionProvidersMock = vi.hoisted(() => vi.fn());
 
@@ -337,7 +338,7 @@ function openMenu(trigger: HTMLElement) {
  */
 async function chooserModelIds(): Promise<string[]> {
   if (!document.querySelector("[role='option']")) {
-    openMenu(screen.getByTestId("llm-model-select"));
+    openMenu(screen.getByTestId(TEST_IDS.llmModelSelect));
   }
   return waitFor(() => {
     const found = [...document.querySelectorAll<HTMLElement>("[role='option']")];
@@ -1838,7 +1839,7 @@ describe("LlmTab OpenAI model catalogue", () => {
       .toHaveTextContent("https://api.openai.com/v1/models");
     expect(screen.getByTestId("llm-tab:model-sync-status")).toHaveTextContent("1");
 
-    openMenu(screen.getByTestId("llm-model-select"));
+    openMenu(screen.getByTestId(TEST_IDS.llmModelSelect));
     await screen.findByText("gpt-from-endpoint");
     // The bundled catalogue is metadata, never the list: none of its ids may
     // appear once the endpoint has answered.

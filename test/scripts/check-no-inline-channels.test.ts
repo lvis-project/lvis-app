@@ -33,10 +33,6 @@ function createRoot(): string {
   return root;
 }
 
-function run(root: string) {
-  return runGateScript(SCRIPT, root);
-}
-
 function write(root: string, rel: string, source: string): void {
   writeFileSync(join(root, rel), source, "utf-8");
 }
@@ -50,7 +46,7 @@ describe("check-no-inline-channels", () => {
     const root = createRoot();
     write(root, "src/plugin-preload.ts", "ipcRenderer.invoke(CHANNELS.pluginBridge.callTool);\n");
 
-    const result = run(root);
+    const result = runGateScript(SCRIPT, root);
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("[no-inline-channels] OK");
@@ -65,7 +61,7 @@ describe("check-no-inline-channels", () => {
     const root = createRoot();
     write(root, rel, `const channel = ${JSON.stringify(channel)};\n`);
 
-    const result = run(root);
+    const result = runGateScript(SCRIPT, root);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`${rel}:1 inline channel literal`);
@@ -80,7 +76,7 @@ describe("check-no-inline-channels", () => {
       "",
     ].join("\n"));
 
-    const result = run(root);
+    const result = runGateScript(SCRIPT, root);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr.match(/src\/plugin-preload\.ts:\d+ inline channel literal/g)).toHaveLength(3);
@@ -90,7 +86,7 @@ describe("check-no-inline-channels", () => {
     const root = createRoot();
     write(root, "src/plugin-preload.ts", "const channel = 'lvis' + ':plugin:event';\n");
 
-    const result = run(root);
+    const result = runGateScript(SCRIPT, root);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("src/plugin-preload.ts:1 inline channel literal");
@@ -100,19 +96,19 @@ describe("check-no-inline-channels", () => {
     const root = createRoot();
     write(root, "src/plugin-preload.ts", "// `lvis:plugin:event` is documented here.\n");
 
-    expect(run(root).status).toBe(0);
+    expect(runGateScript(SCRIPT, root).status).toBe(0);
   });
 
   it("distinguishes a CLI command name from a marketplace wire channel", () => {
     const root = createRoot();
-    expect(run(root).status).toBe(0);
+    expect(runGateScript(SCRIPT, root).status).toBe(0);
 
     write(root, "src/cli/commands.ts", [
       "export const CLI_COMMANDS = [{ name: 'marketplace:list' }] as const;",
       "const channel = 'marketplace:raw-wire';",
       "",
     ].join("\n"));
-    const result = run(root);
+    const result = runGateScript(SCRIPT, root);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("src/cli/commands.ts:2 inline channel literal");
   });
@@ -125,7 +121,7 @@ describe("check-no-inline-channels", () => {
       "",
     ].join("\n"));
 
-    const result = run(root);
+    const result = runGateScript(SCRIPT, root);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("src/cli/commands.ts:2 inline channel literal");
@@ -136,7 +132,7 @@ describe("check-no-inline-channels", () => {
     write(root, "src/ipc/domains/new-domain.ts", "const channel = 'window:new-channel';\n");
     write(root, "src/preload/new-surface.ts", "const channel = 'lvis:new-channel';\n");
 
-    const result = run(root);
+    const result = runGateScript(SCRIPT, root);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("src/ipc/domains/new-domain.ts:1 inline channel literal");

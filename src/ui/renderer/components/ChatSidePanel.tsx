@@ -50,6 +50,7 @@ import {
   UrlDocumentViewer,
   tabIcon,
 } from "./ChatSidePanelPreview.js";
+import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../shared/test-ids.js";
 
 
 /** Status tone for the sub-agent list row badge. */
@@ -554,7 +555,7 @@ function WorkspaceLauncher({
                 key={item.kind}
                 type="button"
                 role="menuitem"
-                data-testid={`chat-side-panel-launcher-${item.kind}`}
+                data-testid={chatSidePanelLauncherTestId(item.kind)}
                 className="flex w-full items-center gap-3 rounded-md border px-3 py-2.5 text-left text-sm hover:bg-muted/(--opacity-muted)"
                 onClick={onSelect}
               >
@@ -934,7 +935,7 @@ export function ChatSidePanel({
 
   return (
     <aside
-      data-testid="chat-side-panel"
+      data-testid={TEST_IDS.chatSidePanel}
       // A raised card — the floating sidebar's own recipe — filling the box
       // its tile reserves for it (the wrapper carries the card's insets), so a
       // docked panel and a floating one are one surface at two positions.

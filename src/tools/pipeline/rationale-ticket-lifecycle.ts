@@ -18,6 +18,7 @@ import {
   type ReviewerReevaluationFailureOutcome,
   type ReviewerReevaluationOutcome,
 } from "./rationale-pr1-contract.js";
+import { UUID_PATTERN } from "../../shared/uuid.js";
 import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 function seal<T>(value: T, label: string): T {
@@ -253,7 +254,7 @@ export function validateRationaleTicketRecord(record: RationaleTicketStateRecord
     "RationaleTicketStateRecord");
   if (record.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
       typeof record.ticketId !== "string" ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      !UUID_PATTERN
         .test(record.ticketId) ||
       !/^[0-9a-f]{64}$/.test(record.actionDigest) ||
       !STATE_NAMES.includes(record.state) || !STATUS_NAMES.includes(record.rationaleStatus)) {
@@ -318,7 +319,7 @@ export function validateHostConsumedAllowOnceReceipt(
   validateRationaleTicketRecord(receipt.ticket);
   if (receipt.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
       receipt.kind !== "host-consumed-allow-once-cas" ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      !UUID_PATTERN
         .test(receipt.receiptId) ||
       receipt.ticketId !== control.ticketId ||
       receipt.actionDigest !== control.action.actionDigest ||
@@ -529,8 +530,6 @@ const INVOCATION_STATES: readonly InvocationAuditState[] = [
 const INVOCATION_EVENTS: readonly InvocationAuditEventName[] = [
   "complete", "fail", "crash-recovery",
 ];
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function invocationRecordDigest(record: InvocationAuditRecord): string {
   return sha256Hex(canonicalStringify(record));

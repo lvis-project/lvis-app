@@ -28,19 +28,15 @@ import { relativeLuminance } from "./helpers.js";
 import { render } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { AssistantCard } from "../../src/ui/renderer/components/AssistantCard.js";
-import type { ChatEntry } from "../../src/lib/chat-stream-state.js";
 import { BUNDLE_IDS, loadThemeBundle } from "../../src/ui/renderer/theme/bundles/index.js";
+import { assistantEntry } from "../../src/__tests__/test-helpers.js";
 
 /* ────────────────────────────────────────────────────────────────────────
  * 1. Component-level guard
  * ──────────────────────────────────────────────────────────────────────── */
 describe("AssistantCard — markdown wrapper classes (light-theme regression guard)", () => {
-  function makeEntry(text: string): Extract<ChatEntry, { kind: "assistant" }> {
-    return { kind: "assistant", text, streaming: false };
-  }
-
   it("uses lvis-prose and does NOT carry prose-invert", () => {
-    const { getByTestId } = render(<AssistantCard entry={makeEntry("hello world")} />);
+    const { getByTestId } = render(<AssistantCard entry={assistantEntry("hello world")} />);
     const body = getByTestId("assistant-message-body");
     expect(body.classList.contains("lvis-prose")).toBe(true);
     // The inverted variant hard-codes near-white text. It MUST NOT appear on
@@ -49,7 +45,7 @@ describe("AssistantCard — markdown wrapper classes (light-theme regression gua
   });
 
   it("still applies the base `prose` and `prose-sm` typography classes", () => {
-    const { getByTestId } = render(<AssistantCard entry={makeEntry("body")} />);
+    const { getByTestId } = render(<AssistantCard entry={assistantEntry("body")} />);
     const body = getByTestId("assistant-message-body");
     expect(body.classList.contains("prose")).toBe(true);
     expect(body.classList.contains("prose-sm")).toBe(true);

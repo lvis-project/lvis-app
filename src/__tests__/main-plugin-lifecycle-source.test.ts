@@ -1,10 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { readBootWiring } from "../__tests__/support/boot-wiring-source.js";
-
-async function readSource(relative: string): Promise<string> {
-  return readFile(new URL(relative, import.meta.url), "utf8");
-}
+import { readRepoFile } from "./test-helpers.js";
 
 describe("main process plugin lifecycle regression guards", () => {
   it("reports lvis:// install success only after runtime activation succeeds", async () => {
@@ -12,7 +8,7 @@ describe("main process plugin lifecycle regression guards", () => {
     // src/main/lvis-deep-link.ts. Same guarantee, new location — the section
     // is now terminated by the `broadcastPluginLifecycleEvent` definition that
     // immediately follows `handleLvisUri` (previously `activateView`).
-    const source = await readSource("../main/lvis-deep-link.ts");
+    const source = readRepoFile("src/main/lvis-deep-link.ts");
     const lifecycleSection = source.match(
       /let installProgressSlug = params\.slug[\s\S]*?\r?\n}\r?\n\r?\nfunction broadcastPluginLifecycleEvent/,
     )?.[0];
@@ -76,7 +72,7 @@ describe("main process plugin lifecycle regression guards", () => {
     // regression a template invites is a RENAME: `CHANNELS.agents.*` moves, the
     // renderer follows it, and the templated producer keeps broadcasting the
     // old name with nothing failing. This is the assertion that catches it.
-    const source = await readSource("../main/lvis-deep-link.ts");
+    const source = readRepoFile("src/main/lvis-deep-link.ts");
     const channelsHelper = source.match(
       // Terminated by a brace alone on its own line, so the helper's return-TYPE
       // block (which closes with `} {`) does not end the match early.
@@ -98,7 +94,7 @@ describe("main process plugin lifecycle regression guards", () => {
     // src/main/lvis-deep-link.ts. C18: the bridge replacement wiring moved from
     // boot.ts into boot/steps/conversation-wiring.ts + boot/assemble-services.ts
     // as BootContext (`ctx.*`) fields — same guarantee, new location.
-    const mainSource = await readSource("../main/lvis-deep-link.ts");
+    const mainSource = readRepoFile("src/main/lvis-deep-link.ts");
     const bootSource = await readBootWiring();
 
     expect(mainSource).toContain("registerMainWindowPluginEventBridge(mainWindow)");

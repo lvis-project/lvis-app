@@ -37,6 +37,7 @@ import { join } from "node:path";
 
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { ToolExecutor } from "../executor.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
@@ -55,12 +56,6 @@ import {
 } from "../../permissions/sandbox-capability.js";
 
 // ─── Helpers ─────────────────────────────────────────
-
-function userPermissionContext(
-  overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
-): import("../executor.js").ToolPermissionContext {
-  return { trustOrigin: "user-keyboard", ...overrides };
-}
 
 /** A stub ApprovalGate that records every request and answers with a fixed choice. */
 function makeGate(choice: ApprovalChoice): {

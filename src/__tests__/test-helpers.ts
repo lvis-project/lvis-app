@@ -1,7 +1,11 @@
 import { vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type { IpcMainInvokeEvent } from "electron";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
+import type { ChatEntry } from "../lib/chat-stream-state.js";
 
 export function makeMockWebContents() {
   return {
@@ -35,6 +39,14 @@ export function hostFrameEvent(): IpcMainInvokeEvent {
 /** A synthetic event from ANY OTHER frame — a plugin shell, a remote page, an empty URL. */
 export function foreignFrameEvent(url: string): IpcMainInvokeEvent {
   return { senderFrame: { url }, sender: {} } as unknown as IpcMainInvokeEvent;
+}
+
+/**
+ * A frame from a page the host never loads — the canonical "wrong sender" for a
+ * gated channel. Every guard must refuse it.
+ */
+export function untrustedEvent(): IpcMainInvokeEvent {
+  return foreignFrameEvent("https://evil.example.com/");
 }
 
 /** A plugin-UI-shell frame — a `file:` frame that sensitive host channels must refuse. */
@@ -160,4 +172,76 @@ export function liveWindow(): FakeBrowserWindow {
     isDestroyed: () => false,
     webContents: { isDestroyed: () => false, send: vi.fn() },
   };
+}
+
+/**
+ * Run `fn` with `process.env.TZ` pinned to `zone`, restoring the previous value
+ * afterwards — for a sync `fn` on return, for an async one when its promise
+ * settles. Node re-reads `TZ` on assignment for both `Date` and the `Intl`
+ * default, so no other setup is needed.
+ *
+ * Every civil-calendar assertion has to pin the zone or it asserts nothing
+ * beyond "the machine running the suite agrees with itself". Three suites
+ * carried the same `withTz` plus a `beforeEach`/`afterEach` pair to undo it;
+ * this is the one owner and it undoes itself.
+ */
+export function withTz<T>(zone: string, fn: () => T): T {
+  const previous = process.env.TZ;
+  const restore = (): void => {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  };
+  process.env.TZ = zone;
+  let result: T;
+  try {
+    result = fn();
+  } catch (err) {
+    restore();
+    throw err;
+  }
+  if (result instanceof Promise) {
+    return result.finally(restore) as T;
+  }
+  restore();
+  return result;
+}
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/**
+ * Read a file by its repo-relative path, for source-discipline suites that
+ * assert on what is checked in (workflows, styles, scripts) rather than on
+ * behaviour. Anchored on this file's location, not `process.cwd()`, so a
+ * suite run from another working directory reads the same repo.
+ */
+export function readRepoFile(path: string): string {
+  return readFileSync(resolve(REPO_ROOT, path), "utf8");
+}
+
+/** A user transcript entry — the minimal shape every transcript suite starts from. */
+export function userEntry(text: string): ChatEntry {
+  return { kind: "user", text };
+}
+
+/** A settled (non-streaming) assistant entry with the given body. */
+export function assistantEntry(text: string): Extract<ChatEntry, { kind: "assistant" }> {
+  return { kind: "assistant", text, streaming: false };
+}
+
+/** Let un-awaited work that was queued with setImmediate run before asserting on it. */
+export function settleMacrotask(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Override `process.platform` for a platform-branching subject. The caller
+ * owns restoring the real value in its own afterEach.
+ */
+export function setProcessPlatform(value: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", { value, configurable: true });
+}
+
+/** Parse a tool's JSON text output as a keyed record. */
+export function parseJsonRecord(output: string): Record<string, unknown> {
+  return JSON.parse(output) as Record<string, unknown>;
 }

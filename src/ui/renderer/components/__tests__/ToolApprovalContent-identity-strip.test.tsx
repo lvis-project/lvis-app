@@ -7,6 +7,7 @@ import type { ApprovalRequest } from "../../types.js";
 import {
   createRationaleApprovalDisplay,
 } from "../../../../shared/rationale-approval-display.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 /**
  * Identity strip SOT: every approval card names the tool it is deciding about,
@@ -92,8 +93,8 @@ describe("ToolApprovalContent identity strip", () => {
     expect(screen.getByTestId("approval-tool-identity")).not.toHaveTextContent("request-level-name");
     expect(screen.queryByTestId("approval-identity-unverified")).toBeNull();
     // Full decision surface intact for a valid seal.
-    expect(screen.getByTestId("approve-button")).toBeInTheDocument();
-    expect(screen.getByTestId("deny-button")).toBeInTheDocument();
+    expect(screen.getByTestId(TEST_IDS.approveButton)).toBeInTheDocument();
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toBeInTheDocument();
     // Fields the host deliberately did not attest are not rendered as facts.
     expect(screen.queryByTestId("approval-conversation")).toBeNull();
   });
@@ -124,9 +125,9 @@ describe("ToolApprovalContent identity strip", () => {
     );
     // Fail-closed means the allow options are not presented at all — a
     // permanently disabled button teaches users to distrust the panel.
-    expect(screen.queryByTestId("approve-button")).toBeNull();
-    expect(screen.queryByTestId("allow-always-button")).toBeNull();
-    expect(screen.getByTestId("deny-button")).toBeInTheDocument();
+    expect(screen.queryByTestId(TEST_IDS.approveButton)).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.allowAlwaysButton)).toBeNull();
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toBeInTheDocument();
   });
 
 
@@ -156,9 +157,9 @@ describe("ToolApprovalContent identity strip", () => {
     expect(screen.getByTestId("tool-approval-panel")).toBeInTheDocument();
     expect(screen.getByTestId("approval-tool-identity")).toHaveTextContent("write_file");
     // The one generic decision row serves path grants too.
-    expect(screen.getByTestId("approve-button")).toBeInTheDocument();
-    expect(screen.getByTestId("deny-button")).toBeInTheDocument();
-    expect(screen.getByTestId("approval-review-details")).toBeInTheDocument();
+    expect(screen.getByTestId(TEST_IDS.approveButton)).toBeInTheDocument();
+    expect(screen.getByTestId(TEST_IDS.denyButton)).toBeInTheDocument();
+    expect(screen.getByTestId(TEST_IDS.approvalReviewDetails)).toBeInTheDocument();
     expect(screen.getByTestId("approval-path-grant-evidence")).toBeInTheDocument();
     expect(screen.queryByTestId("docked-approval-panel")).toBeNull();
   });
@@ -191,7 +192,7 @@ describe("ToolApprovalContent identity strip", () => {
     );
     const panel = screen.getByTestId("tool-approval-panel");
     // Focus the parent-grant decision, as a keyboard user would before committing.
-    screen.getByTestId("allow-always-button").focus();
+    screen.getByTestId(TEST_IDS.allowAlwaysButton).focus();
     fireEvent.keyDown(panel, { key: "a" });
     fireEvent.keyDown(panel, { key: "d" });
     expect(onDecide).not.toHaveBeenCalled();

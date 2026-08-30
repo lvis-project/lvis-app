@@ -15,10 +15,9 @@
 import { randomUUID } from "node:crypto";
 import { hasControlChars } from "./display-safe-text.js";
 import { maskSensitiveData } from "./dlp.js";
+import { UUID_PATTERN } from "./uuid.js";
 
 const DLP_SAFE_UUID_MAX_ATTEMPTS = 8;
-const UUID_V4_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STRUCTURAL_ID_MAX_LENGTH = 256;
 
 /**
@@ -91,7 +90,7 @@ export function createDlpSafeUuid(
   }
   const candidate = dlpSafeCandidate(() => {
     const uuid = makeUuid();
-    if (!UUID_V4_PATTERN.test(uuid)) return null;
+    if (!UUID_PATTERN.test(uuid)) return null;
     return prefix ? `${prefix}-${uuid}` : uuid;
   }, DLP_SAFE_UUID_MAX_ATTEMPTS);
   if (candidate === null) {

@@ -2361,12 +2361,20 @@ export class ApprovalGate {
     // the owner refusing this particular call. No `rememberPattern`: the
     // timeout, the other outcome the host reaches on its own, sets none, and
     // that field's only consumers persist it as an allow/deny rule.
+    // The stop's own words go on the row, so a reviewer can tell the user's
+    // stop from a tile the host let go of — closed, or released when the
+    // renderer reloaded — without reading the turn log beside it.
+    const abortCause = (): string => {
+      const reason: unknown = abortSignal?.reason;
+      if (reason instanceof Error) return reason.message;
+      return typeof reason === "string" ? reason : "unspecified";
+    };
     const denyForAbortedTurn = (): ApprovalDecision => {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
         sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
-        output: `[approval:cancelled] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} reason=turn-abort → deny-once`,
+        output: `[approval:cancelled] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} reason=turn-abort cause=${JSON.stringify(abortCause())} → deny-once`,
       });
       return markHostApprovalRejectedDecision({
         requestId: fullReq.id,

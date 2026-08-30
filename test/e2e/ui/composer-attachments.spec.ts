@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * Composer attachment redesign — DOM-level smoke checks.
@@ -32,20 +33,20 @@ test("legacy indexer popover removed; new attach button in action bar", async ({
 });
 
 test("composer renders and strip is absent when no attachments", async ({ mainWindow }) => {
-  const composer = mainWindow.locator('[data-testid="composer"]');
+  const composer = mainWindow.locator(testIdSelector(TEST_IDS.composer));
   const found = await composer
     .waitFor({ state: "visible", timeout: 15_000 })
     .then(() => true)
     .catch(() => false);
   test.skip(!found, "Composer not visible — skipping");
 
-  await expect(mainWindow.locator('[data-testid="composer-textarea"]')).toBeVisible();
+  await expect(mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea))).toBeVisible();
   // Empty state — strip occupies zero space.
   await expect(mainWindow.locator('[data-testid="composer-strip"]')).toHaveCount(0);
 });
 
 test("typing a stale marker does not flash a phantom chip", async ({ mainWindow }) => {
-  const textarea = mainWindow.locator('[data-testid="composer-textarea"]');
+  const textarea = mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea));
   const found = await textarea
     .waitFor({ state: "visible", timeout: 15_000 })
     .then(() => true)

@@ -6,6 +6,7 @@ import { layoutBoxes, layoutGutters, leaf, resizeGutter, splitLeaf, type ChatGro
 import { CHAT_SESSION_DRAG_TYPE } from "../chat-group-drop.js";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 import type { LvisApi } from "../../types.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 const t = ((key: string) => key) as never;
 
@@ -81,7 +82,7 @@ describe("ChatGroupFrame", () => {
   it("owns the work-panel toggle — the panel belongs to this conversation", () => {
     const onTogglePanel = vi.fn();
     render(frame({ panelOpen: true, onTogglePanel }));
-    const toggle = screen.getByTestId("chat-group-panel-toggle");
+    const toggle = screen.getByTestId(TEST_IDS.chatGroupPanelToggle);
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(toggle);
     expect(onTogglePanel).toHaveBeenCalledTimes(1);

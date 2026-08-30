@@ -15,6 +15,7 @@ import { OVERLAY_V1, PERMISSIONS, ROUTINES } from "../../src/shared/ipc-channels
 import { CHANNELS } from "../../src/contract/app-contract.js";
 import { validateSender } from "../../src/ipc/gated.js";
 import type { IpcMainInvokeEvent } from "electron";
+import { foreignFrameEvent } from "../../src/__tests__/test-helpers.js";
 
 // ─── Channel manifest ────────────────────────────────────────────────────────
 
@@ -113,37 +114,33 @@ const CHANNEL_MANIFEST: Record<string, "mutating" | "sensitive" | "public-read">
 
 // ─── validateSender unit tests ───────────────────────────────────────────────
 
-function makeEvent(url: string): IpcMainInvokeEvent {
-  return { senderFrame: { url } } as unknown as IpcMainInvokeEvent;
-}
-
 describe("validateSender", () => {
   it("trusts file:// renderer (packaged app)", () => {
-    expect(validateSender(makeEvent("file:///app/index.html"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("file:///app/index.html"))).toBe(true);
   });
 
   it("trusts http://localhost dev server", () => {
-    expect(validateSender(makeEvent("http://localhost:5173/"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("http://localhost:5173/"))).toBe(true);
   });
 
   it("trusts http://127.0.0.1 dev server", () => {
-    expect(validateSender(makeEvent("http://127.0.0.1:5173/"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("http://127.0.0.1:5173/"))).toBe(true);
   });
 
   it("rejects https://evil.com (remote origin)", () => {
-    expect(validateSender(makeEvent("https://evil.com"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("https://evil.com"))).toBe(false);
   });
 
   it("rejects http://localhost.attacker.com (hostname spoof)", () => {
-    expect(validateSender(makeEvent("http://localhost.attacker.com"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("http://localhost.attacker.com"))).toBe(false);
   });
 
   it("rejects https://localhost (HTTPS is not trusted)", () => {
-    expect(validateSender(makeEvent("https://localhost"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("https://localhost"))).toBe(false);
   });
 
   it("rejects empty url", () => {
-    expect(validateSender(makeEvent(""))).toBe(false);
+    expect(validateSender(foreignFrameEvent(""))).toBe(false);
   });
 
   it("returns false when the event has no senderFrame", () => {

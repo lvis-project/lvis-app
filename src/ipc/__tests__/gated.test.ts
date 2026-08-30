@@ -15,34 +15,31 @@ import {
   auditUnauthorized,
   validatePluginFrame,
 } from "../gated.js";
-
-function ev(url: string): IpcMainInvokeEvent {
-  return { senderFrame: { url } } as unknown as IpcMainInvokeEvent;
-}
+import { foreignFrameEvent } from "../../__tests__/test-helpers.js";
 
 describe("validateSender", () => {
   it("accepts file:// renderer", () => {
-    expect(validateSender(ev("file:///Applications/Lvis.app/dist/index.html"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("file:///Applications/Lvis.app/dist/index.html"))).toBe(true);
   });
 
   it("accepts http://localhost (dev server)", () => {
-    expect(validateSender(ev("http://localhost:5173/"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("http://localhost:5173/"))).toBe(true);
   });
 
   it("accepts http://127.0.0.1 (dev server)", () => {
-    expect(validateSender(ev("http://127.0.0.1:5173/"))).toBe(true);
+    expect(validateSender(foreignFrameEvent("http://127.0.0.1:5173/"))).toBe(true);
   });
 
   it("rejects attacker host that starts with 'localhost'", () => {
-    expect(validateSender(ev("http://localhost.attacker.com/"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("http://localhost.attacker.com/"))).toBe(false);
   });
 
   it("rejects arbitrary remote origin", () => {
-    expect(validateSender(ev("https://evil.example.com/"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("https://evil.example.com/"))).toBe(false);
   });
 
   it("rejects malformed URL", () => {
-    expect(validateSender(ev("not-a-url"))).toBe(false);
+    expect(validateSender(foreignFrameEvent("not-a-url"))).toBe(false);
   });
 
   // Electron nulls `senderFrame` once the sending frame is destroyed or
@@ -56,26 +53,26 @@ describe("validateSender", () => {
   });
 
   it("refuses a present frame with an empty url", () => {
-    expect(validateSender(ev(""))).toBe(false);
+    expect(validateSender(foreignFrameEvent(""))).toBe(false);
   });
 });
 
 describe("validateHostRendererSender", () => {
   it("accepts the host file renderer", () => {
-    expect(validateHostRendererSender(ev("file:///Applications/Lvis.app/dist/index.html"))).toBe(true);
+    expect(validateHostRendererSender(foreignFrameEvent("file:///Applications/Lvis.app/dist/index.html"))).toBe(true);
   });
 
   it("accepts dev server host renderer URLs", () => {
-    expect(validateHostRendererSender(ev("http://localhost:5173/"))).toBe(true);
-    expect(validateHostRendererSender(ev("http://127.0.0.1:5173/"))).toBe(true);
+    expect(validateHostRendererSender(foreignFrameEvent("http://localhost:5173/"))).toBe(true);
+    expect(validateHostRendererSender(foreignFrameEvent("http://127.0.0.1:5173/"))).toBe(true);
   });
 
   it("rejects plugin UI shell file frames", () => {
-    expect(validateHostRendererSender(ev("file:///dist/src/plugin-ui-shell.html"))).toBe(false);
+    expect(validateHostRendererSender(foreignFrameEvent("file:///dist/src/plugin-ui-shell.html"))).toBe(false);
   });
 
   it("rejects arbitrary remote origins", () => {
-    expect(validateHostRendererSender(ev("https://evil.example.com/"))).toBe(false);
+    expect(validateHostRendererSender(foreignFrameEvent("https://evil.example.com/"))).toBe(false);
   });
 
   it("rejects missing senderFrame for state-mutating host channels", () => {
@@ -96,25 +93,25 @@ describe("plugin-shell frame predicate — agreement across guards", () => {
   const SHELL_SUFFIX_LOOKALIKE = "file:///dist/src/evil-plugin-ui-shell.html";
 
   it("treats a host file frame that merely mentions the shell name as the HOST renderer", () => {
-    expect(validateHostRendererSender(ev(HOST_LOOKALIKE))).toBe(true);
-    expect(validatePluginFrame(ev(HOST_LOOKALIKE))).toBe(false);
+    expect(validateHostRendererSender(foreignFrameEvent(HOST_LOOKALIKE))).toBe(true);
+    expect(validatePluginFrame(foreignFrameEvent(HOST_LOOKALIKE))).toBe(false);
   });
 
   it("treats a remote page serving the shell filename as neither host nor plugin", () => {
-    expect(validateHostRendererSender(ev(REMOTE_LOOKALIKE))).toBe(false);
-    expect(validatePluginFrame(ev(REMOTE_LOOKALIKE))).toBe(false);
+    expect(validateHostRendererSender(foreignFrameEvent(REMOTE_LOOKALIKE))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent(REMOTE_LOOKALIKE))).toBe(false);
   });
 
   it("matches the real shell document, case-folded, on a /-anchored path segment", () => {
-    expect(validatePluginFrame(ev(SHELL))).toBe(true);
-    expect(validatePluginFrame(ev(SHELL_MIXED_CASE))).toBe(true);
-    expect(validateHostRendererSender(ev(SHELL))).toBe(false);
-    expect(validateHostRendererSender(ev(SHELL_MIXED_CASE))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent(SHELL))).toBe(true);
+    expect(validatePluginFrame(foreignFrameEvent(SHELL_MIXED_CASE))).toBe(true);
+    expect(validateHostRendererSender(foreignFrameEvent(SHELL))).toBe(false);
+    expect(validateHostRendererSender(foreignFrameEvent(SHELL_MIXED_CASE))).toBe(false);
   });
 
   it("does not accept a filename that merely ENDS with the shell name", () => {
-    expect(validatePluginFrame(ev(SHELL_SUFFIX_LOOKALIKE))).toBe(false);
-    expect(validateHostRendererSender(ev(SHELL_SUFFIX_LOOKALIKE))).toBe(true);
+    expect(validatePluginFrame(foreignFrameEvent(SHELL_SUFFIX_LOOKALIKE))).toBe(false);
+    expect(validateHostRendererSender(foreignFrameEvent(SHELL_SUFFIX_LOOKALIKE))).toBe(true);
   });
 });
 
@@ -127,7 +124,7 @@ describe("UNAUTHORIZED_FRAME", () => {
 describe("auditUnauthorized", () => {
   it("calls auditLogger.log with warn type and channel/frameUrl", () => {
     const mockLogger = { log: vi.fn() };
-    const event = ev("https://evil.example.com/") as IpcMainInvokeEvent;
+    const event = foreignFrameEvent("https://evil.example.com/") as IpcMainInvokeEvent;
     auditUnauthorized(mockLogger as never, "lvis:test:channel", event);
     expect(mockLogger.log).toHaveBeenCalledOnce();
     const call = mockLogger.log.mock.calls[0][0] as Record<string, unknown>;
@@ -143,7 +140,7 @@ describe("auditUnauthorized", () => {
   it("redacts the user's home directory in file:// frame URLs", () => {
     const mockLogger = { log: vi.fn() };
     const home = os.homedir();
-    const event = ev(`file://${home}/Documents/lvis-project/lvis-app/dist/src/plugin-ui-shell.html`) as IpcMainInvokeEvent;
+    const event = foreignFrameEvent(`file://${home}/Documents/lvis-project/lvis-app/dist/src/plugin-ui-shell.html`) as IpcMainInvokeEvent;
     auditUnauthorized(mockLogger as never, "lvis:test:channel", event);
     const parsed = JSON.parse(
       mockLogger.log.mock.calls[0][0].input as string,
@@ -155,15 +152,15 @@ describe("auditUnauthorized", () => {
 
 describe("validatePluginFrame", () => {
   it("accepts plugin-ui-shell.html", () => {
-    expect(validatePluginFrame(ev("file:///plugins/slug/plugin-ui-shell.html"))).toBe(true);
+    expect(validatePluginFrame(foreignFrameEvent("file:///plugins/slug/plugin-ui-shell.html"))).toBe(true);
   });
 
   it("rejects non-shell file URLs", () => {
-    expect(validatePluginFrame(ev("file:///plugins/slug/index.html"))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent("file:///plugins/slug/index.html"))).toBe(false);
   });
 
   it("rejects http:// URLs", () => {
-    expect(validatePluginFrame(ev("http://localhost:5173/"))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent("http://localhost:5173/"))).toBe(false);
   });
 
   it("refuses a missing frame", () => {
@@ -176,7 +173,7 @@ describe("gated() integration — unauthorized path returns UNAUTHORIZED_FRAME",
   it("handler is NOT called when sender is unauthorized", async () => {
     // Simulate what domain files do: check validateSender, return UNAUTHORIZED_FRAME
     const handler = vi.fn(async () => ({ ok: true }));
-    const event = ev("https://evil.example.com/") as IpcMainInvokeEvent;
+    const event = foreignFrameEvent("https://evil.example.com/") as IpcMainInvokeEvent;
 
     // Inline pattern (same as domain files use)
     const result = !validateSender(event) ? UNAUTHORIZED_FRAME : await handler(event);
@@ -187,7 +184,7 @@ describe("gated() integration — unauthorized path returns UNAUTHORIZED_FRAME",
 
   it("handler IS called when sender is authorized", async () => {
     const handler = vi.fn(async () => ({ ok: true, data: "hello" }));
-    const event = ev("file:///dist/index.html") as IpcMainInvokeEvent;
+    const event = foreignFrameEvent("file:///dist/index.html") as IpcMainInvokeEvent;
 
     const result = !validateSender(event) ? UNAUTHORIZED_FRAME : await handler(event);
 

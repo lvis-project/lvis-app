@@ -11,6 +11,7 @@ import { TooltipProvider } from "../../src/components/ui/tooltip.js";
 import { ActionPanel } from "../../src/ui/renderer/components/ActionPanel.js";
 import { renderApp } from "./render-app.js";
 import { MOCK_DEFAULT_SESSION_ID } from "./mock-lvis-api.js";
+import { TEST_IDS, testIdSelector } from "../../src/shared/test-ids.js";
 
 describe("App smoke (Phase 1 infra)", () => {
   it("renders App without crash", async () => {
@@ -176,7 +177,7 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeFalsy();
 
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="chat-group-panel-toggle"]')!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
     });
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenLastCalledWith(true));
     await waitFor(() =>
@@ -184,15 +185,15 @@ describe("App smoke (Phase 1 infra)", () => {
         container.querySelector('[data-testid="chat-side-panel-motion"]')?.getAttribute("aria-hidden"),
       ).toBe("false"),
     );
-    expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
+    expect(container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="chat-group-panel-toggle"]')!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
     });
     const closingMotion = container.querySelector('[data-testid="chat-side-panel-motion"]');
     expect(closingMotion).toBeTruthy();
     expect(closingMotion?.getAttribute("aria-hidden")).toBe("true");
-    expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
+    expect(container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))).toBeTruthy();
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenLastCalledWith(false));
     await waitFor(
       () => expect(container.querySelector('[data-testid="chat-side-panel-motion"]')).toBeFalsy(),
@@ -206,9 +207,9 @@ describe("App smoke (Phase 1 infra)", () => {
 
     // Open it on the chat surface, where the conversation that owns it is.
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="chat-group-panel-toggle"]')!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
     });
-    await waitFor(() => expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy());
+    await waitFor(() => expect(container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))).toBeTruthy());
 
     // Leaving for a view with no conversation takes the panel AND its toggle
     // with it — the panel reports on a conversation, and Settings is not one.
@@ -226,7 +227,7 @@ describe("App smoke (Phase 1 infra)", () => {
       container.querySelector('[data-testid="chat-surface"]')?.getAttribute("data-visible"),
     ).toBe("false");
     expect(
-      container.querySelector('[data-testid="chat-side-panel"]')?.closest('[data-testid="chat-surface"]'),
+      container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))?.closest('[data-testid="chat-surface"]'),
     ).toBeTruthy();
 
     // Coming back restores it — the state rode with the group, not with the
@@ -239,9 +240,9 @@ describe("App smoke (Phase 1 infra)", () => {
       expect(
         container.querySelector('[data-testid="chat-surface"]')?.getAttribute("data-visible"),
       ).toBe("true");
-      expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
+      expect(container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))).toBeTruthy();
     });
-    expect(container.querySelector('[data-testid="chat-group-panel-toggle"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))?.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("does not duplicate primary sidebar navigation in the right action panel", async () => {
@@ -379,7 +380,7 @@ describe("Settings inline (all modes)", () => {
 
     // The app-level navbar returns to the prior/home view.
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="view-path-back"]')!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.viewPathBack))!);
     });
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy(),
@@ -413,7 +414,7 @@ describe("sub-agent frames per tile", () => {
     const { container, emitAgentSpawnEvent } = await renderApp({
       history: { sessionId: MOCK_DEFAULT_SESSION_ID, messages: [{ role: "user", content: "kept" }] },
     });
-    await waitFor(() => expect(container.querySelector('[data-testid="composer-textarea"]')).toBeTruthy());
+    await waitFor(() => expect(container.querySelector(testIdSelector(TEST_IDS.composerTextarea))).toBeTruthy());
 
     await act(async () => {
       emitAgentSpawnEvent({ spawnId: "theirs", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Theirs", parentSessionId: "another-tile" });

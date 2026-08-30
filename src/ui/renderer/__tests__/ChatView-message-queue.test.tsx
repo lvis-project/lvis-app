@@ -16,6 +16,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { clearQueueStoreHandle, deferred, getQueueStore, submitChatMessage } from "../../../../test/renderer/helpers.js";
+import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
 describe("ChatView message queue (enqueue while streaming → drains after)", () => {
   afterEach(() => {
@@ -90,7 +91,7 @@ describe("ChatView ⌘K guide", () => {
     const { container, api } = await renderApp({ hasApiKey: true });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    const textarea = container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement;
+    const textarea = container.querySelector(testIdSelector(TEST_IDS.composerTextarea)) as HTMLTextAreaElement;
     expect(textarea).toBeTruthy();
     await act(async () => {
       fireEvent.change(textarea, { target: { value: "다음 라운드에서 표를 만들어줘" } });
@@ -110,7 +111,7 @@ describe("ChatView ⌘K guide", () => {
     const { container, api } = await renderApp({ hasApiKey: true });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    const textarea = container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement;
+    const textarea = container.querySelector(testIdSelector(TEST_IDS.composerTextarea)) as HTMLTextAreaElement;
     expect(textarea).toBeTruthy();
 
     await act(async () => {
@@ -128,7 +129,7 @@ describe("ChatView ⌘K guide", () => {
     const { container, api } = await renderApp({ hasApiKey: true });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    const textarea = container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement;
+    const textarea = container.querySelector(testIdSelector(TEST_IDS.composerTextarea)) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "keep this draft" } });
     const dock = document.createElement("section");
     dock.dataset.testid = "approval-dock";

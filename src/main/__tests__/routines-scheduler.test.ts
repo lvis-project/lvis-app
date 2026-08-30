@@ -5,31 +5,12 @@
  * cron lastFiredMinuteUTC dedup persistence, and dispatchNow (trigger-now IPC path).
  */
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { RoutinesStore } from "../routines-store.js";
 import { RoutinesScheduler } from "../routines-scheduler.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-
-function tempStore() {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-sched-"));
-  const store = new RoutinesStore(join(dir, "routines.json"));
-  const cleanup = () => cleanupTmpDir(dir);
-  return { store, cleanup };
-}
-
-function pastIso(offsetMs = -1000): string {
-  return new Date(Date.now() + offsetMs).toISOString();
-}
-
-function futureIso(offsetMs = 60_000): string {
-  return new Date(Date.now() + offsetMs).toISOString();
-}
+import { futureIso, tempRoutinesStore, pastIso } from "./routines-fixture.js";
 
 describe("RoutinesScheduler — llm-session dispatch", () => {
   it("fires onLlmSession handler when llm-session routine is due", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await store.add({
         trigger: "schedule",
@@ -51,7 +32,7 @@ describe("RoutinesScheduler — llm-session dispatch", () => {
   });
 
   it("does not fire onNotification for llm-session routine", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await store.add({
         trigger: "schedule",
@@ -74,7 +55,7 @@ describe("RoutinesScheduler — llm-session dispatch", () => {
 
 describe("RoutinesScheduler — notification-only dispatch", () => {
   it("fires onNotification handler for notification-only routine", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await store.add({
         trigger: "schedule",
@@ -95,7 +76,7 @@ describe("RoutinesScheduler — notification-only dispatch", () => {
   });
 
   it("does not fire onLlmSession for notification-only routine", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await store.add({
         trigger: "schedule",
@@ -118,7 +99,7 @@ describe("RoutinesScheduler — notification-only dispatch", () => {
 
 describe("RoutinesScheduler — future routine not fired", () => {
   it("does not fire routines scheduled in the future", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await store.add({
         trigger: "schedule",
@@ -141,7 +122,7 @@ describe("RoutinesScheduler — future routine not fired", () => {
 
 describe("RoutinesScheduler — markFired persistence", () => {
   it("updates lastFiredAt and dismisses one-shot routine after fire", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await store.add({
         trigger: "schedule",
@@ -164,7 +145,7 @@ describe("RoutinesScheduler — markFired persistence", () => {
 
 describe("RoutinesScheduler — dispatchNow (trigger-now IPC)", () => {
   it("dispatches routine immediately via dispatchNow", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -186,7 +167,7 @@ describe("RoutinesScheduler — dispatchNow (trigger-now IPC)", () => {
   });
 
   it("dispatchNow returns false for unknown id", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const scheduler = new RoutinesScheduler(store);
       const ok = await scheduler.dispatchNow("nonexistent-id");
@@ -197,7 +178,7 @@ describe("RoutinesScheduler — dispatchNow (trigger-now IPC)", () => {
   });
 
   it("dispatchNow updates lastFiredAt", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const r = await store.add({
         trigger: "schedule",
@@ -220,7 +201,7 @@ describe("RoutinesScheduler — dispatchNow (trigger-now IPC)", () => {
 
 describe("RoutinesScheduler — per-tick error isolation", () => {
   it("checkAndFire resolves even when a handler throws", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       await store.add({
         trigger: "schedule",

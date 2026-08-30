@@ -19,14 +19,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { createTmpDirTracker } from "../../../__tests__/support/tmp-dir-teardown.js";
 
-const tmpDirs = new Set<string>();
-
-function trackTmpDir(dir: string): string {
-  tmpDirs.add(dir);
-  return dir;
-}
+const tmpDirs = createTmpDirTracker();
 
 const runtimeTestState = vi.hoisted(() => ({
   browserWindows: [] as unknown[],
@@ -190,7 +185,7 @@ async function overlayHostApi(input: {
   return createHostApi!(
     "plugin-a",
     { id: "plugin-a", capabilities: ["host:overlay"] },
-    trackTmpDir(mkdtempSync(join(tmpdir(), "lvis-overlay-win-"))),
+    tmpDirs.track(mkdtempSync(join(tmpdir(), "lvis-overlay-win-"))),
     {
       registerDisposer: vi.fn(),
       trackOperation: <T>(operation: Promise<T>) => operation,
@@ -207,12 +202,7 @@ beforeEach(() => {
   runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
 });
 
-afterEach(async () => {
-  for (const dir of tmpDirs) {
-    await cleanupTmpDir(dir);
-  }
-  tmpDirs.clear();
-});
+afterEach(() => tmpDirs.cleanup());
 
 describe("hostApi.triggerConversation overlay send targets the live main window", () => {
   it("sends to the window created AFTER a close+reopen, not the boot capture", async () => {
