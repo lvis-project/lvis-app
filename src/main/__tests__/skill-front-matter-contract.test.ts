@@ -13,7 +13,8 @@
  * committed snapshot rather than restated here, so a test cannot agree with a
  * host constant that has drifted from the SDK.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
@@ -21,9 +22,9 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   SkillStore,
+  MAX_SKILL_TRIGGERS,
+  MAX_SKILL_TRIGGER_CHARS,
   SKILL_NAME_ALLOWLIST,
-  SKILL_NAME_MAX_CHARS,
-  isAllowedSkillName,
   parseFrontmatter,
 } from "../skill-store.js";
 import type { ActivePluginGeneration } from "../../plugins/plugin-generation-coordinator.js";
@@ -93,6 +94,34 @@ function pluginGeneration(pluginId: string, skillMarkdown: string): ActivePlugin
         sha256: fingerprint,
       }],
     }],
+  };
+}
+
+/** A generation contributing two skills, so one bad header can be contained. */
+function twoSkillGeneration(
+  pluginId: string,
+  brokenMarkdown: string,
+  goodMarkdown: string,
+): ActivePluginGeneration {
+  const fingerprint = "b".repeat(64);
+  const contribution = (localId: string, content: string) => ({
+    ownerPluginId: pluginId,
+    ownerVersion: "1.0.0",
+    kind: "skill" as const,
+    localId,
+    path: `skills/${localId}`,
+    fingerprint,
+    files: [{ path: `skills/${localId}/SKILL.md`, content, sha256: fingerprint }],
+  });
+  return {
+    pluginId,
+    pluginVersion: "1.0.0",
+    generationId: "g1",
+    artifactGenerationId: "3".repeat(64),
+    manifestSha256: "1".repeat(64),
+    receiptSha256: "2".repeat(64),
+    state: {},
+    contributions: [contribution("broken", brokenMarkdown), contribution("good", goodMarkdown)],
   };
 }
 
@@ -170,6 +199,114 @@ describe("skill front matter — the declared fields survive", () => {
   });
 });
 
+describe("skill front matter — a header that reads short, and one that does not read", () => {
+  it("reports a value an unquoted '#' truncated, and keeps the YAML reading", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { fm } = parseFrontmatter(
+        ["---", "name: hashed", "description: cost #1 priority", "---", "b"].join("\n"),
+      );
+      // YAML is right and the value really is short — the point is that the
+      // loss is announced rather than silent.
+      expect(fm.description).toBe("cost");
+      const said = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(said).toContain("description");
+      expect(said).toContain("hashed");
+      expect(said).toContain("cost #1 priority");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("says nothing when a quoted value legitimately differs from its raw line", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { fm } = parseFrontmatter(
+        ["---", "name: quoted", 'description: "cost #1 priority"', "---", "b"].join("\n"),
+      );
+      expect(fm.description).toBe("cost #1 priority");
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("refuses exactly the header shapes the loading policy documents", () => {
+    // The migration note in docs/development/skill-loading-policy.md tells an
+    // author which headers stop loading and how to quote them. It is only
+    // useful if it is accurate, so the shapes are checked here rather than
+    // trusted — the first draft of that table claimed an unquoted `3:1`
+    // breaks, and it does not.
+    const header = (description: string) =>
+      ["---", "name: probe", `description: ${description}`, "---", "b"].join("\n");
+    for (const description of ["@mention first", "[draft] notes", "use when: deploying"]) {
+      expect(() => parseFrontmatter(header(description)), description).toThrow();
+    }
+    expect(() => parseFrontmatter(header("ratio 3:1"))).not.toThrow();
+    expect(parseFrontmatter(header("ratio 3:1")).fm.description).toBe("ratio 3:1");
+    expect(() =>
+      parseFrontmatter(
+        ["---", "name: probe", "description: d", "metadata:", "\tauthor: y", "---", "b"].join("\n"),
+      ),
+    ).toThrow();
+  });
+
+  it("drops only the unreadable skill from a plugin, leaving the plugin active", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skill-contract-"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = new SkillStore({ userDir: dir });
+      // Tab indentation is a YAML syntax error, so this header does not parse.
+      const broken = ["---", "name: broken", "description: d", "metadata:", "\tauthor: x", "---", "b"].join("\n");
+      const good = ["---", "name: good", "description: Still here", "---", "b"].join("\n");
+      store.publishPluginGeneration(twoSkillGeneration("plugin-one", broken, good));
+
+      // The plugin activated and its readable skill is available.
+      expect((await store.load("plugin:plugin-one:good"))?.description).toBe("Still here");
+      expect(await store.load("plugin:plugin-one:broken")).toBeNull();
+      expect(store.listCatalogSync().map((entry) => entry.name)).toEqual([
+        "plugin:plugin-one:good",
+      ]);
+      const said = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(said).toContain("plugin-one:broken");
+    } finally {
+      warn.mockRestore();
+      await cleanupTmpDir(dir);
+    }
+  });
+});
+
+describe("skill front matter — triggers are bounded where the record is built", () => {
+  it("caps the declared hints in count and length", () => {
+    const many = Array.from({ length: 30 }, (_, i) => `trigger-${i}-${"x".repeat(80)}`);
+    const { fm } = parseFrontmatter(
+      ["---", "name: many", "description: d", `triggers: [${many.join(", ")}]`, "---", "b"].join("\n"),
+    );
+    expect(fm.triggers).toHaveLength(30); // the parse keeps what the author wrote
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skill-contract-"));
+    return (async () => {
+      try {
+        mkdirSync(join(dir, "many"));
+        writeFileSync(
+          join(dir, "many", "SKILL.md"),
+          ["---", "name: many", "description: d", `triggers: [${many.join(", ")}]`, "---", "b"].join("\n"),
+          "utf8",
+        );
+        const store = new SkillStore({ userDir: dir });
+        const skill = await store.load("many");
+        // The record is where the bound lands, so every consumer inherits it.
+        expect(skill?.triggers).toHaveLength(MAX_SKILL_TRIGGERS);
+        for (const trigger of skill?.triggers ?? []) {
+          expect(trigger.length).toBeLessThanOrEqual(MAX_SKILL_TRIGGER_CHARS);
+        }
+        expect(store.listCatalogSync()[0].triggers).toHaveLength(MAX_SKILL_TRIGGERS);
+      } finally {
+        await cleanupTmpDir(dir);
+      }
+    })();
+  });
+});
+
 describe("skill front matter — triggers reach the catalog and leave with the skill", () => {
   it("registers and unregisters a user skill's triggers with the skill itself", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-skill-contract-"));
@@ -210,13 +347,23 @@ describe("skill front matter — triggers reach the catalog and leave with the s
   });
 });
 
-describe("skill name rule — one rule, and it is the schema's", () => {
+describe("skill name rule — one charset, and it is the schema's", () => {
   it("the host's charset is the pattern the SDK schema carries", () => {
     // Read, never restated: a literal here would pass against a host constant
     // that had drifted away from the SDK, which is the whole failure this
     // guards.
     expect(SKILL_NAME_ALLOWLIST.source).toBe(skillComponent.properties.name.pattern);
-    expect(SKILL_NAME_MAX_CHARS).toBe(skillComponent.properties.name.maxLength);
+  });
+
+  it("the host enforces no length of its own; the ceiling is an admission rule", () => {
+    // The schema bounds a name at 64 characters and the marketplace refuses a
+    // longer one at publication. The host does not re-police that: a name is
+    // the author's, and a long directory name is not a safety property. If
+    // this ever starts failing, the host has grown a length check that the
+    // SDK's description says it does not have.
+    const ceiling = skillComponent.properties.name.maxLength;
+    expect(ceiling).toBeGreaterThan(0);
+    expect(SKILL_NAME_ALLOWLIST.test("a".repeat((ceiling as number) + 1))).toBe(true);
   });
 
   it("the record carries exactly the fields the schema declares", () => {
@@ -231,29 +378,30 @@ describe("skill name rule — one rule, and it is the schema's", () => {
   });
 
   it("admits the spellings the schema admits and refuses the ones it refuses", () => {
-    for (const name of ["My_Skill", "UPPER", "ab", "-lead", "trail-", "a".repeat(SKILL_NAME_MAX_CHARS)]) {
-      expect(isAllowedSkillName(name), name).toBe(true);
+    for (const name of ["My_Skill", "UPPER", "ab", "-lead", "trail-"]) {
+      expect(SKILL_NAME_ALLOWLIST.test(name), name).toBe(true);
     }
-    for (const name of ["", "has space", "dot.name", "../escape", "a".repeat(SKILL_NAME_MAX_CHARS + 1)]) {
-      expect(isAllowedSkillName(name), name).toBe(false);
+    for (const name of ["", "has space", "dot.name", "../escape"]) {
+      expect(SKILL_NAME_ALLOWLIST.test(name), name).toBe(false);
     }
   });
+});
 
-  it("refuses a name over the ceiling at load, not just at install", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "lvis-skill-contract-"));
-    try {
-      const overlong = "a".repeat(SKILL_NAME_MAX_CHARS + 1);
-      mkdirSync(join(dir, overlong));
-      writeFileSync(
-        join(dir, overlong, "SKILL.md"),
-        ["---", `name: ${overlong}`, "description: d", "---", "b"].join("\n"),
-        "utf8",
-      );
-      const store = new SkillStore({ userDir: dir });
-      expect(await store.load(overlong)).toBeNull();
-      expect(store.listCatalogSync()).toEqual([]);
-    } finally {
-      await cleanupTmpDir(dir);
-    }
+describe("the SDK schema snapshot", () => {
+  it("is the file `sources.json` recorded", () => {
+    // The offline half of the drift gate, run on every pull request: the bytes
+    // on disk are the bytes whose hash was recorded when the snapshot was
+    // taken. It catches the edit-the-copy mistake — a rule "fixed" here
+    // instead of in the SDK. The other half (are these still the SDK's bytes?)
+    // needs the network and runs in `.github/workflows/sdk-schema-drift.yml`.
+    const sources = JSON.parse(
+      readFileSync(join(REPO_ROOT, "schemas/sdk/sources.json"), "utf8"),
+    ) as { ref: string; repository: string; files: Record<string, { sha256: string }> };
+    const raw = readFileSync(join(REPO_ROOT, "schemas/sdk/skill-package.schema.json"), "utf8");
+    expect(sources.repository).toBe("lvis-project/lvis-plugin-sdk");
+    expect(sources.ref).toMatch(/^v\d+\.\d+\.\d+$/);
+    expect(createHash("sha256").update(raw, "utf8").digest("hex")).toBe(
+      sources.files["skill-package.schema.json"].sha256,
+    );
   });
 });

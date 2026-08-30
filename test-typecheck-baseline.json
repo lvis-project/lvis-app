@@ -95,7 +95,7 @@
     "src/mcp/__tests__/stdio-server-loop.test.ts": 1,
     "src/memory/__tests__/preference-refresh-service.test.ts": 1,
     "src/permissions/__tests__/agent-action-approver.test.ts": 1,
-    "src/permissions/__tests__/approval-gate.test.ts": 30,
+    "src/permissions/__tests__/approval-gate.test.ts": 27,
     "src/permissions/__tests__/effect-enforcement.test.ts": 1,
     "src/permissions/__tests__/host-fetch-verb-snapshot.test.ts": 1,
     "src/permissions/__tests__/hostapi-effect-recorder.test.ts": 1,

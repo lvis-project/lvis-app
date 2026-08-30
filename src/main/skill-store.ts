@@ -39,25 +39,39 @@ const log = createLogger("lvis");
  * `skillName` arg to navigate outside the directory or smuggle shell
  * metacharacters into the resolved file path.
  *
- * This charset and the length ceiling below are ALSO the authoring contract:
- * they are what `$defs/skillComponent/properties/name` of the SDK schema
- * carries, so a name the marketplace admits is a name this host can install
- * and a name this host refuses never reaches publication. The two are held
- * equal by a test that reads the pattern out of the committed schema snapshot
- * rather than restating it (`__tests__/skill-front-matter-contract.test.ts`).
- * The regex stays written out here because it is a path gate first: its
- * security property has to be readable where it is enforced.
+ * This charset is ALSO the authoring contract: it is what
+ * `$defs/skillComponent/properties/name` of the SDK schema carries, so a name
+ * the marketplace admits is a name this host can install. A test reads the
+ * pattern out of the committed schema snapshot rather than restating it
+ * (`__tests__/skill-front-matter-contract.test.ts`). The regex stays written
+ * out here because it is a path gate first: its security property has to be
+ * readable where it is enforced.
+ *
+ * The charset is ALL the host checks. The schema's 64-character ceiling is an
+ * admission rule — it bounds what the marketplace publishes — and the host
+ * does not re-police it: a name is the author's, and a long one that reached
+ * the disk is not a safety problem, only an unusually long directory name.
  */
 export const SKILL_NAME_ALLOWLIST = /^[a-zA-Z0-9_-]+$/;
-/**
- * Ceiling on a skill name, matching the schema's `maxLength`. A name becomes a
- * directory segment and a picker label, and both are bounded surfaces.
- */
-export const SKILL_NAME_MAX_CHARS = 64;
 
-/** Is `name` a legal skill name — path-safe charset and within the ceiling? */
-export function isAllowedSkillName(name: string): boolean {
-  return name.length <= SKILL_NAME_MAX_CHARS && SKILL_NAME_ALLOWLIST.test(name);
+/**
+ * Bounds on the keyword hints a skill declares. Applied where the record is
+ * built, not where it is rendered, so every consumer inherits them —
+ * `skill_list`, the IPC catalog and the prompt section all read the same
+ * already-bounded list rather than each re-deriving one. A skill cannot buy
+ * itself room in a token-budgeted catalog by declaring hundreds of them.
+ */
+export const MAX_SKILL_TRIGGERS = 8;
+export const MAX_SKILL_TRIGGER_CHARS = 48;
+
+/** Cap the declared hints in count and length; order and spelling are kept. */
+function boundedTriggers(triggers: readonly string[] | undefined): readonly string[] {
+  if (!triggers || triggers.length === 0) return Object.freeze([]);
+  return Object.freeze(
+    triggers.slice(0, MAX_SKILL_TRIGGERS).map((trigger) =>
+      trigger.length > MAX_SKILL_TRIGGER_CHARS ? trigger.slice(0, MAX_SKILL_TRIGGER_CHARS) : trigger,
+    ),
+  );
 }
 // Built from the ONE selector pattern (src/shared/plugin-skill-selector.ts), so
 // the catalog, `skill_load`/`skill_read`, and the turn-scope gate cannot drift.
@@ -220,7 +234,7 @@ function materializedSkill(
  * keeping different subsets.
  */
 function skillComponentFields(fm: SkillFrontmatter): SkillComponentFields {
-  const fields: SkillComponentFields = { triggers: Object.freeze(fm.triggers ?? []) };
+  const fields: SkillComponentFields = { triggers: boundedTriggers(fm.triggers) };
   if (fm.license !== undefined) fields.license = fm.license;
   if (fm.compatibility !== undefined) fields.compatibility = fm.compatibility;
   if (fm.metadata !== undefined) fields.metadata = fm.metadata;
@@ -383,26 +397,69 @@ export function parseFrontmatter(raw: string): {
   fm: SkillFrontmatter;
   body: string;
 } {
-  const { block, body } = parseFrontmatterBlock(raw);
+  const { fields, block, body } = parseFrontmatterBlock(raw);
   const fm: SkillFrontmatter = { name: "" };
   const parsed: unknown = block.length > 0 ? parseYaml(block) : undefined;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { fm, body };
   const doc = parsed as Record<string, unknown>;
 
-  if (typeof doc.name === "string") fm.name = doc.name.trim();
-  if (typeof doc.description === "string") fm.description = doc.description.trim();
+  const scalar = (key: string): string | undefined => {
+    const value = doc[key];
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    warnOnShortenedScalar(key, fields.get(key), trimmed, doc.name);
+    return trimmed;
+  };
+
+  const name = scalar("name");
+  if (name !== undefined) fm.name = name;
+  const description = scalar("description");
+  if (description !== undefined) fm.description = description;
   if (doc.triggers !== undefined) fm.triggers = parseFrontmatterStringList(doc.triggers);
-  if (typeof doc.license === "string") fm.license = doc.license.trim();
-  if (typeof doc.compatibility === "string") fm.compatibility = doc.compatibility.trim();
+  const license = scalar("license");
+  if (license !== undefined) fm.license = license;
+  const compatibility = scalar("compatibility");
+  if (compatibility !== undefined) fm.compatibility = compatibility;
   if (doc.metadata && typeof doc.metadata === "object" && !Array.isArray(doc.metadata)) {
     fm.metadata = doc.metadata as Record<string, unknown>;
   }
   // The schema spells this key `allowed-tools`; the TS field is camel-cased
   // because the rest of this record is, and the hyphen is not addressable.
-  if (typeof doc["allowed-tools"] === "string") {
-    fm.allowedTools = (doc["allowed-tools"] as string).trim();
-  }
+  const allowedTools = scalar("allowed-tools");
+  if (allowedTools !== undefined) fm.allowedTools = allowedTools;
   return { fm, body };
+}
+
+/**
+ * Say so when YAML read less of a line than the author probably wrote.
+ *
+ * `description: cost #1 priority` is, to YAML, the value `cost` followed by a
+ * comment — the rest is gone, and gone silently, which is the one way a
+ * correct parser is worse than the line reader it replaced. The flat reading
+ * of the same line still holds the whole text, so the two can be compared and
+ * the difference reported.
+ *
+ * Only unquoted scalars are compared. For a quoted one YAML's reading is
+ * authoritative and the flat reading is a crude approximation of it (escapes,
+ * embedded colons), so a difference there means nothing. The YAML value is
+ * kept either way: this reports the loss, it does not paper over it.
+ */
+function warnOnShortenedScalar(
+  key: string,
+  rawLine: string | undefined,
+  parsedValue: string,
+  skillName: unknown,
+): void {
+  if (rawLine === undefined) return;
+  const raw = rawLine.trim();
+  if (raw.startsWith('"') || raw.startsWith("'")) return;
+  if (raw === parsedValue) return;
+  const label = typeof skillName === "string" && skillName.length > 0 ? skillName : "<unnamed>";
+  log.warn(
+    `skill frontmatter: '${key}' of "${label}" read as ${JSON.stringify(parsedValue)}, ` +
+      `but the line carries ${JSON.stringify(raw)} — an unquoted '#' starts a YAML ` +
+      `comment; quote the value to keep it whole`,
+  );
 }
 
 export interface SkillStoreOptions {
@@ -455,7 +512,7 @@ export class SkillStore {
     if (PLUGIN_SKILL_SELECTOR_ALLOWLIST.test(name)) {
       return this.pluginSkills.get(name) ?? null;
     }
-    if (!isAllowedSkillName(name)) return null;
+    if (!SKILL_NAME_ALLOWLIST.test(name)) return null;
     let canonicalDir: string;
     try {
       canonicalDir = await realpath(this.userDir);
@@ -650,7 +707,23 @@ export class SkillStore {
     }
     for (const contribution of generation.contributions) {
       if (contribution.kind !== "skill") continue;
-      const skill = materializedSkill(generation, contribution);
+      // One unreadable SKILL.md drops ITS skill, not the plugin. A header the
+      // YAML parser refuses is a defect in one contributed file, and letting
+      // it throw here would take the whole activation down with it — every
+      // other skill and every tool the plugin contributes. The user-directory
+      // scan has always contained a bad entry this way; the bundled path now
+      // matches it. The duplicate-selector check below still throws: that is
+      // the generation contradicting itself, not one file being malformed.
+      let skill: LoadedSkill;
+      try {
+        skill = materializedSkill(generation, contribution);
+      } catch (err) {
+        log.warn(
+          `plugin Skill '${generation.pluginId}:${contribution.localId}' skipped: %s`,
+          (err as Error).message,
+        );
+        continue;
+      }
       if (next.has(skill.name)) {
         throw new Error(`duplicate plugin Skill selector: ${skill.name}`);
       }
@@ -731,7 +804,7 @@ export class SkillStore {
       const { baseName, filePath } = candidate;
       // C2(b): allowlist on filename — reject anything with `/`, `..`, NUL,
       // or other disallowed characters before opening the file.
-      if (!isAllowedSkillName(baseName)) {
+      if (!SKILL_NAME_ALLOWLIST.test(baseName)) {
         log.warn(`skill scan: rejected non-allowlist entry: ${entry.name}`);
         continue;
       }
@@ -907,7 +980,7 @@ export class SkillStore {
       const candidate = this.skillCandidate(dir, entry);
       if (!candidate) continue;
       const { baseName, filePath } = candidate;
-      if (!isAllowedSkillName(baseName)) {
+      if (!SKILL_NAME_ALLOWLIST.test(baseName)) {
         log.warn(`skill catalog: rejected non-allowlist entry: ${entry.name}`);
         continue;
       }
@@ -936,7 +1009,7 @@ export class SkillStore {
         skills.push({
           name,
           description: normalizeCatalogDescription(fm.description ?? ""),
-          triggers: Object.freeze(fm.triggers ?? []),
+          triggers: boundedTriggers(fm.triggers),
           baseName,
           filePath: canonicalFile,
         });
@@ -992,7 +1065,7 @@ function resolveSkillName(baseName: string, fm: SkillFrontmatter): string {
   if (name !== baseName) {
     throw new Error(`frontmatter name "${name}" must match skill id "${baseName}"`);
   }
-  if (!isAllowedSkillName(name)) {
+  if (!SKILL_NAME_ALLOWLIST.test(name)) {
     throw new Error(`rejected non-allowlist frontmatter name "${name}"`);
   }
   return name;

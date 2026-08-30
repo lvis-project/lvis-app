@@ -1,0 +1,11 @@
+{
+  "comment": "Byte-for-byte snapshots of SDK-owned schema files. The SDK is the single home of the contract; this copy has no authority. Refresh with `node scripts/sync-sdk-schemas.mjs --ref <sdk-tag>` — never by editing the snapshot.",
+  "repository": "lvis-project/lvis-plugin-sdk",
+  "defaultBranch": "main",
+  "ref": "v13.2.0",
+  "files": {
+    "skill-package.schema.json": {
+      "sha256": "4cb162c64d4bf1ad52842e148521a17b2172725d2892e4b6ea295cfce8a78d40"
+    }
+  }
+}
