@@ -49,6 +49,7 @@ function renderLane() {
         <FloatingRightLane>
           <OverlayCardRegion
             chatGroupId="main"
+            actionChatGroupId="main"
             overlayCardTile={() => ({ chatGroupId: "main", orphaned: false })}
             onPluginPrimaryAction={vi.fn()}
           />

@@ -166,12 +166,13 @@ export function useRoutineOverlay({
       const { source, pendingPrompt, summary } = item;
       if (source.kind === "routine" || !pendingPrompt) return;
 
-      // Resolved from the card's ORIGIN, not from the tile that rendered it.
-      // The two agree whenever the origin conversation is open — that is how
-      // the card got there — but the tile can close between the paint and the
-      // click, and inserting into the caller's tile then would put a prompt
-      // staged for one conversation into another. A card with no origin is
-      // the focused tile's by definition, so the caller's group stands.
+      // Resolved from the card's ORIGIN, not from the surface that rendered
+      // it. The two agree whenever the origin conversation is open — that is
+      // how the card got there — but the tile can close between the paint and
+      // the click, and inserting into the caller's tile then would put a
+      // prompt staged for one conversation into another. A card with no origin
+      // has no conversation to contradict, so the group the caller named (a
+      // tile's own, or the focused one for the window's region) stands.
       const targetGroupId = item.originSessionId === undefined
         ? chatGroupId
         : tileHoldingSession(registry.readTiles(), item.originSessionId)?.chatGroupId;

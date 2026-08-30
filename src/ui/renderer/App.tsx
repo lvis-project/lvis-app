@@ -38,6 +38,8 @@ import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { ApprovalDock } from "./components/permissions/ApprovalDock.js";
+import { FloatingRightLane } from "./components/FloatingRightLane.js";
+import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import type { ApprovalRequest } from "./types.js";
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
 import type { ExactDenyDraft } from "./exact-permission-decision.js";
@@ -273,12 +275,12 @@ export function App() {
     focusGroup(chatGroupId);
     return true;
   }, [focusGroup]);
-  // Which tile shows an overlay card. Only the window can answer it: it needs
-  // every tile's conversation and which one is focused.
+  // Which surface shows an overlay card. Only the window can answer it: it
+  // needs every tile's conversation to say whether any of them owns the card.
   const overlayCardTileForWindow = useCallback(
     (originSessionId: string | undefined): OverlayCardPlacement =>
-      overlayCardTile(tileSessions, chatGroups.focusedId, originSessionId),
-    [tileSessions, chatGroups.focusedId],
+      overlayCardTile(tileSessions, originSessionId),
+    [tileSessions],
   );
 
   const focusTileHolding = useCallback((sessionId: string): boolean => {
@@ -1710,6 +1712,26 @@ export function App() {
                         );
                       })()}
                     </ErrorBoundary>
+                    {/* The window's own overlay region: the cards no open
+                        conversation owns — a routine fire, a plugin event, one
+                        whose origin conversation has left the screen. Drawn
+                        once here rather than in whichever tile happens to be
+                        focused, which would say the card belongs to that
+                        conversation and would make it jump between tiles as
+                        focus moves. Its action names the focused conversation
+                        (`actionChatGroupId`), stated rather than inferred from
+                        where the card landed. */}
+                    <FloatingRightLane>
+                      <OverlayCardRegion
+                        chatGroupId={null}
+                        actionChatGroupId={chatGroups.focusedId}
+                        overlayCardTile={overlayCardTileForWindow}
+                        onPluginPrimaryAction={(id, chatGroupId) => {
+                          void handlePluginPrimaryAction(id, chatGroupId);
+                        }}
+                        onRoutineAcknowledge={handleRoutineAcknowledge}
+                      />
+                    </FloatingRightLane>
                     {/* The window's own dock: only requests no conversation
                         surface claimed (see `unclaimedApprovals`). Its scope is
                         this wrapper — beside the tiles, an ancestor of none —

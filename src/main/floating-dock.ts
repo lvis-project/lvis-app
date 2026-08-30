@@ -127,6 +127,17 @@ export interface DockBounds {
 
 /** What the host shows in its own line, above every plugin slot. */
 export interface DockActivity {
+  /**
+   * WHICH conversation is doing it — the tile's title, not its id.
+   *
+   * Required, and first, because the dock holds ONE activity line while the
+   * window can hold four conversations. An unlabelled line means the user
+   * cannot tell which of them the progress belongs to, and the next line to
+   * arrive silently replaces it. Naming the conversation is what makes a
+   * single line honest; a caller that has no conversation to name says so
+   * (the window's own work) rather than leaving it out.
+   */
+  readonly conversation: string;
   /** One line: what the app is doing right now. */
   readonly summary: string;
   /** `null` when the work has no measurable progress. */

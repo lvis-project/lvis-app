@@ -1,13 +1,14 @@
-// OverlayCardRegion — mounts this tile's active OverlayCard from OverlayContext.
+// OverlayCardRegion — mounts one surface's active OverlayCard from OverlayContext.
 //
-// Renders in a separate z-layer inside ChatView above the scroll area.
+// Renders in a separate z-layer above the scroll area: inside ChatView for a
+// tile, in the window's own lane for the cards no conversation owns.
 // Never injects entries into chat history; routine sources remain isolated.
 //
-// One card renders in ONE tile — see `overlayCardTile`. The queue is the
-// window's, but the SLICE of it this tile shows, and which card of that slice
-// is active, belong to the tile: a window-wide counter would say "1/3" over a
-// tile that has one card, and stepping next would move to a card that renders
-// somewhere else entirely.
+// One card renders on ONE surface — see `overlayCardTile`. The queue is the
+// window's, but the SLICE of it a surface shows, and which card of that slice
+// is active, belong to that surface: a window-wide counter would say "1/3"
+// over a tile that has one card, and stepping next would move to a card that
+// renders somewhere else entirely.
 //
 // Two source variants:
 //   - routine: primary action opens the routine's session (only when
@@ -24,8 +25,19 @@ import { FLOATING_LANE_ITEM_WIDTH } from "./FloatingRightLane.js";
 import type { OverlayCardPlacement } from "./chat-group-session-registry.js";
 
 export interface OverlayCardRegionProps {
-  /** The tile this region renders inside. */
-  chatGroupId: string;
+  /**
+   * The tile this region renders inside, or `null` when it is the window's
+   * own region — the one that draws what no conversation owns.
+   */
+  chatGroupId: string | null;
+  /**
+   * The conversation this region's primary action runs in. A tile's region
+   * acts in its own tile. The window's region has no conversation of its own,
+   * so it names the focused one — the conversation the user is looking at,
+   * the same rule an unowned question already follows. Stated here rather
+   * than inferred from where the card happens to be drawn.
+   */
+  actionChatGroupId: string;
   /**
    * Where a card belongs, given the conversation it came from, and whether
    * that conversation is still open. The window answers it, because only the
@@ -42,15 +54,16 @@ export interface OverlayCardRegionProps {
 }
 
 export function OverlayCardRegion({
-  chatGroupId, overlayCardTile, onPluginPrimaryAction, onRoutineAcknowledge,
+  chatGroupId, actionChatGroupId, overlayCardTile, onPluginPrimaryAction, onRoutineAcknowledge,
 }: OverlayCardRegionProps) {
   const { t } = useTranslation();
   const { queue, dismiss, openSession, expandedCardIds, setCardExpanded } =
     useOverlayContext();
 
-  // This tile's slice of the window queue. Every tile mounts a region and each
-  // one keeps only the cards attributed to it, so a card is shown — and so
-  // dismissed or confirmed — exactly once however many tiles are open.
+  // This surface's slice of the window queue. Every tile mounts a region, the
+  // window mounts one more, and each keeps only the cards attributed to it, so
+  // a card is shown — and so dismissed or confirmed — exactly once however
+  // many tiles are open.
   const mine = useMemo(
     () => queue.filter((item) => overlayCardTile(item.originSessionId).chatGroupId === chatGroupId),
     [queue, overlayCardTile, chatGroupId],
@@ -88,6 +101,7 @@ export function OverlayCardRegion({
     return (
       <div
         data-testid="overlay-card-region"
+        data-overlay-surface={chatGroupId ?? "window"}
         // Position comes from `FloatingRightLane`, which is also what keeps the
         // action-panel rail from landing on top of this card's controls.
         className={`pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`}
@@ -139,6 +153,7 @@ export function OverlayCardRegion({
     return (
       <div
         data-testid="overlay-card-region"
+        data-overlay-surface={chatGroupId ?? "window"}
         // Position comes from `FloatingRightLane`, which is also what keeps the
         // action-panel rail from landing on top of this card's controls.
         className={`pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`}
@@ -160,7 +175,7 @@ export function OverlayCardRegion({
             onPrimaryAction={orphaned ? undefined : () => {
               // Dismiss from queue first, then notify App for chat insert
               dismiss(active.id);
-              onPluginPrimaryAction(active.id, chatGroupId);
+              onPluginPrimaryAction(active.id, actionChatGroupId);
             }}
             {...(orphaned ? { notice: t("overlayCardRegion.originConversationClosed") } : {})}
             primaryActionLabel={active.primaryActionLabel ?? t("overlayCardRegion.confirm")}

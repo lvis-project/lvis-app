@@ -21,6 +21,7 @@ const dock = window.lvisDock;
 
 const els = {
   activity: document.getElementById("activity"),
+  conversation: document.getElementById("conversation"),
   summary: document.getElementById("summary"),
   detail: document.getElementById("detail"),
   bar: document.getElementById("bar"),
@@ -56,6 +57,12 @@ function main() {
     // plugin-supplied fragment in it, and the difference must not depend on
     // remembering.
     els.summary.textContent = activity.summary;
+    // Which conversation the line belongs to. One line, up to four
+    // conversations: without the name the user cannot tell whose progress
+    // this is, and cannot tell that the previous line was replaced.
+    const conversation = typeof activity.conversation === "string" ? activity.conversation : "";
+    els.conversation.textContent = conversation;
+    els.conversation.hidden = conversation.length === 0;
     const detail = typeof activity.detail === "string" ? activity.detail : "";
     els.detail.textContent = detail;
     els.detail.hidden = detail.length === 0;
