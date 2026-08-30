@@ -56,10 +56,14 @@ export function hasOnlyKeys(value: object, allowed: ReadonlySet<string> | readon
 }
 
 /**
- * Whether `value` is an array whose every element is a string. `every`
- * skips holes, so a sparse array passes; the inputs this guards are parsed
- * JSON and IPC payloads, which cannot carry holes.
+ * Whether `value` is an array whose every element is a string, with no holes.
+ * `Array.prototype.every` skips holes, so a bare `every` would let a sparse
+ * array through and a consumer would then read `undefined` out of a value
+ * typed `string[]`; the spread turns each hole into `undefined`, which fails
+ * the element check, so `[ , "a"]` is refused. Parsed JSON and IPC payloads
+ * cannot carry holes, so for them this is the same verdict as `every`; the
+ * A2A codec validates in-memory objects, where the difference is real.
  */
 export function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return Array.isArray(value) && [...value].every((item) => typeof item === "string");
 }

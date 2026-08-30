@@ -90,4 +90,13 @@ describe("isStringArray", () => {
     expect(isStringArray([undefined])).toBe(false);
     expect(isStringArray(null)).toBe(false);
   });
+
+  it("refuses a sparse array: a hole would surface as undefined in a string[]", () => {
+    const sparse = new Array<string>(1);
+    expect(isStringArray(sparse)).toBe(false);
+    const holeInTheMiddle: string[] = [];
+    holeInTheMiddle[0] = "a";
+    holeInTheMiddle[2] = "c";
+    expect(isStringArray(holeInTheMiddle)).toBe(false);
+  });
 });
