@@ -516,6 +516,30 @@ describe("model card (status-row model cell)", () => {
     await waitFor(() => expect(subscriptionUseApiForChat).toHaveBeenCalledTimes(1));
   });
 
+  it("checks the subscription provider — not an API model — while a subscription runtime is active", async () => {
+    getSettings.mockResolvedValue({
+      ...settingsWithPins(),
+      llm: { ...settingsWithPins().llm, activeChatRuntime: { kind: "subscription", provider: "codex" } },
+    });
+    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    fireEvent.click(getByTestId("iab-status-model"));
+    const card = await findByTestId("model-quick-picker");
+    await waitFor(() => expect(card.querySelectorAll("[role='option']").length).toBe(3));
+    const checked = card.querySelectorAll("[role='option'][aria-selected='true']");
+    expect(checked).toHaveLength(1);
+    expect(checked[0]?.querySelector("button")?.getAttribute("data-testid")).toBe("model-quick-picker-option:codex");
+    expect(checked[0]?.textContent).toContain("Codex");
+    // The API model that happens to share the settings the API path still
+    // holds (vendor "openai-compatible", model "qwen3.8-27b-gguf") is listed
+    // as an alternative, not marked as the route the chat is actually on.
+    expect(
+      card
+        .querySelector("[data-testid='model-quick-picker-option:openai-compatible:qwen3.8-27b-gguf']")
+        ?.closest("[role='option']")
+        ?.getAttribute("aria-selected"),
+    ).toBe("false");
+  });
+
   it("carries the reasoning control and the way to the full catalogue", async () => {
     const onOpenModelSettings = vi.fn();
     const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings });

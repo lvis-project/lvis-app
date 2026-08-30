@@ -601,7 +601,9 @@ function ModelQuickPicker({
   }, [open]);
 
   const pick = async (choice: ModelCardChoice) => {
-    if (choice.current) {
+    // The subscription row is the card's own "you are here" marker, not a
+    // pick — it is always `current` and the chat is on it already.
+    if (choice.kind === "subscription" || choice.current) {
       setOpen(false);
       return;
     }
@@ -688,20 +690,26 @@ function ModelQuickPicker({
           {t("bottomActionRow.modelPickerModels")}
         </div>
         <ul className="max-h-56 overflow-y-auto px-1 py-1" role="listbox" aria-label={t("bottomActionRow.modelPickerModels")}>
-          {choices.map((choice) => (
-            <li key={`${choice.vendor}::${choice.modelId}`} role="option" aria-selected={choice.current}>
+          {choices.map((choice) => {
+            const key = choice.kind === "api" ? `${choice.vendor}::${choice.modelId}` : `subscription::${choice.provider}`;
+            const testId = choice.kind === "api"
+              ? `model-quick-picker-option:${choice.vendor}:${choice.modelId}`
+              : `model-quick-picker-option:${choice.provider}`;
+            return (
+            <li key={key} role="option" aria-selected={choice.current}>
               <button
                 type="button"
                 onClick={() => void pick(choice)}
-                data-testid={`model-quick-picker-option:${choice.vendor}:${choice.modelId}`}
+                data-testid={testId}
                 className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent"
               >
                 <span className="max-w-[7rem] shrink-0 truncate text-caption text-muted-foreground">{choice.vendorLabel}</span>
-                <span className="min-w-0 flex-1 truncate">{choice.modelId}</span>
+                <span className="min-w-0 flex-1 truncate">{choice.modelId ?? ""}</span>
                 {choice.current ? <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /> : null}
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
         {anyPinned ? null : (
           <p className="px-3 pb-2 text-caption text-muted-foreground" data-testid="model-quick-picker-no-pins">

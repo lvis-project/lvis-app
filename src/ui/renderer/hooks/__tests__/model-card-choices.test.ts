@@ -51,4 +51,25 @@ describe("modelCardChoices", () => {
     expect(modelCardChoices(llm({ pinnedModels: [] }))).toEqual([expect.objectContaining({ modelId: "gpt-5.4", current: true })]);
     expect(modelCardChoices(llm({}))).toEqual([expect.objectContaining({ modelId: "gpt-5.4", current: true })]);
   });
+
+  it("checks the subscription provider, not the API model it happens to share settings with, while a subscription runtime is active", () => {
+    const choices = modelCardChoices(llm({
+      pinnedModels: ["gpt-5.4"],
+      activeChatRuntime: { kind: "subscription", provider: "codex", model: "gpt-5.1-codex" },
+    }));
+    expect(choices).toEqual([
+      expect.objectContaining({ kind: "subscription", provider: "codex", vendorLabel: "Codex", modelId: "gpt-5.1-codex", current: true }),
+      expect.objectContaining({ kind: "api", vendor: "openai", modelId: "gpt-5.4", current: false }),
+    ]);
+  });
+
+  it("names the subscription provider alone when the runtime has no model of its own", () => {
+    const choices = modelCardChoices(llm({
+      pinnedModels: [],
+      activeChatRuntime: { kind: "subscription", provider: "kimi-code" },
+    }));
+    expect(choices).toEqual([
+      expect.objectContaining({ kind: "subscription", provider: "kimi-code", vendorLabel: "Kimi Code", modelId: null, current: true }),
+    ]);
+  });
 });
