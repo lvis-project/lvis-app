@@ -13,8 +13,10 @@ import {
 import {
   DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
   isSubscriptionRuntimeId,
+  subscriptionRuntimeDescriptor,
   type SubscriptionChatRuntimeSelection,
   type SubscriptionRuntimeCapabilities,
+  type SubscriptionRuntimeId,
 } from "../../../shared/subscription-runtime.js";
 import { selectSubscriptionRuntimeUiPolicy, type SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 
@@ -289,7 +291,8 @@ export function useSettings(api: LvisApi): UseSettingsResult {
   };
 }
 
-export interface ModelCardChoice {
+interface ApiModelCardChoice {
+  kind: "api";
   vendor: LLMVendor;
   vendorLabel: string;
   modelId: string;
@@ -298,13 +301,35 @@ export interface ModelCardChoice {
 }
 
 /**
- * What the composer's model card lists: the model the chat is on, then the
- * pinned models, resolved to the vendor that offers each.
+ * The card's row for an active subscription runtime. A subscription session
+ * has exactly one active route, and this is it — it is never one of several
+ * candidates, so `current` is always `true` and it is never clickable.
+ * `modelId` is null when the runtime has no model of its own to name (see
+ * `SubscriptionRuntimeDescriptor.supportsModelSelection`).
+ */
+interface SubscriptionModelCardChoice {
+  kind: "subscription";
+  provider: SubscriptionRuntimeId;
+  vendorLabel: string;
+  modelId: string | null;
+  current: true;
+}
+
+export type ModelCardChoice = ApiModelCardChoice | SubscriptionModelCardChoice;
+
+/**
+ * What the composer's model card lists: the route the chat is on right now,
+ * then the pinned API models, resolved to the vendor that offers each.
  *
- * The current model is always there, pinned or not — the card is where a
+ * The current route is always there, pinned or not — the card is where a
  * person looks to see what they are talking to, and a list that omits it
- * answers the wrong question. It leads when it is not itself pinned;
- * otherwise it sits where the pin order puts it.
+ * answers the wrong question. When the chat is on a subscription runtime
+ * (`llm.activeChatRuntime`), that provider — not an API model — is the
+ * checked row; API models are listed as alternatives, none of them checked,
+ * because switching to one leaves the subscription runtime (see
+ * `subscriptionUseApiForChat` at the call site). Otherwise the current API
+ * model leads when it is not itself pinned; otherwise it sits where the pin
+ * order puts it.
  *
  * `pinnedModels` stores ids only, so a stored id is matched against what is
  * actually offered — the active vendor's curated line plus every synced
@@ -341,19 +366,47 @@ export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
     activeBlock,
     active === "openai-compatible" ? llm.marketplaceProviderPresetId : undefined,
   );
+  // `kind === "subscription"` alone decides the branch: an unrecognised
+  // provider id must still keep the card off the API model it would
+  // otherwise mismark as current. `isSubscriptionRuntimeId` below only
+  // chooses how to *label* that provider — it never re-admits the API
+  // branch.
+  const activeRuntime = llm.activeChatRuntime;
+  const subscription = activeRuntime?.kind === "subscription" ? activeRuntime : null;
   const choices: ModelCardChoice[] = [];
   for (const modelId of pinned) {
     for (const vendor of offered.get(modelId) ?? []) {
       choices.push({
+        kind: "api",
         vendor,
         vendorLabel: getVendorOption(vendor).label,
         modelId,
-        current: vendor === active && modelId === currentModel,
+        // A pinned API model can equal the vendor/model the settings still
+        // hold for the API path even while a subscription runtime is what
+        // the chat is actually on — that stale match is not "current".
+        current: subscription === null && vendor === active && modelId === currentModel,
       });
     }
   }
-  if (currentModel && !choices.some((choice) => choice.current)) {
-    choices.unshift({ vendor: active, vendorLabel: getVendorOption(active).label, modelId: currentModel, current: true });
+  if (subscription === null && currentModel && !choices.some((choice) => choice.current)) {
+    choices.unshift({ kind: "api", vendor: active, vendorLabel: getVendorOption(active).label, modelId: currentModel, current: true });
+  }
+  if (subscription) {
+    const model = typeof subscription.model === "string" ? subscription.model.trim() : "";
+    // `subscriptionRuntimeDescriptor` falls back to its first entry for an id
+    // it does not recognise — fine for a lookup that only ever sees validated
+    // ids, wrong here: an unrecognised id must show as itself, never borrow
+    // another provider's label.
+    const vendorLabel = isSubscriptionRuntimeId(subscription.provider)
+      ? subscriptionRuntimeDescriptor(subscription.provider).label
+      : subscription.provider;
+    choices.unshift({
+      kind: "subscription",
+      provider: subscription.provider,
+      vendorLabel,
+      modelId: model.length > 0 ? model : null,
+      current: true,
+    });
   }
   return choices;
 }

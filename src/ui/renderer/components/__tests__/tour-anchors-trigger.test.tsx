@@ -2,7 +2,7 @@
 /**
  * Tutorial-C PR #983 follow-up — verify the SpotlightTour `data-tour-anchor`
  * attributes are present on the live production DOM (Composer textarea,
- * InputActionBar root, CommandPopover trigger) and that the renderer-side
+ * InputActionBar root, SlashPicker trigger) and that the renderer-side
  * keyboard trigger (⌘+Shift+/) actually invokes `api.tour.start` with the
  * `first-boot-essentials` scenario.
  *
@@ -64,8 +64,8 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       onSelectPlugin: vi.fn(),
       onInsertSlashCommand: vi.fn(),
       commandActions: [],
-      commandPopoverOpen: false,
-      onCommandPopoverOpenChange: vi.fn(),
+      slashPickerOpen: false,
+      onSlashPickerOpenChange: vi.fn(),
       ringSlot: null,
       onAttach: vi.fn(),
       attachDisabled: false,
@@ -92,7 +92,7 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
   });
 
   it("SlashPicker trigger carries data-tour-anchor=command-palette-toggle", () => {
-    // The ⌘ CommandPopover merged into the unified SlashPicker; the tour
+    // The old ⌘ command-palette button merged into the unified SlashPicker; the tour
     // anchor moved onto the picker's trigger so step 3 still resolves.
     const { getByTestId } = render(
       <TooltipProvider>
@@ -107,7 +107,7 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       </TooltipProvider>,
     );
     expect(
-      getByTestId(TEST_IDS.commandPopoverTrigger).getAttribute("data-tour-anchor"),
+      getByTestId(TEST_IDS.slashPickerTrigger).getAttribute("data-tour-anchor"),
     ).toBe("command-palette-toggle");
   });
 
@@ -123,8 +123,8 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       onSelectPlugin: vi.fn(),
       onInsertSlashCommand: vi.fn(),
       commandActions: [],
-      commandPopoverOpen: false,
-      onCommandPopoverOpenChange: vi.fn(),
+      slashPickerOpen: false,
+      onSlashPickerOpenChange: vi.fn(),
       ringSlot: null,
       onAttach: vi.fn(),
       attachDisabled: false,

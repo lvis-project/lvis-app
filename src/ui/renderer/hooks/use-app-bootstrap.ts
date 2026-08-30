@@ -13,7 +13,7 @@ export interface AppBootstrapDeps {
    *  and this reuses onOpenSettings so tab normalization + return-view capture
    *  stay identical to a click. */
   onOpenSettings: (tab?: string) => void;
-  toggleCommandPopover: () => void;
+  toggleSlashPicker: () => void;
 }
 
 /**
@@ -31,12 +31,12 @@ export interface AppBootstrapDeps {
  *  2. [] — mount-time side-effects (refreshes + IPC subscription); stable
  *     deps intentionally omitted (eslint-disable comment).
  *  3. [] — attaches the Cmd/Ctrl+K keydown handler once; reads
- *     toggleCommandPopover via toggleRef so it always calls the latest
+ *     toggleSlashPicker via toggleRef so it always calls the latest
  *     closure without ever re-attaching the listener.
  */
 export function useAppBootstrap({
   api, refreshViews, refreshCards, checkApiKey,
-  setActiveView, onOpenSettings, toggleCommandPopover,
+  setActiveView, onOpenSettings, toggleSlashPicker,
 }: AppBootstrapDeps) {
   const isMountedRef = useRef(true);
 
@@ -74,11 +74,11 @@ export function useAppBootstrap({
   }, []);
 
   // Stable ref so the keydown handler is attached once and never re-attached
-  // when toggleCommandPopover identity changes (e.g. due to activeView updates).
+  // when toggleSlashPicker identity changes (e.g. due to activeView updates).
   // Synchronous assignment (not useEffect) ensures the ref is always current
   // before any paint — avoids stale ref on the render immediately after updates.
-  const toggleRef = useRef(toggleCommandPopover);
-  toggleRef.current = toggleCommandPopover;
+  const toggleRef = useRef(toggleSlashPicker);
+  toggleRef.current = toggleSlashPicker;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

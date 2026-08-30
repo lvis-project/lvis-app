@@ -334,7 +334,7 @@ export function SlashPickerPanel({
       <Command shouldFilter={false}>
         <CommandInput
           ref={inputRef}
-          placeholder={t("commandPopoverPanel.searchPlaceholder")}
+          placeholder={t("slashPickerPanel.searchPlaceholder")}
           value={query}
           onValueChange={(next) => {
             setQuery(next);
@@ -350,7 +350,7 @@ export function SlashPickerPanel({
           }}
         />
         <CommandList className="max-h-[340px] overflow-y-auto scrollbar-thin">
-          <CommandEmpty>{t("commandPopoverPanel.noResults")}</CommandEmpty>
+          <CommandEmpty>{t("slashPickerPanel.noResults")}</CommandEmpty>
 
           {/* Root drill-down: category rows that open each group. Only shown
               when not searching and not already inside a category. */}

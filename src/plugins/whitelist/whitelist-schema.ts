@@ -14,6 +14,7 @@
  * descriptive per-field errors, fail-closed on any unknown shape.
  */
 import type { SignatureEnvelope } from "../types.js";
+import { SHA256_HEX } from "../../lib/hex-digest-equal.js";
 import {
   HOST_SECRET_READ_MAX_ITEMS,
   findHostSecretReadListViolation,
@@ -51,9 +52,6 @@ export type WhitelistSignatureEnvelope = SignatureEnvelope;
 // about what a well-formed host-secret key is. Its collection-level counterpart
 // `findHostSecretReadListViolation` (same module) carries the `maxItems` /
 // `uniqueItems` bounds for the same reason.
-
-/** Hex sha-256 = 64 lowercase hex digits. */
-const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
  * Parse + validate a raw JSON string into a `WhitelistDocument`.
@@ -108,7 +106,7 @@ export function parseWhitelistDocument(raw: string): WhitelistDocument {
     if (typeof grant.publisher !== "string" || grant.publisher.length === 0) {
       throw new Error(`[whitelist] pluginGrants['${pluginId}'].publisher must be a non-empty string`);
     }
-    if (typeof grant.approvedManifestSha256 !== "string" || !SHA256_HEX_PATTERN.test(grant.approvedManifestSha256)) {
+    if (typeof grant.approvedManifestSha256 !== "string" || !SHA256_HEX.test(grant.approvedManifestSha256)) {
       throw new Error(
         `[whitelist] pluginGrants['${pluginId}'].approvedManifestSha256 must be 64 lowercase hex digits`,
       );
