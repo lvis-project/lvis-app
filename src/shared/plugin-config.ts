@@ -1,3 +1,5 @@
+import { isPlainRecord } from "./is-record.js";
+
 export type PluginConfigPrimitive = string | number | boolean | null;
 export type PluginConfigValue =
   | PluginConfigPrimitive
@@ -13,12 +15,6 @@ export const PLUGIN_CONFIG_RESERVED_KEYS = new Set([
 ]);
 
 const PLUGIN_CONFIG_ID_RE = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/;
-
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
 
 export function sanitizePluginConfigPluginId(pluginId: string): string {
   if (typeof pluginId !== "string") {
@@ -52,7 +48,7 @@ export function sanitizePluginConfigKey(key: string, path = "config"): string {
 }
 
 export function sanitizePluginConfig(config: unknown, path = "config"): PluginConfigRecord {
-  if (!isPlainObject(config)) {
+  if (!isPlainRecord(config)) {
     throw new Error("Plugin config payload must be a plain object.");
   }
   return sanitizePluginConfigObject(config, path);
@@ -88,7 +84,7 @@ function sanitizePluginConfigValue(value: unknown, path: string): PluginConfigVa
     return value.map((item, index) =>
       sanitizePluginConfigValue(item, `${path}[${index}]`));
   }
-  if (isPlainObject(value)) {
+  if (isPlainRecord(value)) {
     return sanitizePluginConfigObject(value, path);
   }
   throw new Error(

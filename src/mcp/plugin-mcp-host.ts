@@ -47,7 +47,9 @@ import {
   RAW_RESULT_META,
 } from "./protocol-constants.js";
 
-const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
+import { getLvisAppVersion } from "../shared/app-version.js";
+
+const CLIENT_INFO = { name: "lvis-app", version: getLvisAppVersion() } as const;
 /** First-party host advertises elicitation; sampling/roots are deprecated (§8 SEP-2577). */
 const CLIENT_CAPABILITIES = { elicitation: { form: {}, url: {} }, extensions: {} } as const;
 

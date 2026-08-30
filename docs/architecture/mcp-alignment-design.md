@@ -215,8 +215,8 @@ Decisions ratified during implementation:
   host decides what its LLM provider can consume).
 
 **`plugin-loopback-server` — boot exclusion plumbing DONE; only the live flip
-remains (gated).** `boot/plugins.ts` now has the SOT `LOOPBACK_MIGRATED_PLUGIN_IDS`
-(ships EMPTY) and the legacy sweeps (`registerPluginTools` /
+remains (gated).** `plugins/isolation/out-of-process-plugins.ts` now has the SOT
+`OUT_OF_PROCESS_PLUGIN_IDS` (the host-owned census of plugins routed out of process) and the legacy sweeps (`registerPluginTools` /
 `syncPluginToolRegistry` / `syncPluginToolRegistryForPlugin`) exclude migrated
 plugins from BOTH registration and the replaced id set, so the manager's tools are
 never clobbered (unit-tested via an injectable set). **The live flip = populate
@@ -298,7 +298,7 @@ re-sign + installed-plugin migration are not) and **(b) all first-party plugins
 migrated**. The flag-day itself — route EVERY plugin's registration through the
 loopback manager and delete `pluginToolsForRegistration` + its adapter (7 call
 sites + ~6 test files) — is the single highest-blast-radius change in the
-initiative; the boot wiring is in place (flip `LOOPBACK_MIGRATED_PLUGIN_IDS` to
+initiative; the boot wiring is in place (flip `OUT_OF_PROCESS_PLUGIN_IDS` to
 universal), so once (a)+(b) hold it is a bounded, mechanical removal best done as a
 focused change with proportionate owner review, not rushed.
 
@@ -344,7 +344,7 @@ were actually implementable once the open decisions were made autonomously:
 - **M3 boot wiring DONE** — `PluginLoopbackManager` is wired into
   `boot/steps/plugin-runtime.ts` (onEnable→start, onDisable→stop, boot-start of
   migrated plugins; typecheck + full build green). Only ACTIVATION (populating
-  `LOOPBACK_MIGRATED_PLUGIN_IDS`) is gated — the installed in-house plugins ship
+  `OUT_OF_PROCESS_PLUGIN_IDS`) is gated — the installed in-house plugins ship
   `category:null` and would fail closed in both paths, so no valid pilot exists.
 - **M4 out-of-process spawner DONE (experimental-isolated)** — `StdioChildTransport` spawns a real
   subprocess plugin server; a REAL `node`-subprocess test proves discover +

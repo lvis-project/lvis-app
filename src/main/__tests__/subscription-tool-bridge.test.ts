@@ -4,6 +4,7 @@ import {
   SubscriptionToolBridge,
   type SubscriptionHostToolCall,
 } from "../subscription-tool-bridge.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../../shared/subscription-runtime.js";
 
 const bridges: SubscriptionToolBridge[] = [];
 
@@ -181,6 +182,18 @@ describe("SubscriptionToolBridge remote tool aliases", () => {
       "subscription-host-tool-invalid",
     );
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tool set beyond the shared bridge contract before opening a runtime", () => {
+    const tool = (index: number) => ({
+      name: `tool_${index}`,
+      description: "Bounded by the shared contract.",
+      inputSchema: { type: "object" as const, properties: {} },
+    });
+    const atLimit = Array.from({ length: SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount }, (_, i) => tool(i));
+    bridges.push(new SubscriptionToolBridge(atLimit));
+    expect(() => new SubscriptionToolBridge([...atLimit, tool(atLimit.length)]))
+      .toThrow("subscription-host-tools-too-many");
   });
 
   it("rejects descriptions beyond the shared Codex and ACP limit before opening a runtime", () => {

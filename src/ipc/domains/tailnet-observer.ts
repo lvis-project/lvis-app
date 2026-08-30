@@ -16,6 +16,7 @@ import {
 } from "../../shared/tailnet-observer-config.js";
 import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { isRecord } from "../../shared/is-record.js";
 
 const DISABLED = Object.freeze({
   ok: false as const,
@@ -29,10 +30,6 @@ const UNAVAILABLE = Object.freeze({
   ok: false as const,
   error: "tailnet-observer-unavailable" as const,
 });
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * The resolver's own kebab-case codes reach the renderer verbatim.
@@ -74,7 +71,7 @@ export function registerTailnetObserverHandlers(deps: IpcDeps): void {
     }
     if (!service) return DISABLED;
     if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
-    const config = record(payload) ? parseTailnetObserverConfigView(payload.config) : null;
+    const config = isRecord(payload) ? parseTailnetObserverConfigView(payload.config) : null;
     if (config === null) return INPUT_INVALID;
     try {
       await service.apply(config);

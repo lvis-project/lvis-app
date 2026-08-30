@@ -25,7 +25,7 @@ import {
 } from "../tools/pipeline/rationale-resume-contract.js";
 import type { RationaleTicketStoreAuditEvent } from "../tools/pipeline/rationale-ticket-store.js";
 import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
-import { hasExactKeys } from "../shared/is-record.js";
+import { hasExactKeys, isPlainRecord } from "../shared/is-record.js";
 import { utcDateKey } from "../shared/local-date.js";
 
 export const RATIONALE_AUDIT_SCHEMA_VERSION = 1 as const;
@@ -176,11 +176,6 @@ function assertSessionId(sessionId: string): void {
 function dateFor(at: number): string {
   assertTime(at);
   return utcDateKey(new Date(at));
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) &&
-    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 }
 
 function parseFingerprint(value: unknown): FileFingerprint | null {

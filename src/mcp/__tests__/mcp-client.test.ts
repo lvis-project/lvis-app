@@ -23,6 +23,7 @@ import {
   afterEach,
 } from "vitest";
 import { PassThrough } from "node:stream";
+import { getLvisAppVersion } from "../../shared/app-version.js";
 import { EventEmitter } from "node:events";
 
 // ─── dns mock — configurable per test ───────────────────────
@@ -1357,7 +1358,7 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     for (const [, init] of fetchMock.mock.calls) {
       const meta = readRpcParams(init as RequestInit)?._meta as Record<string, unknown> | undefined;
       expect(meta?.["io.modelcontextprotocol/protocolVersion"]).toBe("2026-07-28");
-      expect(meta?.["io.modelcontextprotocol/clientInfo"]).toMatchObject({ name: "lvis-app" });
+      expect(meta?.["io.modelcontextprotocol/clientInfo"]).toEqual({ name: "lvis-app", version: getLvisAppVersion() });
       expect(meta?.["io.modelcontextprotocol/clientCapabilities"]).toMatchObject({ elicitation: {} });
     }
     await client.disconnect();

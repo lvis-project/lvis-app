@@ -9,7 +9,7 @@
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
 import { UUID_PATTERN } from "./uuid.js";
-import { hasExactKeys } from "./is-record.js";
+import { hasExactKeys, isRecord } from "./is-record.js";
 import { isNonNegativeSafeInteger } from "./safe-integer.js";
 
 export const TAILNET_INVITATION_DURATION_PRESETS = ["10m", "1h", "24h"] as const;
@@ -134,10 +134,6 @@ export interface TailnetSharingOwnerApi {
 const ACTOR_FINGERPRINT = /^[a-f0-9]{12}$/;
 const INVITATION_CODE = /^lvis-pair-v1\.[A-Za-z0-9_-]{43}$/;
 
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export function isTailnetSharingId(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
@@ -163,7 +159,7 @@ function isTailnetSharingErrorCode(value: unknown): value is TailnetSharingError
 export function isTailnetSharingCreateInvitationInput(
   value: unknown,
 ): value is TailnetSharingCreateInvitationInput {
-  if (!record(value) || !hasUserKeyboardIntent(value.intent)) return false;
+  if (!isRecord(value) || !hasUserKeyboardIntent(value.intent)) return false;
   return value.duration === undefined
     ? hasExactKeys(value, ["intent"])
     : hasExactKeys(value, ["duration", "intent"]) && isTailnetInvitationDurationPreset(value.duration);
@@ -172,7 +168,7 @@ export function isTailnetSharingCreateInvitationInput(
 export function isTailnetSharingActivatePairingInput(
   value: unknown,
 ): value is TailnetSharingActivatePairingInput {
-  return record(value)
+  return isRecord(value)
     && hasExactKeys(value, ["id", "intent"])
     && hasUserKeyboardIntent(value.intent)
     && isTailnetSharingId(value.id);
@@ -181,7 +177,7 @@ export function isTailnetSharingActivatePairingInput(
 export function isTailnetSharingCreateCurrentConversationShareInput(
   value: unknown,
 ): value is TailnetSharingCreateCurrentConversationShareInput {
-  if (!record(value) || !hasUserKeyboardIntent(value.intent)) return false;
+  if (!isRecord(value) || !hasUserKeyboardIntent(value.intent)) return false;
   const base = isTailnetSharingId(value.pairingId) && isTailnetSharePermission(value.permission);
   return value.duration === undefined
     ? hasExactKeys(value, ["intent", "pairingId", "permission"]) && base
@@ -191,14 +187,14 @@ export function isTailnetSharingCreateCurrentConversationShareInput(
 }
 
 export function isTailnetSharingRevokeInput(value: unknown): value is TailnetSharingRevokeInput {
-  return record(value)
+  return isRecord(value)
     && hasExactKeys(value, ["id", "intent"])
     && hasUserKeyboardIntent(value.intent)
     && isTailnetSharingId(value.id);
 }
 
 function parseInvitationSummary(value: unknown): TailnetSharingInvitationSummary | null {
-  if (!record(value) || !hasExactKeys(value, ["expiresAt", "id"])
+  if (!isRecord(value) || !hasExactKeys(value, ["expiresAt", "id"])
     || !isTailnetSharingId(value.id) || !isNonNegativeSafeInteger(value.expiresAt)) {
     return null;
   }
@@ -206,7 +202,7 @@ function parseInvitationSummary(value: unknown): TailnetSharingInvitationSummary
 }
 
 function parsePairingSummary(value: unknown): TailnetSharingPairingSummary | null {
-  if (!record(value) || !hasExactKeys(value, ["actorFingerprint", "expiresAt", "id", "state"])
+  if (!isRecord(value) || !hasExactKeys(value, ["actorFingerprint", "expiresAt", "id", "state"])
     || !isTailnetSharingId(value.id)
     || typeof value.actorFingerprint !== "string"
     || !ACTOR_FINGERPRINT.test(value.actorFingerprint)
@@ -223,7 +219,7 @@ function parsePairingSummary(value: unknown): TailnetSharingPairingSummary | nul
 }
 
 function parseShareSummary(value: unknown): TailnetSharingShareSummary | null {
-  if (!record(value) || !hasExactKeys(value, ["actorFingerprint", "expiresAt", "id", "pairingId", "permission"])
+  if (!isRecord(value) || !hasExactKeys(value, ["actorFingerprint", "expiresAt", "id", "pairingId", "permission"])
     || !isTailnetSharingId(value.id)
     || !isTailnetSharingId(value.pairingId)
     || typeof value.actorFingerprint !== "string"
@@ -247,7 +243,7 @@ function parseShareSummary(value: unknown): TailnetSharingShareSummary | null {
  * renderer callers even if a main-process producer is broadened incorrectly.
  */
 export function parseTailnetSharingSnapshot(value: unknown): TailnetSharingSnapshot | null {
-  if (!record(value) || !hasExactKeys(value, ["invitations", "pairings", "shares"])
+  if (!isRecord(value) || !hasExactKeys(value, ["invitations", "pairings", "shares"])
     || !Array.isArray(value.invitations)
     || !Array.isArray(value.pairings)
     || !Array.isArray(value.shares)) {
@@ -271,7 +267,7 @@ export function parseTailnetSharingSnapshot(value: unknown): TailnetSharingSnaps
 export function parseTailnetSharingCreatedInvitation(
   value: unknown,
 ): TailnetSharingCreatedInvitation | null {
-  if (!record(value) || !hasExactKeys(value, ["code", "expiresAt", "id"])
+  if (!isRecord(value) || !hasExactKeys(value, ["code", "expiresAt", "id"])
     || !isTailnetSharingId(value.id)
     || typeof value.code !== "string"
     || !INVITATION_CODE.test(value.code)
@@ -282,7 +278,7 @@ export function parseTailnetSharingCreatedInvitation(
 }
 
 function parseTailnetSharingFailure(value: unknown): TailnetSharingFailure | null {
-  if (!record(value) || !hasExactKeys(value, ["error", "ok"])
+  if (!isRecord(value) || !hasExactKeys(value, ["error", "ok"])
     || value.ok !== false || !isTailnetSharingErrorCode(value.error)) {
     return null;
   }
@@ -293,14 +289,14 @@ function parseTailnetSharingFailure(value: unknown): TailnetSharingFailure | nul
 export function parseTailnetSharingMutationResult(value: unknown): TailnetSharingMutationResult | null {
   const failure = parseTailnetSharingFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !hasExactKeys(value, ["ok"]) || value.ok !== true) return null;
+  if (!isRecord(value) || !hasExactKeys(value, ["ok"]) || value.ok !== true) return null;
   return Object.freeze({ ok: true });
 }
 
 export function parseTailnetSharingSnapshotResult(value: unknown): TailnetSharingSnapshotResult | null {
   const failure = parseTailnetSharingFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !hasExactKeys(value, ["ok", "snapshot"]) || value.ok !== true) return null;
+  if (!isRecord(value) || !hasExactKeys(value, ["ok", "snapshot"]) || value.ok !== true) return null;
   const snapshot = parseTailnetSharingSnapshot(value.snapshot);
   return snapshot === null ? null : Object.freeze({ ok: true, snapshot });
 }
@@ -310,7 +306,7 @@ export function parseTailnetSharingCreateInvitationResult(
 ): TailnetSharingCreateInvitationResult | null {
   const failure = parseTailnetSharingFailure(value);
   if (failure !== null) return failure;
-  if (!record(value) || !hasExactKeys(value, ["invitation", "ok"]) || value.ok !== true) return null;
+  if (!isRecord(value) || !hasExactKeys(value, ["invitation", "ok"]) || value.ok !== true) return null;
   const invitation = parseTailnetSharingCreatedInvitation(value.invitation);
   return invitation === null ? null : Object.freeze({ ok: true, invitation });
 }

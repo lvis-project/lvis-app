@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
+import { MAX_SESSION_FILE_BYTES } from "../../../memory/memory-manager.js";
 import {
   MAX_LOCAL_USER_CONTENT_PARTS,
   MAX_LOCAL_USER_CONTENT_TEXT_CHARS,
@@ -17,7 +18,6 @@ import {
 } from "../../../main/subscription-attachment-input.js";
 
 const CHANNEL = "lvis:chat:import";
-const MAX_SESSION_FILE_BYTES = 5_000_000;
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 

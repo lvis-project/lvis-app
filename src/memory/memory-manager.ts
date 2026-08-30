@@ -31,7 +31,7 @@ import { isRecord } from "../shared/is-record.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
 import { dlpSafeCandidate } from "../shared/dlp-safe-id.js";
 import { UUID_PATTERN } from "../shared/uuid.js";
-import { sha256Hex } from "../lib/hex-digest-equal.js";
+import { SHA256_HEX, sha256Hex } from "../lib/hex-digest-equal.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
@@ -575,11 +575,17 @@ function getDefaultUserPrefs(): string {
   return t("be_memoryManager.defaultUserPrefs");
 }
 
-const MAX_SESSION_FILE_BYTES = 5_000_000;
+/**
+ * Session-file limits. This module owns the on-disk session format, so the
+ * caps it enforces when reading a session are declared here; the chat IPC
+ * layer imports them to apply the same gates to an imported file and to the
+ * project metadata a session is created with.
+ */
+export const MAX_SESSION_FILE_BYTES = 5_000_000;
 /** Max length of summaryPreamble stored in session metadata (~2000 tokens). */
 const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
-const MAX_PROJECT_ROOT_CHARS = 2_048;
-const MAX_PROJECT_NAME_CHARS = 120;
+export const MAX_PROJECT_ROOT_CHARS = 2_048;
+export const MAX_PROJECT_NAME_CHARS = 120;
 const MAX_A2A_WIRE_ID_CHARS = 256;
 const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 
@@ -818,16 +824,19 @@ function normalizeMemoryCapture(value: unknown): MemoryCaptureV1 | null {
     || value.method !== "llm-refined"
     || !MEMORY_CAPTURE_TRIGGERS.has(value.trigger as MemoryCaptureTrigger)
     || typeof value.sourceDigest !== "string"
-    || !/^[a-f0-9]{64}$/i.test(value.sourceDigest)
     || !isValidMemoryTimestamp(value.capturedAt)
   ) {
     return null;
   }
+  // Caller-supplied provenance: normalise the digest here, then hold it to the
+  // strict lowercase shape every digest this app mints already has.
+  const sourceDigest = value.sourceDigest.toLowerCase();
+  if (!SHA256_HEX.test(sourceDigest)) return null;
   return {
     v: 1,
     method: "llm-refined",
     trigger: value.trigger as MemoryCaptureTrigger,
-    sourceDigest: value.sourceDigest.toLowerCase(),
+    sourceDigest,
     capturedAt: value.capturedAt,
   };
 }
@@ -871,15 +880,17 @@ function decodeMemoryMetadata(encoded: string): MemoryMetadataV1 | null {
       || raw.derivation.v !== 1
       || raw.derivation.type !== "consolidated-overview"
       || typeof raw.derivation.sourceFingerprint !== "string"
-      || !/^[a-f0-9]{64}$/i.test(raw.derivation.sourceFingerprint)
       || !isValidMemoryTimestamp(raw.derivation.generatedAt)
     ) {
       return null;
     }
+    // On-disk frontmatter: normalise at the read boundary, then strict.
+    const sourceFingerprint = raw.derivation.sourceFingerprint.toLowerCase();
+    if (!SHA256_HEX.test(sourceFingerprint)) return null;
     derivation = {
       v: 1,
       type: "consolidated-overview",
-      sourceFingerprint: raw.derivation.sourceFingerprint.toLowerCase(),
+      sourceFingerprint,
       generatedAt: raw.derivation.generatedAt,
     };
   }
@@ -3531,7 +3542,7 @@ export class MemoryManager {
       && this.isValidConsolidationScope(snapshot.scope)
       && Array.isArray(snapshot.sources)
       && typeof snapshot.sourceFingerprint === "string"
-      && /^[a-f0-9]{64}$/i.test(snapshot.sourceFingerprint);
+      && SHA256_HEX.test(snapshot.sourceFingerprint);
   }
 
   private getConsolidationSnapshotForScope(scope: MemoryScope): MemoryConsolidationSnapshot {
