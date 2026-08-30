@@ -16,6 +16,7 @@ import {
   teardownSeededElectron,
 } from "./seeded-electron.js";
 import { openInlineSettings } from "./inline-settings.js";
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
@@ -225,7 +226,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       // temporary handler so an immediately rejected IPC call is still
       // observed before the caller asserts its rejection.
       void invocation.catch(() => undefined);
-      const approvalDialog = ctx.page.getByTestId("approval-dock");
+      const approvalDialog = ctx.page.getByTestId(TEST_IDS.approvalDock);
       const approvalVisible = await approvalDialog
         .waitFor({
           state: "visible",
@@ -239,7 +240,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       if (approvalVisible) {
         await expect(approvalDialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
           .toHaveCount(0);
-        const approve = ctx.page.getByTestId("approve-button");
+        const approve = ctx.page.getByTestId(TEST_IDS.approveButton);
         await expect(approve).toBeEnabled();
         await approve.click();
       }
@@ -341,7 +342,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         );
       }, { serverId: mcpTool!.mcpServerId!, text: probe });
 
-      const approvalDialog = ctx.page.getByTestId("approval-dock");
+      const approvalDialog = ctx.page.getByTestId(TEST_IDS.approvalDock);
       const approvalVisible = await approvalDialog
         .waitFor({
           state: "visible",
@@ -355,7 +356,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       if (approvalVisible) {
         await expect(approvalDialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
           .toHaveCount(0);
-        const approve = ctx.page.getByTestId("approve-button");
+        const approve = ctx.page.getByTestId(TEST_IDS.approveButton);
         await expect(approve).toBeEnabled();
         await approve.click();
       }

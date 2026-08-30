@@ -23,6 +23,7 @@ import {
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { foreignFrameEvent } from "../../__tests__/test-helpers.js";
 
 function fakeWindow() {
   const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -92,10 +93,6 @@ function createTestAutoUpdater(
     ...deps,
     auditLogger: deps.auditLogger ?? fakeAuditLogger().logger,
   });
-}
-
-function ipcEvent(url: string): IpcMainInvokeEvent {
-  return { senderFrame: { url } } as unknown as IpcMainInvokeEvent;
 }
 
 const HOST_RENDERER_URL = "file:///Applications/LVIS.app/Contents/Resources/app.asar/dist/src/index.html";
@@ -437,7 +434,7 @@ describe("auto-updater", () => {
     await svc.triggerCheck();
     u.emit("update-downloaded", { version: "3.0.0" });
 
-    const result = await svc._testOnly.ipcInstallNow(ipcEvent(PLUGIN_SHELL_URL));
+    const result = await svc._testOnly.ipcInstallNow(foreignFrameEvent(PLUGIN_SHELL_URL));
 
     expect(result).toEqual({ ok: false, reason: "unauthorized-frame" });
     expect(u.installs).toBe(0);
@@ -479,7 +476,7 @@ describe("auto-updater", () => {
     await svc.triggerCheck();
     u.emit("update-downloaded", { version: "3.0.0" });
 
-    const result = await svc._testOnly.ipcInstallNow(ipcEvent(HOST_RENDERER_URL));
+    const result = await svc._testOnly.ipcInstallNow(foreignFrameEvent(HOST_RENDERER_URL));
 
     expect(result).toEqual({ ok: false, reason: "not-confirmed" });
     expect(u.installs).toBe(0);
@@ -498,7 +495,7 @@ describe("auto-updater", () => {
     await svc.triggerCheck();
     u.emit("update-downloaded", { version: "3.0.0" });
 
-    const result = await svc._testOnly.ipcInstallNow(ipcEvent(HOST_RENDERER_URL));
+    const result = await svc._testOnly.ipcInstallNow(foreignFrameEvent(HOST_RENDERER_URL));
 
     expect(result).toEqual({ ok: true });
     expect(u.installs).toBe(1);

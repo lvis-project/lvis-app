@@ -17,6 +17,7 @@ import { makeHookTrustRow as hook } from "./test-helpers.js";
 import type { HookTrustRow } from "../../types.js";
 import { isPolicyUserEditable, type PolicySource } from "../../../../shared/policy-editability.js";
 import { t } from "../../../../i18n/runtime.js";
+import { TEST_IDS, execModeTestId } from "../../../../shared/test-ids.js";
 
 /**
  * Mirrors the `PERMISSIONS.policyGet` handler: the host attaches `editable`
@@ -254,7 +255,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     }));
     expect(onExactDenySaved).toHaveBeenCalledWith("approval-exact-1");
     expect(onDiscardExactDeny).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTestId("settings-page-title")).toHaveFocus());
+    await waitFor(() => expect(screen.getByTestId(TEST_IDS.settingsPageTitle)).toHaveFocus());
     expect(screen.getByRole("status")).toHaveTextContent("plugin:meeting_list_preps");
   });
 
@@ -297,8 +298,8 @@ describe("PermissionsTab hook quarantine notice", () => {
     const { rerender } = render(<PermissionsTab exactDenyDraft={draft} />);
     await waitFor(() => expect(screen.getByTestId("exact-deny-focus-target")).toHaveFocus());
 
-    screen.getByTestId("settings-page-title").focus();
-    expect(screen.getByTestId("settings-page-title")).toHaveFocus();
+    screen.getByTestId(TEST_IDS.settingsPageTitle).focus();
+    expect(screen.getByTestId(TEST_IDS.settingsPageTitle)).toHaveFocus();
     rerender(<PermissionsTab exactDenyDraft={{ ...draft }} />);
 
     await waitFor(() => expect(screen.getByTestId("exact-deny-focus-target")).toHaveFocus());
@@ -323,7 +324,7 @@ describe("PermissionsTab hook quarantine notice", () => {
       });
       return (
         <>
-          <button type="button" data-testid="open-permanent-deny-settings">
+          <button type="button" data-testid={TEST_IDS.openPermanentDenySettings}>
             Return to exact deny
           </button>
           <PermissionsTab
@@ -338,7 +339,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     await waitFor(() => expect(screen.getByTestId("exact-deny-focus-target")).toHaveFocus());
     fireEvent.click(screen.getByRole("button", { name: t("permissionsTab.cancelButton") }));
 
-    await waitFor(() => expect(screen.getByTestId("open-permanent-deny-settings")).toHaveFocus());
+    await waitFor(() => expect(screen.getByTestId(TEST_IDS.openPermanentDenySettings)).toHaveFocus());
     expect(screen.queryByTestId("exact-deny-draft")).toBeNull();
   });
 
@@ -349,13 +350,13 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
 
-    expect(screen.getByTestId("exec-mode-default")).toHaveTextContent("쓰기 확인");
+    expect(screen.getByTestId(execModeTestId("default"))).toHaveTextContent("쓰기 확인");
     expect(screen.getByText(/읽기 도구는 허용/)).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-strict")).toHaveTextContent("전체 확인");
+    expect(screen.getByTestId(execModeTestId("strict"))).toHaveTextContent("전체 확인");
     expect(screen.getByText(/읽기까지 포함해 모든 도구/)).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-auto")).toHaveTextContent("자동 검증");
+    expect(screen.getByTestId(execModeTestId("auto"))).toHaveTextContent("자동 검증");
     expect(screen.getByText(/대화형 저위험·중위험 판정/)).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-allow")).toHaveTextContent("모두 허용");
+    expect(screen.getByTestId(execModeTestId("allow"))).toHaveTextContent("모두 허용");
   });
 
   it("keeps the rendered mode unchanged when durable mode confirmation fails", async () => {
@@ -370,17 +371,17 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
 
-    expect(screen.getByTestId("exec-mode-default")).toBeTruthy();
+    expect(screen.getByTestId(execModeTestId("default"))).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-auto"));
+      fireEvent.click(screen.getByTestId(execModeTestId("auto")));
     });
 
     expect(api.permission.setMode).toHaveBeenCalledWith("auto");
     expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith("mode llm");
     expect(screen.getByText("사용자가 모드 변경을 거부했습니다.")).toBeTruthy();
-    const defaultButton = screen.getByTestId("exec-mode-default");
-    const autoButton = screen.getByTestId("exec-mode-auto");
+    const defaultButton = screen.getByTestId(execModeTestId("default"));
+    const autoButton = screen.getByTestId(execModeTestId("auto"));
     expect(defaultButton.className).toContain("border-primary");
     expect(autoButton.className).not.toContain("border-primary");
   });
@@ -393,7 +394,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-auto"));
+      fireEvent.click(screen.getByTestId(execModeTestId("auto")));
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
@@ -405,7 +406,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(api.permission.setMode.mock.invocationCallOrder[0]).toBeLessThan(
       api.permission.reviewerDispatch.mock.invocationCallOrder.at(-1)!,
     );
-    const autoButton = screen.getByTestId("exec-mode-auto");
+    const autoButton = screen.getByTestId(execModeTestId("auto"));
     expect(autoButton.className).toContain("border-primary");
   });
 
@@ -448,7 +449,7 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-allow"));
+      fireEvent.click(screen.getByTestId(execModeTestId("allow")));
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode disabled");
@@ -456,7 +457,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(api.permission.setMode.mock.invocationCallOrder[0]).toBeLessThan(
       api.permission.reviewerDispatch.mock.invocationCallOrder.at(-1)!,
     );
-    expect(screen.getByTestId("exec-mode-allow").className).toContain("border-primary");
+    expect(screen.getByTestId(execModeTestId("allow")).className).toContain("border-primary");
   });
 
   it("hydrates the active mode from durable settings on mount", async () => {
@@ -467,7 +468,7 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
 
-    const autoButton = screen.getByTestId("exec-mode-auto");
+    const autoButton = screen.getByTestId(execModeTestId("auto"));
     expect(autoButton.className).toContain("border-primary");
   });
 
@@ -523,7 +524,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("reviewer-fallback-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
     expect(screen.queryByTestId("reviewer-cli-mapping-panel")).toBeNull();
-    expect(screen.queryByTestId("reviewer-prompt-panel")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.reviewerPromptPanel)).toBeNull();
     expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
   });
@@ -536,7 +537,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-auto"));
+      fireEvent.click(screen.getByTestId(execModeTestId("auto")));
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
@@ -546,8 +547,8 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("reviewer-fallback-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
-    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeTruthy();
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(screen.queryByText("검증 프롬프트")).toBeNull();
     expect(screen.getByTestId("reviewer-system-prompt")).toHaveTextContent("UNTRUSTED_INPUT");
     expect(screen.queryByTestId("reviewer-mode-llm")).toBeNull();
@@ -564,7 +565,7 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
 
-    expect(screen.queryByTestId("reviewer-prompt-panel")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.reviewerPromptPanel)).toBeNull();
     const onModeChanged = api.permission.onModeChanged.mock.calls[0]?.[0] as ((mode: string) => void) | undefined;
     expect(onModeChanged).toBeTruthy();
 
@@ -572,8 +573,8 @@ describe("PermissionsTab hook quarantine notice", () => {
       onModeChanged?.("auto");
     });
 
-    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeTruthy();
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
   });
 
   it("does not expose the reviewer fallback policy in Settings", async () => {
@@ -583,12 +584,12 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-auto"));
+      fireEvent.click(screen.getByTestId(execModeTestId("auto")));
     });
 
     expect(screen.queryByTestId("reviewer-fallback-select")).toBeNull();
-    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeTruthy();
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith(
       expect.stringMatching(/^fallback\b/),
     );
@@ -601,14 +602,14 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-auto"));
+      fireEvent.click(screen.getByTestId(execModeTestId("auto")));
     });
 
     expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
     expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
-    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeTruthy();
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith(
       expect.stringMatching(/^(provider|model)\b/),
     );
@@ -640,8 +641,8 @@ describe("PermissionsTab hook quarantine notice", () => {
     });
     expect(screen.getByTestId("interactive-auto-approve-select")).toBeTruthy();
     expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
-    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeTruthy();
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
   });
 
   it("surfaces the reviewer rewire failure when entering the auto-verification mode", async () => {
@@ -671,7 +672,7 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
     await act(async () => {
-      fireEvent.click(screen.getByTestId("exec-mode-auto"));
+      fireEvent.click(screen.getByTestId(execModeTestId("auto")));
     });
 
     // The exec mode switch succeeds, but the auto-wired `mode llm` reviewer
@@ -844,8 +845,8 @@ describe("PermissionsTab hook quarantine notice", () => {
     await act(async () => {
       render(<PermissionsTab />);
     });
-    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.getByTestId(TEST_IDS.reviewerPromptPanel)).toBeTruthy();
+    expect(screen.getByTestId(execModeTestId("auto"))).toContainElement(screen.getByTestId(TEST_IDS.reviewerPromptPanel));
     expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
     expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();

@@ -13,6 +13,7 @@ import {
   type AgentSendRuntime,
 } from "../agent-send.js";
 import { ToolRegistry } from "../registry.js";
+import { UUID_PATTERN } from "../../shared/uuid.js";
 
 function success(parts: A2APart[], disposition: "parent" | "queued" | "mailbox" = "parent"):
 A2AAgentSendResult {
@@ -87,7 +88,7 @@ describe("agent_send host boundary", () => {
     }));
     const generatedMessageId = sendAgentMessage.mock.calls[0]?.[0].messageId ?? "";
     expect(generatedMessageId)
-      .toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      .toMatch(UUID_PATTERN);
     expect(maskSensitiveData(generatedMessageId).detections).toEqual([]);
     expect(tool.modelVisible).toBe(false);
     expect(runtime.cancelQuestionWait).not.toHaveBeenCalled();

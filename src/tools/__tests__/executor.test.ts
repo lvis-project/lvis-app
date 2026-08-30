@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 
 import { ToolExecutor } from "../executor.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
 import { BashTool, PowerShellTool } from "../shell-tools.js";
@@ -77,12 +78,6 @@ async function waitForApprovalPayload<T>(
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error("approval request was not sent");
-}
-
-function userPermissionContext(
-  overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
-): import("../executor.js").ToolPermissionContext {
-  return { trustOrigin: "user-keyboard", ...overrides };
 }
 
 function comparablePath(path: string | undefined): string {

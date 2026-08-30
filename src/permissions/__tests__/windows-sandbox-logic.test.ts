@@ -35,11 +35,9 @@ import {
   DEFAULT_WINDOWS_PROXY_PORT_RANGE as ASRT_PROXY_PORT_RANGE,
 } from "@anthropic-ai/sandbox-runtime";
 import { parseWindowsBinShell } from "@anthropic-ai/sandbox-runtime/dist/sandbox/windows-sandbox-utils.js";
+import { setProcessPlatform as forcePlatform } from "../../__tests__/test-helpers.js";
 
 const ORIGINAL_PLATFORM = process.platform;
-function forcePlatform(value: NodeJS.Platform): void {
-  Object.defineProperty(process, "platform", { value, configurable: true });
-}
 afterEach(() => {
   Object.defineProperty(process, "platform", {
     value: ORIGINAL_PLATFORM,

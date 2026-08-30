@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { AskUserQuestionCard, type AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import type { LvisApi } from "../types.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface QuestionOverlayProps {
   api: LvisApi;
@@ -38,7 +39,7 @@ export function QuestionOverlay({ api, requests, onResolved }: QuestionOverlayPr
     <div
       ref={rootRef}
       className="pointer-events-auto absolute inset-x-0 bottom-0 z-40 flex justify-center"
-      data-testid="question-overlay"
+      data-testid={TEST_IDS.questionOverlay}
     >
       {/* Edge-to-edge horizontally so the chat surface behind the overlay
          doesn't peek through the padding. Bottom edge is flush with the

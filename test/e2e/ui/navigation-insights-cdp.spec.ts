@@ -9,6 +9,7 @@ import {
 } from "./seeded-electron.js";
 import { localDateKey } from "../../../src/shared/local-date.js";
 import { makeTestT } from "./i18n.js";
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 const t = makeTestT("ko");
 
@@ -119,7 +120,7 @@ async function selectSettingsTab(
 ): Promise<void> {
   const tab = page.getByRole("tab", { name });
   if (!await tab.isVisible().catch(() => false)) {
-    const mobileBack = page.getByTestId("settings-mobile-back");
+    const mobileBack = page.getByTestId(TEST_IDS.settingsMobileBack);
     if (await mobileBack.isVisible().catch(() => false)) await mobileBack.click();
   }
   await page.getByRole("tab", { name }).click();
@@ -174,7 +175,7 @@ test.describe("navigation and monthly insights under CDP", () => {
       expect(insights.modelText).toContain("subscription-alpha");
       await attachCdpScreenshot(cdp, "navigation-insights-desktop-cdp.png");
 
-      await ctx.page.getByTestId("view-path-back").click();
+      await ctx.page.getByTestId(TEST_IDS.viewPathBack).click();
       await expect(ctx.page.getByTestId("view-path-current-work-board")).toBeVisible();
       const afterBack = await readNavigationProbe(cdp);
       expect(afterBack.forwardDisabled).toBe(false);
@@ -190,7 +191,7 @@ test.describe("navigation and monthly insights under CDP", () => {
       await expect(ctx.page.getByTestId("general-tab-card-plugin")).toBeVisible();
       await ctx.page.getByTestId("general-tab-card-plugin").click();
       await expect(ctx.page.getByTestId("view-path-current-settings:plugin-config")).toBeVisible();
-      await ctx.page.getByTestId("view-path-back").click();
+      await ctx.page.getByTestId(TEST_IDS.viewPathBack).click();
       await expect(ctx.page.getByTestId("view-path-current-settings:usage")).toBeVisible();
       await ctx.page.getByTestId("view-path-forward").click();
       await expect(ctx.page.getByTestId("view-path-current-settings:plugin-config")).toBeVisible();
@@ -219,8 +220,8 @@ test.describe("navigation and monthly insights under CDP", () => {
       await privacyToggle.click();
       // The first step replays Chat -> Model within Settings; the second exits
       // Settings to Home and exercises the unmount flush boundary.
-      await ctx.page.getByTestId("view-path-back").click();
-      await ctx.page.getByTestId("view-path-back").click();
+      await ctx.page.getByTestId(TEST_IDS.viewPathBack).click();
+      await ctx.page.getByTestId(TEST_IDS.viewPathBack).click();
       await expect(ctx.page.getByTestId("view-path-current-home")).toBeVisible();
       await ctx.page.getByTestId("sidebar-settings").click();
       await selectSettingsTab(ctx.page, /Chat|채팅/);
@@ -231,7 +232,7 @@ test.describe("navigation and monthly insights under CDP", () => {
       await ctx.page.getByTestId("sidebar-starred").click();
       await expect(ctx.page.getByTestId("view-path-current-insights")).toBeVisible();
       await ctx.page.setViewportSize({ width: 460, height: 900 });
-      await expect(ctx.page.getByTestId("view-path-back")).toBeVisible();
+      await expect(ctx.page.getByTestId(TEST_IDS.viewPathBack)).toBeVisible();
       await expect(ctx.page.getByTestId("view-path-forward")).toBeVisible();
       await expect(ctx.page.getByTestId("view-path-breadcrumb")).toBeHidden();
       // ResizeObserver/month range effects can briefly re-enter loading while

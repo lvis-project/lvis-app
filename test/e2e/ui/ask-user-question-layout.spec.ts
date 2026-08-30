@@ -1,5 +1,6 @@
 import type { ElectronApplication, Page } from 'playwright';
 import { test, expect } from './fixtures.js';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 type AskQuestionItem = {
   question: string;
@@ -37,7 +38,7 @@ async function ensureQuestionOverlayVisible(
   },
 ): Promise<boolean> {
   const injected = await injectAskQuestion(app, id, item);
-  const overlay = mainWindow.locator('[data-testid="question-overlay"]');
+  const overlay = mainWindow.locator(testIdSelector(TEST_IDS.questionOverlay));
   return overlay
     .waitFor({ state: 'visible', timeout: injected ? 5_000 : 10_000 })
     .then(() => true)

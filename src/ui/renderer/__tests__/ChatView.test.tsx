@@ -15,6 +15,7 @@ import {
   __resetSuggestedRepliesStoreForTests,
   __teardownSuggestedRepliesIpcForTests,
 } from "../hooks/use-suggested-replies.js";
+import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
 function installDeterministicScrollMetrics(initialScrollHeight = 2400, clientHeight = 600) {
   const descriptors = {
@@ -186,7 +187,7 @@ describe("ChatView", () => {
       );
 
       await act(async () => {
-        fireEvent.click(container.querySelector('[data-testid="view-path-back"]')!);
+        fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.viewPathBack))!);
       });
 
       await waitFor(() => {
@@ -214,7 +215,7 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.querySelector('[data-testid="suggested-replies-ghost"]')).not.toBeNull();
       expect(container.textContent).not.toContain("LVIS 에이전트가 준비되었습니다");
-      const textarea = container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement | null;
+      const textarea = container.querySelector(testIdSelector(TEST_IDS.composerTextarea)) as HTMLTextAreaElement | null;
       expect(textarea?.getAttribute("placeholder")).toBe("");
     });
   });
@@ -258,7 +259,7 @@ describe("ChatView", () => {
       expect(composerDock).toHaveAttribute("data-composer-placement", "center");
       expect(composerDock).not.toHaveAttribute("data-composer-centered-lift");
       expect(container.querySelector('[data-testid="composer-project-selector-slot"]')).not.toBeNull();
-      expect(container.querySelector('[data-testid="composer-textarea"]')).not.toBeNull();
+      expect(container.querySelector(testIdSelector(TEST_IDS.composerTextarea))).not.toBeNull();
       const sendButton = container.querySelector('[data-testid="composer-send-button"]') as HTMLButtonElement | null;
       expect(sendButton?.disabled).toBe(true);
     });
@@ -304,7 +305,7 @@ describe("ChatView", () => {
     const { container } = await renderApp({ hasApiKey: true });
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="composer-textarea"]')).not.toBeNull();
+      expect(container.querySelector(testIdSelector(TEST_IDS.composerTextarea))).not.toBeNull();
     });
     expect(container.querySelector('[data-testid="composer-api-key-chip"]')).toBeNull();
     expect(container.querySelector('[data-testid="chat-view:no-api-key-card"]')).toBeNull();
@@ -1011,7 +1012,7 @@ describe("ChatView", () => {
     });
 
     const openButton = await waitFor(() => {
-      const button = container.querySelector('[data-testid="chat-group-panel-toggle"]') as HTMLButtonElement | null;
+      const button = container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle)) as HTMLButtonElement | null;
       expect(button).not.toBeNull();
       return button!;
     });
@@ -1023,14 +1024,14 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="chat-side-panel"]')).not.toBeNull();
+      expect(container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))).not.toBeNull();
       expect(container.querySelector('[data-testid="chat-preview-rail"]')).not.toBeNull();
       expect(container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]")).not.toBeNull();
     });
-    expect(container.querySelector('[data-testid="chat-view-root"]')?.className).toContain("flex-row");
-    expect(container.querySelector('[data-testid="chat-view-root"]')?.className).not.toContain("lg:pr-96");
+    expect(container.querySelector(testIdSelector(TEST_IDS.chatViewRoot))?.className).toContain("flex-row");
+    expect(container.querySelector(testIdSelector(TEST_IDS.chatViewRoot))?.className).not.toContain("lg:pr-96");
     expect(container.querySelector('[data-testid="chat-main-column"]')).not.toBeNull();
-    const sidePanelClassName = container.querySelector('[data-testid="chat-side-panel"]')?.className ?? "";
+    const sidePanelClassName = container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))?.className ?? "";
     expect(sidePanelClassName).toContain("relative");
     expect(sidePanelClassName).not.toContain("absolute");
     expect(sidePanelClassName).not.toContain("lg:relative");
@@ -1107,7 +1108,7 @@ describe("ChatView", () => {
     expect(container.querySelector('[data-testid="chat-side-panel-subagent-viewer"]')).toBeNull();
 
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="chat-group-panel-toggle"]')!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
     });
     const subagentLauncher = await waitFor(() => {
       const button = container.querySelector('[data-testid="chat-side-panel-launcher-subagent"]') as HTMLButtonElement | null;
@@ -1193,11 +1194,11 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("[File #1]");
       expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
-      expect(container.querySelector('[data-testid="chat-group-panel-toggle"]')).not.toBeNull();
+      expect(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))).not.toBeNull();
     });
 
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="chat-group-panel-toggle"]')!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
     });
 
     await waitFor(() => {
@@ -1775,7 +1776,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("지역 기준을 알려주세요");
-      const overlay = container.querySelector('[data-testid="question-overlay"]');
+      const overlay = container.querySelector(testIdSelector(TEST_IDS.questionOverlay));
       const card = container.querySelector('[data-testid="ask-user-question-card"]');
       expect(overlay).not.toBeNull();
       expect(overlay?.className).not.toContain("pb-3");

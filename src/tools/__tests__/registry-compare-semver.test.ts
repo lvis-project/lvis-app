@@ -11,38 +11,36 @@
 import { describe, it, expect } from "vitest";
 import { compareSemver } from "../registry.js";
 
-const sign = (n: number) => (n < 0 ? -1 : n > 0 ? 1 : 0);
-
 describe("compareSemver", () => {
   it("orders plain numeric cores", () => {
-    expect(sign(compareSemver("1.0.0", "2.0.0"))).toBe(-1);
-    expect(sign(compareSemver("1.2.0", "1.10.0"))).toBe(-1); // numeric, not lexical
-    expect(sign(compareSemver("1.0.1", "1.0.0"))).toBe(1);
-    expect(sign(compareSemver("1.0.0", "1.0.0"))).toBe(0);
+    expect(Math.sign(compareSemver("1.0.0", "2.0.0"))).toBe(-1);
+    expect(Math.sign(compareSemver("1.2.0", "1.10.0"))).toBe(-1); // numeric, not lexical
+    expect(Math.sign(compareSemver("1.0.1", "1.0.0"))).toBe(1);
+    expect(Math.sign(compareSemver("1.0.0", "1.0.0"))).toBe(0);
   });
 
   it("ranks a release ABOVE its own pre-release (the bug)", () => {
-    expect(sign(compareSemver("1.0.0", "1.0.0-beta"))).toBe(1);
-    expect(sign(compareSemver("1.0.0-beta", "1.0.0"))).toBe(-1);
-    expect(sign(compareSemver("2.0.0-rc.1", "2.0.0"))).toBe(-1);
+    expect(Math.sign(compareSemver("1.0.0", "1.0.0-beta"))).toBe(1);
+    expect(Math.sign(compareSemver("1.0.0-beta", "1.0.0"))).toBe(-1);
+    expect(Math.sign(compareSemver("2.0.0-rc.1", "2.0.0"))).toBe(-1);
   });
 
   it("a pre-release of a higher core still beats a lower release", () => {
-    expect(sign(compareSemver("2.0.0-alpha", "1.9.9"))).toBe(1);
+    expect(Math.sign(compareSemver("2.0.0-alpha", "1.9.9"))).toBe(1);
   });
 
   it("orders pre-release identifiers per semver precedence", () => {
-    expect(sign(compareSemver("1.0.0-alpha", "1.0.0-beta"))).toBe(-1); // lexical
-    expect(sign(compareSemver("1.0.0-alpha", "1.0.0-alpha.1"))).toBe(-1); // fewer fields lower
-    expect(sign(compareSemver("1.0.0-alpha.1", "1.0.0-alpha.2"))).toBe(-1); // numeric
-    expect(sign(compareSemver("1.0.0-rc.2", "1.0.0-rc.10"))).toBe(-1); // numeric, not lexical
-    expect(sign(compareSemver("1.0.0-1", "1.0.0-alpha"))).toBe(-1); // numeric < alphanumeric
-    expect(sign(compareSemver("1.0.0-beta", "1.0.0-beta"))).toBe(0);
+    expect(Math.sign(compareSemver("1.0.0-alpha", "1.0.0-beta"))).toBe(-1); // lexical
+    expect(Math.sign(compareSemver("1.0.0-alpha", "1.0.0-alpha.1"))).toBe(-1); // fewer fields lower
+    expect(Math.sign(compareSemver("1.0.0-alpha.1", "1.0.0-alpha.2"))).toBe(-1); // numeric
+    expect(Math.sign(compareSemver("1.0.0-rc.2", "1.0.0-rc.10"))).toBe(-1); // numeric, not lexical
+    expect(Math.sign(compareSemver("1.0.0-1", "1.0.0-alpha"))).toBe(-1); // numeric < alphanumeric
+    expect(Math.sign(compareSemver("1.0.0-beta", "1.0.0-beta"))).toBe(0);
   });
 
   it("ignores build metadata", () => {
-    expect(sign(compareSemver("1.0.0+build.9", "1.0.0+build.1"))).toBe(0);
-    expect(sign(compareSemver("1.0.0-beta+exp", "1.0.0-beta"))).toBe(0);
+    expect(Math.sign(compareSemver("1.0.0+build.9", "1.0.0+build.1"))).toBe(0);
+    expect(Math.sign(compareSemver("1.0.0-beta+exp", "1.0.0-beta"))).toBe(0);
   });
 
   it("sorting a mixed list picks the final release as newest", () => {

@@ -26,6 +26,7 @@ import {
 import type { RationaleTicketStoreAuditEvent } from "../tools/pipeline/rationale-ticket-store.js";
 import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 import { hasExactKeys, isPlainRecord } from "../shared/is-record.js";
+import { utcDateKey } from "../shared/local-date.js";
 
 export const RATIONALE_AUDIT_SCHEMA_VERSION = 1 as const;
 export const RATIONALE_AUDIT_MAX_DAILY_BYTES = 64 * 1024 * 1024;
@@ -174,7 +175,7 @@ function assertSessionId(sessionId: string): void {
 
 function dateFor(at: number): string {
   assertTime(at);
-  return new Date(at).toISOString().slice(0, 10);
+  return utcDateKey(new Date(at));
 }
 
 function parseFingerprint(value: unknown): FileFingerprint | null {

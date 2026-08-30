@@ -16,30 +16,27 @@ vi.mock("electron", () => ({
 }));
 
 import { validatePluginFrame } from "../ipc-bridge.js";
-
-function ev(url: string): IpcMainInvokeEvent {
-  return { senderFrame: { url } } as unknown as IpcMainInvokeEvent;
-}
+import { foreignFrameEvent } from "./test-helpers.js";
 
 describe("validatePluginFrame", () => {
   it("accepts a plugin-ui-shell file:// frame", () => {
-    expect(validatePluginFrame(ev("file:///dist/src/plugin-ui-shell.html"))).toBe(true);
+    expect(validatePluginFrame(foreignFrameEvent("file:///dist/src/plugin-ui-shell.html"))).toBe(true);
   });
 
   it("rejects a host renderer file:// frame (no plugin-ui-shell in path)", () => {
-    expect(validatePluginFrame(ev("file:///dist/src/index.html"))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent("file:///dist/src/index.html"))).toBe(false);
   });
 
   it("rejects a generic file:// frame", () => {
-    expect(validatePluginFrame(ev("file:///some/other/file.html"))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent("file:///some/other/file.html"))).toBe(false);
   });
 
   it("rejects http:// frames even if they contain plugin-ui-shell", () => {
-    expect(validatePluginFrame(ev("http://evil.example.com/plugin-ui-shell.html"))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent("http://evil.example.com/plugin-ui-shell.html"))).toBe(false);
   });
 
   it("rejects https:// frames", () => {
-    expect(validatePluginFrame(ev("https://evil.example.com/"))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent("https://evil.example.com/"))).toBe(false);
   });
 
   it("refuses a missing sender frame", () => {
@@ -49,6 +46,6 @@ describe("validatePluginFrame", () => {
   });
 
   it("rejects malformed URL", () => {
-    expect(validatePluginFrame(ev("not-a-url"))).toBe(false);
+    expect(validatePluginFrame(foreignFrameEvent("not-a-url"))).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * Smoke test for chat input affordance. We do not require a live LLM
@@ -27,7 +28,7 @@ test('chat input element can be located or test skips cleanly', async ({ mainWin
 });
 
 test('chat input keeps real keyboard typing intact', async ({ mainWindow }) => {
-  const input = mainWindow.locator('[data-testid="composer-textarea"]').first();
+  const input = mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea)).first();
   const found = await input
     .waitFor({ state: 'visible', timeout: 15_000 })
     .then(() => true)

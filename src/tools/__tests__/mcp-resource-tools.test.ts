@@ -20,6 +20,7 @@ import {
 } from "../mcp-resource-tools.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../../shared/mcp-resource-bounds.js";
 import { MCP_RESOURCE_LIST_MAX_CHARS } from "../mcp-resource-tools.js";
+import { parseJsonRecord as parse } from "../../__tests__/test-helpers.js";
 
 const ctx = () => ({}) as never;
 
@@ -55,10 +56,6 @@ function deps(over: Partial<McpResourceToolDeps> = {}): McpResourceToolDeps {
     }),
     ...over,
   };
-}
-
-function parse(output: string): Record<string, unknown> {
-  return JSON.parse(output) as Record<string, unknown>;
 }
 
 describe("mcp_resource_list", () => {

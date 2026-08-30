@@ -7,6 +7,7 @@ import { InputActionBar } from "../InputActionBar.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../../shared/assistant-context-menu.js";
 import type { InputStatusRow } from "../../hooks/use-input-status-row.js";
+import { TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
 
 const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "" };
 const codingPreset: RolePreset = { id: "coding", name: "코딩", systemPromptAdd: "Code carefully." };
@@ -113,7 +114,7 @@ describe("InputActionBar (unified bar)", () => {
   it("leading cluster order is [command] → [persona] → [attach] (ring moved to status row)", () => {
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
-    const picker = leading.querySelector("[data-testid='command-popover-trigger']");
+    const picker = leading.querySelector(testIdSelector(TEST_IDS.commandPopoverTrigger));
     const persona = leading.querySelector("[data-testid='iab-assistant-context-button']");
     const attach = leading.querySelector("[data-testid='iab-attach-button']");
     expect(picker && persona && attach).toBeTruthy();

@@ -10,16 +10,11 @@
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { ToolExecutor, type ToolPermissionContext } from "../executor.js";
+import { ToolExecutor } from "../executor.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool } from "../base.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
-
-function userPermissionContext(
-  overrides: Partial<ToolPermissionContext> = {},
-): ToolPermissionContext {
-  return { trustOrigin: "user-keyboard", ...overrides };
-}
 
 describe("ToolExecutor.executeOne success shape", () => {
   it("binds the required conversation cwd into the shared tool execution context", async () => {

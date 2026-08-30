@@ -8,6 +8,7 @@ import {
   type SeededElectronContext,
 } from "./seeded-electron";
 import { makeTestT } from "./i18n";
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 // This spec drives the app via `launchSeededElectron` (not the `./fixtures`
 // `test`, which exposes a `t` fixture). `launchSeededElectron` seeds the ko
@@ -51,7 +52,7 @@ function turnSummary(opts: {
 }
 
 async function expectChatBooted(ctx: SeededElectronContext): Promise<void> {
-  await ctx.page.locator('[data-testid="composer"]').first().waitFor({
+  await ctx.page.locator(testIdSelector(TEST_IDS.composer)).first().waitFor({
     state: "visible",
     timeout: 20_000,
   });
@@ -105,7 +106,7 @@ test.describe("context-budget token surfaces", () => {
       await expect(ctx.page.getByText("123,456").first()).toBeVisible();
       await expect(ctx.page.getByText(t("tokenProgressRing.effectiveLimitTpmLabel")).first()).toBeVisible();
 
-      const badge = ctx.page.getByTestId("token-cost-badge").first();
+      const badge = ctx.page.getByTestId(TEST_IDS.tokenCostBadge).first();
       await expect(badge).toContainText("2.0k");
       await expect(badge).not.toContainText(t("tokenCostBadge.pricingUnknownBadge"));
       await badge.click({ force: true });
@@ -173,7 +174,7 @@ test.describe("context-budget token surfaces", () => {
         // post-compact projected 42,000 / 200,000 (TPM) ≈ 21%
         t("tokenProgressRing.projectedInputAriaLabel", { pct: "21" }),
       );
-      await expect(ctx.page.getByTestId("token-cost-badge")).toHaveCount(1);
+      await expect(ctx.page.getByTestId(TEST_IDS.tokenCostBadge)).toHaveCount(1);
       await ctx.page.getByTestId("token-progress-ring").click({ force: true });
       await expect(ctx.page.getByTestId("token-progress-ring-detail")).toBeVisible();
       await expect(ctx.page.getByText("42,000").first()).toBeVisible();

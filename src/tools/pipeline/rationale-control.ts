@@ -20,6 +20,7 @@ import { canonicalStringify } from "../../permissions/user-approval-store.js";
 import { normalizeRationaleApprovalDisplayText } from "../../shared/rationale-approval-display.js";
 import { assertValidToolUseId } from "../../shared/tool-use-id.js";
 import { isRecord } from "../../shared/is-record.js";
+import { UUID_PATTERN } from "../../shared/uuid.js";
 import { sha256Hex } from "../../lib/hex-digest-equal.js";
 
 export const RATIONALE_CONTROL_CONTRACT_VERSION = 1 as const;
@@ -329,11 +330,10 @@ export function validateHostAnchorRoundReservationReceipt(
         !validateTriggeringBatchDisposition(batch) || action.anchorId !== anchor.anchorId) {
       return false;
     }
-    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     return receipt.contractVersion === RATIONALE_CONTROL_CONTRACT_VERSION &&
       receipt.kind === "host-anchor-round-cas-reservation" &&
-      uuid.test(receipt.reservationId) && uuid.test(receipt.ticketId) &&
-      uuid.test(receipt.nonce) && receipt.anchorId === anchor.anchorId &&
+      UUID_PATTERN.test(receipt.reservationId) && UUID_PATTERN.test(receipt.ticketId) &&
+      UUID_PATTERN.test(receipt.nonce) && receipt.anchorId === anchor.anchorId &&
       receipt.anchorDigest === digest(anchor) &&
       receipt.actionDigest === action.actionDigest &&
       receipt.batchDigest === batch.batchDigest && receipt.round === 1 &&
@@ -1355,10 +1355,10 @@ export function verifyRationaleRequiredControl(
     assertBoundedText(control.ticketId, "ticketId", 256);
     assertBoundedText(control.nonce, "nonce", 256);
     if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      !UUID_PATTERN.test(
         control.ticketId,
       ) ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      !UUID_PATTERN.test(
         control.nonce,
       ) ||
       !/^[0-9a-f]{64}$/.test(control.invocationDigest)

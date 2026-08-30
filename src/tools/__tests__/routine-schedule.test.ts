@@ -6,36 +6,20 @@
  * that the length cap is enforced at the tool boundary.
  */
 import { describe, it, expect } from "vitest";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 import { createRoutineScheduleTool } from "../routine-schedule.js";
 import {
   MAX_CRON_EXPR_LENGTH,
   MAX_ROUTINE_SOURCE_LENGTH,
   MIN_INTERVAL_MS,
-  RoutinesStore,
 } from "../../main/routines-store.js";
-import type { ToolExecutionContext } from "../base.js";
+import { futureIso, tempRoutinesStore } from "../../main/__tests__/routines-fixture.js";
+import { toolExecutionContext as ctx } from "./tool-context-fixture.js";
 
-const ctx = (): ToolExecutionContext => ({ cwd: "/tmp", extraAllowedDirectories: [], metadata: {} });
-
-function tempStore() {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-routine-tool-"));
-  const store = new RoutinesStore(join(dir, "routines.json"));
-  const cleanup = () => cleanupTmpDir(dir);
-  return { store, cleanup };
-}
-
-function futureIso(offsetMs = 60_000): string {
-  return new Date(Date.now() + offsetMs).toISOString();
-}
 
 describe("routine_schedule tool — source marker", () => {
   it("stamps the source marker onto the persisted routine", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const tool = createRoutineScheduleTool(store);
       const result = await tool.execute(
@@ -57,7 +41,7 @@ describe("routine_schedule tool — source marker", () => {
   });
 
   it("leaves source unset when omitted", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const tool = createRoutineScheduleTool(store);
       const result = await tool.execute(
@@ -77,7 +61,7 @@ describe("routine_schedule tool — source marker", () => {
   });
 
   it("rejects a source longer than the cap with a clean tool error", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const tool = createRoutineScheduleTool(store);
       const result = await tool.execute(
@@ -101,7 +85,7 @@ describe("routine_schedule tool — source marker", () => {
 
 describe("routine_schedule tool — validation bounds shared with the store", () => {
   it("rejects a cron expression one character past the store's cap", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const tool = createRoutineScheduleTool(store);
       // A valid expression of exactly `length` characters: a minute list padded
@@ -127,7 +111,7 @@ describe("routine_schedule tool — validation bounds shared with the store", ()
   });
 
   it("persists an interval at the store's minimum and drops one a millisecond under it", async () => {
-    const { store, cleanup } = tempStore();
+    const { store, cleanup } = tempRoutinesStore();
     try {
       const tool = createRoutineScheduleTool(store);
       const persistedRepeat = async (intervalMs: number) => {

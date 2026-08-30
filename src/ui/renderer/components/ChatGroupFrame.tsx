@@ -43,6 +43,7 @@ import { AXIS_OF,
   type DropEdge,
   type SplitAxis,
 } from "./chat-group-tree.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 /**
  * The least a tile may be dragged down to, in px.
@@ -434,7 +435,7 @@ export function ChatGroupFrame({
               title={panelLabel}
               aria-label={panelLabel}
               aria-pressed={panelOpen}
-              data-testid="chat-group-panel-toggle"
+              data-testid={TEST_IDS.chatGroupPanelToggle}
             >
               {panelOpen ? <PanelBottomClose className="h-4 w-4" /> : <PanelBottomOpen className="h-4 w-4" />}
             </Button>

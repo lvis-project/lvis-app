@@ -11,14 +11,12 @@
  * {@link RoutinesScheduler} (separate module) drives the polling loop and
  * fires execution events when a scheduled routine's next-fire time arrives.
  */
-import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
-import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
+import { readJsonFileOrEmpty, writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
-import { isMissingPathError } from "../lib/atomic-file.js";
 import { isStringArray } from "../shared/is-record.js";
 const log = createLogger("lvis");
 
@@ -155,32 +153,18 @@ function isDirectoryAtOrBelow(rootKey: string, directory: string): boolean {
   return isWorkspaceKeyAtOrBelow(rootKey, candidate);
 }
 
-async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
-  try {
-    const raw = await readFile(filePath, "utf-8");
-    let parsed: RoutinesFile;
-    try {
-      parsed = JSON.parse(raw) as RoutinesFile;
-    } catch (err) {
-      log.warn("[routines-store] corrupt JSON, treating as empty + backup");
-      await rename(filePath, `${filePath}.corrupt-${Date.now()}.bak`);
-      return { version: 2, routines: [] };
-    }
-    if (!Array.isArray(parsed.routines)) {
-      return { version: 2, routines: [] };
-    }
+function emptyRoutinesFile(): RoutinesFile {
+  return { version: 2, routines: [] };
+}
+
+function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
+  return readJsonFileOrEmpty(filePath, emptyRoutinesFile, (parsed) => {
+    const file = parsed as RoutinesFile;
+    if (!Array.isArray(file.routines)) return emptyRoutinesFile();
     // Filter out tampered/corrupted or non-canonical records so a single bad
     // entry cannot cause the scheduler tick to throw and stall all routines.
-    return {
-      version: 2,
-      routines: parsed.routines.filter(isCanonicalRecord),
-    };
-  } catch (err) {
-    if (isMissingPathError(err)) {
-      return { version: 2, routines: [] };
-    }
-    throw err;
-  }
+    return { version: 2, routines: file.routines.filter(isCanonicalRecord) };
+  });
 }
 
 async function writeFileAtomic(filePath: string, data: RoutinesFile): Promise<void> {

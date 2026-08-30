@@ -5,15 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 import { createDynamicTool } from "../base.js";
-import { ToolExecutor, type ToolPermissionContext } from "../executor.js";
+import { ToolExecutor } from "../executor.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { makePermissionManager } from "./executor-reviewer-fixtures.js";
-
-function userPermissionContext(
-  overrides: Partial<ToolPermissionContext> = {},
-): ToolPermissionContext {
-  return { trustOrigin: "user-keyboard", ...overrides };
-}
 
 function makeReviewedNetworkProbe(name: string, executeSpy: ReturnType<typeof vi.fn>): ToolRegistry {
   const registry = new ToolRegistry();

@@ -22,12 +22,12 @@ import {
   WhitelistCache,
   whitelistRegistry,
 } from "../../../plugins/whitelist/whitelist-registry.js";
-import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../../plugins/marketplace-keys.js";
 import { resetHostSecretCountersForTesting } from "../../../telemetry/host-secret-counters.js";
 import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 import type { SignatureEnvelope } from "../../../plugins/types.js";
 import type { PluginManifest } from "../../../plugins/types.js";
+import { manifestSha } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // -------- helpers --------
 
@@ -111,12 +111,6 @@ function manifestFor(pluginId: string, allowedKeys: string[]): PluginManifest {
     tools: [],
     hostSecrets: { read: allowedKeys },
   } as PluginManifest;
-}
-
-function shaOfManifest(manifest: PluginManifest): string {
-  // Mirror what `plugin-runtime.ts` produces — same canonicalJSON helper
-  // so the Tier-3 manifest-sha pin matches.
-  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
 }
 
 function makeAuditLogger() {
@@ -266,7 +260,7 @@ describe("resolveApiKey — Tier-3 whitelist registry deny passthrough", () => {
   it("returns reason=not-whitelisted when registry denies (plugin absent from grants)", async () => {
     // Seed registry with a grant for OTHER plugin so this plugin is absent.
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     await seedRegistryWithGrant({
       pluginId: "other",
       allowedKeys: ["llm.apiKey.openai"],
@@ -296,7 +290,7 @@ describe("resolveApiKey — Tier-3 BEFORE Tier-4 ordering (cycle 1 MEDIUM)", () 
     // Tier-3 must surface first (not-whitelisted), not the vendor-mismatch
     // leak that would tell the plugin which vendor is active.
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     await seedRegistryWithGrant({
       pluginId: "other",
       allowedKeys: ["llm.apiKey.openai"],
@@ -325,7 +319,7 @@ describe("resolveApiKey — Tier-3 BEFORE Tier-4 ordering (cycle 1 MEDIUM)", () 
 describe("resolveApiKey — Tier-4 vendor mismatch", () => {
   it("returns vendor-mismatch when plugin allowlisted but vendor != active", async () => {
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.openai"],
@@ -358,7 +352,7 @@ describe("resolveApiKey — Tier-4 vendor mismatch", () => {
     // Tier-4 mismatch and the family had no reachable allow path here at all.
     const presetKey = "llm.marketplaceProvider.future-router.apiKey";
     const manifest = manifestFor("p", [presetKey]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: [presetKey],
@@ -393,7 +387,7 @@ describe("resolveApiKey — Tier-4 vendor mismatch", () => {
     // Tier-4 is preserved across the merge: reachable is not the same as open.
     const presetKey = "llm.marketplaceProvider.future-router.apiKey";
     const manifest = manifestFor("p", [presetKey]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: [presetKey],
@@ -429,7 +423,7 @@ describe("resolveApiKey — Tier-4 vendor mismatch", () => {
     // the traffic. The SDK-facing `reason` stays `not-whitelisted` — that enum
     // is the plugin contract and is deliberately unchanged.
     const manifest = manifestFor("p", []);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     const auditLogger = makeAuditLogger();
     const settingsService = makeSettingsService({ provider: "openai" });
 
@@ -456,7 +450,7 @@ describe("resolveApiKey — Tier-4 vendor mismatch", () => {
   it("denies the generic OpenAI-compatible key while a marketplace preset is active", async () => {
     const genericKey = "llm.apiKey.openai-compatible";
     const manifest = manifestFor("p", [genericKey]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: [genericKey],
@@ -500,14 +494,14 @@ describe("resolveApiKey — success: release() lifetime", () => {
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.openai"],
-      manifestSha256: shaOfManifest(manifest),
+      manifestSha256: manifestSha(manifest),
     });
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "openai" },
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-host" },
@@ -531,14 +525,14 @@ describe("resolveApiKey — signal aborts mid-flight (cycle 1 HIGH)", () => {
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.openai"],
-      manifestSha256: shaOfManifest(manifest),
+      manifestSha256: manifestSha(manifest),
     });
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "openai", signal: ac.signal },
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-host" },
@@ -562,14 +556,14 @@ describe("resolveApiKey — vendor alias normalization (cycle 1 CRITICAL)", () =
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.claude"],
-      manifestSha256: shaOfManifest(manifest),
+      manifestSha256: manifestSha(manifest),
     });
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "anthropic" }, // SDK enum name
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "claude", // host vendor name
           secrets: { "llm.apiKey.claude": "sk-claude" },
@@ -589,14 +583,14 @@ describe("resolveApiKey — vendor alias normalization (cycle 1 CRITICAL)", () =
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.vertex-ai"],
-      manifestSha256: shaOfManifest(manifest),
+      manifestSha256: manifestSha(manifest),
     });
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "vertex" },
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "vertex-ai",
           secrets: { "llm.apiKey.vertex-ai": "sk-vertex" },
@@ -616,14 +610,14 @@ describe("resolveApiKey — vendor alias normalization (cycle 1 CRITICAL)", () =
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.azure-foundry"],
-      manifestSha256: shaOfManifest(manifest),
+      manifestSha256: manifestSha(manifest),
     });
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "azure-openai" },
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "azure-foundry",
           secrets: { "llm.apiKey.azure-foundry": "sk-azure" },
@@ -650,14 +644,14 @@ describe("resolveApiKey — permission revoke fires release() on outstanding bea
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.openai"],
-      manifestSha256: shaOfManifest(manifest),
+      manifestSha256: manifestSha(manifest),
     });
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "openai" },
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-host" },
@@ -701,14 +695,14 @@ describe("resolveApiKey — baseUrl present on azure-foundry success", () => {
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.azure-foundry"],
-      manifestSha256: shaOfManifest(manifest),
+      manifestSha256: manifestSha(manifest),
     });
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "azure-openai" },
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "azure-foundry",
           secrets: { "llm.apiKey.azure-foundry": "sk-az" },
@@ -734,7 +728,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
     // Note: NO `seedRegistryWithGrant` call — the whitelist registry has
     // no grant for this plugin. Without admin-bypass Tier-3 would deny.
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     const auditLogger = makeAuditLogger();
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "openai" },
@@ -772,7 +766,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     // `source=whitelist-registry`. No `seedRegistryWithGrant` here: the
     // whitelist registry holds no grant at all for this plugin.
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     const auditLogger = makeAuditLogger();
 
     const result = await resolveApiKey(
@@ -802,7 +796,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
 
   it("attributes the allow line to whitelist-registry on the ordinary Tier-3 path", async () => {
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.openai"],
@@ -841,7 +835,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         registryManifestSha256: "f".repeat(64),
         settingsService: makeSettingsService({
           provider: "openai",
@@ -869,7 +863,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-host" },
@@ -894,7 +888,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-host" },
@@ -912,7 +906,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
       "../../../telemetry/host-secret-counters.js"
     );
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
-    const manifestSha256 = shaOfManifest(manifest);
+    const manifestSha256 = manifestSha(manifest);
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "openai" },
       {
@@ -946,7 +940,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256: manifestSha(manifest),
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-x" },

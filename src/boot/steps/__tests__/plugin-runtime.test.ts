@@ -12,14 +12,9 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { createTmpDirTracker } from "../../../__tests__/support/tmp-dir-teardown.js";
 
-const tmpDirs = new Set<string>();
-
-function trackTmpDir(dir: string): string {
-  tmpDirs.add(dir);
-  return dir;
-}
+const tmpDirs = createTmpDirTracker();
 
 const runtimeTestState = vi.hoisted(() => ({
   appPrependOnceListener: vi.fn(),
@@ -165,12 +160,7 @@ beforeEach(() => {
   dnsTestState.lookup.mockReset();
 });
 
-afterEach(async () => {
-  for (const dir of tmpDirs) {
-    await cleanupTmpDir(dir);
-  }
-  tmpDirs.clear();
-});
+afterEach(() => tmpDirs.cleanup());
 
 describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", () => {
   it("re-throws the original ApprovalOriginError even when auditLogger.log throws", () => {
@@ -652,7 +642,7 @@ describe("initPluginRuntime HostApi factory", () => {
       createHostApi!,
       pluginId,
       manifest,
-      trackTmpDir(mkdtempSync("/tmp/lvis-hostfetch-data-")),
+      tmpDirs.track(mkdtempSync("/tmp/lvis-hostfetch-data-")),
     );
     return { api, networkFetch, bootAuditLogger };
   }
@@ -865,7 +855,7 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const pluginDataDir = trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-"));
+    const pluginDataDir = tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-"));
     const api = invokeHostApiFactory(
       createHostApi!,
       "plugin-a",
@@ -968,7 +958,7 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const pluginDataDir = trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-"));
+    const pluginDataDir = tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-"));
     const api = invokeHostApiFactory(
       createHostApi!,
       "plugin-a",
@@ -1052,7 +1042,7 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const pluginDataDir = trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-"));
+    const pluginDataDir = tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-"));
     const api = invokeHostApiFactory(
       createHostApi!,
       "caller-plugin",
@@ -1118,7 +1108,7 @@ describe("initPluginRuntime HostApi factory", () => {
       createHostApi!,
       "evil-plugin",
       { id: "ms-graph", config: {} },
-      trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-")),
+      tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-")),
     );
     expect(evilApi).not.toHaveProperty("callTool");
     expect(evilApi).toHaveProperty("emitEvent");
@@ -1197,7 +1187,7 @@ describe("initPluginRuntime HostApi factory", () => {
         },
       ],
     };
-    const cacheRoot = trackTmpDir(mkdtempSyncOs("/tmp/lvis-b6-whitelist-"));
+    const cacheRoot = tmpDirs.track(mkdtempSyncOs("/tmp/lvis-b6-whitelist-"));
     const cache = new WhitelistCache(cacheRoot);
     await cache.store({
       body: grantBody,
@@ -1264,7 +1254,7 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const pluginDataDir = trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-"));
+    const pluginDataDir = tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-"));
     const api = invokeHostApiFactory(
       createHostApi!,
       "plugin-b6",
@@ -1398,7 +1388,7 @@ describe("initPluginRuntime HostApi factory", () => {
       createHostApi!,
       "plugin-marketplace-secret",
       manifest,
-      trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-")),
+      tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-")),
     );
 
     expect(await api.getSecret(activeKey)).toBe("fr-secret");
@@ -1508,7 +1498,7 @@ describe("initPluginRuntime HostApi factory", () => {
       createHostApi!,
       "plugin-generic-compatible-secret",
       manifest,
-      trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-")),
+      tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-")),
     );
 
     expect(await api.getSecret(genericKey)).toBeNull();
@@ -1578,7 +1568,7 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const pluginDataDir = trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-"));
+    const pluginDataDir = tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-"));
     const api = invokeHostApiFactory(
       createHostApi!,
       "plugin-b7",
@@ -1659,7 +1649,7 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const pluginDataDir = trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-"));
+    const pluginDataDir = tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-"));
     const api = invokeHostApiFactory(
       createHostApi!,
       "plugin-q",
@@ -1776,7 +1766,7 @@ describe("initPluginRuntime HostApi factory", () => {
       createHostApi!,
       "plugin-cache-fail",
       manifest,
-      trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-")),
+      tmpDirs.track(mkdtempSync("/tmp/lvis-hostapi-data-")),
     );
     expect(await api.getSecret("llm.apiKey.openai")).toBe("sk-openai");
 
@@ -1848,7 +1838,7 @@ describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () =>
       createHostApi!,
       pluginId,
       { id: pluginId, config: {}, capabilities: [] },
-      trackTmpDir(mkdtempSync("/tmp/lvis-hasroutine-")),
+      tmpDirs.track(mkdtempSync("/tmp/lvis-hasroutine-")),
     );
   }
 

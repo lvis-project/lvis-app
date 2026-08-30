@@ -16,14 +16,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { PermissionManager } from "../permission-manager.js";
-import {
-  canonicalizePathForMatch,
-  caseFoldForMatch,
-} from "../sensitive-paths.js";
-
-function fold(raw: string): string {
-  return caseFoldForMatch(canonicalizePathForMatch(raw));
-}
+import { foldPathForMatch as fold } from "./test-helpers.js";
 
 function target(raw: string): { filePath: string; canonicalPath: string } {
   return { filePath: raw, canonicalPath: fold(raw) };

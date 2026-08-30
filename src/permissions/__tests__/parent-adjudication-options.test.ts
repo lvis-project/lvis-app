@@ -28,7 +28,7 @@ import type {
 } from "../permission-settings-store.js";
 import type { ParentContextTurn } from "../parent-context-evidence.js";
 import { makeMockWebContents } from "../../__tests__/test-helpers.js";
-import { auditRowTexts } from "./test-helpers.js";
+import { auditRowStartingWith } from "./test-helpers.js";
 
 const CHILD_SESSION = "child-session-1";
 const PARENT_SESSION = "parent-session-1";
@@ -168,13 +168,6 @@ function fakeQueue(
   return { queue: { append: spy } as unknown as DeferredQueue, append: spy };
 }
 
-function rowStartingWith(
-  auditLogger: { log: ReturnType<typeof vi.fn> },
-  marker: string,
-): string | undefined {
-  return auditRowTexts(auditLogger).find((row) => row.startsWith(marker));
-}
-
 describe("tier 2 — parent context evidence", () => {
   it("sends none by default, and does not even read the transcript", async () => {
     const parentContext = vi.fn(() => [
@@ -302,7 +295,7 @@ describe("tier 3 — where a background escalation goes", () => {
       deferredId: "deferred-1",
     });
     expect(notificationService.fire).toHaveBeenCalledTimes(1);
-    const row = rowStartingWith(auditLogger, "[approval:parent-escalation-deferred]");
+    const row = auditRowStartingWith(auditLogger, "[approval:parent-escalation-deferred]");
     expect(row).toContain("deferredId=deferred-1");
     expect(row).toContain("cause=parent-escalated");
     expect(row).toContain("→ deny-once");

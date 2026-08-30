@@ -4,6 +4,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { deferred, settingsWithActiveView } from "../../../../test/renderer/helpers.js";
 import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
+import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
 /**
  * Visit history and the top-bar path, driven the way a user drives them:
@@ -64,7 +65,7 @@ describe("App view history", () => {
   it("names the destination on the buttons, since chat mode shows no path", async () => {
     const { container } = await renderApp({ hasApiKey: true });
     await ready(container);
-    const back = () => container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+    const back = () => container.querySelector(testIdSelector(TEST_IDS.viewPathBack)) as HTMLButtonElement;
 
     // Nothing behind yet: the generic label, and no destination to claim.
     expect(back().getAttribute("aria-label")).toBe("뒤로");
@@ -82,7 +83,7 @@ describe("App view history", () => {
     const { container } = await renderApp({ hasApiKey: true });
     await ready(container);
 
-    const back = () => container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+    const back = () => container.querySelector(testIdSelector(TEST_IDS.viewPathBack)) as HTMLButtonElement;
     const forward = () => container.querySelector('[data-testid="view-path-forward"]') as HTMLButtonElement;
     expect(back().disabled).toBe(true);
     expect(forward().disabled).toBe(true);
@@ -199,7 +200,7 @@ describe("App view history after a restored launch location", () => {
     });
 
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
-    const back = container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+    const back = container.querySelector(testIdSelector(TEST_IDS.viewPathBack)) as HTMLButtonElement;
     // Without this, back would offer a home screen that was never visited.
     expect(back.disabled).toBe(true);
   });
@@ -211,7 +212,7 @@ describe("App view history after a restored launch location", () => {
     });
 
     await waitFor(() => expect(path(container)).toContain("권한"));
-    const back = container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+    const back = container.querySelector(testIdSelector(TEST_IDS.viewPathBack)) as HTMLButtonElement;
     expect(back.disabled).toBe(true);
   });
 
@@ -229,7 +230,7 @@ describe("App view history after a restored launch location", () => {
 
     // Back now returns to where the app launched — not to home.
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.viewPathBack)) as HTMLButtonElement);
     });
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
   });
@@ -246,7 +247,7 @@ describe("App view history after a restored launch location", () => {
   };
 
   const backButton = (container: HTMLElement) =>
-    container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+    container.querySelector(testIdSelector(TEST_IDS.viewPathBack)) as HTMLButtonElement;
 
   it("counts a navigation made before the restore lands as a visit", async () => {
     const { gate, getSettings } = restoreGate();

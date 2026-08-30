@@ -105,3 +105,34 @@ async function stopChild(child: ChildProcess): Promise<void> {
 }
 
 const CHILD_TERM_GRACE_MS = 2_000;
+
+/**
+ * Track the scratch directories a suite creates and remove them together.
+ *
+ * The four boot-step suites each kept a module-level `Set` plus a `trackTmpDir`
+ * that added to it and an `afterEach` that drained it — the same three lines,
+ * four times. Per-tracker rather than module-global for the reason
+ * {@link createChildTracker} gives: two suites in one worker must never sweep
+ * each other's directories.
+ */
+export function createTmpDirTracker(): TmpDirTracker {
+  const dirs = new Set<string>();
+  return {
+    track(dir) {
+      dirs.add(dir);
+      return dir;
+    },
+    async cleanup() {
+      const pending = [...dirs];
+      dirs.clear();
+      for (const dir of pending) await cleanupTmpDir(dir);
+    },
+  };
+}
+
+export interface TmpDirTracker {
+  /** Register a scratch directory; returns it so `mkdtempSync(...)` can be wrapped in place. */
+  track: (dir: string) => string;
+  /** Remove every registered directory (retrying transient locks). Safe to call twice. */
+  cleanup: () => Promise<void>;
+}

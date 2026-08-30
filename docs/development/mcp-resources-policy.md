@@ -71,8 +71,8 @@ At connect, after `tools/list` and `prompts/list`:
 - gate on the server having **advertised** `resources` in its capabilities AND the
   capability being approved by governance — the same two-key gate `prompts/list`
   uses; an unadvertised or unapproved capability means no request leaves the host.
-- paginate with the same bound as prompts (`MAX_RESOURCE_PAGES`), so a hostile
-  `nextCursor` loop cannot hang the handshake.
+- paginate with a page cap (`MCP_RESOURCE_MAX_PAGES`, 20 — the same value the
+  prompts loop uses), so a hostile `nextCursor` loop cannot hang the handshake.
 - **sanitize at the wire boundary.** The declared TS types are casts, not checks.
   Each entry keeps `uri`, `name`, optional `title`/`description`/`mimeType`, and
   `size` only when they are the right type and within bounds; anything else is
@@ -191,7 +191,7 @@ Mirrors the prompt bounds, and shares the module where the numbers overlap:
 Every one of these is enforced in main, and the UI uses the same constants from a
 shared module so a field the user can fill is never one main drops.
 
-The composer's own `ATTACH_MAX_COUNT` (5) is a SEPARATE lane and resources do not count
+The composer's own `MAX_COMPOSER_ATTACHMENT_COUNT` (5) is a SEPARATE lane and resources do not count
 toward it: that number bounds how many chips stay legible side by side, while this one
 bounds how much server text a turn carries. Folding them would mean five attached
 documents stops the user adding a screenshot, and would make the bound above unreachable

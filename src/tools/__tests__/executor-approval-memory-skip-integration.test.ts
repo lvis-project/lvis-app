@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ToolExecutor } from "../executor.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { AuditLogger } from "../../audit/audit-logger.js";
@@ -35,12 +36,6 @@ import {
 } from "../../permissions/user-approval-store.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import { makeWriteProbeTool } from "./approval-memory-test-fixtures.js";
-
-function userPermissionContext(
-  overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
-): import("../executor.js").ToolPermissionContext {
-  return { trustOrigin: "user-keyboard", ...overrides };
-}
 
 describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManager + real store)", () => {
   let dir: string;

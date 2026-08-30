@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useTranslation } from "../../../i18n/react.js";
 import { normalizeNetworkAccessGrant } from "../../../shared/network-access.js";
 import type { MarketplaceItem } from "../types.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface PluginInstallDialogProps {
   target: MarketplaceItem | null;
@@ -71,7 +72,7 @@ export function PluginInstallDialog({ target, onClose, onConfirm, working }: Plu
         {target && networkAccess && (
           <div
             className="space-y-2 rounded-md border bg-muted/(--opacity-subtle) p-3 text-xs"
-            data-testid="plugin-install-network-access"
+            data-testid={TEST_IDS.pluginInstallNetworkAccess}
           >
             <div className="font-medium">{t("pluginInstallDialog.networkAccessTitle")}</div>
             {reasoning && (

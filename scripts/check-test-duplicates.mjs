@@ -4,9 +4,12 @@ import { pathToFileURL } from "node:url";
 import process from "node:process";
 import {
   isArrowFunction,
+  isCallExpression,
   isFunctionDeclaration,
   isFunctionExpression,
+  isFunctionLikeDeclaration,
   isIdentifier,
+  isSourceFile,
   isVariableDeclaration,
 } from "typescript/unstable/ast";
 import { parseSourceFiles } from "./lib/ts7-ast.mjs";
@@ -37,6 +40,13 @@ const SHARED_RENDERER_MOCK_FILE_RE = /^mock-lvis-api\.(?:ts|tsx|mts|mjs|js)$/;
 const TEST_SUPPORT_PATH_RE = /(?:^|\/)(?:test|__tests__|fixtures)(?:\/|$)/;
 const HELPER_NAME_RE =
   /^(?:make|create|write|setup|fixture|mock|fake|stub|build)[A-Z_][A-Za-z0-9_]*$/;
+/**
+ * Floor for the advisory name-hotspot path and for same-file pairs ONLY. A
+ * helper name repeated across files is worth reporting when its body is
+ * substantial or its name says "fixture"; it is noise for a two-line `ctx()`.
+ * The cross-file exact-body path is not gated by this — it was, and six groups
+ * of identical 40-character helpers went unreported while the gate printed 0.
+ */
 const MIN_GENERAL_HELPER_BODY_LENGTH = 80;
 const IGNORED_HELPER_NAMES = new Set([
   "setup",
@@ -96,15 +106,30 @@ export function collectHelpers(files, root = ROOT) {
         return;
       }
       const normalizedBody = normalizeHelperBody(body.getText(sourceFile));
-      if (!isHelperCandidate(name, normalizedBody)) {
+      if (!normalizedBody) {
         node.forEachChild(visit);
         return;
       }
-      if (!byName.has(name)) byName.set(name, new Set());
-      byName.get(name).add(rel);
+      // Exact path: every helper a suite could import instead of redeclaring,
+      // whatever its length. Two identical bodies in two FILES are a duplicate
+      // whether they are 40 characters or 400; the length floor is only a noise
+      // filter for the name-hotspot path and for same-file pairs (see
+      // collectDuplicateBodies). What the exact path excludes is structural, not metric:
+      // closures nested inside another helper or a test body (a promise
+      // executor's `resolve`, a fixture's inner `cleanup`) are that helper's
+      // implementation, not something a second suite could share, and a body
+      // with no identifier or literal at all (`{}`, `undefined`, `() => {}`)
+      // is a placeholder, not a helper.
       const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
-      if (!byBody.has(normalizedBody)) byBody.set(normalizedBody, []);
-      byBody.get(normalizedBody).push({ name, rel, line });
+      const candidate = isHelperCandidate(name, normalizedBody);
+      if (isShareableScope(node) && hasSubstance(normalizedBody)) {
+        if (!byBody.has(normalizedBody)) byBody.set(normalizedBody, []);
+        byBody.get(normalizedBody).push({ name, rel, line, candidate });
+      }
+      if (candidate) {
+        if (!byName.has(name)) byName.set(name, new Set());
+        byName.get(name).add(rel);
+      }
 
       node.forEachChild(visit);
     };
@@ -128,6 +153,36 @@ function getHelperNode(node) {
   return null;
 }
 
+/**
+ * A helper another file could import: declared at module scope, or directly
+ * inside a `describe` callback (a module-like grouping scope). Anything nested
+ * in a test body or in another function is local to that function.
+ */
+function isShareableScope(node) {
+  let current = node.parent;
+  while (current && !isSourceFile(current)) {
+    if (isFunctionLikeDeclaration(current)) {
+      const call = current.parent;
+      const isDescribeCallback =
+        call &&
+        isCallExpression(call) &&
+        isIdentifier(call.expression) &&
+        call.expression.text === "describe";
+      if (!isDescribeCallback) return false;
+    }
+    current = current.parent;
+  }
+  return true;
+}
+
+const PLACEHOLDER_TOKENS = new Set(["undefined", "null", "true", "false", "void", "return"]);
+
+/** A body that names something — an identifier, a string, a number — rather than `{}` or a bare literal. */
+function hasSubstance(normalizedBody) {
+  const tokens = normalizedBody.match(/[A-Za-z_$][A-Za-z0-9_$]*|"[^"]*"|'[^']*'|`[^`]*`|\d+/g) ?? [];
+  return tokens.some((token) => !PLACEHOLDER_TOKENS.has(token));
+}
+
 function isHelperCandidate(name, normalizedBody) {
   if (!normalizedBody) return false;
   if (IGNORED_HELPER_NAMES.has(name)) {
@@ -145,6 +200,12 @@ export function collectDuplicateNames(byName) {
     .sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]));
 }
 
+/**
+ * Identical bodies across two files are always a finding. Within ONE file they
+ * are a finding only when a helper is a candidate by name or size: two short
+ * same-file wrappers that differ only in their defaults (`futureIso` /
+ * `pastIso`) are one local API, not a copy waiting to be shared.
+ */
 export function collectDuplicateBodies(byBody) {
   return [...byBody.entries()]
     .map(([body, entries]) => {
@@ -152,7 +213,11 @@ export function collectDuplicateBodies(byBody) {
       const uniqueNames = new Set(entries.map((entry) => entry.name));
       return { body, entries, uniqueLocations, uniqueNames };
     })
-    .filter((group) => group.entries.length > 1)
+    .filter(
+      (group) =>
+        group.entries.length > 1 &&
+        (group.uniqueLocations.size > 1 || group.entries.some((entry) => entry.candidate)),
+    )
     .sort(
       (a, b) =>
         b.entries.length - a.entries.length ||

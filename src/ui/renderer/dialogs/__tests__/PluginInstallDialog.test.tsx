@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { PluginInstallDialog } from "../PluginInstallDialog.js";
 import type { MarketplaceItem } from "../../types.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 // Renderer suite runs under the `ko` locale (vitest-ambient-intl setup), so the
 // admin-consent strings assert against the Korean catalog values.
@@ -82,7 +83,7 @@ describe("PluginInstallDialog — admin consent gate (#1098)", () => {
       />,
     );
 
-    const disclosure = screen.getByTestId("plugin-install-network-access");
+    const disclosure = screen.getByTestId(TEST_IDS.pluginInstallNetworkAccess);
     expect(disclosure.textContent).toContain("네트워크 접근 요청");
     expect(disclosure.textContent).toContain("Calendar sync needs Microsoft Graph access.");
     expect(disclosure.textContent).toContain("graph.microsoft.com");
@@ -112,7 +113,7 @@ describe("PluginInstallDialog — admin consent gate (#1098)", () => {
       />,
     );
 
-    const disclosure = screen.getByTestId("plugin-install-network-access");
+    const disclosure = screen.getByTestId(TEST_IDS.pluginInstallNetworkAccess);
     expect(disclosure.textContent).toContain("네트워크 접근 요청");
     expect(disclosure.textContent).toContain("사설 네트워크");
   });
@@ -134,7 +135,7 @@ describe("PluginInstallDialog — admin consent gate (#1098)", () => {
       />,
     );
 
-    const disclosure = screen.getByTestId("plugin-install-network-access");
+    const disclosure = screen.getByTestId(TEST_IDS.pluginInstallNetworkAccess);
     expect(disclosure.textContent).toContain("api.example.com");
     expect(disclosure.textContent).toContain("사설 네트워크");
   });
@@ -151,7 +152,7 @@ describe("PluginInstallDialog — admin consent gate (#1098)", () => {
       />,
     );
 
-    expect(screen.queryByTestId("plugin-install-network-access")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.pluginInstallNetworkAccess)).toBeNull();
   });
 
   it("shows no panel for a grant whose every field is empty", () => {
@@ -167,7 +168,7 @@ describe("PluginInstallDialog — admin consent gate (#1098)", () => {
       />,
     );
 
-    expect(screen.queryByTestId("plugin-install-network-access")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.pluginInstallNetworkAccess)).toBeNull();
   });
 
   it("re-arms consent when reopened for a different admin plugin", () => {

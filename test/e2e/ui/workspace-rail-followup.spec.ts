@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
+import { TEST_IDS, chatSidePanelLauncherTestId } from "../../../src/shared/test-ids.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -67,10 +68,10 @@ test.describe("workspace rail follow-up", () => {
 
   test("file-browser: project root lists a file and opens its real content", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
 
-    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+    await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 
     // The project-roots browser is present (diagnosis ③) with the seeded file.
     await expect(page.getByTestId("chat-side-panel-project-roots")).toBeVisible();
@@ -86,8 +87,8 @@ test.describe("workspace rail follow-up", () => {
 
   test("tab bar: many tabs stay reachable via horizontal scroll (diagnosis ②)", async () => {
     await page.setViewportSize({ width: 900, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
 
     // Open enough tabs that the strip is guaranteed to overflow its width. The
     // FIRST tab comes from the empty-state launcher (no tabs → no tab bar yet);
@@ -119,9 +120,9 @@ test.describe("workspace rail follow-up", () => {
     writeFileSync(resolve(docsDir, "guide.md"), "# Guide\n\nnested-marker\n", "utf-8");
 
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId("chat-group-panel-toggle").click();
-    await expect(page.getByTestId("chat-side-panel")).toBeVisible();
-    await page.getByTestId("chat-side-panel-launcher-file-browser").click();
+    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
+    await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 
     // ARIA tree widget with conformant treeitem rows.
     const tree = page.getByRole("tree");

@@ -12,6 +12,7 @@ import { mcpAppPartitionName } from "../../../../shared/mcp-app-partition.js";
 import { MCP_APP_CARD_MAX_HEIGHT_PX } from "../../../../shared/mcp-app-card-size.js";
 import { __resetMcpAppCardLocationStoreForTests } from "../../state/mcp-app-card-location-store.js";
 import type { McpUiPayload } from "../../../../mcp/types.js";
+import { mcpUiPayload as payload } from "./mcp-app-panel-fixture.js";
 
 // The host-context WIRING test (below) needs to observe both the args
 // `createMcpAppBridge` is called with and the `bridge.setHostContext` calls that
@@ -80,7 +81,6 @@ function stubLvis() {
   (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
 }
 
-const payload = (serverId: string): McpUiPayload => ({ serverId, resourceUri: "ui://card/1" });
 
 /** The display-mode halves (5th arg) of the deps createMcpAppBridge was seeded with. */
 function seededDisplayDeps() {

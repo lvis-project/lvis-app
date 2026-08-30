@@ -8,6 +8,7 @@ import {
 } from "../state/message-queue-store.js";
 import type { Attachment } from "../types/attachments.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import { BLOCKING_SURFACE_SELECTOR } from "../../../shared/test-ids.js";
 import type { ChatStreamEvent } from "../../../lib/chat-stream-state.js";
 import type { ComposerHandle, ComposerSurface } from "../components/Composer.js";
 
@@ -402,7 +403,7 @@ export function useMessageQueue({
       if (e.key !== "Escape") return;
       if (
         document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
+          BLOCKING_SURFACE_SELECTOR,
         )
       ) {
         return;
@@ -435,7 +436,7 @@ export function useMessageQueue({
       // 미확정 음절 손실은 마이너 — 사용자 의도 (인터럽트) 가 명확.
       if (
         document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
+          BLOCKING_SURFACE_SELECTOR,
         )
       ) {
         return;
@@ -457,7 +458,7 @@ export function useMessageQueue({
       if (e.isComposing) return;
       if (
         document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
+          BLOCKING_SURFACE_SELECTOR,
         )
       ) {
         return;

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { MainToolbar } from "../MainToolbar.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}) {
   return {
@@ -52,7 +53,7 @@ describe("MainToolbar", () => {
     expect(crumb).toBeTruthy();
     expect(crumb!.textContent).toContain("홈");
     // It is a path, not a Home button — no history controls come with it.
-    expect(screen.queryByTestId("view-path-back")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.viewPathBack)).toBeNull();
   });
 
   // The search / star / export controls + the collapse toggle moved to the

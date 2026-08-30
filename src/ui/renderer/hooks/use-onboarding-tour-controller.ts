@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { getApi } from "../api-client.js";
 import { LLM_VENDORS } from "../../../shared/llm-vendor-defaults.js";
 import { hasSeenFirstBootTour } from "../onboarding/first-boot-tour-gate.js";
+import { BLOCKING_SURFACE_SELECTOR } from "../../../shared/test-ids.js";
 
 type Api = ReturnType<typeof getApi>;
 
@@ -106,7 +107,7 @@ export function useOnboardingTourController(
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.isComposing) return;
       if (
         document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
+          BLOCKING_SURFACE_SELECTOR,
         )
       ) {
         return;

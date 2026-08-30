@@ -1,7 +1,9 @@
 /**
  * Common test helpers for renderer test files.
  */
-import { act, fireEvent } from "@testing-library/react";
+import { createElement, type ReactElement } from "react";
+import { act, fireEvent, render } from "@testing-library/react";
+import { TooltipProvider } from "../../src/components/ui/tooltip.js";
 import type { MessageQueueStore } from "../../src/ui/renderer/state/message-queue-store.js";
 import { SETTINGS_TABS } from "../../src/shared/settings-tabs.js";
 import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
@@ -211,4 +213,9 @@ export function emptyActionPanelActivity(): ActionPanelActivityState {
     mcpCalls: [],
     fetchedPages: [],
   };
+}
+
+/** Render a component that uses shadcn tooltips — they require the provider above them. */
+export function renderWithTooltipProvider(ui: ReactElement) {
+  return render(createElement(TooltipProvider, null, ui));
 }

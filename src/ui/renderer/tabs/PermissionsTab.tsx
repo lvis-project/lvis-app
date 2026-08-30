@@ -53,6 +53,7 @@ import { getApi } from "../api-client.js";
 import { isIpcErrorResult } from "../types.js";
 import { canonicalStringify } from "../../../shared/canonical-json.js";
 import type { ExactDenyDraft } from "../exact-permission-decision.js";
+import { TEST_IDS, execModeTestId, testIdSelector } from "../../../shared/test-ids.js";
 import { formatDateTime } from "../../../shared/format-time.js";
 
 const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
@@ -307,13 +308,13 @@ export function PermissionsTab({
     onDiscardExactDeny?.();
     requestAnimationFrame(() => {
       const opener = document.querySelector<HTMLButtonElement>(
-        '[data-testid="open-permanent-deny-settings"]',
+        testIdSelector(TEST_IDS.openPermanentDenySettings),
       );
       if (opener && !opener.disabled) {
         opener.focus();
         return;
       }
-      document.querySelector<HTMLElement>('[data-testid="settings-page-title"]')?.focus();
+      document.querySelector<HTMLElement>(testIdSelector(TEST_IDS.settingsPageTitle))?.focus();
     });
   }, [onDiscardExactDeny]);
 
@@ -341,7 +342,7 @@ export function PermissionsTab({
       showBanner("warn", t("permissionsTab.exactDenySaved", { toolName: exactDenyDraft.toolName }));
       onExactDenySaved?.(exactDenyDraft.requestId);
       requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>('[data-testid="settings-page-title"]')?.focus();
+        document.querySelector<HTMLElement>(testIdSelector(TEST_IDS.settingsPageTitle))?.focus();
       });
     } catch (err) {
       showBanner("error", t("permissionsTab.errorRevokeFailed", { message: (err as Error).message }));
@@ -953,7 +954,7 @@ export function PermissionsTab({
               <Label
                 key={opt.value}
                 htmlFor={`exec-mode-${opt.value}-radio`}
-                data-testid={`exec-mode-${opt.value}`}
+                data-testid={execModeTestId(opt.value)}
                 className={`flex h-auto min-w-0 w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${mode === opt.value ? "border-primary bg-primary/(--opacity-subtle) hover:bg-primary/(--opacity-subtle)" : "border-muted hover:border-muted-foreground/(--opacity-medium)"}`}
               >
                 <RadioGroupItem
@@ -1010,7 +1011,7 @@ export function PermissionsTab({
                       </span>
                       <details
                         className="mt-2 rounded-md border bg-muted/(--opacity-light)"
-                        data-testid="reviewer-prompt-panel"
+                        data-testid={TEST_IDS.reviewerPromptPanel}
                         onClick={(event) => event.stopPropagation()}
                       >
                         <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold text-muted-foreground">

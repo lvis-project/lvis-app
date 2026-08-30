@@ -11,6 +11,7 @@
  * the open conversation is a separate, explicitly gestured owner action.
  */
 import { hasUserKeyboardIntent, type UserKeyboardIntent } from "./chat-origin.js";
+import { UUID_PATTERN } from "./uuid.js";
 import { hasExactKeys, isRecord } from "./is-record.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "./safe-integer.js";
 
@@ -195,7 +196,6 @@ export interface TelegramConnectionOwnerApi {
   onChanged(handler: () => void): () => void;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACCOUNT_FINGERPRINT = /^[a-f0-9]{12}$/;
 /**
  * Deliberately not slash-prefixed. The shared ingress core rejects all leading
@@ -225,7 +225,7 @@ const MAX_CONVERSATION_CHARS = 4_096;
 const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 export function isTelegramConnectionId(value: unknown): value is string {
-  return typeof value === "string" && UUID.test(value);
+  return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
 /**

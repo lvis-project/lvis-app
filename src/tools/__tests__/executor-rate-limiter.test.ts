@@ -12,7 +12,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ToolExecutor, type ToolPermissionContext } from "../executor.js";
+import { ToolExecutor } from "../executor.js";
+import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool } from "../base.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
@@ -23,12 +24,6 @@ interface RateCheck {
 
 function limiterOf(executor: ToolExecutor): RateCheck {
   return (executor as unknown as { rateLimiter: RateCheck }).rateLimiter;
-}
-
-function userPermissionContext(
-  overrides: Partial<ToolPermissionContext> = {},
-): ToolPermissionContext {
-  return { trustOrigin: "user-keyboard", ...overrides };
 }
 
 const noopAuditLogger = {

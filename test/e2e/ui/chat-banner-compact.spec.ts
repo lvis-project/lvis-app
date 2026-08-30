@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
  * Chat banner + compact pipeline e2e smoke.
@@ -18,7 +19,7 @@ import { test, expect } from './fixtures';
 test.describe('chat banner + compact pipeline', () => {
   test('status-bar and composer DOM contracts render after window open', async ({ mainWindow }) => {
     // Wait until the renderer has booted past the splash.
-    const composer = mainWindow.locator('[data-testid="composer"]').first();
+    const composer = mainWindow.locator(testIdSelector(TEST_IDS.composer)).first();
     const found = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)
@@ -26,7 +27,7 @@ test.describe('chat banner + compact pipeline', () => {
 
     test.skip(!found, 'Composer not visible — chat surface not booted in this E2E sandbox.');
 
-    await expect(mainWindow.locator('[data-testid="composer-textarea"]').first()).toBeVisible();
+    await expect(mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea)).first()).toBeVisible();
     await expect(mainWindow.locator('[data-testid="composer-send-button"]').first()).toBeVisible();
     // The notifications-only StatusBar intentionally unmounts while empty.
     // Persistent composer status lives in the unified input action bar.
@@ -34,7 +35,7 @@ test.describe('chat banner + compact pipeline', () => {
   });
 
   test('/compact slash command produces a system-entry banner response', async ({ mainWindow }) => {
-    const input = mainWindow.locator('[data-testid="composer-textarea"]').first();
+    const input = mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea)).first();
     const found = await input
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)
@@ -61,7 +62,7 @@ test.describe('chat banner + compact pipeline', () => {
   });
 
   test('composer textarea accepts text input', async ({ mainWindow }) => {
-    const input = mainWindow.locator('[data-testid="composer-textarea"]').first();
+    const input = mainWindow.locator(testIdSelector(TEST_IDS.composerTextarea)).first();
     const found = await input
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)

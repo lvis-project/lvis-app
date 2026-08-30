@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ChatEntry } from "../../../../lib/chat-stream-state.js";
 import type { SubAgentSpawn } from "../types.js";
 import { groupSubAgentSessions } from "../group-subagent-sessions.js";
-
-// Minimal assistant entry factory so each segment carries a distinguishable
-// transcript body (inlined here to avoid a shared-helper collision with the
-// derive test file).
-function assistant(text: string): ChatEntry {
-  return { kind: "assistant", text, streaming: false };
-}
+import { assistantEntry } from "../../../../__tests__/test-helpers.js";
 
 function spawn(overrides: Partial<SubAgentSpawn> & Pick<SubAgentSpawn, "spawnId">): SubAgentSpawn {
   return {
@@ -29,7 +22,7 @@ describe("groupSubAgentSessions", () => {
         instructions: "original prompt",
         status: "done",
         childSessionId: "child-1",
-        entries: [assistant("original work")],
+        entries: [assistantEntry("original work")],
         toolCallCount: 3,
       }),
       spawn({
@@ -37,7 +30,7 @@ describe("groupSubAgentSessions", () => {
         title: "(sub-agent)", // resume titles are looser; original title wins
         status: "done",
         childSessionId: "child-1",
-        entries: [assistant("resume 1 work")],
+        entries: [assistantEntry("resume 1 work")],
         toolCallCount: 2,
       }),
       spawn({
@@ -45,7 +38,7 @@ describe("groupSubAgentSessions", () => {
         title: "(sub-agent)",
         status: "running",
         childSessionId: "child-1",
-        entries: [assistant("resume 2 tail")],
+        entries: [assistantEntry("resume 2 tail")],
         toolCallCount: 1,
       }),
     ]);
@@ -88,7 +81,7 @@ describe("groupSubAgentSessions", () => {
   });
 
   it("keeps a spawn without childSessionId as its own solo group (today's behavior)", () => {
-    const solo = spawn({ spawnId: "solo-1", title: "Solo", entries: [assistant("x")], toolCallCount: 2 });
+    const solo = spawn({ spawnId: "solo-1", title: "Solo", entries: [assistantEntry("x")], toolCallCount: 2 });
     const grouped = groupSubAgentSessions([solo]);
     expect(grouped).toHaveLength(1);
     // Singleton groups are returned verbatim (reference identity preserved).
@@ -105,9 +98,9 @@ describe("groupSubAgentSessions", () => {
 
   it("preserves first-seen group order across interleaved sessions", () => {
     const grouped = groupSubAgentSessions([
-      spawn({ spawnId: "a1", title: "A", childSessionId: "ca", entries: [assistant("a1")] }),
-      spawn({ spawnId: "b1", title: "B", childSessionId: "cb", entries: [assistant("b1")] }),
-      spawn({ spawnId: "a2", title: "(sub-agent)", childSessionId: "ca", entries: [assistant("a2")] }),
+      spawn({ spawnId: "a1", title: "A", childSessionId: "ca", entries: [assistantEntry("a1")] }),
+      spawn({ spawnId: "b1", title: "B", childSessionId: "cb", entries: [assistantEntry("b1")] }),
+      spawn({ spawnId: "a2", title: "(sub-agent)", childSessionId: "ca", entries: [assistantEntry("a2")] }),
     ]);
     expect(grouped).toHaveLength(2);
     // Group order follows the first appearance of each childSessionId (A then B),

@@ -5,6 +5,7 @@ import type { ApprovalDecisionExtras } from "../../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import type { UserApprovalVerdict } from "../../../../shared/permissions-events.js";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
+import { TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
 
 export interface ApprovalDockProps {
   queue: ApprovalRequest[];
@@ -19,7 +20,7 @@ export interface ApprovalDockProps {
 }
 
 function focusPendingQuestion(): boolean {
-  const overlay = document.querySelector<HTMLElement>('[data-testid="question-overlay"]');
+  const overlay = document.querySelector<HTMLElement>(testIdSelector(TEST_IDS.questionOverlay));
   if (!overlay) return false;
   const target = overlay.querySelector<HTMLElement>(
     '[role="option"][tabindex="0"]:not(:disabled), [role="option"]:not(:disabled), button:not(:disabled), [tabindex="0"]',
@@ -65,9 +66,9 @@ export function ApprovalDock({
     if (!root) return;
     // One decision row for every request kind — fail-closed Reject first.
     const selectors = [
-      '[data-testid="deny-button"]:not(:disabled)',
-      '[data-testid="approve-button"]:not(:disabled)',
-      '[data-testid="allow-always-button"]:not(:disabled)',
+      `${testIdSelector(TEST_IDS.denyButton)}:not(:disabled)`,
+      `${testIdSelector(TEST_IDS.approveButton)}:not(:disabled)`,
+      `${testIdSelector(TEST_IDS.allowAlwaysButton)}:not(:disabled)`,
     ];
     for (const selector of selectors) {
       const target = root.querySelector<HTMLElement>(selector);
@@ -107,7 +108,7 @@ export function ApprovalDock({
     } else if (previousRequestId !== null && requestId === null) {
       const returnTarget = returnFocusRef.current;
       returnFocusRef.current = null;
-      const hasPendingQuestion = document.querySelector('[data-testid="question-overlay"]') !== null;
+      const hasPendingQuestion = document.querySelector(testIdSelector(TEST_IDS.questionOverlay)) !== null;
       if (hasPendingQuestion || dockHadFocusBeforeRender) {
         if (returnFocusFrameRef.current !== null) {
           cancelAnimationFrame(returnFocusFrameRef.current);
@@ -122,7 +123,7 @@ export function ApprovalDock({
           if (focusPendingQuestion()) return;
           if (
             attempt < 3 &&
-            document.querySelector('[data-testid="question-overlay"]') !== null
+            document.querySelector(testIdSelector(TEST_IDS.questionOverlay)) !== null
           ) {
             returnFocusFrameRef.current = requestAnimationFrame(
               () => completeFocusHandoff(attempt + 1),
@@ -141,7 +142,7 @@ export function ApprovalDock({
 
   useEffect(() => {
     if (requestId === null) return;
-    const canvas = rootRef.current?.closest<HTMLElement>('[data-testid="route-canvas"]');
+    const canvas = rootRef.current?.closest<HTMLElement>(testIdSelector(TEST_IDS.routeCanvas));
     if (!canvas) return;
 
     const snapshots = new Map<HTMLElement, {
@@ -214,7 +215,7 @@ export function ApprovalDock({
         bottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))",
         maxHeight: "min(48dvh, 28rem, max(8rem, calc(100% - max(0.75rem, env(safe-area-inset-bottom, 0px)) - 0.75rem)))",
       }}
-      data-testid="approval-dock"
+      data-testid={TEST_IDS.approvalDock}
       data-overlay-position="bottom"
       data-approval-request-id={isRationale ? undefined : request.id}
       data-approval-tool-name={isRationale ? undefined : request.toolName}
@@ -232,7 +233,7 @@ export function ApprovalDock({
         {remaining > 0 ? (
           <span
             className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
-            data-testid="approval-queue-depth"
+            data-testid={TEST_IDS.approvalDockQueueDepth}
             aria-label={t("toolApprovalDialog.pendingCount", { count: remaining })}
           >
             1 / {queue.length}

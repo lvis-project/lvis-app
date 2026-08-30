@@ -14,6 +14,7 @@ import {
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { SubscriptionUsageTelemetry } from "../../../shared/subscription-runtime.js";
 import { formatCost, formatTokens } from "../../../lib/cost-format.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface TokenCostBadgePricing {
   inputPer1M: number;
@@ -119,7 +120,7 @@ function TokenCostBadgeImpl({
       <Tooltip>
         <TooltipTrigger asChild>
           <span
-            data-testid="token-cost-badge"
+            data-testid={TEST_IDS.tokenCostBadge}
             data-usage-kind="subscription"
             className="inline-flex items-center gap-1 rounded border border-border/(--opacity-medium) bg-muted/(--opacity-muted) px-1.5 py-0.5 text-[10px] tabular-nums"
             aria-label={t("tokenCostBadge.ariaLabelSubscriptionUsage")}
@@ -192,7 +193,7 @@ function TokenCostBadgeImpl({
       <TooltipTrigger asChild>
         <button
           type="button"
-          data-testid="token-cost-badge"
+          data-testid={TEST_IDS.tokenCostBadge}
           onClick={(e) => {
             e.stopPropagation();
             if (cost !== null) setMode((m) => (m === "tokens" ? "cost" : "tokens"));

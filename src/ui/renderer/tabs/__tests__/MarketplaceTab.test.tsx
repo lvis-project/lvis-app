@@ -19,6 +19,7 @@ import { MarketplaceTab } from "../MarketplaceTab.js";
 import type { MarketplaceItem } from "../../types.js";
 import type { LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 function marketplaceTabApi(overrides: Partial<LvisApi> = {}): LvisApi {
   const { api } = makeMockLvisApi();
@@ -241,8 +242,8 @@ describe("MarketplaceTab", () => {
 
     fireEvent.click(await findByTestId("marketplace:action:network-plug"));
 
-    await waitFor(() => expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("Needs API access"));
-    expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("api.example.com");
+    await waitFor(() => expect(screen.getByTestId(TEST_IDS.pluginInstallNetworkAccess).textContent).toContain("Needs API access"));
+    expect(screen.getByTestId(TEST_IDS.pluginInstallNetworkAccess).textContent).toContain("api.example.com");
     expect(screen.getByRole("button", { name: "설치" })).toBeTruthy();
   });
 
@@ -272,7 +273,7 @@ describe("MarketplaceTab", () => {
     fireEvent.click(await findByTestId("marketplace:action:lan-plug"));
 
     await waitFor(() =>
-      expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("사설 네트워크"),
+      expect(screen.getByTestId(TEST_IDS.pluginInstallNetworkAccess).textContent).toContain("사설 네트워크"),
     );
   });
 

@@ -2,6 +2,7 @@ import { test, expect } from './fixtures';
 import { openInlineSettings } from './inline-settings.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 // R5 verification: Settings is an always-inline panel (no detached window) and
 // its shell is responsive — master-detail on a wide panel, a 2-depth stack
@@ -68,18 +69,18 @@ test('Settings inline shell is responsive (wide master-detail ↔ narrow 2-depth
   await expect.poll(async () => root.getAttribute('data-settings-layout'), { timeout: 5_000 }).toBe('narrow');
   // Wide tab changes intentionally retain the active detail when the panel
   // later narrows. Return to depth 1 explicitly before validating the list.
-  await expect(mainWindow.getByTestId('settings-mobile-back')).toBeVisible();
-  await mainWindow.getByTestId('settings-mobile-back').click();
+  await expect(mainWindow.getByTestId(TEST_IDS.settingsMobileBack)).toBeVisible();
+  await mainWindow.getByTestId(TEST_IDS.settingsMobileBack).click();
   await expect(mainWindow.getByTestId('settings-mobile-list')).toBeVisible();
   writeFileSync(join(OUT, '2-mobile-list.png'), await mainWindow.screenshot());
 
   // ---- NARROW depth 2: drill into a section, back button appears ----
   await mainWindow.getByRole('tab', { name: /Model|모델/ }).first().click();
-  await expect(mainWindow.getByTestId('settings-mobile-back')).toBeVisible();
+  await expect(mainWindow.getByTestId(TEST_IDS.settingsMobileBack)).toBeVisible();
   await expectSettingsBottomClearance(mainWindow);
   writeFileSync(join(OUT, '3-mobile-detail.png'), await mainWindow.screenshot());
 
   // back returns to the list
-  await mainWindow.getByTestId('settings-mobile-back').click();
+  await mainWindow.getByTestId(TEST_IDS.settingsMobileBack).click();
   await expect(mainWindow.getByTestId('settings-mobile-list')).toBeVisible();
 });
