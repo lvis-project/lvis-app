@@ -39,6 +39,7 @@ import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { ApprovalDock, WINDOW_DOCK_MIN_HEIGHT } from "./components/permissions/ApprovalDock.js";
+import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import type { ApprovalRequest } from "./types.js";
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
 import type { ExactDenyDraft } from "./exact-permission-decision.js";
@@ -280,9 +281,12 @@ export function App() {
   // past what the user's own gestures can. `SHELL_GUTTER` is the tile row's
   // bottom air, which is canvas height the tiles never see.
   //
+  // One budget for everything the band holds — the dock and the window's own
+  // overlay cards stack inside it and share it.
+  //
   // Expressed as a percentage of `<main>`, the flex parent the band and the
   // route canvas share, so it tracks the window without measuring it.
-  const windowDockMaxHeight = useMemo(() => {
+  const windowBandMaxHeight = useMemo(() => {
     const reserved = minimumCanvasHeight(
       chatGroups.groups.map((group) => group.box),
       CHAT_GROUP_MIN_HEIGHT + CHAT_GROUP_CELL_INSET,
@@ -290,12 +294,12 @@ export function App() {
     return `max(${WINDOW_DOCK_MIN_HEIGHT}px, calc(100% - ${reserved}px))`;
   }, [chatGroups.groups]);
 
-  // Which tile shows an overlay card. Only the window can answer it: it needs
-  // every tile's conversation and which one is focused.
+  // Which surface shows an overlay card. Only the window can answer it: it
+  // needs every tile's conversation to say whether any of them owns the card.
   const overlayCardTileForWindow = useCallback(
     (originSessionId: string | undefined): OverlayCardPlacement =>
-      overlayCardTile(tileSessions, chatGroups.focusedId, originSessionId),
-    [tileSessions, chatGroups.focusedId],
+      overlayCardTile(tileSessions, originSessionId),
+    [tileSessions],
   );
 
   const focusTileHolding = useCallback((sessionId: string): boolean => {
@@ -1728,32 +1732,52 @@ export function App() {
                       })()}
                     </ErrorBoundary>
                   </div>
-                  {/* The window's own dock: only requests no conversation
-                      surface claimed (see `unclaimedApprovals`). Its scope is
-                      this wrapper — beside the tiles, an ancestor of none —
-                      so the card covers no tile's composer and takes no
-                      tile's caret.
+                  {/* The window's own band: everything the window itself has to
+                      show, stacked in one strip beside the tiles rather than
+                      floating over them.
+
+                      Two occupants. The dock draws only the approval requests
+                      no conversation surface claimed (see `unclaimedApprovals`).
+                      The overlay region draws the cards no open conversation
+                      owns — a routine fire, a plugin event, one whose origin
+                      conversation has left the screen — once, rather than in
+                      whichever tile happens to be focused, which would say the
+                      card belongs to that conversation and would make it jump
+                      between tiles as focus moves.
 
                       It is a BAND, not a float: a flex sibling BELOW the route
                       canvas, so the space it takes is space the tile grid does
-                      not get. An absolutely positioned dock over the canvas
-                      left `inert` and the caret alone but still won the
-                      hit-test at a tile composer's centre — keyboard-reachable,
-                      not mouse-clickable. `empty:hidden` gives the band back
-                      when the dock draws nothing.
+                      not get, and nothing here can win a hit-test over a tile.
+                      An absolutely positioned surface over the canvas left
+                      `inert` and the caret alone and still took the click at a
+                      tile composer's centre — keyboard-reachable, not
+                      mouse-clickable. `empty:hidden` gives the band back when
+                      both occupants draw nothing.
 
                       Its cap is what the tile grid can spare, not a share of
                       the viewport: the shortest tile still has to clear the
                       floor the split and resize rules already hold it to, or
                       every transcript on screen collapses to nothing. Below
-                      `WINDOW_DOCK_MIN_HEIGHT` the band stops giving and the
-                      card scrolls inside it instead. */}
+                      `WINDOW_DOCK_MIN_HEIGHT` the band stops giving and its
+                      occupants scroll inside it instead — `overflow-y-auto`,
+                      because two occupants asking for more than the budget
+                      would otherwise paint outside the band and back over the
+                      tiles, which is the whole thing the band exists to stop. */}
                   <div
-                    className="flex shrink-0 flex-col px-3 pb-3 empty:hidden"
-                    style={{ maxHeight: windowDockMaxHeight }}
+                    className="flex shrink-0 flex-col gap-2 overflow-y-auto overscroll-contain px-3 pb-3 empty:hidden"
+                    style={{ maxHeight: windowBandMaxHeight }}
                     data-approval-scope
                     data-testid={TEST_IDS.windowApprovalScope}
                   >
+                    <OverlayCardRegion
+                      chatGroupId={null}
+                      actionChatGroupId={chatGroups.focusedId}
+                      overlayCardTile={overlayCardTileForWindow}
+                      onPluginPrimaryAction={(id, chatGroupId) => {
+                        void handlePluginPrimaryAction(id, chatGroupId);
+                      }}
+                      onRoutineAcknowledge={handleRoutineAcknowledge}
+                    />
                     <ApprovalDock
                       placement="window-chrome"
                       queue={unclaimedApprovals}

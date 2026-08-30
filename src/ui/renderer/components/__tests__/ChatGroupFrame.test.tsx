@@ -222,23 +222,23 @@ describe("useChatGroups", () => {
   it("says which split directions the floors still afford", () => {
     const { result } = renderHook(() => useChatGroups("work"));
     // Roomy on both axes.
-    expect(result.current.splitFits("main", "row", { width: 1000, height: 500 })).toBe(true);
-    expect(result.current.splitFits("main", "column", { width: 1000, height: 500 })).toBe(true);
+    expect(result.current.splitFits("main", "row", { width: 1000, height: 1000 })).toBe(true);
+    expect(result.current.splitFits("main", "column", { width: 1000, height: 1000 })).toBe(true);
     // Each axis at its own boundary, written out in absolute px. These are the
     // anchors: a half is measured after losing CHAT_GROUP_CELL_INSET, so the
     // tightest canvas that still splits is 2*(floor + inset) — 916 wide against
-    // the 448 width floor, 500 tall against the 240 height floor. Because they
+    // the 448 width floor, 580 tall against the 280 height floor. Because they
     // are literals, a change to CHAT_GROUP_FRAME_BORDER (and so to the inset)
     // moves the boundary and fails here, which a derived expectation could not
     // catch: it would move with the implementation.
     expect(result.current.splitFits("main", "row", { width: 916, height: 1000 })).toBe(true);
     expect(result.current.splitFits("main", "row", { width: 915, height: 1000 })).toBe(false);
-    expect(result.current.splitFits("main", "column", { width: 1000, height: 500 })).toBe(true);
-    expect(result.current.splitFits("main", "column", { width: 1000, height: 499 })).toBe(false);
+    expect(result.current.splitFits("main", "column", { width: 1000, height: 580 })).toBe(true);
+    expect(result.current.splitFits("main", "column", { width: 1000, height: 579 })).toBe(false);
     // The same two boundaries derived from the constants, so the anchors above
     // are readable as arithmetic rather than as magic numbers.
     expect(2 * (CHAT_GROUP_MIN_WIDTH + CHAT_GROUP_CELL_INSET)).toBe(916);
-    expect(2 * (CHAT_GROUP_MIN_HEIGHT + CHAT_GROUP_CELL_INSET)).toBe(500);
+    expect(2 * (CHAT_GROUP_MIN_HEIGHT + CHAT_GROUP_CELL_INSET)).toBe(580);
     // A canvas under BOTH floors fails on either axis.
     expect(result.current.splitFits("main", "row", { width: 800, height: 400 })).toBe(false);
     expect(result.current.splitFits("main", "column", { width: 800, height: 400 })).toBe(false);
@@ -246,7 +246,7 @@ describe("useChatGroups", () => {
     expect(result.current.splitFits("main", "row", undefined)).toBe(true);
     // After a side-by-side split each half is 500 of 1000 — a second split beside no longer fits.
     act(() => result.current.split("main", "row"));
-    expect(result.current.splitFits("main", "row", { width: 1000, height: 500 })).toBe(false);
+    expect(result.current.splitFits("main", "row", { width: 1000, height: 1000 })).toBe(false);
   });
 
   it("tracks the work panel per group rather than per window", () => {

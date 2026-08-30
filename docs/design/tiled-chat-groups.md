@@ -103,7 +103,7 @@ conversation, and its items open the very tabs the picker offers.
 Which way a tile is halved is the user's call: the header's split control
 drops two buttons — beside the chat, under it — rather than guessing from the
 tile's shape, and a direction whose halves would fall under the tile floors
-(448px wide, 240px tall) is offered disabled — with a one-line reason when
+(448px wide, 280px tall) is offered disabled — with a one-line reason when
 neither fits — so the limit reads in the control instead of arriving as a
 rejection. Dropping a conversation on a tile's edge answers to the same floors:
 an edge that would not fit lands in the centre.
@@ -192,7 +192,7 @@ proportions, so a drag on one boundary never moves a boundary the user was not
 holding.
 
 The floors are pixels: 448px across — `SIDE_PANEL_MIN_WIDTH`, the narrowest
-width DESIGN.md holds any surface to — and 240px down. The tree only knows
+width DESIGN.md holds any surface to — and 280px down. The tree only knows
 shares, so the bar converts through the measured canvas. A pair that cannot
 hold two floors offers no bar at all, rather than a bar that snaps back on
 every drag.
@@ -311,20 +311,31 @@ and the caret correct while still winning the hit-test at a tile's textarea:
 keyboard-reachable, not mouse-clickable. Position follows the same rule the
 scope does — a surface may only take space from itself.
 
+That band is the window's whole surface, not the dock's alone: the unclaimed
+approval dock and the window's own overlay cards stack inside it and share one
+budget. Anything the window has to show has the same problem and takes the same
+answer — a second float, anchored top-right, would land on the rightmost tile's
+own lane and take clicks meant for it.
+
 Because a band takes its height out of the grid, its cap comes from the grid's
 own arithmetic rather than from a share of the viewport: the shortest tile must
 still clear `CHAT_GROUP_MIN_HEIGHT` plus the cell inset and the tile row's
 bottom gutter — the floor a split or a gutter drag already holds it to — and the
 band gets what is left, down to `WINDOW_DOCK_MIN_HEIGHT`, below which the card
 scrolls inside itself instead of taking more. A fraction of the window would be
-comfortable above one tile and starve four: measured at 1243x768 with a 2x2, an
-uncapped band leaves 138px frames, and the cap holds them at 242px.
+comfortable above one tile and starve four: measured at 1243x768 with a 2x2
+holding an unclaimed request and a window card, an uncapped band grows to 590px
+and leaves 59px frames with no transcript at all, while the cap holds the band
+at 144px and the frames at 282px. The cap is a ceiling, not a size: with one
+short card the band settles at 112px on its own and the frames keep 298px.
 
-The floor is parity with the user's own gestures, not a promise of a readable
-tile: at `CHAT_GROUP_MIN_HEIGHT` the frame has no room left for a transcript in
-the current composer, with or without a band — dragging the window down to 540px
-tall reaches the same 240px frame and the same empty transcript with nothing
-docked at all. That is a property of the constant, not of the band.
+`CHAT_GROUP_MIN_HEIGHT` is the measured floor, not a round number: it is the
+frame height at which a tile still holds a header, a composer, AND one visible
+turn. Shrinking the window with one tile up, the turn goes first — at a 290px
+frame the transcript viewport is 11px, at 270px it is 0 and the composer starts
+overflowing its column. 280px is where all three still fit. The floor lives on
+what the tile contains, so it moves when the composer does rather than when the
+window does, and the band's cap moves with it.
 
 A headless or routine turn is **not** a source of cards here. It has no
 interactive approver by construction: the reviewer's headless lane answers
@@ -346,7 +357,8 @@ announced causes would be a second thing to keep in step with the gate's
 
 The two unowned cases split on purpose. An unowned question is adopted by the
 focused tile at arrival: an answer needs a conversation to land in. An unowned
-approval goes to the window's dock: its answer needs none.
+approval goes to the window's dock: its answer needs none. An unowned overlay
+card takes the second road too — see below.
 
 The card names the conversation by the surface's own label — the tile's title,
 "Side chat", "Conversation not open in any tile" — and keeps the raw session
@@ -364,6 +376,57 @@ domain's renderer-lifetime watch), and letting go stops its turn, which
 retires the ask it was parked on: the audit row says `cause="renderer reload
 released the tile"`, and a card for a turn that no longer exists is never
 re-offered.
+
+### Every other surface a session raises
+
+The same rule, applied to the channels that predate tiled chat groups. Each one
+has to answer one question — is this news about ONE conversation, or about the
+window? — and the answer decides where it is subscribed and who draws it.
+
+**About one conversation, so per tile.** The token stream and the provider
+fallback toast (`lvis:chat:stream`, `lvis:chat:fallback`) are labelled with
+`chatGroupId` at the one main-side subscriber that owns those frames and
+filtered in the preload adapter each tile holds, so an unaddressed frame can
+only be a bug in one place. The filter is fail-closed: an unlabelled frame
+reaches no surface at all. There is exactly one producer and it labels
+everything it sends, so fanning an unlabelled frame out would answer a producer
+bug by showing one conversation's tokens in every open tile. The skill badge (`lvis:skill-load:event`) is
+window-wide on the wire and carries the session the tool ran in; the tile that
+owns that session draws the badge, through the same `sessionOwnedBy` predicate
+its cards use. An MCP app's `ui/message` and `ui/update-model-context` resolve
+their card's own session across every live loop rather than comparing it to the
+primary one. Away-authority arms the tile the renderer names and refuses a tile
+the window is not showing rather than resolving it to the primary loop; the
+session-todo channel refuses an unnamed session for the same reason.
+
+**About the window, so subscribed once.** The approval-memory hit and the
+permission-review suggestion report on the window's permission settings, not on
+a conversation. They are subscribed once at App level and rendered once — per
+tile they would raise the same toast in every open conversation at once.
+
+**Overlay cards: owned, or the window's.** An `OverlayItem` carries the
+conversation it came from when main knew one. A card with an origin renders in
+the tile holding that conversation and its primary action continues THAT
+conversation, resolved from the origin at click time rather than from the
+surface that drew the card.
+
+A card with no origin — a routine fire, a plugin event — and a card whose origin
+conversation has left the screen are drawn once in the window's own band, above
+the approval dock and inside the same height budget. This is stated, not fallen
+back to, and it is literally the same home the window's approval dock gives an
+unclaimed request. The alternative, drawing it in whichever tile
+is focused, says the card belongs to that conversation when it does not, and
+makes the card jump between tiles as focus moves. The window's region has no
+conversation of its own, so its action names the focused one explicitly
+(`actionChatGroupId`) — the same rule an unowned question already follows. An
+orphaned card keeps its dismiss and loses its action: running it in a
+conversation it was never staged for is the mismatch main refuses on the way in.
+
+**The dock's activity line.** The floating dock holds ONE activity line while
+the window can hold four conversations, so `DockActivity` names the conversation
+and the dock draws that name above the summary. Required rather than optional:
+an unlabelled line cannot be attributed, and the next line to arrive replaces it
+without the user knowing what it replaced.
 
 ### The controls: split and drop
 

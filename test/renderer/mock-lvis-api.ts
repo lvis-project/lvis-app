@@ -160,6 +160,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
   emitChatStream: (ev: ChatStreamEvent) => void;
   emitAgentSpawnEvent: (event: AgentSpawnEvent) => void;
+  /** `lvis:skill-load:event` — window-wide, stamped with the turn's session. */
+  emitSkillLoaded: (event: { name: string; description: string; sessionId: string }) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFired: (r: unknown) => void;
@@ -215,6 +217,9 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 
   const chatStreamHandlers = new Set<(ev: ChatStreamEvent) => void>();
   const agentSpawnEventHandlers = new Set<(event: AgentSpawnEvent) => void>();
+  const skillLoadedHandlers = new Set<
+    (event: { name: string; description: string; sessionId: string }) => void
+  >();
   const overlayShowHandlers = new Set<(item: unknown) => void>();
   const overlayDismissHandlers = new Set<(id: string) => void>();
   const routineFiredHandlers = new Set<(r: unknown) => void>();
@@ -486,6 +491,12 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       agentSpawnEventHandlers.add(handler);
       return () => agentSpawnEventHandlers.delete(handler);
     }),
+    onSkillLoaded: vi.fn((
+      handler: (event: { name: string; description: string; sessionId: string }) => void,
+    ) => {
+      skillLoadedHandlers.add(handler);
+      return () => skillLoadedHandlers.delete(handler);
+    }),
     onChatFallback: vi.fn((_h: (payload: { from: string; to: string }) => void) => () => {}),
     onNotificationToast: vi.fn((handler: (payload: unknown) => void) => {
       notificationToastHandlers.add(handler);
@@ -709,6 +720,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     api,
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
     emitAgentSpawnEvent: (event) => agentSpawnEventHandlers.forEach((h) => h(event)),
+    emitSkillLoaded: (event) => skillLoadedHandlers.forEach((h) => h(event)),
     emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
     emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
     emitRoutineFired: (r) => routineFiredHandlers.forEach((h) => h(r)),

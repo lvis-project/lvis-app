@@ -21,6 +21,7 @@ const dock = window.lvisDock;
 
 const els = {
   activity: document.getElementById("activity"),
+  conversation: document.getElementById("conversation"),
   summary: document.getElementById("summary"),
   detail: document.getElementById("detail"),
   bar: document.getElementById("bar"),
@@ -56,6 +57,13 @@ function main() {
     // plugin-supplied fragment in it, and the difference must not depend on
     // remembering.
     els.summary.textContent = activity.summary;
+    // Which conversation the line belongs to. One line, up to four
+    // conversations: without the name the user cannot tell whose progress this
+    // is, and cannot tell that the previous line was replaced. `conversation`
+    // is required on `DockActivity` and the host is the only sender, so it is
+    // read straight — a default here would be a second, quieter answer to the
+    // question the type already answers.
+    els.conversation.textContent = activity.conversation;
     const detail = typeof activity.detail === "string" ? activity.detail : "";
     els.detail.textContent = detail;
     els.detail.hidden = detail.length === 0;

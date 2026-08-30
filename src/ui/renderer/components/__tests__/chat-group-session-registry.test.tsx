@@ -197,32 +197,36 @@ describe("overlayCardTile", () => {
   ];
 
   it("sends a card to the tile holding the conversation it came from", () => {
-    // Not the focused tile: the card's action continues the conversation it
-    // was raised in, which may be sitting unfocused beside it.
-    expect(overlayCardTile(tiles, "main", "s-2")).toEqual({
+    // Which tile is focused does not enter into it: the card's action
+    // continues the conversation it was raised in, which may be sitting
+    // unfocused beside the one the user is typing in.
+    expect(overlayCardTile(tiles, "s-2")).toEqual({
       chatGroupId: "group-2",
       orphaned: false,
     });
-  });
-
-  it("sends a card with no conversation behind it to the focused tile", () => {
-    expect(overlayCardTile(tiles, "group-2", undefined)).toEqual({
-      chatGroupId: "group-2",
-      orphaned: false,
-    });
-    expect(overlayCardTile(tiles, "main", undefined)).toEqual({
+    expect(overlayCardTile(tiles, "s-1")).toEqual({
       chatGroupId: "main",
       orphaned: false,
     });
   });
 
-  it("shows an orphaned card in the focused tile, marked as having no origin", () => {
+  it("sends a card with no conversation behind it to the window's own chrome", () => {
+    // A routine fire or a plugin event belongs to no conversation. Drawing it
+    // in whichever tile is focused would claim otherwise, and would move the
+    // card every time the user changes tiles.
+    expect(overlayCardTile(tiles, undefined)).toEqual({
+      chatGroupId: null,
+      orphaned: false,
+    });
+  });
+
+  it("shows an orphaned card in the window's chrome, marked as having no origin", () => {
     // The conversation was closed, maximized away, or folded out of sight
     // while the card waited. Showing the card nowhere would strand it; showing
     // it in every tile is what this whole function exists to prevent. What the
     // flag buys is the third option: visible, dismissible, not actionable.
-    expect(overlayCardTile(tiles, "group-2", "s-gone")).toEqual({
-      chatGroupId: "group-2",
+    expect(overlayCardTile(tiles, "s-gone")).toEqual({
+      chatGroupId: null,
       orphaned: true,
     });
   });

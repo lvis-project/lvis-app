@@ -32,8 +32,14 @@ import type { ChatStreamEvent } from "../lib/chat-stream-state.js";
  * Every group's frames arrive on the same channel, so a surface only forwards
  * the ones addressed to ITS group. Dropping the check would put another tile's
  * tokens in this tile's transcript, and another tile's provider swap in this
- * tile's banner. An unlabelled frame is addressed to no group and reaches
- * every surface.
+ * tile's banner.
+ *
+ * Fail-closed on the label, not fan-out. These channels have exactly one
+ * producer and it stamps the group on every frame it sends (see the labelling
+ * subscriber in `ipc/domains/chat.ts`), so an unlabelled frame is a producer
+ * bug rather than a broadcast. Handing it to every surface would answer that
+ * bug by showing one conversation's tokens in all of them — the loudest
+ * possible wrong answer, and the one hardest to trace back.
  */
 function subscribeForChatGroup<T>(
   channel: string,
@@ -42,7 +48,7 @@ function subscribeForChatGroup<T>(
 ): () => void {
   const listener = (_event: unknown, payload: T) => {
     const frameGroup = (payload as { chatGroupId?: unknown }).chatGroupId;
-    if (typeof frameGroup === "string" && frameGroup !== chatGroupId) return;
+    if (frameGroup !== chatGroupId) return;
     handler(payload);
   };
   ipcRenderer.on(channel, listener);

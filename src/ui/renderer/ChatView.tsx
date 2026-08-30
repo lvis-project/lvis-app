@@ -707,6 +707,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
         <OverlayCardRegion
           chatGroupId={chatGroupId}
+          actionChatGroupId={chatGroupId}
           overlayCardTile={overlayCardTile}
           onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
           onRoutineAcknowledge={onRoutineAcknowledge}

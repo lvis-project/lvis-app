@@ -183,9 +183,15 @@ describe("FloatingDock activity", () => {
     const stub = stubSurface();
     const dock = new FloatingDock(stub.surface, () => SURFACE);
 
-    dock.setActivity({ summary: "Indexing 3 documents" });
+    dock.setActivity({ conversation: "Quarterly report", summary: "Indexing 3 documents" });
     expect(dock.visible).toBe(true);
-    expect(stub.activities[stub.activities.length - 1]).toMatchObject({ summary: "Indexing 3 documents" });
+    // The line says WHOSE work it is. One line, up to four conversations: an
+    // unlabelled line cannot be attributed, and the next one to arrive
+    // replaces it without the user knowing what it replaced.
+    expect(stub.activities[stub.activities.length - 1]).toMatchObject({
+      conversation: "Quarterly report",
+      summary: "Indexing 3 documents",
+    });
 
     dock.setActivity(null);
     // A window floating above every other application with nothing in it is
@@ -197,7 +203,7 @@ describe("FloatingDock activity", () => {
   it("keeps the dock up when activity clears but a panel is still attached", async () => {
     const stub = stubSurface();
     const dock = new FloatingDock(stub.surface, () => SURFACE);
-    dock.setActivity({ summary: "working" });
+    dock.setActivity({ conversation: "Quarterly report", summary: "working" });
     dock.attach("meeting", { extensionId: "recorder" });
 
     dock.setActivity(null);
@@ -448,7 +454,7 @@ describe("FloatingDock slot lifetime", () => {
       pluginId,
       extensionId,
     }));
-    dock.setActivity({ summary: "working" });
+    dock.setActivity({ conversation: "Quarterly report", summary: "working" });
     const handle = dock.attach("meeting", { extensionId: "recorder" });
     const seen: DetachReason[] = [];
     handle.onDetached((reason) => seen.push(reason));
