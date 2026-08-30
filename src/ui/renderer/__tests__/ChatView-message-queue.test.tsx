@@ -125,7 +125,7 @@ describe("ChatView ⌘K guide", () => {
     expect(api.chatGuide).not.toHaveBeenCalled();
   });
 
-  it("does not route global guide shortcuts through an open approval dock", async () => {
+  it("does not route global guide shortcuts through an approval dock covering this composer", async () => {
     const { container, api } = await renderApp({ hasApiKey: true });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
@@ -133,7 +133,9 @@ describe("ChatView ⌘K guide", () => {
     fireEvent.change(textarea, { target: { value: "keep this draft" } });
     const dock = document.createElement("section");
     dock.dataset.testid = "approval-dock";
-    document.body.append(dock);
+    // The card that covers THIS composer lives in the composer's own surface;
+    // one in another surface is not its business (see blockingSurfaceCovers).
+    textarea.closest("[data-approval-scope]")!.append(dock);
 
     try {
       fireEvent.keyDown(textarea, { key: "k", code: "KeyK", ctrlKey: true });

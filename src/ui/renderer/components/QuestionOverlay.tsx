@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { AskUserQuestionCard, type AskUserQuestionRequest } from "./AskUserQuestionCard.js";
+import { focusIsFreeFor } from "./permissions/ApprovalDock.js";
 import type { LvisApi } from "../types.js";
 import { TEST_IDS } from "../../../shared/test-ids.js";
 
@@ -22,6 +23,8 @@ export function QuestionOverlay({ api, requests, onResolved }: QuestionOverlayPr
     const focusFirstChoiceWhenExposed = () => {
       if (composer.inert || composer.getAttribute("aria-hidden") === "true") return;
       if (root.contains(document.activeElement)) return;
+      // The caret of a user typing in another tile stays where it is.
+      if (!focusIsFreeFor(root)) return;
       root.querySelector<HTMLElement>(
         '[role="option"][tabindex="0"]:not(:disabled), [role="option"]:not(:disabled)',
       )?.focus();

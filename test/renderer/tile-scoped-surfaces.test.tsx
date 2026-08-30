@@ -1,5 +1,6 @@
 /**
- * What belongs to a TILE and what belongs to the WINDOW, with two tiles open.
+ * What belongs to a TILE and what belongs to the WINDOW, with two or three
+ * tiles open.
  *
  * Main pushes several surfaces at the renderer that predate tiled chat groups.
  * Each one has to answer the same question — is this news about one
@@ -14,10 +15,13 @@ import {
   collectTiles,
   focusTile,
   forceOverflowingSummaries,
+  splitIntoThreeTiles,
   splitIntoTwoTiles,
+  submitChatMessage,
   toggleTileMaximized,
 } from "./helpers.js";
-import type { MockLvisApi } from "./mock-lvis-api.js";
+import { MOCK_DEFAULT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
+import { BLOCKING_SURFACE_SELECTOR } from "../../src/shared/test-ids.js";
 
 /** The permission namespace's subscriptions, as the mock records them. */
 function permissionSubscription(api: MockLvisApi, name: string): ReturnType<typeof vi.fn> {
@@ -374,5 +378,372 @@ describe("a card that follows focus keeps what the user did to it", () => {
     } finally {
       restoreOverflow();
     }
+  });
+});
+
+describe("a turn parked on an approval, with two tiles", () => {
+  const request = (overrides: Record<string, unknown>) => ({
+    id: "req-parked-turn",
+    category: "tool",
+    toolName: "read_file",
+    toolCategory: "read",
+    args: { path: "/tmp/notes.md" },
+    reason: "read the notes",
+    createdAt: Date.now(),
+    requireExplicit: false,
+    nonce: "nonce-parked-turn",
+    hmac: "hmac-parked-turn",
+    ...overrides,
+  });
+  const band = (tile: { element: HTMLElement }) =>
+    tile.element.querySelector('[data-testid="approval-waiting-band"]');
+  const dock = (within: HTMLElement) =>
+    within.querySelectorAll('[data-testid="approval-dock"]');
+
+  it("draws the card and the waiting band in the tile holding the session that asked, and nowhere else, until the card is answered", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+
+    await waitFor(() => expect(dock(second!.element)).toHaveLength(1));
+    expect(dock(primary!.element)).toHaveLength(0);
+    expect(dock(container)).toHaveLength(1);
+    await waitFor(() => expect(band(second!)).not.toBeNull());
+    expect(band(second!)!.getAttribute("data-tool-names")).toBe("read_file");
+    expect(band(primary!)).toBeNull();
+
+    const deny = second!.element.querySelector<HTMLButtonElement>('[data-testid="deny-button"]');
+    expect(deny).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(deny!);
+    });
+
+    await waitFor(() => expect(band(second!)).toBeNull());
+    await waitFor(() => expect(dock(container)).toHaveLength(0));
+  });
+
+  it("calls the conversation by its title on the card, and keeps the id for the review details", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+
+    await waitFor(() => expect(dock(second!.element)).toHaveLength(1));
+    const label = second!.element.querySelector('[data-testid="approval-conversation"]');
+    expect(label?.textContent).not.toContain(`session-${second!.chatGroupId}`);
+    expect(label?.textContent?.trim().length).toBeGreaterThan(0);
+    expect(
+      second!.element.querySelector('[data-testid="approval-conversation-id"]')?.textContent,
+    ).toContain(`session-${second!.chatGroupId}`);
+  });
+
+  it("tells the waiting tile that its queued messages are held by the approval", async () => {
+    const { container, api, emitApproval } = await renderApp({
+      hasApiKey: true,
+      lvisEnv: { isDev: true, isE2E: true },
+    });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    // A turn that never ends keeps the second tile streaming; the next Enter
+    // there goes to the queue, not to the model.
+    api.chatSend.mockImplementationOnce(() => new Promise(() => {}));
+    await submitChatMessage(second!.element, "첫 질문");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
+    await submitChatMessage(second!.element, "이어서 부탁");
+    await waitFor(() =>
+      expect(second!.element.querySelector('[data-testid="message-queue-panel"]')).not.toBeNull(),
+    );
+    expect(second!.element.querySelector('[data-testid="message-queue-held-by-approval"]')).toBeNull();
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+
+    await waitFor(() =>
+      expect(second!.element.querySelector('[data-testid="message-queue-held-by-approval"]')).not.toBeNull(),
+    );
+    expect(primary!.element.querySelector('[data-testid="message-queue-panel"]')).toBeNull();
+  });
+
+  it("names what was blocked in that tile's transcript when the turn ends unanswered, and lets the dead card go", async () => {
+    const { container, emitApproval, emitChatStream } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+    await waitFor(() => expect(band(second!)).not.toBeNull());
+
+    // The host settled the ask (timeout) and the turn ended on a failed call.
+    await act(async () => {
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      const notices = Array.from(second!.element.querySelectorAll('[data-testid="system-entry"]'));
+      expect(notices.some((el) => el.textContent?.includes("read_file"))).toBe(true);
+    });
+    expect(
+      Array.from(primary!.element.querySelectorAll('[data-testid="system-entry"]'))
+        .some((el) => el.textContent?.includes("read_file")),
+    ).toBe(false);
+    expect(band(second!)).toBeNull();
+    await waitFor(() => expect(dock(container)).toHaveLength(0));
+  });
+
+  it("brings a request the host was already parked on back after a reload, in the tile holding its session", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      pendingApprovals: [request({ sessionId: MOCK_DEFAULT_SESSION_ID })],
+    });
+
+    const [primary] = collectTiles(container);
+    await waitFor(() => expect(band(primary!)).not.toBeNull());
+    expect(band(primary!)!.getAttribute("data-tool-names")).toBe("read_file");
+    await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
+  });
+
+  it("draws a request parked before this tile knew its session once: in the tile, never beside it in the window", async () => {
+    // A reload: the request comes back from the host before the primary tile
+    // has loaded the session it names. Until then nothing owns it and the
+    // window's dock holds it; once the tile knows its session it claims the
+    // request, and the window's dock must let go of it.
+    let resolveHistory!: (history: { sessionId: string; messages: never[] }) => void;
+    const history = new Promise<{ sessionId: string; messages: never[] }>((resolve) => {
+      resolveHistory = resolve;
+    });
+    const { container } = await renderApp({
+      hasApiKey: true,
+      history,
+      pendingApprovals: [request({ sessionId: MOCK_DEFAULT_SESSION_ID })],
+    });
+    await waitFor(() => expect(dock(container)).toHaveLength(1));
+    expect(dock(container)[0]!.closest("[data-approval-scope]"))
+      .toHaveAttribute("data-testid", "window-approval-scope");
+
+    await act(async () => {
+      resolveHistory({ sessionId: MOCK_DEFAULT_SESSION_ID, messages: [] });
+    });
+    const [primary] = collectTiles(container);
+    await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
+    expect(dock(container)).toHaveLength(1);
+    expect(band(primary!)!.getAttribute("data-tool-names")).toBe("read_file");
+  });
+
+  it("leaves a request that names no conversation to the window's own dock, outside every tile", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitApproval(request({ id: "req-host" }));
+    });
+
+    await waitFor(() => expect(dock(container)).toHaveLength(1));
+    expect(dock(primary!.element)).toHaveLength(0);
+    expect(dock(second!.element)).toHaveLength(0);
+    expect(band(primary!)).toBeNull();
+    expect(band(second!)).toBeNull();
+    // The window's dock has a scope of its own beside the tiles: no tile's
+    // composer goes inert, and both still take the keyboard.
+    expect(dock(container)[0]!.closest("[data-approval-scope]"))
+      .toHaveAttribute("data-testid", "window-approval-scope");
+    for (const tile of [primary!, second!]) {
+      const composer = tile.element.querySelector<HTMLElement>("[data-composer-placement]")!;
+      expect(composer).not.toHaveAttribute("inert");
+      const input = tile.element.querySelector<HTMLTextAreaElement>("textarea")!;
+      await act(async () => {
+        input.focus();
+      });
+      expect(document.activeElement).toBe(input);
+    }
+  });
+});
+
+describe("cards raised by one of three tiles", () => {
+  const request = (overrides: Record<string, unknown>) => ({
+    id: "req-middle-tile",
+    category: "tool",
+    toolName: "write_file",
+    toolCategory: "write",
+    args: { path: "/tmp/out.md" },
+    reason: "write the summary",
+    createdAt: Date.now(),
+    requireExplicit: false,
+    nonce: "nonce-middle-tile",
+    hmac: "hmac-middle-tile",
+    ...overrides,
+  });
+  const dock = (within: HTMLElement) =>
+    within.querySelectorAll('[data-testid="approval-dock"]');
+  const composer = (tile: { element: HTMLElement }) =>
+    tile.element.querySelector<HTMLElement>('[data-composer-placement]');
+  const textarea = (tile: { element: HTMLElement }) =>
+    tile.element.querySelector<HTMLTextAreaElement>("textarea");
+  const band = (tile: { element: HTMLElement }) =>
+    tile.element.querySelector('[data-testid="approval-waiting-band"]');
+  const tileCell = (node: Element) =>
+    node.closest<HTMLElement>('[data-testid^="chat-group-cell:"]');
+  /**
+   * The tiles that did not ask: nothing covers them, their composers are not
+   * inert, and each takes the keyboard — focus lands, typed text stays.
+   */
+  const expectUntouched = async (...others: Array<{ element: HTMLElement }>) => {
+    for (const tile of others) {
+      expect(tile.element.querySelectorAll(BLOCKING_SURFACE_SELECTOR)).toHaveLength(0);
+      expect(composer(tile)).not.toHaveAttribute("inert");
+      const input = textarea(tile)!;
+      await act(async () => {
+        input.focus();
+      });
+      expect(document.activeElement).toBe(input);
+      fireEvent.change(input, { target: { value: "옆 타일은 계속 입력" } });
+      expect(input.value).toBe("옆 타일은 계속 입력");
+    }
+  };
+
+  it("shows the approval card in the tile that asked, while the other two keep their composers, their focus, and their turns", async () => {
+    const { container, api, emitApproval } = await renderApp({ hasApiKey: true });
+    const [first, middle, third] = await splitIntoThreeTiles(container);
+
+    // The user is typing in the first tile when the middle tile's turn asks.
+    await focusTile(first!);
+    await act(async () => {
+      textarea(first!)!.focus();
+    });
+    expect(document.activeElement).toBe(textarea(first!));
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${middle!.chatGroupId}` }));
+    });
+
+    await waitFor(() => expect(dock(middle!.element)).toHaveLength(1));
+    expect(dock(first!.element)).toHaveLength(0);
+    expect(dock(third!.element)).toHaveLength(0);
+    expect(dock(container)).toHaveLength(1);
+
+    // No focus steal: the caret stays where the user was typing.
+    expect(document.activeElement).toBe(textarea(first!));
+    // The card's nearest tile ancestor is the tile that asked.
+    expect(tileCell(dock(container)[0]!)).toBe(middle!.element);
+    // Only the covered composer is inert; the other two accept input.
+    expect(composer(middle!)).toHaveAttribute("inert");
+    await expectUntouched(first!, third!);
+
+    // Both neighbours run a turn while the middle tile waits.
+    await submitChatMessage(first!.element, "첫 타일 질문");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
+    await focusTile(third!);
+    await submitChatMessage(third!.element, "셋째 타일 질문");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(2));
+    expect(dock(middle!.element)).toHaveLength(1);
+
+    // Answering in the middle tile clears its card and frees its composer.
+    const approve = middle!.element.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    expect(approve).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(approve!);
+    });
+    await waitFor(() => expect(dock(container)).toHaveLength(0));
+    await waitFor(() => expect(composer(middle!)).not.toHaveAttribute("inert"));
+  });
+
+  it("shows a user-question card in the tile that asked, and only there, while another tile runs a turn", async () => {
+    const { container, api, emitAskUserQuestion } = await renderApp({ hasApiKey: true });
+    const [first, middle, third] = await splitIntoThreeTiles(container);
+
+    // The user is typing in the first tile when the middle tile's turn asks.
+    await focusTile(first!);
+    await act(async () => {
+      textarea(first!)!.focus();
+    });
+    expect(document.activeElement).toBe(textarea(first!));
+
+    await act(async () => {
+      emitAskUserQuestion({
+        id: "ask-middle",
+        sessionId: `session-${middle!.chatGroupId}`,
+        questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
+        createdAt: Date.now(),
+      });
+    });
+
+    const question = (tile: { element: HTMLElement }) =>
+      tile.element.querySelector('[data-testid="question-overlay"]');
+    await waitFor(() => expect(question(middle!)).not.toBeNull());
+    expect(tileCell(question(middle!)!)).toBe(middle!.element);
+    expect(container.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(1);
+    // The card seats its first answer a frame after mounting; let that frame
+    // pass, then the caret must still be where the user was typing.
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(document.activeElement).toBe(textarea(first!));
+    await expectUntouched(first!, third!);
+
+    await focusTile(first!);
+    await submitChatMessage(first!.element, "첫 타일은 계속 진행");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
+    expect(question(middle!)).not.toBeNull();
+    expect(question(first!)).toBeNull();
+  });
+
+  it("shows the sub-agent spawn card in the tile that asked, and only there", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [first, middle, third] = await splitIntoThreeTiles(container);
+
+    await focusTile(first!);
+    await act(async () => {
+      textarea(first!)!.focus();
+    });
+
+    // `agent_spawn` asks by contract; its card is an approval card raised by
+    // the turn that is spawning, so it belongs to that turn's tile.
+    await act(async () => {
+      emitApproval(request({
+        id: "req-spawn-middle",
+        toolName: "agent_spawn",
+        toolCategory: "meta",
+        args: { title: "메모 정리", instructions: "메모를 한 줄로 정리해" },
+        reason: "spawn a sub-agent for the summary",
+        nonce: "nonce-spawn-middle",
+        hmac: "hmac-spawn-middle",
+        sessionId: `session-${middle!.chatGroupId}`,
+      }));
+    });
+
+    await waitFor(() => expect(dock(middle!.element)).toHaveLength(1));
+    expect(dock(container)).toHaveLength(1);
+    expect(tileCell(dock(container)[0]!)).toBe(middle!.element);
+    expect(band(middle!)?.getAttribute("data-tool-names")).toBe("agent_spawn");
+    expect(band(first!)).toBeNull();
+    expect(band(third!)).toBeNull();
+
+    expect(document.activeElement).toBe(textarea(first!));
+    expect(composer(middle!)).toHaveAttribute("inert");
+    await expectUntouched(first!, third!);
+  });
+
+  it("brings a spawn card the host was parked on back after a reload, into the tile holding its session", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      pendingApprovals: [request({
+        id: "req-spawn-parked",
+        toolName: "agent_spawn",
+        toolCategory: "meta",
+        args: { title: "메모 정리", instructions: "메모를 한 줄로 정리해" },
+        sessionId: MOCK_DEFAULT_SESSION_ID,
+      })],
+    });
+    const [primary, second] = await splitIntoTwoTiles(container);
+
+    await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
+    expect(dock(container)).toHaveLength(1);
+    expect(band(primary!)?.getAttribute("data-tool-names")).toBe("agent_spawn");
+    await expectUntouched(second!);
   });
 });

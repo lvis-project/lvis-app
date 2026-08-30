@@ -7,6 +7,8 @@ import { SideChatView } from "../SideChatView.js";
 import type { ChatStreamEvent } from "../../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../../types.js";
 import { ChatContextProvider, type ChatContextValue } from "../../context/ChatContext.js";
+import { ApprovalSurfaceProvider } from "../../hooks/use-approval.js";
+import { approvalSurfaceStub } from "../../../../../test/renderer/helpers.js";
 import { TEST_IDS } from "../../../../shared/test-ids.js";
 
 function makeApi() {
@@ -43,11 +45,13 @@ function makeApi() {
 function renderView(api: LvisApi, chatContext?: Partial<ChatContextValue>) {
   return render(
     <TooltipProvider>
-      {chatContext ? (
-        <ChatContextProvider value={chatContext as ChatContextValue}>
-          <SideChatView api={api} />
-        </ChatContextProvider>
-      ) : <SideChatView api={api} />}
+      <ApprovalSurfaceProvider value={approvalSurfaceStub()}>
+        {chatContext ? (
+          <ChatContextProvider value={chatContext as ChatContextValue}>
+            <SideChatView api={api} />
+          </ChatContextProvider>
+        ) : <SideChatView api={api} />}
+      </ApprovalSurfaceProvider>
     </TooltipProvider>,
   );
 }

@@ -751,6 +751,8 @@ type LvisNamespaceOverrides = {
     enableDevConsole: boolean;
     debugStream: boolean;
   }>;
+  /** Requests the host is already parked on when the renderer mounts. */
+  pendingApprovals?: unknown[];
 };
 
 export function makeMockLvisNamespace(overrides: LvisNamespaceOverrides = {}) {
@@ -772,6 +774,9 @@ export function makeMockLvisNamespace(overrides: LvisNamespaceOverrides = {}) {
           return () => approvalHandlers.delete(cb);
         }),
         respond: vi.fn(async () => ({ ok: true })),
+        // Nothing parked on the host by default; a test that opens with a
+        // request already waiting (a reload mid-approval) overrides this.
+        listPending: vi.fn(async () => overrides.pendingApprovals ?? []),
         // `/allow` selector. Defaults to "no provider configured" so a test
         // that never opts in still exercises the failure path rather than a
         // silently successful proposal.

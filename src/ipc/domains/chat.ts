@@ -843,9 +843,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return chatGroupContext(chatGroupId.trim());
   };
 
-  /** Stop whatever a group's loop is doing and wait until it has stopped. */
-  const quiesce = async (context: ChatGroupContext): Promise<void> => {
-    context.loop.abortCurrentTurn();
+  /**
+   * Stop whatever a group's loop is doing and wait until it has stopped.
+   * `reason` is what the stopped turn — and an approval it was parked on —
+   * records; it names the host's action, not the user's.
+   */
+  const quiesce = async (context: ChatGroupContext, reason: string): Promise<void> => {
+    context.loop.abortCurrentTurn(new Error(reason));
     const active = context.surfaceRuntime.activity.activeTurn()
       ?? context.surfaceRuntime.activity.activeMutation();
     if (!active) return;
@@ -856,10 +860,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
   };
 
-  const releaseGroup = async (id: string): Promise<boolean> => {
+  const releaseGroup = async (id: string, reason: string): Promise<boolean> => {
     const context = groupContexts.get(id);
     if (!context) return false;
-    await quiesce(context);
+    await quiesce(context, reason);
     context.unsubscribeStream();
     groupContexts.delete(id);
     deps.releaseChatGroupLoop?.(id);
@@ -880,15 +884,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const contents = getMainWindow()?.webContents;
     if (!contents || watchedRenderers.has(contents)) return;
     watchedRenderers.add(contents);
-    const releaseAll = () => {
+    const releaseAll = (reason: string) => {
       for (const id of [...groupContexts.keys()]) {
-        if (id !== MAIN_CHAT_GROUP_ID) void releaseGroup(id);
+        if (id !== MAIN_CHAT_GROUP_ID) void releaseGroup(id, reason);
       }
     };
     contents.on("did-start-navigation", (event) => {
-      if (event.isMainFrame && !event.isSameDocument) releaseAll();
+      if (event.isMainFrame && !event.isSameDocument) releaseAll("renderer reload released the tile");
     });
-    contents.on("render-process-gone", releaseAll);
+    contents.on("render-process-gone", () => releaseAll("renderer process gone; tile released"));
   };
 
   /**
@@ -912,12 +916,12 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // window-active pointer cleared so the next launch does not bring the
       // closed conversation back — so no other tile is refused that session
       // by a tile that no longer exists.
-      await quiesce(mainGroup);
+      await quiesce(mainGroup, "tile closed");
       mainGroup.loop.newConversation();
       await memoryManager.markMainActiveFresh();
       return { ok: true, released: true };
     }
-    return { ok: true, released: await releaseGroup(id) };
+    return { ok: true, released: await releaseGroup(id, "tile closed") };
   });
 
   // read-only, sender guard optional

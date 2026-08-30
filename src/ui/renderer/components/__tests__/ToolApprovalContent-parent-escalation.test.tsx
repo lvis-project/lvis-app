@@ -48,7 +48,7 @@ const ALL_CAUSES: readonly ParentEscalationCause[] = [
 describe("ToolApprovalContent parent-escalation band", () => {
   it("says a parent agent already tried, and names the child that asked", () => {
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={escalatedRequest({
           cause: "parent-escalated",
@@ -72,7 +72,7 @@ describe("ToolApprovalContent parent-escalation band", () => {
     // like the one below would speak in the app's voice on the one surface
     // where the user decides whether to trust the call.
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={escalatedRequest({
           cause: "parent-escalated",
@@ -95,7 +95,7 @@ describe("ToolApprovalContent parent-escalation band", () => {
     // unattributed, reads as the app instructing the user — the band would then
     // become a channel for the very argument the parent declined to accept.
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={escalatedRequest({
           cause: "timeout",
@@ -121,7 +121,7 @@ describe("ToolApprovalContent parent-escalation band", () => {
   it("labels every cause the host can escalate on", () => {
     for (const cause of ALL_CAUSES) {
       const { unmount } = render(
-        <ToolApprovalContent
+        <ToolApprovalContent conversationLabel="conversation"
           open
           request={escalatedRequest({ cause, reason: "", childTitle: "report writer" })}
           onDecide={vi.fn()}
@@ -143,7 +143,7 @@ describe("ToolApprovalContent parent-escalation band", () => {
     // and it would do it with nothing on screen saying so.
     const bounded = `${"x".repeat(230)} and that path is not in the task`;
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={escalatedRequest({
           cause: "malformed-output",
@@ -162,7 +162,7 @@ describe("ToolApprovalContent parent-escalation band", () => {
     // crosses IPC. A blank line here would be the one escalation with no
     // account at all — the exact gap the band exists to close.
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={escalatedRequest({
           cause: "cause-from-a-later-build" as ParentEscalationCause,
@@ -178,7 +178,7 @@ describe("ToolApprovalContent parent-escalation band", () => {
   });
 
   it("stays absent for an ask no parent ever saw", () => {
-    render(<ToolApprovalContent open request={escalatedRequest(undefined)} onDecide={vi.fn()} />);
+    render(<ToolApprovalContent conversationLabel="conversation" open request={escalatedRequest(undefined)} onDecide={vi.fn()} />);
     expect(screen.queryByTestId("parent-escalation-band")).toBeNull();
   });
 });

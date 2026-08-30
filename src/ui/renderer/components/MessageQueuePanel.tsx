@@ -20,9 +20,15 @@ interface MessageQueuePanelProps {
   store: MessageQueueStore;
 
   onSendNow: (item: MessageQueueItem) => void;
+  /**
+   * The turn is parked on an approval. Rows drain at the next tool boundary,
+   * and a parked turn reaches none until the approval is answered — so the
+   * strip says that instead of promising the next break-point.
+   */
+  heldByApproval: boolean;
 }
 
-export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) {
+export function MessageQueuePanel({ store, onSendNow, heldByApproval }: MessageQueuePanelProps) {
   const { t } = useTranslation();
   const items = useSyncExternalStore<readonly MessageQueueItem[]>(
     store.subscribe,
@@ -86,11 +92,18 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
             <span className="ml-1 text-[10px]">{t("messageQueuePanel.cmdEnterHint")}</span>
           </span>
         )}
-        {!expanded && (
+        {heldByApproval ? (
+          <span
+            className="ml-2 min-w-0 truncate font-medium text-warning"
+            data-testid="message-queue-held-by-approval"
+          >
+            · {t("messageQueuePanel.heldByApprovalHint")}
+          </span>
+        ) : !expanded ? (
           <span className="ml-2 min-w-0 truncate text-muted-foreground">
             · {t("messageQueuePanel.collapsedHint")}
           </span>
-        )}
+        ) : null}
       </button>
 
       {expanded && (

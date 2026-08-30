@@ -57,7 +57,7 @@ describe("ToolApprovalContent rationale card", () => {
     const record = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("lvis", { userApproval: { record } });
     const { container } = render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeRationaleRequest(makeReadyDisplay())}
         onDecide={onDecide}
@@ -125,7 +125,7 @@ describe("ToolApprovalContent rationale card", () => {
       userApproval: { record: vi.fn().mockResolvedValue({ ok: true }) },
     });
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeRationaleRequest(display)}
         onDecide={vi.fn()}
@@ -149,7 +149,7 @@ describe("ToolApprovalContent rationale card", () => {
       modalFallbackRequired: true,
     };
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeRationaleRequest(failed)}
         onDecide={onDecide}
@@ -173,7 +173,7 @@ describe("ToolApprovalContent rationale card", () => {
       unexpected: '<img data-testid="raw-injection" src="x" />',
     };
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeRationaleRequest(malformed)}
         onDecide={onDecide}

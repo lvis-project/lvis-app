@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { canonicalStringify } from "../../../../shared/canonical-json.js";
 import { useTranslation } from "../../../../i18n/react.js";
 import type { ApprovalDecisionExtras } from "../../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import type { UserApprovalVerdict } from "../../../../shared/permissions-events.js";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
-import { TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
+import { MODAL_DIALOG_SELECTOR, TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
 
 export interface ApprovalDockProps {
-  queue: ApprovalRequest[];
+  /** The requests this surface draws, head first. */
+  queue: readonly ApprovalRequest[];
+  /** What the card calls the conversation that asked — the tile's title, not its id. */
+  conversationLabel: string;
   proposedChoice?: ApprovalChoice | null;
   onDecide: (
     choice: ApprovalChoice,
@@ -19,8 +22,48 @@ export interface ApprovalDockProps {
   interactionLocked?: boolean;
 }
 
-function focusPendingQuestion(): boolean {
-  const overlay = document.querySelector<HTMLElement>(testIdSelector(TEST_IDS.questionOverlay));
+/**
+ * The surface a dock belongs to: the nearest `data-approval-scope` ancestor —
+ * a tile's conversation column, a side chat's panel, or the window's route
+ * canvas for requests no conversation claims. Everything the dock does to
+ * its surroundings (inert the composer it covers, hand focus to a question
+ * card) stays inside it, so a card raised by one tile is invisible to the
+ * keyboard and the composer of every other.
+ */
+function approvalScopeOf(root: Element | null): HTMLElement | null {
+  return root?.closest<HTMLElement>("[data-approval-scope]") ?? null;
+}
+
+/**
+ * Is a surface that takes over `target`'s composer on screen? A modal dialog
+ * anywhere — it is portaled to the body — or an approval card inside the
+ * composer's own surface. A card in the tile next door is not one: that
+ * tile's keys keep working. A composer in no surface has the window for one.
+ */
+export function blockingSurfaceCovers(target: EventTarget | null): boolean {
+  if (document.querySelector(MODAL_DIALOG_SELECTOR) !== null) return true;
+  const scope = target instanceof Element ? approvalScopeOf(target) : null;
+  return (scope ?? document).querySelector(testIdSelector(TEST_IDS.approvalDock)) !== null;
+}
+
+/**
+ * May a card rooted at `root` take focus? Only when nothing else has it, or
+ * when what has it is inside the card's own surface — a user typing in
+ * another tile is never interrupted by a card that is not theirs. The
+ * approval dock and the user-question card apply the same rule.
+ */
+export function focusIsFreeFor(root: HTMLElement | null): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || active === document.body) return true;
+  return approvalScopeOf(root)?.contains(active) === true;
+}
+
+function pendingQuestionIn(scope: HTMLElement | null): HTMLElement | null {
+  return scope?.querySelector<HTMLElement>(testIdSelector(TEST_IDS.questionOverlay)) ?? null;
+}
+
+function focusPendingQuestion(scope: HTMLElement | null): boolean {
+  const overlay = pendingQuestionIn(scope);
   if (!overlay) return false;
   const target = overlay.querySelector<HTMLElement>(
     '[role="option"][tabindex="0"]:not(:disabled), [role="option"]:not(:disabled), button:not(:disabled), [tabindex="0"]',
@@ -31,17 +74,21 @@ function focusPendingQuestion(): boolean {
 }
 
 /**
- * Route-independent, bottom-floating foreground approval surface.
+ * Bottom-floating foreground approval surface, one per drawing surface.
  *
- * The dock is deliberately an absolutely positioned sibling of routed content
- * inside App's padded route canvas. It never changes the route's measured
- * height and it does not portal over the viewport, so the user can keep reading
- * and navigating the route that raised the request around the card. All
+ * The dock is deliberately an absolutely positioned sibling of the content
+ * of the surface that draws it — a tile's conversation column, a side chat's
+ * panel, or the window's route canvas for requests no conversation claims.
+ * It never changes that content's measured height and it does not portal
+ * over the viewport, so the user can keep reading and navigating around the
+ * card, and a card in one tile leaves every other tile untouched: no
+ * backdrop, no focus steal, no inert composer outside its own scope. All
  * ApprovalRequest variants share this one queue head and no approval surface
  * uses role=dialog, aria-modal, a backdrop, a focus trap, or body scroll lock.
  */
 export function ApprovalDock({
   queue,
+  conversationLabel,
   proposedChoice = null,
   onDecide,
   onOpenPermanentDeny,
@@ -55,6 +102,13 @@ export function ApprovalDock({
   const activeRequestIdRef = useRef<string | null>(requestId);
   activeRequestIdRef.current = requestId;
   const rootRef = useRef<HTMLElement>(null);
+  // The scope outlives the section: once the queue empties the section is
+  // gone, and the focus handoff below still has to find this surface's
+  // question card. Captured at commit while the section is mounted.
+  const scopeRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (rootRef.current) scopeRef.current = approvalScopeOf(rootRef.current);
+  });
   const previousRequestIdRef = useRef<string | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const returnFocusFrameRef = useRef<number | null>(null);
@@ -89,12 +143,18 @@ export function ApprovalDock({
     const previousRequestId = previousRequestIdRef.current;
 
     if (previousRequestId === null && requestId !== null) {
-      const activeElement = document.activeElement;
-      returnFocusRef.current =
-        activeElement instanceof HTMLElement && activeElement !== document.body
-          ? activeElement
-          : null;
-      focusPreferredDecision();
+      // Take focus only from our own surface. Someone working in another tile
+      // keeps their caret; the card waits for them to come over.
+      if (focusIsFreeFor(rootRef.current)) {
+        const activeElement = document.activeElement;
+        returnFocusRef.current =
+          activeElement instanceof HTMLElement && activeElement !== document.body
+            ? activeElement
+            : null;
+        focusPreferredDecision();
+      } else {
+        returnFocusRef.current = null;
+      }
       previousRequestIdRef.current = requestId;
     } else if (
       previousRequestId !== null &&
@@ -102,13 +162,15 @@ export function ApprovalDock({
       previousRequestId !== requestId
     ) {
       // Keep keyboard interaction live on FIFO advance by focusing the next
-      // request's real enabled decision, never a non-activating container.
-      focusPreferredDecision();
+      // request's real enabled decision, never a non-activating container —
+      // under the same rule: never across surfaces.
+      if (focusIsFreeFor(rootRef.current)) focusPreferredDecision();
       previousRequestIdRef.current = requestId;
     } else if (previousRequestId !== null && requestId === null) {
       const returnTarget = returnFocusRef.current;
       returnFocusRef.current = null;
-      const hasPendingQuestion = document.querySelector(testIdSelector(TEST_IDS.questionOverlay)) !== null;
+      const scope = scopeRef.current;
+      const hasPendingQuestion = pendingQuestionIn(scope) !== null;
       if (hasPendingQuestion || dockHadFocusBeforeRender) {
         if (returnFocusFrameRef.current !== null) {
           cancelAnimationFrame(returnFocusFrameRef.current);
@@ -120,11 +182,8 @@ export function ApprovalDock({
           // the approval overlay. Its one-shot mount focus cannot run again, so
           // hand focus to the now-visible question before restoring the older
           // composer/route target.
-          if (focusPendingQuestion()) return;
-          if (
-            attempt < 3 &&
-            document.querySelector(testIdSelector(TEST_IDS.questionOverlay)) !== null
-          ) {
+          if (focusPendingQuestion(scope)) return;
+          if (attempt < 3 && pendingQuestionIn(scope) !== null) {
             returnFocusFrameRef.current = requestAnimationFrame(
               () => completeFocusHandoff(attempt + 1),
             );
@@ -140,9 +199,13 @@ export function ApprovalDock({
     previousRequestIdRef.current = requestId;
   }, [dockHadFocusBeforeRender, focusPreferredDecision, requestId]);
 
+  // The card covers the composer of ITS surface; that composer is inert while
+  // the card is up. Composers of other surfaces are outside the scope and are
+  // not touched — a tile waiting on approval is not a reason to stop typing
+  // in the tile next to it.
   useEffect(() => {
     if (requestId === null) return;
-    const canvas = rootRef.current?.closest<HTMLElement>(testIdSelector(TEST_IDS.routeCanvas));
+    const canvas = approvalScopeOf(rootRef.current);
     if (!canvas) return;
 
     const snapshots = new Map<HTMLElement, {
@@ -252,6 +315,7 @@ export function ApprovalDock({
         key={request.id}
         open
         request={request}
+        conversationLabel={conversationLabel}
         pendingCount={queue.length}
         onDecide={decide}
         onOpenPermanentDeny={onOpenPermanentDeny}

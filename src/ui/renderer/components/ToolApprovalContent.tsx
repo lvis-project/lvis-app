@@ -459,6 +459,7 @@ function ParentEscalationBand({ notice }: { notice: ParentEscalationNotice }) {
 export function ToolApprovalContent({
   open,
   request,
+  conversationLabel,
   pendingCount = 1,
   onDecide,
   onOpenPermanentDeny,
@@ -467,6 +468,12 @@ export function ToolApprovalContent({
 }: {
   open: boolean;
   request: ApprovalRequest | null;
+  /**
+   * What the card calls the conversation that raised it — the surface's own
+   * name for itself (a tile's title, "Side chat", "no conversation"). The
+   * raw session id is kept for the review details, where an id is useful.
+   */
+  conversationLabel: string;
   pendingCount?: number;
   onDecide: (
     choice: ApprovalChoice,
@@ -962,9 +969,9 @@ export function ToolApprovalContent({
                     <span aria-hidden="true">·</span>
                     <span>{originLabel}</span>
                     <span aria-hidden="true">·</span>
-                    <code className="min-w-0 break-all font-mono" data-testid="approval-conversation">
-                      {request.sessionId ?? tHook("approvalAttribution.unattributed")}
-                    </code>
+                    <span className="min-w-0 truncate" data-testid="approval-conversation">
+                      {conversationLabel}
+                    </span>
                   </div>
                   )}
                   {request.kind === "agent-action" && request.approvalScope ? (
@@ -1056,6 +1063,12 @@ export function ToolApprovalContent({
                 />
               </summary>
               <div className="space-y-3 border-t p-3">
+                <p className="break-all text-[10px] text-muted-foreground">
+                  {tHook("approvalAttribution.rowConversation")}:{" "}
+                  <code className="font-mono" data-testid="approval-conversation-id">
+                    {request.sessionId ?? tHook("approvalAttribution.unattributed")}
+                  </code>
+                </p>
                 {isRationaleApproval ? (
                   <RationaleApprovalCard display={rationaleDisplay} />
                 ) : isOutOfDir ? (

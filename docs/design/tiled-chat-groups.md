@@ -265,6 +265,65 @@ Two rules the tiles must keep:
   when React re-renders. Two frames landing in the same tick then read a stale
   (or already-cleared) accumulator, and a finished turn renders a blank body.
 
+### Cards belong to the conversation that asked
+
+A tool-approval card and a user-question card are raised by ONE turn, and a
+turn runs in one tile. Both render inside that tile's conversation column —
+over its own composer, in front of its own transcript — and nowhere else.
+With three tiles open, a card raised by the middle one leaves the other two
+exactly as they were: no backdrop, no dimmed surface, no focus steal, their
+composers accept input and their turns keep running. This is what
+`data-approval-scope` marks: the element a dock is allowed to affect.
+
+The routing is one rule, `sessionOwnedBy`, applied by two readers:
+
+- **Questions** arrive on the window-wide `lvis:ask-user:request` channel;
+  `useWorkflowTools` keeps the ones whose `sessionId` the tile owns (its own
+  session, or a sub-agent it spawned) or draws (a session no tile holds that
+  the focused tile adopted). The card is `QuestionOverlay` inside the tile's
+  composer dock.
+- **Approvals** arrive on the window-wide `lvis:approval:request` channel into
+  the window's one FIFO (`useApproval`). Every drawing surface CLAIMS the
+  sessions it owns — a tile through the same `ownsSession` predicate its
+  stream subscriptions use, a side chat its own loop's session — and reads the
+  queue for those requests. `ApprovalDock` renders them per surface, head
+  first, and answers through the window's `decide(requestId, …)`, so the
+  signed response path (request id + nonce + HMAC) does not change with where
+  the card is drawn. The ask a sub-agent spawn raises is one of these
+  approvals (`agent_spawn` asks by contract), so the spawn card follows the
+  same rule: it is drawn in the tile whose turn is spawning.
+
+What no surface claims has one explicit home, the window's own dock: a
+request that names no conversation (a host or plugin ask), or a session no
+open surface holds (a headless routine's turn, a tile maximized away while its
+turn asked). That dock draws only unclaimed requests; it is those requests'
+home, not a catch-all behind the tiles. It is drawn over the route canvas from
+a `data-approval-scope` of its own, beside the tiles and an ancestor of none —
+so an unclaimed card covers no tile's composer and takes no tile's caret. The
+invariant, then: a `data-approval-scope` contains at most ONE composer, the one
+its dock may cover.
+
+The two unowned cases split on purpose. An unowned question is adopted by the
+focused tile at arrival: an answer needs a conversation to land in. An unowned
+approval goes to the window's dock: its answer needs none.
+
+The card names the conversation by the surface's own label — the tile's title,
+"Side chat", "Conversation not open in any tile" — and keeps the raw session
+id in the review details, where an identifier is useful.
+
+While a tile's turn is parked on an approval, a band above its composer says
+which tools are waiting, and its message queue says it is held by the
+approval. If the host settles the ask without an answer (timeout, cancel),
+the turn's `done` puts a system entry in that tile naming what was blocked and
+drops the dead card. A renderer reloaded mid-approval reads the parked
+requests back (`lvis:approval:pending`) and the card reappears in the tile
+holding that session — the primary conversation's, whose turn a reload does
+not stop. Every other tile is let go of when the renderer navigates (the chat
+domain's renderer-lifetime watch), and letting go stops its turn, which
+retires the ask it was parked on: the audit row says `cause="renderer reload
+released the tile"`, and a card for a turn that no longer exists is never
+re-offered.
+
 ### The controls: split and drop
 
 `useChatGroups` owns `split()`, `close()` and `dropOnEdge()`, bounded by

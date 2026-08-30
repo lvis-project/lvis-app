@@ -31,7 +31,7 @@ describe("ToolApprovalContent allowed choices", () => {
     const record = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("lvis", { userApproval: { record } });
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={makeOneShotPluginRequest()}
         onDecide={onDecide}

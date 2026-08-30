@@ -4,11 +4,13 @@ import { ChatContextProvider, type ChatContextValue } from "../context/ChatConte
 import { ChatView } from "../ChatView.js";
 import { chatGroupApi } from "./ChatGroupFrame.js";
 import {
+  sessionOwnedBy,
   tileDrawsSession,
   useRegisterChatGroupSession,
   type ChatGroupSessionRegistry,
   type OverlayCardPlacement,
 } from "./chat-group-session-registry.js";
+import { useApprovalSurface } from "../hooks/use-approval.js";
 import { useChatState } from "../hooks/use-chat-state.js";
 import { useChatStatusIndicators } from "../hooks/use-chat-status-indicators.js";
 import { useContextBudget } from "../hooks/use-context-budget.js";
@@ -183,7 +185,7 @@ export function ChatGroupSession({
   const ownedChildSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const ownsSession = useCallback(
     (sessionId: string) =>
-      sessionId === currentSessionIdRef.current || ownedChildSessionIdsRef.current.has(sessionId),
+      sessionOwnedBy(currentSessionIdRef.current, ownedChildSessionIdsRef.current, sessionId),
     [],
   );
   const focusedRef = useRef(focused);
@@ -209,15 +211,19 @@ export function ChatGroupSession({
   useLayoutEffect(() => {
     focusedRef.current = focused;
   }, [focused]);
-  // Same commit-time discipline as the session id below: the listener reads the
-  // ref from an IPC callback, so it must never see a render that was discarded.
-  useLayoutEffect(() => {
-    ownedChildSessionIdsRef.current = new Set(
+  const ownedChildSessionIds = useMemo(
+    () => new Set(
       subAgentSpawns
         .map((spawn) => spawn.childSessionId)
         .filter((childSessionId): childSessionId is string => Boolean(childSessionId)),
-    );
-  }, [subAgentSpawns]);
+    ),
+    [subAgentSpawns],
+  );
+  // Same commit-time discipline as the session id below: the listener reads the
+  // ref from an IPC callback, so it must never see a render that was discarded.
+  useLayoutEffect(() => {
+    ownedChildSessionIdsRef.current = ownedChildSessionIds;
+  }, [ownedChildSessionIds]);
 
   const {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted,
@@ -544,6 +550,59 @@ export function ChatGroupSession({
     [runMcpPrompt],
   );
 
+  // ── the approvals this tile's turn is parked on ────────────────────────────
+
+  // The approval card is drawn where the conversation that asked is shown.
+  // This tile claims the sessions it owns (its own, and its sub-agents'), so
+  // the window leaves their cards to it; the cards render inside this tile's
+  // conversation column (ChatView) and nowhere else.
+  const approvals = useApprovalSurface();
+  useEffect(
+    () => approvals.claims.claim(chatGroupId, ownsSession),
+    // `ownsSession` is stable and reads refs, so what this tile owns changes
+    // without the claim changing. Re-claiming on every such change is how
+    // the window learns to re-read the predicate; without it a request parked
+    // before this tile knew its session (a reload) stays on the window's
+    // dock beside the card this tile draws for the same request.
+    [approvals.claims, chatGroupId, ownsSession, currentSessionId, ownedChildSessionIds],
+  );
+  // A request names the session that asked. A sub-agent's ask names the
+  // child's session, which the tile that spawned it also owns — its turn is
+  // the one waiting on the answer. Read from state, not from the refs the
+  // predicate above uses: those are written at commit, one render later.
+  const pendingApprovals = useMemo(
+    () => approvals.queue.filter((req) =>
+      req.sessionId !== undefined
+        && sessionOwnedBy(currentSessionId, ownedChildSessionIds, req.sessionId)),
+    [approvals.queue, currentSessionId, ownedChildSessionIds],
+  );
+
+  // A turn that ends while an ask of ITS OWN session is still parked here ended
+  // without an answer: the host settled the ask (timeout, cancel) and moved on,
+  // and the transcript shows a failed call with nothing that says why. Name what
+  // was blocked next to it, and let go of the dead card — its buttons no longer
+  // reach anything. A child's ask is not this turn's to close: a sub-agent can
+  // outlive its parent's turn, and `agent-action` asks are not turn-bound.
+  const turnEndApprovalsRef = useRef({
+    pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: approvals.dropSettled, t,
+  });
+  useLayoutEffect(() => {
+    turnEndApprovalsRef.current = {
+      pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: approvals.dropSettled, t,
+    };
+  });
+  useEffect(() => api.onChatStream((ev) => {
+    if (ev.type !== "done") return;
+    const turnEnd = turnEndApprovalsRef.current;
+    const unanswered = turnEnd.pendingApprovals.filter(
+      (req) => req.category === "tool" && req.sessionId === turnEnd.currentSessionId,
+    );
+    if (unanswered.length === 0) return;
+    const tools = [...new Set(unanswered.map((req) => req.toolName))].join(", ");
+    turnEnd.appendSystemEntry(turnEnd.t("chatView.approvalUnansweredNotice", { tools }));
+    turnEnd.dropSettled(unanswered.map((req) => req.id));
+  }), [api]);
+
   // ── what this tile tells the window ────────────────────────────────────────
 
   useRegisterChatGroupSession(registry, chatGroupId, {
@@ -635,6 +694,7 @@ export function ChatGroupSession({
         askQuestions={askQuestions}
         onResolveAskQuestion={dismissAskQuestion}
         approvalSentenceInterceptSubmit={env.approvalSentenceInterceptSubmit}
+        pendingApprovals={pendingApprovals}
         plugins={env.plugins}
         onSelectPlugin={env.onSelectPlugin}
         appMode={env.appMode}

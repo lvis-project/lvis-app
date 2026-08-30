@@ -7,6 +7,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
+import { focusIsFreeFor } from "./permissions/ApprovalDock.js";
 import type { LvisApi } from "../types.js";
 
 export interface AskUserQuestionItem {
@@ -146,11 +147,12 @@ export function AskUserQuestionCard({
     if (onConfirmStep) return;
     const frame = requestAnimationFrame(() => {
       const active = document.activeElement;
-      if (
-        active instanceof HTMLElement &&
-        cardRef.current?.contains(active) &&
-        active !== cardRef.current
-      ) {
+      if (active instanceof HTMLElement && cardRef.current?.contains(active)) {
+        // Focus already on an answer: keyboard navigation is under way.
+        if (active !== cardRef.current) return;
+      } else if (!focusIsFreeFor(cardRef.current)) {
+        // Focus is outside this card's surface — a user typing in another
+        // tile — and a question they did not ask must not pull it away.
         return;
       }
       if (!questionFormRef.current?.focusFirstAnswer()) {

@@ -171,6 +171,20 @@ describe("ApprovalGate", () => {
     expect(result.requestId).toBe("req-1");
   });
 
+  it("listPendingRendererRequests hands back the parked request exactly as it was sent, and nothing once it is answered", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const promise = gate.requestAndWait(makeRequest({ id: "req-parked" }));
+
+    const sent = (wc.send.mock.calls[0] as unknown as [string, ApprovalRequest])[1];
+    expect(gate.listPendingRendererRequests()).toEqual([sent]);
+
+    const { nonce, hmac } = lastSentNonceHmac(wc);
+    gate.resolve("req-parked", { requestId: "req-parked", choice: "deny-once", nonce, hmac });
+    await promise;
+    expect(gate.listPendingRendererRequests()).toEqual([]);
+  });
+
   it("issues a private one-shot receipt only after an HMAC-verified allow-once", async () => {
     const wc = makeMockWebContents();
     const auditLogger = { log: vi.fn() };
@@ -2807,6 +2821,44 @@ describe("ApprovalGate", () => {
       );
       expect(cancelled).toContain("abort-1");
       expect(cancelled).toContain("reason=turn-abort");
+      expect(cancelled).toContain('cause="user cancelled turn"');
+    });
+
+    it("keeps a parked request for the next renderer while its turn is not stopped", async () => {
+      // A renderer reload does not stop the primary conversation's turn; the
+      // request it parked on is what `listPendingRendererRequests` hands the
+      // renderer that comes back.
+      const { wc, gate } = makeAuditingGate();
+      const turn = new AbortController();
+      const parked = gate.requestAndWait(makeAbortableRequest(turn.signal));
+      const sent = (wc.send.mock.calls[0] as unknown as [string, ApprovalRequest])[1];
+      expect(gate.listPendingRendererRequests()).toEqual([sent]);
+
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve("abort-1", { requestId: "abort-1", choice: "allow-once", nonce, hmac });
+      expect((await parked).choice).toBe("allow-once");
+      expect(gate.listPendingRendererRequests()).toEqual([]);
+    });
+
+    it("retires a parked request with the release that stopped its turn, and says so", async () => {
+      // A tile the host let go of — closed, or released by a renderer reload
+      // — has no turn left to answer into; the request is not re-offered, and
+      // the row names the release rather than a stop the user never made.
+      const { auditLogger, gate } = makeAuditingGate();
+      const turn = new AbortController();
+      const parked = gate.requestAndWait(makeAbortableRequest(turn.signal));
+      expect(gate.listPendingRendererRequests()).toHaveLength(1);
+
+      turn.abort(new Error("renderer reload released the tile"));
+      const decision = await parked;
+
+      expect(decision.choice).toBe("deny-once");
+      expect(isHostApprovalRejectedDecision(decision)).toBe(true);
+      expect(gate.listPendingRendererRequests()).toEqual([]);
+      const cancelled = auditRowTexts(auditLogger).find((row) =>
+        row.startsWith("[approval:cancelled]"),
+      );
+      expect(cancelled).toContain('cause="renderer reload released the tile"');
     });
 
     it("does not raise a modal for a turn that is already over", async () => {

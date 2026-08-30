@@ -129,6 +129,21 @@ export function tileHoldingSession(
   return tiles.find((tile) => tile.sessionId === sessionId);
 }
 
+/**
+ * Does a tile holding `currentSessionId`, whose sub-agents run in
+ * `childSessionIds`, own `sessionId`? A child runs its own session, so a card
+ * or a frame it raises names an id that is not the tile's — the tile that
+ * spawned it is still the conversation waiting on it. ONE rule: the stable
+ * subscription predicates read it through refs, render reads it from state.
+ */
+export function sessionOwnedBy(
+  currentSessionId: string,
+  childSessionIds: ReadonlySet<string>,
+  sessionId: string,
+): boolean {
+  return sessionId === currentSessionId || childSessionIds.has(sessionId);
+}
+
 /** Where an overlay card renders, and whether it can still be acted on. */
 export interface OverlayCardPlacement {
   /** The one tile that shows the card. */

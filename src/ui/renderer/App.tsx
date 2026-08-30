@@ -66,7 +66,7 @@ import { useOnboardingTourController } from "./hooks/use-onboarding-tour-control
 import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
-import { useApproval } from "./hooks/use-approval.js";
+import { ApprovalSurfaceProvider, useApproval, useApprovalClaimsVersion, type ApprovalSurfaceContextValue } from "./hooks/use-approval.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useApprovalSentence } from "./hooks/use-approval-sentence.js";
 import { useSearch } from "./hooks/use-search.js";
@@ -395,7 +395,23 @@ export function App() {
   } = useMarketplaceUpdates(api);
   const { announcements: marketplaceAnnouncements, dismiss: dismissMarketplaceAnnouncement } = useMarketplaceAnnouncements(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
-  const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
+  const approvals = useApproval();
+  const { queue: approvalQueue, decide: handleApprovalDecide, claims: approvalClaims } = approvals;
+  // A card is drawn by the surface that claimed its session: a tile for its
+  // own conversation and its sub-agents, a side chat for its loop. What is
+  // left for the window's own dock is exactly the requests no surface
+  // claimed — a request that names no conversation (a host or plugin ask),
+  // or a session no open surface holds (a routine's turn, a session this
+  // window closed while its ask was still parked). That dock is those
+  // requests' home, not a catch-all: it draws nothing a surface has claimed.
+  const approvalClaimsVersion = useApprovalClaimsVersion(approvalClaims);
+  const unclaimedApprovals = useMemo(
+    () => approvalQueue.filter((req) =>
+      req.sessionId === undefined || approvalClaims.ownerOf(req.sessionId) === null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read claims when they change
+    [approvalQueue, approvalClaims, approvalClaimsVersion],
+  );
+  const windowApprovalHead = unclaimedApprovals[0] ?? null;
   // Approval-memory hit + permission review suggestion. Both report on the
   // WINDOW's permission settings, not on one conversation, so they are
   // subscribed and rendered once here — per tile they would raise the same
@@ -406,18 +422,31 @@ export function App() {
     handleEnablePermissionReviewSuggestion,
   } = usePermissionToasts();
   const [exactDenyDraft, setExactDenyDraft] = useState<ExactDenyDraft | null>(null);
+  // `/allow <sentence>` is typed into the focused tile's composer, so it
+  // addresses the out-of-directory card shown in that tile; with none there,
+  // the window's own card. Other approval kinds keep their own explicit
+  // decision form and must never consume a proposal they cannot display.
+  const approvalSentenceTarget = useMemo(() => {
+    const inFocusedTile = approvalQueue.find((req) =>
+      req.kind === "out-of-allowed-dir"
+        && req.sessionId !== undefined
+        && approvalClaims.ownerOf(req.sessionId) === chatGroups.focusedId);
+    if (inFocusedTile !== undefined) return inFocusedTile;
+    return unclaimedApprovals.find((req) => req.kind === "out-of-allowed-dir") ?? null;
+  }, [approvalQueue, approvalClaims, chatGroups.focusedId, unclaimedApprovals]);
   const {
     proposedChoice: approvalProposedChoice,
     interceptSubmit: interceptApprovalSentence,
   } = useApprovalSentence({
-    // `/allow <sentence>` proposes a filesystem scope and is meaningful only
-    // for the out-of-directory card. Other approval kinds keep their own
-    // explicit decision form and must never consume a proposal they cannot
-    // display.
-    approvalRequest:
-      approvalQueue[0]?.kind === "out-of-allowed-dir" ? approvalQueue[0] : null,
+    approvalRequest: approvalSentenceTarget,
     onNotice: (message: string) => focusedSession.appendSystemEntry(message),
   });
+  const approvalProposal = useMemo(
+    () => (approvalSentenceTarget !== null && approvalProposedChoice !== null
+      ? { requestId: approvalSentenceTarget.id, choice: approvalProposedChoice }
+      : null),
+    [approvalSentenceTarget, approvalProposedChoice],
+  );
 
   // Routine + plugin-overlay IPC pipeline. Owns runningRoutines, the addFireRef
   // surfaced to OverlayContextProvider (populated during that provider's render),
@@ -490,16 +519,23 @@ export function App() {
 
   const handleExactDenySaved = useCallback((requestId: string) => {
     setExactDenyDraft((current) => current?.requestId === requestId ? null : current);
-    if (approvalQueue[0]?.id === requestId) {
-      void handleApprovalDecide("deny-once");
+    if (approvalQueue.some((req) => req.id === requestId)) {
+      void handleApprovalDecide(requestId, "deny-once");
     }
   }, [approvalQueue, handleApprovalDecide]);
 
   useEffect(() => {
-    if (exactDenyDraft && approvalQueue[0]?.id !== exactDenyDraft.requestId) {
+    if (exactDenyDraft && !approvalQueue.some((req) => req.id === exactDenyDraft.requestId)) {
       setExactDenyDraft(null);
     }
   }, [approvalQueue, exactDenyDraft]);
+
+  const approvalSurface = useMemo<ApprovalSurfaceContextValue>(() => ({
+    ...approvals,
+    openPermanentDeny: handleOpenPermanentDeny,
+    lockedRequestId: exactDenyDraft?.requestId ?? null,
+    proposal: approvalProposal,
+  }), [approvals, handleOpenPermanentDeny, exactDenyDraft, approvalProposal]);
 
   // Auth status for every plugin that declares `manifest.auth`
 
@@ -1129,7 +1165,8 @@ export function App() {
     handleExport, handleImport, pluginEntries, handleViewSelectWithDoctor, appMode,
     commandActions, commandPopoverOpen, overlayCardTileForWindow,
     handlePluginPrimaryAction, handleRoutineAcknowledge,
-    interceptApprovalSentence, activeProject, defaultWorkspaceProject, workspaceProjects,
+    interceptApprovalSentence,
+    activeProject, defaultWorkspaceProject, workspaceProjects,
     onNewChatForProject, refreshWorkspaceProjects, handleProjectError,
   ]);
 
@@ -1147,6 +1184,7 @@ export function App() {
               from outside the React tree. Hoisting it out — or mounting it below
               its consumers — would leave that ref null when the first IPC event
               lands. See src/ui/renderer/context/OverlayContext.tsx. */}
+          <ApprovalSurfaceProvider value={approvalSurface}>
           <OverlayContextProvider
             onOpenSession={handleOpenRoutineSession}
             addFireRef={addFireRef}
@@ -1672,13 +1710,41 @@ export function App() {
                         );
                       })()}
                     </ErrorBoundary>
-                    <ApprovalDock
-                      queue={approvalQueue}
-                      proposedChoice={approvalProposedChoice}
-                      onDecide={handleApprovalDecide}
-                      onOpenPermanentDeny={handleOpenPermanentDeny}
-                      interactionLocked={exactDenyDraft !== null}
-                    />
+                    {/* The window's own dock: only requests no conversation
+                        surface claimed (see `unclaimedApprovals`). Its scope is
+                        this wrapper — beside the tiles, an ancestor of none —
+                        so the card covers no tile's composer and takes no
+                        tile's caret. `contents` keeps the dock positioned
+                        against the route canvas as before. */}
+                    <div
+                      className="contents"
+                      data-approval-scope
+                      data-testid={TEST_IDS.windowApprovalScope}
+                    >
+                      <ApprovalDock
+                        queue={unclaimedApprovals}
+                      conversationLabel={
+                          windowApprovalHead?.sessionId === undefined
+                            ? t("approvalAttribution.unattributed")
+                            : t("approvalAttribution.headlessSession")
+                        }
+                        proposedChoice={
+                          windowApprovalHead !== null
+                            && approvalProposal?.requestId === windowApprovalHead.id
+                            ? approvalProposal.choice
+                            : null
+                        }
+                        onDecide={(choice, pattern, extras) => {
+                          if (windowApprovalHead === null) return;
+                          void handleApprovalDecide(windowApprovalHead.id, choice, pattern, extras);
+                        }}
+                        onOpenPermanentDeny={handleOpenPermanentDeny}
+                        interactionLocked={
+                          windowApprovalHead !== null
+                            && exactDenyDraft?.requestId === windowApprovalHead.id
+                        }
+                      />
+                    </div>
                   </div>
                   {/* StatusBar notifications render inside ChatView, directly above
                       the composer. The composer's own status sub-row keeps showing
@@ -1705,6 +1771,7 @@ export function App() {
             />
             <DevConsoleToggle />
           </OverlayContextProvider>
+          </ApprovalSurfaceProvider>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

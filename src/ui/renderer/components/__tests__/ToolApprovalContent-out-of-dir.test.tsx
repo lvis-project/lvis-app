@@ -44,7 +44,7 @@ function renderCard(
   const record = vi.fn().mockResolvedValue({ ok: true });
   vi.stubGlobal("lvis", { userApproval: { record } });
   const view = render(
-    <ToolApprovalContent open request={request} onDecide={onDecide} {...extraProps} />,
+    <ToolApprovalContent conversationLabel="conversation" open request={request} onDecide={onDecide} {...extraProps} />,
   );
   return { onDecide, record, view };
 }

@@ -1232,6 +1232,12 @@ type ApprovalSentenceSelectResult =
   export type LvisApprovalApi = {
   onRequest: (cb: (req: ApprovalRequest) => void) => () => void;
   respond: (decision: ApprovalDecision) => Promise<unknown>;
+  /**
+   * Requests the host is still waiting on, in the order they were asked.
+   * Read once on mount: a renderer that loaded after a request went out never
+   * saw it through `onRequest`.
+   */
+  listPending: () => Promise<ApprovalRequest[]>;
   selectSentence: (
     requestId: string,
     input: string,

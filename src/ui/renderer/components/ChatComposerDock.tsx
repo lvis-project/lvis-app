@@ -1,5 +1,5 @@
 import type React from "react";
-import { KeyRound, Store } from "lucide-react";
+import { KeyRound, ShieldQuestion, Store } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useCallback, useEffect, useState, type RefObject } from "react";
@@ -13,7 +13,7 @@ import { QuestionOverlay } from "./QuestionOverlay.js";
 import { computeComposerPlaceholder } from "../utils/composer-placeholder.js";
 import { ATTACH_MAX_COUNT, type Attachment } from "../types/attachments.js";
 import { MessageQueueStore, type MessageQueueItem } from "../state/message-queue-store.js";
-import type { LvisApi } from "../types.js";
+import type { ApprovalRequest, LvisApi } from "../types.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { SuggestedRepliesSnapshot } from "../hooks/use-suggested-replies.js";
 import type { QuickAction } from "./command-actions.js";
@@ -88,6 +88,8 @@ export interface ChatComposerDockProps {
   onOpenModelSettings: () => void;
   onOpenPermissions: () => void;
   onOpenApprovalQueue?: () => void;
+  /** Approvals this conversation's turn is parked on; the band above the queue names them. */
+  pendingApprovals: readonly ApprovalRequest[];
   askQuestions: AskUserQuestionRequest[];
   onResolveAskQuestion: (id: string) => void;
   /** Active project — drives the empty-state project selector trigger label. */
@@ -252,6 +254,7 @@ export function ChatComposerDock({
   onOpenModelSettings,
   onOpenPermissions,
   onOpenApprovalQueue,
+  pendingApprovals,
   askQuestions,
   onResolveAskQuestion,
   activeProject,
@@ -344,9 +347,11 @@ export function ChatComposerDock({
     >
       <div className={dockColumnClass} data-testid="session-todo-dock">
         <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+        <ApprovalWaitingBand pendingApprovals={pendingApprovals} />
         <MessageQueuePanel
           store={messageQueueStore}
           onSendNow={onMessageQueueSendNow}
+          heldByApproval={pendingApprovals.length > 0}
         />
       </div>
       <div className={`${dockColumnClass} overflow-x-hidden pb-1`}>
@@ -536,6 +541,31 @@ export function ChatComposerDock({
  * a second credential affordance with its own copy would be the kind of copy
  * that drifts.
  */
+
+/**
+ * The dock strip for a turn parked on an approval. It sits in the tile whose
+ * conversation asked — the approval card itself is shown once for the window,
+ * so without this a second tile shows a turn that has simply stopped moving,
+ * and a queue that never drains. Same band grammar as the queue strip below it
+ * (dashed = not committed yet), in the hue the approval chips already use.
+ */
+function ApprovalWaitingBand({ pendingApprovals }: { pendingApprovals: readonly ApprovalRequest[] }) {
+  const { t } = useTranslation();
+  if (pendingApprovals.length === 0) return null;
+  const tools = [...new Set(pendingApprovals.map((req) => req.toolName))].join(", ");
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center gap-2 border-x border-y border-dashed border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) px-3 py-1.5 text-xs text-foreground"
+      data-testid="approval-waiting-band"
+      data-tool-names={tools}
+    >
+      <ShieldQuestion className="h-3 w-3 shrink-0 text-warning" />
+      <span className="min-w-0 truncate">{t("chatView.approvalWaitingBand", { tools })}</span>
+    </div>
+  );
+}
 
 interface ComposerApiKeyChipProps {
   subscriptionPendingProvider?: string;

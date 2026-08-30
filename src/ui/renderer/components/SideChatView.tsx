@@ -20,10 +20,11 @@
  * one implementation. Only the New-session affordance is side-specific chrome.
  * All streaming is driven by `useSideChat`, which subscribes to the DEDICATED
  * side-chat IPC channel so main-chat frames never appear here. Tool APPROVAL
- * requests surface in the app-level ApprovalDock (shared global ApprovalGate),
- * never inside this tab.
+ * requests the side loop raises are drawn by this tab's own `ApprovalDock`:
+ * the panel claims its session, so its cards never reach the tile beside it
+ * or the window's dock.
  */
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
@@ -41,6 +42,16 @@ import { ATTACH_MAX_COUNT, type Attachment } from "../types/attachments.js";
 import type { LvisApi } from "../types.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import { useOptionalChatContext } from "../context/ChatContext.js";
+import { useApprovalSurface } from "../hooks/use-approval.js";
+import { ApprovalDock } from "./permissions/ApprovalDock.js";
+import { sessionOwnedBy } from "./chat-group-session-registry.js";
+
+/**
+ * The side loop's stream carries no sub-agent frames, so this panel learns of
+ * no child session: the set is empty by construction. It still claims through
+ * the tile's own rule (`sessionOwnedBy`) so the two readers cannot drift.
+ */
+const NO_CHILD_SESSIONS: ReadonlySet<string> = new Set();
 
 /** Stable empty lists: the composer's inline menu memoizes on their identity. */
 const NO_COMMAND_ACTIONS: never[] = [];
@@ -89,6 +100,25 @@ function SideChatSession({
     isCurrentTurnEvent,
   } = useSideChat(api);
   const chatContext = useOptionalChatContext();
+  // A side chat runs its own session; its approval cards belong in this panel,
+  // not in the tile beside it and not in the window. The panel claims the
+  // session once the loop has one, and draws the card over its own composer.
+  const approvals = useApprovalSurface();
+  useEffect(() => {
+    if (sessionId === null) return undefined;
+    return approvals.claims.claim(
+      `side-chat:${sessionId}`,
+      (id) => sessionOwnedBy(sessionId, NO_CHILD_SESSIONS, id),
+    );
+  }, [approvals.claims, sessionId]);
+  const pendingApprovals = useMemo(
+    () => (sessionId === null
+      ? []
+      : approvals.queue.filter((req) =>
+        req.sessionId !== undefined && sessionOwnedBy(sessionId, NO_CHILD_SESSIONS, req.sessionId))),
+    [approvals.queue, sessionId],
+  );
+  const approvalHead = pendingApprovals[0] ?? null;
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const attachmentNCounter = useRef(0);
@@ -196,7 +226,7 @@ function SideChatSession({
   });
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="side-chat-view">
+    <div className="relative flex h-full min-h-0 flex-col" data-testid="side-chat-view" data-approval-scope>
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-1.5">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {t("chatPreviewRail.sideChat.title")}
@@ -250,6 +280,7 @@ function SideChatSession({
         <MessageQueuePanel
           store={messageQueueStore}
           onSendNow={handleMessageQueueSendNow}
+          heldByApproval={approvalHead !== null}
         />
         {/* The same no-credential affordance the main dock shows, in the strip
             above the input box. `hasApiKey` is the app's readiness verdict, so a
@@ -331,6 +362,16 @@ function SideChatSession({
           </div>
         </ComposerFrame>
       </div>
+      <ApprovalDock
+        queue={pendingApprovals}
+        conversationLabel={t("chatPreviewRail.sideChat.title")}
+        onDecide={(choice, pattern, extras) => {
+          if (approvalHead === null) return;
+          void approvals.decide(approvalHead.id, choice, pattern, extras);
+        }}
+        onOpenPermanentDeny={approvals.openPermanentDeny}
+        interactionLocked={approvalHead !== null && approvals.lockedRequestId === approvalHead.id}
+      />
     </div>
   );
 }

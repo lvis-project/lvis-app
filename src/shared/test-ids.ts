@@ -35,6 +35,7 @@ export const TEST_IDS = {
   settingsPageTitle: "settings-page-title",
   tokenCostBadge: "token-cost-badge",
   viewPathBack: "view-path-back",
+  windowApprovalScope: "window-approval-scope",
 } as const;
 
 export type TestId = (typeof TEST_IDS)[keyof typeof TEST_IDS];
@@ -54,10 +55,16 @@ export function testIdSelector(id: TestId): string {
   return `[data-testid="${id}"]`;
 }
 
+/** An open modal dialog. Portaled to the body, so it is window-wide by construction. */
+export const MODAL_DIALOG_SELECTOR =
+  '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]';
+
 /**
  * Any open dialog, or the approval dock: the surfaces that make the rest of
  * the route inert. Message queueing, the onboarding tour and the spotlight all
- * pause while one is on screen.
+ * pause while one is on screen. An approval card is scoped to the surface it
+ * is drawn in — readers that answer for ONE composer ask `blockingSurfaceCovers`
+ * (permissions/ApprovalDock) rather than the whole document.
  */
 export const BLOCKING_SURFACE_SELECTOR =
-  `[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], ${testIdSelector(TEST_IDS.approvalDock)}`;
+  `${MODAL_DIALOG_SELECTOR}, ${testIdSelector(TEST_IDS.approvalDock)}`;

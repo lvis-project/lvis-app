@@ -146,3 +146,20 @@ describe("approvalQueueReducer", () => {
     expect(state[0].id).toBe("new");
   });
 });
+
+describe("approvalQueueReducer — drop", () => {
+  it("drop removes exactly the named requests and keeps the rest in order", () => {
+    let state: ApprovalRequest[] = [];
+    for (const req of ["a", "b", "c"].map(makeReq)) state = approvalQueueReducer(state, { type: "push", req });
+    state = approvalQueueReducer(state, { type: "drop", ids: ["b"] });
+    expect(state.map((req) => req.id)).toEqual(["a", "c"]);
+  });
+
+  it("drop with no matching id returns the same state object", () => {
+    let state: ApprovalRequest[] = [];
+    state = approvalQueueReducer(state, { type: "push", req: makeReq("a") });
+    const unchanged = approvalQueueReducer(state, { type: "drop", ids: ["zzz"] });
+    expect(unchanged).toBe(state);
+    expect(approvalQueueReducer(state, { type: "drop", ids: [] })).toBe(state);
+  });
+});

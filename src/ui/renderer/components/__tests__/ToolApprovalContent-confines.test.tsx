@@ -39,7 +39,7 @@ function makeRequest(
 
 function renderSandboxSummary(req: ApprovalRequest) {
   const { container } = render(
-    <ToolApprovalContent open request={req} onDecide={() => undefined} />,
+    <ToolApprovalContent conversationLabel="conversation" open request={req} onDecide={() => undefined} />,
   );
   return {
     container,

@@ -17,6 +17,7 @@ export const en = {
   "messageQueuePanel.removeTitle": "Remove",
   "messageQueuePanel.handedOffBadge": "delivering",
   "messageQueuePanel.handedOffTitle": "Handed to the model — it appears above once the current step finishes.",
+  "messageQueuePanel.heldByApprovalHint": "held until the pending approval is answered",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "messageQueuePanel.panelTitle": "메시지 큐",
@@ -36,4 +37,5 @@ export const ko: Record<keyof typeof en, string> = {
   "messageQueuePanel.removeTitle": "제거",
   "messageQueuePanel.handedOffBadge": "주입됨",
   "messageQueuePanel.handedOffTitle": "모델에 전달됨 — 현재 단계가 끝나면 위 대화에 나타납니다.",
+  "messageQueuePanel.heldByApprovalHint": "대기 중인 승인에 답할 때까지 보류됩니다",
 };

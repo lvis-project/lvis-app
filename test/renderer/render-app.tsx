@@ -26,6 +26,8 @@ type RenderAppOpts = Parameters<typeof makeMockLvisApi>[0] & {
     enableDevConsole: boolean;
     debugStream: boolean;
   }>;
+  /** Approval requests the host is already parked on when the window mounts. */
+  pendingApprovals?: unknown[];
 };
 
 export type RenderAppReturn = {
@@ -48,7 +50,7 @@ export type RenderAppReturn = {
 };
 
 export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppReturn> {
-  const { lvisEnv, ...apiOpts } = opts;
+  const { lvisEnv, pendingApprovals, ...apiOpts } = opts;
   const {
     api,
     emitChatStream,
@@ -63,7 +65,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitNotificationToast,
     emitNotificationClicked,
   } = makeMockLvisApi(apiOpts);
-  const { ns, emitApproval } = makeMockLvisNamespace({ env: lvisEnv });
+  const { ns, emitApproval } = makeMockLvisNamespace({ env: lvisEnv, pendingApprovals });
 
   vi.stubGlobal("lvisApi", api);
   vi.stubGlobal("lvis", ns);

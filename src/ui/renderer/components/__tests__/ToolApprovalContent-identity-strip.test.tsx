@@ -79,7 +79,7 @@ function rationaleRequest(args: Record<string, unknown>): ApprovalRequest {
 
 describe("ToolApprovalContent identity strip", () => {
   it("names the tool on a plain request (unchanged behavior)", () => {
-    render(<ToolApprovalContent open request={baseRequest()} onDecide={vi.fn()} />);
+    render(<ToolApprovalContent conversationLabel="conversation" open request={baseRequest()} onDecide={vi.fn()} />);
     expect(screen.getByTestId("approval-tool-identity")).toHaveTextContent("agent_spawn");
   });
 
@@ -88,7 +88,7 @@ describe("ToolApprovalContent identity strip", () => {
     // HMAC-sealed display.toolName may render. Diverging names prove which
     // source the strip reads.
     const request = { ...rationaleRequest(sealedDisplayArgs()), toolName: "request-level-name" };
-    render(<ToolApprovalContent open request={request} onDecide={vi.fn()} />);
+    render(<ToolApprovalContent conversationLabel="conversation" open request={request} onDecide={vi.fn()} />);
     expect(screen.getByTestId("approval-tool-identity")).toHaveTextContent("agent_spawn");
     expect(screen.getByTestId("approval-tool-identity")).not.toHaveTextContent("request-level-name");
     expect(screen.queryByTestId("approval-identity-unverified")).toBeNull();
@@ -101,7 +101,7 @@ describe("ToolApprovalContent identity strip", () => {
 
   it("names the tool even when the sealed display is INVALID", () => {
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={rationaleRequest({ garbage: true })}
         onDecide={vi.fn()}
@@ -117,7 +117,7 @@ describe("ToolApprovalContent identity strip", () => {
 
   it("offers ONLY deny when the sealed display is invalid", () => {
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={rationaleRequest({ garbage: true })}
         onDecide={vi.fn()}
@@ -137,7 +137,7 @@ describe("ToolApprovalContent identity strip", () => {
     // the same identity strip, review expander, and decision row as every
     // other kind — one frame, one visual language, no second layout.
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={{
           ...baseRequest(),
@@ -173,7 +173,7 @@ describe("ToolApprovalContent identity strip", () => {
     const onDecide = vi.fn();
     const { allowedChoices: _unconstrained, ...openChoices } = baseRequest();
     render(
-      <ToolApprovalContent
+      <ToolApprovalContent conversationLabel="conversation"
         open
         request={{
           ...openChoices,
