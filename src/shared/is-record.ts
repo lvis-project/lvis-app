@@ -56,14 +56,21 @@ export function hasOnlyKeys(value: object, allowed: ReadonlySet<string> | readon
 }
 
 /**
- * Whether `value` is an array whose every element is a string, with no holes.
- * `Array.prototype.every` skips holes, so a bare `every` would let a sparse
- * array through and a consumer would then read `undefined` out of a value
- * typed `string[]`; the spread turns each hole into `undefined`, which fails
- * the element check, so `[ , "a"]` is refused. Parsed JSON and IPC payloads
- * cannot carry holes, so for them this is the same verdict as `every`; the
- * A2A codec validates in-memory objects, where the difference is real.
+ * Whether `value` is an array whose every indexed element is a string, with
+ * no holes. The check walks `0..length-1` by index, which is what a consumer
+ * of a `string[]` does, so it refuses both shapes a looser check admits:
+ * a sparse array (`Array.prototype.every` skips holes and `[ , "a"]` would
+ * pass, then read back as `undefined`) and an array whose own
+ * `Symbol.iterator` yields strings while its indexed elements are not (a
+ * spread-then-`every` check sees only the iterator). Parsed JSON and IPC
+ * payloads can carry neither, so for them the verdict is the same as a bare
+ * `every`; the A2A codec validates in-memory objects, where both differences
+ * are real.
  */
 export function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && [...value].every((item) => typeof item === "string");
+  if (!Array.isArray(value)) return false;
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] !== "string") return false;
+  }
+  return true;
 }

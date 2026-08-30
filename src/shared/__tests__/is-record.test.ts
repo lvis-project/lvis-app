@@ -99,4 +99,13 @@ describe("isStringArray", () => {
     holeInTheMiddle[2] = "c";
     expect(isStringArray(holeInTheMiddle)).toBe(false);
   });
+
+  it("judges the indexed elements, not what an overridden iterator yields", () => {
+    const disguised: unknown[] = [{ not: "a string" }];
+    Object.defineProperty(disguised, Symbol.iterator, {
+      value: function* () { yield "looks fine"; },
+    });
+    expect([...(disguised as Iterable<unknown>)]).toEqual(["looks fine"]);
+    expect(isStringArray(disguised)).toBe(false);
+  });
 });
