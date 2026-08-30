@@ -1,5 +1,7 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/SlashPicker.tsx. Do not edit by hand.
 export const en = {
+  "slashPicker.ariaLabel": "Command palette (Ctrl/Cmd+K)",
+  "slashPicker.shortcutHint": "Ctrl/Cmd + K",
   "slashPicker.catCommand": "Commands",
   "slashPicker.catCommandDesc": "Built-in slash commands",
   "slashPicker.catShortcut": "Shortcuts",
@@ -15,6 +17,8 @@ export const en = {
   "slashPicker.inlineHint": "↑↓ navigate · ⏎ select · esc dismiss",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
+  "slashPicker.ariaLabel": "명령 팔레트 (Ctrl/Cmd+K)",
+  "slashPicker.shortcutHint": "Ctrl/Cmd + K",
   "slashPicker.catCommand": "커맨드",
   "slashPicker.catCommandDesc": "내장 슬래시 명령",
   "slashPicker.catShortcut": "바로가기",

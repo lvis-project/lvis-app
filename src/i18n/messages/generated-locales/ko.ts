@@ -83,8 +83,6 @@ import { ko as ko_cherryBlossom } from "../generated/cherryBlossom.js";
 import { ko as ko_clipboardPaste } from "../generated/clipboardPaste.js";
 import { ko as ko_codexSubscriptionCard } from "../generated/codexSubscriptionCard.js";
 import { ko as ko_commandActions } from "../generated/commandActions.js";
-import { ko as ko_commandPopover } from "../generated/commandPopover.js";
-import { ko as ko_commandPopoverPanel } from "../generated/commandPopoverPanel.js";
 import { ko as ko_compactedToolResult } from "../generated/compactedToolResult.js";
 import { ko as ko_composer } from "../generated/composer.js";
 import { ko as ko_composerPlaceholder } from "../generated/composerPlaceholder.js";
@@ -153,6 +151,7 @@ import { ko as ko_settingsContent } from "../generated/settingsContent.js";
 import { ko as ko_sidebar } from "../generated/sidebar.js";
 import { ko as ko_skillBadge } from "../generated/skillBadge.js";
 import { ko as ko_slashPicker } from "../generated/slashPicker.js";
+import { ko as ko_slashPickerPanel } from "../generated/slashPickerPanel.js";
 import { ko as ko_solarizedLight } from "../generated/solarizedLight.js";
 import { ko as ko_sparkline } from "../generated/sparkline.js";
 import { ko as ko_spotlightTour } from "../generated/spotlightTour.js";
@@ -276,8 +275,6 @@ export const koMessages: Record<string, string> = {
   ...ko_clipboardPaste,
   ...ko_codexSubscriptionCard,
   ...ko_commandActions,
-  ...ko_commandPopover,
-  ...ko_commandPopoverPanel,
   ...ko_compactedToolResult,
   ...ko_composer,
   ...ko_composerPlaceholder,
@@ -346,6 +343,7 @@ export const koMessages: Record<string, string> = {
   ...ko_sidebar,
   ...ko_skillBadge,
   ...ko_slashPicker,
+  ...ko_slashPickerPanel,
   ...ko_solarizedLight,
   ...ko_sparkline,
   ...ko_spotlightTour,

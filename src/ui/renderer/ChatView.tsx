@@ -117,9 +117,9 @@ export interface ChatViewProps {
   onLoadSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
 
   commandActions: QuickAction[];
-  /** Controlled open state for CommandPopover */
-  commandPopoverOpen: boolean;
-  onCommandPopoverOpenChange: (open: boolean) => void;
+  /** Controlled open state for SlashPicker */
+  slashPickerOpen: boolean;
+  onSlashPickerOpenChange: (open: boolean) => void;
   // Fork-based revert is replaced by the same-session checkpoint chain.
   // sessionId remains stable until the user explicitly branches from a checkpoint.
   /**
@@ -165,7 +165,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   const approvals = useApprovalSurface();
   const approvalHead = pendingApprovals[0] ?? null;
@@ -830,8 +830,8 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         streaming={streaming}
         onInsertSlashCommand={handleInsertSlashCommand}
         onRunMcpPrompt={onRunMcpPrompt}
-        commandPopoverOpen={commandPopoverOpen}
-        onCommandPopoverOpenChange={onCommandPopoverOpenChange}
+        slashPickerOpen={slashPickerOpen}
+        onSlashPickerOpenChange={onSlashPickerOpenChange}
         ringSlot={ringSlot}
         onImageAttachmentUnavailable={emitAttachmentUnavailable}
         onImageAttachmentLimitExceeded={emitImageAttachmentLimitExceeded}

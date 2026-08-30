@@ -364,7 +364,7 @@ export function App() {
     projectLabel,
     setProjectLabel,
   } = useProjectPreferences(api);
-  const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
+  const [slashPickerOpen, setSlashPickerOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [workspaceProjects, setWorkspaceProjects] = useState<ProjectIdentity[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectIdentity | undefined>(undefined);
@@ -1038,19 +1038,19 @@ export function App() {
 
 
   // ─── Effects ──────────────────────────────────
-  const toggleCommandPopover = useCallback(() => {
+  const toggleSlashPicker = useCallback(() => {
     if (activeView !== "home") {
       setActiveView("home");
-      setCommandPopoverOpen(true);
+      setSlashPickerOpen(true);
     } else {
-      setCommandPopoverOpen((prev) => !prev);
+      setSlashPickerOpen((prev) => !prev);
     }
   }, [activeView]);
 
   useAppBootstrap({
     api, refreshViews, refreshCards: async () => { await refreshCards(); }, checkApiKey,
     setActiveView, onOpenSettings,
-    toggleCommandPopover,
+    toggleSlashPicker,
   });
   // Plugin/agent/skill lifecycle → catalog refresh. Owns the in-flight install
   // tracker + every IPC subscription that keeps plugin views/cards/marketplace
@@ -1058,10 +1058,10 @@ export function App() {
   // poll, agent/skill install results). See use-plugin-lifecycle-refresh.ts.
   usePluginLifecycleRefresh({ api, pluginCards, refreshViews, refreshCards, refreshMarketplace });
 
-  // Auto-close CommandPopover when navigating away from home — the popover
+  // Auto-close SlashPicker when navigating away from home — the popover
   // is only mounted on the home view so leaving it open causes stuck state.
   useEffect(() => {
-    if (activeView !== "home") setCommandPopoverOpen(false);
+    if (activeView !== "home") setSlashPickerOpen(false);
   }, [activeView]);
 
   const commandActions = useMemo(
@@ -1135,7 +1135,7 @@ export function App() {
     onSelectPlugin: handleViewSelectWithDoctor,
     appMode,
     onOpenApprovalQueue: () => setDeferredQueueOpen(true),
-    commandActions, commandPopoverOpen, onCommandPopoverOpenChange: setCommandPopoverOpen,
+    commandActions, slashPickerOpen, onSlashPickerOpenChange: setSlashPickerOpen,
     // The window answers where a card goes, because only it sees every tile.
     overlayCardTile: overlayCardTileForWindow,
     onPluginPrimaryAction: (id: string, chatGroupId: string) => {
@@ -1163,7 +1163,7 @@ export function App() {
     searchHighlight, searchChangeQuery, searchToggleCase, searchNext, searchPrev,
     searchCloseOverlay, searchToggleOverlay,
     handleExport, handleImport, pluginEntries, handleViewSelectWithDoctor, appMode,
-    commandActions, commandPopoverOpen, overlayCardTileForWindow,
+    commandActions, slashPickerOpen, overlayCardTileForWindow,
     handlePluginPrimaryAction, handleRoutineAcknowledge,
     interceptApprovalSentence,
     activeProject, defaultWorkspaceProject, workspaceProjects,

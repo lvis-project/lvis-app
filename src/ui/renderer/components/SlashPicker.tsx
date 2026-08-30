@@ -1,6 +1,6 @@
 /**
  * SlashPicker — the unified "/" entry point that replaces the old ⌘
- * CommandPopover. It folds the built-in slash commands, the view shortcuts
+ * command palette. It folds the built-in slash commands, the view shortcuts
  * (QuickAction list), and the installed plugins into ONE picker, adopting the
  * resource-picker Command-palette look (search box + grouped, two-line items).
  *
@@ -64,8 +64,8 @@ export function SlashPicker({
               variant="outline"
               size="sm"
               className="h-7 w-7 shrink-0 bg-input-bar p-0"
-              aria-label={t("commandPopover.ariaLabel")}
-              data-testid={TEST_IDS.commandPopoverTrigger}
+              aria-label={t("slashPicker.ariaLabel")}
+              data-testid={TEST_IDS.slashPickerTrigger}
               // Tutorial-C SpotlightTour anchor. Step 3 of
               // `first-boot-essentials` highlights this picker toggle, see
               // `default-tour-scenarios.ts`. Kept on the unified picker so the
@@ -76,7 +76,7 @@ export function SlashPicker({
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">{t("commandPopover.shortcutHint")}</TooltipContent>
+        <TooltipContent side="top">{t("slashPicker.shortcutHint")}</TooltipContent>
       </Tooltip>
 
       {open && (

@@ -113,7 +113,7 @@ describe("App — view key guard on the activate-view IPC", () => {
     });
     await waitFor(() => expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy());
 
-    await user.click(screen.getByTestId(TEST_IDS.commandPopoverTrigger));
+    await user.click(screen.getByTestId(TEST_IDS.slashPickerTrigger));
     await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
     const group = await screen.findByTestId("slash-group-plugin");
     await user.click(await within(group).findByText("Broken View"));

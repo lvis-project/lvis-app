@@ -33,6 +33,7 @@
  */
 import { SEMVER_CORE_PATTERN } from "../../shared/semver-compare.js";
 import { isValidIsoTimestamp } from "../../shared/marketplace-package-assets.js";
+import { SHA256_HEX } from "../../lib/hex-digest-equal.js";
 
 /** One admitted artifact. `(slug, version)` is unique within a document. */
 export interface AdmissionEntry {
@@ -84,8 +85,6 @@ const ENTRY_KEYS = new Set([
   "publisher",
   "admittedAt",
 ]);
-
-const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 
 function isValidSlug(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256;
@@ -166,7 +165,7 @@ export function parseAdmissionDocument(raw: string): AdmissionDocument {
         `[admission] admissions[${i}].version must be a semver string (got ${JSON.stringify(rec.version)})`,
       );
     }
-    if (typeof rec.artifactSha256 !== "string" || !SHA256_HEX_PATTERN.test(rec.artifactSha256)) {
+    if (typeof rec.artifactSha256 !== "string" || !SHA256_HEX.test(rec.artifactSha256)) {
       throw new Error(
         `[admission] admissions[${i}].artifactSha256 must be 64 lowercase hex characters`,
       );

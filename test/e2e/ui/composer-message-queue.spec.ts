@@ -102,7 +102,7 @@ test('InputActionBar: command → persona → attach leading controls and reason
     (nodes) => nodes.map((node) => node.getAttribute('data-testid')),
   );
   expect(leadingIds).toEqual([
-    'command-popover-trigger',
+    'slash-picker-trigger',
     'iab-assistant-context-button',
     'iab-attach-button',
   ]);
