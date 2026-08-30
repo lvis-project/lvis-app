@@ -84,7 +84,7 @@
             "pattern": "[\\r\\n]"
           },
           "maxLength": 64,
-          "description": "Skill slug. Must equal the directory name the SKILL.md lives in; for a standalone package it is also the marketplace slug and install directory name. The charset and the 64-character ceiling are the host's: the slug becomes a path segment under the skills directory and a label in the picker, so a name must be path-safe and bounded. Beyond that the spelling is the author's — case, digits, underscores and hyphens are all theirs to choose."
+          "description": "Skill slug. Must equal the directory name the SKILL.md lives in; for a standalone package it is also the marketplace slug and install directory name. The charset is the host's (`SKILL_NAME_ALLOWLIST`): the slug becomes a path segment under the skills directory, so a name must be path-safe. The 64-character ceiling is this schema's own bound, keeping the slug a viable path segment on every target filesystem; the host enforces no length of its own. Beyond those two the spelling is the author's — case, digits, underscores and hyphens are all theirs to choose."
         },
         "description": {
           "type": "string",
