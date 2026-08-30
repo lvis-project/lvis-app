@@ -39,8 +39,8 @@ import {
   DEFAULT_HOOK_TIMEOUT_MS,
   type HookEvent,
 } from "./script-hook-types.js";
-
 import { isRecord } from "../shared/is-record.js";
+
 /**
  * A normalized declarative hook entry parsed from `hooks.json`. This is the
  * config-origin half of the unified registry (`hook-registry.ts`); legacy `.sh`
