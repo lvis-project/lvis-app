@@ -6,16 +6,25 @@
  * `resources/skills/` and are seeded into `~/.lvis/skills/` on first boot
  * by `seed-lvis-home-docs.ts`, so the user can freely edit each prompt.
  *
- * Frontmatter contract:
+ * Front matter contract: the `skillComponent` definition of the SDK-owned
+ * skill package schema, snapshotted at `schemas/sdk/skill-package.schema.json`
+ * — `name` and `description` required, `triggers`, `license`,
+ * `compatibility`, `metadata` and `allowed-tools` optional. The same
+ * definition governs a skill shipped as a standalone marketplace package and a
+ * skill bundled in a plugin's `skills[]` directory, so both paths through this
+ * module keep the same fields.
+ *
  *   ---
- *   name: <skill name>           # required, unique
+ *   name: <skill name>           # required, unique, path-safe
  *   description: <one line>      # surfaced as the badge subtitle
+ *   triggers: [alpha, beta]      # keyword hints, surfaced on the catalog
  *   ---
  *   <markdown body>              # loaded into the current-turn prompt overlay
  */
 import { readFile, readdir, realpath, stat, open } from "node:fs/promises";
 import { closeSync, openSync, readdirSync, readSync, realpathSync } from "node:fs";
 import { resolve, join, relative, isAbsolute, dirname, basename, sep } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { PLUGIN_SKILL_SELECTOR_PATTERN } from "../shared/plugin-skill-selector.js";
@@ -29,8 +38,41 @@ const log = createLogger("lvis");
  * non-printable noise is rejected up-front so an attacker cannot use the
  * `skillName` arg to navigate outside the directory or smuggle shell
  * metacharacters into the resolved file path.
+ *
+ * This charset is ALSO the authoring contract: it is what
+ * `$defs/skillComponent/properties/name` of the SDK schema carries, so a name
+ * the marketplace admits is a name this host can install. A test reads the
+ * pattern out of the committed schema snapshot rather than restating it
+ * (`__tests__/skill-front-matter-contract.test.ts`). The regex stays written
+ * out here because it is a path gate first: its security property has to be
+ * readable where it is enforced.
+ *
+ * The charset is ALL the host checks. The schema's 64-character ceiling is an
+ * admission rule — it bounds what the marketplace publishes — and the host
+ * does not re-police it: a name is the author's, and a long one that reached
+ * the disk is not a safety problem, only an unusually long directory name.
  */
 export const SKILL_NAME_ALLOWLIST = /^[a-zA-Z0-9_-]+$/;
+
+/**
+ * Bounds on the keyword hints a skill declares. Applied where the record is
+ * built, not where it is rendered, so every consumer inherits them —
+ * `skill_list`, the IPC catalog and the prompt section all read the same
+ * already-bounded list rather than each re-deriving one. A skill cannot buy
+ * itself room in a token-budgeted catalog by declaring hundreds of them.
+ */
+export const MAX_SKILL_TRIGGERS = 8;
+export const MAX_SKILL_TRIGGER_CHARS = 48;
+
+/** Cap the declared hints in count and length; order and spelling are kept. */
+function boundedTriggers(triggers: readonly string[] | undefined): readonly string[] {
+  if (!triggers || triggers.length === 0) return Object.freeze([]);
+  return Object.freeze(
+    triggers.slice(0, MAX_SKILL_TRIGGERS).map((trigger) =>
+      trigger.length > MAX_SKILL_TRIGGER_CHARS ? trigger.slice(0, MAX_SKILL_TRIGGER_CHARS) : trigger,
+    ),
+  );
+}
 // Built from the ONE selector pattern (src/shared/plugin-skill-selector.ts), so
 // the catalog, `skill_load`/`skill_read`, and the turn-scope gate cannot drift.
 const PLUGIN_SKILL_SELECTOR_ALLOWLIST = new RegExp(`^${PLUGIN_SKILL_SELECTOR_PATTERN}$`);
@@ -116,9 +158,28 @@ export interface SkillResourceContent {
   bytes: number;
 }
 
+/**
+ * SKILL.md front matter — every field `$defs/skillComponent` declares.
+ *
+ * The optional five used to be read and thrown away. They are kept now because
+ * the schema promises them to an author on both delivery paths: dropping
+ * `triggers` in particular meant a skill could declare keyword hints that
+ * nothing downstream ever saw.
+ */
 export interface SkillFrontmatter {
   name: string;
   description?: string;
+  /** Keyword hints, surfaced on the catalog the model reads. */
+  triggers?: string[];
+  license?: string;
+  compatibility?: string;
+  metadata?: Record<string, unknown>;
+  /**
+   * Space-delimited tools the skill declares itself pre-approved to use.
+   * Carried and surfaced; NOT enforced — the permission layer is unchanged by
+   * this field, and a skill cannot widen its own reach by declaring it.
+   */
+  allowedTools?: string;
 }
 
 function materializedSkill(
@@ -158,6 +219,7 @@ function materializedSkill(
   return Object.freeze({
     name: selector,
     description: fm.description ?? "",
+    ...skillComponentFields(fm),
     body: trimmedBody,
     filePath: `plugin://${owner.pluginId}/${owner.localId}/SKILL.md`,
     approvalKey: [owner.pluginId, owner.pluginVersion, owner.generationId, owner.localId, owner.fingerprint].join("|"),
@@ -166,7 +228,38 @@ function materializedSkill(
   });
 }
 
-export interface LoadedSkill {
+/**
+ * Project parsed front matter onto the fields a skill record carries. One
+ * function so the plugin path and the user-directory path cannot drift into
+ * keeping different subsets.
+ */
+function skillComponentFields(fm: SkillFrontmatter): SkillComponentFields {
+  const fields: SkillComponentFields = { triggers: boundedTriggers(fm.triggers) };
+  if (fm.license !== undefined) fields.license = fm.license;
+  if (fm.compatibility !== undefined) fields.compatibility = fm.compatibility;
+  if (fm.metadata !== undefined) fields.metadata = fm.metadata;
+  if (fm.allowedTools !== undefined) fields.allowedTools = fm.allowedTools;
+  return fields;
+}
+
+/**
+ * The declared fields a skill record carries beyond its identity and body.
+ *
+ * One shape for both delivery paths — a skill loaded from `~/.lvis/skills/`
+ * and a skill materialized out of a plugin generation — so a field cannot be
+ * kept on one path and dropped on the other, which is the state this replaced.
+ */
+interface SkillComponentFields {
+  /** Keyword hints the author declared; empty when the header carries none. */
+  triggers: readonly string[];
+  license?: string;
+  compatibility?: string;
+  metadata?: Record<string, unknown>;
+  /** Declared, surfaced, and NOT enforced — see {@link SkillFrontmatter}. */
+  allowedTools?: string;
+}
+
+export interface LoadedSkill extends SkillComponentFields {
   name: string;
   description: string;
   body: string;
@@ -181,9 +274,20 @@ export interface LoadedSkill {
   resources: readonly SkillResourceRef[];
 }
 
+/**
+ * Catalog row for prompt assembly and `skill_list`.
+ *
+ * `triggers` rides along because it is the field that only means anything on
+ * a listing: keyword hints exist to help pick a skill, and the catalog is
+ * where picking happens. A row appears when the skill is registered and is
+ * gone when it is removed, so the hints have exactly the skill's lifetime.
+ * The remaining declared fields stay off the catalog — it is a bounded
+ * prompt surface, and they are reachable on the loaded skill.
+ */
 export interface SkillCatalogEntry {
   name: string;
   description: string;
+  triggers: readonly string[];
   pluginOwner?: PluginSkillOwner;
 }
 
@@ -214,23 +318,27 @@ const SKILL_CATALOG_DESCRIPTION_MAX_CHARS = 1024;
 export interface FrontmatterBlock {
   /** `key` → the raw text after the colon (untrimmed, quotes intact). Last key wins. */
   fields: ReadonlyMap<string, string>;
+  /** The block between the `---` fences, verbatim; empty when there is none. */
+  block: string;
   /** Everything after the closing `---`; the whole input when there is no block. */
   body: string;
 }
 
 /**
- * Split a markdown document into its YAML-ish `---` frontmatter block and
- * body. Supports `key: value` lines only — deliberately tiny, full YAML would
- * pull in a dep we don't need. Skills, agent profiles and persona prompts
- * all read their headers through this one parser; each maps the fields onto
- * its own typed shape.
+ * Split a markdown document into its `---` frontmatter block and body.
+ *
+ * Two views of the same block come back. `fields` is the flat `key: value`
+ * reading — enough for agent profiles and persona prompts, whose headers are
+ * scalars and inline lists. `block` is the verbatim text, for a caller whose
+ * contract has structure the flat reading cannot represent: skill front matter
+ * declares `metadata` as a mapping, which no line-at-a-time parser can carry.
  */
 export function parseFrontmatterBlock(raw: string): FrontmatterBlock {
   const fmRegex = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/;
   const match = raw.match(fmRegex);
   const fields = new Map<string, string>();
   if (!match) {
-    return { fields, body: raw };
+    return { fields, block: "", body: raw };
   }
   const [full, block] = match;
   for (const line of block.split(/\r?\n/)) {
@@ -238,7 +346,31 @@ export function parseFrontmatterBlock(raw: string): FrontmatterBlock {
     if (!m) continue;
     fields.set(m[1], m[2]);
   }
-  return { fields, body: raw.slice(full.length) };
+  return { fields, block, body: raw.slice(full.length) };
+}
+
+/**
+ * Read a frontmatter value that the contract types as a list of strings.
+ *
+ * YAML gives a sequence; a hand-written header may still spell it as one line
+ * (`a, b` or `[a, b]`), which is what agent profiles have always accepted.
+ * Both readings land here so the two stores cannot disagree about what a list
+ * is. Non-string entries are dropped rather than coerced — a trigger is a
+ * keyword, and a number that reached this field is a mistake in the file.
+ */
+export function parseFrontmatterStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  }
+  if (typeof value !== "string") return [];
+  const trimmed = value.trim();
+  const inner = trimmed.startsWith("[") && trimmed.endsWith("]")
+    ? trimmed.slice(1, -1)
+    : trimmed;
+  return inner
+    .split(",")
+    .map(unquoteFrontmatterValue)
+    .filter((s) => s.length > 0);
 }
 
 /** Trim a frontmatter scalar and unwrap one pair of surrounding quotes (single or double). */
@@ -246,16 +378,88 @@ export function unquoteFrontmatterValue(raw: string): string {
   return raw.trim().replace(/^["']|["']$/g, "");
 }
 
-/** The skill header: `name` (required) and `description`. */
+/**
+ * The skill header, as `$defs/skillComponent` describes it.
+ *
+ * Front matter is YAML — that is what the Agent Skills specification the
+ * schema follows says it is — and the component has a mapping field
+ * (`metadata`) and a sequence field (`triggers`), so it is read with a YAML
+ * parser rather than line by line. Malformed YAML throws; every caller here
+ * already treats a header it cannot read as a skill that does not load, which
+ * is the honest outcome for a file whose contract cannot be established.
+ *
+ * Undeclared keys are ignored rather than refused. Admission against the
+ * schema happens where publication does, in the marketplace; a second refusal
+ * here would mean an SDK that adds a field breaks every already-installed
+ * skill that uses it until the host ships a new snapshot.
+ */
 export function parseFrontmatter(raw: string): {
   fm: SkillFrontmatter;
   body: string;
 } {
-  const { fields, body } = parseFrontmatterBlock(raw);
-  const fm: SkillFrontmatter = { name: unquoteFrontmatterValue(fields.get("name") ?? "") };
-  const description = fields.get("description");
-  if (description !== undefined) fm.description = unquoteFrontmatterValue(description);
+  const { fields, block, body } = parseFrontmatterBlock(raw);
+  const fm: SkillFrontmatter = { name: "" };
+  const parsed: unknown = block.length > 0 ? parseYaml(block) : undefined;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { fm, body };
+  const doc = parsed as Record<string, unknown>;
+
+  const scalar = (key: string): string | undefined => {
+    const value = doc[key];
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    warnOnShortenedScalar(key, fields.get(key), trimmed, doc.name);
+    return trimmed;
+  };
+
+  const name = scalar("name");
+  if (name !== undefined) fm.name = name;
+  const description = scalar("description");
+  if (description !== undefined) fm.description = description;
+  if (doc.triggers !== undefined) fm.triggers = parseFrontmatterStringList(doc.triggers);
+  const license = scalar("license");
+  if (license !== undefined) fm.license = license;
+  const compatibility = scalar("compatibility");
+  if (compatibility !== undefined) fm.compatibility = compatibility;
+  if (doc.metadata && typeof doc.metadata === "object" && !Array.isArray(doc.metadata)) {
+    fm.metadata = doc.metadata as Record<string, unknown>;
+  }
+  // The schema spells this key `allowed-tools`; the TS field is camel-cased
+  // because the rest of this record is, and the hyphen is not addressable.
+  const allowedTools = scalar("allowed-tools");
+  if (allowedTools !== undefined) fm.allowedTools = allowedTools;
   return { fm, body };
+}
+
+/**
+ * Say so when YAML read less of a line than the author probably wrote.
+ *
+ * `description: cost #1 priority` is, to YAML, the value `cost` followed by a
+ * comment — the rest is gone, and gone silently, which is the one way a
+ * correct parser is worse than the line reader it replaced. The flat reading
+ * of the same line still holds the whole text, so the two can be compared and
+ * the difference reported.
+ *
+ * Only unquoted scalars are compared. For a quoted one YAML's reading is
+ * authoritative and the flat reading is a crude approximation of it (escapes,
+ * embedded colons), so a difference there means nothing. The YAML value is
+ * kept either way: this reports the loss, it does not paper over it.
+ */
+function warnOnShortenedScalar(
+  key: string,
+  rawLine: string | undefined,
+  parsedValue: string,
+  skillName: unknown,
+): void {
+  if (rawLine === undefined) return;
+  const raw = rawLine.trim();
+  if (raw.startsWith('"') || raw.startsWith("'")) return;
+  if (raw === parsedValue) return;
+  const label = typeof skillName === "string" && skillName.length > 0 ? skillName : "<unnamed>";
+  log.warn(
+    `skill frontmatter: '${key}' of "${label}" read as ${JSON.stringify(parsedValue)}, ` +
+      `but the line carries ${JSON.stringify(raw)} — an unquoted '#' starts a YAML ` +
+      `comment; quote the value to keep it whole`,
+  );
 }
 
 export interface SkillStoreOptions {
@@ -290,6 +494,7 @@ export class SkillStore {
       byName.set(s.name, {
         name: s.name,
         description: s.description,
+        triggers: s.triggers,
       });
     }
     return [
@@ -297,6 +502,7 @@ export class SkillStore {
       ...[...this.pluginSkills.values()].map((skill) => ({
         name: skill.name,
         description: skill.description,
+        triggers: skill.triggers,
         pluginOwner: skill.pluginOwner,
       })),
     ];
@@ -501,7 +707,23 @@ export class SkillStore {
     }
     for (const contribution of generation.contributions) {
       if (contribution.kind !== "skill") continue;
-      const skill = materializedSkill(generation, contribution);
+      // One unreadable SKILL.md drops ITS skill, not the plugin. A header the
+      // YAML parser refuses is a defect in one contributed file, and letting
+      // it throw here would take the whole activation down with it — every
+      // other skill and every tool the plugin contributes. The user-directory
+      // scan has always contained a bad entry this way; the bundled path now
+      // matches it. The duplicate-selector check below still throws: that is
+      // the generation contradicting itself, not one file being malformed.
+      let skill: LoadedSkill;
+      try {
+        skill = materializedSkill(generation, contribution);
+      } catch (err) {
+        log.warn(
+          `plugin Skill '${generation.pluginId}:${contribution.localId}' skipped: %s`,
+          (err as Error).message,
+        );
+        continue;
+      }
       if (next.has(skill.name)) {
         throw new Error(`duplicate plugin Skill selector: ${skill.name}`);
       }
@@ -639,6 +861,7 @@ export class SkillStore {
     return {
       name,
       description: fm.description ?? "",
+      ...skillComponentFields(fm),
       body: trimmedBody,
       filePath: canonicalFile,
       resources,
@@ -786,6 +1009,7 @@ export class SkillStore {
         skills.push({
           name,
           description: normalizeCatalogDescription(fm.description ?? ""),
+          triggers: boundedTriggers(fm.triggers),
           baseName,
           filePath: canonicalFile,
         });

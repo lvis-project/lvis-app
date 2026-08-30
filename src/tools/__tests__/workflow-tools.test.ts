@@ -1756,7 +1756,7 @@ describe("skill_list and agent_list tools", () => {
       mkdirSync(join(skillDir, "deploy"), { recursive: true });
       writeFileSync(
         join(skillDir, "deploy", "SKILL.md"),
-        "---\nname: deploy\ndescription: Deploy workflow\n---\nsecret body",
+        "---\nname: deploy\ndescription: Deploy workflow\ntriggers: [ship, release]\n---\nsecret body",
         "utf-8",
       );
       const tool = createSkillListTool(new SkillStore({ userDir: skillDir }));
@@ -1767,7 +1767,10 @@ describe("skill_list and agent_list tools", () => {
           expect.objectContaining({ name: "deploy", description: "Deploy workflow" }),
         ]),
       );
-      expect(parsed.skills[0]).not.toHaveProperty("triggers");
+      // Dispatch metadata, which is what a listing is for: the keyword hints
+      // the author declared come through. The body does not — that stays
+      // behind `skill_load` and its approval gate.
+      expect(parsed.skills[0].triggers).toEqual(["ship", "release"]);
       expect(r.output).not.toContain("secret body");
     } finally {
       await cleanupTmpDir(skillDir);

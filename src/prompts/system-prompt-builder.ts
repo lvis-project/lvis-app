@@ -3,7 +3,11 @@
 import { hostname, platform, userInfo } from "node:os";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
-import type { SkillCatalogEntry } from "../main/skill-store.js";
+import {
+  MAX_SKILL_TRIGGERS,
+  MAX_SKILL_TRIGGER_CHARS,
+  type SkillCatalogEntry,
+} from "../main/skill-store.js";
 import type { ToolCatalogEntry, ToolRegistry, ToolSchemaEntry } from "../tools/registry.js";
 import { redactFsPath } from "../audit/dlp-filter.js";
 import { estimateTokens } from "../shared/token-estimate.js";
@@ -1082,7 +1086,23 @@ function renderSkillCatalogRecord(skill: SkillCatalogEntry): string {
     sanitizeSkillCatalogText(skill.description),
     MAX_SKILL_DESCRIPTION_CHARS,
   );
-  return JSON.stringify({ name, description: description || t("be_systemPromptBuilder.skillNoDescription") });
+  // The author's keyword hints. Count and length are already bounded on the
+  // record (`MAX_SKILL_TRIGGERS` / `MAX_SKILL_TRIGGER_CHARS`, applied where
+  // front matter is parsed); what is left to do here is what the surrounding
+  // text also needs — strip the characters that would break out of the
+  // trusted block, and re-apply the ceiling because sanitizing can only
+  // shorten. Both bounds are re-asserted rather than assumed: this renders
+  // into a prompt, and it is the last place to be wrong about that.
+  const triggers = skill.triggers
+    .slice(0, MAX_SKILL_TRIGGERS)
+    .map((trigger) => truncateSkillCatalogText(sanitizeSkillCatalogText(trigger), MAX_SKILL_TRIGGER_CHARS))
+    .filter((trigger) => trigger.length > 0);
+  const record: { name: string; description: string; triggers?: string[] } = {
+    name,
+    description: description || t("be_systemPromptBuilder.skillNoDescription"),
+  };
+  if (triggers.length > 0) record.triggers = triggers;
+  return JSON.stringify(record);
 }
 
 // ─── Constants ──────────────────────────────────────

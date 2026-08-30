@@ -1,0 +1,60 @@
+name: SDK schema drift
+
+# `schemas/sdk/` holds byte-for-byte copies of SDK-owned schema files. The
+# host implements what they define (SKILL.md front matter) and the contract
+# test reads the rule out of the snapshot rather than restating it — so a
+# snapshot that has quietly fallen behind the SDK makes every host-side
+# assertion agree with the wrong definition, and agree loudly.
+#
+# The offline half of the check — the committed bytes still hash to what
+# `schemas/sdk/sources.json` records — runs in the test suite, on every PR,
+# with no network. It catches a hand edit to a copy that is not supposed to be
+# edited.
+#
+# This job is the half that needs the network, which is why it is here and not
+# in `ci.yml`: core CI is deliberately secret-free and does not reach out to
+# sibling repositories. It compares the snapshot against the SDK twice, and the
+# two comparisons answer different questions —
+#
+#   at the recorded tag  — provenance. Did that tag really publish these bytes?
+#                          A recorded hash only proves the copy is
+#                          self-consistent; this proves it came from where it
+#                          says it did.
+#   at the SDK's default branch — drift. Has the contract moved since? This is
+#                          the one that goes red on a normal day, and the fix
+#                          is to re-sync and bump the recorded ref.
+#
+# The SDK repository is public, so `gh api` needs only the token this workflow
+# already has. Scheduled as well as per-PR: drift arrives when the OTHER
+# repository merges something, which no pull request here would otherwise
+# notice.
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "schemas/sdk/**"
+      - "scripts/sync-sdk-schemas.mjs"
+      - ".github/workflows/sdk-schema-drift.yml"
+      - "src/main/skill-store.ts"
+  schedule:
+    # Daily. Drift is created by merges in lvis-plugin-sdk, on a clock this
+    # repository does not control.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sdk-schema-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Snapshot matches its recorded hash, the pinned tag, and the SDK head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/sync-sdk-schemas.mjs --verify

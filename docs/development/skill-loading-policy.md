@@ -18,10 +18,14 @@ applies to schemas, applied to instruction bytes:
    the skill is reflected into the in-memory catalog
    (`src/main/skill-store.ts`). Activation tracks the *current active
    generation*, not merely "installed".
-3. **Catalogued (per turn)** — only each skill's **name + description** are
-   injected into the system prompt as an untrusted-metadata catalog. Bodies stay
-   hidden. This is the always-present fixed cost, so it MUST be bounded (see
-   Policy §1–§3).
+3. **Catalogued (per turn)** — only each skill's **name + description +
+   triggers** are injected into the system prompt as an untrusted-metadata
+   catalog. Bodies stay hidden. This is the always-present fixed cost, so it
+   MUST be bounded (see Policy §1–§3). `triggers` are the author's keyword
+   hints from the front matter; they are dispatch metadata read by the model,
+   not a router — keyword routing stays retired — and they are bounded at
+   8 entries of 48 characters where the skill record is built, so every
+   consumer inherits the same cap.
 4. **Loaded on demand** — the model calls `skill_load({skillName})`. First load
    is approval-gated with a sha256 binding over the skill's approval **material**
    (TOCTOU-safe, `src/tools/skill-load.ts`) — the body for a flat skill, and the
@@ -192,3 +196,39 @@ rendered (`src/prompts/system-prompt-builder.ts`), reusing the existing
   and `skill_load` admission in one turn — an out-of-scope plugin's skill is
   refused at the same deny point that refuses that plugin's tools.
 - Bodies: approval-gate + hash binding + turn-boundary clearing unchanged.
+
+## Front Matter
+
+A SKILL.md header is YAML, and is parsed as YAML. The fields it may carry are
+the SDK's `$defs/skillComponent` — `name` and `description` required,
+`triggers`, `license`, `compatibility`, `metadata` and `allowed-tools`
+optional — snapshotted at `schemas/sdk/skill-package.schema.json`. All of them
+are kept on the skill record; the host does not re-validate the header against
+the schema, because admission belongs where publication is.
+
+`allowed-tools` is carried and surfaced but **not enforced**. A skill cannot
+widen its own reach by declaring it; the permission layer does not read it.
+
+Names must match `SKILL_NAME_ALLOWLIST` (`^[a-zA-Z0-9_-]+$`), which is the
+schema's charset. The schema's 64-character ceiling is an admission rule the
+marketplace applies at publication; the host enforces no length of its own.
+
+### Headers that a real YAML parser rejects
+
+The header used to be read line by line, which accepted things YAML does not.
+A header that no longer parses does not load — the skill is skipped with a
+diagnostic in the log, and on the plugin path only that skill is dropped, not
+the plugin. The shapes that change:
+
+| header | why it fails | fix |
+| --- | --- | --- |
+| `description: use when: deploying` | a colon *followed by a space* opens a nested mapping (`3:1` with no space is fine) | `description: "use when: deploying"` |
+| `description: @mention first` | `@` is a reserved indicator | `description: "@mention first"` |
+| `description: [draft] notes` | reads as a sequence, not text | `description: "[draft] notes"` |
+| indentation with tab characters | YAML forbids tabs for indentation | indent with spaces |
+
+One shape parses but reads short: an unquoted `#` starts a comment, so
+`description: cost #1 priority` is the value `cost`. That is YAML behaving
+correctly, and quoting fixes it — the loader compares the parsed value against
+the raw line and logs a warning naming the skill and the field when the two
+disagree, so the loss is visible rather than silent.

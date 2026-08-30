@@ -20,6 +20,7 @@ function makeSkill(
   return {
     name,
     description: "",
+    triggers: [],
     body,
     filePath: `/tmp/${name}.md`,
     resources,
