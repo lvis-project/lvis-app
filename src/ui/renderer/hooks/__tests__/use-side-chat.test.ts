@@ -14,7 +14,14 @@ import type { LvisApi } from "../../types.js";
 function makeApi() {
   let handler: ((e: ChatStreamEvent) => void) | null = null;
   const abort = vi.fn(async () => ({ ok: true as const }));
-  const send = vi.fn(async () => ({ ok: true as const, result: {} }));
+  // Typed as the real invoke is — either shape — so a test can hand back the
+  // host's refusal without casting past the contract.
+  const send = vi.fn(
+    async (): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> => ({
+      ok: true,
+      result: {},
+    }),
+  );
   const newSession = vi.fn(async () => ({ ok: true as const, sessionId: "side-2" }));
   const load = vi.fn(async () => ({ ok: true as const, sessionId: "side-3", messages: [] }));
   const list = vi.fn(async () => ({ current: "side-1", sessions: [] }));
@@ -268,5 +275,55 @@ describe("useSideChat unified-transcript rendering (tool / thinking / permission
     expect(checkpoint).toMatchObject({ kind: "checkpoint", removedMessages: 5 });
     const ctxUsage = result.current.entries.find((e) => e.kind === "context_usage");
     expect(ctxUsage).toMatchObject({ kind: "context_usage", tokensIn: 800 });
+  });
+
+  // A refused send starts no turn, so re-arming the guard for it is wrong: the
+  // turn that IS running keeps emitting, and once its id is no longer above the
+  // high-water mark those frames can never be adopted again — the answer would
+  // freeze on screen while the host streamed on.
+  it("keeps rendering the running turn when the host refuses the next send", async () => {
+    const { api, emit, spies } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("first");
+    });
+    emit({ type: "text_delta", text: "hello", streamId: 1 });
+
+    // The end-of-turn drain raced a turn that had not finished: the host still
+    // has one in flight and refuses.
+    spies.send.mockResolvedValueOnce({ ok: false, error: "streaming-active" });
+    await act(async () => {
+      await result.current.send("drained row", { inputOrigin: "queue-auto" });
+    });
+
+    emit({ type: "text_delta", text: " world", streamId: 1 });
+
+    const streaming = result.current.entries.find(
+      (e): e is Extract<ChatEntry, { kind: "assistant" }> =>
+        e.kind === "assistant" && e.streaming === true,
+    );
+    expect(streaming?.text).toBe("hello world");
+  });
+
+  // The abort is awaited AFTER the transcript and the composer have already
+  // committed the interrupt, so a transport failure that escaped would destroy
+  // the text the user typed.
+  it("reports a failed abort instead of throwing", async () => {
+    const { api, spies } = makeApi();
+    spies.abort.mockRejectedValueOnce(new Error("render frame disposed"));
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("first");
+    });
+
+    await act(async () => {
+      await expect(result.current.abort()).resolves.toBeUndefined();
+    });
+    expect(lastAssistant(result.current.entries)).toMatchObject({
+      text: "render frame disposed",
+      systemNotice: "stream-error",
+    });
   });
 });

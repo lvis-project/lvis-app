@@ -7,7 +7,7 @@ import { SessionTodoPanel } from "./SessionTodoPanel.js";
 import { MessageQueuePanel } from "./MessageQueuePanel.js";
 import { DeferredApprovalChip } from "./DeferredApprovalChip.js";
 import { StatusBar, type StatusBarProps } from "./StatusBar.js";
-import { Composer, type ComposerHandle } from "./Composer.js";
+import { Composer, ComposerFrame, type ComposerHandle } from "./Composer.js";
 import { InputActionBar } from "./InputActionBar.js";
 import { QuestionOverlay } from "./QuestionOverlay.js";
 import { computeComposerPlaceholder } from "../utils/composer-placeholder.js";
@@ -20,7 +20,6 @@ import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import type { ViewModeState } from "./ViewModeBanner.js";
 import type { RolePreset } from "../../../data/role-presets.js";
-import type { AppMode } from "../MainToolbar.js";
 import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import { ComposerProjectSelector } from "./ComposerProjectSelector.js";
 import type { ProjectErrorReporter } from "../hooks/use-add-project-folder.js";
@@ -86,7 +85,6 @@ export interface ChatComposerDockProps {
   reasoningAvailable?: boolean;
   onToggleThinking: (v: boolean) => Promise<void> | void;
   inputStatusRow: InputStatusRow;
-  appMode?: AppMode;
   onOpenModelSettings: () => void;
   onOpenPermissions: () => void;
   onOpenApprovalQueue?: () => void;
@@ -106,6 +104,94 @@ export interface ChatComposerDockProps {
    *  centered layout. */
   projectSelectorOpen: boolean;
   onProjectSelectorOpenChange: (open: boolean) => void;
+}
+
+interface ComposerRuntimeGateInput {
+  /** Canonical selected subscription runtime policy; legacy markers are fallback-only. */
+  subscriptionRuntimePolicy?: SubscriptionRuntimeUiPolicy;
+  subscriptionImageAttachmentProvider?: string;
+  subscriptionFileAttachmentProvider?: string;
+  settingsLoaded?: boolean;
+  subscriptionUnavailableProvider?: string;
+  subscriptionPendingProvider?: string;
+  /** The draft's current attachments — checked against the selected runtime. */
+  attachments: Attachment[];
+}
+
+interface ComposerRuntimeGates {
+  runtimeImageAttachmentProvider: string | undefined;
+  runtimeFileAttachmentProvider: string | undefined;
+  runtimeUnavailable: boolean;
+  runtimePending: boolean;
+  attachmentInputsReady: boolean;
+  imagesEnabled: boolean;
+  filesEnabled: boolean;
+  /**
+   * A runtime may be switched after a draft has accumulated attachments. Keep
+   * the draft editable so the user can remove or preserve markers, but do not
+   * leave either visual send path enabled for an attachment type the newly
+   * selected runtime has not verified.
+   */
+  draftHasUnsupportedAttachment: boolean;
+}
+
+/**
+ * What the selected runtime lets a composer accept and send. One resolver for
+ * every composer surface: the main dock and the side chat read the same
+ * readiness contract, so the answer to "may this draft go out" is computed
+ * once, here, rather than once per surface.
+ */
+export function resolveComposerRuntimeGates({
+  subscriptionRuntimePolicy,
+  subscriptionImageAttachmentProvider,
+  subscriptionFileAttachmentProvider,
+  settingsLoaded,
+  subscriptionUnavailableProvider,
+  subscriptionPendingProvider,
+  attachments,
+}: ComposerRuntimeGateInput): ComposerRuntimeGates {
+  const runtimeImageAttachmentProvider = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.imageAttachmentProvider
+    : subscriptionImageAttachmentProvider;
+  const runtimeFileAttachmentProvider = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.fileAttachmentProvider
+    : subscriptionFileAttachmentProvider;
+  const runtimeUnavailable = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.chatUnavailable
+    : subscriptionUnavailableProvider !== undefined;
+  const runtimePending = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.chatPending
+    : subscriptionPendingProvider !== undefined;
+  const attachmentInputsReady = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.attachmentInputsReady
+    : settingsLoaded !== false && !runtimePending;
+  const imagesEnabled = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.imagesEnabled
+    : attachmentInputsReady && runtimeImageAttachmentProvider === undefined;
+  const filesEnabled = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.filesEnabled
+    : attachmentInputsReady && runtimeFileAttachmentProvider === undefined;
+  const draftHasUnsupportedAttachment =
+    (runtimeImageAttachmentProvider !== undefined
+      && attachments.some((attachment) => attachment.kind === "image"))
+    || (runtimeFileAttachmentProvider !== undefined
+      && attachments.some((attachment) => attachment.kind === "file"))
+    || subscriptionImageAttachmentLimitViolation(
+      subscriptionRuntimePolicy?.imageAttachmentLimits,
+      attachments
+        .filter((attachment) => attachment.kind === "image")
+        .map((attachment) => ({ bytes: attachment.bytes })),
+    ) !== null;
+  return {
+    runtimeImageAttachmentProvider,
+    runtimeFileAttachmentProvider,
+    runtimeUnavailable,
+    runtimePending,
+    attachmentInputsReady,
+    imagesEnabled,
+    filesEnabled,
+    draftHasUnsupportedAttachment,
+  };
 }
 
 /**
@@ -163,7 +249,6 @@ export function ChatComposerDock({
   reasoningAvailable,
   onToggleThinking,
   inputStatusRow,
-  appMode,
   onOpenModelSettings,
   onOpenPermissions,
   onOpenApprovalQueue,
@@ -217,47 +302,29 @@ export function ChatComposerDock({
   // exactly how the mention menu shipped with a dead keyboard. The counter itself is a
   // ref, so there is nothing to close over.
   const allocateN = useCallback(() => ++attachmentNCounter.current, [attachmentNCounter]);
-  const runtimeImageAttachmentProvider = subscriptionRuntimePolicy
-    ? subscriptionRuntimePolicy.imageAttachmentProvider
-    : subscriptionImageAttachmentProvider;
-  const runtimeFileAttachmentProvider = subscriptionRuntimePolicy
-    ? subscriptionRuntimePolicy.fileAttachmentProvider
-    : subscriptionFileAttachmentProvider;
-  const runtimeUnavailable = subscriptionRuntimePolicy
-    ? subscriptionRuntimePolicy.chatUnavailable
-    : subscriptionUnavailableProvider !== undefined;
-  const runtimePending = subscriptionRuntimePolicy
-    ? subscriptionRuntimePolicy.chatPending
-    : subscriptionPendingProvider !== undefined;
-  const attachmentInputsReady = subscriptionRuntimePolicy
-    ? subscriptionRuntimePolicy.attachmentInputsReady
-    : settingsLoaded !== false && !runtimePending;
-  const imagesEnabled = subscriptionRuntimePolicy
-    ? subscriptionRuntimePolicy.imagesEnabled
-    : attachmentInputsReady && runtimeImageAttachmentProvider === undefined;
-  const filesEnabled = subscriptionRuntimePolicy
-    ? subscriptionRuntimePolicy.filesEnabled
-    : attachmentInputsReady && runtimeFileAttachmentProvider === undefined;
+  const {
+    runtimeImageAttachmentProvider,
+    runtimeFileAttachmentProvider,
+    runtimeUnavailable,
+    runtimePending,
+    attachmentInputsReady,
+    imagesEnabled,
+    filesEnabled,
+    draftHasUnsupportedAttachment,
+  } = resolveComposerRuntimeGates({
+    subscriptionRuntimePolicy,
+    subscriptionImageAttachmentProvider,
+    subscriptionFileAttachmentProvider,
+    settingsLoaded,
+    subscriptionUnavailableProvider,
+    subscriptionPendingProvider,
+    attachments,
+  });
   const composerInputDisabled = viewMode !== null || (hasApiKey === false && (
     runtimeUnavailable
     || runtimePending
     || !question.trimStart().startsWith("/")
   ));
-  // A runtime may be switched after a draft has accumulated attachments. Keep
-  // the draft editable so the user can remove or preserve markers, but do not
-  // leave either visual send path enabled for an attachment type the newly
-  // selected runtime has not verified.
-  const draftHasUnsupportedAttachment =
-    (runtimeImageAttachmentProvider !== undefined
-      && attachments.some((attachment) => attachment.kind === "image"))
-    || (runtimeFileAttachmentProvider !== undefined
-      && attachments.some((attachment) => attachment.kind === "file"))
-    || subscriptionImageAttachmentLimitViolation(
-      subscriptionRuntimePolicy?.imageAttachmentLimits,
-      attachments
-        .filter((attachment) => attachment.kind === "image")
-        .map((attachment) => ({ bytes: attachment.bytes })),
-    ) !== null;
   const composerSendDisabled = !attachmentInputsReady
     || composerInputDisabled
     || draftHasUnsupportedAttachment;
@@ -268,6 +335,12 @@ export function ChatComposerDock({
         centeredMarginClass,
       ].join(" ")}
       data-composer-placement={centered ? "center" : "bottom"}
+      // Which surface this whole dock subtree serves. The Composer's textarea
+      // carries the same attribute for the field itself; here it covers the
+      // queue panel and action bar too, so a test (or a stylesheet) can address
+      // "the main dock's send button" without matching the side chat's, which
+      // renders the very same test ids.
+      data-composer-surface="main"
     >
       <div className={dockColumnClass} data-testid="session-todo-dock">
         <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
@@ -346,9 +419,10 @@ export function ChatComposerDock({
               />
             </div>
           ) : null}
-          <div className="lvis-surface-raised relative z-10 overflow-hidden rounded-xl border border-input-bar-border bg-input-bar text-input-bar-foreground transition-colors duration-[var(--motion-fast)] ease-[var(--motion-ease-standard)] focus-within:border-input-bar-focus focus-within:ring-1 focus-within:ring-input-bar-focus motion-reduce:transition-none">
+          <ComposerFrame>
         <Composer
           ref={composerRef}
+          surface="main"
           text={question}
           onTextChange={setQuestion}
           attachments={attachments}
@@ -419,12 +493,11 @@ export function ChatComposerDock({
           reasoningAvailable={reasoningAvailable}
           onToggleThinking={onToggleThinking}
           statusRow={inputStatusRow}
-          appMode={appMode}
           onOpenModelSettings={onOpenModelSettings}
           onOpenPermissions={onOpenPermissions}
           onOpenApprovalQueue={onOpenApprovalQueue}
         />
-          </div>
+          </ComposerFrame>
         </div>
       </div>
       <QuestionOverlay
@@ -458,6 +531,10 @@ export function ChatComposerDock({
  * key, marketplace for a keyless local/router provider — so nothing is lost by
  * collapsing it into a popover. Copy reuses the card's existing `chatView.*`
  * message keys verbatim.
+ *
+ * The side chat reads the same readiness contract and shows this same chip:
+ * a second credential affordance with its own copy would be the kind of copy
+ * that drifts.
  */
 
 interface ComposerApiKeyChipProps {
@@ -467,7 +544,7 @@ interface ComposerApiKeyChipProps {
   subscriptionUnavailableProvider?: string;
 }
 
-function ComposerApiKeyChip({
+export function ComposerApiKeyChip({
   onOpenSettings,
   subscriptionUnavailableProvider,
   subscriptionRuntimePolicy,

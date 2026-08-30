@@ -15,13 +15,23 @@
  */
 import { test, expect } from './fixtures';
 
+/**
+ * The side chat renders the SAME composer, queue panel, and turn control as the
+ * main dock, with the same test ids. Every locator that means "the main dock's
+ * X" is anchored on the dock's surface marker so it cannot resolve to the side
+ * chat's copy — and so a second match is a real failure rather than something
+ * `.first()` quietly hides.
+ */
+const MAIN = '[data-composer-surface="main"] ';
+
+
 test('idle: composer input-bar contains textarea only (no Send/Stop/Guide buttons)', async ({ mainWindow }) => {
   // textarea 존재
-  const textarea = mainWindow.locator('[data-testid="composer-textarea"]');
+  const textarea = mainWindow.locator(MAIN + '[data-testid="composer-textarea"]');
   await expect(textarea).toBeVisible();
 
   // input-bar 안 v6 이전의 Send/Stop/Guide 버튼은 사라짐
-  const inputBar = mainWindow.locator('[data-testid="composer-input-bar"]');
+  const inputBar = mainWindow.locator(MAIN + '[data-testid="composer-input-bar"]');
   await expect(inputBar).toBeVisible();
   // input-bar 직하 자식 button 0 (textarea 만)
   const buttonsInsideInputBar = inputBar.locator('> button');
@@ -37,21 +47,21 @@ test('idle: unified InputActionBar 가 TokenRing + Send 를 표시하고 가이�
   await expect(guideBtn).toHaveCount(0);
 
   // 통합 turn control — idle 이면 send 아이콘 (라벨은 aria-label/title 로만)
-  const sendBtn = mainWindow.locator('[data-testid="composer-send-button"]');
+  const sendBtn = mainWindow.locator(MAIN + '[data-testid="composer-send-button"]');
   await expect(sendBtn).toBeVisible();
 });
 
 test('idle: cancel button + immediate-inject hint 모두 미노출 (busy 일 때만)', async ({ mainWindow }) => {
   // 정지는 별도 버튼이 아니라 같은 turn control 이 busy + 빈 draft 일 때 갖는 상태.
-  const cancelBtn = mainWindow.locator('[data-testid="composer-cancel-button"]');
+  const cancelBtn = mainWindow.locator(MAIN + '[data-testid="composer-cancel-button"]');
   await expect(cancelBtn).toHaveCount(0);
   // ⌘⏎ 즉시 주입 hint 도 busy 시만
-  const immediateHint = mainWindow.locator('[data-testid="composer-hint-immediate"]');
+  const immediateHint = mainWindow.locator(MAIN + '[data-testid="composer-hint-immediate"]');
   await expect(immediateHint).toHaveCount(0);
 });
 
 test('idle: MessageQueuePanel 미렌더 (큐 비어 있음 sentinel)', async ({ mainWindow }) => {
-  const panel = mainWindow.locator('[data-testid="message-queue-panel"]');
+  const panel = mainWindow.locator(MAIN + '[data-testid="message-queue-panel"]');
   // 큐 비면 panel 자체가 null return → DOM 부재
   await expect(panel).toHaveCount(0);
 });
@@ -85,7 +95,7 @@ test.describe('renderer debug stream env', () => {
 
 test('InputActionBar: command → persona → attach leading controls and reasoning status are visible', async ({ mainWindow }) => {
   // attach button 존재
-  const attachBtn = mainWindow.locator('[data-testid="iab-attach-button"]');
+  const attachBtn = mainWindow.locator(MAIN + '[data-testid="iab-attach-button"]');
   await expect(attachBtn).toBeVisible();
   const leadingIds = await mainWindow.locator('[data-testid="iab-leading"] [data-testid]').evaluateAll(
     (nodes) => nodes.map((node) => node.getAttribute('data-testid')),
@@ -109,15 +119,15 @@ test('큐 항목 수정 (더블클릭) — input 진입 + Enter commit', async (
     }
   });
   // 큐 row 가 안 뜨면 (test hook 미설치) skip — production 빌드 호환.
-  const row = mainWindow.locator('[data-testid="message-queue-row-text"]').first();
+  const row = mainWindow.locator(MAIN + '[data-testid="message-queue-row-text"]').first();
   const visible = await row.isVisible().catch(() => false);
   if (!visible) test.skip();
   await row.dblclick();
-  const input = mainWindow.locator('[data-testid="message-queue-row-edit"]');
+  const input = mainWindow.locator(MAIN + '[data-testid="message-queue-row-edit"]');
   await expect(input).toBeVisible();
   await input.fill("edited text");
   await input.press("Enter");
-  await expect(mainWindow.locator('[data-testid="message-queue-row-text"]').first()).toContainText("edited text");
+  await expect(mainWindow.locator(MAIN + '[data-testid="message-queue-row-text"]').first()).toContainText("edited text");
 });
 
 test('queue-auto 자동 인입 — done event 시 큐 항목이 user bubble + "↪ 큐에서" hint 로 표시', async ({ app, mainWindow, t }) => {
@@ -155,7 +165,7 @@ test('queue-auto 자동 인입 — done event 시 큐 항목이 user bubble + "�
       store.add("끝나면 요약");
     }
   });
-  const row = mainWindow.locator('[data-testid="message-queue-row-text"]').first();
+  const row = mainWindow.locator(MAIN + '[data-testid="message-queue-row-text"]').first();
   await expect(row).toBeVisible();
   // done event 발화 — main 프로세스에서 broadcast.
   await app.evaluate(({ BrowserWindow }) => {

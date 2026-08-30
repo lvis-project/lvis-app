@@ -16,6 +16,10 @@ import {
   MCP_RESOURCE_FENCE_OPEN,
 } from "../../../shared/mcp-resource-bounds.js";
 
+/** A real 1×1 PNG: the image normalizer decodes and sniffs the bytes. */
+const ONE_PIXEL_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
 vi.mock("electron", () => ({
@@ -267,13 +271,67 @@ describe("side-chat IPC domain", () => {
     expect(side.runTurn).not.toHaveBeenCalled();
   });
 
-  it("rejects empty input", async () => {
+  it("rejects a send carrying neither text nor an attachment", async () => {
     const side = makeSideLoop();
     register(side, makeMainLoop());
     const handler = handlers.get(CHANNELS.sidechat.send)!;
     const result = await handler(ev("file:///index.html"), { input: "   " });
     expect(result).toMatchObject({ ok: false, error: "empty-text" });
     expect(side.runTurn).not.toHaveBeenCalled();
+  });
+
+  // The shared composer offers an attachment-only send on this surface, and the
+  // main chat accepts one. Refusing it here produced an empty user bubble
+  // followed by an error entry — the renderer had already committed the turn.
+  it("accepts an attachment-only send (no text)", async () => {
+    const side = makeSideLoop();
+    register(side, makeMainLoop());
+    const handler = handlers.get(CHANNELS.sidechat.send)!;
+    const result = await handler(ev("file:///index.html"), {
+      input: "",
+      attachments: [{ type: "image", image: `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`, mimeType: "image/png" }],
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(side.runTurn).toHaveBeenCalledTimes(1);
+    const [, , , options] = side.runTurn.mock.calls[0] as unknown as [
+      string,
+      unknown,
+      unknown,
+      { attachments?: unknown[] },
+    ];
+    expect(options.attachments).toHaveLength(1);
+  });
+
+  // Two turns on one ConversationLoop interleave into a single history. The
+  // handler runs `runStreamedTurn` directly, so nothing else refuses the second
+  // send: a queue drain fired by a superseded turn's trailing `done` would have
+  // landed here on top of the live turn.
+  it("refuses a second send while a side turn is still streaming", async () => {
+    let releaseTurn!: () => void;
+    const side = makeSideLoop();
+    side.runTurn = vi.fn(
+      () => new Promise((resolve) => { releaseTurn = () => resolve({ route: "chat" }); }),
+    );
+    register(side, makeMainLoop());
+    const handler = handlers.get(CHANNELS.sidechat.send)!;
+
+    const first = handler(ev("file:///index.html"), { input: "first" });
+    const second = await handler(ev("file:///index.html"), { input: "second" });
+
+    expect(second).toMatchObject({ ok: false, error: "streaming-active" });
+    expect(side.runTurn).toHaveBeenCalledTimes(1);
+
+    releaseTurn();
+    await first;
+
+    // …and the loop is free again once the turn settles. Swap in a turn that
+    // completes on its own so this send is not held by the same latch.
+    const settledTurn = vi.fn(async () => ({ route: "chat" }));
+    side.runTurn = settledTurn;
+    const third = await handler(ev("file:///index.html"), { input: "third" });
+    expect(third).toMatchObject({ ok: true });
+    expect(settledTurn).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed when the side-chat loop is absent", async () => {
