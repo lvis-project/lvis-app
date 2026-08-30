@@ -53,8 +53,8 @@ export interface InputActionBarProps {
   onInsertSlashCommand: (cmd: string) => void;
   onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   commandActions: QuickAction[];
-  commandPopoverOpen: boolean;
-  onCommandPopoverOpenChange: (open: boolean) => void;
+  slashPickerOpen: boolean;
+  onSlashPickerOpenChange: (open: boolean) => void;
   // Status sub-row — token progress ring (composed by the caller: ring + cost
   // detail). Rendered at the END of the status sub-row, after the permission
   // cell. The ring surfaces %/cost on hover/click.
@@ -150,8 +150,8 @@ export function InputActionBar({
   onInsertSlashCommand,
   onRunMcpPrompt,
   commandActions,
-  commandPopoverOpen,
-  onCommandPopoverOpenChange,
+  slashPickerOpen,
+  onSlashPickerOpenChange,
   ringSlot,
   onAttach,
   attachDisabled,
@@ -230,8 +230,8 @@ export function InputActionBar({
             onSelectPlugin={onSelectPlugin}
             onInsert={onInsertSlashCommand}
             onRunMcpPrompt={onRunMcpPrompt}
-            open={commandPopoverOpen}
-            onOpenChange={onCommandPopoverOpenChange}
+            open={slashPickerOpen}
+            onOpenChange={onSlashPickerOpenChange}
           />
 
           {/* Native persona context menu. Electron draws this outside the

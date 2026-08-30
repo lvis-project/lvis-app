@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 191
+ * Fragments: 190
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
@@ -92,8 +92,6 @@ import { en as en_cherryBlossom } from "./cherryBlossom.js";
 import { en as en_clipboardPaste } from "./clipboardPaste.js";
 import { en as en_codexSubscriptionCard } from "./codexSubscriptionCard.js";
 import { en as en_commandActions } from "./commandActions.js";
-import { en as en_commandPopover } from "./commandPopover.js";
-import { en as en_commandPopoverPanel } from "./commandPopoverPanel.js";
 import { en as en_compactedToolResult } from "./compactedToolResult.js";
 import { en as en_composer } from "./composer.js";
 import { en as en_composerPlaceholder } from "./composerPlaceholder.js";
@@ -162,6 +160,7 @@ import { en as en_settingsContent } from "./settingsContent.js";
 import { en as en_sidebar } from "./sidebar.js";
 import { en as en_skillBadge } from "./skillBadge.js";
 import { en as en_slashPicker } from "./slashPicker.js";
+import { en as en_slashPickerPanel } from "./slashPickerPanel.js";
 import { en as en_solarizedLight } from "./solarizedLight.js";
 import { en as en_sparkline } from "./sparkline.js";
 import { en as en_spotlightTour } from "./spotlightTour.js";
@@ -285,8 +284,6 @@ export const generatedEn: Record<string, string> = {
   ...en_clipboardPaste,
   ...en_codexSubscriptionCard,
   ...en_commandActions,
-  ...en_commandPopover,
-  ...en_commandPopoverPanel,
   ...en_compactedToolResult,
   ...en_composer,
   ...en_composerPlaceholder,
@@ -355,6 +352,7 @@ export const generatedEn: Record<string, string> = {
   ...en_sidebar,
   ...en_skillBadge,
   ...en_slashPicker,
+  ...en_slashPickerPanel,
   ...en_solarizedLight,
   ...en_sparkline,
   ...en_spotlightTour,

@@ -61,8 +61,8 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     onSelectPlugin: vi.fn(),
     onInsertSlashCommand: vi.fn(),
     commandActions: [],
-    commandPopoverOpen: false,
-    onCommandPopoverOpenChange: vi.fn(),
+    slashPickerOpen: false,
+    onSlashPickerOpenChange: vi.fn(),
     ringSlot: <span data-testid="ring-slot" />,
     onAttach: vi.fn(),
     attachDisabled: false,
@@ -114,7 +114,7 @@ describe("InputActionBar (unified bar)", () => {
   it("leading cluster order is [command] → [persona] → [attach] (ring moved to status row)", () => {
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
-    const picker = leading.querySelector(testIdSelector(TEST_IDS.commandPopoverTrigger));
+    const picker = leading.querySelector(testIdSelector(TEST_IDS.slashPickerTrigger));
     const persona = leading.querySelector("[data-testid='iab-assistant-context-button']");
     const attach = leading.querySelector("[data-testid='iab-attach-button']");
     expect(picker && persona && attach).toBeTruthy();
