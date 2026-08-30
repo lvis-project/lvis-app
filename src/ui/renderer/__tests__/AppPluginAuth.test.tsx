@@ -22,7 +22,7 @@ describe("App plugin auth routing", () => {
   type PickerUser = ReturnType<typeof makeUser>;
 
   const openPluginCategory = async (user: PickerUser) => {
-    await user.click(screen.getByTestId(TEST_IDS.commandPopoverTrigger));
+    await user.click(screen.getByTestId(TEST_IDS.slashPickerTrigger));
     await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
   };
   const selectPluginView = async (user: PickerUser, label: string) => {
@@ -285,7 +285,7 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.listPluginUiExtensions).toHaveBeenCalled();
     });
-    await user.click(screen.getByTestId(TEST_IDS.commandPopoverTrigger));
+    await user.click(screen.getByTestId(TEST_IDS.slashPickerTrigger));
     // The unified SlashPicker opens on a category drill-down; the plugin-view
     // QuickAction ("…열기") lives under the 바로가기/shortcut group. Drill into
     // it, then select the action.

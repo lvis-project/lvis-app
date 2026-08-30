@@ -57,8 +57,8 @@ export interface ChatComposerDockProps {
   streaming: boolean;
   onInsertSlashCommand: (cmd: string) => void;
   onRunMcpPrompt: (prompt: McpPromptEntry) => void;
-  commandPopoverOpen: boolean;
-  onCommandPopoverOpenChange: (open: boolean) => void;
+  slashPickerOpen: boolean;
+  onSlashPickerOpenChange: (open: boolean) => void;
   ringSlot: React.ReactNode;
   onAttach: () => Promise<void> | void;
   /** App-owned warning for a verified image-capability refusal only. */
@@ -229,8 +229,8 @@ export function ChatComposerDock({
   streaming,
   onInsertSlashCommand,
   onRunMcpPrompt,
-  commandPopoverOpen,
-  onCommandPopoverOpenChange,
+  slashPickerOpen,
+  onSlashPickerOpenChange,
   onImageAttachmentUnavailable,
   onImageAttachmentLimitExceeded,
   ringSlot,
@@ -462,8 +462,8 @@ export function ChatComposerDock({
           onInsertSlashCommand={onInsertSlashCommand}
           onRunMcpPrompt={onRunMcpPrompt}
           commandActions={commandActions}
-          commandPopoverOpen={commandPopoverOpen}
-          onCommandPopoverOpenChange={onCommandPopoverOpenChange}
+          slashPickerOpen={slashPickerOpen}
+          onSlashPickerOpenChange={onSlashPickerOpenChange}
           ringSlot={ringSlot}
           attachDisabled={
             attachments.length >= ATTACH_MAX_COUNT ||

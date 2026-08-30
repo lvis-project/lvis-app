@@ -112,8 +112,8 @@ export interface ChatGroupEnvironment {
   appMode: "chat" | "work";
   onOpenApprovalQueue: () => void;
   commandActions: React.ComponentProps<typeof ChatView>["commandActions"];
-  commandPopoverOpen: boolean;
-  onCommandPopoverOpenChange: Dispatch<SetStateAction<boolean>>;
+  slashPickerOpen: boolean;
+  onSlashPickerOpenChange: Dispatch<SetStateAction<boolean>>;
   /**
    * Which tile shows an overlay card, given the conversation it came from —
    * the window's answer, since only it sees every tile.
@@ -703,8 +703,8 @@ export function ChatGroupSession({
         currentSessionTitle={currentSessionTitle}
         onLoadSession={handleLoadSessionAndRefresh}
         commandActions={env.commandActions}
-        commandPopoverOpen={env.commandPopoverOpen}
-        onCommandPopoverOpenChange={env.onCommandPopoverOpenChange}
+        slashPickerOpen={env.slashPickerOpen}
+        onSlashPickerOpenChange={env.onSlashPickerOpenChange}
         chatGroupId={chatGroupId}
         overlayCardTile={env.overlayCardTile}
         onPluginPrimaryAction={env.onPluginPrimaryAction}

@@ -85,7 +85,7 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
     expect(commands).toContain("/help");
     for (const entry of SLASH_COMMANDS) {
       expect(entry.cmd.startsWith("/")).toBe(true);
-      expect(entry.labelKey).toMatch(/^commandPopoverPanel\.cmd/);
+      expect(entry.labelKey).toMatch(/^slashPickerPanel\.cmd/);
     }
   });
 });
