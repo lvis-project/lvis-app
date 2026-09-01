@@ -54,9 +54,10 @@ export interface OverlayItem {
    *
    * Required, and never minted at render: an insertion card shows this as its
    * relative time, and a card that re-derived "now" whenever it was re-rendered
-   * — which a focus change does, since the card moves between tiles — would
-   * reset its own age in front of the user. Main stamps it on the two emit
-   * paths; a routine item takes the instant it fired.
+   * — a routine's spinner being replaced by its result, or its tile closing and
+   * the card falling to the window band — would reset its own age in front of
+   * the user. Main stamps it on the two emit paths; a routine item takes the
+   * instant it fired.
    */
   createdAt: string;
   /**
@@ -71,6 +72,17 @@ export interface OverlayItem {
    * NOT `source.eventId`: that identifies the plugin EVENT, not a session.
    */
   originSessionId?: string;
+  /**
+   * The tile a card WITHOUT an origin conversation was pinned to, stamped by
+   * the renderer when the card arrived — never by main, which has no focus.
+   *
+   * A plugin trigger and a headless routine have no conversation to belong to,
+   * yet confirming one starts a turn in a tile. Reading live focus at paint
+   * time would let the card slide between tiles while the user reads it, and
+   * the turn would start wherever focus happened to land on the click. Pinning
+   * at arrival makes the tile that shows the card the tile that runs it.
+   */
+  adoptedChatGroupId?: string;
 }
 
 export interface OverlayContextValue {
@@ -90,9 +102,9 @@ export interface OverlayContextValue {
    * Cards the user has expanded, by id.
    *
    * Held here rather than inside the card because the card UNMOUNTS whenever it
-   * moves between tiles (a focus change moves every card with no origin), and a
-   * summary the user opened must not close itself because they looked at
-   * another tile.
+   * changes surface — its pinned tile closes and it falls to the window band,
+   * or its origin conversation is re-opened in another tile — and a summary the
+   * user opened must not close itself because the layout moved around it.
    */
   expandedCardIds: ReadonlySet<string>;
   setCardExpanded: (id: string, expanded: boolean) => void;
@@ -149,6 +161,12 @@ export function OverlayContextProvider({
       // Date.parse() defensive comparison — handles any ISO string normalisation differences.
       // Invalid timestamp on incoming item → drop (stale-by-default); invalid existing → accept incoming.
       let dominated = false;
+      // The pin belongs to the SLOT, not to the push. A routine's spinner and
+      // the result that replaces it are two pushes seconds apart, and focus can
+      // move between them; re-stamping the replacement would carry the card to
+      // whichever tile the user had reached, which is the move the pin exists
+      // to prevent. The first push decides, and the slot keeps that decision.
+      let inheritedPin: string | undefined;
       const filtered = prev.filter((it) => {
         if (item.source.kind === "routine" && it.source.kind === "routine") {
           if (it.source.routineId !== item.source.routineId) return true;
@@ -165,18 +183,24 @@ export function OverlayContextProvider({
             dominated = true;
             return true;
           }
+          inheritedPin ??= it.adoptedChatGroupId;
           return false; // drop existing, incoming is newer (or existing timestamp invalid)
         }
         if (item.source.kind === "plugin" && it.source.kind === "plugin") {
-          return !(
-            it.source.pluginId === item.source.pluginId &&
-            it.source.eventId === item.source.eventId
-          );
+          const replaced = it.source.pluginId === item.source.pluginId
+            && it.source.eventId === item.source.eventId;
+          if (replaced) inheritedPin ??= it.adoptedChatGroupId;
+          return !replaced;
         }
         return true;
       });
       if (dominated) return prev; // stale replay — discard
-      return [...filtered, { ...item }];
+      // The slot's pin wins over the incoming one: the replacement was stamped
+      // from focus a moment ago, and that is exactly the value to discard.
+      return [...filtered, {
+        ...item,
+        ...(inheritedPin === undefined ? {} : { adoptedChatGroupId: inheritedPin }),
+      }];
     });
   }, []);
 

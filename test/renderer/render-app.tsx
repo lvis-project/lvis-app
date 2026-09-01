@@ -41,6 +41,7 @@ export type RenderAppReturn = {
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFired: (r: unknown) => void;
+  emitRoutineRunningStarted: (p: unknown) => void;
   emitPluginEvent: (eventType: string, payload: unknown) => void;
   emitViewActivate: (v: string, settingsTab?: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
@@ -62,6 +63,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitOverlayShow,
     emitOverlayDismiss,
     emitRoutineFired,
+    emitRoutineRunningStarted,
     emitPluginEvent,
     emitViewActivate,
     emitAskUserQuestion,
@@ -90,6 +92,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitOverlayShow,
     emitOverlayDismiss,
     emitRoutineFired,
+    emitRoutineRunningStarted,
     emitPluginEvent,
     emitViewActivate,
     emitAskUserQuestion,

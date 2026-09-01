@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
  * the other line up instead of stepping in and out by a few pixels. The
  * `max-w` clamp is what keeps the lane on-screen in a narrow window.
  */
-export const FLOATING_LANE_ITEM_WIDTH = "w-[23rem] max-w-[calc(100vw-2rem)]";
+export const FLOATING_LANE_ITEM_WIDTH = "w-[23rem] max-w-[calc(100%-2rem)]";
 
 export function FloatingRightLane({ children }: { children: ReactNode }) {
   return (

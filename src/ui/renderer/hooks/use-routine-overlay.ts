@@ -44,10 +44,13 @@ export function useRoutineOverlay({
   api,
   t,
   registry,
+  focusedChatGroupId,
 }: {
   api: Api;
   t: TranslateFn;
   registry: ChatGroupSessionRegistry;
+  /** The tile a card with no origin conversation is pinned to on arrival. */
+  focusedChatGroupId: string;
 }): UseRoutineOverlayResult {
   // runningRoutines tracks in-flight LLM sessions.
   const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
@@ -55,8 +58,27 @@ export function useRoutineOverlay({
   // addFire ref is populated by OverlayContextProvider during render
   // so the IPC subscription below can call it without prop-drilling
   const addFireRef = useRef<OverlayContextValue["addFire"] | null>(null);
+
+  // Read through a ref so a focus change does not tear down the IPC
+  // subscriptions below, which would drop cards mid-flight.
+  const focusedChatGroupIdRef = useRef(focusedChatGroupId);
+  focusedChatGroupIdRef.current = focusedChatGroupId;
+
+  /**
+   * Every card enters the queue here so the pin is stamped in ONE place. A card
+   * that names its origin conversation needs no pin — the tile holding that
+   * session draws it. A card without one is pinned to the focused tile now,
+   * rather than resolved against focus at paint time; see `overlayCardTile`.
+   */
+  const pushCard = useCallback((item: OverlayItem): OverlayItem => {
+    const pinned = item.originSessionId === undefined
+      ? { ...item, adoptedChatGroupId: focusedChatGroupIdRef.current }
+      : item;
+    addFireRef.current?.(pinned);
+    return pinned;
+  }, []);
   const pushRoutineResult = useCallback((evt: RoutineFiredPayload) => {
-    addFireRef.current?.({
+    pushCard({
       id: `${evt.id}-${evt.firedAt}`,
       source: { kind: "routine", routineId: evt.id, firedAt: evt.firedAt },
       title: evt.title,
@@ -75,7 +97,7 @@ export function useRoutineOverlay({
     const unsubStarted = api.onRoutineRunningStarted((payload) => {
       const { routineId, firedAt, title } = payload;
       setRunningRoutines((prev) => new Set([...prev, routineId]));
-      addFireRef.current?.({
+      pushCard({
         id: `${routineId}-running`,
         source: { kind: "routine", routineId, firedAt },
         title,
@@ -103,7 +125,7 @@ export function useRoutineOverlay({
         return next;
       });
       const failedAt = new Date().toISOString();
-      addFireRef.current?.({
+      pushCard({
         id: `${evt.routineId}-running`,
         source: { kind: "routine", routineId: evt.routineId, firedAt: failedAt },
         title: t("app.routineFailedTitle"),
@@ -138,8 +160,10 @@ export function useRoutineOverlay({
     if (typeof api.onOverlayShow !== "function") return;
     const unsubShow = api.onOverlayShow((item) => {
       // Populate lookup ref so handlePluginPrimaryAction can find the item
-      overlayItemsRef.current.set(item.id, item);
-      addFireRef.current?.(item);
+      // The queue and this lookup hold the SAME object: the handler below reads
+      // the map, and a card whose pin lived only in the queue would be acted on
+      // without it.
+      overlayItemsRef.current.set(item.id, pushCard(item));
     });
     const unsubDismiss = typeof api.onOverlayDismiss === "function"
       ? api.onOverlayDismiss((id) => {
@@ -174,7 +198,7 @@ export function useRoutineOverlay({
       // has no conversation to contradict, so the group the caller named (a
       // tile's own, or the focused one for the window's region) stands.
       const targetGroupId = item.originSessionId === undefined
-        ? chatGroupId
+        ? item.adoptedChatGroupId ?? chatGroupId
         : tileHoldingSession(registry.readTiles(), item.originSessionId)?.chatGroupId;
       const tile = targetGroupId === undefined ? undefined : registry.read(targetGroupId);
       if (!tile) {
