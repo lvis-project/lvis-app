@@ -453,6 +453,18 @@ describe("model card (status-row model cell)", () => {
     const { getByTestId, findByTestId, queryByTestId, unmount } = renderBar({ onOpenModelSettings, enableThinkingChat: true });
     const chip = getByTestId("iab-status-reasoning");
     expect(chip.getAttribute("data-level")).not.toBe("0");
+    // The level is drawn, not spelled: the gauge fill has to track the level,
+    // and the word must not come back as visible text beside it.
+    const gauge = getByTestId("iab-reasoning-gauge");
+    expect(gauge.getAttribute("data-filled"))
+      .toBe(String((Number(chip.getAttribute("data-level")) / 3) * 100));
+    // The fill is confined to the bulb, not the whole icon box: the glyph's
+    // base lines take the bottom of the box, so a fill measured over the box
+    // would spend the first level where nothing is drawn and level 1 would be
+    // indistinguishable from level 0.
+    expect(gauge.querySelectorAll("svg")[1].getAttribute("style")).toContain("41.666");
+    expect(chip.textContent).toBe("");
+    expect(chip.getAttribute("aria-label")).toContain(":");
     fireEvent.click(chip);
     expect(await findByTestId("model-quick-picker")).toBeTruthy();
     expect(queryByTestId("reasoning-popover")).toBeNull();

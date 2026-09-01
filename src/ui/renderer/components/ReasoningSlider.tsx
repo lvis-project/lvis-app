@@ -30,6 +30,9 @@ export interface ReasoningLevelOptions {
 
 export type ReasoningLevel = 0 | 1 | 2 | 3;
 
+/** Top of the ladder. The slider's range and any gauge read the same number. */
+export const REASONING_LEVEL_MAX = 3;
+
 /**
  * The reasoning level as ONE value the composer's controls all read.
  *
@@ -121,7 +124,7 @@ export function ReasoningLevelControl({
       <input
         type="range"
         min={0}
-        max={3}
+        max={REASONING_LEVEL_MAX}
         step={1}
         value={level}
         onChange={(e) => apply(Number(e.target.value))}

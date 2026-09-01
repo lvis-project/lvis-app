@@ -32,7 +32,8 @@ import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import { SlashPicker, type QuickAction } from "./SlashPicker.js";
-import { ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
+import { REASONING_LEVEL_MAX, ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
+import type { ReasoningLevel } from "./ReasoningSlider.js";
 import { getApi } from "../api-client.js";
 import { isIpcErrorResult } from "../types.js";
 import { modelCardChoices, type ModelCardChoice } from "../hooks/use-settings.js";
@@ -555,6 +556,45 @@ function StatusSubRow({
  * The reasoning chip beside the model cell is a second way in, not a
  * second control: it shows the current level and opens this same card.
  */
+/**
+ * How deep the model thinks, drawn as how full the bulb is. The status row is a
+ * glance surface: a word costs more width than the icon it sits next to and
+ * still has to be read. The outline always draws so the control stays findable
+ * at level 0, where there is no fill at all; the fill is the gauge and rises
+ * from the base. The level stays in the accessible name on the button, so
+ * nothing that cannot see the fill loses the value.
+ */
+// The bulb's own extent inside the icon's 24-unit box, as fractions of the
+// icon's height. The glyph is a bulb (y 2..14) over two base lines (y 18, 22);
+// only the bulb is the gauge. Filling the whole box instead would spend the
+// first third of the ladder on the base lines, where nothing shows — level 1
+// then looks exactly like level 0.
+const BULB_TOP = 2 / 24;
+const BULB_BOTTOM = 14 / 24;
+
+function ReasoningGauge({ level }: { level: ReasoningLevel }): React.JSX.Element {
+  const filled = level / REASONING_LEVEL_MAX;
+  // Grows from the base of the bulb toward its top.
+  const clipTop = (BULB_BOTTOM - filled * (BULB_BOTTOM - BULB_TOP)) * 100;
+  const clipBottom = (1 - BULB_BOTTOM) * 100;
+  return (
+    <span
+      className="relative inline-flex h-3.5 w-3.5 shrink-0"
+      data-testid="iab-reasoning-gauge"
+      data-filled={filled * 100}
+      aria-hidden="true"
+    >
+      <Lightbulb className="absolute inset-0 h-3.5 w-3.5 opacity-45" />
+      <Lightbulb
+        className="absolute inset-0 h-3.5 w-3.5 transition-[clip-path] duration-(--motion-fast) ease-(--motion-ease-standard) motion-reduce:transition-none"
+        fill="currentColor"
+        stroke="none"
+        style={{ clipPath: `inset(${clipTop}% 0 ${clipBottom}% 0)` }}
+      />
+    </span>
+  );
+}
+
 function ModelQuickPicker({
   vendorModel,
   displayModel,
@@ -662,10 +702,9 @@ function ModelQuickPicker({
               openedByChipRef.current = !open;
               setOpen(!open);
             }}
-            className={`flex shrink-0 cursor-pointer items-center gap-0.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
+            className={`flex shrink-0 cursor-pointer items-center transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
           >
-            <Lightbulb className="h-3 w-3 shrink-0" aria-hidden="true" />
-            <span className="shrink-0 tabular-nums">{levelLabels[level]}</span>
+            <ReasoningGauge level={level} />
           </button>
         </>
       ) : null}
