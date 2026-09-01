@@ -21,9 +21,13 @@ export interface AgentSpawnEvent<TEntry = unknown> {
   /**
    * The conversation that spawned this sub-agent. Every tile receives every
    * frame on one channel; a tile keeps only the frames of the conversation it
-   * is showing. Absent only when the tool ran without a session in context.
+   * is showing, so an unlabelled frame is one every tile keeps — N cards for
+   * one sub-agent, and the tile that acts on it is not the one that spawned it.
+   * Required for that reason: a spawn is always requested by a parent that has
+   * a session, and the id survives the whole way (`agent-spawn.ts` stamps it on
+   * every frame), so there is nothing for an absent value to mean.
    */
-  parentSessionId?: string;
+  parentSessionId: string;
   taskState: A2AProjectedTaskState;
   type: "start" | "activity" | "done" | "error";
   title?: string;

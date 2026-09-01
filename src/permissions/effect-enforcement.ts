@@ -175,6 +175,13 @@ export interface EffectGateContext {
   readonly headless: boolean;
   /** The executing tool's name — surfaced in the approval dock. */
   readonly toolName: string;
+  /**
+   * The conversation whose turn is blocked on this effect, when there is one.
+   * It decides which tile draws the modal; without it the ask lands in the
+   * window's chrome, away from the transcript that is waiting on it. Absent for
+   * effects raised outside a turn (a plugin's own background work).
+   */
+  readonly sessionId?: string;
   /** Invocation-scoped `allow-once` descriptor keys (discarded when the frame pops). */
   readonly onceGrants: Set<string>;
 }
@@ -345,6 +352,9 @@ export async function gateMutatingEffect(params: {
     category: "agent-action",
     kind: "agent-action",
     toolName: ctx.toolName,
+    // Attribute the modal to the conversation that is blocked on it, the same
+    // way an invocation approval does.
+    ...(ctx.sessionId === undefined ? {} : { sessionId: ctx.sessionId }),
     // `meta` keeps the sandbox-capability row out of this non-execution modal.
     toolCategory: "meta",
     // NON-SECRET descriptor only (host-owned effect class + forensic target).

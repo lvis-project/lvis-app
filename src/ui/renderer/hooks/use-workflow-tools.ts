@@ -122,7 +122,22 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
       );
     });
     const unsubSpawn = api.onAgentSpawnEvent?.((event) => {
-      if (ownsSession && event.parentSessionId && !ownsSession(event.parentSessionId)) return;
+      // Narrower than the question above, deliberately: a question addressed to
+      // a session no tile holds is ADOPTED by the focused tile, because a card
+      // nobody draws is a gate that times out against a blank window. A spawn
+      // frame has no such deadline — it is a progress row in the panel of the
+      // conversation that spawned it, and adopting it would put another
+      // conversation's agents in this tile's list.
+      //
+      // The type says this field is always there; the IPC boundary does not
+      // enforce types, so a frame that breaks the contract is dropped AND said
+      // out loud, because dropping it silently is indistinguishable from the
+      // sub-agent never having started.
+      if (typeof event.parentSessionId !== "string" || event.parentSessionId.length === 0) {
+        console.warn("[lvis] agent-spawn frame names no conversation; dropped", event.spawnId);
+        return;
+      }
+      if (ownsSession && !ownsSession(event.parentSessionId)) return;
       setSubAgentSpawns((prev) => {
         const existingIdx = prev.findIndex((s) => s.spawnId === event.spawnId);
         if (event.type === "start") {
