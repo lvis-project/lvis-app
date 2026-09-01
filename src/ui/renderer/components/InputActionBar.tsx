@@ -569,11 +569,11 @@ function StatusSubRow({
 // only the bulb is the gauge. Filling the whole box instead would spend the
 // first third of the ladder on the base lines, where nothing shows — level 1
 // then looks exactly like level 0.
-export const BULB_TOP = 2 / 24;
-export const BULB_BOTTOM = 14 / 24;
+const BULB_TOP = 2 / 24;
+const BULB_BOTTOM = 14 / 24;
 
 /** Where the fill's top edge sits, as a percentage down from the icon's top. */
-export function reasoningGaugeClipTop(level: ReasoningLevel): number {
+function reasoningGaugeClipTop(level: ReasoningLevel): number {
   const filled = level / REASONING_LEVEL_MAX;
   return (BULB_BOTTOM - filled * (BULB_BOTTOM - BULB_TOP)) * 100;
 }
