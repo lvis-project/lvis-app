@@ -448,11 +448,75 @@ describe("model card (status-row model cell)", () => {
     expect(onOpenModelSettings).not.toHaveBeenCalled();
   });
 
+  it("fills the bulb by level, and never outside it", async () => {
+    // The numbers are the geometry, not a restatement of the source: the bulb
+    // occupies y 2..14 of the icon's 24-unit box, so a full gauge clips 2/24
+    // from the top and an empty one 14/24, and the bottom clip is the base
+    // lines below the bulb at every level. A gauge measured over the whole box
+    // would put level 1 at 66.67% from the top — inside the base lines, where
+    // nothing is drawn — and level 1 would render identically to level 0.
+    const cases: Array<{ budget: number; enabled: boolean; level: string; top: number }> = [
+      { budget: 10_000, enabled: false, level: "0", top: 58.3333 },
+      { budget: 4_000, enabled: true, level: "1", top: 41.6667 },
+      { budget: 10_000, enabled: true, level: "2", top: 25 },
+      { budget: 24_000, enabled: true, level: "3", top: 8.3333 },
+    ];
+    for (const testCase of cases) {
+      getSettings.mockResolvedValue({
+        llm: {
+          provider: "azure-foundry",
+          vendors: { "azure-foundry": { thinkingBudgetTokens: testCase.budget } },
+        },
+      });
+      const { getByTestId, findByTestId, unmount } = renderBar({
+        enableThinkingChat: testCase.enabled,
+      });
+      await findByTestId("iab-reasoning-gauge");
+      await waitFor(() => {
+        expect(getByTestId("iab-status-reasoning").getAttribute("data-level"))
+          .toBe(testCase.level);
+      });
+      const clip = getByTestId("iab-reasoning-gauge")
+        .querySelectorAll("svg")[1]!
+        .getAttribute("style") ?? "";
+      const [top, bottom] = [...clip.matchAll(/([\d.]+)%/g)].map((m) => Number(m[1]));
+      expect(top).toBeCloseTo(testCase.top, 3);
+      // 1 - 14/24: the base lines are never part of the gauge.
+      expect(bottom).toBeCloseTo(41.6667, 3);
+      unmount();
+    }
+  });
+
+  it("reads its geometry off the glyph it actually draws", async () => {
+    // BULB_TOP/BULB_BOTTOM are the bulb's extent inside lucide's lightbulb
+    // path. lucide redraws icons in minor releases and the dependency is a
+    // caret range, so a redraw would silently move the band the gauge fills
+    // while every gate in the repo stayed green — nothing else reads the path.
+    // Asserting against what is actually rendered is what makes that loud.
+    const { getByTestId, findByTestId } = renderBar({ enableThinkingChat: true });
+    await findByTestId("iab-reasoning-gauge");
+    const paths = [...getByTestId("iab-reasoning-gauge")
+      .querySelectorAll("svg")[0]!
+      .querySelectorAll("path")]
+      .map((path) => path.getAttribute("d") ?? "");
+
+    // The bulb: starts at y 14 and arcs over a circle of radius 6 centred at
+    // y 8, so the glyph spans y 2..14 — the band the gauge fills.
+    expect(paths.some((d) => d.startsWith("M15 14") && d.includes("A6 6 0 0 0 6 8"))).toBe(true);
+    // The base lines, at y 18 and 22: below the bulb, never part of the gauge.
+    expect(paths.filter((d) => /^M\d+ (18|22)/.test(d))).toHaveLength(2);
+  });
+
   it("the reasoning chip is a second way into the same card, and goes with reasoning", async () => {
     const onOpenModelSettings = vi.fn();
     const { getByTestId, findByTestId, queryByTestId, unmount } = renderBar({ onOpenModelSettings, enableThinkingChat: true });
     const chip = getByTestId("iab-status-reasoning");
     expect(chip.getAttribute("data-level")).not.toBe("0");
+    // The level is drawn, not spelled: the gauge fill has to track the level,
+    // and the word must not come back as visible text beside it.
+    expect(getByTestId("iab-reasoning-gauge")).toBeTruthy();
+    expect(chip.textContent).toBe("");
+    expect(chip.getAttribute("aria-label")).toContain(":");
     fireEvent.click(chip);
     expect(await findByTestId("model-quick-picker")).toBeTruthy();
     expect(queryByTestId("reasoning-popover")).toBeNull();

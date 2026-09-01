@@ -32,7 +32,8 @@ import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import { SlashPicker, type QuickAction } from "./SlashPicker.js";
-import { ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
+import { REASONING_LEVEL_MAX, ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
+import type { ReasoningLevel } from "./ReasoningSlider.js";
 import { getApi } from "../api-client.js";
 import { isIpcErrorResult } from "../types.js";
 import { modelCardChoices, type ModelCardChoice } from "../hooks/use-settings.js";
@@ -555,6 +556,54 @@ function StatusSubRow({
  * The reasoning chip beside the model cell is a second way in, not a
  * second control: it shows the current level and opens this same card.
  */
+/**
+ * How deep the model thinks, drawn as how full the bulb is. The status row is a
+ * glance surface: a word costs more width than the icon it sits next to and
+ * still has to be read. The outline always draws so the control stays findable
+ * at level 0, where there is no fill at all; the fill is the gauge and rises
+ * from the base. The level stays in the accessible name on the button, so
+ * nothing that cannot see the fill loses the value.
+ */
+// The bulb's own extent inside the icon's 24-unit box, as fractions of the
+// icon's height. The glyph is a bulb (y 2..14) over two base lines (y 18, 22);
+// only the bulb is the gauge. Filling the whole box instead would spend the
+// first third of the ladder on the base lines, where nothing shows — level 1
+// then looks exactly like level 0.
+const BULB_TOP = 2 / 24;
+const BULB_BOTTOM = 14 / 24;
+
+/** Where the fill's top edge sits, as a percentage down from the icon's top. */
+function reasoningGaugeClipTop(level: ReasoningLevel): number {
+  const filled = level / REASONING_LEVEL_MAX;
+  return (BULB_BOTTOM - filled * (BULB_BOTTOM - BULB_TOP)) * 100;
+}
+
+function ReasoningGauge({ level }: { level: ReasoningLevel }): React.JSX.Element {
+  const clipBottom = (1 - BULB_BOTTOM) * 100;
+  return (
+    <span
+      className="relative inline-flex h-3 w-3 shrink-0"
+      data-testid="iab-reasoning-gauge"
+      data-level={level}
+      aria-hidden="true"
+    >
+      {/* At level 0 the outline is the ONLY thing drawn, so it carries the
+          control's whole contrast budget and stays at the row's own token
+          alpha. Above 0 the fill is what the eye reads, and dimming the
+          unfilled remainder is what makes the level legible at 12px. */}
+      <Lightbulb
+        className={`absolute inset-0 h-3 w-3 ${level > 0 ? "opacity-(--opacity-muted)" : ""}`}
+      />
+      <Lightbulb
+        className="absolute inset-0 h-3 w-3 transition-[clip-path] duration-(--motion-fast) ease-(--motion-ease-standard) motion-reduce:transition-none"
+        fill="currentColor"
+        stroke="none"
+        style={{ clipPath: `inset(${reasoningGaugeClipTop(level)}% 0 ${clipBottom}% 0)` }}
+      />
+    </span>
+  );
+}
+
 function ModelQuickPicker({
   vendorModel,
   displayModel,
@@ -662,10 +711,9 @@ function ModelQuickPicker({
               openedByChipRef.current = !open;
               setOpen(!open);
             }}
-            className={`flex shrink-0 cursor-pointer items-center gap-0.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
+            className={`-m-1.5 flex shrink-0 cursor-pointer items-center p-1.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
           >
-            <Lightbulb className="h-3 w-3 shrink-0" aria-hidden="true" />
-            <span className="shrink-0 tabular-nums">{levelLabels[level]}</span>
+            <ReasoningGauge level={level} />
           </button>
         </>
       ) : null}

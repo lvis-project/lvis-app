@@ -31,6 +31,15 @@ export interface ReasoningLevelOptions {
 export type ReasoningLevel = 0 | 1 | 2 | 3;
 
 /**
+ * Top of the ladder. The slider's range, the clamp that pairs with it, and the
+ * composer's gauge all read this one number. The type above and `levelLabels`
+ * below still spell the rungs out, so adding one is still a deliberate edit in
+ * three places — this constant removes the pair that could silently disagree,
+ * where the slider offers a level the clamp then throws away.
+ */
+export const REASONING_LEVEL_MAX = 3;
+
+/**
  * The reasoning level as ONE value the composer's controls all read.
  *
  * Level 0 is thinking off; 1–3 are the depths, persisted per vendor as a
@@ -88,7 +97,7 @@ export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions):
 
   const apply = useCallback(
     (next: number) => {
-      const lvl = Math.max(0, Math.min(3, Math.round(next))) as ReasoningLevel;
+      const lvl = Math.max(0, Math.min(REASONING_LEVEL_MAX, Math.round(next))) as ReasoningLevel;
       if (lvl === 0) {
         if (enabled) void onToggle(false);
         return;
@@ -121,7 +130,7 @@ export function ReasoningLevelControl({
       <input
         type="range"
         min={0}
-        max={3}
+        max={REASONING_LEVEL_MAX}
         step={1}
         value={level}
         onChange={(e) => apply(Number(e.target.value))}
