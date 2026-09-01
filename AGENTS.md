@@ -488,7 +488,9 @@ precedent.
   module-private; what they export is `*ContextValue`, `*ContextProvider` and
   the hooks. The name is truthful about the file's subject but is not a
   same-named export, so it is the minority side of the `.tsx` clause.
-- One remaining `export default` site: `SlashPickerPanel.tsx`.
+- No `export default` site left in production source; the only ones are
+  plugin fixtures inside `__tests__`, where the default export IS the plugin
+  entry contract.
 - Three spellings of the test-seam suffix, by distinct name over the file set:
   `ForTest` (26), `ForTests` (16), `ForTesting` (5). `ForTest` is the standard;
   the other two are the backlog.

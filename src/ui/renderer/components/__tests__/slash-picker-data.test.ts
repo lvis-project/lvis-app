@@ -7,10 +7,9 @@ import {
   CATEGORY_ICON,
   CATEGORY_ORDER,
   catLabel,
-  catDescription,
-  filterMcpPrompts,
   filterMcpTools,
   filterSkills,
+  buildComposerMenuSections,
   type McpPromptEntry,
   type McpToolEntry,
   type SkillEntry,
@@ -52,11 +51,9 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
   it("resolves human labels for the new categories", () => {
     expect(catLabel("mcp").length).toBeGreaterThan(0);
     expect(catLabel("skills").length).toBeGreaterThan(0);
-    // Every category needs BOTH a label and a drill-down description —
-    // `catLabel`/`catDescription` switch exhaustively, so a category added
-    // without its cases would return undefined here.
+    // `catLabel` switches exhaustively, so a category added without its case
+    // would return undefined here.
     expect(catLabel("mcp-prompts").length).toBeGreaterThan(0);
-    expect(catDescription("mcp-prompts").length).toBeGreaterThan(0);
   });
 
   it("filters MCP tools by name or server id", () => {
@@ -65,18 +62,49 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
     expect(filterMcpTools(mcpTools, "linear")).toEqual([mcpTools[1]]);
   });
 
-  it("filters MCP prompts by name, title, description, or server id", () => {
-    expect(filterMcpPrompts(mcpPrompts, "")).toHaveLength(2);
-    expect(filterMcpPrompts(mcpPrompts, "triage")).toEqual([mcpPrompts[0]]);
-    expect(filterMcpPrompts(mcpPrompts, "inbound")).toEqual([mcpPrompts[0]]);
-    expect(filterMcpPrompts(mcpPrompts, "daily")).toEqual([mcpPrompts[1]]);
-    expect(filterMcpPrompts(mcpPrompts, "linear")).toEqual([mcpPrompts[1]]);
-  });
-
   it("filters skills by name or description", () => {
     expect(filterSkills(skills, "")).toHaveLength(2);
     expect(filterSkills(skills, "research")).toEqual([skills[0]]);
     expect(filterSkills(skills, "diff")).toEqual([skills[1]]);
+  });
+
+  it("carries a prompt's and a skill's description into the row's second line", () => {
+    // The deleted panel drew two lines per row. A native menu keeps the second
+    // one in `sublabel`, so dropping it here would silently cost the user every
+    // description while every other assertion still passed.
+    const sections = buildComposerMenuSections({
+      actions: [],
+      plugins: [],
+      mcpTools,
+      mcpPrompts,
+      skills,
+      onInsert: () => {},
+      onSelectPlugin: () => {},
+      onRunMcpPrompt: () => {},
+    });
+    const rows = new Map(sections.flatMap((s) => s.items).map((row) => [row.id, row]));
+    expect(rows.get("category:mcp-prompts")!.submenu!.map((r) => r.sublabel))
+      .toEqual(["Sort inbound issues", undefined]);
+    expect(rows.get("category:skills")!.submenu!.map((r) => r.sublabel))
+      .toEqual(["Fan-out web research", "Review the current diff"]);
+  });
+
+  it("leaves out a category with nothing in it rather than drawing an empty submenu", () => {
+    const sections = buildComposerMenuSections({
+      actions: [],
+      plugins: [],
+      mcpTools: [],
+      mcpPrompts: [],
+      skills: [],
+      onInsert: () => {},
+      onSelectPlugin: () => {},
+      onRunMcpPrompt: () => {},
+    });
+    // Only the built-in commands survive: no actions, no plugins, no MCP, no
+    // skills. The empty shortcut section is dropped too, so what is left is one
+    // section holding one category.
+    expect(sections).toHaveLength(1);
+    expect(sections[0]!.items.map((row) => row.id)).toEqual(["category:command"]);
   });
 
   it("SLASH_COMMANDS is the one built-in command list: unique commands, each with a catalog label", () => {

@@ -133,4 +133,6 @@ export const UI = {
   assistantContextAction: "lvis:ui:assistant-context-action",
   nativeContextMenu: "lvis:ui:native-context-menu",
   nativeContextAction: "lvis:ui:native-context-action",
+  dynamicMenu: "lvis:ui:dynamic-menu",
+  dynamicMenuAction: "lvis:ui:dynamic-menu-action",
 } as const;

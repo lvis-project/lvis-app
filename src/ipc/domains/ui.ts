@@ -11,6 +11,10 @@ import type {
 import {
   NATIVE_CONTEXT_MENU_COMMANDS,
   NATIVE_CONTEXT_MENU_COMMANDS_BY_KIND,
+  NATIVE_MENU_MAX_DEPTH,
+  NATIVE_MENU_MAX_ITEMS,
+  sanitizeNativeMenuLabel,
+  type DynamicNativeMenuAction,
   type NativeContextMenuAction,
   type NativeContextMenuCommand,
   type NativeContextMenuKind,
@@ -173,6 +177,14 @@ function normalizePayload(value: unknown): AssistantContextMenuPayload | null {
   };
 }
 
+/**
+ * An accelerator is a key spec, not text: anything outside this shape is
+ * dropped rather than handed to Electron, which throws on a malformed one and
+ * would take the whole menu down with it. At least one modifier is required so
+ * a row can never claim a bare keystroke the app itself may want.
+ */
+const ACCELERATOR_PATTERN = /^(?:(?:CommandOrControl|CmdOrCtrl|Command|Cmd|Control|Ctrl|Alt|Option|AltGr|Shift|Super|Meta)\+)+[A-Za-z0-9]$/;
+
 function normalizeNativePayload(value: unknown): NativeContextMenuPayload | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
@@ -235,6 +247,104 @@ function sendAction(event: IpcMainInvokeEvent, action: AssistantContextMenuActio
 function sendNativeAction(event: IpcMainInvokeEvent, action: NativeContextMenuAction): void {
   if (event.sender.isDestroyed()) return;
   event.sender.send(UI.nativeContextAction, action);
+}
+
+/** Popped-up menus, held until the OS reports them closed. */
+const liveDynamicMenus = new Set<Menu>();
+
+function sendDynamicMenuAction(
+  event: IpcMainInvokeEvent,
+  action: DynamicNativeMenuAction,
+): void {
+  if (event.sender.isDestroyed()) return;
+  event.sender.send(UI.dynamicMenuAction, action);
+}
+
+/**
+ * A dynamic menu carries rows main did not author, so nothing here trusts the
+ * payload's shape: a row is kept only if it has an id and something to draw
+ * after sanitising, the tree is bounded in depth and total rows, and an id is
+ * echoed back verbatim rather than interpreted.
+ */
+function buildDynamicMenuItems(
+  event: IpcMainInvokeEvent,
+  requestId: string,
+  items: unknown,
+  depth: number,
+  budget: { remaining: number },
+): MenuItemConstructorOptions[] {
+  if (!Array.isArray(items) || depth > NATIVE_MENU_MAX_DEPTH) return [];
+  const built: MenuItemConstructorOptions[] = [];
+  for (const raw of items) {
+    if (budget.remaining <= 0) break;
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    if (typeof item.id !== "string" || item.id.length === 0) continue;
+    if (typeof item.label !== "string") continue;
+    const label = sanitizeNativeMenuLabel(item.label);
+    if (label.length === 0) continue;
+    const id = item.id;
+    // Children are drawn before the parent claims its own slot, so a container
+    // whose subtree did not survive the budget can be dropped whole. Demoting
+    // it to a leaf instead would draw a row that reports a choice the renderer
+    // registered no callback for: the menu closes, nothing runs, and the reply
+    // consumes the pending request so the NEXT choice is dead too.
+    const declaresSubmenu = Array.isArray(item.submenu) && item.submenu.length > 0;
+    const submenu = declaresSubmenu
+      ? buildDynamicMenuItems(event, requestId, item.submenu, depth + 1, budget)
+      : [];
+    if (declaresSubmenu && submenu.length === 0) continue;
+    budget.remaining -= 1;
+    const sublabel = typeof item.sublabel === "string"
+      ? sanitizeNativeMenuLabel(item.sublabel)
+      : "";
+    built.push({
+      label,
+      ...(sublabel.length > 0 ? { sublabel } : {}),
+      ...(typeof item.accelerator === "string" && ACCELERATOR_PATTERN.test(item.accelerator)
+        ? { accelerator: item.accelerator }
+        : {}),
+      enabled: item.enabled !== false,
+      // A row with children opens them; only a leaf reports a choice.
+      ...(submenu.length > 0
+        ? { submenu }
+        : { click: () => sendDynamicMenuAction(event, { requestId, id }) }),
+    });
+  }
+  return built;
+}
+
+function buildDynamicMenu(
+  event: IpcMainInvokeEvent,
+  payload: unknown,
+): { menu: Menu; x: number; y: number } | null {
+  if (!payload || typeof payload !== "object") return null;
+  const raw = payload as Record<string, unknown>;
+  const requestId = cleanRequestId(raw.requestId);
+  const x = cleanCoordinate(raw.x);
+  const y = cleanCoordinate(raw.y);
+  if (!requestId || x === null || y === null || !Array.isArray(raw.sections)) return null;
+
+  const budget = { remaining: NATIVE_MENU_MAX_ITEMS };
+  const template: MenuItemConstructorOptions[] = [];
+  for (const section of raw.sections) {
+    if (!section || typeof section !== "object") continue;
+    const items = buildDynamicMenuItems(
+      event,
+      requestId,
+      (section as Record<string, unknown>).items,
+      1,
+      budget,
+    );
+    if (items.length === 0) continue;
+    if (template.length > 0) template.push({ type: "separator" });
+    template.push(...items);
+  }
+  if (template.length === 0) return null;
+  // The clamped coordinates travel with the menu: the raw payload's are a DOM
+  // rect the renderer never bounded, and a clipped composer reports a negative
+  // left edge, which would pop the menu off every display.
+  return { menu: Menu.buildFromTemplate(template), x, y };
 }
 
 function buildAssistantContextMenu(
@@ -316,6 +426,29 @@ export function registerUiHandlers(deps: IpcDeps): void {
       window,
       x: normalized.x,
       y: normalized.y,
+    });
+    return { ok: true };
+  });
+
+  ipcMain.handle(UI.dynamicMenu, (event, payload: unknown) => {
+    const window = hostWindowForUiEvent(event);
+    if (!window) {
+      auditUnauthorized(auditLogger, UI.dynamicMenu, event);
+      return UNAUTHORIZED_FRAME;
+    }
+
+    const built = buildDynamicMenu(event, payload);
+    if (!built) return { ok: false, error: "invalid-dynamic-menu" };
+
+    // Electron does not retain a popped-up menu for the caller, so the local
+    // binding is the only reference keeping it alive; release it when the OS
+    // closes the menu rather than when this handler returns.
+    liveDynamicMenus.add(built.menu);
+    built.menu.popup({
+      window,
+      x: built.x,
+      y: built.y,
+      callback: () => liveDynamicMenus.delete(built.menu),
     });
     return { ok: true };
   });

@@ -6,6 +6,7 @@ import { Terminal, Zap, Puzzle, Server, Sparkles, MessageSquareText, type Lucide
 import { t } from "../../../i18n/runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
+import type { NativeMenuRow } from "../hooks/use-native-context-menu.js";
 
 /** A single live MCP-server tool, namespaced by its server. */
 export interface McpToolEntry {
@@ -94,24 +95,6 @@ export function catLabel(category: Category): string {
   }
 }
 
-/** Short description shown under a category in the drill-down list. */
-export function catDescription(category: Category): string {
-  switch (category) {
-    case "command":
-      return t("slashPicker.catCommandDesc");
-    case "shortcut":
-      return t("slashPicker.catShortcutDesc");
-    case "plugin":
-      return t("slashPicker.catPluginDesc");
-    case "mcp":
-      return t("slashPicker.catMcpDesc");
-    case "mcp-prompts":
-      return t("slashPicker.catMcpPromptsDesc");
-    case "skills":
-      return t("slashPicker.catSkillsDesc");
-  }
-}
-
 /** Normalize a typed query for case-insensitive substring matching. */
 export function normalizeSlashQuery(query: string): string {
   return query.trim().toLowerCase();
@@ -152,23 +135,82 @@ export function filterMcpTools(tools: McpToolEntry[], query: string): McpToolEnt
   );
 }
 
-/** Filter server-declared prompts by name, title, description, or server id. */
-export function filterMcpPrompts(prompts: McpPromptEntry[], query: string): McpPromptEntry[] {
-  const q = normalizeSlashQuery(query);
-  if (!q) return prompts;
-  return prompts.filter((p) =>
-    p.name.toLowerCase().includes(q)
-    || p.serverId.toLowerCase().includes(q)
-    || (p.title ?? "").toLowerCase().includes(q)
-    || (p.description ?? "").toLowerCase().includes(q),
-  );
-}
-
 /** Filter registered skills by name or description substring. */
 export function filterSkills(skills: SkillEntry[], query: string): SkillEntry[] {
   const q = normalizeSlashQuery(query);
   if (!q) return skills;
   return skills.filter(
     (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+  );
+}
+
+/**
+ * The composer's command menu as native menu rows.
+ *
+ * The picker used to be a search box over a flat list; a native menu cannot
+ * filter as you type, so the shape carries the weight instead. What the user
+ * reaches for constantly — the view shortcuts — stays flat at the top, and each
+ * long, install-dependent list (plugins, MCP tools and prompts, skills) sits
+ * behind its own submenu. Typing to find something is still the "/" menu in the
+ * composer, which is unchanged.
+ *
+ * A category with nothing in it is left out rather than shown empty: an
+ * always-present row that never opens teaches the user it is broken.
+ */
+export function buildComposerMenuSections(input: {
+  actions: QuickAction[];
+  plugins: PluginEntry[];
+  mcpTools: McpToolEntry[];
+  mcpPrompts: McpPromptEntry[];
+  skills: SkillEntry[];
+  onInsert: (cmd: string) => void;
+  onSelectPlugin: (viewKey: string) => void;
+  onRunMcpPrompt: (prompt: McpPromptEntry) => void;
+}): Array<{ items: NativeMenuRow[] }> {
+  const shortcuts: NativeMenuRow[] = input.actions.map((action) => ({
+    id: `shortcut:${action.id}`,
+    label: action.label,
+    onSelect: () => action.run(),
+  }));
+
+  const categories: NativeMenuRow[] = [];
+  const push = (category: Category, rows: NativeMenuRow[]): void => {
+    if (rows.length === 0) return;
+    categories.push({ id: `category:${category}`, label: catLabel(category), submenu: rows });
+  };
+
+  push("command", SLASH_COMMANDS.map((command) => ({
+    id: `command:${command.cmd}`,
+    label: `${command.cmd} — ${t(command.labelKey)}`,
+    // The trailing space is what lets the user keep typing arguments.
+    onSelect: () => input.onInsert(`${command.cmd} `),
+  })));
+  push("plugin", input.plugins.map((plugin) => ({
+    id: `plugin:${plugin.viewKey}`,
+    label: plugin.label,
+    onSelect: () => input.onSelectPlugin(plugin.viewKey),
+  })));
+  push("mcp", input.mcpTools.map((tool) => ({
+    id: `mcp:${tool.serverId}:${tool.name}`,
+    label: tool.name,
+    onSelect: () => input.onInsert(`/${tool.name} `),
+  })));
+  push("mcp-prompts", input.mcpPrompts.map((prompt) => ({
+    id: `mcp-prompt:${prompt.serverId}:${prompt.name}`,
+    label: prompt.title ?? prompt.name,
+    // The deleted panel drew two lines per row; `sublabel` is where a native
+    // menu keeps the second one, so what a prompt or skill DOES survives here.
+    ...(prompt.description === undefined ? {} : { sublabel: prompt.description }),
+    onSelect: () => input.onRunMcpPrompt(prompt),
+  })));
+  push("skills", input.skills.map((skill) => ({
+    id: `skill:${skill.name}`,
+    label: skill.name,
+    sublabel: skill.description,
+    onSelect: () => input.onInsert(`/${skill.name} `),
+  })));
+
+  return [{ items: shortcuts }, { items: categories }].filter(
+    (section) => section.items.length > 0,
   );
 }

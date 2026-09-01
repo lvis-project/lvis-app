@@ -55,6 +55,8 @@ import type {
 import type {
   NativeContextMenuAction,
   NativeContextMenuPayload,
+  DynamicNativeMenuAction,
+  DynamicNativeMenuPayload,
 } from "../../shared/native-context-menu.js";
 import type { AiProviderPingIpcResult } from "../../shared/ai-provider-ping.js";
 import type {
@@ -1911,6 +1913,12 @@ export interface LvisUiApi {
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
   onNativeContextMenuAction: (
     cb: (action: NativeContextMenuAction) => void,
+  ) => () => void;
+  showDynamicMenu: (
+    payload: DynamicNativeMenuPayload,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onDynamicMenuAction: (
+    cb: (action: DynamicNativeMenuAction) => void,
   ) => () => void;
 }
 
