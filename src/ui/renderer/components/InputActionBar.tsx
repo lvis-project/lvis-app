@@ -569,27 +569,36 @@ function StatusSubRow({
 // only the bulb is the gauge. Filling the whole box instead would spend the
 // first third of the ladder on the base lines, where nothing shows — level 1
 // then looks exactly like level 0.
-const BULB_TOP = 2 / 24;
-const BULB_BOTTOM = 14 / 24;
+export const BULB_TOP = 2 / 24;
+export const BULB_BOTTOM = 14 / 24;
+
+/** Where the fill's top edge sits, as a percentage down from the icon's top. */
+export function reasoningGaugeClipTop(level: ReasoningLevel): number {
+  const filled = level / REASONING_LEVEL_MAX;
+  return (BULB_BOTTOM - filled * (BULB_BOTTOM - BULB_TOP)) * 100;
+}
 
 function ReasoningGauge({ level }: { level: ReasoningLevel }): React.JSX.Element {
-  const filled = level / REASONING_LEVEL_MAX;
-  // Grows from the base of the bulb toward its top.
-  const clipTop = (BULB_BOTTOM - filled * (BULB_BOTTOM - BULB_TOP)) * 100;
   const clipBottom = (1 - BULB_BOTTOM) * 100;
   return (
     <span
-      className="relative inline-flex h-3.5 w-3.5 shrink-0"
+      className="relative inline-flex h-3 w-3 shrink-0"
       data-testid="iab-reasoning-gauge"
-      data-filled={filled * 100}
+      data-level={level}
       aria-hidden="true"
     >
-      <Lightbulb className="absolute inset-0 h-3.5 w-3.5 opacity-45" />
+      {/* At level 0 the outline is the ONLY thing drawn, so it carries the
+          control's whole contrast budget and stays at the row's own token
+          alpha. Above 0 the fill is what the eye reads, and dimming the
+          unfilled remainder is what makes the level legible at 12px. */}
       <Lightbulb
-        className="absolute inset-0 h-3.5 w-3.5 transition-[clip-path] duration-(--motion-fast) ease-(--motion-ease-standard) motion-reduce:transition-none"
+        className={`absolute inset-0 h-3 w-3 ${level > 0 ? "opacity-(--opacity-muted)" : ""}`}
+      />
+      <Lightbulb
+        className="absolute inset-0 h-3 w-3 transition-[clip-path] duration-(--motion-fast) ease-(--motion-ease-standard) motion-reduce:transition-none"
         fill="currentColor"
         stroke="none"
-        style={{ clipPath: `inset(${clipTop}% 0 ${clipBottom}% 0)` }}
+        style={{ clipPath: `inset(${reasoningGaugeClipTop(level)}% 0 ${clipBottom}% 0)` }}
       />
     </span>
   );
@@ -702,7 +711,7 @@ function ModelQuickPicker({
               openedByChipRef.current = !open;
               setOpen(!open);
             }}
-            className={`flex shrink-0 cursor-pointer items-center transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
+            className={`-m-1.5 flex shrink-0 cursor-pointer items-center p-1.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
           >
             <ReasoningGauge level={level} />
           </button>
