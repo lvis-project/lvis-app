@@ -32,14 +32,21 @@ test("budget-suspended sub-agent renders waiting in the workspace rail", async (
         resumeId: "child-budget-waiting",
       },
     },
-  ] satisfies AgentSpawnEvent[];
+  ] satisfies Array<Omit<AgentSpawnEvent, "parentSessionId">>;
+  // A tile keeps only the frames its own conversation spawned, so the injected
+  // frames have to name the conversation this window is showing.
+  const parentSessionId = await mainWindow.evaluate(
+    async () => (await (window as unknown as {
+      lvis: { chatSessions: () => Promise<{ current: string }> };
+    }).lvis.chatSessions()).current,
+  );
   await app.evaluate(({ BrowserWindow }, injectedEvents) => {
     const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
     if (!win) throw new Error("agent-spawn-e2e-window-missing");
     for (const event of injectedEvents) {
       win.webContents.send("lvis:agent-spawn:event", event);
     }
-  }, events);
+  }, events.map((event) => ({ ...event, parentSessionId })));
 
   const row = mainWindow.getByTestId("chat-side-panel-subagent-row");
   await expect(row).toBeVisible({ timeout: 10_000 });

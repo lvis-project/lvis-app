@@ -205,12 +205,20 @@ test.describe("workspace rail UX redesign", () => {
     await page.getByTestId(chatSidePanelLauncherTestId("subagent")).click();
     await expect(page.getByTestId("chat-side-panel-tab-subagent")).toBeVisible();
 
-    const sendSpawn = async (event: AgentSpawnEvent): Promise<void> => {
+    // A tile keeps only the frames its own conversation spawned, so every
+    // injected frame has to name the conversation this window is showing —
+    // exactly what the real spawn path stamps.
+    const parentSessionId = await page.evaluate(
+      async () => (await (window as unknown as {
+        lvis: { chatSessions: () => Promise<{ current: string }> };
+      }).lvis.chatSessions()).current,
+    );
+    const sendSpawn = async (event: Omit<AgentSpawnEvent, "parentSessionId">): Promise<void> => {
       await app.evaluate(({ BrowserWindow }, ev) => {
         const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
         if (!win) return;
         win.webContents.send("lvis:agent-spawn:event", ev);
-      }, event);
+      }, { ...event, parentSessionId });
     };
 
     const CHILD = "e2e-child-session";

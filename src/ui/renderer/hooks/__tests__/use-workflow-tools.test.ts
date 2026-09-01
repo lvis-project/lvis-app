@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useWorkflowTools } from "../use-workflow-tools.js";
 import type { LvisApi } from "../../types.js";
-import type { AgentSpawnEvent } from "../../../../shared/subagent-events.js";
+import type { AgentSpawnEvent } from "../../../../tools/agent-spawn.js";
 
 describe("useWorkflowTools", () => {
   it("preserves suspension metadata when a done event transitions a spawn to waiting", () => {
@@ -25,6 +25,7 @@ describe("useWorkflowTools", () => {
         type: "start",
         taskState: "TASK_STATE_SUBMITTED",
         title: "Budgeted agent",
+        parentSessionId: "session-solo",
       });
       onSpawn?.({
         spawnId: "spawn-waiting",
@@ -33,6 +34,7 @@ describe("useWorkflowTools", () => {
         status: "waiting",
         summary: "partial work",
         suspension: { reason: "budget", resumeId: "child-waiting" },
+        parentSessionId: "session-solo",
       });
     });
 
