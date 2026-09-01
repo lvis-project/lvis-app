@@ -698,6 +698,7 @@ export async function executeAuthorizedToolInvocation(
             {
               headless: invocationPermissionContext.headless === true,
               toolName: toolUse.name,
+              ...(sessionId === undefined ? {} : { sessionId }),
             },
             () => {
               if (

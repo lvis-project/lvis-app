@@ -111,6 +111,9 @@ describe("App.handleAsk — /load command routing", () => {
 
     await act(async () => {
       emitAgentSpawnEvent({
+        // Production always names the spawning conversation; the renderer
+        // drops a frame it cannot attribute.
+        parentSessionId: "sess-current",
         spawnId: "live-old-spawn",
         type: "start",
         taskState: "TASK_STATE_SUBMITTED",

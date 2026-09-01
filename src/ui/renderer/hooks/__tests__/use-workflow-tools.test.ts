@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useWorkflowTools } from "../use-workflow-tools.js";
 import type { LvisApi } from "../../types.js";
+import type { AgentSpawnEvent } from "../../../../shared/subagent-events.js";
 
 describe("useWorkflowTools", () => {
   it("preserves suspension metadata when a done event transitions a spawn to waiting", () => {
@@ -61,13 +62,19 @@ describe("useWorkflowTools", () => {
     act(() => {
       onSpawn?.({ spawnId: "mine", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Mine", parentSessionId: "session-mine" });
       onSpawn?.({ spawnId: "theirs", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Theirs", parentSessionId: "session-other-tile" });
-      // A frame that names no conversation is not another tile's — it is kept.
-      onSpawn?.({ spawnId: "unaddressed", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Unaddressed" });
+      // A frame that names no conversation is one EVERY tile would keep, which
+      // is N cards for one sub-agent and an act-on button in a tile that did
+      // not spawn it. `parentSessionId` is required on the wire for that
+      // reason; this is the runtime half of the same rule, since the type does
+      // not cross the IPC boundary.
+      onSpawn?.({
+        spawnId: "unaddressed", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Unaddressed",
+      } as unknown as AgentSpawnEvent);
       // Later phases of another tile's agent are dropped too, not synthesized.
       onSpawn?.({ spawnId: "theirs", type: "done", taskState: "TASK_STATE_COMPLETED", status: "done", summary: "x", parentSessionId: "session-other-tile" });
     });
 
-    expect(result.current.subAgentSpawns.map((s) => s.spawnId)).toEqual(["mine", "unaddressed"]);
+    expect(result.current.subAgentSpawns.map((s) => s.spawnId)).toEqual(["mine"]);
   });
 
   it("a tile draws only the question cards of the conversations it owns", () => {

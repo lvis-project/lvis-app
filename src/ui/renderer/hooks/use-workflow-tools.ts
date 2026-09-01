@@ -122,7 +122,9 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
       );
     });
     const unsubSpawn = api.onAgentSpawnEvent?.((event) => {
-      if (ownsSession && event.parentSessionId && !ownsSession(event.parentSessionId)) return;
+      // Same rule as the question above, and for the same reason: a frame the
+      // spawning conversation does not own is a frame this tile must not keep.
+      if (ownsSession && !ownsSession(event.parentSessionId)) return;
       setSubAgentSpawns((prev) => {
         const existingIdx = prev.findIndex((s) => s.spawnId === event.spawnId);
         if (event.type === "start") {
