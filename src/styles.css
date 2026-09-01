@@ -527,6 +527,17 @@
     --diff-add-fg:    hsl(var(--success));
     --diff-remove-fg: hsl(var(--destructive));
 
+    /* Reasoning depth — how deep the model thinks, drawn as how yellow the
+     * bulb is. Three steps of ONE hue rather than a rising fill line: at 12px
+     * a fill edge moving a few pixels is not a difference the eye catches,
+     * while pale-to-deep is legible at a glance and survives being small.
+     * Mixed toward white and black rather than toward the surface, so the
+     * ladder stays a yellow ladder on a dark ground as well as a light one —
+     * an alpha ramp would fade the low end into the composer bar instead. */
+    --reasoning-fill-1: color-mix(in oklab, hsl(var(--warning)) 42%, white);
+    --reasoning-fill-2: hsl(var(--warning));
+    --reasoning-fill-3: color-mix(in oklab, hsl(var(--warning)) 72%, black);
+
     /* Brand gradient — violet → blue. The single source for the onboarding
      * brand avatar and primary CTA fills. --gradient-brand-soft is the faint
      * blend used behind soft recommendation cards. */
