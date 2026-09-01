@@ -430,9 +430,24 @@ without the user knowing what it replaced.
 
 ### The controls: split and drop
 
-`useChatGroups` owns `split()`, `close()` and `dropOnEdge()`, bounded by
-`MAX_CHAT_GROUPS` in work mode and 1 in chat mode; chat mode collapses to the
-focused group. `split()` halves the **largest** tile along its longer side, not
+`useChatGroups` owns `split()`, `close()`, `dropOnEdge()` and `adopt()`, all
+bounded by `MAX_CHAT_GROUPS` — the ceiling counts LOOPS, so it is the same in
+both modes. What chat mode holds to one is the number of tiles it DRAWS: it
+collapses to the focused group and keeps the others. The split and drop controls
+are gated on `canSplit`, which does carry the mode, because they are gestures on
+the CANVAS; `adopt()` is not, because giving an incoming conversation a group of
+its own is not a canvas gesture. In chat mode the adopted group simply becomes
+the one drawn, and the conversation it displaced keeps streaming behind it.
+
+That is what the sidebar takes when the focused group is mid-turn. It has to
+take something: a running turn writes through the loop that owns it, and
+`saveSession` rewrites the whole session file from that loop's in-memory
+history, so swapping the session under a running loop would write one
+conversation's messages into another's file. Main refuses it, and the renderer
+does not ask — it adopts instead. At the ceiling one idle, non-focused group is
+released to make room; its conversation is on disk, so reopening it is a resume.
+
+`split()` halves the **largest** tile along its longer side, not
 the focused one — focus moves to whatever was just added, so a focus-based split
 walks four clicks down to 124px columns, a quarter of the 448px floor a tile
 inherits. Halving the largest turns the same four clicks into a 2x2.

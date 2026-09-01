@@ -177,7 +177,7 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
   });
 
-  it("does not open or acknowledge a routine session while the active chat is streaming", async () => {
+  it("opens a routine's session while the active chat is streaming, without taking its place", async () => {
     const { container, api, emitRoutineFired } = await renderApp();
     const pendingSend = deferred<{ ok: true }>();
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
@@ -202,9 +202,12 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
       await Promise.resolve();
     });
 
-    expect(api.chatSessionResume).not.toHaveBeenCalledWith("routine-session-1");
-    expect(api.chatSessionHistory).not.toHaveBeenCalledWith("routine-session-1");
-    expect(api.acknowledgeRoutineResult).not.toHaveBeenCalled();
+    // A routine card opening its session takes the same route the sidebar does:
+    // the running conversation is not swapped out — the routine's gets a group
+    // of its own — so the card's primary action works mid-turn instead of
+    // dropping the click.
+    await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("routine-session-1"));
+    await waitFor(() => expect(api.acknowledgeRoutineResult).toHaveBeenCalled());
 
     await act(async () => {
       pendingSend.resolve({ ok: true });

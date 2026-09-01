@@ -569,9 +569,13 @@ export interface ChatGroupState {
  *
  * A group is bound to a conversation SOURCE, and every source is a distinct
  * ConversationLoop in main — `MAX_CHAT_GROUPS` is that ceiling, counted in
- * LEAVES and including the primary. Chat mode holds exactly one: it is the
- * focused-writing mode, and a second tile there would be the thing it exists
- * to remove.
+ * LEAVES and including the primary. It is the same ceiling in both modes,
+ * because it counts loops.
+ *
+ * What chat mode holds to one is the number of tiles it DRAWS: `visibleTree`
+ * collapses to the focused leaf. Groups behind it keep their conversations —
+ * that is why toggling modes is not destructive, and it is what lets the
+ * sidebar reach a second conversation there without splitting the canvas.
  */
 export function useChatGroups(appMode?: "chat" | "work") {
   const [tree, setTree] = useState<ChatGroupNode>(() => leaf(MAIN_CHAT_GROUP_ID));
@@ -612,6 +616,47 @@ export function useChatGroups(appMode?: "chat" | "work") {
     setMaximizedId(null);
     return id;
   }, [tree]);
+
+  /**
+   * Give a conversation a group of its own, beside the focused one.
+   *
+   * This is what the sidebar takes when the focused group is mid-turn. A group
+   * is a live conversation, NOT a visible tile: chat mode's `visibleTree`
+   * collapses to the focused leaf, so the canvas still shows one conversation
+   * and the new one simply becomes the one it shows. Work mode renders the new
+   * leaf beside the old, which is what that mode means. The ceiling counts
+   * loops, so it is the same in both — `canSplit` stays the canvas question and
+   * is deliberately not consulted here.
+   *
+   * At the ceiling one idle, non-focused group is released to make room. Its
+   * conversation is on disk, so reopening it is a resume; what goes with it is
+   * that tile's composer draft and scroll position. `isIdle` is asked rather
+   * than known because whether a group is mid-turn lives in the tiles, not in
+   * the tree.
+   *
+   * Returns the new group's id and the released one, or null when every other
+   * group is busy — the caller has to say so, since nothing in the gesture
+   * showed the limit the way a missing drop edge does.
+   */
+  const adopt = useCallback((
+    isIdle: (chatGroupId: string) => boolean,
+  ): { chatGroupId: string; released: string | null } | null => {
+    let base = tree;
+    let released: string | null = null;
+    if (countLeaves(tree) >= MAX_CHAT_GROUPS) {
+      const spare = leafIds(tree).find((id) => id !== focusedId && isIdle(id));
+      if (spare === undefined) return null;
+      base = closeLeaf(tree, spare);
+      released = spare;
+    }
+    const id = `group-${nextGroupIndex.current}`;
+    nextGroupIndex.current += 1;
+    setTree(splitLeaf(base, focusedId, "right", id));
+    setFocusedId(id);
+    // A group added behind a maximized tile would be one nobody can see.
+    setMaximizedId(null);
+    return { chatGroupId: id, released };
+  }, [tree, focusedId]);
 
   /**
    * The header's split: halve `groupId` on `axis`, the new tile trailing —
@@ -684,6 +729,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
   // even while one is: the tree, not the view, says how many there are. Not
   // in chat mode, though: it shows one tile and nothing of the others, so a
   // close there would swap in a conversation the user has no way to expect.
+  // `adopt` releases a group there instead, and only an idle one.
   const closable = appMode !== "chat" && countLeaves(tree) > 1;
   const canMaximize = appMode !== "chat" && countLeaves(tree) > 1;
 
@@ -729,6 +775,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
     split,
     splitFits,
     dropOnEdge,
+    adopt,
     resize,
     previewResize,
     close,

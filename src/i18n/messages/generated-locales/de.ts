@@ -73,6 +73,7 @@ export const deMessages: Record<string, string> = {
   "app.pluginDoctorRequiredToast": "{label} wurde nicht geladen. Öffnen Sie die Plugin-Einstellungen und führen Sie Doctor aus.",
   "app.routineFailedSummary": "Routineausführung fehlgeschlagen: {error}",
   "app.routineFailedTitle": "[Fehlgeschlagen] Routine",
+  "app.conversationCeilingReached": "Vier Unterhaltungen sind bereits aktiv und alle erzeugen gerade eine Antwort. Stoppe eine oder warte, bis sie fertig ist.",
   "app.mcpPromptArgsUnrunnable": "Dieser Prompt verlangt ein Argument, das diese App nicht anzeigen kann, und lässt sich daher hier nicht ausführen.",
   "app.mcpPromptArgsTitle": "\"{name}\" ausführen",
   "app.mcpPromptArgsDescription": "Dieser Prompt wurde vom MCP-Server \"{serverId}\" deklariert. Füll die Argumente aus; der zurückgegebene Text gelangt als nicht vertrauenswürdiger, vom Server verfasster Inhalt in die Unterhaltung.",

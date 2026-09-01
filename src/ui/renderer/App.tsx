@@ -302,15 +302,72 @@ export function App() {
     [tileSessions],
   );
 
+  // Letting a conversation go in main. Fire-and-forget because nothing in the
+  // window can address that group once it has left the tree.
+  const releaseChatGroupLoop = useCallback((chatGroupId: string) => {
+    void chatGroupApi(api, chatGroupId).chatGroupRelease().catch((err: unknown) => {
+      console.warn("[lvis] chat group release failed: %s", (err as Error).message);
+    });
+  }, [api]);
+
+  // Closing a tile is one of the two moments its conversation is let go of in
+  // main — not unmount, which the chat-mode toggle also causes and must not
+  // destroy anything. (The other is `adopt` releasing an idle group to make
+  // room.) The tile leaves the tree at once.
+  const closeChatGroup = useCallback((chatGroupId: string) => {
+    chatGroups.close(chatGroupId);
+    releaseChatGroupLoop(chatGroupId);
+  }, [chatGroups, releaseChatGroupLoop]);
+
+  const [pendingSessionDrop, setPendingSessionDrop] =
+    useState<{ chatGroupId: string; sessionId: string } | null>(null);
+
   const focusTileHolding = useCallback((sessionId: string): boolean => {
     const holder = tileHoldingSession(tileSessions, sessionId);
-    return holder !== undefined && focusChatGroup(holder.chatGroupId);
+    if (holder === undefined) return false;
+    // A tile already holding it means the conversation is REACHED, which is a
+    // different question from whether focus moved — `focusChatGroup` answers
+    // the latter and says false when the tile is already focused. Reading that
+    // as "not reached" is what sent a click on the focused tile's own session
+    // down to a load the main process then refused, leaving a user sitting on
+    // a plugin panel with no way back to the conversation.
+    focusChatGroup(holder.chatGroupId);
+    return true;
   }, [tileSessions, focusChatGroup]);
 
-  const handleLoadSessionAndRefresh = useCallback(
-    async (sessionId: string) => focusTileHolding(sessionId) || focusedSession.loadSession(sessionId),
-    [focusedSession, focusTileHolding],
-  );
+  /**
+   * Open a conversation from outside the canvas — the sidebar, search, an
+   * import, a notification.
+   *
+   * Three answers, in order: a tile already holding it is focused; an idle
+   * focused tile loads it; and a focused tile that is mid-turn does not have
+   * the conversation taken out from under it — the incoming one is given a
+   * group of its own instead. Swapping the session on a running loop is what
+   * main refuses, and rightly: `saveSession` rewrites the session file from
+   * the loop's in-memory history, so a swap mid-turn writes one conversation's
+   * messages into the other's file.
+   *
+   * In chat mode the adopted group is the only one drawn, so the canvas does
+   * not split; the running conversation keeps streaming behind it and its
+   * sidebar row keeps saying so.
+   */
+  const handleLoadSessionAndRefresh = useCallback(async (sessionId: string) => {
+    if (focusTileHolding(sessionId)) return true;
+    if (!streaming) return focusedSession.loadSession(sessionId);
+    const adopted = chatGroupsRef.current.adopt(
+      (chatGroupId) => tileSessions.find((tile) => tile.chatGroupId === chatGroupId)?.streaming !== true,
+    );
+    if (!adopted) {
+      statusPushToast({ severity: "warning", message: t("app.conversationCeilingReached"), ttlMs: 8_000 });
+      return false;
+    }
+    // The tree already dropped it; main still has to let the loop go.
+    if (adopted.released !== null) releaseChatGroupLoop(adopted.released);
+    // The adopted group is not mounted yet, so the load rides the same delivery
+    // the edge-drop uses — it runs when that tile publishes its handle.
+    setPendingSessionDrop({ chatGroupId: adopted.chatGroupId, sessionId });
+    return true;
+  }, [focusedSession, focusTileHolding, releaseChatGroupLoop, statusPushToast, streaming, t, tileSessions]);
 
   const handleImportAndLoad = useCallback(async () => {
     const sessionId = await handleImport();
@@ -318,16 +375,6 @@ export function App() {
     await handleLoadSessionAndRefresh(sessionId);
   }, [handleImport, handleLoadSessionAndRefresh]);
 
-  // Closing a tile is the one moment its conversation is let go of in main —
-  // not unmount, which the chat-mode toggle also causes and must not destroy
-  // anything. The tile leaves the tree at once; the release is fire-and-forget
-  // because nothing in the window can address that group afterwards.
-  const closeChatGroup = useCallback((chatGroupId: string) => {
-    chatGroups.close(chatGroupId);
-    void chatGroupApi(api, chatGroupId).chatGroupRelease().catch((err: unknown) => {
-      console.warn("[lvis] chat group release failed: %s", (err as Error).message);
-    });
-  }, [api, chatGroups]);
 
   /**
    * A conversation dragged out of the sidebar and dropped on a tile.
@@ -337,9 +384,6 @@ export function App() {
    * load cannot happen in this handler — it is remembered and run the moment
    * that tile publishes its handle.
    */
-  const [pendingSessionDrop, setPendingSessionDrop] =
-    useState<{ chatGroupId: string; sessionId: string } | null>(null);
-
   const handleSessionDrop = useCallback((
     targetGroupId: string,
     sessionId: string,
@@ -664,25 +708,18 @@ export function App() {
 
   const handleOpenRoutineSession = useCallback(
     async (sessionId: string) => {
-      // Moving focus to the tile already showing it touches no conversation,
-      // so it is not held back by the focused tile's stream.
-      if (focusTileHolding(sessionId)) {
-        setActiveView("home");
-        return true;
-      }
-      if (streaming) {
-        console.warn("[lvis] openRoutineSession blocked during streaming");
-        return false;
-      }
+      // One rule for reaching a conversation, wherever the request comes from:
+      // a routine card opening its session is the sidebar's ladder with the
+      // view switch on the end.
+      setActiveView("home");
       try {
-        setActiveView("home");
-        return await focusedSession.loadSession(sessionId);
+        return await handleLoadSessionAndRefresh(sessionId);
       } catch (err) {
         console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
         return false;
       }
     },
-    [focusedSession, focusTileHolding, setActiveView, streaming],
+    [handleLoadSessionAndRefresh, setActiveView],
   );
 
   useEffect(() => {

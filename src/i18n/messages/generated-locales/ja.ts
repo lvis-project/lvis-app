@@ -60,6 +60,7 @@ export const jaMessages: Record<string, string> = {
   "app.pluginDoctorRequiredToast": "{label} はロードされませんでした。プラグイン設定を開き、Doctor を実行します。",
   "app.routineFailedSummary": "ルーチンの実行に失敗しました: {error}",
   "app.routineFailedTitle": "[失敗] ルーチン",
+  "app.conversationCeilingReached": "4 件の会話がすでに動いており、そのすべてが応答を生成中です。いずれかを停止するか、終わるまでお待ちください。",
   "app.mcpPromptArgsUnrunnable": "このプロンプトはアプリが表示できない引数を要求するため、ここからは実行できません。",
   "app.mcpPromptArgsTitle": "\"{name}\" を実行",
   "app.mcpPromptArgsDescription": "このプロンプトは MCP サーバー \"{serverId}\" が宣言したものです。引数を入力すると、サーバーが返したテキストが untrusted (サーバー作成) のコンテンツとして会話に入ります。",

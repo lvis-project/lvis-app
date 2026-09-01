@@ -238,14 +238,12 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
   const handleLoadSession = useCallback(
     async (
       sessionId: string,
-      streaming: boolean,
       applyLoadedSession: (entries: ChatEntry[]) => void,
     ): Promise<boolean> => {
-      // Don't swap sessions mid-stream — ConversationLoop.runTurn() has no
-      // concurrency guard, so replacing history while a turn is writing to it
-
-      // keep this guard here too for programmatic callers (e.g. starred jump).
-      if (streaming) return false;
+      // Whether this group may take a session is main's answer, not one this
+      // hook re-derives: the loop it would swap out from under lives there,
+      // and `chatSessionResume` refuses while that loop is mid-turn. A second
+      // copy of the rule here could only drift from the first.
       const token = ++sessionReadTokenRef.current;
       try {
         const res = await api.chatSessionResume(sessionId);

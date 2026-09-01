@@ -18,9 +18,11 @@ import {
   splitIntoThreeTiles,
   splitIntoTwoTiles,
   submitChatMessage,
+  deferred,
   toggleTileMaximized,
 } from "./helpers.js";
 import { MOCK_DEFAULT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
+import { MAIN_CHAT_GROUP_ID } from "../../src/contract/app-contract.js";
 import { BLOCKING_SURFACE_SELECTOR } from "../../src/shared/test-ids.js";
 
 /** The permission namespace's subscriptions, as the mock records them. */
@@ -1049,5 +1051,135 @@ describe("three tiles, every kind of surface at once", () => {
     }
     expect(count(pinned.element, "overlay-card-region")).toBe(1);
     expect(count(container, "overlay-card-region")).toBe(1);
+  });
+});
+
+/**
+ * Reaching a conversation from the sidebar while another one is mid-turn.
+ *
+ * A running turn writes through the loop that owns it, and main rewrites the
+ * whole session file from that loop's in-memory history — so the session under
+ * a running loop cannot be swapped. What used to happen instead is that the
+ * sidebar went dead: every row disabled, no toast, and on a plugin panel (where
+ * no row counts as active) not even the streaming conversation's own row was
+ * clickable. The conversation is given a group of its own now.
+ */
+describe("opening a conversation while another is mid-turn", () => {
+  const OTHER_SESSION = "sess-other";
+  const withOtherSession = {
+    hasApiKey: true,
+    sessions: [
+      { id: MOCK_DEFAULT_SESSION_ID, title: "지금 답하는 중", modifiedAt: new Date(2, 0, 2).toISOString() },
+      { id: OTHER_SESSION, title: "다른 대화", modifiedAt: new Date(2, 0, 1).toISOString() },
+    ],
+  };
+
+  const sessionRow = (container: HTMLElement, id: string) =>
+    container.querySelector(`[data-testid="sidebar-session-${id}"]`) as HTMLButtonElement | null;
+
+  /**
+   * Chat mode starts with the rail collapsed, which hides the session list. The
+   * user in the report had it open — expanding it is part of reproducing them.
+   */
+  const expandSidebar = async (container: HTMLElement) => {
+    const toggle = container.querySelector('[data-testid="sidebar-collapse-toggle"]') as HTMLButtonElement | null;
+    if (!toggle || toggle.getAttribute("aria-pressed") === "true") return;
+    await act(async () => { fireEvent.click(toggle); });
+  };
+
+  const rowFor = (container: HTMLElement, id: string) => waitFor(() => {
+    const found = sessionRow(container, id);
+    if (!found) throw new Error(`sidebar row for ${id} not rendered`);
+    return found;
+  });
+
+  /** The mode the shell reads before first paint; "work" is the harness default. */
+  const startInChatMode = () => {
+    (window as { __lvisInitialAppMode?: string }).__lvisInitialAppMode = "chat";
+    return () => { delete (window as { __lvisInitialAppMode?: string }).__lvisInitialAppMode; };
+  };
+
+  it("chat mode: adopts the conversation without splitting the canvas", async () => {
+    const restoreMode = startInChatMode();
+    try {
+      const pendingSend = deferred<{ ok: true }>();
+      const { container, api } = await renderApp(withOtherSession);
+      api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+      await submitChatMessage(container, "아직 답하는 중");
+      await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+      await expandSidebar(container);
+
+      const row = await rowFor(container, OTHER_SESSION);
+      // A row that is not the streaming conversation stays live: one tile's
+      // turn is not a reason to lock every other conversation away.
+      expect(row.disabled).toBe(false);
+      await act(async () => { fireEvent.click(row); });
+
+      await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith(OTHER_SESSION));
+      // The adopted conversation got a group of its own, and chat mode draws
+      // only the focused one — so the canvas still shows a single tile. This is
+      // the whole point: the user asked to READ another conversation, not to
+      // rearrange the screen.
+      const tiles = collectTiles(container);
+      expect(tiles).toHaveLength(1);
+      expect(tiles[0]!.chatGroupId).not.toBe(MAIN_CHAT_GROUP_ID);
+      // …and the group that was running was never released to make room: its
+      // turn is still going behind the adopted one.
+      expect(api.chatGroup).not.toHaveBeenCalledWith(MAIN_CHAT_GROUP_ID);
+
+      await act(async () => {
+        pendingSend.resolve({ ok: true });
+        await pendingSend.promise;
+      });
+    } finally {
+      restoreMode();
+    }
+  });
+
+  it("work mode: the adopted conversation is a second tile, which is what that mode means", async () => {
+    const pendingSend = deferred<{ ok: true }>();
+    const { container, api } = await renderApp(withOtherSession);
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+    await submitChatMessage(container, "아직 답하는 중");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    await act(async () => { fireEvent.click(await rowFor(container, OTHER_SESSION)); });
+
+    await waitFor(() => expect(collectTiles(container)).toHaveLength(2));
+    expect(collectTiles(container).map((tile) => tile.chatGroupId)).toContain(MAIN_CHAT_GROUP_ID);
+
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await pendingSend.promise;
+    });
+  });
+
+  it("clicking the streaming conversation's own row is navigation, not a load", async () => {
+    const pendingSend = deferred<{ ok: true }>();
+    const { container, api } = await renderApp(withOtherSession);
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+    await submitChatMessage(container, "아직 답하는 중");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+    api.chatSessionResume.mockClear();
+
+    const row = await rowFor(container, MOCK_DEFAULT_SESSION_ID);
+    expect(row.disabled).toBe(false);
+    await act(async () => { fireEvent.click(row); });
+
+    // The tile already holds it, so there is nothing to load and nothing to
+    // adopt — asking main would only earn a refusal for a conversation the
+    // window is already showing. This is the click that used to dead-end from
+    // a plugin panel, where no row counts as active.
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+    expect(collectTiles(container)).toHaveLength(1);
+    expect(collectTiles(container)[0]!.chatGroupId).toBe(MAIN_CHAT_GROUP_ID);
+
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await pendingSend.promise;
+    });
   });
 });

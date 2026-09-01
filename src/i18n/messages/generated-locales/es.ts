@@ -73,6 +73,7 @@ export const esMessages: Record<string, string> = {
   "app.pluginDoctorRequiredToast": "{label} no se cargó. Abra Configuración de plugins y ejecute Doctor.",
   "app.routineFailedSummary": "Error en la ejecución de rutina: {error}",
   "app.routineFailedTitle": "[Falló] Rutina",
+  "app.conversationCeilingReached": "Ya hay cuatro conversaciones activas y todas están generando una respuesta. Detén una o espera a que termine.",
   "app.mcpPromptArgsUnrunnable": "Este prompt requiere un argumento que esta app no puede mostrar, así que no se puede ejecutar desde aquí.",
   "app.mcpPromptArgsTitle": "Ejecutar \"{name}\"",
   "app.mcpPromptArgsDescription": "Este prompt lo declara el servidor MCP \"{serverId}\". Rellena sus argumentos; el texto que devuelva entra en la conversación como contenido no confiable escrito por el servidor.",

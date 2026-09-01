@@ -840,7 +840,7 @@ describe("Sidebar conversation context menu", () => {
     }
   });
 
-  it("does not expose session switching for an inactive conversation while streaming", async () => {
+  it("keeps another conversation reachable while this one is streaming", async () => {
     const onToggleSessionStar = vi.fn();
     const { getByTestId, showNativeContextMenu, restore } = renderSidebar({
       streaming: true,
@@ -849,11 +849,15 @@ describe("Sidebar conversation context menu", () => {
     });
     try {
       const inactiveRow = await waitFor(() => getByTestId("sidebar-session-sess-2"));
-      expect(inactiveRow).toBeDisabled();
+      // One conversation's turn is not a reason to lock the others away. Where
+      // the incoming conversation goes is the window's call — it gives it a
+      // group of its own rather than taking the running one's place — so the
+      // sidebar's job is simply to stay openable.
+      expect(inactiveRow).not.toBeDisabled();
       fireEvent.contextMenu(inactiveRow);
       expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
         kind: "conversation",
-        commands: ["conversation.pin"],
+        commands: expect.arrayContaining(["conversation.open"]),
       }));
     } finally {
       restore();

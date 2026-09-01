@@ -768,7 +768,6 @@ function InlineRename({
 function SessionRow({
   session,
   active,
-  streaming,
   onLoadSession,
   isPinned,
   onTogglePin,
@@ -783,7 +782,6 @@ function SessionRow({
 }: {
   session: SessionSummary;
   active: boolean;
-  streaming: boolean;
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   /** Truthy when this conversation is pinned — pinned rows sort to the top and show a persistent filled pin. */
   isPinned?: boolean;
@@ -804,7 +802,6 @@ function SessionRow({
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const time = formatRelativeSessionTime(session.modifiedAt, t);
-  const rowDisabled = streaming && !active;
   const pinLabel = isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation");
   return (
     <div
@@ -814,11 +811,10 @@ function SessionRow({
         active
           ? "bg-primary/(--opacity-subtle) text-primary"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
-        rowDisabled ? "cursor-not-allowed opacity-50" : "",
         // Archived rows stay READABLE. Dimming them to the point of illegibility
         // would make the archive a place things go to be lost, which is what
         // delete is for.
-        archived && !rowDisabled ? "opacity-70" : "",
+        archived ? "opacity-70" : "",
       ].filter(Boolean).join(" ")}
       data-archived={archived ? "true" : undefined}
       data-unread={unread ? "true" : undefined}
@@ -890,7 +886,6 @@ function SessionRow({
       ) : (
         <button
           type="button"
-          disabled={rowDisabled}
           aria-current={active ? "page" : undefined}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid={`sidebar-session-${session.id}`}
@@ -898,7 +893,7 @@ function SessionRow({
           // Dragging a conversation onto a tile is how the main area is
           // arranged: the edge it lands on says whether to split that tile or
           // replace what it holds. A click still just opens it in place.
-          draggable={!rowDisabled}
+          draggable
           onDragStart={(event) => {
             event.dataTransfer.setData(CHAT_SESSION_DRAG_TYPE, session.id);
             event.dataTransfer.effectAllowed = "copy";
@@ -1155,9 +1150,7 @@ function ProjectSessionList({
     const archived = actions?.isArchived(session.id) ?? false;
     const unread = actions?.isUnread(session.id) ?? false;
     return {
-      ...(!streaming || session.id === currentSessionId
-        ? { "conversation.open": () => void onLoadSession?.(session.id) }
-        : {}),
+      "conversation.open": () => void onLoadSession?.(session.id),
       ...(actions
         ? {
             [unread ? "conversation.mark-read" : "conversation.mark-unread"]: () =>
@@ -1184,7 +1177,6 @@ function ProjectSessionList({
       key={session.id}
       session={session}
       active={conversationSurfaceVisible && session.id === currentSessionId}
-      streaming={streaming}
       onLoadSession={onLoadSession}
       isPinned={isSessionPinned(session.id)}
       onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}

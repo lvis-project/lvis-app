@@ -60,6 +60,7 @@ export const zhMessages: Record<string, string> = {
   "app.pluginDoctorRequiredToast": "{label} 未加载。打开插件设置并运行 Doctor。",
   "app.routineFailedSummary": "例程执行失败：{error}",
   "app.routineFailedTitle": "[失败]例行公事",
+  "app.conversationCeilingReached": "已有四个对话在进行，且全部正在生成回复。请停止其中一个或等待其完成。",
   "app.mcpPromptArgsUnrunnable": "该提示词需要本应用无法显示的参数，因此无法在此运行。",
   "app.mcpPromptArgsTitle": "运行 \"{name}\"",
   "app.mcpPromptArgsDescription": "该提示词由 MCP 服务器 \"{serverId}\" 声明。填写参数后，服务器返回的文本将作为不可信的、由服务器撰写的内容进入对话。",

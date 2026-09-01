@@ -599,7 +599,7 @@ describe("handleAsk — /load", () => {
       await result.current.handleAsk("/load s-held");
     });
 
-    expect(sessionLoad).toHaveBeenCalledWith("s-held-by-another-tile", false, expect.any(Function));
+    expect(sessionLoad).toHaveBeenCalledWith("s-held-by-another-tile", expect.any(Function));
     expect(setErrorWithThought).toHaveBeenCalledWith("app.sessionLoadFailed");
     expect(chatSend).not.toHaveBeenCalled();
   });

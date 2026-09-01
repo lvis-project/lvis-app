@@ -248,7 +248,7 @@ describe("useCurrentSession — what a tile holds on mount", () => {
       useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, restoreSubAgents, onLoadedSession }));
     await waitFor(() => expect(result.current.currentSessionId).toBe("loop-live"));
     order.length = 0;
-    await act(async () => { await result.current.handleLoadSession("other", false, vi.fn()); });
+    await act(async () => { await result.current.handleLoadSession("other", vi.fn()); });
     expect(order).toEqual(["reset", "restore"]);
     expect(restoreSubAgents).toHaveBeenLastCalledWith(restoredSubAgents);
   });
@@ -268,7 +268,7 @@ describe("useCurrentSession — what a tile holds on mount", () => {
     await waitFor(() => expect(result.current.currentSessionId).toBe("loop-fresh"));
 
     const applyLoadedSession = vi.fn();
-    const loaded = await result.current.handleLoadSession("held-elsewhere", false, applyLoadedSession);
+    const loaded = await result.current.handleLoadSession("held-elsewhere", applyLoadedSession);
     expect(loaded).toBe(true);
     expect(focusSessionHolder).toHaveBeenCalledWith("group-2");
     expect(api.chatSessionHistory).not.toHaveBeenCalledWith("held-elsewhere");

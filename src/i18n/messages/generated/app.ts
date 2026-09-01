@@ -1,6 +1,7 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/App.tsx. Do not edit by hand.
 export const en = {
   "app.routineFailedTitle": "[Failed] Routine",
+  "app.conversationCeilingReached": "Four conversations are already running and every one of them is generating a reply. Stop one or wait for it to finish.",
   "app.mcpPromptArgsUnrunnable": "This prompt requires an argument this app cannot show, so it cannot be run from here.",
   "app.mcpPromptArgsTitle": "Run \"{name}\"",
   "app.mcpPromptArgsDescription": "This prompt is declared by the MCP server \"{serverId}\". Fill in its arguments; the text it returns enters the conversation as untrusted, server-authored content.",
@@ -50,6 +51,7 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "app.routineFailedTitle": "[실패] 루틴",
+  "app.conversationCeilingReached": "이미 네 개의 대화가 실행 중이고 모두 응답을 생성하고 있습니다. 하나를 중지하거나 끝날 때까지 기다려 주세요.",
   "app.mcpPromptArgsUnrunnable": "이 프롬프트는 앱이 표시할 수 없는 인자를 요구하므로 여기서 실행할 수 없습니다.",
   "app.mcpPromptArgsTitle": "\"{name}\" 실행",
   "app.mcpPromptArgsDescription": "이 프롬프트는 MCP 서버 \"{serverId}\" 가 선언한 것입니다. 인자를 채우면, 서버가 돌려준 텍스트가 untrusted (서버 작성) 콘텐츠로 대화에 들어갑니다.",

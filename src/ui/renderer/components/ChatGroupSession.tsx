@@ -354,8 +354,8 @@ export function ChatGroupSession({
   // ── conversation actions ───────────────────────────────────────────────────
 
   const handleLoadSession = useCallback(
-    (sessionId: string) => sessionLoad(sessionId, streaming, applyLoadedSession),
-    [sessionLoad, streaming, applyLoadedSession],
+    (sessionId: string) => sessionLoad(sessionId, applyLoadedSession),
+    [sessionLoad, applyLoadedSession],
   );
 
   const handleLoadSessionAndRefresh = useCallback(async (sessionId: string) => {
