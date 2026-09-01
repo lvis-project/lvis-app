@@ -1740,12 +1740,11 @@ export function App() {
 
                       Two occupants. The dock draws only the approval requests
                       no conversation surface claimed (see `unclaimedApprovals`).
-                      The overlay region draws the cards no open conversation
-                      owns — a routine fire, a plugin event, one whose origin
-                      conversation has left the screen — once, rather than in
-                      whichever tile happens to be focused, which would say the
-                      card belongs to that conversation and would make it jump
-                      between tiles as focus moves.
+                      The overlay region draws only what no tile can draw: a
+                      card whose origin conversation has left the screen, and
+                      one pinned to a tile that has since closed. A card with no
+                      origin belongs to the tile it arrived over — see
+                      `overlayCardTile` — so it is drawn there, not here.
 
                       It is a BAND, not a float: a flex sibling BELOW the route
                       canvas, so the space it takes is space the tile grid does

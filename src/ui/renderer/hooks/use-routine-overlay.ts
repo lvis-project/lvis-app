@@ -50,7 +50,7 @@ export function useRoutineOverlay({
   t: TranslateFn;
   registry: ChatGroupSessionRegistry;
   /** The tile a card with no origin conversation is pinned to on arrival. */
-  focusedChatGroupId: string | null;
+  focusedChatGroupId: string;
 }): UseRoutineOverlayResult {
   // runningRoutines tracks in-flight LLM sessions.
   const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
@@ -70,12 +70,12 @@ export function useRoutineOverlay({
    * session draws it. A card without one is pinned to the focused tile now,
    * rather than resolved against focus at paint time; see `overlayCardTile`.
    */
-  const pushCard = useCallback((item: OverlayItem) => {
-    addFireRef.current?.(
-      item.originSessionId === undefined && focusedChatGroupIdRef.current !== null
-        ? { ...item, adoptedChatGroupId: focusedChatGroupIdRef.current }
-        : item,
-    );
+  const pushCard = useCallback((item: OverlayItem): OverlayItem => {
+    const pinned = item.originSessionId === undefined
+      ? { ...item, adoptedChatGroupId: focusedChatGroupIdRef.current }
+      : item;
+    addFireRef.current?.(pinned);
+    return pinned;
   }, []);
   const pushRoutineResult = useCallback((evt: RoutineFiredPayload) => {
     pushCard({
@@ -160,8 +160,10 @@ export function useRoutineOverlay({
     if (typeof api.onOverlayShow !== "function") return;
     const unsubShow = api.onOverlayShow((item) => {
       // Populate lookup ref so handlePluginPrimaryAction can find the item
-      overlayItemsRef.current.set(item.id, item);
-      pushCard(item);
+      // The queue and this lookup hold the SAME object: the handler below reads
+      // the map, and a card whose pin lived only in the queue would be acted on
+      // without it.
+      overlayItemsRef.current.set(item.id, pushCard(item));
     });
     const unsubDismiss = typeof api.onOverlayDismiss === "function"
       ? api.onOverlayDismiss((id) => {
@@ -196,7 +198,7 @@ export function useRoutineOverlay({
       // has no conversation to contradict, so the group the caller named (a
       // tile's own, or the focused one for the window's region) stands.
       const targetGroupId = item.originSessionId === undefined
-        ? chatGroupId
+        ? item.adoptedChatGroupId ?? chatGroupId
         : tileHoldingSession(registry.readTiles(), item.originSessionId)?.chatGroupId;
       const tile = targetGroupId === undefined ? undefined : registry.read(targetGroupId);
       if (!tile) {

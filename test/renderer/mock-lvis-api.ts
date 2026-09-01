@@ -165,6 +165,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFired: (r: unknown) => void;
+  /** The spinner a routine shows while it runs, before its result replaces it. */
+  emitRoutineRunningStarted: (p: unknown) => void;
   emitPluginEvent: (eventType: string, payload: unknown) => void;
   emitWorkBoardItemChanged: (p: unknown) => void;
   /** `settingsTab` mirrors the main process's `lvis:view:activate` payload for settings opens. */
@@ -223,6 +225,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const overlayShowHandlers = new Set<(item: unknown) => void>();
   const overlayDismissHandlers = new Set<(id: string) => void>();
   const routineFiredHandlers = new Set<(r: unknown) => void>();
+  const routineRunningHandlers = new Set<(p: unknown) => void>();
   const pluginEventHandlers = new Map<string, Set<(p: unknown) => void>>();
   const workBoardItemChangedHandlers = new Set<(p: unknown) => void>();
   const viewHandlers = new Set<(v: string, settingsTab?: string) => void>();
@@ -616,7 +619,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       }
       return () => routineFiredHandlers.delete(h);
     }),
-    onRoutineRunningStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
+    onRoutineRunningStarted: vi.fn((h: (p: unknown) => void) => {
+      routineRunningHandlers.add(h);
+      return () => routineRunningHandlers.delete(h);
+    }),
     onRoutineRunningFinished: vi.fn((_h: (id: string) => void) => () => {}),
     onRoutineFailed: vi.fn((_handler: (event: { routineId: string; error: string }) => void) => () => {}),
     listRoutineSessions: vi.fn(async (routineId: string) => routineSessionsByRoutine[routineId] ?? []),
@@ -724,6 +730,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
     emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
     emitRoutineFired: (r) => routineFiredHandlers.forEach((h) => h(r)),
+    emitRoutineRunningStarted: (p) => routineRunningHandlers.forEach((h) => h(p)),
     emitPluginEvent: (eventType, payload) =>
       pluginEventHandlers.get(eventType)?.forEach((h) => h(payload)),
     emitWorkBoardItemChanged: (p) => workBoardItemChangedHandlers.forEach((h) => h(p)),
