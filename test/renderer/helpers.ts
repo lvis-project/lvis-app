@@ -55,19 +55,32 @@ export interface RenderedTile {
 }
 
 /**
- * Every tile currently mounted in `container`, in layout order.
+ * Every tile the view is SHOWING, in layout order.
  *
  * The `chat-group-cell:` testid prefix — and the slice that recovers the chat
  * group id from it — is this one place, so a test that needs the open tiles
  * never has to restate the naming scheme.
+ *
+ * A conversation the view is not showing keeps its tile mounted (its turn keeps
+ * its stream subscription that way) and marks it `data-hidden`. Those are not
+ * "open tiles" to a reader, so they are left out here; {@link mountedTileIds}
+ * is for the tests that are about them.
  */
 export function collectTiles(container: HTMLElement): RenderedTile[] {
   const prefix = "chat-group-cell:";
   return Array.from(container.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`))
+    .filter((element) => element.getAttribute("data-hidden") !== "true")
     .map((element) => ({
       chatGroupId: element.getAttribute("data-testid")!.slice(prefix.length),
       element,
     }));
+}
+
+/** Every chat group that still has a mounted tile, shown or hidden. */
+export function mountedTileIds(container: HTMLElement): string[] {
+  const prefix = "chat-group-cell:";
+  return Array.from(container.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`))
+    .map((element) => element.getAttribute("data-testid")!.slice(prefix.length));
 }
 
 /**
@@ -87,8 +100,19 @@ export async function splitIntoTwoTiles(container: HTMLElement): Promise<Rendere
  * back all three, in layout order. Three conversations, three session ids.
  */
 export async function splitIntoThreeTiles(container: HTMLElement): Promise<RenderedTile[]> {
-  const [, second] = await splitIntoTwoTiles(container);
-  return splitWith(container, second!.element, 3);
+  return splitIntoNTiles(container, 3);
+}
+
+/** Split until `count` tiles are open, each split taken from the newest tile. */
+export async function splitIntoNTiles(
+  container: HTMLElement,
+  count: number,
+): Promise<RenderedTile[]> {
+  let tiles = await splitIntoTwoTiles(container);
+  for (let open = 3; open <= count; open += 1) {
+    tiles = await splitWith(container, tiles[tiles.length - 1]!.element, open);
+  }
+  return tiles;
 }
 
 async function splitWith(

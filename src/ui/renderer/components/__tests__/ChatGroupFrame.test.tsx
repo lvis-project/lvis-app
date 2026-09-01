@@ -365,6 +365,11 @@ describe("useChatGroups placement", () => {
   });
 });
 
+/** The groups the view actually draws — the rest stay mounted but hidden. */
+function drawn(groups: readonly { id: string; hidden: boolean }[]): string[] {
+  return groups.filter((group) => !group.hidden).map((group) => group.id);
+}
+
 describe("useChatGroups ceilings", () => {
   it("collapses to the focused tile in chat mode and offers no split there", () => {
     const { result } = renderHook(() => useChatGroups("chat"));
@@ -394,7 +399,12 @@ describe("useChatGroups ceilings", () => {
     act(() => result.current.dropOnEdge("main", "right"));
     expect(result.current.closable).toBe(true);
     rerender({ mode: "chat" });
-    expect(result.current.groups).toHaveLength(1);
+    // One tile DRAWN, both groups still mounted: the other conversation may be
+    // mid-turn, and a turn's stream subscription lives in its tile. Chat mode
+    // hides it rather than taking it away.
+    // The split focused the new group, and chat mode draws the focused one.
+    expect(drawn(result.current.groups)).toEqual(["group-2"]);
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2"]);
     expect(result.current.closable).toBe(false);
     expect(result.current.canMaximize).toBe(false);
   });
@@ -407,14 +417,15 @@ describe("useChatGroups ceilings", () => {
 
     act(() => result.current.toggleMaximize("group-2"));
     expect(result.current.maximizedId).toBe("group-2");
-    expect(result.current.groups.map((group) => group.id)).toEqual(["group-2"]);
+    expect(drawn(result.current.groups)).toEqual(["group-2"]);
     expect(result.current.gutters).toEqual([]);
-    // Still two tiles: the view changed, not the workspace.
+    // Still two tiles, both mounted: the view changed, not the workspace.
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2"]);
     expect(result.current.closable).toBe(true);
 
     act(() => result.current.toggleMaximize("group-2"));
     expect(result.current.maximizedId).toBeNull();
-    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2"]);
+    expect(drawn(result.current.groups)).toEqual(["main", "group-2"]);
   });
 
   it("drops a maximize when its tile closes or another tile is added", () => {

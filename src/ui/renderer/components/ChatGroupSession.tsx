@@ -148,6 +148,12 @@ export interface ChatGroupSessionProps {
   panelOpen: boolean;
   /** Is this the tile the window is focused on? It adopts cards no tile holds. */
   focused: boolean;
+  /**
+   * The view is not drawing this tile. It stays mounted so its conversation's
+   * turn keeps its stream subscription, its streaming flag and its stop
+   * control — but it must claim nothing the user has to see.
+   */
+  hidden: boolean;
   onSidePanelOpenChange: (open: boolean) => void;
 }
 
@@ -161,7 +167,8 @@ export interface ChatGroupSessionProps {
  * one set of variables.
  */
 export function ChatGroupSession({
-  chatGroupId, api: windowApi, registry, env, children, panelOpen, focused, onSidePanelOpenChange,
+  chatGroupId, api: windowApi, registry, env, children, panelOpen, focused, hidden,
+  onSidePanelOpenChange,
 }: ChatGroupSessionProps) {
   const { t } = useTranslation();
 
@@ -606,7 +613,7 @@ export function ChatGroupSession({
   // ── what this tile tells the window ────────────────────────────────────────
 
   useRegisterChatGroupSession(registry, chatGroupId, {
-    entries, streaming,
+    entries, streaming, hidden,
     applyLoadedSession, applyInitialSession, clearForNewChat,
     resetForNewSession, restoreSubAgentSpawns,
     ask: handleAsk,

@@ -16,13 +16,15 @@ import {
   focusTile,
   forceOverflowingSummaries,
   splitIntoThreeTiles,
+  splitIntoNTiles,
   splitIntoTwoTiles,
   submitChatMessage,
   deferred,
+  mountedTileIds,
   toggleTileMaximized,
 } from "./helpers.js";
 import { MOCK_DEFAULT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
-import { MAIN_CHAT_GROUP_ID } from "../../src/contract/app-contract.js";
+import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../src/contract/app-contract.js";
 import { BLOCKING_SURFACE_SELECTOR } from "../../src/shared/test-ids.js";
 
 /** The permission namespace's subscriptions, as the mock records them. */
@@ -1124,9 +1126,13 @@ describe("opening a conversation while another is mid-turn", () => {
       const tiles = collectTiles(container);
       expect(tiles).toHaveLength(1);
       expect(tiles[0]!.chatGroupId).not.toBe(MAIN_CHAT_GROUP_ID);
-      // …and the group that was running was never released to make room: its
-      // turn is still going behind the adopted one.
-      expect(api.chatGroup).not.toHaveBeenCalledWith(MAIN_CHAT_GROUP_ID);
+      // The displaced group is HIDDEN, not gone: its tile stays mounted so the
+      // running turn keeps its stream subscription, its streaming flag and its
+      // stop control. Unmounting it would drop the frames on the floor and stop
+      // the sidebar saying that conversation is running.
+      expect(mountedTileIds(container)).toContain(MAIN_CHAT_GROUP_ID);
+      // …and nothing released its loop to make room.
+      expect(api.chatGroupRelease).not.toHaveBeenCalled();
 
       await act(async () => {
         pendingSend.resolve({ ok: true });
@@ -1148,11 +1154,98 @@ describe("opening a conversation while another is mid-turn", () => {
     await act(async () => { fireEvent.click(await rowFor(container, OTHER_SESSION)); });
 
     await waitFor(() => expect(collectTiles(container)).toHaveLength(2));
-    expect(collectTiles(container).map((tile) => tile.chatGroupId)).toContain(MAIN_CHAT_GROUP_ID);
+    const ids = collectTiles(container).map((tile) => tile.chatGroupId);
+    expect(ids).toContain(MAIN_CHAT_GROUP_ID);
+    // The second tile has to actually HOLD the conversation that was asked for.
+    // A tile that merely appeared would lose the click's whole purpose.
+    await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith(OTHER_SESSION));
+    await waitFor(() => expect(api.chatSessionHistory).toHaveBeenCalledWith(OTHER_SESSION));
 
     await act(async () => {
       pendingSend.resolve({ ok: true });
       await pendingSend.promise;
+    });
+  });
+
+  it("stays reachable from a view that is not the conversation surface", async () => {
+    // The reported dead end. Off the chat surface NO row counts as active, and
+    // the old guard was `streaming && !active` — so a plugin panel (or any
+    // other view) turned every row off, including the row of the conversation
+    // that was streaming. There was no way back to it at all.
+    const pendingSend = deferred<{ ok: true }>();
+    const { container, api } = await renderApp(withOtherSession);
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+    await submitChatMessage(container, "아직 답하는 중");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    // The streaming conversation's row starts marked as the one on screen.
+    const own = await rowFor(container, MOCK_DEFAULT_SESSION_ID);
+    expect(own.getAttribute("aria-current")).toBe("page");
+
+    // Leave the conversation surface. Settings has the same shape as the plugin
+    // panel from the report: an inline view that is not "home", so no row is
+    // "active" any more — which is exactly what the old guard keyed off.
+    const settings = container.querySelector('[data-testid="sidebar-settings"]') as HTMLButtonElement;
+    await act(async () => { fireEvent.click(settings); });
+    await waitFor(() => {
+      expect(sessionRow(container, MOCK_DEFAULT_SESSION_ID)!.getAttribute("aria-current")).toBeNull();
+    });
+
+    const offSurface = await rowFor(container, MOCK_DEFAULT_SESSION_ID);
+    const other = await rowFor(container, OTHER_SESSION);
+    expect(offSurface.disabled).toBe(false);
+    expect(other.disabled).toBe(false);
+
+    // Clicking back into the streaming conversation returns to it.
+    await act(async () => { fireEvent.click(offSurface); });
+    await waitFor(() => {
+      expect(sessionRow(container, MOCK_DEFAULT_SESSION_ID)!.getAttribute("aria-current")).toBe("page");
+    });
+
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await pendingSend.promise;
+    });
+  });
+
+  it("refuses out loud when every other conversation is busy, and never evicts the primary", async () => {
+    const { container, api } = await renderApp(withOtherSession);
+    const pending: Array<{ resolve: (value: { ok: true }) => void }> = [];
+    api.chatSend.mockImplementation(async () => {
+      const gate = deferred<{ ok: true }>();
+      pending.push(gate);
+      return gate.promise;
+    });
+
+    // Fill the window to the ceiling, then put every conversation mid-turn.
+    const tiles = await splitIntoNTiles(container, MAX_CHAT_GROUPS);
+    expect(tiles).toHaveLength(MAX_CHAT_GROUPS);
+    for (const [index, tile] of tiles.entries()) {
+      await focusTile(tile);
+      await submitChatMessage(tile.element, `${index + 1}번째`);
+    }
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(MAX_CHAT_GROUPS));
+
+    const before = mountedTileIds(container);
+    expect(before).toHaveLength(MAX_CHAT_GROUPS);
+    api.chatSessionResume.mockClear();
+
+    await act(async () => { fireEvent.click(await rowFor(container, OTHER_SESSION)); });
+
+    // Nothing was released to make room — least of all the primary, whose
+    // release also points its loop at a fresh conversation and clears the
+    // persisted window-active session.
+    expect(api.chatGroupRelease).not.toHaveBeenCalled();
+    expect(mountedTileIds(container)).toEqual(before);
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+    // And the user is told, because nothing in this gesture shows the limit the
+    // way a missing drop edge does.
+    await waitFor(() => expect(container.textContent).toContain("네 개의 대화"));
+
+    await act(async () => {
+      for (const gate of pending) gate.resolve({ ok: true });
+      await Promise.resolve();
     });
   });
 

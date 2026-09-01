@@ -225,6 +225,11 @@ export function App() {
   // side, and the tree only knows fractions — a fraction cannot say which side
   // of a tile is longer.
   const chatGroupCanvasRef = useRef<HTMLDivElement>(null);
+  /** A canvas not laid out yet measures 0x0 — that is "unmeasured", not "no room". */
+  const measuredCanvasSize = (canvas: HTMLElement | null) =>
+    canvas && canvas.clientWidth > 0 && canvas.clientHeight > 0
+      ? { width: canvas.clientWidth, height: canvas.clientHeight }
+      : undefined;
 
   const focusedSession = useChatGroupSession(chatGroupSessions, chatGroups.focusedId);
   const tileSessions = useTileSessions(chatGroupSessions);
@@ -336,27 +341,36 @@ export function App() {
   }, [tileSessions, focusChatGroup]);
 
   /**
-   * Open a conversation from outside the canvas — the sidebar, search, an
-   * import, a notification.
+   * Put a conversation in front of the user, in `targetGroupId` if that group
+   * can take it.
    *
    * Three answers, in order: a tile already holding it is focused; an idle
-   * focused tile loads it; and a focused tile that is mid-turn does not have
-   * the conversation taken out from under it — the incoming one is given a
-   * group of its own instead. Swapping the session on a running loop is what
-   * main refuses, and rightly: `saveSession` rewrites the session file from
-   * the loop's in-memory history, so a swap mid-turn writes one conversation's
+   * target loads it; and a target that is mid-turn does not have its
+   * conversation taken out from under it — the incoming one is given a group of
+   * its own beside it instead. Swapping the session on a running loop is what
+   * main refuses, and rightly: `saveSession` rewrites the session file from the
+   * loop's in-memory history, so a swap mid-turn writes one conversation's
    * messages into the other's file.
    *
-   * In chat mode the adopted group is the only one drawn, so the canvas does
-   * not split; the running conversation keeps streaming behind it and its
-   * sidebar row keeps saying so.
+   * In chat mode the adopted group is the only one DRAWN, so the canvas does
+   * not split. The displaced tile stays mounted and its turn runs on.
    */
-  const handleLoadSessionAndRefresh = useCallback(async (sessionId: string) => {
+  const reachSession = useCallback(async (
+    sessionId: string,
+    targetGroupId: string,
+  ): Promise<boolean> => {
     if (focusTileHolding(sessionId)) return true;
-    if (!streaming) return focusedSession.loadSession(sessionId);
-    const adopted = chatGroupsRef.current.adopt(
-      (chatGroupId) => tileSessions.find((tile) => tile.chatGroupId === chatGroupId)?.streaming !== true,
-    );
+    const target = tileSessions.find((tile) => tile.chatGroupId === targetGroupId);
+    const tile = chatGroupSessions.read(targetGroupId);
+    if (target !== undefined && !target.streaming && tile) return tile.loadSession(sessionId);
+    const adopted = chatGroupsRef.current.adopt(targetGroupId, (chatGroupId) => {
+      const each = tileSessions.find((candidate) => candidate.chatGroupId === chatGroupId);
+      // A group with no tile is a group whose state nothing can see. That is
+      // not the same as an idle one, and releasing it would abort whatever it
+      // is doing — so an unanswerable question is answered "busy".
+      if (each === undefined) return false;
+      return !each.streaming;
+    }, measuredCanvasSize(chatGroupCanvasRef.current));
     if (!adopted) {
       statusPushToast({ severity: "warning", message: t("app.conversationCeilingReached"), ttlMs: 8_000 });
       return false;
@@ -367,7 +381,16 @@ export function App() {
     // the edge-drop uses — it runs when that tile publishes its handle.
     setPendingSessionDrop({ chatGroupId: adopted.chatGroupId, sessionId });
     return true;
-  }, [focusedSession, focusTileHolding, releaseChatGroupLoop, statusPushToast, streaming, t, tileSessions]);
+  }, [
+    chatGroupSessions, focusTileHolding, releaseChatGroupLoop,
+    statusPushToast, t, tileSessions,
+  ]);
+
+  /** The same ladder for a request from outside the canvas: the focused tile is the target. */
+  const handleLoadSessionAndRefresh = useCallback(
+    (sessionId: string) => reachSession(sessionId, chatGroupsRef.current.focusedId),
+    [reachSession],
+  );
 
   const handleImportAndLoad = useCallback(async () => {
     const sessionId = await handleImport();
@@ -396,14 +419,18 @@ export function App() {
     }
     if (target === "center") {
       chatGroups.focus(targetGroupId);
-      void chatGroupSessions.read(targetGroupId)?.loadSession(sessionId);
+      // "Show it here" is the same request the sidebar makes, aimed at the tile
+      // the user pointed at. Dropping straight to `loadSession` would earn a
+      // silent refusal when that tile is mid-turn — the dead end a click no
+      // longer has.
+      void reachSession(sessionId, targetGroupId);
       return;
     }
     const created = chatGroups.dropOnEdge(targetGroupId, target);
     // null is the ceiling: four tiles already. Nothing to say — the frame
     // stops offering edges once `canSplit` is false.
     if (created) setPendingSessionDrop({ chatGroupId: created, sessionId });
-  }, [chatGroups, chatGroupSessions, tileSessions]);
+  }, [chatGroups, reachSession, tileSessions]);
 
   useEffect(() => {
     if (!pendingSessionDrop) return;
@@ -710,10 +737,13 @@ export function App() {
     async (sessionId: string) => {
       // One rule for reaching a conversation, wherever the request comes from:
       // a routine card opening its session is the sidebar's ladder with the
-      // view switch on the end.
-      setActiveView("home");
+      // view switch on the end. The switch only happens if the conversation was
+      // actually reached — a card naming a session that cannot be opened must
+      // not drag the user out of the routines view to look at an unrelated one.
       try {
-        return await handleLoadSessionAndRefresh(sessionId);
+        const loaded = await handleLoadSessionAndRefresh(sessionId);
+        if (loaded !== false) setActiveView("home");
+        return loaded;
       } catch (err) {
         console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
         return false;
@@ -1571,8 +1601,13 @@ export function App() {
                                      the sidebar's at every font scale, so neither side may
                                      be rem. */
                                   className="absolute flex p-(--chrome-gap-tight)"
-                                  style={areaStyle(group.box)}
+                                  /* Hidden, not unmounted: this tile's conversation
+                                     may be mid-turn, and the turn's stream
+                                     subscription, its streaming flag and its stop
+                                     control all live inside the tile. */
+                                  style={{ ...areaStyle(group.box), ...(group.hidden ? { display: "none" } : {}) }}
                                   data-testid={`chat-group-cell:${group.id}`}
+                                  data-hidden={group.hidden ? "true" : undefined}
                                 >
                                   {/* The tile owns its conversation: every hook inside is
                                       keyed on its group-bound api, so two tiles stream at
@@ -1584,6 +1619,7 @@ export function App() {
                                     env={chatGroupEnvironment}
                                     panelOpen={group.panelOpen}
                                     focused={chatGroups.focusedId === group.id}
+                                    hidden={group.hidden}
                                     onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
                                   >
                                     {({ actions, content, currentSessionId: tileSessionId }) => (
@@ -1602,15 +1638,9 @@ export function App() {
                                         actions={actions}
                                         {...(chatGroups.canSplit ? {
                                           onSplit: (axis: ChatGroupSplitAxis) => chatGroups.split(group.id, axis),
-                                          splitFits: (axis: ChatGroupSplitAxis) => {
-                                            // A canvas that has not been laid out yet measures 0×0;
-                                            // that is "unmeasured", not "no room".
-                                            const canvas = chatGroupCanvasRef.current;
-                                            const measured = canvas && canvas.clientWidth > 0 && canvas.clientHeight > 0;
-                                            return chatGroups.splitFits(group.id, axis, measured
-                                              ? { width: canvas.clientWidth, height: canvas.clientHeight }
-                                              : undefined);
-                                          },
+                                          splitFits: (axis: ChatGroupSplitAxis) => chatGroups.splitFits(
+                                            group.id, axis, measuredCanvasSize(chatGroupCanvasRef.current),
+                                          ),
                                         } : {})}
                                         {...(chatGroups.closable ? { onClose: () => closeChatGroup(group.id) } : {})}
                                         {...(chatGroups.canMaximize ? {

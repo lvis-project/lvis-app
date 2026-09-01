@@ -194,6 +194,11 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const history = overrides.history ?? { sessionId: currentSession, messages: [] };
   const historyBySession = overrides.historyBySession ?? {};
   const hasApiKey = overrides.hasApiKey ?? true;
+  const chatGroupRelease = vi.fn(async () => ({ ok: true, released: true }));
+  const chatGroupApis = new Map<string, {
+    chatGetHistory: ReturnType<typeof vi.fn>;
+    chatGroupRelease: typeof chatGroupRelease;
+  }>();
   const subscriptionRuntimeStatus = overrides.subscriptionRuntimeStatus ?? {
     ok: false,
     error: { code: "subscription-runtime-not-configured", message: "not configured" },
@@ -385,10 +390,21 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     // split throws `chat-group-unavailable`. Each non-primary group answers
     // with its OWN conversation id, which is what lets a test tell two tiles
     // apart; everything else is deliberately the window's shared mock.
-    chatGroup: vi.fn((chatGroupId: string) => ({
-      chatGetHistory: vi.fn(async () => ({ ...(await history), sessionId: `session-${chatGroupId}` })),
-      chatGroupRelease: vi.fn(async () => ({ ok: true, released: true })),
-    })),
+    chatGroup: vi.fn((chatGroupId: string) => {
+      // Memoized per group, and the release spy is SHARED across groups. A
+      // fresh object per call would hand every assertion a spy nothing had
+      // called yet, so "was any loop released?" could not be asked at all.
+      const existing = chatGroupApis.get(chatGroupId);
+      if (existing) return existing;
+      const made = {
+        chatGetHistory: vi.fn(async () => ({ ...(await history), sessionId: `session-${chatGroupId}` })),
+        chatGroupRelease,
+      };
+      chatGroupApis.set(chatGroupId, made);
+      return made;
+    }),
+    /** Every group's release goes through this one spy — see `chatGroup`. */
+    chatGroupRelease,
     captureUserKeyboardIntent: vi.fn(() => ({ inputOrigin: "user-keyboard", token: "mock-user-intent" })),
     // Mirrors `runStreamedTurn`: every accepted turn announces its input and
     // the identity of the row the host appended for it, which is how the

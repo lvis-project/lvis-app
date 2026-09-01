@@ -58,6 +58,13 @@ export interface ChatGroupSessionHandle {
   }) => void;
   /** Which session this tile is holding — the sidebar highlights it. */
   currentSessionId: string;
+  /**
+   * The view is not drawing this tile right now (chat mode, or another tile
+   * maximized). It is still mounted, because its conversation may be mid-turn
+   * and the turn's subscription lives here — but nothing it renders is on
+   * screen, so it must not CLAIM anything the user has to see.
+   */
+  hidden: boolean;
   currentSessionProject: SessionProjectSummary;
   /** Load a session into this tile, refusing mid-turn. */
   loadSession: (sessionId: string) => Promise<boolean>;
@@ -98,6 +105,7 @@ const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
   ask: async () => {},
   insertImportedTriggerEntry: () => {},
   currentSessionId: "",
+  hidden: false,
   currentSessionProject: {},
   loadSession: async () => false,
   fallbackToast: null,
@@ -115,6 +123,8 @@ export interface TileSession {
   chatGroupId: string;
   sessionId: string;
   streaming: boolean;
+  /** Mounted but not drawn — see {@link ChatGroupSessionHandle.hidden}. */
+  hidden: boolean;
 }
 
 /**
@@ -193,14 +203,19 @@ export function overlayCardTile(
   tiles: readonly TileSession[],
   card: { originSessionId?: string; adoptedChatGroupId?: string },
 ): OverlayCardPlacement {
+  // Drawing is what is at stake here, not ownership: a hidden tile is mounted
+  // so its turn survives, but it paints nothing, and a card handed to it would
+  // be a card nobody can see. The window's band takes those, exactly as it took
+  // them when the tile was unmounted instead.
+  const drawn = tiles.filter((tile) => !tile.hidden);
   if (card.originSessionId !== undefined) {
-    const holder = tileHoldingSession(tiles, card.originSessionId);
+    const holder = tileHoldingSession(drawn, card.originSessionId);
     return holder === undefined
       ? { chatGroupId: null, orphaned: true }
       : { chatGroupId: holder.chatGroupId, orphaned: false };
   }
   const pinned = card.adoptedChatGroupId;
-  if (pinned !== undefined && tiles.some((tile) => tile.chatGroupId === pinned)) {
+  if (pinned !== undefined && drawn.some((tile) => tile.chatGroupId === pinned)) {
     return { chatGroupId: pinned, orphaned: false };
   }
   return { chatGroupId: null, orphaned: false };
@@ -230,7 +245,9 @@ export function tileDrawsSession(args: {
 }): boolean {
   if (args.owned) return true;
   if (!args.focused) return false;
-  return tileHoldingSession(args.tiles, args.sessionId) === undefined;
+  // A hidden tile holds its conversation but paints nothing, so it cannot be
+  // the reason a card goes undrawn.
+  return tileHoldingSession(args.tiles.filter((tile) => !tile.hidden), args.sessionId) === undefined;
 }
 
 /**
@@ -266,6 +283,7 @@ export class ChatGroupSessionRegistry {
       && previous.entries === handle.entries
       && previous.streaming === handle.streaming
       && previous.currentSessionId === handle.currentSessionId
+      && previous.hidden === handle.hidden
       && previous.currentSessionProject === handle.currentSessionProject
       && previous.fallbackToast === handle.fallbackToast
       && this.snapshots.has(chatGroupId);
@@ -302,12 +320,14 @@ export class ChatGroupSessionRegistry {
       chatGroupId,
       sessionId: handle.currentSessionId,
       streaming: handle.streaming,
+      hidden: handle.hidden,
     }));
     const same = next.length === this.tiles.length && next.every((tile, index) => {
       const previous = this.tiles[index]!;
       return previous.chatGroupId === tile.chatGroupId
         && previous.sessionId === tile.sessionId
-        && previous.streaming === tile.streaming;
+        && previous.streaming === tile.streaming
+        && previous.hidden === tile.hidden;
     });
     if (same) return;
     this.tiles = Object.freeze(next.map((tile) => Object.freeze(tile)));
@@ -358,6 +378,7 @@ export class ChatGroupSessionRegistry {
         ChatGroupSessionHandle["insertImportedTriggerEntry"]
       >[0]) => live()?.insertImportedTriggerEntry(input),
       currentSessionId: handle.currentSessionId,
+      hidden: handle.hidden,
       currentSessionProject: handle.currentSessionProject,
       loadSession: async (sessionId: string) => await live()?.loadSession(sessionId) ?? false,
       fallbackToast: handle.fallbackToast,
