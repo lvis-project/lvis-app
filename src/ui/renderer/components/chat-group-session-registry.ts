@@ -242,7 +242,15 @@ export function tileDrawsSession(args: {
   /** The tile already knows this session (its own conversation or a child it spawned). */
   owned: boolean;
   focused: boolean;
+  /** This tile is mounted but paints nothing. */
+  hidden: boolean;
 }): boolean {
+  // Ahead of ownership, not after it. A hidden tile owning the session is the
+  // ordinary case while its turn runs off-screen, and answering yes there draws
+  // the card twice: once inside `display:none`, and once in the focused tile,
+  // which adopts the session precisely because no DRAWN tile holds it. The
+  // second copy is the one the user answers, and the first outlives the answer.
+  if (args.hidden) return false;
   if (args.owned) return true;
   if (!args.focused) return false;
   // A hidden tile holds its conversation but paints nothing, so it cannot be

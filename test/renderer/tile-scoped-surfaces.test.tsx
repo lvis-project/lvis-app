@@ -9,7 +9,7 @@
  */
 import "./setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { act, fireEvent, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import {
   collectTiles,
@@ -26,6 +26,7 @@ import {
 import { MOCK_DEFAULT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../src/contract/app-contract.js";
 import { BLOCKING_SURFACE_SELECTOR } from "../../src/shared/test-ids.js";
+import { CHAT_SESSION_DRAG_TYPE } from "../../src/ui/renderer/components/chat-group-drop.js";
 
 /** The permission namespace's subscriptions, as the mock records them. */
 function permissionSubscription(api: MockLvisApi, name: string): ReturnType<typeof vi.fn> {
@@ -1105,7 +1106,7 @@ describe("opening a conversation while another is mid-turn", () => {
     const restoreMode = startInChatMode();
     try {
       const pendingSend = deferred<{ ok: true }>();
-      const { container, api } = await renderApp(withOtherSession);
+      const { container, api, releasedGroupIds } = await renderApp(withOtherSession);
       api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
 
       await submitChatMessage(container, "아직 답하는 중");
@@ -1132,7 +1133,7 @@ describe("opening a conversation while another is mid-turn", () => {
       // the sidebar saying that conversation is running.
       expect(mountedTileIds(container)).toContain(MAIN_CHAT_GROUP_ID);
       // …and nothing released its loop to make room.
-      expect(api.chatGroupRelease).not.toHaveBeenCalled();
+      expect(releasedGroupIds()).toEqual([]);
 
       await act(async () => {
         pendingSend.resolve({ ok: true });
@@ -1210,7 +1211,7 @@ describe("opening a conversation while another is mid-turn", () => {
   });
 
   it("refuses out loud when every other conversation is busy, and never evicts the primary", async () => {
-    const { container, api } = await renderApp(withOtherSession);
+    const { container, api, releasedGroupIds } = await renderApp(withOtherSession);
     const pending: Array<{ resolve: (value: { ok: true }) => void }> = [];
     api.chatSend.mockImplementation(async () => {
       const gate = deferred<{ ok: true }>();
@@ -1236,12 +1237,12 @@ describe("opening a conversation while another is mid-turn", () => {
     // Nothing was released to make room — least of all the primary, whose
     // release also points its loop at a fresh conversation and clears the
     // persisted window-active session.
-    expect(api.chatGroupRelease).not.toHaveBeenCalled();
+    expect(releasedGroupIds()).toEqual([]);
     expect(mountedTileIds(container)).toEqual(before);
     expect(api.chatSessionResume).not.toHaveBeenCalled();
     // And the user is told, because nothing in this gesture shows the limit the
     // way a missing drop edge does.
-    await waitFor(() => expect(container.textContent).toContain("네 개의 대화"));
+    await waitFor(() => expect(container.textContent).toContain("비워 둘 수 있는 대화가 없습니다"));
 
     await act(async () => {
       for (const gate of pending) gate.resolve({ ok: true });
@@ -1273,6 +1274,184 @@ describe("opening a conversation while another is mid-turn", () => {
     await act(async () => {
       pendingSend.resolve({ ok: true });
       await pendingSend.promise;
+    });
+  });
+
+  it("hands a hidden tile's card to the window band, not to the tile nobody can see", async () => {
+    const restoreMode = startInChatMode();
+    try {
+      const pendingSend = deferred<{ ok: true }>();
+      const { container, api, emitOverlayShow } = await renderApp(withOtherSession);
+      api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+      await submitChatMessage(container, "아직 답하는 중");
+      await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+      await expandSidebar(container);
+      await act(async () => { fireEvent.click(await rowFor(container, OTHER_SESSION)); });
+      await waitFor(() => expect(mountedTileIds(container).length).toBe(2));
+
+      // The primary tile now holds its conversation without drawing it. A card
+      // for that conversation must not be handed to it: `display:none` would
+      // swallow the one surface the parked turn can be answered from.
+      await act(async () => {
+        emitOverlayShow({
+          id: "app:invoices:hidden",
+          source: { kind: "app", serverId: "invoices", eventId: "hidden" },
+          originSessionId: MOCK_DEFAULT_SESSION_ID,
+          title: "invoices",
+          summary: "숨은 타일의 카드",
+          running: false,
+          pendingPrompt: '<app-message source="app:invoices">\n숨은 타일의 카드\n</app-message>',
+          createdAt: new Date().toISOString(),
+        });
+      });
+
+      await waitFor(() => {
+        const band = container.querySelector<HTMLElement>('[data-overlay-surface="window"]');
+        expect(band?.textContent).toContain("숨은 타일의 카드");
+      });
+      const hiddenTile = container.querySelector<HTMLElement>(
+        `[data-testid="chat-group-cell:${MAIN_CHAT_GROUP_ID}"]`,
+      );
+      expect(hiddenTile?.getAttribute("data-hidden")).toBe("true");
+      expect(hiddenTile?.textContent).not.toContain("숨은 타일의 카드");
+
+      await act(async () => {
+        pendingSend.resolve({ ok: true });
+        await pendingSend.promise;
+      });
+    } finally {
+      restoreMode();
+    }
+  });
+
+  it("parks a hidden tile's approval on the window's dock, where it can be answered", async () => {
+    const restoreMode = startInChatMode();
+    try {
+      const pendingSend = deferred<{ ok: true }>();
+      const { container, api, emitApproval } = await renderApp(withOtherSession);
+      api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+      await submitChatMessage(container, "아직 답하는 중");
+      await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+      await expandSidebar(container);
+      await act(async () => { fireEvent.click(await rowFor(container, OTHER_SESSION)); });
+      await waitFor(() => expect(mountedTileIds(container).length).toBe(2));
+
+      // The turn that is still running is the reason the tile stays mounted —
+      // and a running turn parks on approvals. Claiming one here would draw the
+      // card inside `display:none`: no buttons anyone can reach, and the turn
+      // sits out its timeout with nothing on screen to explain the wait.
+      await act(async () => {
+        emitApproval({
+          id: "req-hidden-tile",
+          category: "tool",
+          toolName: "read_file",
+          toolCategory: "read",
+          args: { path: "/tmp/notes.md" },
+          reason: "read the notes",
+          createdAt: Date.now(),
+          requireExplicit: false,
+          nonce: "nonce-hidden-tile",
+          hmac: "hmac-hidden-tile",
+          sessionId: MOCK_DEFAULT_SESSION_ID,
+        });
+      });
+
+      const hiddenTile = container.querySelector<HTMLElement>(
+        `[data-testid="chat-group-cell:${MAIN_CHAT_GROUP_ID}"]`,
+      )!;
+      expect(hiddenTile.getAttribute("data-hidden")).toBe("true");
+      await waitFor(() => {
+        expect(container.querySelectorAll('[data-testid="approval-dock"]')).toHaveLength(1);
+      });
+      expect(hiddenTile.querySelectorAll('[data-testid="approval-dock"]')).toHaveLength(0);
+
+      await act(async () => {
+        pendingSend.resolve({ ok: true });
+        await pendingSend.promise;
+      });
+    } finally {
+      restoreMode();
+    }
+  });
+
+  it("a conversation dropped on a mid-turn tile's centre gets its own group", async () => {
+    const pendingSend = deferred<{ ok: true }>();
+    const { container, api } = await renderApp(withOtherSession);
+    const [, second] = await splitIntoTwoTiles(container);
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+    await focusTile(second!);
+    await submitChatMessage(second!.element, "아직 답하는 중");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+    api.chatSessionResume.mockClear();
+
+    // A centre drop asks the tile to SHOW this conversation, which is the one
+    // thing a mid-turn tile cannot do — the same refusal the sidebar hit.
+    const frame = second!.element.querySelector('[data-testid="chat-group"]')!;
+    vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    // jsdom drops the pointer coordinates a drag carries, and the coordinates
+    // ARE the gesture — so they are set on the event itself.
+    const drop = createEvent.drop(frame, {
+      // `files` too: the window's file-drop guard reads it on every drop.
+      dataTransfer: {
+        types: [CHAT_SESSION_DRAG_TYPE], getData: () => OTHER_SESSION, dropEffect: "none", files: [],
+      },
+    });
+    Object.defineProperty(drop, "clientX", { value: 400 });
+    Object.defineProperty(drop, "clientY", { value: 300 });
+    await act(async () => { fireEvent(frame, drop); });
+
+    await waitFor(() => expect(mountedTileIds(container)).toHaveLength(3));
+    await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith(OTHER_SESSION));
+
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await pendingSend.promise;
+    });
+  });
+
+  it("releases the loop of the group it set aside, and says so", async () => {
+    const { container, api, releasedGroupIds } = await renderApp(withOtherSession);
+    const pending: Array<{ resolve: (value: { ok: true }) => void }> = [];
+    api.chatSend.mockImplementation(async () => {
+      const gate = deferred<{ ok: true }>();
+      pending.push(gate);
+      return gate.promise;
+    });
+
+    const tiles = await splitIntoNTiles(container, MAX_CHAT_GROUPS);
+    // Two conversations mid-turn — the primary, which the click will target,
+    // and one neighbour. The other two are idle and can be set aside.
+    await focusTile(tiles[1]!);
+    await submitChatMessage(tiles[1]!.element, "옆 타일");
+    await focusTile(tiles[0]!);
+    await submitChatMessage(tiles[0]!.element, "여기도 답하는 중");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(2));
+
+    await act(async () => { fireEvent.click(await rowFor(container, OTHER_SESSION)); });
+
+    const released = releasedGroupIds();
+    expect(released).toHaveLength(1);
+    // Not the primary, not the busy neighbour, and not the group just created
+    // for the incoming conversation — releasing any of those either aborts a
+    // turn or throws away the tile that was just made.
+    expect(released[0]).not.toBe(MAIN_CHAT_GROUP_ID);
+    expect(released[0]).not.toBe(tiles[1]!.chatGroupId);
+    expect([tiles[2]!.chatGroupId, tiles[3]!.chatGroupId]).toContain(released[0]);
+    expect(mountedTileIds(container)).not.toContain(released[0]);
+    expect(mountedTileIds(container)).toHaveLength(MAX_CHAT_GROUPS);
+    // Making room costs a tile the user did not ask to lose, from a click that
+    // looked like plain navigation.
+    await waitFor(() => expect(container.textContent).toContain("자리를 만들기 위해"));
+
+    await act(async () => {
+      for (const gate of pending) gate.resolve({ ok: true });
+      await Promise.resolve();
     });
   });
 });

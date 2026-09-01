@@ -6,6 +6,7 @@
  * crashing.
  */
 import { vi, type Mock } from "vitest";
+import { MAIN_CHAT_GROUP_ID } from "../../src/contract/app-contract.js";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 import type { ChatEntry, ChatStreamEvent } from "../../src/lib/chat-stream-state.js";
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../../src/shared/subagent-events.js";
@@ -158,6 +159,8 @@ export const DEFAULT_APP_INFO = {
 
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
+  /** Which groups' loops were released — one spy per group, see the body. */
+  releasedGroupIds: () => string[];
   emitChatStream: (ev: ChatStreamEvent) => void;
   emitAgentSpawnEvent: (event: AgentSpawnEvent) => void;
   /** `lvis:skill-load:event` — window-wide, stamped with the turn's session. */
@@ -194,11 +197,14 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const history = overrides.history ?? { sessionId: currentSession, messages: [] };
   const historyBySession = overrides.historyBySession ?? {};
   const hasApiKey = overrides.hasApiKey ?? true;
-  const chatGroupRelease = vi.fn(async () => ({ ok: true, released: true }));
   const chatGroupApis = new Map<string, {
     chatGetHistory: ReturnType<typeof vi.fn>;
-    chatGroupRelease: typeof chatGroupRelease;
+    chatGroupRelease: ReturnType<typeof vi.fn>;
   }>();
+  // The primary group is not reached through `chatGroup()` — `chatGroupApi`
+  // hands it the window api itself — so its release is the top-level member,
+  // exactly as in `LvisApi`.
+  const chatGroupRelease = vi.fn(async () => ({ ok: true, released: true }));
   const subscriptionRuntimeStatus = overrides.subscriptionRuntimeStatus ?? {
     ok: false,
     error: { code: "subscription-runtime-not-configured", message: "not configured" },
@@ -391,19 +397,21 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     // with its OWN conversation id, which is what lets a test tell two tiles
     // apart; everything else is deliberately the window's shared mock.
     chatGroup: vi.fn((chatGroupId: string) => {
-      // Memoized per group, and the release spy is SHARED across groups. A
-      // fresh object per call would hand every assertion a spy nothing had
-      // called yet, so "was any loop released?" could not be asked at all.
+      // Memoized per group, so a spy a test reads is the same one production
+      // called. A fresh object per call would hand every assertion a spy
+      // nothing had touched, and "was a loop released?" could not be asked.
+      // The spy is per GROUP, not shared: the interesting question at the
+      // conversation ceiling is not whether something was released but WHICH
+      // group was — a shared spy answers the first and hides the second.
       const existing = chatGroupApis.get(chatGroupId);
       if (existing) return existing;
       const made = {
         chatGetHistory: vi.fn(async () => ({ ...(await history), sessionId: `session-${chatGroupId}` })),
-        chatGroupRelease,
+        chatGroupRelease: vi.fn(async () => ({ ok: true, released: true })),
       };
       chatGroupApis.set(chatGroupId, made);
       return made;
     }),
-    /** Every group's release goes through this one spy — see `chatGroup`. */
     chatGroupRelease,
     captureUserKeyboardIntent: vi.fn(() => ({ inputOrigin: "user-keyboard", token: "mock-user-intent" })),
     // Mirrors `runStreamedTurn`: every accepted turn announces its input and
@@ -740,6 +748,18 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 
   return {
     api,
+    /**
+     * Which groups' loops were released. One spy per group rather than one
+     * shared spy: at the conversation ceiling the interesting question is not
+     * whether something was released but WHICH group was, and a shared spy
+     * answers only the first.
+     */
+    releasedGroupIds: (): string[] => [
+      ...(chatGroupRelease.mock.calls.length > 0 ? [MAIN_CHAT_GROUP_ID] : []),
+      ...[...chatGroupApis.entries()]
+        .filter(([, group]) => group.chatGroupRelease.mock.calls.length > 0)
+        .map(([chatGroupId]) => chatGroupId),
+    ],
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
     emitAgentSpawnEvent: (event) => agentSpawnEventHandlers.forEach((h) => h(event)),
     emitSkillLoaded: (event) => skillLoadedHandlers.forEach((h) => h(event)),

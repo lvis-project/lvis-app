@@ -20,6 +20,8 @@ export interface UseChatScrollParams {
   searchOpen: boolean;
   searchMatches: number[];
   searchIdx: number;
+  /** The tile around this transcript is mounted but not drawn. */
+  hidden: boolean;
 }
 
 export interface UseChatScrollResult {
@@ -46,6 +48,7 @@ export function useChatScroll({
   searchOpen,
   searchMatches,
   searchIdx,
+  hidden,
 }: UseChatScrollParams): UseChatScrollResult {
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const previousEntryCountRef = useRef(entries.length);
@@ -92,6 +95,16 @@ export function useChatScroll({
   }, [scrollViewportRef]);
 
   const restoredSessionScrollRef = useRef<string | null>(null);
+
+  // Hiding the tile takes the viewport's layout away: `display:none` zeroes
+  // `scrollTop` and every measurement below it. The restore below runs once per
+  // session per mount, and the tile no longer unmounts when it leaves the view,
+  // so without this the position saved for this conversation is never applied
+  // again and coming back lands at the bottom of the transcript.
+  useLayoutEffect(() => {
+    if (!hidden) return;
+    restoredSessionScrollRef.current = null;
+  }, [hidden]);
 
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current;
@@ -156,6 +169,10 @@ export function useChatScroll({
     if (!viewport || typeof ResizeObserverImpl !== "function") return;
     const observer = new ResizeObserverImpl(() => {
       if (viewMode) return;
+      // A hidden tile's viewport reports 0×0, where `isNearBottom()` is true of
+      // every scroll position. Acting on that pins a transcript the user had
+      // scrolled up in to its bottom, and the pin outlives the hiding.
+      if (viewport.clientHeight === 0) return;
       if (pinnedToBottomRef.current || isNearBottom()) {
         scheduleAutoBottomPin();
       }

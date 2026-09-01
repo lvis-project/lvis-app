@@ -230,7 +230,18 @@ describe("overlayCardTile", () => {
     });
     // …and the focused tile adopts a question for that conversation, rather
     // than leaving it to the tile that holds it and draws nothing.
-    expect(tileDrawsSession({ tiles: hidden, sessionId: "s-2", owned: false, focused: true })).toBe(true);
+    expect(tileDrawsSession({
+      tiles: hidden, sessionId: "s-2", owned: false, focused: true, hidden: false,
+    })).toBe(true);
+    // The other half of the same answer, and the one that decides whether the
+    // card is drawn ONCE: the hidden tile owns "s-2" and must still decline.
+    // Owning is the ordinary case while its turn runs off-screen, so an
+    // ownership check that ran first would draw the card twice — invisibly
+    // here, and again in the tile that adopted it above. Only the second copy
+    // can be answered, and the first would outlive the answer.
+    expect(tileDrawsSession({
+      tiles: hidden, sessionId: "s-2", owned: true, focused: false, hidden: true,
+    })).toBe(false);
   });
 
   it("draws a card with no conversation behind it in the tile it was pinned to", () => {
@@ -285,21 +296,21 @@ describe("tileDrawsSession", () => {
     // A routine turn runs in a session no tile is showing. Its question has to
     // land somewhere or the gate waits out its timeout against a blank window.
     const routineSession = "s-routine";
-    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: true })).toBe(true);
-    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: false })).toBe(false);
+    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: true, hidden: false })).toBe(true);
+    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: false, hidden: false })).toBe(false);
   });
 
   it("never adopts a session another tile is showing — that tile draws it", () => {
-    expect(tileDrawsSession({ tiles, sessionId: "s-other", owned: false, focused: true })).toBe(false);
+    expect(tileDrawsSession({ tiles, sessionId: "s-other", owned: false, focused: true, hidden: false })).toBe(false);
   });
 
   it("adopts a background child whose parent tile has since switched conversations", () => {
     // The switch cleared the parent's spawn list, so the child is no longer
     // owned by anyone and no tile holds its session.
-    expect(tileDrawsSession({ tiles, sessionId: "s-background-child", owned: false, focused: true })).toBe(true);
+    expect(tileDrawsSession({ tiles, sessionId: "s-background-child", owned: false, focused: true, hidden: false })).toBe(true);
   });
 
   it("draws its own conversation whether or not it is the focused tile", () => {
-    expect(tileDrawsSession({ tiles, sessionId: "s-main", owned: true, focused: false })).toBe(true);
+    expect(tileDrawsSession({ tiles, sessionId: "s-main", owned: true, focused: false, hidden: false })).toBe(true);
   });
 });

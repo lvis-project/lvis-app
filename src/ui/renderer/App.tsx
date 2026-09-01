@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
+import { MAX_CHAT_GROUPS } from "../../contract/app-contract.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ThemeProvider } from "./theme/index.js";
@@ -102,6 +103,13 @@ import { TEST_IDS } from "../../shared/test-ids.js";
 
 /** The per-turn output ceiling the cost projection assumes. */
 const MAX_OUTPUT_TOKENS = 4096;
+
+/** A canvas not laid out yet measures 0x0 — that is "unmeasured", not "no room". */
+function measuredCanvasSize(canvas: HTMLElement | null) {
+  return canvas && canvas.clientWidth > 0 && canvas.clientHeight > 0
+    ? { width: canvas.clientWidth, height: canvas.clientHeight }
+    : undefined;
+}
 
 export function App() {
   const { t } = useTranslation();
@@ -225,12 +233,6 @@ export function App() {
   // side, and the tree only knows fractions — a fraction cannot say which side
   // of a tile is longer.
   const chatGroupCanvasRef = useRef<HTMLDivElement>(null);
-  /** A canvas not laid out yet measures 0x0 — that is "unmeasured", not "no room". */
-  const measuredCanvasSize = (canvas: HTMLElement | null) =>
-    canvas && canvas.clientWidth > 0 && canvas.clientHeight > 0
-      ? { width: canvas.clientWidth, height: canvas.clientHeight }
-      : undefined;
-
   const focusedSession = useChatGroupSession(chatGroupSessions, chatGroups.focusedId);
   const tileSessions = useTileSessions(chatGroupSessions);
   const { entries, streaming, currentSessionId, currentSessionProject, fallbackToast } = focusedSession;
@@ -372,11 +374,25 @@ export function App() {
       return !each.streaming;
     }, measuredCanvasSize(chatGroupCanvasRef.current));
     if (!adopted) {
-      statusPushToast({ severity: "warning", message: t("app.conversationCeilingReached"), ttlMs: 8_000 });
+      statusPushToast({
+        severity: "warning",
+        message: t("app.conversationCeilingReached", { count: MAX_CHAT_GROUPS }),
+        ttlMs: 8_000,
+      });
       return false;
     }
     // The tree already dropped it; main still has to let the loop go.
-    if (adopted.released !== null) releaseChatGroupLoop(adopted.released);
+    if (adopted.released !== null) {
+      releaseChatGroupLoop(adopted.released);
+      // Say so. Making room costs the user a tile they did not ask to lose, and
+      // the click that caused it looked like plain navigation. The conversation
+      // itself is on disk; the composer draft and the scroll position were not.
+      statusPushToast({
+        severity: "info",
+        message: t("app.conversationSetAside"),
+        ttlMs: 8_000,
+      });
+    }
     // The adopted group is not mounted yet, so the load rides the same delivery
     // the edge-drop uses — it runs when that tile publishes its handle.
     setPendingSessionDrop({ chatGroupId: adopted.chatGroupId, sessionId });

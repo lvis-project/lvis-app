@@ -344,18 +344,21 @@ export function turnsEndedUnseen(
   attention: Attention,
 ): string[] {
   // "Looking" is a property of the conversation, not the tile, and the user
-  // sees its turn end through the focused tile.
+  // sees its turn end through the focused tile — provided that tile is drawn.
+  // A hidden one is mounted only so its turn survives; nobody is watching it.
   const watched = attention.conversationVisible
-    ? current.find((tile) => tile.chatGroupId === attention.focusedChatGroupId)?.sessionId
+    ? current.find((tile) =>
+      tile.chatGroupId === attention.focusedChatGroupId && !tile.hidden)?.sessionId
     : undefined;
   return turnsEnded(previous, current).filter((sessionId) => sessionId !== watched);
 }
 
 /**
  * The conversations whose turn ended between two readings of the tiles,
- * whether or not anyone was looking. A tile that left the canvas mid-turn
- * (closed, or collapsed by chat mode) took the turn with it, and one that
- * moved to another conversation no longer speaks for the turn that ended.
+ * whether or not anyone was looking. A tile that is gone from the reading took
+ * its turn with it — that now means closed, since leaving the view keeps the
+ * tile mounted and its turn running — and one that moved to another
+ * conversation no longer speaks for the turn that ended.
  */
 export function turnsEnded(
   previous: readonly TileSession[],

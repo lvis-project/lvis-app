@@ -32,6 +32,13 @@ export interface ChatContextValue {
    * first session id resolves on app boot.
    */
   currentSessionId: string;
+  /**
+   * The tile around this subtree is mounted but paints nothing — its turn is
+   * running off-screen. Surfaces that claim a card for themselves (the side
+   * chat's approval claim) must stand down while this holds, or the card is
+   * drawn where nobody can answer it.
+   */
+  hidden: boolean;
 
   // API state
   hasApiKey: boolean | null;

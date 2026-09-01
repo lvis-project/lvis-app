@@ -626,7 +626,6 @@ export function useChatGroups(appMode?: "chat" | "work") {
     return id;
   }, [tree]);
 
-
   /**
    * The header's split: halve `groupId` on `axis`, the new tile trailing —
    * beside it for `row`, under it for `column`. The direction is the user's;
@@ -708,9 +707,17 @@ export function useChatGroups(appMode?: "chat" | "work") {
     // `dropOnEdge` degrades to "center" there. The displaced conversation keeps
     // its group and its turn either way; only what the canvas draws differs.
     // Otherwise: a group added behind a maximized tile would be one nobody sees.
-    setMaximizedId(splitFits(besideGroupId, "row", canvasSize) ? null : id);
+    // Chat mode is exempt: it already draws one tile alone, and `splitFits`
+    // measures a split it will never perform — against tree boxes that shrink
+    // with every group the mode is keeping out of view, so it reports "no room"
+    // on a canvas that is in fact whole. Setting a maximize there is invisible
+    // until the user toggles to work mode, which would then open maximized
+    // instead of tiled.
+    setMaximizedId(
+      appMode === "chat" || splitFits(besideGroupId, "row", canvasSize) ? null : id,
+    );
     return { chatGroupId: id, released };
-  }, [tree, focusedId, splitFits]);
+  }, [tree, focusedId, splitFits, appMode]);
 
   // Any tile but the last can go, the primary included: once split, the
   // primary is one tile among the others to the user, and a close that works
@@ -729,6 +736,19 @@ export function useChatGroups(appMode?: "chat" | "work") {
   const toggleMaximize = useCallback((id: string) => {
     setMaximizedId((current) => (current === id ? null : id));
     setFocusedId(id);
+  }, []);
+
+  // Focus is what the window asks for; being SEEN is what the caller means.
+  // In work mode `maximizedId`, not focus, decides which tile is drawn, so
+  // focusing a tile the maximize is hiding moves every focus-derived surface —
+  // the sidebar's current row, search, the unread bookkeeping — onto a tile
+  // nobody can see, and the click that asked for it does nothing on screen.
+  // Maximizing follows the focus instead: one tile alone, and it is this one.
+  // (`dropOnEdge` and `adopt` clear the maximize outright for the same reason;
+  // here the mode is kept because the user chose it and only the subject moved.)
+  const focus = useCallback((id: string) => {
+    setFocusedId(id);
+    setMaximizedId((current) => (current === null ? null : id));
   }, []);
 
   // Chat mode collapses to the focused tile rather than closing the others:
@@ -809,7 +829,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
     gutters,
     tree,
     focusedId,
-    focus: setFocusedId,
+    focus,
     setPanelOpen,
     canSplit,
     split,
