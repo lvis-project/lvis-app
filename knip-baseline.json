@@ -2624,11 +2624,6 @@
     },
     {
       "type": "types",
-      "file": "src/tools/agent-spawn.ts",
-      "name": "AgentSpawnEvent"
-    },
-    {
-      "type": "types",
       "file": "src/tools/executor-ceiling.ts",
       "name": "ToolCeilingTerminationReason"
     },

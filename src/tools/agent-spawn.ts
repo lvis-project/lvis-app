@@ -207,6 +207,21 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           isError: true,
         };
       }
+      // A spawn is always requested from inside a conversation, and its frames
+      // are addressed to that conversation's tile. Without the id there is no
+      // tile to draw progress in and no owner for the child's own approvals, so
+      // the spawn is refused here rather than emitted unaddressed.
+      const originSessionId =
+        typeof ctx.metadata?.sessionId === "string" ? ctx.metadata.sessionId : undefined;
+      if (originSessionId === undefined) {
+        return {
+          output: JSON.stringify({
+            error: "agent_spawn requires a conversation in context",
+            taskState: projectSubAgentRunState("rejected"),
+          }),
+          isError: true,
+        };
+      }
       const a = (rawInput ?? {}) as Record<string, unknown>;
       // Sub-agents ALWAYS run in the background on a surface that can deliver
       // their results (user directive 2026-08-14, superseding the earlier
@@ -281,21 +296,6 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         : profile?.sourceTools && profile.sourceTools.length > 0
           ? profile.sourceTools
           : undefined;
-      // A spawn is always requested from inside a conversation, and its frames
-      // are addressed to that conversation's tile. Without the id there is no
-      // tile to draw progress in and no owner for the child's own approvals, so
-      // the spawn is refused here rather than emitted unaddressed.
-      const originSessionId =
-        typeof ctx.metadata?.sessionId === "string" ? ctx.metadata.sessionId : undefined;
-      if (originSessionId === undefined) {
-        return {
-          output: JSON.stringify({
-            error: "agent_spawn requires a conversation in context",
-            taskState: projectSubAgentRunState("rejected"),
-          }),
-          isError: true,
-        };
-      }
       const toolUseId =
         typeof ctx.metadata?.toolUseId === "string"
           ? (ctx.metadata.toolUseId as string)

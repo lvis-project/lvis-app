@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useWorkflowTools } from "../use-workflow-tools.js";
 import type { LvisApi } from "../../types.js";
+import type { AgentSpawnEvent } from "../../../../tools/agent-spawn.js";
 
 describe("useWorkflowTools", () => {
   it("preserves suspension metadata when a done event transitions a spawn to waiting", () => {
@@ -70,7 +71,7 @@ describe("useWorkflowTools", () => {
       // not cross the IPC boundary.
       onSpawn?.({
         spawnId: "unaddressed", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "Unaddressed",
-      } as unknown as Parameters<NonNullable<typeof onSpawn>>[0]);
+      } as unknown as AgentSpawnEvent);
       // Later phases of another tile's agent are dropped too, not synthesized.
       onSpawn?.({ spawnId: "theirs", type: "done", taskState: "TASK_STATE_COMPLETED", status: "done", summary: "x", parentSessionId: "session-other-tile" });
     });
