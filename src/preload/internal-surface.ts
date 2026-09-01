@@ -26,6 +26,8 @@ import type {
 } from "../shared/assistant-context-menu.js";
 import type {
   NativeContextMenuAction,
+  DynamicNativeMenuAction,
+  DynamicNativeMenuPayload,
   NativeContextMenuPayload,
 } from "../shared/native-context-menu.js";
 import {
@@ -211,6 +213,13 @@ export function buildLvisNamespaceExtras() {
       const listener = (_event: unknown, action: NativeContextMenuAction) => cb(action);
       ipcRenderer.on(UI.nativeContextAction, listener);
       return () => ipcRenderer.removeListener(UI.nativeContextAction, listener);
+    },
+    showDynamicMenu: (payload: DynamicNativeMenuPayload) =>
+      ipcRenderer.invoke(UI.dynamicMenu, payload),
+    onDynamicMenuAction: (cb: (action: DynamicNativeMenuAction) => void) => {
+      const listener = (_event: unknown, action: DynamicNativeMenuAction) => cb(action);
+      ipcRenderer.on(UI.dynamicMenuAction, listener);
+      return () => ipcRenderer.removeListener(UI.dynamicMenuAction, listener);
     },
   },
   pluginConfig: {

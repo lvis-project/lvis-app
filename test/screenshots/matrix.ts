@@ -103,17 +103,21 @@ async function openWorkMode(page: Page): Promise<void> {
 }
 
 /**
- * Open a seeded plugin's sidebar panel via the composer command popover, then
- * wait for its UI bundle to render inside the plugin webview.
+ * Open a seeded plugin's panel from the sidebar's plugin rail, then wait for
+ * its UI bundle to render inside the plugin webview.
  *
- * Navigation reflects the CURRENT app (#1311 removed the standalone plugin-grid
- * button from the input area — plugins now live inside the slash / command
- * popover, see SlashPickerPanel.tsx): Ctrl/Cmd+K opens the popover →
- * `slash-picker-cat-plugin` category → the plugin's row (matched by its
- * manifest displayName label) → `onSelectPlugin(viewKey)`. In WORK mode (the
- * harness default) `handleViewSelect` opens the panel INLINE via `setActiveView`
- * in the main renderer, so the webview mounts inside mainWindow and is
- * screenshottable in either workspace mode.
+ * The sidebar rail is the only DOM route left to a plugin panel: the composer's
+ * command button opens a NATIVE Electron menu, which lives outside the page and
+ * cannot be seen, driven, or screenshotted by Playwright. Each rail row carries
+ * `data-viewkey="plugin:<pluginId>:<viewId>"` (Sidebar.tsx, `PluginNavItem`),
+ * so a prefix match addresses a plugin without knowing its view id or its
+ * localized display label, and works whether the rail is expanded or collapsed
+ * (the collapsed square button carries the same attribute, only its text is
+ * dropped). Clicking a row calls `handleViewSelectWithDoctor(viewKey)`, the
+ * same handler the picker used to call; in WORK mode (the harness default) that
+ * opens the panel INLINE via `setActiveView` in the main renderer, so the
+ * webview mounts inside mainWindow and is screenshottable in either workspace
+ * mode.
  *
  * The plugin UI loads inside an Electron <webview> (plugin-ui-host.tsx) whose
  * guest content is the plugin's real bundle served over `lvis-plugin://asset`.
@@ -121,18 +125,17 @@ async function openWorkMode(page: Page): Promise<void> {
  * wait for the <webview> element to attach + finish loading and give the guest
  * a settle beat, then screenshot the host panel region (which contains it).
  *
- * @param label the plugin's manifest `ui[].displayName` (its row label in the
- *   picker), e.g. "미팅" for meeting or "업무 도우미" for work-assistant.
+ * @param pluginId the plugin's manifest id, e.g. `meeting` or `local-indexer`.
  */
 async function openPluginPanel(
   page: Page,
-  label: string,
+  pluginId: string,
   options: { timeoutMs?: number } = {},
 ): Promise<void> {
   const deadline = Date.now() + (options.timeoutMs ?? 30_000);
   for (;;) {
-    await selectPluginPanel(page, label);
     try {
+      await selectPluginPanel(page, pluginId);
       // The plugin panel host mounts a <webview>. Wait for it to attach and
       // finish its first load; the guest bundle then renders its own DOM.
       await page.locator('webview').first().waitFor({ state: 'visible', timeout: 8_000 });
@@ -146,7 +149,7 @@ async function openPluginPanel(
       // any key with no registered view, which dropped the click and left the
       // app where it was. That is fixed in the host (a preparing plugin's panel
       // opens and waits), and this loop stays because it also covers the plainer
-      // case of a row that is not in the picker yet.
+      // case of a row that has not appeared in the rail yet.
       if (Date.now() >= deadline) throw err;
     }
   }
@@ -156,29 +159,11 @@ async function openPluginPanel(
   await page.waitForTimeout(2_500);
 }
 
-/** One walk of the command popover to the named plugin's panel row. */
-async function selectPluginPanel(page: Page, label: string): Promise<void> {
+/** One walk of the sidebar rail to the named plugin's panel row. */
+async function selectPluginPanel(page: Page, pluginId: string): Promise<void> {
   await openWorkMode(page);
 
-  // Open the command popover (Ctrl/Cmd+K). The composer must be focused first
-  // so the global shortcut is in scope.
-  const composer = page.locator('[data-testid="composer-textarea"]').first();
-  await composer.waitFor({ state: 'visible', timeout: 15_000 });
-  await composer.click();
-  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-  await page.keyboard.press(`${mod}+k`);
-
-  const picker = page.locator('[data-testid="slash-picker"]').first();
-  await picker.waitFor({ state: 'visible', timeout: 15_000 });
-
-  // Drill into the "plugin" category, then click the plugin's row by its label.
-  const pluginCat = page.locator('[data-testid="slash-picker-cat-plugin"]').first();
-  await pluginCat.waitFor({ state: 'visible', timeout: 15_000 });
-  await pluginCat.click();
-
-  const pluginGroup = page.locator('[data-testid="slash-group-plugin"]').first();
-  await pluginGroup.waitFor({ state: 'visible', timeout: 15_000 });
-  const row = pluginGroup.locator('[cmdk-item]').filter({ hasText: label }).first();
+  const row = page.locator(`[data-viewkey^="plugin:${pluginId}:"]`).first();
   await row.waitFor({ state: 'visible', timeout: 15_000 });
   await row.click();
 }
@@ -326,7 +311,7 @@ function meetingMinutesScenario(subTab: (typeof MINUTES_SUB_TAB)[keyof typeof MI
         fabricatedMeetingSession(),
     },
     steps: async ({ app, page }) => {
-      await openPluginPanel(page, '미팅');
+      await openPluginPanel(page, 'meeting');
       // The right-hand tab of the guest's two-tab bar, then the seeded session's
       // row in the list it reveals, then the sub-tab this capture is about. Each
       // step waits for the control the previous one produced, so a broken chain
@@ -835,7 +820,7 @@ function localIndexerScenario(
     skip: REAL_PYTHON_CAPTURES ? undefined : LIVE_WORKER_SKIP,
     seededCorpus: LOCAL_INDEXER_SEED,
     steps: async ({ app, page }) => {
-      await openPluginPanel(page, '로컬 인덱서', { timeoutMs: 120_000 });
+      await openPluginPanel(page, 'local-indexer', { timeoutMs: 120_000 });
       // The host paints its own placeholder until the guest document is up;
       // wait for a control only the guest renders before doing anything to it.
       await waitInPluginGuest(app, '[data-role="scanBtn"]');
@@ -899,7 +884,7 @@ function localIndexerChatScenario(
     seededCorpus: LOCAL_INDEXER_SEED,
     scriptedScript: { turns: [ACTIVATE_LOCAL_INDEXER, ...turns] },
     steps: async ({ app, page }) => {
-      await openPluginPanel(page, '로컬 인덱서', { timeoutMs: 120_000 });
+      await openPluginPanel(page, 'local-indexer', { timeoutMs: 120_000 });
       await waitInPluginGuest(app, '[data-role="scanBtn"]');
       await runDemoIndexing(app);
       await page.locator('[data-testid="sidebar-new-chat"]').first().click();
@@ -1453,7 +1438,7 @@ export const scenarios: Record<string, ScenarioEntry> = {
       // "Approve Tool Execution" permission dock — the plugin-first-tool-call
       // permission grant this docs key depicts. Navigate to the panel; the dock
       // appears below it, then assert the dock content.
-      await openPluginPanel(page, '미팅');
+      await openPluginPanel(page, 'meeting');
       await page
         .locator('[data-testid="approval-dock"]')
         .first()
@@ -1632,7 +1617,7 @@ export const scenarios: Record<string, ScenarioEntry> = {
     steps: async ({ app, page }) => {
       // Real lvis-plugin-meeting UI, default tab ("예정 회의" / upcoming),
       // reading the fabricated prep the corpus wrote into its own store.
-      await openPluginPanel(page, '미팅');
+      await openPluginPanel(page, 'meeting');
       // Waits for the prep itself rather than a fixed settle: the card renders
       // only once `meeting_list_preps` returns, and that round trip is the slow
       // part. If the seeding ever stops landing, this says so.

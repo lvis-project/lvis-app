@@ -6,6 +6,7 @@ import { Terminal, Zap, Puzzle, Server, Sparkles, MessageSquareText, type Lucide
 import { t } from "../../../i18n/runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
+import type { NativeMenuRow } from "../hooks/use-native-context-menu.js";
 
 /** A single live MCP-server tool, namespaced by its server. */
 export interface McpToolEntry {
@@ -170,5 +171,72 @@ export function filterSkills(skills: SkillEntry[], query: string): SkillEntry[] 
   if (!q) return skills;
   return skills.filter(
     (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+  );
+}
+
+/**
+ * The composer's command menu as native menu rows.
+ *
+ * The picker used to be a search box over a flat list; a native menu cannot
+ * filter as you type, so the shape carries the weight instead. What the user
+ * reaches for constantly — the view shortcuts — stays flat at the top, and each
+ * long, install-dependent list (plugins, MCP tools and prompts, skills) sits
+ * behind its own submenu. Typing to find something is still the "/" menu in the
+ * composer, which is unchanged.
+ *
+ * A category with nothing in it is left out rather than shown empty: an
+ * always-present row that never opens teaches the user it is broken.
+ */
+export function buildComposerMenuSections(input: {
+  actions: QuickAction[];
+  plugins: PluginEntry[];
+  mcpTools: McpToolEntry[];
+  mcpPrompts: McpPromptEntry[];
+  skills: SkillEntry[];
+  onInsert: (cmd: string) => void;
+  onSelectPlugin: (viewKey: string) => void;
+  onRunMcpPrompt: (prompt: McpPromptEntry) => void;
+}): Array<{ items: NativeMenuRow[] }> {
+  const shortcuts: NativeMenuRow[] = input.actions.map((action) => ({
+    id: `shortcut:${action.id}`,
+    label: action.label,
+    onSelect: () => action.run(),
+  }));
+
+  const categories: NativeMenuRow[] = [];
+  const push = (category: Category, rows: NativeMenuRow[]): void => {
+    if (rows.length === 0) return;
+    categories.push({ id: `category:${category}`, label: catLabel(category), submenu: rows });
+  };
+
+  push("command", SLASH_COMMANDS.map((command) => ({
+    id: `command:${command.cmd}`,
+    label: `${command.cmd} — ${t(command.labelKey)}`,
+    // The trailing space is what lets the user keep typing arguments.
+    onSelect: () => input.onInsert(`${command.cmd} `),
+  })));
+  push("plugin", input.plugins.map((plugin) => ({
+    id: `plugin:${plugin.viewKey}`,
+    label: plugin.label,
+    onSelect: () => input.onSelectPlugin(plugin.viewKey),
+  })));
+  push("mcp", input.mcpTools.map((tool) => ({
+    id: `mcp:${tool.serverId}:${tool.name}`,
+    label: tool.name,
+    onSelect: () => input.onInsert(`/${tool.name} `),
+  })));
+  push("mcp-prompts", input.mcpPrompts.map((prompt) => ({
+    id: `mcp-prompt:${prompt.serverId}:${prompt.name}`,
+    label: prompt.title ?? prompt.name,
+    onSelect: () => input.onRunMcpPrompt(prompt),
+  })));
+  push("skills", input.skills.map((skill) => ({
+    id: `skill:${skill.name}`,
+    label: skill.name,
+    onSelect: () => input.onInsert(`/${skill.name} `),
+  })));
+
+  return [{ items: shortcuts }, { items: categories }].filter(
+    (section) => section.items.length > 0,
   );
 }

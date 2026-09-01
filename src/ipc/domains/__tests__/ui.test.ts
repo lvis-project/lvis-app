@@ -285,3 +285,94 @@ describe("ui IPC handlers", () => {
     expect(popupMock).not.toHaveBeenCalled();
   });
 });
+
+describe("dynamic native menu", () => {
+  beforeEach(async () => {
+    await setup();
+  });
+
+  const payload = (sections: unknown) => ({
+    requestId: "11111111-2222-4333-8444-555555555555",
+    x: 12.4,
+    y: 30.6,
+    sections,
+  });
+
+  it("builds sections into one menu, separated, and echoes the clicked id back", () => {
+    const result = invoke(UI.dynamicMenu, makeEvent(), payload([
+      { items: [{ id: "shortcut:board", label: "업무 보드" }] },
+      {
+        items: [{
+          id: "category:command",
+          label: "명령",
+          submenu: [{ id: "command:/new", label: "/new — 새 대화" }],
+        }],
+      },
+    ]));
+    expect(result).toEqual({ ok: true });
+    expect(popupMock).toHaveBeenCalledWith(expect.objectContaining({ x: 12, y: 31 }));
+
+    const template = firstTemplate();
+    expect(template.map((item) => item.label ?? item.type))
+      .toEqual(["업무 보드", "separator", "명령"]);
+
+    // A row with children opens them; only a leaf reports a choice.
+    expect(template[2]!.click).toBeUndefined();
+    template[2]!.submenu![0]!.click!();
+    expect(sendMock).toHaveBeenCalledWith(UI.dynamicMenuAction, {
+      requestId: "11111111-2222-4333-8444-555555555555",
+      id: "command:/new",
+    });
+  });
+
+  it("flattens what a plugin name could otherwise do to the menu's structure", () => {
+    invoke(UI.dynamicMenu, makeEvent(), payload([{
+      items: [
+        { id: "a", label: "메모\n관리자 권한 부여‮" },
+        { id: "b", label: "가".repeat(400) },
+        { id: "c", label: "   " },
+        { id: "d", label: "정상" },
+      ],
+    }]));
+
+    const labels = firstTemplate().map((item) => item.label);
+    // A newline would draw one row's text as two; a bidi override reorders what
+    // the OS draws. Neither survives, and a label that is only whitespace is
+    // not a row at all.
+    expect(labels[0]).toBe("메모 관리자 권한 부여");
+    expect(labels[1]!.length).toBe(120);
+    expect(labels).not.toContain("   ");
+    expect(labels).toContain("정상");
+  });
+
+  it("refuses a payload with nothing to draw rather than popping an empty menu", () => {
+    expect(invoke(UI.dynamicMenu, makeEvent(), payload([{ items: [{ label: "no id" }] }])))
+      .toEqual({ ok: false, error: "invalid-dynamic-menu" });
+    expect(invoke(UI.dynamicMenu, makeEvent(), { requestId: "x", x: 0, y: 0, sections: [] }))
+      .toEqual({ ok: false, error: "invalid-dynamic-menu" });
+    expect(popupMock).not.toHaveBeenCalled();
+  });
+
+  it("drops an accelerator that is not a key spec, keeping the row", () => {
+    invoke(UI.dynamicMenu, makeEvent(), payload([{
+      items: [
+        { id: "a", label: "붙이기", accelerator: "CommandOrControl+U" },
+        { id: "b", label: "이상한 것", accelerator: "not; a spec" },
+      ],
+    }]));
+    const template = firstTemplate() as Array<{ accelerator?: string }>;
+    // Electron throws on a malformed accelerator and would take the whole menu
+    // down with it, so the row is kept and the accelerator is what is dropped.
+    expect(template[0]!.accelerator).toBe("CommandOrControl+U");
+    expect(template[1]!.accelerator).toBeUndefined();
+  });
+
+  it("stops at the depth a menu can be, so a payload cannot nest without bound", () => {
+    const deep = { id: "l3", label: "3", submenu: [{ id: "l4", label: "4" }] };
+    invoke(UI.dynamicMenu, makeEvent(), payload([{
+      items: [{ id: "l1", label: "1", submenu: [{ id: "l2", label: "2", submenu: [deep] }] }],
+    }]));
+    const level2 = firstTemplate()[0]!.submenu![0] as { submenu?: unknown[] };
+    expect(level2.submenu).toBeUndefined();
+  });
+});
