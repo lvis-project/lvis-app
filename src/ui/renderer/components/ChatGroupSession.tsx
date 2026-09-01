@@ -118,7 +118,7 @@ export interface ChatGroupEnvironment {
    * Which tile shows an overlay card, given the conversation it came from —
    * the window's answer, since only it sees every tile.
    */
-  overlayCardTile: (originSessionId: string | undefined) => OverlayCardPlacement;
+  overlayCardTile: (card: { originSessionId?: string; adoptedChatGroupId?: string }) => OverlayCardPlacement;
   onPluginPrimaryAction: (id: string, chatGroupId: string) => void;
   onRoutineAcknowledge: React.ComponentProps<typeof ChatView>["onRoutineAcknowledge"];
   approvalSentenceInterceptSubmit: React.ComponentProps<typeof ChatView>["approvalSentenceInterceptSubmit"];

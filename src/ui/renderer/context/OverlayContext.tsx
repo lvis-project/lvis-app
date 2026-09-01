@@ -71,6 +71,17 @@ export interface OverlayItem {
    * NOT `source.eventId`: that identifies the plugin EVENT, not a session.
    */
   originSessionId?: string;
+  /**
+   * The tile a card WITHOUT an origin conversation was pinned to, stamped by
+   * the renderer when the card arrived — never by main, which has no focus.
+   *
+   * A plugin trigger and a headless routine have no conversation to belong to,
+   * yet confirming one starts a turn in a tile. Reading live focus at paint
+   * time would let the card slide between tiles while the user reads it, and
+   * the turn would start wherever focus happened to land on the click. Pinning
+   * at arrival makes the tile that shows the card the tile that runs it.
+   */
+  adoptedChatGroupId?: string;
 }
 
 export interface OverlayContextValue {

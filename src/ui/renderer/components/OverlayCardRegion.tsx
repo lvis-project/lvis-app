@@ -43,7 +43,7 @@ export interface OverlayCardRegionProps {
    * that conversation is still open. The window answers it, because only the
    * window can see every tile.
    */
-  overlayCardTile: (originSessionId: string | undefined) => OverlayCardPlacement;
+  overlayCardTile: (card: { originSessionId?: string; adoptedChatGroupId?: string }) => OverlayCardPlacement;
   /**
    * Called when the user confirms a plugin overlay item, with the tile that
    * showed the card — the conversation the staged prompt is inserted into and
@@ -65,7 +65,7 @@ export function OverlayCardRegion({
   // a card is shown — and so dismissed or confirmed — exactly once however
   // many tiles are open.
   const mine = useMemo(
-    () => queue.filter((item) => overlayCardTile(item.originSessionId).chatGroupId === chatGroupId),
+    () => queue.filter((item) => overlayCardTile(item).chatGroupId === chatGroupId),
     [queue, overlayCardTile, chatGroupId],
   );
 
@@ -160,7 +160,7 @@ export function OverlayCardRegion({
     // start the turn in whatever tile happens to be focused, which is the very
     // mismatch main refuses on the way in — so the card keeps only its dismiss,
     // and says why.
-    const { orphaned } = overlayCardTile(active.originSessionId);
+    const { orphaned } = overlayCardTile(active);
     return (
       <div
         data-testid="overlay-card-region"

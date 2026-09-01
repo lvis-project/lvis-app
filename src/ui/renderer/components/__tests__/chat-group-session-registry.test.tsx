@@ -199,22 +199,42 @@ describe("overlayCardTile", () => {
   it("sends a card to the tile holding the conversation it came from", () => {
     // Which tile is focused does not enter into it: the card's action
     // continues the conversation it was raised in, which may be sitting
-    // unfocused beside the one the user is typing in.
-    expect(overlayCardTile(tiles, "s-2")).toEqual({
+    // unfocused beside the one the user is typing in. A pin left over from an
+    // earlier surface does not override the origin.
+    expect(overlayCardTile(tiles, { originSessionId: "s-2" })).toEqual({
       chatGroupId: "group-2",
       orphaned: false,
     });
-    expect(overlayCardTile(tiles, "s-1")).toEqual({
+    expect(overlayCardTile(tiles, { originSessionId: "s-1", adoptedChatGroupId: "group-2" })).toEqual({
       chatGroupId: "main",
       orphaned: false,
     });
   });
 
-  it("sends a card with no conversation behind it to the window's own chrome", () => {
-    // A routine fire or a plugin event belongs to no conversation. Drawing it
-    // in whichever tile is focused would claim otherwise, and would move the
-    // card every time the user changes tiles.
-    expect(overlayCardTile(tiles, undefined)).toEqual({
+  it("draws a card with no conversation behind it in the tile it was pinned to", () => {
+    // A routine fire or a plugin event belongs to no conversation, but
+    // confirming one starts a turn in a tile. The pin is taken from focus once,
+    // when the card arrived, so the card does not move while it is being read
+    // and the turn starts in the tile that showed it.
+    expect(overlayCardTile(tiles, { adoptedChatGroupId: "group-2" })).toEqual({
+      chatGroupId: "group-2",
+      orphaned: false,
+    });
+  });
+
+  it("sends an unpinned card to the window's own chrome", () => {
+    // Nothing was open to pin it to — the card arrived with no tile mounted.
+    expect(overlayCardTile(tiles, {})).toEqual({
+      chatGroupId: null,
+      orphaned: false,
+    });
+  });
+
+  it("returns a card to the window's chrome when its pinned tile closes", () => {
+    // The tile it was pinned to is gone, so there is no surface left holding
+    // it. It is not orphaned — it never had an origin conversation to lose, so
+    // it stays actionable and the window's region names the target.
+    expect(overlayCardTile(tiles, { adoptedChatGroupId: "group-gone" })).toEqual({
       chatGroupId: null,
       orphaned: false,
     });
@@ -225,7 +245,7 @@ describe("overlayCardTile", () => {
     // while the card waited. Showing the card nowhere would strand it; showing
     // it in every tile is what this whole function exists to prevent. What the
     // flag buys is the third option: visible, dismissible, not actionable.
-    expect(overlayCardTile(tiles, "s-gone")).toEqual({
+    expect(overlayCardTile(tiles, { originSessionId: "s-gone" })).toEqual({
       chatGroupId: null,
       orphaned: true,
     });

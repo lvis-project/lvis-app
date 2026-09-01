@@ -131,7 +131,7 @@ export interface ChatViewProps {
    * Where an overlay card belongs, given the conversation it came from, and
    * whether that conversation is still open.
    */
-  overlayCardTile: (originSessionId: string | undefined) => OverlayCardPlacement;
+  overlayCardTile: (card: { originSessionId?: string; adoptedChatGroupId?: string }) => OverlayCardPlacement;
   /**
    * Called when user confirms a plugin overlay item; id is the OverlayItem.id,
    * and the group is the tile that showed the card.

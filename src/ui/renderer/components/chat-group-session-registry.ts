@@ -178,20 +178,32 @@ export interface OverlayCardPlacement {
  *
  * A card no conversation owns — a routine fire, a plugin event, or one whose
  * origin conversation has left the screen — goes to the window's own chrome.
- * This is the same rule the window's approval dock follows, and it is stated
- * rather than fallen back to: the alternative, drawing it in whichever tile
- * happens to be focused, says the card belongs to that conversation when it
- * does not, and makes the card jump between tiles as focus moves.
+ * This is the same rule the window's approval dock follows.
+ *
+ * A card with NO origin conversation is a different case, and it is the common
+ * one: a plugin trigger and a headless routine belong to no conversation, but
+ * confirming either starts a turn in a tile. That tile is the card's pin
+ * (`adoptedChatGroupId`), taken from focus once, when the card arrived — the
+ * same adoption `tileDrawsSession` gives an unheld question. Reading focus here
+ * instead would slide the card between tiles while it is being read. The window
+ * band keeps only what no tile can draw: an orphaned origin, a pin whose tile
+ * has since closed, and cards that arrived with no tile open at all.
  */
 export function overlayCardTile(
   tiles: readonly TileSession[],
-  originSessionId: string | undefined,
+  card: { originSessionId?: string; adoptedChatGroupId?: string },
 ): OverlayCardPlacement {
-  if (originSessionId === undefined) return { chatGroupId: null, orphaned: false };
-  const holder = tileHoldingSession(tiles, originSessionId);
-  return holder === undefined
-    ? { chatGroupId: null, orphaned: true }
-    : { chatGroupId: holder.chatGroupId, orphaned: false };
+  if (card.originSessionId !== undefined) {
+    const holder = tileHoldingSession(tiles, card.originSessionId);
+    return holder === undefined
+      ? { chatGroupId: null, orphaned: true }
+      : { chatGroupId: holder.chatGroupId, orphaned: false };
+  }
+  const pinned = card.adoptedChatGroupId;
+  if (pinned !== undefined && tiles.some((tile) => tile.chatGroupId === pinned)) {
+    return { chatGroupId: pinned, orphaned: false };
+  }
+  return { chatGroupId: null, orphaned: false };
 }
 
 /**

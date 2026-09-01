@@ -297,8 +297,8 @@ export function App() {
   // Which surface shows an overlay card. Only the window can answer it: it
   // needs every tile's conversation to say whether any of them owns the card.
   const overlayCardTileForWindow = useCallback(
-    (originSessionId: string | undefined): OverlayCardPlacement =>
-      overlayCardTile(tileSessions, originSessionId),
+    (card: { originSessionId?: string; adoptedChatGroupId?: string }): OverlayCardPlacement =>
+      overlayCardTile(tileSessions, card),
     [tileSessions],
   );
 
@@ -479,7 +479,9 @@ export function App() {
     runningRoutines,
     handlePluginPrimaryAction,
     handleRoutineAcknowledge,
-  } = useRoutineOverlay({ api, t, registry: chatGroupSessions });
+  } = useRoutineOverlay({
+    api, t, registry: chatGroupSessions, focusedChatGroupId: chatGroups.focusedId,
+  });
 
   // Marketplace + plugin UI extensions
   const {
