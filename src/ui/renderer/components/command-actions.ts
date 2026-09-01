@@ -117,7 +117,8 @@ export function matchesLauncherShortcut(
 
 /**
  * Build the default quick-action list from app state.
- * Kept separate from SlashPicker so App does not import cmdk at startup.
+ * Kept separate from SlashPicker so App can build the actions without pulling
+ * the picker — and its menu bridge — into the startup path.
  */
 export function buildQuickActions({
   setActiveView,

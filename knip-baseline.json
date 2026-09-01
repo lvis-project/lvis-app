@@ -54,11 +54,6 @@
     },
     {
       "type": "duplicates",
-      "file": "src/ui/renderer/components/SlashPickerPanel.tsx",
-      "name": "SlashPickerPanel,default"
-    },
-    {
-      "type": "duplicates",
       "file": "src/ui/renderer/theme/bundles/index.ts",
       "name": "BUNDLES,DEFAULT_VISIBLE_BUNDLES"
     },
@@ -956,11 +951,6 @@
       "type": "exports",
       "file": "src/ui/renderer/components/slash-picker-data.ts",
       "name": "normalizeSlashQuery"
-    },
-    {
-      "type": "exports",
-      "file": "src/ui/renderer/components/SlashPickerPanel.tsx",
-      "name": "SlashPickerPanel"
     },
     {
       "type": "exports",

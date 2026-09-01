@@ -1,9 +1,5 @@
-// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/SlashPickerPanel.tsx. Do not edit by hand.
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/slash-picker-data.ts. Do not edit by hand.
 export const en = {
-  "slashPickerPanel.searchPlaceholder": "Search...",
-  "slashPickerPanel.noResults": "No results",
-  "slashPickerPanel.quickActions": "Quick Actions",
-  "slashPickerPanel.slashCommands": "Slash Commands",
   "slashPickerPanel.cmdNew": "New conversation",
   "slashPickerPanel.cmdSessions": "Session list",
   "slashPickerPanel.cmdLoad": "Load session",
@@ -23,10 +19,6 @@ export const en = {
   "slashPickerPanel.cmdHelp": "Help",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
-  "slashPickerPanel.searchPlaceholder": "검색...",
-  "slashPickerPanel.noResults": "결과 없음",
-  "slashPickerPanel.quickActions": "빠른 실행",
-  "slashPickerPanel.slashCommands": "슬래시 명령",
   "slashPickerPanel.cmdNew": "새 대화",
   "slashPickerPanel.cmdSessions": "세션 목록",
   "slashPickerPanel.cmdLoad": "세션 불러오기",

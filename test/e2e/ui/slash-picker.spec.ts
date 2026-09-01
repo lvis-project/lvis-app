@@ -2,116 +2,84 @@ import { test, expect } from './fixtures';
 import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
 
 /**
- * E2E tests for the unified SlashPicker command surface.
+ * E2E for the composer's command button.
  *
- * These tests require `bun run build` to have produced dist/src/main/main.js.
- * All tests hard-fail when the UI trigger is not visible — a missing trigger
- * is a real regression, not a skip. The fixture waits up to 60 s for React
- * to boot before handing control to tests.
+ * The menu itself is the OS's, so there is no popover to locate, no row to
+ * click, and nothing a screenshot can show. What is still end-to-end — and what
+ * these tests hold — is everything up to the OS: the button is on screen, both
+ * ways of raising the menu reach the preload bridge, and the payload the
+ * renderer builds from the REAL app (its installed plugins, its connected MCP
+ * servers, its registered skills) has the shape the menu is drawn from.
+ *
+ * Typing to filter is a different surface and still fully drivable: "/" in the
+ * composer opens `InlineSlashMenu`, covered by its own specs.
+ *
+ * Requires `bun run build`. A missing trigger is a real regression, never a skip.
  */
 
-test('slash picker: Cmd/Ctrl+K opens and closes the popover', async ({ mainWindow }) => {
-  // Wait for the InputActionBar to appear (signals full React boot).
-  // 60 s timeout matches CI worst-case boot — failure to load is a real regression.
+type MenuRow = { id: string; label: string; submenu?: MenuRow[] };
+type MenuPayload = { requestId: string; x: number; y: number; sections: Array<{ items: MenuRow[] }> };
+
+/** Hold what the renderer hands the bridge, and keep the menu off the screen. */
+async function captureMenuPayloads(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const ui = (window as unknown as { lvis: { ui: Record<string, unknown> } }).lvis.ui;
+    const captured: unknown[] = [];
+    (window as unknown as { __menuPayloads: unknown[] }).__menuPayloads = captured;
+    ui.showDynamicMenu = async (payload: unknown) => {
+      captured.push(payload);
+      return { ok: true };
+    };
+  });
+}
+
+const payloads = (page: import('@playwright/test').Page) =>
+  page.evaluate(() => (window as unknown as { __menuPayloads: MenuPayload[] }).__menuPayloads);
+
+test('command button: both the click and Cmd/Ctrl+K raise the menu', async ({ mainWindow }) => {
   const trigger = mainWindow.locator(testIdSelector(TEST_IDS.slashPickerTrigger));
   await expect(trigger).toBeVisible({ timeout: 60_000 });
+  await captureMenuPayloads(mainWindow);
+
+  await trigger.click();
+  await expect.poll(() => payloads(mainWindow).then((p) => p.length)).toBe(1);
 
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-
-  // Open via Cmd/Ctrl+K
   await mainWindow.keyboard.press(`${mod}+k`);
-  const popover = mainWindow.locator('[data-testid="slash-picker"]');
-  await expect(popover).toBeVisible({ timeout: 5_000 });
+  await expect.poll(() => payloads(mainWindow).then((p) => p.length)).toBe(2);
 
-  // Close via Cmd/Ctrl+K again (toggle)
-  await mainWindow.keyboard.press(`${mod}+k`);
-  await expect(popover).not.toBeVisible({ timeout: 5_000 });
+  // The menu drops from the button, so it is anchored to it rather than to the
+  // pointer — the shortcut has no pointer to anchor to.
+  const box = await trigger.boundingBox();
+  const [first] = await payloads(mainWindow) as MenuPayload[];
+  expect(Math.abs(first!.x - Math.round(box!.x))).toBeLessThanOrEqual(2);
+  expect(Math.abs(first!.y - Math.round(box!.y + box!.height))).toBeLessThanOrEqual(2);
 });
 
-test('slash picker: command and shortcut categories are visible when open', async ({ mainWindow }) => {
+test('command button: shortcuts stay flat and the installed lists sit behind submenus', async ({ mainWindow }) => {
   const trigger = mainWindow.locator(testIdSelector(TEST_IDS.slashPickerTrigger));
-  await expect(trigger).toBeVisible({ timeout: 20_000 });
-
+  await expect(trigger).toBeVisible({ timeout: 60_000 });
+  await captureMenuPayloads(mainWindow);
   await trigger.click();
-  await mainWindow.locator('[data-testid="slash-picker"]').waitFor({ state: 'visible', timeout: 5_000 });
+  await expect.poll(() => payloads(mainWindow).then((p) => p.length)).toBe(1);
 
-  await expect(mainWindow.locator('[data-testid="slash-picker-cat-command"]')).toBeVisible();
-  await expect(mainWindow.locator('[data-testid="slash-picker-cat-shortcut"]')).toBeVisible();
-});
+  const [payload] = await payloads(mainWindow) as MenuPayload[];
+  const [shortcuts, categories] = payload!.sections;
 
-test('slash picker: search filters items and hides empty group', async ({ mainWindow }) => {
-  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.slashPickerTrigger));
-  const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
-    .then(() => true)
-    .catch(() => false);
-  test.skip(!found, 'SlashPicker trigger not found — skipping E2E.');
+  // A native menu cannot filter as you type, so this shape IS the navigation:
+  // what the user reaches for constantly is one click away, and what depends on
+  // what is installed is one level down.
+  expect(shortcuts!.items.length).toBeGreaterThan(0);
+  expect(shortcuts!.items.every((row) => row.submenu === undefined)).toBe(true);
+  expect(categories!.items.every((row) => (row.submenu?.length ?? 0) > 0)).toBe(true);
 
-  await trigger.click();
-  await mainWindow.locator('[data-testid="slash-picker"]').waitFor({ state: 'visible', timeout: 5_000 });
+  const commands = categories!.items.find((row) => row.id === 'category:command');
+  expect(commands).toBeDefined();
+  expect(commands!.submenu!.some((row) => row.id === 'command:/new')).toBe(true);
 
-  const input = mainWindow.locator('[data-testid="command-input"]');
-  await input.fill('zzznomatch');
-
-  // Both groups should disappear
-  await expect(mainWindow.locator('[data-testid^="slash-group-"]')).toHaveCount(0, { timeout: 3_000 });
-});
-
-test('slash picker: list has max-h constraint and is scrollable when items overflow', async ({ mainWindow }) => {
-  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.slashPickerTrigger));
-  await expect(trigger).toBeVisible({ timeout: 20_000 });
-
-  await trigger.click();
-  await mainWindow.locator('[data-testid="slash-picker"]').waitFor({ state: 'visible', timeout: 5_000 });
-
-  // Verify real scroll behaviour: content must overflow the constrained list,
-  // and scrollTop must actually advance when set (genuine scroll capability).
-  const list = mainWindow.locator('[data-testid="slash-picker"] [cmdk-list]');
-  await mainWindow.locator('[data-testid="slash-picker-cat-command"]').click();
-  const overflows = await list.evaluate((el) => el.scrollHeight > el.clientHeight);
-  expect(overflows).toBe(true);
-  const canScroll = await list.evaluate((el) => {
-    el.scrollTop = 100;
-    return el.scrollTop > 0;
-  });
-  expect(canScroll).toBe(true);
-});
-
-test('slash picker: slash command click inserts text and closes popover', async ({ mainWindow }) => {
-  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.slashPickerTrigger));
-  const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
-    .then(() => true)
-    .catch(() => false);
-  test.skip(!found, 'SlashPicker trigger not found — skipping E2E.');
-
-  await trigger.click();
-  await mainWindow.locator('[data-testid="slash-picker"]').waitFor({ state: 'visible', timeout: 5_000 });
-  await mainWindow.locator('[data-testid="slash-picker-cat-command"]').click();
-
-  // Click the /help slash command item
-  const slashGroup = mainWindow.locator('[data-testid="slash-group-command"]');
-  const helpItem = slashGroup.locator('[cmdk-item]').filter({ hasText: '/help' }).first();
-  await helpItem.click();
-
-  // Popover should close
-  await expect(mainWindow.locator('[data-testid="slash-picker"]')).not.toBeVisible({ timeout: 3_000 });
-
-  // Check textarea has /help inserted
-  const textarea = mainWindow.locator('textarea').first();
-  const val = await textarea.inputValue();
-  expect(val).toContain('/help');
-});
-
-test('slash picker: top ⌘ toolbar button is absent', async ({ mainWindow, t }) => {
-  // Wait for the InputActionBar to appear (signals full React boot) before
-  // asserting absence — prevents the negative assertion from passing before
-  // the UI has had a chance to mount.
-  const trigger = mainWindow.locator(testIdSelector(TEST_IDS.slashPickerTrigger));
-  const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
-    .then(() => true)
-    .catch(() => false);
-  test.skip(!found, 'SlashPicker trigger not found — skipping E2E.');
-
-  // Verify the old top Command palette button no longer exists in MainToolbar
-  const oldButton = mainWindow.locator(`button[title="${t('slashPicker.ariaLabel')}"]`);
-  await expect(oldButton).not.toBeAttached({ timeout: 5_000 });
+  // Every leaf carries an id the renderer can resolve, and every label is one
+  // line — main drops a row that is neither.
+  const leaves = categories!.items.flatMap((row) => row.submenu ?? []);
+  expect(leaves.every((row) => row.id.length > 0 && row.label.trim().length > 0)).toBe(true);
+  expect(leaves.every((row) => !row.label.includes('\n'))).toBe(true);
 });
