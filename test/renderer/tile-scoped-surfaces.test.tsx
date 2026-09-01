@@ -1325,6 +1325,58 @@ describe("opening a conversation while another is mid-turn", () => {
     }
   });
 
+  it("lends the window a surface for a question its tile can no longer draw", async () => {
+    const restoreMode = startInChatMode();
+    try {
+      const pendingSend = deferred<{ ok: true }>();
+      const { container, api, emitAskUserQuestion } = await renderApp(withOtherSession);
+      api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+      await submitChatMessage(container, "아직 답하는 중");
+      await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+      // The gate arrives while the tile is still drawn, so the tile takes it —
+      // it is the only surface that ever receives it.
+      await act(async () => {
+        emitAskUserQuestion({
+          id: "ask-before-hide",
+          sessionId: MOCK_DEFAULT_SESSION_ID,
+          questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
+          createdAt: Date.now(),
+        });
+      });
+      await waitFor(() => {
+        expect(container.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(1);
+      });
+
+      await expandSidebar(container);
+      await act(async () => { fireEvent.click(await rowFor(container, OTHER_SESSION)); });
+      await waitFor(() => expect(mountedTileIds(container).length).toBe(2));
+
+      const hiddenTile = container.querySelector<HTMLElement>(
+        `[data-testid="chat-group-cell:${MAIN_CHAT_GROUP_ID}"]`,
+      )!;
+      expect(hiddenTile.getAttribute("data-hidden")).toBe("true");
+      // Still exactly one card, and it is no longer the one inside the tile
+      // nobody can see. A question has a deadline: left there it would time out
+      // against a blank window, which is what an approval used to do too.
+      await waitFor(() => {
+        expect(container.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(1);
+      });
+      expect(hiddenTile.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(0);
+      const band = container.querySelector<HTMLElement>('[data-testid="window-approval-scope"]')!;
+      expect(band.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(1);
+      expect(band.textContent).toContain("어느 형식으로 정리할까요?");
+
+      await act(async () => {
+        pendingSend.resolve({ ok: true });
+        await pendingSend.promise;
+      });
+    } finally {
+      restoreMode();
+    }
+  });
+
   it("parks a hidden tile's approval on the window's dock, where it can be answered", async () => {
     const restoreMode = startInChatMode();
     try {

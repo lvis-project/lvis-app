@@ -608,6 +608,16 @@ export function ChatGroupSession({
     () => (hidden ? [] : ownedApprovals),
     [hidden, ownedApprovals],
   );
+  // A question is a gate with a deadline, so the same rule as the approvals
+  // above: a hidden tile keeps holding it — nothing else received it — and
+  // stops drawing it, and the window draws it in its band instead. Kept here
+  // rather than moved to the window because ONE surface has to own the answer:
+  // resolving is `dismissAskQuestion`, and a second copy of the queue would
+  // leave the tile showing a card whose gate is already closed.
+  const drawnAskQuestions = useMemo(
+    () => (hidden ? [] : askQuestions),
+    [hidden, askQuestions],
+  );
 
   // A turn that ends while an ask of ITS OWN session is still parked here ended
   // without an answer: the host settled the ask (timeout, cancel) and moved on,
@@ -639,6 +649,7 @@ export function ChatGroupSession({
 
   useRegisterChatGroupSession(registry, chatGroupId, {
     entries, streaming, hidden,
+    askQuestions, resolveAskQuestion: dismissAskQuestion,
     applyLoadedSession, applyInitialSession, clearForNewChat,
     resetForNewSession, restoreSubAgentSpawns,
     ask: handleAsk,
@@ -722,8 +733,8 @@ export function ChatGroupSession({
         onFeedback={handleFeedback}
         subAgentSpawns={subAgentSpawns}
         loadedSkills={loadedSkills}
-        hasAskQuestions={askQuestions.length > 0}
-        askQuestions={askQuestions}
+        hasAskQuestions={drawnAskQuestions.length > 0}
+        askQuestions={drawnAskQuestions}
         onResolveAskQuestion={dismissAskQuestion}
         approvalSentenceInterceptSubmit={env.approvalSentenceInterceptSubmit}
         pendingApprovals={pendingApprovals}
