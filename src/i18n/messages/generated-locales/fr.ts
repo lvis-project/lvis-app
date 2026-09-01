@@ -73,6 +73,8 @@ export const frMessages: Record<string, string> = {
   "app.pluginDoctorRequiredToast": "{label} ne s'est pas chargé. Ouvrez les paramètres des plugins et exécutez Doctor.",
   "app.routineFailedSummary": "Échec de l'exécution de la routine: {error}",
   "app.routineFailedTitle": "[Échec] Routine",
+  "app.conversationCeilingReached": "La fenêtre contient déjà {count} conversations et aucune autre ne peut être mise de côté — toutes celles qui le pourraient génèrent une réponse. Arrêtez-en une ou attendez qu'elle se termine.",
+  "app.conversationSetAside": "Une conversation a été fermée pour faire de la place. Elle est enregistrée : la rouvrir reprend où elle s'était arrêtée, mais ce qui était saisi sans être envoyé n'est pas conservé.",
   "app.mcpPromptArgsUnrunnable": "Ce prompt exige un argument que cette app ne peut pas afficher ; il n'est donc pas exécutable ici.",
   "app.mcpPromptArgsTitle": "Exécuter \"{name}\"",
   "app.mcpPromptArgsDescription": "Ce prompt est déclaré par le serveur MCP \"{serverId}\". Remplis ses arguments ; le texte renvoyé entre dans la conversation comme contenu non fiable écrit par le serveur.",

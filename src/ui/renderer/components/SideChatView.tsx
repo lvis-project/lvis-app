@@ -104,13 +104,17 @@ function SideChatSession({
   // not in the tile beside it and not in the window. The panel claims the
   // session once the loop has one, and draws the card over its own composer.
   const approvals = useApprovalSurface();
+  // ...unless the tile holding this panel is hidden. The panel is then inside a
+  // `display:none` subtree, so the card it claims is a card nobody can answer;
+  // the window's dock takes it back until the tile is drawn again.
+  const tileHidden = chatContext?.hidden === true;
   useEffect(() => {
-    if (sessionId === null) return undefined;
+    if (sessionId === null || tileHidden) return undefined;
     return approvals.claims.claim(
       `side-chat:${sessionId}`,
       (id) => sessionOwnedBy(sessionId, NO_CHILD_SESSIONS, id),
     );
-  }, [approvals.claims, sessionId]);
+  }, [approvals.claims, sessionId, tileHidden]);
   const pendingApprovals = useMemo(
     () => (sessionId === null
       ? []

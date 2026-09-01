@@ -238,14 +238,12 @@ export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
   const handleLoadSession = useCallback(
     async (
       sessionId: string,
-      streaming: boolean,
       applyLoadedSession: (entries: ChatEntry[]) => void,
     ): Promise<boolean> => {
-      // Don't swap sessions mid-stream — ConversationLoop.runTurn() has no
-      // concurrency guard, so replacing history while a turn is writing to it
-
-      // keep this guard here too for programmatic callers (e.g. starred jump).
-      if (streaming) return false;
+      // Whether this group may take a session is main's answer, not one this
+      // hook re-derives: the loop it would swap out from under lives there,
+      // and `chatSessionResume` refuses while that loop is mid-turn. A second
+      // copy of the rule here could only drift from the first.
       const token = ++sessionReadTokenRef.current;
       try {
         const res = await api.chatSessionResume(sessionId);
@@ -346,18 +344,21 @@ export function turnsEndedUnseen(
   attention: Attention,
 ): string[] {
   // "Looking" is a property of the conversation, not the tile, and the user
-  // sees its turn end through the focused tile.
+  // sees its turn end through the focused tile — provided that tile is drawn.
+  // A hidden one is mounted only so its turn survives; nobody is watching it.
   const watched = attention.conversationVisible
-    ? current.find((tile) => tile.chatGroupId === attention.focusedChatGroupId)?.sessionId
+    ? current.find((tile) =>
+      tile.chatGroupId === attention.focusedChatGroupId && !tile.hidden)?.sessionId
     : undefined;
   return turnsEnded(previous, current).filter((sessionId) => sessionId !== watched);
 }
 
 /**
  * The conversations whose turn ended between two readings of the tiles,
- * whether or not anyone was looking. A tile that left the canvas mid-turn
- * (closed, or collapsed by chat mode) took the turn with it, and one that
- * moved to another conversation no longer speaks for the turn that ended.
+ * whether or not anyone was looking. A tile that is gone from the reading took
+ * its turn with it — that now means closed, since leaving the view keeps the
+ * tile mounted and its turn running — and one that moved to another
+ * conversation no longer speaks for the turn that ended.
  */
 export function turnsEnded(
   previous: readonly TileSession[],

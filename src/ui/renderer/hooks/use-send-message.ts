@@ -228,7 +228,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
             setErrorWithThought(t("app.sessionNotFound", { requested }));
             return;
           }
-          if (!(await sessionLoad(match.id, false, applyLoadedSession))) {
+          if (!(await sessionLoad(match.id, applyLoadedSession))) {
             setErrorWithThought(t("app.sessionLoadFailed", { requested }));
             return;
           }

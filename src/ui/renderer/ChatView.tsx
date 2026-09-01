@@ -180,7 +180,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     : "w-full max-w-full px-4";
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, currentSessionId,
+    question, setQuestion, chatEndRef, currentSessionId, hidden,
     hasApiKey, settingsLoaded, onOpenSettings,
     searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
@@ -482,6 +482,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     searchOpen,
     searchMatches,
     searchIdx,
+    hidden,
   });
 
   // Checkpoint view-mode handlers + fork-success toast (depends on the scroll

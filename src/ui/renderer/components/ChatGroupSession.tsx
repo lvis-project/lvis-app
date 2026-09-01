@@ -148,6 +148,12 @@ export interface ChatGroupSessionProps {
   panelOpen: boolean;
   /** Is this the tile the window is focused on? It adopts cards no tile holds. */
   focused: boolean;
+  /**
+   * The view is not drawing this tile. It stays mounted so its conversation's
+   * turn keeps its stream subscription, its streaming flag and its stop
+   * control — but it must claim nothing the user has to see.
+   */
+  hidden: boolean;
   onSidePanelOpenChange: (open: boolean) => void;
 }
 
@@ -161,7 +167,8 @@ export interface ChatGroupSessionProps {
  * one set of variables.
  */
 export function ChatGroupSession({
-  chatGroupId, api: windowApi, registry, env, children, panelOpen, focused, onSidePanelOpenChange,
+  chatGroupId, api: windowApi, registry, env, children, panelOpen, focused, hidden,
+  onSidePanelOpenChange,
 }: ChatGroupSessionProps) {
   const { t } = useTranslation();
 
@@ -189,6 +196,7 @@ export function ChatGroupSession({
     [],
   );
   const focusedRef = useRef(focused);
+  const hiddenRef = useRef(hidden);
   // A window-wide card whose session no tile is showing — a routine's, a side
   // chat's, a background agent's after its parent tile moved on — is adopted
   // here rather than dropped by every tile at once. `readTiles` is read at
@@ -201,6 +209,7 @@ export function ChatGroupSession({
       sessionId,
       owned: ownsSession(sessionId),
       focused: focusedRef.current,
+      hidden: hiddenRef.current,
     }),
     [registry, ownsSession],
   );
@@ -210,7 +219,8 @@ export function ChatGroupSession({
   } = useWorkflowTools(api, { ownsSession, drawsSession });
   useLayoutEffect(() => {
     focusedRef.current = focused;
-  }, [focused]);
+    hiddenRef.current = hidden;
+  }, [focused, hidden]);
   const ownedChildSessionIds = useMemo(
     () => new Set(
       subAgentSpawns
@@ -354,8 +364,8 @@ export function ChatGroupSession({
   // ── conversation actions ───────────────────────────────────────────────────
 
   const handleLoadSession = useCallback(
-    (sessionId: string) => sessionLoad(sessionId, streaming, applyLoadedSession),
-    [sessionLoad, streaming, applyLoadedSession],
+    (sessionId: string) => sessionLoad(sessionId, applyLoadedSession),
+    [sessionLoad, applyLoadedSession],
   );
 
   const handleLoadSessionAndRefresh = useCallback(async (sessionId: string) => {
@@ -558,23 +568,45 @@ export function ChatGroupSession({
   // conversation column (ChatView) and nowhere else.
   const approvals = useApprovalSurface();
   useEffect(
-    () => approvals.claims.claim(chatGroupId, ownsSession),
+    () => {
+      // A hidden tile claims nothing. Its turn keeps running — which is why it
+      // is still mounted — and a running turn parks on approvals, so the claim
+      // would send the card to a surface inside `display:none` and the turn
+      // would sit out its timeout with nothing on screen to answer. Releasing
+      // the claim (this effect's own cleanup, on the way into hiding) hands the
+      // request to the window's dock, which is exactly where the card belongs
+      // while the conversation that asked is off-screen.
+      if (hidden) return;
+      return approvals.claims.claim(chatGroupId, ownsSession);
+    },
     // `ownsSession` is stable and reads refs, so what this tile owns changes
     // without the claim changing. Re-claiming on every such change is how
     // the window learns to re-read the predicate; without it a request parked
     // before this tile knew its session (a reload) stays on the window's
     // dock beside the card this tile draws for the same request.
-    [approvals.claims, chatGroupId, ownsSession, currentSessionId, ownedChildSessionIds],
+    [approvals.claims, chatGroupId, ownsSession, currentSessionId, ownedChildSessionIds, hidden],
   );
   // A request names the session that asked. A sub-agent's ask names the
   // child's session, which the tile that spawned it also owns — its turn is
   // the one waiting on the answer. Read from state, not from the refs the
   // predicate above uses: those are written at commit, one render later.
-  const pendingApprovals = useMemo(
+  const ownedApprovals = useMemo(
     () => approvals.queue.filter((req) =>
       req.sessionId !== undefined
         && sessionOwnedBy(currentSessionId, ownedChildSessionIds, req.sessionId)),
     [approvals.queue, currentSessionId, ownedChildSessionIds],
+  );
+  // What this tile DRAWS. A hidden tile draws none of them — it released its
+  // claim above, so the window's dock is showing these, and a second copy in a
+  // `display:none` subtree is not merely invisible: the dock takes keyboard
+  // focus when it mounts, and focusing anything inside a tile focuses that
+  // tile, which would drag the view back to the conversation the user just
+  // navigated away from. The unfiltered list is still what the turn-end notice
+  // below reads: a turn that ends on an unanswered ask has to say so wherever
+  // it was parked.
+  const pendingApprovals = useMemo(
+    () => (hidden ? [] : ownedApprovals),
+    [hidden, ownedApprovals],
   );
 
   // A turn that ends while an ask of ITS OWN session is still parked here ended
@@ -584,17 +616,17 @@ export function ChatGroupSession({
   // reach anything. A child's ask is not this turn's to close: a sub-agent can
   // outlive its parent's turn, and `agent-action` asks are not turn-bound.
   const turnEndApprovalsRef = useRef({
-    pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: approvals.dropSettled, t,
+    ownedApprovals, currentSessionId, appendSystemEntry, dropSettled: approvals.dropSettled, t,
   });
   useLayoutEffect(() => {
     turnEndApprovalsRef.current = {
-      pendingApprovals, currentSessionId, appendSystemEntry, dropSettled: approvals.dropSettled, t,
+      ownedApprovals, currentSessionId, appendSystemEntry, dropSettled: approvals.dropSettled, t,
     };
   });
   useEffect(() => api.onChatStream((ev) => {
     if (ev.type !== "done") return;
     const turnEnd = turnEndApprovalsRef.current;
-    const unanswered = turnEnd.pendingApprovals.filter(
+    const unanswered = turnEnd.ownedApprovals.filter(
       (req) => req.category === "tool" && req.sessionId === turnEnd.currentSessionId,
     );
     if (unanswered.length === 0) return;
@@ -606,7 +638,7 @@ export function ChatGroupSession({
   // ── what this tile tells the window ────────────────────────────────────────
 
   useRegisterChatGroupSession(registry, chatGroupId, {
-    entries, streaming,
+    entries, streaming, hidden,
     applyLoadedSession, applyInitialSession, clearForNewChat,
     resetForNewSession, restoreSubAgentSpawns,
     ask: handleAsk,
@@ -641,7 +673,7 @@ export function ChatGroupSession({
 
   const chatContextValue = useMemo<ChatContextValue>(() => ({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, currentSessionId,
+    question, setQuestion, chatEndRef, currentSessionId, hidden,
     hasApiKey: env.effectiveLlmReady, settingsLoaded: env.settingsLoaded,
     onOpenSettings: env.onOpenSettings,
     ...env.search,
@@ -663,7 +695,7 @@ export function ChatGroupSession({
     activeVendor: env.apiUsageProjectionAvailable ? env.llmVendor : undefined,
   }), [
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, currentSessionId, env,
+    question, currentSessionId, hidden, env,
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
     tpmLimit, tpmPct, isTpmOverflow,
     attachments, costEstimate, costBadgeClass, activePricing,

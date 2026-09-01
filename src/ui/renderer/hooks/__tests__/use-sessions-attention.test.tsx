@@ -6,7 +6,7 @@ import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import type { LvisApi } from "../../types.js";
 
 const tile = (chatGroupId: string, sessionId: string, streaming: boolean): TileSession =>
-  ({ chatGroupId, sessionId, streaming });
+  ({ chatGroupId, sessionId, streaming, hidden: false });
 
 describe("turnsEndedUnseen", () => {
   const looking = { focusedChatGroupId: "main", conversationVisible: true };
@@ -248,7 +248,7 @@ describe("useCurrentSession — what a tile holds on mount", () => {
       useCurrentSession(api as unknown as LvisApi, { resumeWindowActiveSession: false, restoreSubAgents, onLoadedSession }));
     await waitFor(() => expect(result.current.currentSessionId).toBe("loop-live"));
     order.length = 0;
-    await act(async () => { await result.current.handleLoadSession("other", false, vi.fn()); });
+    await act(async () => { await result.current.handleLoadSession("other", vi.fn()); });
     expect(order).toEqual(["reset", "restore"]);
     expect(restoreSubAgents).toHaveBeenLastCalledWith(restoredSubAgents);
   });
@@ -268,7 +268,7 @@ describe("useCurrentSession — what a tile holds on mount", () => {
     await waitFor(() => expect(result.current.currentSessionId).toBe("loop-fresh"));
 
     const applyLoadedSession = vi.fn();
-    const loaded = await result.current.handleLoadSession("held-elsewhere", false, applyLoadedSession);
+    const loaded = await result.current.handleLoadSession("held-elsewhere", applyLoadedSession);
     expect(loaded).toBe(true);
     expect(focusSessionHolder).toHaveBeenCalledWith("group-2");
     expect(api.chatSessionHistory).not.toHaveBeenCalledWith("held-elsewhere");
@@ -280,7 +280,7 @@ describe("useCurrentSession — what a tile holds on mount", () => {
 
 describe("turn ends refresh the window's list, seen or not", () => {
   const tile = (chatGroupId: string, sessionId: string, streaming: boolean): TileSession =>
-    ({ chatGroupId, sessionId, streaming });
+    ({ chatGroupId, sessionId, streaming, hidden: false });
 
   it("turnsEnded names every conversation whose tile stopped streaming", () => {
     const before = [tile("main", "s-1", true), tile("group-2", "s-2", true), tile("group-3", "s-3", false)];

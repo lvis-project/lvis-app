@@ -638,16 +638,22 @@ describe("useCostEstimate (memo invariants)", () => {
 });
 
 describe("useCurrentSession (streaming guard)", () => {
-  it("handleLoadSession is a no-op while streaming=true", async () => {
+  it("leaves the mid-turn refusal to main and shows nothing when it comes back", async () => {
+    // The hook no longer decides this: the loop it would swap out from under
+    // lives in main, and `chatSessionResume` refuses while that loop is
+    // mid-turn. What must hold here is that a refusal draws NOTHING — an
+    // applied history would be the incoming conversation's messages rendered
+    // over a transcript that is still being written.
     const { api } = makeMockLvisApi();
+    api.chatSessionResume.mockResolvedValue({ ok: false, error: "streaming-active" });
     const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
     const setEntries = vi.fn();
     let loaded = true;
     await act(async () => {
-      loaded = await result.current.handleLoadSession("other-sess", true, setEntries);
+      loaded = await result.current.handleLoadSession("other-sess", setEntries);
     });
     expect(loaded).toBe(false);
-    expect(api.chatSessionResume).not.toHaveBeenCalled();
+    expect(api.chatSessionHistory).not.toHaveBeenCalled();
     expect(setEntries).not.toHaveBeenCalled();
   });
 
@@ -657,7 +663,7 @@ describe("useCurrentSession (streaming guard)", () => {
     const setEntries = vi.fn();
     let loaded = false;
     await act(async () => {
-      loaded = await result.current.handleLoadSession("other-sess", false, setEntries);
+      loaded = await result.current.handleLoadSession("other-sess", setEntries);
     });
     expect(loaded).toBe(true);
     expect(api.chatSessionResume).toHaveBeenCalledWith("other-sess");
@@ -677,7 +683,7 @@ describe("useCurrentSession (streaming guard)", () => {
     let loaded = true;
 
     await act(async () => {
-      loaded = await result.current.handleLoadSession("missing-sess", false, setEntries);
+      loaded = await result.current.handleLoadSession("missing-sess", setEntries);
     });
 
     expect(loaded).toBe(false);
@@ -716,7 +722,7 @@ describe("useCurrentSession (streaming guard)", () => {
     });
 
     await act(async () => {
-      await result.current.handleLoadSession("other-sess", false, setEntries);
+      await result.current.handleLoadSession("other-sess", setEntries);
     });
 
     expect(api.chatSessionHistory).toHaveBeenCalledWith("other-sess");
@@ -747,7 +753,7 @@ describe("useCurrentSession (streaming guard)", () => {
     });
 
     await act(async () => {
-      await result.current.handleLoadSession("other-sess", false, setEntries);
+      await result.current.handleLoadSession("other-sess", setEntries);
     });
 
     expect(setEntries).toHaveBeenCalledWith([
@@ -777,7 +783,7 @@ describe("useCurrentSession (streaming guard)", () => {
     await waitFor(() => expect(api.chatGetHistory).toHaveBeenCalledTimes(1));
 
     await act(async () => {
-      await result.current.handleLoadSession("manual-sess", false, applyLoaded);
+      await result.current.handleLoadSession("manual-sess", applyLoaded);
     });
 
     expect(applyLoaded).toHaveBeenCalledWith([{ kind: "user", text: "manual session" }]);
@@ -809,7 +815,7 @@ describe("useCurrentSession (streaming guard)", () => {
     const { result } = renderHook(() => useCurrentSession(api as unknown as LvisApi));
 
     await act(async () => {
-      await result.current.handleLoadSession("manual-sess", false, applyLoaded);
+      await result.current.handleLoadSession("manual-sess", applyLoaded);
     });
 
     expect(result.current.currentSessionId).toBe("manual-sess");

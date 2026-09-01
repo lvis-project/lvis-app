@@ -430,9 +430,47 @@ without the user knowing what it replaced.
 
 ### The controls: split and drop
 
-`useChatGroups` owns `split()`, `close()` and `dropOnEdge()`, bounded by
-`MAX_CHAT_GROUPS` in work mode and 1 in chat mode; chat mode collapses to the
-focused group. `split()` halves the **largest** tile along its longer side, not
+`useChatGroups` owns `split()`, `close()`, `dropOnEdge()` and `adopt()`, all
+bounded by `MAX_CHAT_GROUPS` — the ceiling counts LOOPS, so it is the same in
+both modes. What chat mode holds to one is the number of tiles it DRAWS: it
+collapses to the focused group and keeps the others. The split and drop controls
+are gated on `canSplit`, which does carry the mode, because they are gestures on
+the CANVAS; `adopt()` is not, because giving an incoming conversation a group of
+its own is not a canvas gesture. In chat mode the adopted group simply becomes
+the one drawn, and the conversation it displaced keeps streaming behind it.
+
+That is what the sidebar takes when the focused group is mid-turn. It has to
+take something: a running turn writes through the loop that owns it, and
+`saveSession` rewrites the whole session file from that loop's in-memory
+history, so swapping the session under a running loop would write one
+conversation's messages into another's file. Main refuses it, and the renderer
+does not ask — it adopts instead. At the ceiling one group is set aside to make
+room; its conversation is on disk, so reopening it is a resume, and the window
+says so, because the click that caused it looked like plain navigation. The
+spare is idle, is not the focused group, is not the one being adopted beside,
+and is never the primary: releasing the primary also points its loop at a fresh
+conversation and clears the persisted window-active session, so the next launch
+would open blank instead of where the user left off. A group whose tile has not
+published counts as busy — an unanswerable question is not an idle one.
+
+**Mounted is not drawn.** A tile mounts for every leaf of the live tree; the
+view decides only which of them gets a box. A leaf with no box is hidden with
+`display:none` rather than unmounted, because unmounting takes down the stream
+subscription, the streaming flag and the stop control of a turn that is still
+running — the very turn the user stepped away from. Ownership and drawing are
+therefore separate questions, and `TileSession.hidden` is how the window asks
+the second one. A hidden tile still HOLDS its conversation (`tileHoldingSession`
+counts it, so the sidebar still reports it as responding and its turn ending is
+still bookkept) and DRAWS nothing: it releases its approval claim, draws none of
+its own approval cards, and is filtered out of `overlayCardTile` and
+`tileDrawsSession`. A card handed to a hidden tile is a card nobody can answer,
+and an approval dock inside one steals keyboard focus, which drags the view back
+to the conversation the user just left. Focus reveals for the same reason: in
+work mode `maximizedId`, not focus, decides what is drawn, so focusing a tile a
+maximize is hiding would move every focus-derived surface onto a tile nobody can
+see.
+
+`split()` halves the **largest** tile along its longer side, not
 the focused one — focus moves to whatever was just added, so a focus-based split
 walks four clicks down to 124px columns, a quarter of the 448px floor a tile
 inherits. Halving the largest turns the same four clicks into a 2x2.

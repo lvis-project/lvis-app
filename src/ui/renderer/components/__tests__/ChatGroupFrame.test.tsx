@@ -249,6 +249,84 @@ describe("useChatGroups", () => {
     expect(result.current.splitFits("main", "row", { width: 1000, height: 1000 })).toBe(false);
   });
 
+  it("sets aside an idle group at the ceiling — never the primary, the focused, or the target", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.split("group-2", "row"));
+    act(() => result.current.split("group-3", "row"));
+    expect(result.current.groups.map((group) => group.id))
+      .toEqual(["main", "group-2", "group-3", "group-4"]);
+
+    // Every group idle, so only the exclusions can decide which one goes.
+    act(() => result.current.focus("group-3"));
+    let adopted: { chatGroupId: string; released: string | null } | null = null;
+    act(() => { adopted = result.current.adopt("group-2", () => true, undefined); });
+
+    // "group-4" is the only leaf that is none of: the group being adopted
+    // beside, the focused group, the primary. Each of those three exclusions
+    // would name a different leaf here if it were dropped.
+    expect(adopted).toMatchObject({ released: "group-4" });
+    expect(result.current.groups.map((group) => group.id))
+      .toEqual(["main", "group-2", "group-5", "group-3"]);
+  });
+
+  it("refuses rather than take a busy group, and leaves the tree untouched", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.split("group-2", "row"));
+    act(() => result.current.split("group-3", "row"));
+    act(() => result.current.focus("group-3"));
+    const before = result.current.groups.map((group) => group.id);
+
+    let adopted: { chatGroupId: string; released: string | null } | null = null;
+    act(() => {
+      adopted = result.current.adopt("group-2", (id) => id !== "group-4", undefined);
+    });
+
+    expect(adopted).toBeNull();
+    expect(result.current.groups.map((group) => group.id)).toEqual(before);
+  });
+
+  it("adopts without maximizing in chat mode, where the canvas is never split", () => {
+    // A canvas far under the split floors. Work mode has nowhere to draw both,
+    // so it shows the newcomer alone; chat mode draws one tile whatever the
+    // tree holds, and a maximize set here would only surface — wrongly — the
+    // moment the user toggled to work mode.
+    const tooSmall = { width: 400, height: 300 };
+
+    const work = renderHook(() => useChatGroups("work"));
+    act(() => work.result.current.split("main", "row"));
+    act(() => { work.result.current.adopt("main", () => true, tooSmall); });
+    expect(work.result.current.maximizedId).toBe("group-3");
+
+    const chat = renderHook(() => useChatGroups("chat"));
+    act(() => chat.result.current.split("main", "row"));
+    act(() => { chat.result.current.adopt("main", () => true, tooSmall); });
+    expect(chat.result.current.maximizedId).toBeNull();
+  });
+
+  it("reveals the tile it focuses, so a maximize follows rather than hides it", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.toggleMaximize("main"));
+    expect(result.current.maximizedId).toBe("main");
+
+    // Focusing the other tile while one is maximized used to move focus alone:
+    // every focus-derived surface followed, and the screen did not.
+    act(() => result.current.focus("group-2"));
+    expect(result.current.focusedId).toBe("group-2");
+    expect(result.current.maximizedId).toBe("group-2");
+    expect(result.current.groups.filter((group) => !group.hidden).map((group) => group.id))
+      .toEqual(["group-2"]);
+
+    // With nothing maximized, focus is focus and both tiles stay drawn.
+    act(() => result.current.toggleMaximize("group-2"));
+    act(() => result.current.focus("main"));
+    expect(result.current.maximizedId).toBeNull();
+    expect(result.current.groups.filter((group) => !group.hidden).map((group) => group.id))
+      .toEqual(["main", "group-2"]);
+  });
+
   it("tracks the work panel per group rather than per window", () => {
     const { result } = renderHook(() => useChatGroups());
     expect(result.current.groups[0]!.panelOpen).toBe(false);
@@ -365,6 +443,11 @@ describe("useChatGroups placement", () => {
   });
 });
 
+/** The groups the view actually draws — the rest stay mounted but hidden. */
+function drawn(groups: readonly { id: string; hidden: boolean }[]): string[] {
+  return groups.filter((group) => !group.hidden).map((group) => group.id);
+}
+
 describe("useChatGroups ceilings", () => {
   it("collapses to the focused tile in chat mode and offers no split there", () => {
     const { result } = renderHook(() => useChatGroups("chat"));
@@ -394,7 +477,12 @@ describe("useChatGroups ceilings", () => {
     act(() => result.current.dropOnEdge("main", "right"));
     expect(result.current.closable).toBe(true);
     rerender({ mode: "chat" });
-    expect(result.current.groups).toHaveLength(1);
+    // One tile DRAWN, both groups still mounted: the other conversation may be
+    // mid-turn, and a turn's stream subscription lives in its tile. Chat mode
+    // hides it rather than taking it away.
+    // The split focused the new group, and chat mode draws the focused one.
+    expect(drawn(result.current.groups)).toEqual(["group-2"]);
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2"]);
     expect(result.current.closable).toBe(false);
     expect(result.current.canMaximize).toBe(false);
   });
@@ -407,14 +495,15 @@ describe("useChatGroups ceilings", () => {
 
     act(() => result.current.toggleMaximize("group-2"));
     expect(result.current.maximizedId).toBe("group-2");
-    expect(result.current.groups.map((group) => group.id)).toEqual(["group-2"]);
+    expect(drawn(result.current.groups)).toEqual(["group-2"]);
     expect(result.current.gutters).toEqual([]);
-    // Still two tiles: the view changed, not the workspace.
+    // Still two tiles, both mounted: the view changed, not the workspace.
+    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2"]);
     expect(result.current.closable).toBe(true);
 
     act(() => result.current.toggleMaximize("group-2"));
     expect(result.current.maximizedId).toBeNull();
-    expect(result.current.groups.map((group) => group.id)).toEqual(["main", "group-2"]);
+    expect(drawn(result.current.groups)).toEqual(["main", "group-2"]);
   });
 
   it("drops a maximize when its tile closes or another tile is added", () => {

@@ -1,6 +1,8 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/App.tsx. Do not edit by hand.
 export const en = {
   "app.routineFailedTitle": "[Failed] Routine",
+  "app.conversationCeilingReached": "The window is already holding {count} conversations and none of the others can be set aside — every one that could be is generating a reply. Stop one or wait for it to finish.",
+  "app.conversationSetAside": "A conversation was closed to make room. It is saved, so reopening it picks up where it left off; anything typed but unsent is not kept.",
   "app.mcpPromptArgsUnrunnable": "This prompt requires an argument this app cannot show, so it cannot be run from here.",
   "app.mcpPromptArgsTitle": "Run \"{name}\"",
   "app.mcpPromptArgsDescription": "This prompt is declared by the MCP server \"{serverId}\". Fill in its arguments; the text it returns enters the conversation as untrusted, server-authored content.",
@@ -50,6 +52,8 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "app.routineFailedTitle": "[실패] 루틴",
+  "app.conversationCeilingReached": "이미 {count}개의 대화가 열려 있고, 비워 둘 수 있는 대화가 없습니다 — 비울 수 있는 대화는 모두 응답을 생성 중입니다. 하나를 중지하거나 끝날 때까지 기다려 주세요.",
+  "app.conversationSetAside": "자리를 만들기 위해 대화 하나를 닫았습니다. 대화는 저장되어 있어 다시 열면 이어서 계속되지만, 입력하다 만 내용은 남지 않습니다.",
   "app.mcpPromptArgsUnrunnable": "이 프롬프트는 앱이 표시할 수 없는 인자를 요구하므로 여기서 실행할 수 없습니다.",
   "app.mcpPromptArgsTitle": "\"{name}\" 실행",
   "app.mcpPromptArgsDescription": "이 프롬프트는 MCP 서버 \"{serverId}\" 가 선언한 것입니다. 인자를 채우면, 서버가 돌려준 텍스트가 untrusted (서버 작성) 콘텐츠로 대화에 들어갑니다.",
