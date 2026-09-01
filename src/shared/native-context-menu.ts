@@ -152,16 +152,24 @@ export const NATIVE_MENU_MAX_ITEMS = 400;
  * A plugin's name and an MCP server's tool names are third-party text, and a
  * native menu row is drawn by the OS with no markup to escape into. What such
  * text CAN reach is structure: a line separator splits one row across the menu,
- * and a bidi override reorders what the OS draws. Both are removed, and the
- * result is capped so one row cannot push the rest off the screen.
+ * a bidi override reorders what the OS draws, and on Windows and Linux an `&`
+ * is consumed as a mnemonic marker, so a row can silently rename itself or
+ * claim its neighbour's Alt key. All three are neutralised, and the result is
+ * capped so one row cannot push the rest off the screen.
  */
 export function sanitizeNativeMenuLabel(raw: string): string {
   const flattened = raw.replace(
-    /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2028\u2029\u2066-\u2069]/g,
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2028\u2029\u2066-\u2069]/g,
     " ",
   );
   const collapsed = flattened.replace(/\s+/g, " ").trim();
-  return collapsed.length > NATIVE_MENU_LABEL_MAX
-    ? `${collapsed.slice(0, NATIVE_MENU_LABEL_MAX - 1)}\u2026`
+  // Slicing by code unit can cut a surrogate pair in half and leave U+FFFD in
+  // the drawn row, so the cap counts code points. It is applied before the `&`
+  // escape below, both because the cap is about what the reader sees and
+  // because cutting a doubled `&` in half would revive the mnemonic.
+  const capped = collapsed.length > NATIVE_MENU_LABEL_MAX
+    ? `${Array.from(collapsed).slice(0, NATIVE_MENU_LABEL_MAX - 1).join("")}\u2026`
     : collapsed;
+  // Electron's own escape: a doubled `&` draws as one and binds no key.
+  return capped.replace(/&/g, "&&");
 }

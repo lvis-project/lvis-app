@@ -1081,8 +1081,9 @@ export function App() {
   // poll, agent/skill install results). See use-plugin-lifecycle-refresh.ts.
   usePluginLifecycleRefresh({ api, pluginCards, refreshViews, refreshCards, refreshMarketplace });
 
-  // Auto-close SlashPicker when navigating away from home — the popover
-  // is only mounted on the home view so leaving it open causes stuck state.
+  // Clear the SlashPicker's raise flag when navigating away from home. The
+  // picker is only mounted on the home view, so a flag left set survives the
+  // unmount and pops a menu the moment the user comes back.
   useEffect(() => {
     if (activeView !== "home") setSlashPickerOpen(false);
   }, [activeView]);

@@ -245,7 +245,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // Live MCP-server tools + registered skills back the inline menu's mcp /
   // skills categories (real host IPC). Fetched only while the composer is
-  // enabled so it stays parallel with the SlashPicker popover's data.
+  // enabled so it stays parallel with the command menu's data.
   const { mcpTools, skills } = useSlashPickerRuntime(!disabled);
 
   // Inline "/" autocomplete — derives an open/filtered menu from the controlled

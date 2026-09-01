@@ -115,12 +115,20 @@ describe("SlashPicker", () => {
     const payload = bridge.showDynamicMenu.mock.calls[0]![0] as DynamicNativeMenuPayload;
     const rows = payload.sections.flatMap((section) => flatten(section.items));
 
-    act(() => { bridge.fire({ requestId: payload.requestId, id: "command:/new" }); });
-    expect(onInsert).toHaveBeenCalledWith("/new ");
-
-    // An id from a DIFFERENT request must not reach this call's handlers.
+    // The forged action comes FIRST, while this request is still pending and its
+    // handlers are live. Fired after a legitimate one, it would be rejected by
+    // the pending entry already being consumed, and the requestId comparison —
+    // the thing under test — would never run.
     act(() => { bridge.fire({ requestId: "some-other-request", id: "shortcut:board" }); });
     expect(run).not.toHaveBeenCalled();
+
+    act(() => { bridge.fire({ requestId: payload.requestId, id: "shortcut:board" }); });
+    expect(run).toHaveBeenCalledOnce();
+
+    // …and the pending entry is single-shot: the row that already reported is
+    // not re-runnable.
+    act(() => { bridge.fire({ requestId: payload.requestId, id: "command:/new" }); });
+    expect(onInsert).not.toHaveBeenCalled();
 
     expect(rows.some((row) => row.id === "plugin:meeting")).toBe(true);
     expect(onSelectPlugin).not.toHaveBeenCalled();
@@ -149,5 +157,26 @@ describe("SlashPicker", () => {
     // The OS owns the menu once it is up, so the flag is released immediately —
     // it exists to raise the menu, not to track it.
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+
+    // `onOpenChange` is a spy here, so `open` stays true — exactly the window the
+    // real app is in between popping the menu and the parent clearing the flag.
+    // Any re-render in that window must NOT pop a second menu.
+    rerender(
+      <TooltipProvider>
+        <SlashPicker
+          actions={[]}
+          plugins={[]}
+          onSelectPlugin={vi.fn()}
+          onInsert={vi.fn()}
+          onRunMcpPrompt={vi.fn()}
+          open
+          onOpenChange={onOpenChange}
+        />
+      </TooltipProvider>,
+    );
+    // `openMenu` is async, so a second pop would land a tick later — waiting for
+    // "still once" without flushing would pass against a picker that pops twice.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(bridge.showDynamicMenu).toHaveBeenCalledOnce();
   });
 });

@@ -95,24 +95,6 @@ export function catLabel(category: Category): string {
   }
 }
 
-/** Short description shown under a category in the drill-down list. */
-export function catDescription(category: Category): string {
-  switch (category) {
-    case "command":
-      return t("slashPicker.catCommandDesc");
-    case "shortcut":
-      return t("slashPicker.catShortcutDesc");
-    case "plugin":
-      return t("slashPicker.catPluginDesc");
-    case "mcp":
-      return t("slashPicker.catMcpDesc");
-    case "mcp-prompts":
-      return t("slashPicker.catMcpPromptsDesc");
-    case "skills":
-      return t("slashPicker.catSkillsDesc");
-  }
-}
-
 /** Normalize a typed query for case-insensitive substring matching. */
 export function normalizeSlashQuery(query: string): string {
   return query.trim().toLowerCase();
@@ -150,18 +132,6 @@ export function filterMcpTools(tools: McpToolEntry[], query: string): McpToolEnt
   if (!q) return tools;
   return tools.filter(
     (m) => m.name.toLowerCase().includes(q) || m.serverId.toLowerCase().includes(q),
-  );
-}
-
-/** Filter server-declared prompts by name, title, description, or server id. */
-export function filterMcpPrompts(prompts: McpPromptEntry[], query: string): McpPromptEntry[] {
-  const q = normalizeSlashQuery(query);
-  if (!q) return prompts;
-  return prompts.filter((p) =>
-    p.name.toLowerCase().includes(q)
-    || p.serverId.toLowerCase().includes(q)
-    || (p.title ?? "").toLowerCase().includes(q)
-    || (p.description ?? "").toLowerCase().includes(q),
   );
 }
 
@@ -228,11 +198,15 @@ export function buildComposerMenuSections(input: {
   push("mcp-prompts", input.mcpPrompts.map((prompt) => ({
     id: `mcp-prompt:${prompt.serverId}:${prompt.name}`,
     label: prompt.title ?? prompt.name,
+    // The deleted panel drew two lines per row; `sublabel` is where a native
+    // menu keeps the second one, so what a prompt or skill DOES survives here.
+    ...(prompt.description === undefined ? {} : { sublabel: prompt.description }),
     onSelect: () => input.onRunMcpPrompt(prompt),
   })));
   push("skills", input.skills.map((skill) => ({
     id: `skill:${skill.name}`,
     label: skill.name,
+    sublabel: skill.description,
     onSelect: () => input.onInsert(`/${skill.name} `),
   })));
 

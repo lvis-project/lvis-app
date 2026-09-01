@@ -163,7 +163,10 @@ export function useNativeMenu() {
     pendingRef.current = { requestId, run };
     const result = await show(payload);
     if (result?.ok !== true) {
-      pendingRef.current = null;
+      // Only clear our own entry: two overlapping opens both write this ref, and
+      // the loser resolving late must not strip the callbacks off the menu that
+      // is currently on screen.
+      if (pendingRef.current?.requestId === requestId) pendingRef.current = null;
       return false;
     }
     return true;

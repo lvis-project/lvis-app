@@ -1,18 +1,17 @@
 import "../../../../test/renderer/setup.ts";
 import { describe, expect, it } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { TEST_IDS } from "../../../shared/test-ids.js";
 
 describe("App plugin auth routing", () => {
-  // #1311 (input-area relayout) removed the standalone plugin-grid button from
-  // the action bar; plugin views are now reached through the unified
-  // SlashPicker. These helpers drive a plugin selection through the new entry
-  // point: open the picker, drill into the 플러그인(plugin) category, then click
-  // the plugin's view row by its label. The auth/detach SECURITY behavior under
-  // test is unchanged — selection still routes through the same App
-  // handleViewSelect path — only the UI affordance moved.
+  // The composer's command button now opens a NATIVE menu, which lives outside
+  // the page and jsdom cannot render. The inline "/" menu is the surviving DOM
+  // affordance over the same data — it lists the same plugin rows and the same
+  // shortcut actions — so these helpers type a query and click the row. The
+  // auth/detach SECURITY behavior under test is unchanged: selection still
+  // routes through the same App handleViewSelect path, only the affordance did.
   // One call site for the harness. `userEvent`'s default export does not
   // typecheck under this repo's NodeNext resolution (`tsconfig.tests.json`
   // covers tests; the root config does not), and the diagnostic used to be
@@ -21,16 +20,23 @@ describe("App plugin auth routing", () => {
   const makeUser = () => userEvent.setup();
   type PickerUser = ReturnType<typeof makeUser>;
 
-  const openPluginCategory = async (user: PickerUser) => {
-    await user.click(screen.getByTestId(TEST_IDS.slashPickerTrigger));
-    await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
+  /**
+   * Type "/<query>" in the composer so the inline menu opens, filtered. The
+   * query is one token — a space ends the trigger — so pass a single word.
+   */
+  const openInlineMenu = async (query: string) => {
+    const composer = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
+    const value = `/${query}`;
+    fireEvent.change(composer, { target: { value } });
+    composer.setSelectionRange(value.length, value.length);
+    fireEvent.keyUp(composer, { key: value.slice(-1) });
+    return screen.findByTestId("inline-slash-menu");
   };
   const selectPluginView = async (user: PickerUser, label: string) => {
-    await openPluginCategory(user);
-    // Scope the row lookup to the picker's plugin group — the plugin's own
-    // title can also appear elsewhere in the tree (e.g. a loaded inline view).
-    const group = await screen.findByTestId("slash-group-plugin");
-    await user.click(await within(group).findByText(label));
+    // Scope the row lookup to the menu — the plugin's own title can also appear
+    // elsewhere in the tree (e.g. a loaded inline view).
+    const menu = await openInlineMenu(label.split(" ")[0]!);
+    await user.click(await within(menu).findByText(label));
   };
   const authPluginFixture = {
     pluginCards: [
@@ -67,10 +73,9 @@ describe("App plugin auth routing", () => {
     // The preparing-cell visual detail (aria-busy, phase/progress label, title)
     // is asserted directly against the component in
     // PluginGridButton.test.tsx ("shows preparation detail for preparing
-    // registered plugin cells"). At the App level after #1311 the contract is:
-    // a preparing plugin card that declares a UI extension still appears as a
-    // reachable entry inside the SlashPicker's 플러그인 category.
-    const user = makeUser();
+    // registered plugin cells"). At the App level the contract is: a preparing
+    // plugin card that declares a UI extension still appears as a reachable
+    // entry in the composer's command surface.
     const { api } = await renderApp({
       pluginCards: [
         {
@@ -106,9 +111,8 @@ describe("App plugin auth routing", () => {
       expect(api.listPluginCards).toHaveBeenCalled();
     });
 
-    await openPluginCategory(user);
-    const group = await screen.findByTestId("slash-group-plugin");
-    expect(await within(group).findByText("로컬 인덱서")).toBeInTheDocument();
+    const menu = await openInlineMenu("로컬");
+    expect(await within(menu).findByText("로컬 인덱서")).toBeInTheDocument();
   });
 
   it("opens a preparing plugin's panel on selection instead of dropping the click", async () => {
@@ -285,12 +289,10 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.listPluginUiExtensions).toHaveBeenCalled();
     });
-    await user.click(screen.getByTestId(TEST_IDS.slashPickerTrigger));
-    // The unified SlashPicker opens on a category drill-down; the plugin-view
-    // QuickAction ("…열기") lives under the 바로가기/shortcut group. Drill into
-    // it, then select the action.
-    await user.click(await screen.findByTestId("slash-picker-cat-shortcut"));
-    await user.click(await screen.findByText("Token Plugin 열기"));
+    // The plugin-view QuickAction ("…열기") is a shortcut, not a plugin row —
+    // the inline menu lists both, so the same query reaches it.
+    const menu = await openInlineMenu("Token");
+    await user.click(await within(menu).findByText("Token Plugin 열기"));
 
     // Navigates the plugin view inline (its host renders); never opens a window.
     expect(await screen.findByRole("heading", { name: "Token Plugin" })).toBeInTheDocument();

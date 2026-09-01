@@ -1,6 +1,6 @@
 import "../../../../test/renderer/setup.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 // Named import: the default export does not survive this tsconfig's interop settings.
 import { userEvent } from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
@@ -113,10 +113,15 @@ describe("App — view key guard on the activate-view IPC", () => {
     });
     await waitFor(() => expect(screen.getByTestId(TEST_IDS.chatViewRoot)).toBeTruthy());
 
-    await user.click(screen.getByTestId(TEST_IDS.slashPickerTrigger));
-    await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
-    const group = await screen.findByTestId("slash-group-plugin");
-    await user.click(await within(group).findByText("Broken View"));
+    // The composer's command button opens a native menu jsdom cannot render;
+    // the inline "/" menu is the DOM affordance over the same plugin rows.
+    const composer = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
+    // The query is one token: a space ends the trigger, so type the first word.
+    fireEvent.change(composer, { target: { value: "/Broken" } });
+    composer.setSelectionRange(7, 7);
+    fireEvent.keyUp(composer, { key: "n" });
+    const menu = await screen.findByTestId("inline-slash-menu");
+    await user.click(await within(menu).findByText("Broken View"));
 
     await waitFor(() =>
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("'plugin:broken-plugin:'")),
