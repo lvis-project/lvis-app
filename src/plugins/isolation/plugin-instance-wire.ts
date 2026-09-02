@@ -2,7 +2,7 @@
  * The FORWARD direction of the boundary: the six host→plugin entry points
  * (`docs/blueprints/plugin-process-isolation.md` §2.1).
  *
- * `host-api-wire.ts` is the reverse channel — the 36 members a plugin calls on
+ * `host-api-wire.ts` is the reverse channel — the 38 members a plugin calls on
  * the host. This is the other half: what the HOST calls on the plugin. They are
  * separate contracts with separate failure modes, which is why they are
  * separate modules and not one file called "the wire".

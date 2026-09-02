@@ -11,7 +11,7 @@
  * The load-bearing type is {@link HostApiPathContract}. §3 decided four
  * independent things for every member — how its ARGUMENTS reach the host, how
  * its RETURN reaches the child, whether the call creates a two-sided LIFETIME,
- * and which ERROR IDENTITIES it may reply with — and 36 members × 4 axes is 144
+ * and which ERROR IDENTITIES it may reply with — and 38 members × 4 axes is 152
  * chances to change behaviour that no existing test notices, because today each
  * one is a function call nothing was written to pin. Making all four fields
  * REQUIRED means a member cannot be declared with an axis left undecided: the
@@ -571,7 +571,7 @@ function assertWithinWireBytesMax(byteLength: number, label: string): void {
  * from the contract).
  *
  * WHY THE KEYS ARE A LITERAL UNION. `as const satisfies` makes
- * {@link HostApiPath} the exact set of 36 members rather than `string`, so the
+ * {@link HostApiPath} the exact set of 38 members rather than `string`, so the
  * host dispatch table is `Record<HostApiPath, …>` and a MISSING handler is a
  * compile error. The complementary direction — a member added to
  * `HOSTAPI_EFFECT_BY_PATH` without a contract here — is not expressible in the
@@ -719,6 +719,21 @@ export const HOSTAPI_PATH_CONTRACTS = {
     result: "plain-json",
     lifetime: "none",
     errors: [],
+  },
+  // Text and a key out, a discriminated envelope back. Nothing executable
+  // crosses, and nothing outlives the call — the proposal the host stores is
+  // reachable afterwards only through the board, never through a handle.
+  proposeWork: {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    errors: ["effect-boundary-denied"],
+  },
+  withdrawWorkProposal: {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    errors: ["effect-boundary-denied"],
   },
   getAppPreference: {
     arguments: "child-local",
@@ -1033,6 +1048,8 @@ export const SERVICE_HOSTAPI_PATHS = [
   "getSecret",
   "getAuthPartitionCookies",
   "hasRoutineBySource",
+  "proposeWork",
+  "withdrawWorkProposal",
   "probePrivateHost",
   "resolveApiKey",
   "emitEvent",
@@ -1047,7 +1064,7 @@ export const SERVICE_HOSTAPI_PATHS = [
   "resizeFloatingPanel",
 ] as const satisfies readonly HostApiPath[];
 
-/** One of the fifteen. */
+/** One of the seventeen. */
 export type ServiceHostApiPath = (typeof SERVICE_HOSTAPI_PATHS)[number];
 
 

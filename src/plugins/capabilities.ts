@@ -104,10 +104,18 @@ export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
  * — letting any plugin spoof `plugin.installed` (or in future `host.*`)
  * would let one plugin trick lifecycle subscribers into reacting to fake
  * install/uninstall events.
+ *
+ * `work_board` is here for the same reason: the Work Board is a HOST domain
+ * (`docs/architecture/architecture.md` §"Work Board"), and its only bus event —
+ * `work_board.work_item.due_soon` (`work-board/due-soon.ts`) — is derived by
+ * the host from the user's own rows. It is a namespace with no legitimate
+ * plugin-side emitter, so leaving it out let any plugin forge a due-soon nudge
+ * for an item the user never has, and have every subscriber react to it.
  */
 export const HOST_ONLY_EMIT_NAMESPACES: ReadonlySet<string> = new Set([
   "plugin",
   "host",
+  "work_board",
 ]);
 
 /**

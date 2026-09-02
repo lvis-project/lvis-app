@@ -21,6 +21,7 @@ import {
   PLUGIN_PRIVATE_NAMESPACES,
   PUBLIC_EVENT_NAMESPACES,
   KNOWN_CAPABILITIES,
+  HOST_ONLY_EMIT_NAMESPACES,
 } from "../../plugins/capabilities.js";
 import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { registerManifestEventSubscriptions } from "../plugins.js";
@@ -109,6 +110,20 @@ describe("capabilities module namespace policy", () => {
     expect(canEmitEvent("plugin.installed", ["plugin.installed"])).toBe(false);
     expect(canEmitEvent("plugin.installed", ["email.new", "calendar.event"])).toBe(false);
     expect(canEmitEvent("host.theme.changed", ["host.theme.changed"])).toBe(false);
+  });
+
+  it("refuses a forged work_board emit even when the plugin declares it", () => {
+    // The Work Board is a HOST domain: `work_board.work_item.due_soon` is
+    // derived by the host from the user's own rows and flows OUTWARD to
+    // plugins. Before `work_board` joined the host-only set, the namespace was
+    // ungated, so any plugin could emit a due-soon nudge for an item the user
+    // never had and every subscriber would react to it.
+    expect(canEmitEvent("work_board.work_item.due_soon", [])).toBe(false);
+    expect(
+      canEmitEvent("work_board.work_item.due_soon", ["work_board.work_item.due_soon"]),
+    ).toBe(false);
+    expect(canEmitEvent("work_board.report.generated", ["work_board.report.generated"])).toBe(false);
+    expect(HOST_ONLY_EMIT_NAMESPACES.has("work_board")).toBe(true);
   });
 
   it("private namespaces reject plugin emit even when explicitly declared", () => {

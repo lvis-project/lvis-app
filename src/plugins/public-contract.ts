@@ -540,6 +540,37 @@ export interface PluginManifest {
     bodyField?: string;
     bypassFocusGate?: boolean;
   }>;
+
+  /**
+   * Recommended-work channel declaration — which KINDS of work proposal this
+   * plugin may post to the host's Work Board via
+   * {@link PluginHostApi.proposeWork}.
+   *
+   * DECLARATION IS AUTHORIZATION, and there is no capability string to add: a
+   * plugin authorizes itself to propose in `stale-index` by DECLARING
+   * `stale-index` here, exactly as it authorizes an `email.*` emit by
+   * declaring an `email.*` entry in `emittedEvents`. Absent or empty ⇒ the
+   * plugin may post nothing; `proposeWork` resolves `kind_not_granted`.
+   *
+   * THE DECLARED LIST IS ALSO THE NAG CEILING. A plugin may hold AT MOST ONE
+   * OPEN PROPOSAL PER DECLARED KIND: three declared kinds means at most three
+   * cards, ever, at once. That is structurally stronger than a rate limit,
+   * which resets — to post a new card in a kind the plugin must first withdraw
+   * the old one or the user must resolve it.
+   *
+   * `kinds[].label` is the USER-FACING name of the slot, so consent reads as
+   * "this plugin may raise these two kinds of suggestion" rather than "this
+   * plugin may post cards".
+   *
+   * A malformed block grants NOTHING rather than granting the entries that
+   * happened to parse — a consent-bearing declaration has no partial form.
+   */
+  workProposals?: {
+    /** Human-readable justification surfaced to the user. */
+    reasoning?: string;
+    /** 1..4 entries. Ids must be unique within the plugin. */
+    kinds: WorkProposalKind[];
+  };
   installPolicy?: InstallPolicy;
   dependencies?: Array<string | DependencySpec>;
   pluginAccess?: PluginAccessSpec;
@@ -1703,6 +1734,46 @@ export interface PluginHostApi {
   hasRoutineBySource(source: string): Promise<boolean>;
 
   /**
+   * Post or refresh this plugin's recommended-work proposal for ONE declared
+   * kind. The host persists it beside the Work Board and draws it as a card at
+   * the top of that board; the card's start button runs the HOST's own
+   * plan → approve → execute sequence over a work item the host composes.
+   *
+   * AUTHORIZATION is inferred from the plugin's `workProposals.kinds`
+   * declaration in its installed manifest — the same declaration-as-
+   * authorization rule `emittedEvents` uses for gated event namespaces. An
+   * undeclared `kind` resolves `{ status: "kind_not_granted" }`; callers branch
+   * on `status` rather than expecting a throw.
+   *
+   * UPSERT SEMANTICS. `(kind, key)` is the identity. Re-posting the same key
+   * REFRESHES the card in place and re-arms its TTL. A DIFFERENT key while a
+   * card is already open in that kind resolves `{ status: "slot_busy" }` — one
+   * open proposal per declared kind is the ceiling, and it does not reset.
+   *
+   * A card the user dismissed or accepted stays closed through a refresh:
+   * re-posting is not a way to put a closed card back in front of them.
+   *
+   * SAFETY CONTRACT: every string field is user-visible or LLM-visible. See
+   * {@link WorkProposalUntrustedText} for what the caller must guarantee and
+   * what the host can and cannot do about it.
+   */
+  proposeWork(input: WorkProposalInput): Promise<WorkProposalResult>;
+
+  /**
+   * Retract this plugin's own proposal because the condition it described no
+   * longer holds — the mail was answered, the index was rescanned.
+   *
+   * Retraction is why this is a channel and not a notification: it is what lets
+   * the board stay true over time without the host understanding any plugin's
+   * domain. Scoped to the caller by construction — the id the host looks up is
+   * derived from the CALLER's plugin id, so another plugin's proposal is not
+   * addressable rather than merely refused.
+   *
+   * Resolves `false` when no matching open proposal existed. Idempotent.
+   */
+  withdrawWorkProposal(kind: string, key: string): Promise<boolean>;
+
+  /**
    * §8 Agent Approval System — main-process–side approval management.
    *
    * Plugins use this namespace to interact with the host's §8 ApprovalGate
@@ -1851,6 +1922,154 @@ export interface ConversationTriggerResult {
    */
   eventId?: string;
 }
+
+// ─── Recommended-work proposals ──────────────────────────────────────────────
+//
+// A proposal is a plugin saying "here is something I think you should
+// consider", as a card the host draws at the top of its own Work Board. It is
+// the plugin-facing door to a HOST domain that already exists: the host owns
+// the storage, the card, the start action and the approval gate, and the
+// plugin owns only the judgment that the condition holds.
+//
+// A proposal carries TEXT AND A KEY, and nothing executable. The card's start
+// button drives the host's own plan → approve → execute sequence over an item
+// the host composed, so there is no plugin-supplied action for the host to run
+// and therefore no action-execution surface to bound.
+
+/**
+ * One declared proposal slot. The host namespaces it as `<pluginId>:<kind>`,
+ * so a plugin cannot name another plugin's kind.
+ */
+export interface WorkProposalKind {
+  /** `^[a-z][a-z0-9-]{0,31}$`, unique within the plugin. */
+  id: string;
+  /** What the user sees in the install disclosure and on the card. */
+  label: string;
+}
+
+/** One "here is why I think so" row under a proposal's expandable detail. */
+export interface WorkProposalEvidence {
+  label: string;
+  detail: string;
+}
+
+/** One "here is what stops this" row under a proposal's expandable detail. */
+export interface WorkProposalBlocker {
+  reason: string;
+  /** What would unblock it, when the plugin knows. */
+  resolution?: string;
+}
+
+/**
+ * EVERY STRING A PLUGIN AUTHORED, in one place.
+ *
+ * SAFETY CONTRACT — the caller MUST follow it and the host CANNOT check it.
+ * All of this is shown to the user as plain text, and `taskBrief` additionally
+ * reaches an LLM as prompt text once the user starts the run. Every field MUST
+ * be TEMPLATED text, never raw third-party content (a mail body, a document, an
+ * attachment): pass identifiers inside `taskBrief` and let the run fetch the
+ * content through tools.
+ *
+ * The host length-caps every field, renders each as plain text with no markdown
+ * link or HTML surface, and wraps `taskBrief` in the plugin staged-origin
+ * envelope — but none of that makes injected content safe to author. This is
+ * the same limitation {@link ConversationTriggerSpec} documents, moved from
+ * each plugin's own convention into the host's structure.
+ *
+ * Grouped as one interface deliberately: a reader asking "which of these came
+ * from a plugin" reads the answer off the type instead of auditing per field.
+ */
+export interface WorkProposalUntrustedText {
+  /** One line naming the work. Capped at 120 characters. */
+  title: string;
+  /** One line saying why it is being recommended. Capped at 200. */
+  summary: string;
+  /** The "current state" part of the expandable detail. Capped at 400. */
+  state: string;
+  /** The "evidence" part of the detail. At most 6 rows, each part capped at 200. */
+  evidence: WorkProposalEvidence[];
+  /** Why it cannot proceed, when it cannot. At most 4 rows. Empty when nothing blocks it. */
+  blockers: WorkProposalBlocker[];
+  /** Instruction text seeded into the run. NEVER rendered raw to the user. Capped at 2000. */
+  taskBrief: string;
+}
+
+/**
+ * What a plugin hands {@link PluginHostApi.proposeWork}. Text, a key, and
+ * scheduling hints. No identity — the host binds `pluginId` from the HostApi
+ * caller — and no action.
+ */
+export interface WorkProposalInput {
+  /** One of this plugin's own declared, approved {@link WorkProposalKind} ids. */
+  kind: string;
+  /**
+   * Plugin-scoped identity for the CONDITION this proposal describes — the
+   * upsert and withdraw handle. Re-posting the same key refreshes the card;
+   * a different key while that kind already holds an open card is refused.
+   */
+  key: string;
+  title: string;
+  summary: string;
+  state: string;
+  /** Omit for "nothing to show". The host stores an empty list, never a stand-in row. */
+  evidence?: WorkProposalEvidence[];
+  /** Omit when nothing blocks the work. */
+  blockers?: WorkProposalBlocker[];
+  taskBrief: string;
+  /** Carried onto the work item if the user accepts. Defaults to `medium`. */
+  priority?: "high" | "medium" | "low";
+  /** ISO-8601 deadline carried onto the work item if the user accepts. */
+  dueAt?: string;
+  /**
+   * How long the proposal stays open with no further contact from the plugin.
+   * Host-clamped to [1 hour, 14 days]; 7 days when omitted. The TTL is what
+   * sweeps an abandoned card when the plugin that posted it stops running.
+   */
+  ttlMs?: number;
+}
+
+/**
+ * The persisted proposal. Everything the plugin did not supply is host-owned:
+ * `id` is derived (`<pluginId>:<kind>:<hash(key)>`), `pluginId` comes from the
+ * HostApi identity binding rather than the payload, and the timestamps are the
+ * host's.
+ */
+export interface WorkProposal extends WorkProposalUntrustedText {
+  id: string;
+  kind: string;
+  key: string;
+  /** From the HostApi identity binding — a plugin cannot name another's. */
+  pluginId: string;
+  /** Display name from the installed manifest. */
+  pluginLabel: string;
+  priority: "high" | "medium" | "low";
+  dueAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** `updatedAt + clamp(ttlMs)`. A proposal past this is swept on the next read. */
+  expiresAt: string;
+  /** Set when the user closed the card. Sticky per `id` — a re-post keeps it. */
+  dismissedAt?: string;
+  /** Set when the user accepted; links the proposal to the work item it became. */
+  acceptedItemId?: number;
+}
+
+/**
+ * Outcome of {@link PluginHostApi.proposeWork}. Callers branch on `status` —
+ * a refusal is a value, never a throw, and never a coerced default.
+ */
+export type WorkProposalResult =
+  | { status: "ok"; proposal: WorkProposal }
+  /** `kind` is not among this plugin's declared, approved kinds. */
+  | { status: "kind_not_granted"; kind: string }
+  /** A DIFFERENT key is already open in this kind — the nag ceiling. */
+  | { status: "slot_busy"; kind: string }
+  /** Names the field that failed validation. Nothing was stored. */
+  | { status: "invalid"; field: string }
+  /** The host-wide proposal cap is full. */
+  | { status: "cap_reached" }
+  /** This plugin is upserting faster than the host's churn budget allows. */
+  | { status: "rate_limited" };
 
 export interface PluginRuntimeContext {
   pluginId: string;

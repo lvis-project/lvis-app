@@ -114,6 +114,8 @@ export type ChokepointKind =
   | "onShutdown" // registers a shutdown observer (host-scoped cleanup)
   | "getInstalledPluginIds" // reads the loaded-plugin id list
   | "hasRoutineBySource" // prefix-scoped boolean probe of the routines SOT
+  | "proposeWork" // persists a recommended-work card the user will see
+  | "withdrawWorkProposal" // retracts one of the caller's own cards
   | "getAppPreference" // reads an allow-listed host preference
   | "probePrivateHost" // DNS presence probe (UX hint; no persistence, no egress body)
   | "resolveApiKey" // leases/reads a host-managed credential (no persisted mutation)
@@ -178,6 +180,12 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   resizeFloatingPanel: "write",
   triggerConversation: "write",
   agentApprovalRespond: "write",
+  // Both WRITE: one persists a card the host will show the user under its own
+  // board, the other deletes it. Nothing is executed either way, but "put
+  // something in front of the user that they did not initiate" is exactly the
+  // boundary the effect gate exists for.
+  proposeWork: "write",
+  withdrawWorkProposal: "write",
   // Structural-completeness vocabulary — writes (egress / persist / session).
   callLlm: "write",
   openAuthPartitionViewer: "write",
@@ -385,6 +393,12 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   getInstalledPluginIds: { kind: "getInstalledPluginIds" },
   // Idempotency SOT probe — `source` arg is a non-secret forensic descriptor.
   hasRoutineBySource: { kind: "hasRoutineBySource", targetFromArgs: firstStringArg,
+  },
+  // The declared kind is the forensic pivot — a non-secret slot name the user
+  // approved by label. The proposal's own text is deliberately NOT recorded.
+  proposeWork: { kind: "proposeWork", async: true, targetFromArgs: objectStringField("kind"),
+  },
+  withdrawWorkProposal: { kind: "withdrawWorkProposal", async: true, targetFromArgs: firstStringArg,
   },
   getAppPreference: { kind: "getAppPreference", targetFromArgs: firstStringArg,
   },

@@ -12,6 +12,24 @@
  * {planned, in_progress} AND due_at < now — computed locally in the store.
  */
 
+import type {
+  WorkProposal,
+  WorkProposalBlocker,
+  WorkProposalEvidence,
+  WorkProposalInput,
+  WorkProposalResult,
+  WorkProposalUntrustedText,
+} from "../plugins/public-contract.js";
+
+export type {
+  WorkProposal,
+  WorkProposalBlocker,
+  WorkProposalEvidence,
+  WorkProposalInput,
+  WorkProposalResult,
+  WorkProposalUntrustedText,
+};
+
 /**
  * Hard cap on persisted work items. Hitting the cap means add() throws —
  * the LLM receives a clear error and can prompt the user to complete or
@@ -356,4 +374,76 @@ export interface WorkItemRunResult {
    * flight — no second sub-agent was spawned).
    */
   reason?: string;
+}
+
+// ── Recommended-work proposals ──────────────────────────────────────────────
+//
+// A proposal is a plugin's recommendation that the user consider a piece of
+// work. It is NOT a work item: work items are user-owned rows the user creates
+// and the host never deletes behind their back, while a proposal is
+// machine-authored, author-revocable, and expires on its own. They therefore
+// live in a separate file (`proposals.json`) rather than as a fourth board
+// status, and a proposal only becomes a WorkItem when the user accepts it.
+//
+// A proposal carries TEXT AND A KEY. It carries no action: the card's start
+// button drives the host's own WorkBoardEngine plan → approve → execute
+// sequence, so there is no plugin-supplied action for the host to run.
+
+// The plugin-facing half of this vocabulary — what a plugin hands over and
+// what it gets back — is declared in `plugins/public-contract.ts`, which is the
+// SDK mirror source and therefore cannot import anything. Importing FROM it
+// here (rather than restating the shapes) keeps one definition: a proposal the
+// plugin composed and a proposal the store persisted are the same type, not two
+// that agree today.
+
+/** Longest a declared kind id may be, and the shape it must take. */
+export const PROPOSAL_KIND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+/** Most proposal kinds one plugin may declare — the outer bound of its ceiling. */
+export const MAX_PROPOSAL_KINDS = 4;
+/** Most evidence rows one proposal may carry. */
+export const MAX_PROPOSAL_EVIDENCE = 6;
+/** Most blocker rows one proposal may carry. */
+export const MAX_PROPOSAL_BLOCKERS = 4;
+/** Hard cap on stored proposals across every plugin (runaway-record defence). */
+export const MAX_PROPOSALS = 64;
+
+export const PROPOSAL_KEY_MAX = 200;
+export const PROPOSAL_TITLE_MAX = 120;
+export const PROPOSAL_SUMMARY_MAX = 200;
+export const PROPOSAL_STATE_MAX = 400;
+/** Cap on one evidence / blocker line. */
+export const PROPOSAL_LINE_MAX = 200;
+export const PROPOSAL_TASK_BRIEF_MAX = 2000;
+/** Kind label shown in the install disclosure and on the card. */
+export const PROPOSAL_KIND_LABEL_MAX = 60;
+
+/** Shortest a proposal may ask to live. */
+export const PROPOSAL_TTL_MIN_MS = 60 * 60 * 1000;
+/** Longest a proposal may ask to live — 14 days. */
+export const PROPOSAL_TTL_MAX_MS = 14 * 24 * 60 * 60 * 1000;
+/** What an unstated `ttlMs` means — 7 days. */
+export const PROPOSAL_TTL_DEFAULT_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type WorkProposalListResult =
+  | { status: "ok"; proposals: WorkProposal[] }
+  | { status: "invalid"; reason: string };
+
+export type WorkProposalAcceptResult =
+  | { status: "accepted"; itemId: number; item: WorkItemResolved }
+  | { status: "not_found"; proposalId: string }
+  | { status: "invalid"; reason: string };
+
+export type WorkProposalDismissResult =
+  | { status: "dismissed"; proposalId: string }
+  | { status: "not_found"; proposalId: string };
+
+/**
+ * Emitted to renderer windows whenever the proposal set changes — a plugin
+ * posted or withdrew one, or the user dismissed or accepted one — so the board
+ * re-lists without polling. Slim on purpose: a pointer, not content.
+ */
+export interface WorkProposalChangedEventPayload {
+  proposalId: string;
+  change: "posted" | "withdrawn" | "dismissed" | "accepted";
+  changedAt: string;
 }

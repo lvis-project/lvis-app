@@ -18,6 +18,10 @@ import { expect, vi } from "vitest";
 import { initPluginRuntime } from "../../boot/steps/plugin-runtime.js";
 import { KNOWN_CAPABILITIES } from "../../plugins/capabilities.js";
 import { isPlainNamespace } from "../hostapi-effect-recorder.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { WorkBoardStore } from "../../main/work-board-store.js";
 import type { PluginHostApi } from "../../plugins/types.js";
 
 /**
@@ -108,6 +112,11 @@ export async function buildRealHostApi(
     shellOpenExternal: vi.fn(),
     approvalGate: { requestAndWait: vi.fn(), resolve: vi.fn() } as never,
     routinesStore: { list: () => [] } as never,
+    // A real store over a temp path: `proposeWork` must return a genuine
+    // envelope for the JSON-representability probe, and the probe's kind is
+    // undeclared so it refuses before it ever touches the file.
+    getWorkBoardStore: () =>
+      new WorkBoardStore(join(mkdtempSync(join(tmpdir(), "lvis-probe-wb-")), "board.json")),
   });
 
   const createHostApi = capturedCreateHostApi(harness);

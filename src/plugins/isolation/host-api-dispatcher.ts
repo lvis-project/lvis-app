@@ -284,6 +284,8 @@ export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
   getSecret: unimplementedHostApiPath("getSecret"),
   getInstalledPluginIds: childLocalHostApiPath("getInstalledPluginIds"),
   hasRoutineBySource: unimplementedHostApiPath("hasRoutineBySource"),
+  proposeWork: unimplementedHostApiPath("proposeWork"),
+  withdrawWorkProposal: unimplementedHostApiPath("withdrawWorkProposal"),
   getAppPreference: childLocalHostApiPath("getAppPreference"),
   probePrivateHost: unimplementedHostApiPath("probePrivateHost"),
   resolveApiKey: unimplementedHostApiPath("resolveApiKey"),
@@ -490,10 +492,11 @@ export function createInteractionHostApiPaths(
  * The host handlers for the hostApi members that reach a host SERVICE
  * (`docs/blueprints/plugin-process-isolation.md` §3.1, §3.2).
  *
- * Ten members: network egress (`hostFetch`, `probePrivateHost`), the LLM
+ * Twelve members: network egress (`hostFetch`, `probePrivateHost`), the LLM
  * provider (`callLlm`), credentials (`getSecret`, `resolveApiKey`), the worker
  * supervisor (`spawnWorker`), the event bus (`emitEvent`), the audit log
- * (`logEvent`), the routine store (`hasRoutineBySource`) and the Windows
+ * (`logEvent`), the routine store (`hasRoutineBySource`), the Work Board
+ * (`proposeWork`, `withdrawWorkProposal`) and the Windows
  * drive-mapping lookup (`resolveMappedDriveRoot`). Between them they
  * hold every member §3.2 classified as not JSON-representable, which is why the
  * marshalling work concentrates here.
@@ -536,6 +539,8 @@ export type ServiceHostApi = Pick<
   | "getSecret"
   | "getAuthPartitionCookies"
   | "hasRoutineBySource"
+  | "proposeWork"
+  | "withdrawWorkProposal"
   | "probePrivateHost"
   | "resolveApiKey"
   | "emitEvent"
@@ -1290,6 +1295,35 @@ function hasRoutineBySourcePath(hostApi: ServiceHostApi): HostApiPathHandler {
 }
 
 /**
+ * `proposeWork(input) → Promise<WorkProposalResult>`.
+ *
+ * The whole decision — is this kind granted, is the slot free, is the payload
+ * well formed — belongs to the host implementation, which knows the caller's
+ * id and its manifest from the incarnation it was built for. The boundary
+ * checks only that an object arrived, because re-deriving the grant here would
+ * put a second copy of the authorization rule on the wire.
+ */
+function proposeWorkPath(hostApi: ServiceHostApi): HostApiPathHandler {
+  return defineHostApiPath("proposeWork", async (call) => {
+    const input = call.args[0];
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      rejectArgument(call.path, "input must be an object");
+    }
+    return hostApi.proposeWork(input as Parameters<ServiceHostApi["proposeWork"]>[0]);
+  });
+}
+
+/** `withdrawWorkProposal(kind, key) → Promise<boolean>`. */
+function withdrawWorkProposalPath(hostApi: ServiceHostApi): HostApiPathHandler {
+  return defineHostApiPath("withdrawWorkProposal", async (call) =>
+    hostApi.withdrawWorkProposal(
+      requireString(call, 0, "kind"),
+      requireString(call, 1, "key"),
+    ),
+  );
+}
+
+/**
  * Bind this group's handlers to one plugin incarnation's `hostApi`.
  *
  * Composed over the dispatch table by the caller that owns the child, so the
@@ -1310,6 +1344,8 @@ export function createServiceHostApiPaths(
     getSecret: getSecretPath(hostApi),
     getAuthPartitionCookies: getAuthPartitionCookiesPath(hostApi),
     hasRoutineBySource: hasRoutineBySourcePath(hostApi),
+    proposeWork: proposeWorkPath(hostApi),
+    withdrawWorkProposal: withdrawWorkProposalPath(hostApi),
     probePrivateHost: probePrivateHostPath(hostApi),
     resolveApiKey: resolveApiKeyPath(hostApi),
     emitEvent: emitEventPath(hostApi),

@@ -1286,6 +1286,32 @@ export function buildInternalApiSurface() {
       | import("../shared/work-board-types.js").WorkBoardReportResult
       | { ok: false; error: string }
     >,
+  // ─── Recommended work (plugin-proposed cards) ────
+  // Read the open proposals, promote one into a work item, or close it. There
+  // is no renderer path that CREATES a proposal — a proposal is a plugin's
+  // claim, and the user's own additions are ordinary work items.
+  listWorkProposals: async () =>
+    ipcRenderer.invoke(WORK_BOARD.listProposals) as Promise<
+      | import("../shared/work-board-types.js").WorkProposalListResult
+      | { ok: false; error: string }
+    >,
+  acceptWorkProposal: async (proposalId: string, projectRoot?: string) =>
+    ipcRenderer.invoke(WORK_BOARD.acceptProposal, proposalId, projectRoot) as Promise<
+      | import("../shared/work-board-types.js").WorkProposalAcceptResult
+      | { ok: false; error: string }
+    >,
+  dismissWorkProposal: async (proposalId: string) =>
+    ipcRenderer.invoke(WORK_BOARD.dismissProposal, proposalId) as Promise<
+      | import("../shared/work-board-types.js").WorkProposalDismissResult
+      | { ok: false; error: string }
+    >,
+  onWorkProposalChanged: (
+    handler: (payload: import("../shared/work-board-types.js").WorkProposalChangedEventPayload) => void,
+  ) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.proposalChanged, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.proposalChanged, listener);
+  },
   // Read a past run's persisted transcript (plan+execute conversation) for the
   // run-history view. Resolves with the ordered events (empty when absent).
   getWorkBoardRunTranscript: async (itemId: number, runId: string) =>

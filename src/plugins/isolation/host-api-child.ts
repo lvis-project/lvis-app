@@ -61,6 +61,7 @@ import type {
   DetachReason,
   FloatingPanelHandle,
   AudioCaptureRequest,
+  WorkProposalResult,
 } from "../public-contract.js";
 import type { HostApiCaller, PluginChildContext } from "./plugin-child-runtime.js";
 import {
@@ -271,6 +272,16 @@ export function createServiceChildMembers(
 
     hasRoutineBySource: async (...args) =>
       call("hasRoutineBySource", positional(args[0])) as Promise<boolean>,
+
+    // Unlike `emitEvent`, no local pre-check: `proposeWork` is Promise-returning,
+    // so the host's refusal arrives at the plugin's own await. Re-deriving the
+    // granted kinds here would be a second copy of the authorization rule with
+    // nothing to gain — the host is already the one that answers.
+    proposeWork: async (...args) =>
+      call("proposeWork", positional(args[0])) as Promise<WorkProposalResult>,
+
+    withdrawWorkProposal: async (...args) =>
+      call("withdrawWorkProposal", positional(args[0], args[1])) as Promise<boolean>,
 
     probePrivateHost: async (...args) =>
       call("probePrivateHost", positional(args[0], args[1])) as Promise<boolean>,

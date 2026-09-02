@@ -191,6 +191,8 @@ async function buildRealHostApi(): Promise<{
     shellOpenExternal: vi.fn(),
     approvalGate: { requestAndWait: vi.fn(), resolve: vi.fn() } as never,
     routinesStore: { list: () => [] } as never,
+    // This harness has no Work Board; the proposal verbs are not exercised here.
+    getWorkBoardStore: () => undefined,
   });
 
   const createHostApi = harness.capturedRuntimeOptions?.createHostApi as
