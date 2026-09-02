@@ -58,6 +58,7 @@ import {
 } from "../../permissions/workspace-root-lifecycle.js";
 import { getActivePluginSurfacePermissionScope } from "../../boot/plugin-surface-permissions.js";
 import { detachWorkspaceRootSessions } from "../../memory/workspace-root-session-lifecycle.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -925,7 +926,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
           ok: false,
           error: "read-failed",
           path: dir,
-          message: err instanceof Error ? err.message : String(err),
+          message: errorMessage(err),
         };
       }
     },

@@ -71,6 +71,7 @@ import {
   SubscriptionRuntimeServiceError,
   type SubscriptionRuntimeService,
 } from "../../main/subscription-runtime-service.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 let subscriptionRuntimeStatusRevision = 0;
 
@@ -377,7 +378,7 @@ async function finishProviderPresetMarketplaceMutation(
       rewireError = {
         ok: false,
         error: "reviewer-rewire-failed",
-        message: err instanceof Error ? err.message : String(err),
+        message: errorMessage(err),
       };
     }
   }
@@ -861,7 +862,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       try {
         deps.rewireReviewerAgent?.();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         // A nested/parallel renderer mutation may have taken ownership while
         // reviewer construction ran. Restore the full predecessor only when
         // this request's captured snapshot is still current; otherwise a full
@@ -870,8 +871,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
           try {
             await settingsService.replaceLlm(prevLlm);
           } catch (rollbackErr) {
-            const rollbackMessage =
-              rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+            const rollbackMessage = errorMessage(rollbackErr);
             return {
               ok: false,
               error: "reviewer-rewire-failed",
@@ -945,7 +945,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       return {
         ok: false,
         error: "marketplace-provider-preset-install-failed",
-        message: err instanceof Error ? err.message : String(err),
+        message: errorMessage(err),
       };
     }
   });
@@ -974,7 +974,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       return {
         ok: false,
         error: "marketplace-provider-preset-uninstall-failed",
-        message: err instanceof Error ? err.message : String(err),
+        message: errorMessage(err),
       };
     }
   });

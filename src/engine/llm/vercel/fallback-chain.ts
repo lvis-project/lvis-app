@@ -26,6 +26,7 @@ import type { SubscriptionChatRuntimeSelection } from "../../../shared/subscript
 import { createProvider as defaultCreateProvider } from "../provider-factory.js";
 import { createLogger } from "../../../lib/logger.js";
 import { sleep } from "../../../shared/abortable-deadline.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 const log = createLogger("fallback-chain");
 
@@ -79,7 +80,7 @@ function isNonRetryable(err: unknown): boolean {
   // User cancellation — sacred, never fallback.
   if (err instanceof Error && err.name === "AbortError") return true;
 
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errorMessage(err);
   const lower = msg.toLowerCase();
   // Auth errors (401/403), validation errors (400), model-not-found (404).
   if (/\b(400|401|403|404)\b/.test(msg)) return true;
@@ -167,7 +168,7 @@ async function* attemptStreamWithRetries(
       if (attempt >= MAX_ATTEMPTS_PER_PROVIDER) break;
       // Logged like a fallback is: a run of retries is what a slow or flapping
       // gateway looks like from the chat, and nothing else records why.
-      log.warn(`retry: ${label} attempt=${attempt + 1}/${MAX_ATTEMPTS_PER_PROVIDER} reason=${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`retry: ${label} attempt=${attempt + 1}/${MAX_ATTEMPTS_PER_PROVIDER} reason=${errorMessage(err)}`);
       callbacks?.onStatus?.({
         phase: "retry",
         label,
@@ -175,7 +176,7 @@ async function* attemptStreamWithRetries(
         model: identity.model,
         attempt: attempt + 1,
         maxAttempts: MAX_ATTEMPTS_PER_PROVIDER,
-        reason: err instanceof Error ? err.message : String(err),
+        reason: errorMessage(err),
       });
     }
   }
@@ -321,7 +322,7 @@ export async function* streamWithFallback(
       if (i + 1 >= totalAttempts) break;
       const nextEntry = chain[i]; // chain[i] is the (i+1)-th attempt's entry
       const nextLabel = nextEntry ? `${nextEntry.provider}/${nextEntry.model}` : "??";
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = errorMessage(err);
       const msg = `fallback: ${label}→${nextLabel} reason=${reason}`;
       log.warn(`${msg}`);
       callbacks?.onFallback?.(label, nextLabel);

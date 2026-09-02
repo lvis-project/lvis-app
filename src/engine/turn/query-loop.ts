@@ -61,6 +61,7 @@ import {
   type A2AAgentCausalContext,
 } from "../a2a-agent-message-envelope.js";
 import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } from "./subscription-usage-telemetry.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("lvis");
 // No caller-assigned `maxRounds` = PARENT session: unbounded — a turn ends
@@ -1896,7 +1897,7 @@ export async function finalizeAfterRoundCap(
     }
   } catch (err) {
     log.warn(
-      { err: err instanceof Error ? err.message : String(err) },
+      { err: errorMessage(err) },
       "round-cap finalize: call failed",
     );
     return null;

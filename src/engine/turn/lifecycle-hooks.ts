@@ -8,6 +8,7 @@
 import type { LifecycleHookEvent } from "../../hooks/script-hook-types.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { createLogger } from "../../lib/logger.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -32,9 +33,7 @@ export async function fireLifecycleEvent(
       );
     } catch (err) {
       log.warn(
-        `lifecycle event ${event} dispatch failed (non-blocking, ignored): ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+        `lifecycle event ${event} dispatch failed (non-blocking, ignored): ${errorMessage(err)}`,
       );
     }
 }
@@ -61,7 +60,7 @@ export async function fireUserPromptSubmit(
     } catch (err) {
       // FAIL-CLOSED: a blocking event must DENY on an unexpected error — the
       // turn is refused rather than silently allowed.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       log.error(
         `UserPromptSubmit dispatch threw — failing closed (deny): ${message}`,
       );

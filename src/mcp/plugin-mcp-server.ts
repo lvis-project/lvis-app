@@ -37,6 +37,7 @@ import {
 } from "./protocol-constants.js";
 import { PLUGIN_RESULT_CACHE } from "./plugin-server-projection.js";
 import type { JsonRpcId, JsonRpcRequest, JsonRpcResponse } from "./mcp-client.js";
+import { errorMessage } from "../shared/error-message.js";
 
 /** One content block of a tool result (a 2026-07-28 `CallToolResult` content). */
 export interface PluginToolContent {
@@ -176,7 +177,7 @@ export class PluginMcpServer {
             id,
             error: {
               code: RPC_RESOURCE_NOT_FOUND,
-              message: err instanceof Error ? err.message : String(err),
+              message: errorMessage(err),
             },
           };
         }
@@ -213,7 +214,7 @@ export class PluginMcpServer {
             id,
             result: {
               resultType: "complete",
-              content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+              content: [{ type: "text", text: errorMessage(err) }],
               isError: true,
             },
           };

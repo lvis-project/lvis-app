@@ -38,6 +38,7 @@ import {
 } from "./host-allow-list.js";
 import { createLogger } from "../lib/logger.js";
 import { escapeHtml } from "../shared/escape-html.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("auth-window");
 
@@ -613,7 +614,7 @@ export async function openAuthWindow(
     );
   } catch (err) {
     throw new Error(
-      `openAuthWindow: cookieHosts rejected — ${err instanceof Error ? err.message : String(err)}`,
+      `openAuthWindow: cookieHosts rejected — ${errorMessage(err)}`,
     );
   }
   if (normalizedCookieHosts.length === 0) {
@@ -817,7 +818,7 @@ export async function openAuthWindow(
           `[auth-window:retain] partition=${effectivePartition} cookies=${scoped.length} sessionCookiesMadeDurable=${retained}`,
         );
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = errorMessage(err);
         log.warn(
           {
             phase: "harvest",
@@ -1084,7 +1085,7 @@ export async function openAuthWindow(
               resolve(buildAuthResult(filtered, capturedUrl, returnFinalUrl, retainCookies));
             });
           } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
+            const errMsg = errorMessage(err);
             finish(() => {
               log.warn(
                 {

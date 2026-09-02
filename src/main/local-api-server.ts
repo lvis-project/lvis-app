@@ -58,6 +58,7 @@ import {
 } from "../permissions/agent-action-approver.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("local-api");
 
@@ -550,7 +551,7 @@ async function tombstoneDiscoveryFile(): Promise<void> {
   } catch (err) {
     log.warn(
       "failed to blank local-api discovery file: %s",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 }

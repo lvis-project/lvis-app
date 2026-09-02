@@ -59,6 +59,7 @@ import {
 import { createLogger } from "../lib/logger.js";
 import type { McpUiPayload } from "./types.js";
 import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("plugin-tool-from-mcp");
 
@@ -203,7 +204,7 @@ export function mcpToolToPluginTool(
         };
       } catch (err) {
         return {
-          output: err instanceof Error ? err.message : String(err),
+          output: errorMessage(err),
           isError: true,
         };
       }

@@ -33,6 +33,7 @@ import { isIP, type AddressInfo } from "node:net";
 import type { A2AHttpRouter } from "./a2a-router.js";
 import type { LocalApi } from "./local-api.js";
 import type { StreamEventSource } from "./stream-broadcaster.js";
+import { errorMessage } from "../shared/error-message.js";
 
 /** Loopback bind host — the server MUST never default off-loopback. */
 const DEFAULT_HOST = "127.0.0.1";
@@ -257,7 +258,7 @@ async function handleDispatch(
     sendJson(res, result.ok ? 200 : 403, result);
   } catch (err) {
     // Never leak the thrown message to the client; log internally only.
-    log?.(`dispatch handler threw: ${err instanceof Error ? err.message : String(err)}`);
+    log?.(`dispatch handler threw: ${errorMessage(err)}`);
     sendJson(res, 500, { ok: false, error: "internal-error" });
   }
 }
@@ -500,7 +501,7 @@ export function startLocalApiHttpServer(
     }
     void route(req, res, api, broadcaster, liveStreams, enabledA2ARouter, log).catch((err) => {
       // Defensive: an unexpected error in the routing layer itself.
-      log?.(`request routing error: ${err instanceof Error ? err.message : String(err)}`);
+      log?.(`request routing error: ${errorMessage(err)}`);
       if (!res.headersSent) {
         sendJson(res, 500, { ok: false, error: "internal-error" });
       } else {

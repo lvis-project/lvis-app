@@ -19,6 +19,7 @@ import {
   type SubscriptionUsageTelemetry,
 } from "../../shared/subscription-runtime.js";
 import { providerMatchesActiveChatRuntime } from "./provider.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 export interface StreamCollectParams {
   provider: LLMProvider;
@@ -243,7 +244,7 @@ export async function collectRoundStream(
     if (isContextLengthError(err)) {
       return { kind: "context_error", errorMessage: (err as Error)?.message ?? String(err) };
     }
-    const raw = err instanceof Error ? err.message : String(err);
+    const raw = errorMessage(err);
     const classified = classifyProviderError(raw);
     return {
       kind: "stream_error",

@@ -78,6 +78,7 @@ import type { ConversationCommandPort } from "../../main/conversation-command-po
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
 import { hasOnlyKeys } from "../../shared/is-record.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 /** Refusal: the session named is already open in another tile of this window. */
 const SESSION_OPEN_IN_OTHER_GROUP = "session-open-in-other-group";
@@ -1970,7 +1971,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     } catch (error) {
       // Provider and source details are host-only; renderer callers receive a
       // stable envelope regardless of the failing adapter or source state.
-      log.warn("manual long-term memory consolidation failed: %s", error instanceof Error ? error.message : String(error));
+      log.warn("manual long-term memory consolidation failed: %s", errorMessage(error));
       return { ok: false, error: "memory-consolidation-failed" };
     }
   });
