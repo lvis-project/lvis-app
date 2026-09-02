@@ -16,9 +16,10 @@
  * RENDER PARITY: the side channel already emits the full frame set
  * (`reasoning_delta` / `permission_review` / `tool_start` / `tool_end` /
  * `turn_summary` / `compact_notice` / `assistant_round` / `done`) via the shared
- * `runStreamedTurn`. This hook ports the main chat's ChatEntry reducer so tool
- * calls, thinking, and permission-review status cards render identically to the
- * main transcript. Backend is unchanged.
+ * `runStreamedTurn`. This hook applies the main chat's frame reducer
+ * (`applyTranscriptFrame` / `applyReasoningDelta` in `lib/chat-stream-state`)
+ * so tool calls, thinking, and permission-review status cards render
+ * identically to the main transcript. Backend is unchanged.
  *
  * ISOLATION: it subscribes to the DEDICATED `api.sideChat.onStream` channel —
  * NEVER `onChatStream` — so main-chat frames can never leak into this transcript
@@ -37,20 +38,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../../i18n/runtime.js";
 import {
-  applyToolEnd,
-  applyToolStart,
+  applyReasoningDelta,
+  applyTranscriptFrame,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
+  isTranscriptFrame,
   markTurnAssistantInterrupted,
   setAssistantError,
-  upsertPermissionReview,
   upsertStreamingAssistant,
-  upsertStreamingReasoning,
   type ChatEntry,
   type ChatStreamEvent,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
-import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { UserContentPart } from "../../../engine/llm/types.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import { historyToEntries } from "../utils/history.js";
@@ -191,10 +190,10 @@ export function useSideChat(api: LvisApi): UseSideChat {
     [],
   );
 
-  // Subscribe to the DEDICATED side-chat stream. The reducer is a port of the
-  // main chat's stream reducer (use-chat-state.ts) so tool / reasoning /
-  // permission-review render identically. The stale-frame guard runs FIRST,
-  // before any reducer, so it stays orthogonal to the richer frame set.
+  // Subscribe to the DEDICATED side-chat stream. Frames reduce through the
+  // reducer the main chat uses, so tool / reasoning / permission-review render
+  // identically. The stale-frame guard runs FIRST, before any reducer, so it
+  // stays orthogonal to the richer frame set.
   useEffect(() => {
     if (!api.sideChat) return;
     const handleSideStreamEvent = (event: ChatStreamEvent) => {
@@ -209,40 +208,8 @@ export function useSideChat(api: LvisApi): UseSideChat {
       } else if (ev.type === "reasoning_delta" && ev.text) {
         if (finalAssistantRoundClosedRef.current) return;
         thoughtRef.current += ev.text;
-        setEntries((p) => upsertStreamingReasoning(p, thoughtRef.current));
-      } else if (
-        ev.type === "permission_review" &&
-        ev.reviewStatus &&
-        ev.name &&
-        ev.groupId &&
-        ev.toolUseId !== undefined
-      ) {
-        const {
-          reviewStatus,
-          name,
-          toolCategory,
-          source,
-          groupId,
-          toolUseId,
-          displayOrder = 0,
-          verdictLevel,
-          reason,
-          approvalPurpose,
-        } = ev;
-        setEntries((p) =>
-          upsertPermissionReview(p, {
-            status: reviewStatus,
-            toolName: name,
-            groupId,
-            toolUseId,
-            displayOrder,
-            ...(toolCategory ? { toolCategory } : {}),
-            ...(source ? { source } : {}),
-            ...(verdictLevel ? { verdictLevel } : {}),
-            ...(reason ? { reason } : {}),
-            ...(approvalPurpose ? { approvalPurpose } : {}),
-          }),
-        );
+        const thought = thoughtRef.current;
+        setEntries((p) => applyReasoningDelta(p, thought));
       } else if (ev.type === "assistant_round") {
         const phase = ev.stopReason === "tool_use" || ev.hasToolCalls ? "work" : "final";
         if (finalAssistantRoundClosedRef.current) return;
@@ -256,75 +223,8 @@ export function useSideChat(api: LvisApi): UseSideChat {
         finalAssistantRoundClosedRef.current = phase === "final";
         streamRef.current = "";
         thoughtRef.current = "";
-      } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, displayOrder = 0, name, input, source, toolCategory, pluginId, mcpServerId } = ev;
-        setEntries((p) =>
-          applyToolStart(p, {
-            groupId,
-            toolUseId,
-            displayOrder,
-            name,
-            input,
-            ...(source ? { source } : {}),
-            ...(toolCategory ? { category: toolCategory } : {}),
-            ...(pluginId ? { pluginId } : {}),
-            ...(mcpServerId ? { mcpServerId } : {}),
-          }),
-        );
-      } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, result, isError, durationMs, source, toolCategory, pluginId, mcpServerId, executionPlan } = ev;
-        setEntries((p) =>
-          applyToolEnd(p, {
-            groupId,
-            toolUseId,
-            result,
-            isError,
-            ...(durationMs !== undefined ? { durationMs } : {}),
-            ...(source ? { source } : {}),
-            ...(toolCategory ? { category: toolCategory } : {}),
-            ...(pluginId ? { pluginId } : {}),
-            ...(mcpServerId ? { mcpServerId } : {}),
-            ...(executionPlan !== undefined ? { executionPlan } : {}),
-          }),
-        );
-      } else if (ev.type === "turn_summary") {
-        const summary = parseTurnSummaryEvent(ev);
-        if (!summary) return;
-        setEntries((p) => [
-          ...p,
-          {
-            kind: "turn_summary",
-            ...summary,
-            ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
-            ...(ev.cacheWriteTokens !== undefined ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
-          },
-        ]);
-      } else if (ev.type === "compact_notice") {
-        // Side chat is a full ConversationLoop and CAN compact mid-conversation.
-        // Emit the same checkpoint (+ context_usage) divider the main transcript
-        // renders so a side compaction is not silently dropped.
-        const removed = ev.removedMessages ?? 0;
-        const freed = ev.freedTokens ?? 0;
-        const estimatedAfter = ev.estimatedAfter;
-        setEntries((p) => {
-          const hasReliableAfter = typeof estimatedAfter === "number" && estimatedAfter >= 0;
-          const checkpointEntry = {
-            kind: "checkpoint" as const,
-            removedMessages: removed,
-            freedTokens: freed,
-            ...(ev.trigger ? { trigger: ev.trigger } : {}),
-            ...(ev.summary ? { summary: ev.summary } : {}),
-            ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
-            ...(ev.compactStatus !== undefined ? { compactStatus: ev.compactStatus } : {}),
-            ...(ev.truncatedDir !== undefined ? { truncatedDir: ev.truncatedDir } : {}),
-          };
-          if (!hasReliableAfter) return [...p, checkpointEntry];
-          return [
-            ...p,
-            checkpointEntry,
-            { kind: "context_usage" as const, tokensIn: estimatedAfter, source: "compact-estimate" as const },
-          ];
-        });
+      } else if (isTranscriptFrame(ev)) {
+        setEntries((p) => applyTranscriptFrame(p, ev));
       } else if (ev.type === "error") {
         // Read the accumulated thought HERE, not inside the updater: React runs
         // the updater at flush time, by which point the synchronous
@@ -623,42 +523,4 @@ function dropPendingStreamingAssistant(entries: ChatEntry[]): ChatEntry[] {
     return entries.slice(0, -1);
   }
   return entries;
-}
-
-function parseTurnSummaryEvent(ev: ChatStreamEvent): Pick<
-  Extract<ChatEntry, { kind: "turn_summary" }>,
-  | "turnDurationMs"
-  | "toolCount"
-  | "cumulativeToolMs"
-  | "tokensIn"
-  | "freshInputTokens"
-  | "tokensOut"
-  | "vendorProvider"
-  | "vendorModel"
-> | null {
-  const e = ev;
-  if (
-    !isFiniteNonNegative(e.turnDurationMs) ||
-    !isFiniteNonNegative(e.toolCount) ||
-    !isFiniteNonNegative(e.cumulativeToolMs) ||
-    !isFiniteNonNegative(e.tokensIn) ||
-    !isFiniteNonNegative(e.freshInputTokens) ||
-    !isFiniteNonNegative(e.tokensOut)
-  ) {
-    return null;
-  }
-  return {
-    turnDurationMs: e.turnDurationMs,
-    toolCount: e.toolCount,
-    cumulativeToolMs: e.cumulativeToolMs,
-    tokensIn: e.tokensIn,
-    freshInputTokens: e.freshInputTokens,
-    tokensOut: e.tokensOut,
-    ...(isLLMVendor(e.vendorProvider) ? { vendorProvider: e.vendorProvider } : {}),
-    ...(typeof e.vendorModel === "string" && e.vendorModel.length > 0 ? { vendorModel: e.vendorModel } : {}),
-  };
-}
-
-function isFiniteNonNegative(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }

@@ -1,11 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { t } from "../../i18n/index.js";
 import {
   appendImportedTriggerEntry,
   appendUserEntry,
+  applyReasoningDelta,
+  applyTranscriptFrame,
   applyUserMessageFrame,
   applyToolEnd,
   applyToolStart,
+  dropPendingLlmStatusAssistant,
+  isTranscriptFrame,
+  parseTurnSummaryEvent,
   clearTurnAssistantInterrupted,
   dropOptimisticUserEntry,
   finalizeStreamingReasoning,
@@ -16,6 +22,7 @@ import {
   upsertStreamingReasoning,
   upsertStreamingAssistant,
   type ChatEntry,
+  type ChatStreamEvent,
 } from "../chat-stream-state.js";
 
 describe("chat-stream-state", () => {
@@ -849,5 +856,92 @@ describe("applyUserMessageFrame", () => {
     const entries: ChatEntry[] = [];
     expect(applyUserMessageFrame(entries, { origin: "platform-bridge" })).toBe(entries);
     expect(applyUserMessageFrame(entries, { text: "", origin: "platform-bridge" })).toBe(entries);
+  });
+});
+
+describe("transcript frame reducer (shared by the main and the side chat)", () => {
+  const frame = (f: Partial<ChatStreamEvent> & { type: ChatStreamEvent["type"] }): ChatStreamEvent =>
+    f as ChatStreamEvent;
+  /** The provider-status placeholder the main chat shows while retrying. */
+  const pendingStatus = (): ChatEntry => ({
+    kind: "assistant",
+    text: `${t("useChatState.llmStatusAttemptFirst")} (2/5)`,
+    streaming: true,
+  });
+  const toolStart = frame({ type: "tool_start", groupId: "g1", toolUseId: "t1", name: "web_fetch", displayOrder: 0, input: {} });
+
+  it("names exactly the frames it owns", () => {
+    for (const type of ["permission_review", "tool_start", "tool_end", "turn_summary", "compact_notice"] as const) {
+      expect(isTranscriptFrame(frame({ type }))).toBe(true);
+    }
+    for (const type of ["text_delta", "reasoning_delta", "assistant_round", "done", "error", "llm_status"] as const) {
+      expect(isTranscriptFrame(frame({ type }))).toBe(false);
+    }
+  });
+
+  it("drops the pending provider-status placeholder before a tool starts, a verdict lands, or reasoning begins", () => {
+    const base: ChatEntry[] = [...appendUserEntry([], "q"), pendingStatus()];
+    expect(dropPendingLlmStatusAssistant(base).map((e) => e.kind)).toEqual(["user"]);
+
+    const afterTool = applyTranscriptFrame(base, toolStart);
+    expect(afterTool.map((e) => e.kind)).toEqual(["user", "tool_group"]);
+
+    const afterReview = applyTranscriptFrame(base, frame({
+      type: "permission_review", reviewStatus: "auto_approved", name: "web_fetch", groupId: "g1", toolUseId: "t1",
+    }));
+    expect(afterReview.some((e) => e.kind === "assistant")).toBe(false);
+    expect(afterReview.some((e) => e.kind === "permission_review")).toBe(true);
+
+    const afterThought = applyReasoningDelta(base, "thinking…");
+    expect(afterThought.map((e) => e.kind)).toEqual(["user", "reasoning"]);
+  });
+
+  it("keeps a streaming assistant entry that carries real text", () => {
+    const base: ChatEntry[] = [...appendUserEntry([], "q"), { kind: "assistant", text: "partial reply", streaming: true }];
+    expect(applyTranscriptFrame(base, toolStart).map((e) => e.kind)).toEqual(["user", "assistant", "tool_group"]);
+  });
+
+  it("carries a user stop and the duration through tool_end (the side chat used to drop both)", () => {
+    let entries = applyTranscriptFrame(appendUserEntry([], "q"), toolStart);
+    entries = applyTranscriptFrame(entries, frame({
+      type: "tool_end", groupId: "g1", toolUseId: "t1", name: "web_fetch", result: "stopped", isError: false, cancelled: true, durationMs: 12,
+    }));
+    const group = entries.find((e): e is Extract<ChatEntry, { kind: "tool_group" }> => e.kind === "tool_group");
+    expect(group?.tools[0]).toMatchObject({ toolUseId: "t1", status: "cancelled", durationMs: 12 });
+  });
+
+  it("leaves the list alone for a frame missing its identifying fields, and for frames it does not own", () => {
+    const base = appendUserEntry([], "q");
+    expect(applyTranscriptFrame(base, frame({ type: "tool_start", name: "x" }))).toBe(base);
+    expect(applyTranscriptFrame(base, frame({ type: "permission_review", name: "x", groupId: "g" }))).toBe(base);
+    expect(applyTranscriptFrame(base, frame({ type: "text_delta", text: "hi" }))).toBe(base);
+  });
+
+  it("appends a validated turn_summary with cache and breakdown fields and ignores a malformed one", () => {
+    const base = appendUserEntry([], "q");
+    const totals = { turnDurationMs: 1200, toolCount: 1, cumulativeToolMs: 300, tokensIn: 50, freshInputTokens: 40, tokensOut: 20 };
+    const next = applyTranscriptFrame(base, frame({
+      type: "turn_summary", ...totals, cacheReadTokens: 7, breakdown: { web_fetch: { count: 1, ms: 300 } }, vendorModel: "m",
+    }));
+    expect(next[next.length - 1]).toMatchObject({ kind: "turn_summary", ...totals, cacheReadTokens: 7, breakdown: { web_fetch: { count: 1, ms: 300 } }, vendorModel: "m" });
+    expect(parseTurnSummaryEvent(frame({ type: "turn_summary", ...totals, tokensOut: -1 }))).toBeNull();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(applyTranscriptFrame(base, frame({ type: "turn_summary", ...totals, tokensOut: Number.NaN }))).toBe(base);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("renders compact_notice as a checkpoint, with a context estimate only when the engine reported a reliable one", () => {
+    const base = appendUserEntry([], "q");
+    const withEstimate = applyTranscriptFrame(base, frame({ type: "compact_notice", removedMessages: 3, freedTokens: 900, estimatedAfter: 1200, trigger: "manual" }));
+    expect(withEstimate.slice(-2)).toEqual([
+      { kind: "checkpoint", removedMessages: 3, freedTokens: 900, trigger: "manual" },
+      { kind: "context_usage", tokensIn: 1200, source: "compact-estimate" },
+    ]);
+    const withoutEstimate = applyTranscriptFrame(base, frame({ type: "compact_notice", removedMessages: 3, freedTokens: 900, estimatedAfter: -1 }));
+    expect(withoutEstimate.slice(-1)).toEqual([{ kind: "checkpoint", removedMessages: 3, freedTokens: 900 }]);
   });
 });
