@@ -51,6 +51,8 @@ import { ChatTranscript } from "./components/ChatTranscript.js";
 import { ChatComposerDock } from "./components/ChatComposerDock.js";
 import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
 import { TEST_IDS } from "../../shared/test-ids.js";
+import { usePrefersReducedMotion } from "./hooks/use-prefers-reduced-motion.js";
+import { formatTokensExact } from "../../lib/cost-format.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -285,15 +287,12 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
   // expanded before the opening transition lifecycle begins.
   const [dockedPanelExpanded, setDockedPanelExpanded] = useState(false);
   const [sidePanelResizing, setSidePanelResizing] = useState(false);
+  const reduceMotion = usePrefersReducedMotion();
 
   // Resizing only disables the CSS transition. It must not retrigger this
   // mount/expand lifecycle, otherwise the first drag frame collapses the
   // panel to 0px before expanding it again.
   useEffect(() => {
-    const reduceMotion =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
     if (dockedPanelShouldOpen) {
       setDockedPanelPresent(true);
       if (reduceMotion) {
@@ -327,7 +326,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
       SIDE_PANEL_LAYOUT_TRANSITION_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [dockedPanelShouldOpen]);
+  }, [dockedPanelShouldOpen, reduceMotion]);
 
   const handleSidePanelWidthChange = useCallback(
     (px: number) => {
@@ -765,13 +764,13 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
       */}
       {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/(--opacity-subtle) px-3 py-1.5 text-xs text-destructive">
-          <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: usedTokens.toLocaleString(), limit: tpmLimit.toLocaleString() })}</span>
+          <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: formatTokensExact(usedTokens), limit: formatTokensExact(tpmLimit) })}</span>
           <span>{t("chatView.tpmOverflowWarning")}</span>
         </div>
       )}
       {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.80 && tpmPct < 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/(--opacity-soft) px-3 py-1.5 text-xs text-warning">
-          <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: usedTokens.toLocaleString(), limit: tpmLimit.toLocaleString() })}</span>
+          <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: formatTokensExact(usedTokens), limit: formatTokensExact(tpmLimit) })}</span>
           <span>{t("chatView.tpmNearingWarning")}</span>
         </div>
       )}

@@ -29,6 +29,8 @@ import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { resolveIpcErrorKey } from "../format-ipc-error.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
+import { useCopyFlash } from "../hooks/use-copy-flash.js";
+import { errorMessage } from "../../../shared/error-message.js";
 import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
@@ -154,18 +156,6 @@ export function filterFileTree(nodes: FileTreeNode[], query: string): FileTreeNo
     }
   }
   return filtered;
-}
-
-function useCopyFlash() {
-  const [copied, setCopied] = useState(false);
-  return {
-    copied,
-    copy: (value: string) => {
-      void navigator.clipboard?.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    },
-  };
 }
 
 function TextBlock({ text }: { text: string }) {
@@ -350,7 +340,7 @@ export function PreviewBody({
       })
       .catch((err) => {
         if (cancelled) return;
-        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadError(errorMessage(err));
       });
     return () => {
       cancelled = true;

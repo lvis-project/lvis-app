@@ -77,6 +77,7 @@ import {
 } from "./SubscriptionProvidersSection.js";
 import { TEST_IDS } from "../../../shared/test-ids.js";
 import { formatTokensExact } from "../../../lib/cost-format.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export interface FallbackEntry {
   provider: LLMVendor;
@@ -1295,7 +1296,7 @@ export function LlmTab(props: LlmTabProps) {
           } catch (err) {
             // Callers fire this with `void`, so a rejection escaping here is
             // unhandled and the row is left saying nothing at all.
-            failWith(err instanceof Error ? err.message : String(err));
+            failWith(errorMessage(err));
             return;
           }
           if (!hasCredential) {
@@ -1345,7 +1346,7 @@ export function LlmTab(props: LlmTabProps) {
               if (latest?.status !== "ready") return;
               setModelListState(key, {
                 ...latest,
-                persistError: err instanceof Error ? err.message : String(err),
+                persistError: errorMessage(err),
               });
             };
             void api.updateSettings({ llm: { modelListCache: nextCache } })
@@ -1359,7 +1360,7 @@ export function LlmTab(props: LlmTabProps) {
             failWith(result.message ?? result.error);
           }
         } catch (err) {
-          failWith(err instanceof Error ? err.message : String(err));
+          failWith(errorMessage(err));
         }
       } finally {
         inFlight.delete(key);

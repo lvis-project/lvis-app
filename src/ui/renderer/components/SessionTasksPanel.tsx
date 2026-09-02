@@ -17,6 +17,7 @@ import {
 } from "../../../shared/session-tasks.js";
 import type { LvisApi } from "../types.js";
 import { isRecord } from "../../../shared/is-record.js";
+import { usePrefersReducedMotion } from "../hooks/use-prefers-reduced-motion.js";
 
 const STATUS_BADGE: Record<SessionTaskStatus, { labelKey: string; cls: string; dot: string }> = {
   pending: {
@@ -38,23 +39,6 @@ const STATUS_BADGE: Record<SessionTaskStatus, { labelKey: string; cls: string; d
 
 function isSessionTaskItemArray(value: unknown): value is SessionTaskItem[] {
   return Array.isArray(value) && value.every(isSessionTaskItem);
-}
-
-/**
- * Detects whether the prefers-reduced-motion media query is honored at
- * mount time. The result is captured once — a runtime change to the OS
- * preference would require a remount, which is acceptable for a UX hint
- * and avoids a useEffect listener for a signal that almost never flips.
- */
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return false;
-  }
-  try {
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-    return false;
-  }
 }
 
 export function SessionTasksPanel({
@@ -150,6 +134,10 @@ export function SessionTasksPanel({
     setItems([]);
   }, [sessionId]);
 
+  // Read before the empty-list bail: hook order must not depend on whether
+  // there is a plan to draw.
+  const reduceMotion = usePrefersReducedMotion();
+
   if (items.length === 0) return null;
 
   const visible = items;
@@ -164,7 +152,6 @@ export function SessionTasksPanel({
   // fall back to the first non-completed item so the closed header never goes
   // blank while there is still work to do.
   const collapsedFocus = inProgress ?? visible.find((i) => i.status !== "completed");
-  const reduceMotion = prefersReducedMotion();
   // Pulse only when motion is allowed; otherwise rely on color/dot to
   // signal "active" (still readable, no jitter for sensitive users).
   const activePulse = reduceMotion ? "" : "animate-pulse";
