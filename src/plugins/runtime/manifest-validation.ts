@@ -8,8 +8,6 @@
  */
 
 import { readFile } from "node:fs/promises";
-import * as AjvModule from "ajv";
-import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 // Host-owned manifest-shape SOT (ph2). The schema is imported as a
 // bundler-visible JSON module so it inlines into the packaged main bundle —
@@ -40,6 +38,8 @@ import {
   isAllowedHostSecretKey } from "../../shared/marketplace-package-assets.js";
 import { resolvePluginContributionDeclarations } from "../plugin-contributions.js";
 import { errorMessage } from "../../shared/error-message.js";
+import { resolveAddFormats, resolveAjv } from "../config-schema.js";
+
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
@@ -75,26 +75,6 @@ export function formatUnknownErrorMessage(err: unknown): string {
   return String(err);
 }
 
-interface AjvCtor {
-  new (opts?: unknown): {
-    compile: (schema: unknown) => ValidateFunction;
-  };
-}
-
-/**
- * Resolve the AJV constructor / `addFormats` across CJS/ESM interop. AJV ships
- * its concrete class as either `module.default` (ESM) or `module.exports`
- * (CJS); the same interop dance the host already uses in `config-schema.ts`.
- */
-function resolveAjv(): AjvCtor {
-  const mod = AjvModule as unknown as { default?: unknown };
-  return (mod.default ?? AjvModule) as AjvCtor;
-}
-
-function resolveAddFormats(): (a: unknown) => void {
-  const mod = AddFormatsModule as unknown as { default?: unknown };
-  return (mod.default ?? AddFormatsModule) as (a: unknown) => void;
-}
 
 export function normalizeInstallPolicy(
   source: Partial<Pick<PluginManifest, "installPolicy">> | null | undefined,
