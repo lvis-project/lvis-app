@@ -47,6 +47,7 @@ import type {
   WorkBoardBriefingResult,
   WorkItemRunResult,
 } from "../../shared/work-board-types.js";
+import { errorMessage } from "../../shared/error-message.js";
 import { WORK_BOARD } from "../../shared/ipc-channels.js";
 import { createDirStorage } from "../../work-board/storage.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
@@ -281,7 +282,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       });
       return result;
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = errorMessage(err);
       fanOutToAllWindows(windows(), WORK_BOARD.runFailed, {
         itemId: id,
         reason,
@@ -313,7 +314,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       try {
         return await workBoardReport.generate(kind === "weekly" ? "weekly" : "daily", normalizeProjectListFilter(input));
       } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
+        const reason = errorMessage(err);
         return { status: "error" as const, kind, reason };
       }
     },
@@ -444,7 +445,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
         }
         return result;
       } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
+        const reason = errorMessage(err);
         return { status: "error", kind: briefingKind, reason } satisfies WorkBoardBriefingResult;
       }
     },

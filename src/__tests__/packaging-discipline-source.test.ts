@@ -125,6 +125,7 @@ const HYGIENE_GATES: ReadonlyArray<{ script: string; file: string }> = [
   },
   { script: "check:test-duplicates", file: "check-test-duplicates" },
   { script: "check:sunset-inventory", file: "check-sunset-inventory" },
+  { script: "check:sot-shapes", file: "check-sot-shapes" },
 ];
 
 /** The composite both ci.yml and the pre-push hook call, so the two gate
@@ -133,7 +134,7 @@ const HYGIENE_GATES: ReadonlyArray<{ script: string; file: string }> = [
  *  counts as naming every member. */
 const HYGIENE_COMPOSITE = {
   script: "check:gate-core",
-  members: ["check:knip", "check:test-duplicates", "check:sunset-inventory"],
+  members: ["check:knip", "check:test-duplicates", "check:sunset-inventory", "check:sot-shapes"],
 } as const;
 
 const REPOSITORY_HYGIENE = [

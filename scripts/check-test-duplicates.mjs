@@ -1,3 +1,24 @@
+/**
+ * check-test-duplicates.mjs — duplicated test-helper scan
+ *
+ * Two comparisons, one gate and one report:
+ *
+ *   - EXACT: two helpers whose normalised bodies are byte-identical (comments
+ *     and whitespace stripped). This is the gate (`--fail-on-duplicates`).
+ *   - PARAPHRASE: two helpers whose bodies differ only in parameter names,
+ *     literals, or a `reject` handle one of them also threads through. This
+ *     is reported, never failed.
+ *
+ * WHY THE SECOND COMPARISON EXISTS. An audit found eight `deferred()`
+ * promise helpers, seven approval-gate stubs and nine `makeRequest()` fixture
+ * builders spread across suites while this gate printed
+ * `duplicate helper implementations: 0` — every pair differed by a renamed
+ * parameter, a `reject` the second copy also captured, or a `PromiseLike`
+ * where the first said `Promise`. An exact-body gate reads a tree full of
+ * near-copies as clean, and "0" was taken as "nothing to share". The
+ * paraphrase count makes that scatter visible without turning every renamed
+ * parameter into a red push; a helper worth sharing is a review decision.
+ */
 import { basename, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
@@ -85,6 +106,7 @@ export function walk(dir, out = [], root = ROOT) {
 export function collectHelpers(files, root = ROOT) {
   const byName = new Map();
   const byBody = new Map();
+  const byShape = new Map();
   const sources = parseSourceFiles(files);
   for (const file of files) {
     const sourceFile = sources.get(file);
@@ -121,6 +143,14 @@ export function collectHelpers(files, root = ROOT) {
       if (isShareableScope(node) && hasSubstance(normalizedBody)) {
         if (!byBody.has(normalizedBody)) byBody.set(normalizedBody, []);
         byBody.get(normalizedBody).push({ name, rel, line, candidate });
+        // Paraphrase path: with names and literals collapsed, every one-line
+        // `() => "x"` helper has the same shape, so the length floor is not a
+        // noise filter here but the definition of "enough structure to share".
+        if (normalizedBody.length >= MIN_GENERAL_HELPER_BODY_LENGTH) {
+          const shape = normalizeHelperShape(normalizedBody);
+          if (!byShape.has(shape)) byShape.set(shape, []);
+          byShape.get(shape).push({ name, rel, line, candidate, body: normalizedBody });
+        }
       }
       if (candidate) {
         if (!byName.has(name)) byName.set(name, new Set());
@@ -131,7 +161,7 @@ export function collectHelpers(files, root = ROOT) {
     };
     visit(sourceFile);
   }
-  return { byName, byBody };
+  return { byName, byBody, byShape };
 }
 
 function getHelperNode(node) {
@@ -230,13 +260,62 @@ export function normalizeHelperBody(body) {
     .trim();
 }
 
+const KEYWORDS = new Set([
+  "async", "await", "break", "case", "catch", "class", "const", "continue",
+  "default", "do", "else", "export", "false", "finally", "for", "function",
+  "if", "import", "in", "instanceof", "let", "new", "null", "of", "return",
+  "switch", "this", "throw", "true", "try", "typeof", "undefined", "var",
+  "void", "while", "yield",
+]);
+
+/**
+ * The paraphrase key: a normalised body with every identifier collapsed to
+ * `$`, every literal to `"$"` / `0`, a `reject`/`rej` handle (its
+ * parameter, destructured binding, or `reject = x;` assignment) dropped, and
+ * whitespace removed. Two helpers with the same key say the same thing in
+ * different names.
+ */
+export function normalizeHelperShape(normalizedBody) {
+  return normalizedBody
+    .replace(/\b(?:reject|rej)\b\s*=\s*[A-Za-z_$][\w$]*\s*;?/g, "")
+    .replace(/,\s*\b(?:reject|rej)\b|\b(?:reject|rej)\b\s*,|\b(?:reject|rej)\b/g, "")
+    .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '"$"')
+    .replace(/\b\d+(?:\.\d+)?\b/g, "0")
+    .replace(/\b[A-Za-z_$][\w$]*\b/g, (word) => (KEYWORDS.has(word) ? word : "$"))
+    .replace(/\s+/g, "");
+}
+
+/**
+ * Shape groups that span more than one FILE and more than one exact body:
+ * the near-copies the exact gate cannot see. Groups of exact copies are the
+ * gate's business and are left out here.
+ */
+export function collectParaphraseGroups(byShape) {
+  return [...byShape.entries()]
+    .map(([shape, entries]) => ({
+      shape,
+      entries,
+      uniqueLocations: new Set(entries.map((entry) => entry.rel)),
+      uniqueBodies: new Set(entries.map((entry) => entry.body)),
+      uniqueNames: new Set(entries.map((entry) => entry.name)),
+    }))
+    .filter((group) => group.uniqueLocations.size > 1 && group.uniqueBodies.size > 1)
+    .sort(
+      (a, b) =>
+        b.entries.length - a.entries.length ||
+        b.uniqueLocations.size - a.uniqueLocations.size ||
+        [...a.uniqueNames][0].localeCompare([...b.uniqueNames][0]),
+    );
+}
+
 export function analyzeDuplicateHelpers(root = ROOT) {
   const testFiles = walk(root, [], root);
-  const { byName, byBody } = collectHelpers(testFiles, root);
+  const { byName, byBody, byShape } = collectHelpers(testFiles, root);
   return {
     files: testFiles,
     duplicateBodies: collectDuplicateBodies(byBody),
     duplicateNames: collectDuplicateNames(byName),
+    paraphraseGroups: collectParaphraseGroups(byShape),
   };
 }
 
@@ -253,8 +332,10 @@ export function runDuplicateCli(args = process.argv.slice(2), options = {}) {
   const stderr = options.stderr ?? console.error;
   const failOnDuplicates = args.includes("--fail-on-duplicates");
   const showNameHotspots = args.includes("--name-hotspots");
+  const showParaphrases = args.includes("--paraphrases");
   const limit = parseLimit(args);
-  const { files, duplicateBodies, duplicateNames } = analyzeDuplicateHelpers(root);
+  const { files, duplicateBodies, duplicateNames, paraphraseGroups } =
+    analyzeDuplicateHelpers(root);
 
   stdout(`test files: ${files.length}`);
   stdout(`duplicate helper implementations: ${duplicateBodies.length}`);
@@ -264,6 +345,18 @@ export function runDuplicateCli(args = process.argv.slice(2), options = {}) {
       stdout(`  - ${entry.rel}:${entry.line} (${entry.name})`);
     }
     if (group.entries.length > 8) stdout(`  - ... ${group.entries.length - 8} more`);
+  }
+
+  // Advisory, never a failure: see the header for why the count is printed.
+  stdout(`paraphrased helper implementations (advisory): ${paraphraseGroups.length}`);
+  if (showParaphrases) {
+    for (const group of paraphraseGroups.slice(0, limit)) {
+      stdout(`\n${group.uniqueLocations.size}x ${[...group.uniqueNames].join(" / ")}`);
+      for (const entry of group.entries.slice(0, 8)) {
+        stdout(`  - ${entry.rel}:${entry.line} (${entry.name})`);
+      }
+      if (group.entries.length > 8) stdout(`  - ... ${group.entries.length - 8} more`);
+    }
   }
 
   if (showNameHotspots) {

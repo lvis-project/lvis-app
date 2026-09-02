@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "shapes": {
+    "error-message": {
+      "src/api/http-server.ts": 2,
+      "src/boot/steps/marketplace-setup.ts": 1,
+      "src/boot/steps/plugin-runtime/host-api-factory.ts": 1,
+      "src/boot/steps/reviewer-permission-wiring.ts": 1,
+      "src/boot/steps/sandbox-init.ts": 1,
+      "src/engine/llm/vercel/fallback-chain.ts": 4,
+      "src/engine/turn/lifecycle-hooks.ts": 2,
+      "src/engine/turn/query-loop.ts": 1,
+      "src/engine/turn/stream-collector.ts": 1,
+      "src/hooks/script-hook-manager.ts": 3,
+      "src/ipc/domains/attach.ts": 3,
+      "src/ipc/domains/chat.ts": 1,
+      "src/ipc/domains/plugins.ts": 4,
+      "src/ipc/domains/preview.ts": 1,
+      "src/ipc/domains/settings.ts": 5,
+      "src/ipc/domains/tour.ts": 3,
+      "src/ipc/domains/workspace.ts": 1,
+      "src/ipc/safe-send.ts": 1,
+      "src/lib/with-file-lock.ts": 1,
+      "src/main/audio-capture.ts": 1,
+      "src/main/auth-window-service.ts": 3,
+      "src/main/local-api-server.ts": 1,
+      "src/main/managed-child-processes.ts": 4,
+      "src/main/terminal/pty-manager.ts": 5,
+      "src/mcp/experimental/stdio-server-loop.ts": 1,
+      "src/mcp/mcp-client.ts": 6,
+      "src/mcp/mcp-manager.ts": 6,
+      "src/mcp/mcp-tool-adapter.ts": 1,
+      "src/mcp/plugin-mcp-server.ts": 2,
+      "src/mcp/plugin-runtime-delegate.ts": 2,
+      "src/mcp/plugin-tool-from-mcp.ts": 1,
+      "src/routines/routine-engine.ts": 2
+    },
+    "fs-rename": {
+      "src/audit/hmac-chain.ts": 1,
+      "src/boot/steps/watcher-telemetry-collector.ts": 1,
+      "src/hooks/hook-discovery.ts": 1,
+      "src/hooks/hook-trust-commands.ts": 1,
+      "src/main/audit-service.ts": 1,
+      "src/memory/memory-manager.ts": 3,
+      "src/plugins/installed-entry-fs.ts": 1,
+      "src/plugins/marketplace-update-recovery.ts": 2,
+      "src/plugins/marketplace.ts": 2,
+      "src/plugins/plugin-artifact-store.ts": 4,
+      "src/plugins/plugin-contributions.ts": 1,
+      "src/plugins/plugin-removal-transaction.ts": 1,
+      "src/plugins/plugin-storage-layout.ts": 1,
+      "src/tools/file-tools.ts": 2
+    },
+    "home-tilde": {
+      "src/tools/shell-path-policy.ts": 1
+    }
+  }
+}

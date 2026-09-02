@@ -674,7 +674,8 @@ function runAppChecks(dir) {
   runPackageScripts(dir, ["test", "build"], "lvis-app full checks");
   // After the suite and the build, not before them and not inside `build`.
   // `check:gate-core` is the one inventory of the hygiene gates CI and this
-  // hook share (Knip baseline, duplicate-helper scan, sunset ledger); ci.yml
+  // hook share (Knip baseline, duplicate-helper scan, sunset ledger, shape
+  // ledger); ci.yml
   // calls the same script, so the two lists cannot drift. Each of them reads
   // a ledger that an unrelated change can make stale; ahead of the suite that
   // failure would end the push gate without a test having run. The sunset
