@@ -114,6 +114,37 @@ const CARD_LEFT_INSET = SHELL_GUTTER;
 const CLUSTER_FIRST_BUTTON_X = TRAFFIC_LIGHT_RIGHT_EDGE + SHELL_GUTTER;
 export const CLUSTER_LEAD_PAD_DARWIN = CLUSTER_FIRST_BUTTON_X - CARD_LEFT_INSET;
 
+/** px value of `--chrome-icon-button` in src/styles.css: the square every control on the band line is. */
+export const CHROME_ICON_BUTTON = 24;
+
+/** px value of `--chrome-gap-hair` in src/styles.css: the gap between those squares. */
+export const CHROME_GAP_HAIR = 2;
+
+/**
+ * The sidebar cluster strip: collapse toggle, search, back, forward — four
+ * `CHROME_ICON_BUTTON` squares with `CHROME_GAP_HAIR` between them
+ * (`Sidebar.tsx`'s `ClusterStrip`, whose history half is `ViewPathNav.tsx`'s
+ * `ViewHistoryNav`). The run is the strip's width past its first button.
+ */
+const CLUSTER_STRIP_CONTROLS = 4;
+const CLUSTER_STRIP_RUN = CLUSTER_STRIP_CONTROLS * CHROME_ICON_BUTTON + (CLUSTER_STRIP_CONTROLS - 1) * CHROME_GAP_HAIR;
+
+/**
+ * Where the band's content starts while the sidebar is a collapsed rail.
+ *
+ * The cluster strip does not retract with the card: it stands bare on the
+ * band line, ending `CLUSTER_STRIP_RUN` past its first button — on darwin
+ * `CLUSTER_FIRST_BUTTON_X`, elsewhere the card's inset plus the strip's own
+ * tight pad. The path used to start `CONTENT_TITLE_INSET` past
+ * `COLLAPSED_RAIL_RESERVE`, which on darwin is the lights' line itself, so
+ * it rendered under the toggle and the history buttons. The band clears the
+ * strip by one gutter — the same gap it keeps from the expanded card.
+ */
+export function collapsedBandLeadClearance(isDarwin: boolean): number {
+  const firstButtonX = isDarwin ? CLUSTER_FIRST_BUTTON_X : CARD_LEFT_INSET + CHROME_GAP_TIGHT;
+  return firstButtonX + CLUSTER_STRIP_RUN + SHELL_GUTTER;
+}
+
 /**
  * Card edge -> where a content title starts.
  *
@@ -129,14 +160,15 @@ export const CONTENT_TITLE_INSET = SHELL_GUTTER * 2;
  * What `<main>` reserves on its leading edge while the sidebar is a collapsed
  * icon rail — in px, like everything else on the lights' line. Mirrored in CSS
  * as `--shell-collapsed-rail-reserve` (a pair `check-shell-geometry-tokens.mjs`
- * holds together): the content surface pads by the token, the banner stack
- * insets past it, and the title band reads this constant to put its path on
- * the content title.
+ * holds together): the content surface pads by the token and the banner stack
+ * insets past it.
  *
  * The number is pinned by the traffic lights, not by the rail. On darwin the
  * band's content can start no further left than `BAND_LEAD_PAD_DARWIN`, and
- * the collapsed title sits `CONTENT_TITLE_INSET` past the reserve, so the path
- * and the title line up only when the reserve is exactly the difference. It is
+ * the collapsed title sits `CONTENT_TITLE_INSET` past the reserve, so the
+ * title lands on that lead line only when the reserve is exactly the
+ * difference. (The band's own path starts further right, past the bare
+ * cluster strip — `collapsedBandLeadClearance`.) It is
  * written as a literal because the CSS mirror gate reads this module as source
  * text; `__tests__/shell-geometry.test.ts` holds the identity.
  *

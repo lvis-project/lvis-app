@@ -24,7 +24,6 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     onOpenSettings: vi.fn(),
     onNewChat: vi.fn(),
     streaming: false,
-    onOpenMarketplace: vi.fn(),
     collapsed: false,
     onToggleCollapse: vi.fn(),
     onOpenUnifiedSearch: vi.fn(),
@@ -42,7 +41,7 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
 }
 
 describe("Sidebar plugin Doctor affordance", () => {
-  it("shows failed plugins and routes them to the Doctor navigation key", () => {
+  it("shows failed plugins and routes them to the Doctor navigation key", async () => {
     const onSelect = vi.fn();
     renderSidebar({
       onSelect,
@@ -58,7 +57,9 @@ describe("Sidebar plugin Doctor affordance", () => {
       }],
     });
 
-    const row = screen.getByTestId(sidebarViewTestId(toPluginDoctorViewKey("agent-hub")));
+    // The rows live in the Plugins flyout.
+    fireEvent.click(screen.getByTestId("sidebar-group-plugins"));
+    const row = await screen.findByTestId(sidebarViewTestId(toPluginDoctorViewKey("agent-hub")));
     expect(row.textContent).toContain("Agent Hub");
     expect(row.textContent).toContain("Doctor");
 

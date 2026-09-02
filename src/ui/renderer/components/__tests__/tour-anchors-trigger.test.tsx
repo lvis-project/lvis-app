@@ -148,7 +148,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       onOpenSettings: vi.fn(),
       onNewChat: vi.fn(),
       streaming: false,
-      onOpenMarketplace: vi.fn(),
       collapsed: false,
       onToggleCollapse: vi.fn(),
       onOpenUnifiedSearch: vi.fn(),

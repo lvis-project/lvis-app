@@ -25,6 +25,7 @@
 import "./setup.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { openSidebarGroup } from "./helpers.js";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -185,6 +186,8 @@ describe("installed plugins boot refuses to run", () => {
   it("renders a sidebar row for each of them, telling repair apart from off", async () => {
     const cards = await loadCards();
     await renderApp({ pluginCards: cards });
+    // The rows are the Plugins flyout's.
+    await openSidebarGroup("plugins");
 
     await waitFor(() =>
       expect(screen.getByTestId(sidebarViewTestId(toPluginDoctorViewKey(STRAY_REGISTRY_PLUGIN)))).toBeTruthy(),

@@ -9,8 +9,10 @@
  *
  * Deliberately NOT part of a location:
  *   - the chat session. Loading another conversation changes what `home`
- *     shows, but the path says "Chat" either way and stays true; sessions are
- *     not a navigation depth in the sidebar. (Owner decision.)
+ *     shows and its root crumb names the context it is in — the plain
+ *     conversations list, or the project the session belongs to — but the
+ *     location stays the same one; sessions are not a navigation depth in
+ *     the sidebar. (Owner decision.)
  *   - the marketplace, which opens an external URL and is not an in-app
  *     place at all.
  */
@@ -19,8 +21,9 @@ import {
   normalizeSettingsTab,
   type SettingsTab,
 } from "../../../shared/settings-tabs.js";
-import { parseViewKey, type InlineViewKey } from "../../../shared/view-key.js";
+import { parseViewKey, type BuiltinViewKey, type InlineViewKey } from "../../../shared/view-key.js";
 import type { TranslateFn } from "../../../i18n/translate.js";
+import type { ProjectIdentity } from "../../../shared/project-identity.js";
 
 export interface ViewLocation {
   view: InlineViewKey;
@@ -57,6 +60,13 @@ export interface BreadcrumbDeps {
   t: TranslateFn;
   /** Resolves a plugin view key to its display title. */
   pluginViewLabel: (viewKey: string) => string | undefined;
+  /**
+   * The project the current conversation belongs to, or absent for a plain
+   * conversation. The same fact the sidebar sorts sessions by: a session
+   * whose project is the workspace default is a plain chat, so callers pass
+   * only a NAMED project here.
+   */
+  sessionProject?: Pick<ProjectIdentity, "projectName">;
 }
 
 /**
@@ -95,7 +105,21 @@ export function viewLocationBreadcrumb(
     ];
   }
 
-  return [{ key: location.view, label: t(BUILTIN_LABEL_KEYS[location.view] ?? "mainToolbar.home") }];
+  if (location.view === "home") {
+    // There is no "home": the conversation surface is either the plain
+    // conversations list or a project, the two tabs the sidebar already names.
+    // Neither crumb carries a target — this IS where the user is.
+    const project = deps.sessionProject;
+    return project
+      ? [
+        { key: "projects", label: t("sidebar.projectsTab") },
+        { key: "home", label: project.projectName },
+      ]
+      : [{ key: "home", label: t("sidebar.chatsTab") }];
+  }
+
+  // Settings, plugins and home returned above; what is left is a built-in.
+  return [{ key: location.view, label: t(BUILTIN_LABEL_KEYS[location.view as keyof typeof BUILTIN_LABEL_KEYS]) }];
 }
 
 /**
@@ -103,8 +127,7 @@ export function viewLocationBreadcrumb(
  * than restated so a renamed destination cannot be one thing in the rail and
  * another in the path.
  */
-const BUILTIN_LABEL_KEYS: Record<string, string> = {
-  home: "mainToolbar.home",
+const BUILTIN_LABEL_KEYS: Record<Exclude<BuiltinViewKey, "home" | "settings">, string> = {
   "work-board": "mainToolbar.workBoard",
   routines: "mainToolbar.routines",
   insights: "mainToolbar.insights",

@@ -17,7 +17,16 @@ import "./setup.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
-import { activeSettingsTab, deferred, settingsWithActiveView } from "./helpers.js";
+import {
+  activeSettingsTab,
+  clickSidebarNavRow,
+  closeSidebarGroup,
+  deferred,
+  openSidebarGroup,
+  settingsWithActiveView,
+  sidebarNavRowActive,
+  type SidebarNavGroup,
+} from "./helpers.js";
 import { sidebarViewTestId } from "../../src/ui/renderer/components/Sidebar.js";
 
 afterEach(() => vi.restoreAllMocks());
@@ -43,10 +52,22 @@ function sidebarView(pluginId: string, viewId: string) {
 }
 
 
-function isActive(container: HTMLElement, testId: string): boolean {
-  return container
-    .querySelector(`[data-testid="${testId}"]`)
-    ?.getAttribute("aria-current") === "page";
+// The nav rows live in their group's flyout, so reading a row opens and
+// closes it; the group's trigger is what the static DOM reports.
+function groupOf(testId: string): SidebarNavGroup {
+  return testId === PLUGIN_NAV_TESTID ? "plugins" : "features";
+}
+
+async function isActive(_container: HTMLElement, testId: string): Promise<boolean> {
+  return sidebarNavRowActive(groupOf(testId), testId);
+}
+
+async function waitForActive(container: HTMLElement, testId: string): Promise<void> {
+  await waitFor(() =>
+    expect(
+      container.querySelector(`[data-testid="sidebar-group-${groupOf(testId)}"]`)?.getAttribute("data-active"),
+    ).toBe("true"));
+  expect(await isActive(container, testId)).toBe(true);
 }
 
 function atHome(container: HTMLElement): boolean {
@@ -81,7 +102,7 @@ describe("restoring activeView on launch", () => {
       settings: settingsWithActiveView("work-board"),
     });
 
-    await waitFor(() => expect(isActive(container, "toolbar-work-board")).toBe(true));
+    await waitForActive(container, "toolbar-work-board");
     expect(atHome(container)).toBe(false);
   });
 
@@ -94,7 +115,7 @@ describe("restoring activeView on launch", () => {
     await act(async () => {
       first.emitViewActivate("work-board");
     });
-    await waitFor(() => expect(isActive(first.container, "toolbar-work-board")).toBe(true));
+    await waitForActive(first.container, "toolbar-work-board");
     await waitFor(() =>
       expect(first.api.updateSettings).toHaveBeenCalledWith({
         system: { activeView: "work-board" },
@@ -104,7 +125,7 @@ describe("restoring activeView on launch", () => {
     first.unmount();
 
     const second = await renderApp({ hasApiKey: true, settings: persisted });
-    await waitFor(() => expect(isActive(second.container, "toolbar-work-board")).toBe(true));
+    await waitForActive(second.container, "toolbar-work-board");
   });
 
   it("opens on a restored plugin view once its plugin is loaded", async () => {
@@ -114,7 +135,7 @@ describe("restoring activeView on launch", () => {
       pluginUiExtensions: [sidebarView(PLUGIN_ID, VIEW_ID)],
     });
 
-    await waitFor(() => expect(isActive(container, PLUGIN_NAV_TESTID)).toBe(true));
+    await waitForActive(container, PLUGIN_NAV_TESTID);
     expect(atHome(container)).toBe(false);
   });
 
@@ -130,7 +151,8 @@ describe("restoring activeView on launch", () => {
 
     await settle();
     expect(atHome(container)).toBe(true);
-    expect(container.querySelector(`[data-testid="${PLUGIN_NAV_TESTID}"]`)).toBeNull();
+    // No plugin row means no Plugins group at all.
+    expect(container.querySelector('[data-testid="sidebar-group-plugins"]')).toBeNull();
 
     // ...and staying home must not COST the user their stored location. The app
     // already bounces an active-but-missing plugin view home, but that path
@@ -223,7 +245,7 @@ describe("a launch whose stored location has not arrived yet", () => {
       release();
     });
 
-    await waitFor(() => expect(isActive(container, "toolbar-work-board")).toBe(true));
+    await waitForActive(container, "toolbar-work-board");
   });
 
   it("keeps the view the user picked while the read was still in flight", async () => {
@@ -231,8 +253,8 @@ describe("a launch whose stored location has not arrived yet", () => {
     const { container } = await renderApp(opts);
     await waitFor(() => expect(atHome(container)).toBe(true));
 
-    await clickNav(container, "sidebar-routines");
-    await waitFor(() => expect(isActive(container, "sidebar-routines")).toBe(true));
+    await clickSidebarNavRow("features", "sidebar-routines");
+    await waitForActive(container, "sidebar-routines");
 
     // The stored location arrives second. Applying it now would take the screen
     // the user is on away from them, for a value they have already superseded.
@@ -241,8 +263,8 @@ describe("a launch whose stored location has not arrived yet", () => {
     });
     await settle();
 
-    expect(isActive(container, "sidebar-routines")).toBe(true);
-    expect(isActive(container, "toolbar-work-board")).toBe(false);
+    expect(await isActive(container, "sidebar-routines")).toBe(true);
+    expect(await isActive(container, "toolbar-work-board")).toBe(false);
   });
 
   it("holds a restored PLUGIN view back for good once the user has picked a view", async () => {
@@ -257,16 +279,16 @@ describe("a launch whose stored location has not arrived yet", () => {
     });
     await waitFor(() => expect(atHome(container)).toBe(true));
 
-    await clickNav(container, "sidebar-routines");
-    await waitFor(() => expect(isActive(container, "sidebar-routines")).toBe(true));
+    await clickSidebarNavRow("features", "sidebar-routines");
+    await waitForActive(container, "sidebar-routines");
 
     await act(async () => {
       release();
     });
     await settle();
 
-    expect(isActive(container, "sidebar-routines")).toBe(true);
-    expect(isActive(container, PLUGIN_NAV_TESTID)).toBe(false);
+    expect(await isActive(container, "sidebar-routines")).toBe(true);
+    expect(await isActive(container, PLUGIN_NAV_TESTID)).toBe(false);
   });
 
   it("drops a restore ALREADY waiting on its plugin when the list finally loads", async () => {
@@ -283,8 +305,8 @@ describe("a launch whose stored location has not arrived yet", () => {
     await settle();
     expect(atHome(container)).toBe(true);
 
-    await clickNav(container, "sidebar-routines");
-    await waitFor(() => expect(isActive(container, "sidebar-routines")).toBe(true));
+    await clickSidebarNavRow("features", "sidebar-routines");
+    await waitForActive(container, "sidebar-routines");
 
     // The plugin's view turns up late — a slow load, not an uninstall, so the
     // held key is now perfectly valid and would be entered.
@@ -295,9 +317,10 @@ describe("a launch whose stored location has not arrived yet", () => {
     await settle();
 
     // The row exists now, which is what makes this assertion mean anything.
-    expect(container.querySelector(`[data-testid="${PLUGIN_NAV_TESTID}"]`)).not.toBeNull();
-    expect(isActive(container, "sidebar-routines")).toBe(true);
-    expect(isActive(container, PLUGIN_NAV_TESTID)).toBe(false);
+    expect((await openSidebarGroup("plugins")).querySelector(`[data-testid="${PLUGIN_NAV_TESTID}"]`)).not.toBeNull();
+    await closeSidebarGroup("plugins");
+    expect(await isActive(container, "sidebar-routines")).toBe(true);
+    expect(await isActive(container, PLUGIN_NAV_TESTID)).toBe(false);
   });
 
   it("records a pick that changes nothing on screen, since it still supersedes the stored one", async () => {
@@ -320,7 +343,7 @@ describe("a launch whose stored location has not arrived yet", () => {
     // discard holds with nothing written at all, and the write holds with the
     // restore landing on top of it.
     expect(atHome(container)).toBe(true);
-    expect(isActive(container, "toolbar-work-board")).toBe(false);
+    expect(await isActive(container, "toolbar-work-board")).toBe(false);
     await waitFor(() =>
       expect(api.updateSettings).toHaveBeenCalledWith({ system: { activeView: "home" } }),
     );
@@ -334,8 +357,8 @@ describe("a launch whose stored location has not arrived yet", () => {
     const first = await renderApp(opts);
     await waitFor(() => expect(atHome(first.container)).toBe(true));
 
-    await clickNav(first.container, "sidebar-routines");
-    await waitFor(() => expect(isActive(first.container, "sidebar-routines")).toBe(true));
+    await clickSidebarNavRow("features", "sidebar-routines");
+    await waitForActive(first.container, "sidebar-routines");
     await act(async () => {
       release();
     });
@@ -360,6 +383,6 @@ describe("a launch whose stored location has not arrived yet", () => {
       hasApiKey: true,
       settings: settingsWithActiveView("routines"),
     });
-    await waitFor(() => expect(isActive(second.container, "sidebar-routines")).toBe(true));
+    await waitForActive(second.container, "sidebar-routines");
   });
 });

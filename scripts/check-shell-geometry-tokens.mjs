@@ -46,15 +46,21 @@ import { join } from "node:path";
  * is why this gate resolves one level of `var()` instead of only reading px.
  *
  * `--shell-collapsed-rail-reserve` is here because the content surface pads by
- * the token while the title band reads `COLLAPSED_RAIL_RESERVE` to put its
- * path on the collapsed content title. The two drifting apart is exactly the
- * band-to-title offset this pair closed.
+ * the token while `__tests__/shell-geometry.test.ts` pins `COLLAPSED_RAIL_RESERVE`
+ * to the traffic lights. The two drifting apart is exactly the band-to-title
+ * offset this pair closed.
+ *
+ * `--chrome-icon-button` / `--chrome-gap-hair` are here because
+ * `collapsedBandLeadClearance` adds the sidebar's cluster strip up from them
+ * to start the band's path past that strip while the rail is collapsed.
  */
 const MIRRORS = [
   { css: "--chrome-gap", ts: "SHELL_GUTTER" },
   { css: "--chrome-gap-tight", ts: "CHROME_GAP_TIGHT" },
   { css: "--shell-card-inset", ts: "SHELL_GUTTER" },
   { css: "--shell-collapsed-rail-reserve", ts: "COLLAPSED_RAIL_RESERVE" },
+  { css: "--chrome-icon-button", ts: "CHROME_ICON_BUTTON" },
+  { css: "--chrome-gap-hair", ts: "CHROME_GAP_HAIR" },
 ];
 
 const CSS_REL = join("src", "styles.css");

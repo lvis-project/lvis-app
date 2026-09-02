@@ -2,7 +2,7 @@ import "../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
-import { deferred, settingsWithActiveView } from "../../../../test/renderer/helpers.js";
+import { clickSidebarNavRow, deferred, settingsWithActiveView } from "../../../../test/renderer/helpers.js";
 import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
 import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
@@ -44,17 +44,17 @@ describe("App view history", () => {
   it("records each visit and replays it backward and forward", async () => {
     const { container } = await renderApp({ hasApiKey: true });
     await ready(container);
-    expect(path(container)).toContain("홈");
+    expect(path(container)).toContain("대화");
 
-    await click(container, "toolbar-work-board");
+    await clickSidebarNavRow("features", "toolbar-work-board");
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
-    await click(container, "sidebar-routines");
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
 
     await click(container, "view-path-back");
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
     await click(container, "view-path-back");
-    await waitFor(() => expect(path(container)).toContain("홈"));
+    await waitFor(() => expect(path(container)).toContain("대화"));
 
     await click(container, "view-path-forward");
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
@@ -70,12 +70,12 @@ describe("App view history", () => {
     // Nothing behind yet: the generic label, and no destination to claim.
     expect(back().getAttribute("aria-label")).toBe("뒤로");
 
-    await click(container, "toolbar-work-board");
+    await clickSidebarNavRow("features", "toolbar-work-board");
     await waitFor(() => expect(back().disabled).toBe(false));
     // Now it can say where it goes — the only cue left at chat width.
-    await waitFor(() => expect(back().getAttribute("aria-label")).toContain("홈"));
+    await waitFor(() => expect(back().getAttribute("aria-label")).toContain("대화"));
 
-    await click(container, "sidebar-routines");
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(back().getAttribute("aria-label")).toContain("업무 보드"));
   });
 
@@ -88,7 +88,7 @@ describe("App view history", () => {
     expect(back().disabled).toBe(true);
     expect(forward().disabled).toBe(true);
 
-    await click(container, "toolbar-work-board");
+    await clickSidebarNavRow("features", "toolbar-work-board");
     await waitFor(() => expect(back().disabled).toBe(false));
     expect(forward().disabled).toBe(true);
 
@@ -101,14 +101,14 @@ describe("App view history", () => {
     const { container } = await renderApp({ hasApiKey: true });
     await ready(container);
 
-    await click(container, "toolbar-work-board");
+    await clickSidebarNavRow("features", "toolbar-work-board");
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
-    await click(container, "sidebar-routines");
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
     // Clicking the entry you are already on is common and must not stack up
     // entries that appear to do nothing when replayed.
-    await click(container, "sidebar-routines");
-    await click(container, "sidebar-routines");
+    await clickSidebarNavRow("features", "sidebar-routines");
+    await clickSidebarNavRow("features", "sidebar-routines");
 
     await click(container, "view-path-back");
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
@@ -149,9 +149,9 @@ describe("App view history", () => {
     const { container } = await renderApp({ hasApiKey: true });
     await ready(container);
 
-    await click(container, "toolbar-work-board");
+    await clickSidebarNavRow("features", "toolbar-work-board");
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
-    await click(container, "sidebar-routines");
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
 
     expect(container.querySelector('[data-testid="main-content-back"]')).toBeNull();
@@ -164,20 +164,20 @@ describe("App view history", () => {
     const { container } = await renderApp({ hasApiKey: true });
     await ready(container);
 
-    await click(container, "toolbar-work-board");
+    await clickSidebarNavRow("features", "toolbar-work-board");
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
     await click(container, "view-path-back");
-    await waitFor(() => expect(path(container)).toContain("홈"));
+    await waitFor(() => expect(path(container)).toContain("대화"));
 
     // Navigating somewhere new discards what was ahead, as a browser does.
-    await click(container, "sidebar-routines");
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
     const forward = container.querySelector('[data-testid="view-path-forward"]') as HTMLButtonElement;
     expect(forward.disabled).toBe(true);
 
     // ...and back now returns to home, not to the discarded work board.
     await click(container, "view-path-back");
-    await waitFor(() => expect(path(container)).toContain("홈"));
+    await waitFor(() => expect(path(container)).toContain("대화"));
   });
 
 });
@@ -223,9 +223,7 @@ describe("App view history after a restored launch location", () => {
     });
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
 
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="sidebar-routines"]') as HTMLButtonElement);
-    });
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
 
     // Back now returns to where the app launched — not to home.
@@ -257,9 +255,7 @@ describe("App view history after a restored launch location", () => {
     // The user acts while the launch location is still in flight. This is a
     // deliberate step away from home, not the app settling into where it left
     // off — losing it strands the user with a dead back button.
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="sidebar-routines"]') as HTMLButtonElement);
-    });
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
 
     await act(async () => {
@@ -270,13 +266,13 @@ describe("App view history after a restored launch location", () => {
     await act(async () => {
       fireEvent.click(backButton(container));
     });
-    await waitFor(() => expect(path(container)).toContain("홈"));
+    await waitFor(() => expect(path(container)).toContain("대화"));
   });
 
   it("still makes a late-landing restore the root rather than a step from home", async () => {
     const { gate, getSettings } = restoreGate();
     const { container } = await renderApp({ hasApiKey: true, getSettings });
-    await waitFor(() => expect(path(container)).toContain("홈"));
+    await waitFor(() => expect(path(container)).toContain("대화"));
 
     // Nobody navigated; the app simply arrived where it was left. A restart
     // must not offer "back" to the home screen it passed through.
@@ -295,9 +291,7 @@ describe("App view history after a restored launch location", () => {
     const { container } = await renderApp({ hasApiKey: true, getSettings });
     await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
 
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="sidebar-routines"]') as HTMLButtonElement);
-    });
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
 
     // The stored location arrives after the user has already chosen one. Being
@@ -315,7 +309,7 @@ describe("App view history after a restored launch location", () => {
     await act(async () => {
       fireEvent.click(backButton(container));
     });
-    await waitFor(() => expect(path(container)).toContain("홈"));
+    await waitFor(() => expect(path(container)).toContain("대화"));
   });
 
   /**
@@ -361,7 +355,7 @@ describe("App view history after a restored launch location", () => {
     // that leaves the history untouched and the seed is still the only entry
     // when the surviving half lands.
     await click(container, "sidebar-new-chat");
-    expect(path(container)).toContain("홈");
+    expect(path(container)).toContain("대화");
 
     // Released one commit at a time — over IPC these are separate round trips,
     // and batching them never observes the page half on its own.
@@ -375,16 +369,16 @@ describe("App view history after a restored launch location", () => {
 
     // Nothing moved: the view half was discarded, and a settings page is not a
     // place while the user is not in Settings.
-    expect(path(container)).toContain("홈");
+    expect(path(container)).toContain("대화");
 
     // NOW the user takes their first real step, with the history still the
     // untouched seed. It is a step, not an arrival — the count went up for a
     // page they are not looking at.
-    await click(container, "sidebar-routines");
+    await clickSidebarNavRow("features", "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
     expect(backButton(container).disabled).toBe(false);
     await click(container, "view-path-back");
-    await waitFor(() => expect(path(container)).toContain("홈"));
+    await waitFor(() => expect(path(container)).toContain("대화"));
   });
 
   /**
@@ -449,7 +443,7 @@ describe("App view history after a restored launch location", () => {
           return gate.promise;
         },
       });
-      await waitFor(() => expect(path(container)).toContain("홈"));
+      await waitFor(() => expect(path(container)).toContain("대화"));
 
       const pending = order === "in reverse order" ? [...gates].reverse() : [...gates];
       for (const gate of pending) {

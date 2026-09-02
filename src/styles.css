@@ -1788,10 +1788,12 @@
    * every chrome row a few px under the lights. Band 36 centres a 28px control
    * and the ~12px lights on the same y=18.
    *
-   * `--chrome-gap` / `--chrome-gap-tight` are mirrored in TypeScript as
-   * `SHELL_GUTTER` / `CHROME_GAP_TIGHT` (shared/shell-geometry.ts) for the
-   * same geometry done in JS — the main process's window-bounds math, the chat
-   * group's split arithmetic. */
+   * `--chrome-gap` / `--chrome-gap-tight` / `--chrome-icon-button` /
+   * `--chrome-gap-hair` are mirrored in TypeScript as `SHELL_GUTTER` /
+   * `CHROME_GAP_TIGHT` / `CHROME_ICON_BUTTON` / `CHROME_GAP_HAIR`
+   * (shared/shell-geometry.ts) for the same geometry done in JS — the main
+   * process's window-bounds math, the chat group's split arithmetic, the
+   * title band's clearance past the sidebar cluster strip. */
   :root {
     --chrome-band-height: 36px;
     --chrome-control-height: 28px;
