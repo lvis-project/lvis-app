@@ -263,6 +263,51 @@ async function handleDispatch(
 }
 
 /**
+ * The frame writer and end-of-stream for one SSE response — the loopback
+ * `/v1/events` stream and the tailnet observer stream share it, so the
+ * backpressure policy exists once.
+ *
+ * `writeOrClose` never waits for `drain`: this sits in the model-facing
+ * synchronous fan-out path, and a false `write()` means this one client has
+ * reached node's response buffer high-water mark. It is terminated rather than
+ * retaining an unbounded per-client queue or delaying every other surface;
+ * `destroy()` drops the buffered frame too, so a slow client never receives a
+ * stale frame later. A peer can disappear between the writable-state check and
+ * `write()`, which is why the write is guarded as well.
+ *
+ * `endStream` is what the server registers in its live-stream set: it runs the
+ * caller's `cleanup` (subscription, timers, set membership) and then ends the
+ * response — defensively, because an ended socket does not always re-emit
+ * `close`. `isCleaned` reads the caller's flag so a write after teardown is
+ * refused even while the socket is still nominally writable.
+ */
+export function createSseFrameWriter(
+  res: ServerResponse,
+  cleanup: () => void,
+  isCleaned: () => boolean,
+): { writeOrClose: (frame: string) => boolean; endStream: () => void } {
+  const writeOrClose = (frame: string): boolean => {
+    if (isCleaned() || res.destroyed || res.writableEnded) {
+      cleanup();
+      return false;
+    }
+    try {
+      if (res.write(frame)) return true;
+    } catch {
+      // A peer can disappear between the writable-state check and write().
+    }
+    cleanup();
+    if (!res.destroyed) res.destroy();
+    return false;
+  };
+  const endStream = (): void => {
+    cleanup();
+    if (!res.writableEnded && !res.destroyed) res.end();
+  };
+  return { writeOrClose, endStream };
+}
+
+/**
  * Handle GET /v1/events after auth has passed: upgrade to SSE and fan the
  * broadcaster's `(channel, payload)` frames out to this client. `liveStreams`
  * tracks a per-connection cleanup so `close()` can end every stream and run its
@@ -295,37 +340,12 @@ function handleEvents(
     res.off("close", cleanup);
   };
 
-  /**
-   * Never wait for `drain` in the model-facing synchronous fan-out path. A
-   * false write means this one client has reached node's response buffer high
-   * water mark; terminate it rather than retaining an unbounded per-client
-   * queue or delaying every other surface.
-   */
-  const writeOrClose = (frame: string): boolean => {
-    if (cleaned || res.destroyed || res.writableEnded) {
-      cleanup();
-      return false;
-    }
-    try {
-      if (res.write(frame)) return true;
-    } catch {
-      // A peer can disappear between the writable-state check and write().
-    }
-    cleanup();
-    // `destroy()` drops the buffered frame as well as closing the peer; this
-    // avoids delivering stale frames later to a slow client.
-    if (!res.destroyed) res.destroy();
-    return false;
-  };
-
-  // On server close(): end the response (which triggers the `close` events →
-  // cleanup) and defensively run cleanup so the subscription is dropped even if
-  // an ended socket does not re-emit `close`. Declared before `cleanup` so it can
-  // be removed from `liveStreams` by the same reference that was added.
-  endStream = () => {
-    cleanup();
-    if (!res.writableEnded && !res.destroyed) res.end();
-  };
+  // `endStream` is what server close() calls; the placeholder above lets
+  // `cleanup` reference it before it exists, so `liveStreams` holds the same
+  // reference that was added.
+  const writer = createSseFrameWriter(res, cleanup, () => cleaned);
+  const writeOrClose = writer.writeOrClose;
+  endStream = writer.endStream;
 
   // Client disconnect (either half of the socket closing) → unsubscribe + clear.
   req.on("close", cleanup);

@@ -54,6 +54,7 @@ import {
   SSE_CONTENT_TYPE,
   SSE_HEARTBEAT_MS,
   SSE_RETRY_MS,
+  createSseFrameWriter,
   sendJson as sendJsonResponse,
 } from "./http-server.js";
 import { UUID_PATTERN } from "../shared/uuid.js";
@@ -2639,25 +2640,9 @@ function handleEvents(
     res.off("close", cleanup);
   };
 
-  const writeOrClose = (frame: string): boolean => {
-    if (cleaned || res.destroyed || res.writableEnded) {
-      cleanup();
-      return false;
-    }
-    try {
-      if (res.write(frame)) return true;
-    } catch {
-      // The peer may close between writable state observation and write().
-    }
-    cleanup();
-    if (!res.destroyed) res.destroy();
-    return false;
-  };
-
-  endStream = () => {
-    cleanup();
-    if (!res.writableEnded && !res.destroyed) res.end();
-  };
+  const writer = createSseFrameWriter(res, cleanup, () => cleaned);
+  const writeOrClose = writer.writeOrClose;
+  endStream = writer.endStream;
   const reauthorizeIfPairingShareChanged = (): boolean => {
     if (pairedShare === undefined || isPairedShareCurrent(pairedShare)) return false;
     if (!writeOrClose(formatReauthorizeRequiredEvent(scope.value))) return true;
