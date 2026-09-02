@@ -127,14 +127,14 @@ describe("App smoke (Phase 1 infra)", () => {
 
     // The header carries the conversation's line and the tile controls only —
     // no activity control hangs off it.
-    const header = container.querySelector('[data-testid="chat-group-header"]');
+    const header = container.querySelector('[data-testid="pane-header"]');
     expect(header).toBeTruthy();
     expect(header?.textContent).not.toContain("도구 활동");
     expect(container.querySelector('[data-testid="tool-activity-open-tab"]')).toBeFalsy();
 
     // Open the work panel: its empty launcher carries the compact report.
     await act(async () => {
-      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))!);
     });
     const launcherActivity = await waitFor(() => {
       const found = container.querySelector('[data-testid="chat-side-panel-launcher-tool-activity"]');
@@ -187,9 +187,15 @@ describe("App smoke (Phase 1 infra)", () => {
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenCalledWith(false));
     expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeFalsy();
 
+    // The toggle points along the panel's axis: the panel opens BESIDE the
+    // transcript, so the icon is the right-panel pair, not the bottom one.
+    const panelToggle = () => container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))!;
+    expect(panelToggle().querySelector("svg.lucide-panel-right-open")).toBeTruthy();
+
     await act(async () => {
-      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
+      fireEvent.click(panelToggle());
     });
+    expect(panelToggle().querySelector("svg.lucide-panel-right-close")).toBeTruthy();
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenLastCalledWith(true));
     await waitFor(() =>
       expect(
@@ -199,7 +205,7 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))!);
     });
     const closingMotion = container.querySelector('[data-testid="chat-side-panel-motion"]');
     expect(closingMotion).toBeTruthy();
@@ -218,7 +224,7 @@ describe("App smoke (Phase 1 infra)", () => {
 
     // Open it on the chat surface, where the conversation that owns it is.
     await act(async () => {
-      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))!);
     });
     await waitFor(() => expect(container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))).toBeTruthy());
 
@@ -253,7 +259,7 @@ describe("App smoke (Phase 1 infra)", () => {
       ).toBe("true");
       expect(container.querySelector(testIdSelector(TEST_IDS.chatSidePanel))).toBeTruthy();
     });
-    expect(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))?.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("does not duplicate primary sidebar navigation in the right action panel", async () => {

@@ -47,7 +47,7 @@ export async function submitChatMessage(
   });
 }
 
-/** One open tile: its chat-group id and the element its content renders in. */
+/** One open tile: its chat group id and the element its content renders in. */
 export interface RenderedTile {
   chatGroupId: string;
   /** The tile's cell — everything that tile renders is inside it. */
@@ -57,7 +57,7 @@ export interface RenderedTile {
 /**
  * Every tile the view is SHOWING, in layout order.
  *
- * The `chat-group-cell:` testid prefix — and the slice that recovers the chat
+ * The `pane-cell:` testid prefix — and the slice that recovers the chat
  * group id from it — is this one place, so a test that needs the open tiles
  * never has to restate the naming scheme.
  *
@@ -67,7 +67,7 @@ export interface RenderedTile {
  * is for the tests that are about them.
  */
 export function collectTiles(container: HTMLElement): RenderedTile[] {
-  const prefix = "chat-group-cell:";
+  const prefix = "pane-cell:";
   return Array.from(container.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`))
     .filter((element) => element.getAttribute("data-hidden") !== "true")
     .map((element) => ({
@@ -78,7 +78,7 @@ export function collectTiles(container: HTMLElement): RenderedTile[] {
 
 /** Every chat group that still has a mounted tile, shown or hidden. */
 export function mountedTileIds(container: HTMLElement): string[] {
-  const prefix = "chat-group-cell:";
+  const prefix = "pane-cell:";
   return Array.from(container.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`))
     .map((element) => element.getAttribute("data-testid")!.slice(prefix.length));
 }
@@ -120,14 +120,14 @@ async function splitWith(
   holder: HTMLElement,
   expectedTiles: number,
 ): Promise<RenderedTile[]> {
-  const split = holder.querySelector<HTMLButtonElement>('[data-testid="chat-group-split"]');
-  if (!split) throw new Error("no chat-group split control");
+  const split = holder.querySelector<HTMLButtonElement>('[data-testid="pane-split"]');
+  if (!split) throw new Error("no pane split control");
   await act(async () => {
     fireEvent.click(split);
   });
   // The split control opens a direction choice (portaled, so it is looked up
   // on the document); either direction yields one more tile.
-  const sideBySide = document.querySelector<HTMLButtonElement>('[data-testid="chat-group-split-row"]');
+  const sideBySide = document.querySelector<HTMLButtonElement>('[data-testid="pane-split-row"]');
   if (!sideBySide) throw new Error("no split direction choice");
   await act(async () => {
     fireEvent.click(sideBySide);
@@ -145,7 +145,7 @@ async function splitWith(
  * stop being on screen.
  */
 export async function toggleTileMaximized(tile: RenderedTile): Promise<void> {
-  const button = tile.element.querySelector<HTMLButtonElement>('[data-testid="chat-group-maximize"]');
+  const button = tile.element.querySelector<HTMLButtonElement>('[data-testid="pane-maximize"]');
   if (!button) throw new Error(`tile ${tile.chatGroupId} has no maximize control`);
   await act(async () => {
     fireEvent.click(button);
@@ -171,7 +171,7 @@ export function forceOverflowingSummaries(): () => void {
 
 /** Move focus to a tile the way clicking into it does. */
 export async function focusTile(tile: RenderedTile): Promise<void> {
-  const frame = tile.element.querySelector<HTMLElement>('[data-testid="chat-group"]');
+  const frame = tile.element.querySelector<HTMLElement>('[data-testid="pane"]');
   if (!frame) throw new Error(`tile ${tile.chatGroupId} has no frame`);
   await act(async () => {
     fireEvent.mouseDown(frame);

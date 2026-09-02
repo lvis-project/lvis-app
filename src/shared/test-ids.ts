@@ -17,7 +17,7 @@ export const TEST_IDS = {
   approvalDockQueueDepth: "approval-dock-queue-depth",
   approvalReviewDetails: "approval-review-details",
   approveButton: "approve-button",
-  chatGroupPanelToggle: "chat-group-panel-toggle",
+  panePanelToggle: "pane-panel-toggle",
   chatSidePanel: "chat-side-panel",
   chatViewRoot: "chat-view-root",
   composer: "composer",

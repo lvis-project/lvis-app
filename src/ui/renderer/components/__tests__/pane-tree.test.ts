@@ -9,8 +9,8 @@ import {
   minimumCanvasHeight,
   resizeGutter,
   splitLeaf,
-  type ChatGroupNode,
-} from "../chat-group-tree.js";
+  type PaneNode,
+} from "../pane-tree.js";
 
 const main = leaf("main");
 
@@ -24,8 +24,8 @@ describe("splitLeaf", () => {
   });
 
   it("splits along the axis the edge implies", () => {
-    const side = splitLeaf(main, "main", "right", "group-2") as Extract<ChatGroupNode, { kind: "split" }>;
-    const below = splitLeaf(main, "main", "bottom", "group-2") as Extract<ChatGroupNode, { kind: "split" }>;
+    const side = splitLeaf(main, "main", "right", "group-2") as Extract<PaneNode, { kind: "split" }>;
+    const below = splitLeaf(main, "main", "bottom", "group-2") as Extract<PaneNode, { kind: "split" }>;
 
     expect(side.axis).toBe("row");
     expect(below.axis).toBe("column");
@@ -47,7 +47,7 @@ describe("splitLeaf", () => {
   it("flattens a same-axis split so one shape has one representation", () => {
     // Splitting right twice is three columns, not a column holding two.
     const two = splitLeaf(main, "main", "right", "group-2");
-    const three = splitLeaf(two, "group-2", "right", "group-3") as Extract<ChatGroupNode, { kind: "split" }>;
+    const three = splitLeaf(two, "group-2", "right", "group-3") as Extract<PaneNode, { kind: "split" }>;
 
     expect(three.kind).toBe("split");
     expect(three.children.every((child) => child.kind === "leaf")).toBe(true);
@@ -59,7 +59,7 @@ describe("splitLeaf", () => {
   });
 
   it("reaches a 2x2 whose four tiles each take a quarter", () => {
-    let tree: ChatGroupNode = splitLeaf(main, "main", "right", "group-2");
+    let tree: PaneNode = splitLeaf(main, "main", "right", "group-2");
     tree = splitLeaf(tree, "main", "bottom", "group-3");
     tree = splitLeaf(tree, "group-2", "bottom", "group-4");
 
@@ -102,7 +102,7 @@ describe("closeLeaf", () => {
 
 describe("layoutBoxes", () => {
   it("tiles the whole area with no gap and no overlap", () => {
-    let tree: ChatGroupNode = splitLeaf(main, "main", "right", "group-2");
+    let tree: PaneNode = splitLeaf(main, "main", "right", "group-2");
     tree = splitLeaf(tree, "main", "bottom", "group-3");
 
     const area = layoutBoxes(tree).reduce((sum, b) => sum + b.width * b.height, 0);
@@ -112,7 +112,7 @@ describe("layoutBoxes", () => {
 
 describe("layoutGutters", () => {
   it("puts one gutter on every boundary between siblings, on the split's own axis", () => {
-    let tree: ChatGroupNode = splitLeaf(main, "main", "right", "group-2");
+    let tree: PaneNode = splitLeaf(main, "main", "right", "group-2");
     tree = splitLeaf(tree, "main", "bottom", "group-3");
 
     const gutters = layoutGutters(tree);
@@ -138,7 +138,7 @@ describe("layoutGutters", () => {
 
 describe("resizeGutter", () => {
   it("moves only the boundary that was held", () => {
-    let tree: ChatGroupNode = splitLeaf(main, "main", "right", "group-2");
+    let tree: PaneNode = splitLeaf(main, "main", "right", "group-2");
     tree = splitLeaf(tree, "main", "bottom", "group-3");
     const inner = layoutGutters(tree).find((g) => g.axis === "column")!;
 

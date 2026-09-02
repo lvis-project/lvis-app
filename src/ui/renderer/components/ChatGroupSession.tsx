@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { Button } from "../../../components/ui/button.js";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { TEST_IDS } from "../../../shared/test-ids.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { ChatContextProvider, type ChatContextValue } from "../context/ChatContext.js";
 import { ChatView } from "../ChatView.js";
-import { chatGroupApi } from "./ChatGroupFrame.js";
+import { chatGroupApi } from "./PaneFrame.js";
 import {
   sessionOwnedBy,
   tileDrawsSession,
@@ -20,10 +24,11 @@ import { MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 import { useSendMessage, type HandleAskRefFn } from "../hooks/use-send-message.js";
 import type { useStatusBar } from "../hooks/use-status-bar.js";
 import { useWorkflowTools } from "../hooks/use-workflow-tools.js";
-import { buildChatGroupActions } from "./ChatGroupFrame.js";
+import { buildChatGroupActions } from "./PaneFrame.js";
 import { composeOutgoing as composeOutgoingUtil, type ComposedOutgoing } from "../utils/compose.js";
 import { estimateOutgoingUserMessageTokens } from "../../../shared/multimodal-token-estimate.js";
 import { formatIpcError } from "../format-ipc-error.js";
+import { HEADER_BUTTON_CLASS } from "./PaneFrame.js";
 import { lookupBillablePricingOptional } from "../../../shared/pricing-data.js";
 import { McpPromptArgsDialog } from "../dialogs/McpPromptArgsDialog.js";
 import type { Attachment } from "../types/attachments.js";
@@ -140,6 +145,16 @@ export interface ChatGroupSessionProps {
   /** The frame chrome this tile renders inside, given the tile's own actions. */
   children: (frame: {
     actions: ReturnType<typeof buildChatGroupActions>;
+    /**
+     * The work-panel toggle, for the frame's trailing cluster.
+     *
+     * The panel is per-CONVERSATION — it shows what THIS conversation is doing
+     * — so a window-level toggle could only ever be right for one of the panes
+     * on screen. It is built here, where the conversation's open state and the
+     * call that flips it already live, rather than passed in as two more props
+     * for the frame to assemble.
+     */
+    trailing: ReactNode;
     content: ReactNode;
     /** This tile's session — the frame titles itself by its OWN conversation,
      *  not the focused one, or four tiles would all wear the same name. */
@@ -681,6 +696,29 @@ export function ChatGroupSession({
     [t, currentSessionId, env, handleImportAndLoad],
   );
 
+  // The one control this pane owns as a TILE rather than as content: the work
+  // panel is the conversation's, so it opens from the conversation's own frame.
+  const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
+  const trailing = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={HEADER_BUTTON_CLASS}
+          onClick={() => onSidePanelOpenChange(!panelOpen)}
+          title={panelLabel}
+          aria-label={panelLabel}
+          aria-pressed={panelOpen}
+          data-testid={TEST_IDS.panePanelToggle}
+        >
+          {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{panelLabel}</TooltipContent>
+    </Tooltip>
+  );
+
   const chatContextValue = useMemo<ChatContextValue>(() => ({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId, hidden,
@@ -773,5 +811,5 @@ export function ChatGroupSession({
     </ChatContextProvider>
   );
 
-  return <>{children({ actions, content, currentSessionId })}</>;
+  return <>{children({ actions, trailing, content, currentSessionId })}</>;
 }

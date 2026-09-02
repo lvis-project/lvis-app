@@ -36,17 +36,17 @@ afterEach(() => vi.restoreAllMocks());
  *
  * `main-pane-shell` alone would not do: the conversation surface is one too and
  * is in the DOM at the same time (hidden, not unmounted), and its tile is also
- * a `chat-group`. `data-view` is what says which shell is the view's.
+ * a `pane`. `data-view` is what says which shell is the view's.
  */
 function pane(container: HTMLElement): HTMLElement | null {
   return container.querySelector(
-    '[data-testid="main-pane-shell"][data-view] [data-testid="chat-group"]',
+    '[data-testid="main-pane-shell"][data-view] [data-testid="pane"]',
   );
 }
 
 function paneTitle(container: HTMLElement): string | null {
   return pane(container)
-    ?.querySelector('[data-testid="chat-group-header"] h2')
+    ?.querySelector('[data-testid="pane-header"] h2')
     ?.textContent
     ?.trim() ?? null;
 }
@@ -83,7 +83,7 @@ describe("built-in views are pane bodies", () => {
     // which glyph is the map's business, and asserting it here would only
     // restate the map.
     expect(
-      pane(container)?.querySelector('[data-testid="chat-group-header"] svg'),
+      pane(container)?.querySelector('[data-testid="pane-header"] svg'),
     ).not.toBeNull();
   });
 
@@ -115,12 +115,12 @@ describe("built-in views are pane bodies", () => {
 describe("a view's global actions live in the pane header", () => {
   it("carries the work board's new-item and refresh controls", async () => {
     const { container } = await openView("work-board", "work-board-panel");
-    const header = pane(container)?.querySelector('[data-testid="chat-group-header"]');
+    const header = pane(container)?.querySelector('[data-testid="pane-header"]');
 
-    const add = header?.querySelector('[data-testid="chat-group-action-work-board-add"]');
+    const add = header?.querySelector('[data-testid="pane-action-work-board-add"]');
     expect(add).not.toBeNull();
     expect(add?.getAttribute("aria-label")).toBe(t("workBoard.addItemButton"));
-    expect(header?.querySelector('[data-testid="chat-group-action-work-board-refresh"]')).not.toBeNull();
+    expect(header?.querySelector('[data-testid="pane-action-work-board-refresh"]')).not.toBeNull();
 
     // The control still opens what it opened when it stood beside the heading.
     await act(async () => {
@@ -133,26 +133,26 @@ describe("a view's global actions live in the pane header", () => {
 
   it("carries the routines' new-routine and refresh controls", async () => {
     const { container } = await openView("routines", "routine-panel");
-    const header = pane(container)?.querySelector('[data-testid="chat-group-header"]');
+    const header = pane(container)?.querySelector('[data-testid="pane-header"]');
 
-    expect(header?.querySelector('[data-testid="chat-group-action-routine-add"]')).not.toBeNull();
-    expect(header?.querySelector('[data-testid="chat-group-action-routine-refresh"]')).not.toBeNull();
+    expect(header?.querySelector('[data-testid="pane-action-routine-add"]')).not.toBeNull();
+    expect(header?.querySelector('[data-testid="pane-action-routine-refresh"]')).not.toBeNull();
   });
 
   it("carries the insights' refresh control", async () => {
     const { container } = await openView("insights", "insights-scroll-root");
-    const header = pane(container)?.querySelector('[data-testid="chat-group-header"]');
+    const header = pane(container)?.querySelector('[data-testid="pane-header"]');
 
-    expect(header?.querySelector('[data-testid="chat-group-action-insights-refresh"]')).not.toBeNull();
+    expect(header?.querySelector('[data-testid="pane-action-insights-refresh"]')).not.toBeNull();
   });
 
   it("gives memory no action it does not have", async () => {
     const { container } = await openView("memory", "memory-search-panel");
-    const header = pane(container)?.querySelector('[data-testid="chat-group-header"]');
+    const header = pane(container)?.querySelector('[data-testid="pane-header"]');
 
     // The search box is a body control and stays there; the header invents
     // nothing to fill the space.
-    expect(header?.querySelector('[data-testid^="chat-group-action-"]')).toBeNull();
+    expect(header?.querySelector('[data-testid^="pane-action-"]')).toBeNull();
     expect(container.querySelector('[data-testid="memory-search-panel"] input')).not.toBeNull();
   });
 });
@@ -211,13 +211,13 @@ describe("a plugin view is a pane body", () => {
     // The description was a second line of page chrome under the heading. It is
     // the title's tooltip now — still there, costing the pane no height.
     expect(
-      pane(container)?.querySelector('[data-testid="chat-group-header"] h2')?.getAttribute("title"),
+      pane(container)?.querySelector('[data-testid="pane-header"] h2')?.getAttribute("title"),
     ).toBe(PLUGIN_DESCRIPTION);
     // The glyph the sidebar row draws for this plugin, resolved from the same
     // manifest fields. Read as "an icon is drawn": which one is the resolver's
     // business.
     expect(
-      pane(container)?.querySelector('[data-testid="chat-group-header"] svg'),
+      pane(container)?.querySelector('[data-testid="pane-header"] svg'),
     ).not.toBeNull();
   });
 
@@ -242,7 +242,7 @@ describe("a plugin view is a pane body", () => {
     expect(atHome(container)).toBe(false);
 
     await act(async () => {
-      fireEvent.click(pane(container)?.querySelector('[data-testid="chat-group-close"]') as HTMLElement);
+      fireEvent.click(pane(container)?.querySelector('[data-testid="pane-close"]') as HTMLElement);
     });
 
     await waitFor(() => {
@@ -258,9 +258,13 @@ describe("closing a view's pane", () => {
     const { container } = await openView("routines", "routine-panel");
     expect(atHome(container)).toBe(false);
 
-    const close = pane(container)?.querySelector('[data-testid="chat-group-close"]');
+    const close = pane(container)?.querySelector('[data-testid="pane-close"]');
     expect(close).not.toBeNull();
-    expect(close?.getAttribute("aria-label")).toBe(t("chatGroup.close"));
+    // The control names the VIEW, not the pane: the pane survives this click,
+    // so "close pane" would be a promise the click does not keep.
+    expect(close?.getAttribute("aria-label"))
+      .toBe(t("pane.closeView", { view: t(BUILTIN_LABEL_KEYS.routines) }));
+    expect(close?.getAttribute("aria-label")).not.toBe(t("pane.close"));
 
     await act(async () => {
       fireEvent.click(close as HTMLElement);
@@ -308,7 +312,7 @@ describe("settings is a pane body", () => {
     expect(container.querySelector('[data-testid="main-pane-shell"][data-view="settings"]')).not.toBeNull();
     expect(paneTitle(container)).toBe(t(BUILTIN_LABEL_KEYS.settings));
     expect(
-      pane(container)?.querySelector('[data-testid="chat-group-header"] svg'),
+      pane(container)?.querySelector('[data-testid="pane-header"] svg'),
     ).not.toBeNull();
   });
 
@@ -321,7 +325,7 @@ describe("settings is a pane body", () => {
     const named = [...(pane(container)?.querySelectorAll("h2") ?? [])]
       .filter((h) => h.textContent?.trim() === label);
     expect(named.length).toBe(1);
-    expect(named[0]?.closest('[data-testid="chat-group-header"]')).not.toBeNull();
+    expect(named[0]?.closest('[data-testid="pane-header"]')).not.toBeNull();
     // The ACTIVE PAGE's heading stays: it names the tab, a depth below the
     // pane, exactly as the location path reads it (Settings › …).
     expect(container.querySelector(`${SETTINGS_SHELL} h2`)).not.toBeNull();
@@ -368,7 +372,7 @@ describe("settings is a pane body", () => {
     // Focus follows a split, so the view opens in the SECOND tile.
     const [left, right] = await splitIntoTwoTiles(container);
     const cell = (chatGroupId: string) =>
-      container.querySelector<HTMLElement>(`[data-testid="chat-group-cell:${chatGroupId}"]`)!;
+      container.querySelector<HTMLElement>(`[data-testid="pane-cell:${chatGroupId}"]`)!;
 
     await clickSidebarNavRow("features", "toolbar-work-board");
 
@@ -382,12 +386,12 @@ describe("settings is a pane body", () => {
     // so the second pane went dark for a view it was not showing.
     expect(cell(left!.chatGroupId)
       .querySelector('[data-testid="main-pane-shell"][data-view]')).toBeNull();
-    expect(cell(left!.chatGroupId).querySelector('[data-testid="chat-group"]')).not.toBeNull();
+    expect(cell(left!.chatGroupId).querySelector('[data-testid="pane"]')).not.toBeNull();
 
     // Two frames in that one cell: the board's, and the conversation it covers.
     // The covered one is hidden rather than unmounted — its turn may still be
     // streaming, and its composer draft and scroll position live in it.
-    expect(cell(right!.chatGroupId).querySelectorAll('[data-testid="chat-group"]')).toHaveLength(2);
+    expect(cell(right!.chatGroupId).querySelectorAll('[data-testid="pane"]')).toHaveLength(2);
   });
 
   it("hands the pane back to the conversation when closed", async () => {
@@ -395,7 +399,7 @@ describe("settings is a pane body", () => {
     expect(atHome(container)).toBe(false);
 
     await act(async () => {
-      fireEvent.click(pane(container)?.querySelector('[data-testid="chat-group-close"]') as HTMLElement);
+      fireEvent.click(pane(container)?.querySelector('[data-testid="pane-close"]') as HTMLElement);
     });
 
     await waitFor(() => {

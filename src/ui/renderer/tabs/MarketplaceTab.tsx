@@ -151,7 +151,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   const [packageStatus, setPackageStatus] = useState(() => t("marketplaceTab.statusLoading"));
   const [filter, setFilter] = useState<MarketplacePackageFilter>(initialFilter);
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
-  // #1098/#1279 — plugin installs that need explicit pre-install disclosure.
+  // The package a pre-install disclosure is open for, if any.
   const [installDialogTarget, setInstallDialogTarget] = useState<MarketplaceItem | null>(null);
 
   // Update check + offline cache. Both were environment-only flags
@@ -627,7 +627,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                           void uninstallPackage(item);
                           return;
                         }
-                        // #1098/#1279 — admin-policy and networkAccess plugins
+                        // Admin-policy and networkAccess plugins
                         // show install-time disclosures before the install starts.
                         if (needsInstallDisclosure(item)) {
                           setInstallDialogTarget(item);

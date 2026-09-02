@@ -20,7 +20,7 @@ const SPLIT_KEY_STEP = 5;
  * the caller (a `useVerticalSplit` store) so it survives the panel unmount.
  *
  * The drag is `useEdgeResize`, the same primitive the sidebar, the side panel
- * and the chat-group gutters resize with: the top pane is the "panel", its
+ * and the pane gutters resize with: the top pane is the "panel", its
  * percent is the "width", and `unitsPerPixel` turns the pointer's px into
  * percent of this layout. Until the layout has a measured height there is no
  * conversion, so the pointer is not wired — a drawer folded to zero height

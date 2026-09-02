@@ -42,7 +42,7 @@ import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 import { errorMessage } from "../../../shared/error-message.js";
 import { shortSessionId } from "../../../shared/session-lookup.js";
-import { usePaneActions } from "./ChatGroupFrame.js";
+import { usePaneActions } from "./PaneFrame.js";
 
 export interface WorkBoardPanelProps {
   api: LvisApi;

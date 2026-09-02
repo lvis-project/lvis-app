@@ -28,7 +28,7 @@ import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../share
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
 import { errorMessage } from "../../../shared/error-message.js";
-import { usePaneActions } from "./ChatGroupFrame.js";
+import { usePaneActions } from "./PaneFrame.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;

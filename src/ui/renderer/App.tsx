@@ -17,7 +17,7 @@ import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
 import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession, overlayCardTile, type OverlayCardPlacement } from "./components/chat-group-session-registry.js";
-import { leafIds } from "./components/chat-group-tree.js";
+import { leafIds } from "./components/pane-tree.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
 // each (each renders nothing while no card occupies its slot).
@@ -30,9 +30,9 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroupGutter, PANE_HOME, PaneFrame, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
-import { minimumCanvasHeight } from "./components/chat-group-tree.js";
-import type { DropTarget } from "./components/chat-group-drop.js";
+import { PANE_CELL_INSET, PANE_MIN_HEIGHT, PaneGutter, PANE_HOME, PaneFrame, areaStyle, chatGroupApi, useChatGroups, type PaneSplitAxis } from "./components/PaneFrame.js";
+import { minimumCanvasHeight } from "./components/pane-tree.js";
+import type { DropTarget } from "./components/pane-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import { parseInlineViewKey, type InlineViewKey, type PluginViewKey } from "../../shared/view-key.js";
 import { CONTENT_TITLE_INSET, SHELL_GUTTER, collapsedBandLeadClearance } from "../../shared/shell-geometry.js";
@@ -312,7 +312,7 @@ export function App() {
   const windowBandMaxHeight = useMemo(() => {
     const reserved = minimumCanvasHeight(
       chatGroups.groups.map((group) => group.box),
-      CHAT_GROUP_MIN_HEIGHT + CHAT_GROUP_CELL_INSET,
+      PANE_MIN_HEIGHT + PANE_CELL_INSET,
     ) + SHELL_GUTTER;
     return `max(${WINDOW_DOCK_MIN_HEIGHT}px, calc(100% - ${reserved}px))`;
   }, [chatGroups.groups]);
@@ -917,7 +917,7 @@ export function App() {
   }, [location, t, pluginViews, viewHistory, navigateToLocation, activeProject]);
 
 
-  // The conversation action set. Built once so the chat-group header and the
+  // The conversation action set. Built once so the pane header and the
   // sidebar row's context menu cannot drift apart about what is offered.
   // Build flat PluginEntry list for InputActionBar plugin grid.
   // `unauthed` is set when the owning plugin declares `manifest.auth` AND its
@@ -1391,6 +1391,14 @@ export function App() {
     // way — content navigation, not a history replay, so the top toolbar keeps
     // exclusive ownership of visit history and the result reveals its chat.
     const closePane = () => chatGroups.setPaneContent(paneId, PANE_HOME);
+    /*
+     * What that close control is CALLED here, and the only place it is worked
+     * out. "Close pane" is what the control does on a conversation pane, and it
+     * would be a lie on this path: the pane stays, holding its conversation
+     * again. So the label names the view being dismissed, taken from the title
+     * the frame is already given rather than worked out a second time.
+     */
+    const routedCloseLabel = (title: string) => t("pane.closeView", { view: title });
     const pluginPane = pluginPaneFor(view);
     /*
      * What every pane is as a TILE, whatever it is showing.
@@ -1407,8 +1415,8 @@ export function App() {
       onFocus: () => chatGroups.focus(paneId),
       ...(chatGroups.canSplit ? {
         canSplit: true,
-        onSplit: (axis: ChatGroupSplitAxis) => chatGroups.split(paneId, axis),
-        splitFits: (axis: ChatGroupSplitAxis) => chatGroups.splitFits(
+        onSplit: (axis: PaneSplitAxis) => chatGroups.split(paneId, axis),
+        splitFits: (axis: PaneSplitAxis) => chatGroups.splitFits(
           paneId, axis, measuredCanvasSize(chatGroupCanvasRef.current),
         ),
       } : {}),
@@ -1463,12 +1471,14 @@ export function App() {
       bodyInset: "none" | "page" = "page",
     ) => {
       const PaneIcon = BUILTIN_VIEW_ICONS[view];
+      const title = t(BUILTIN_LABEL_KEYS[view]);
       return paneShell(view, (
         <PaneFrame
-          title={t(BUILTIN_LABEL_KEYS[view])}
+          title={title}
           icon={<PaneIcon className="h-4 w-4" />}
           bodyInset={bodyInset}
           onClose={closePane}
+          closeLabel={routedCloseLabel(title)}
           {...asTile}
         >
           {body}
@@ -1585,11 +1595,12 @@ export function App() {
       icon: pluginPane.view?.icon,
       iconText: pluginPane.view?.iconText,
     });
+    const pluginTitle = pluginPane.view
+      ? getPluginViewLabel(pluginPane.view)
+      : t("be_pluginUiHost.pluginUiTitle");
     return paneShell(view, (
       <PaneFrame
-        title={pluginPane.view
-          ? getPluginViewLabel(pluginPane.view)
-          : t("be_pluginUiHost.pluginUiTitle")}
+        title={pluginTitle}
         description={pluginPane.view?.extension.description
           ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
         icon={(
@@ -1598,6 +1609,7 @@ export function App() {
           </Suspense>
         )}
         onClose={closePane}
+        closeLabel={routedCloseLabel(pluginTitle)}
         {...asTile}
       >
         <PluginUiHostView
@@ -1962,13 +1974,13 @@ export function App() {
                                     than nested flex containers, so a tile's rectangle is
                                     one number that the layout, a drag hit-test, and a
                                     measurement in a test all read the same way. */}
-                                <div className="min-h-0 min-w-0 flex-1 pb-(--chrome-gap) pl-(--chrome-gap-tight) pr-(--chrome-gap) pt-0" data-testid="chat-group-row">
+                                <div className="min-h-0 min-w-0 flex-1 pb-(--chrome-gap) pl-(--chrome-gap-tight) pr-(--chrome-gap) pt-0" data-testid="pane-row">
                                 {/* The positioning context is INSIDE the padding: an
                                     absolutely-positioned child resolves against the padding
                                     box, so anchoring the tiles to the row itself would eat
                                     the air that lines the chat group's bottom edge up with
                                     the sidebar's. */}
-                                <div ref={chatGroupCanvasRef} className="relative h-full w-full" data-testid="chat-group-canvas">
+                                <div ref={chatGroupCanvasRef} className="relative h-full w-full" data-testid="pane-canvas">
                                 {chatGroups.groups.map((group) => (
                                 <div
                                   key={group.id}
@@ -1985,7 +1997,7 @@ export function App() {
                                      subscription, its streaming flag and its stop
                                      control all live inside the tile. */
                                   style={{ ...areaStyle(group.box), ...(group.hidden ? { display: "none" } : {}) }}
-                                  data-testid={`chat-group-cell:${group.id}`}
+                                  data-testid={`pane-cell:${group.id}`}
                                   data-hidden={group.hidden ? "true" : undefined}
                                 >
                                   {/* What this pane is showing. A routed view replaces
@@ -2033,8 +2045,8 @@ export function App() {
                                       || (chatGroups.contentById[group.id]?.view ?? "home") !== "home"}
                                     onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
                                   >
-                                    {({ actions, content, currentSessionId: tileSessionId }) => (
-                                      <ChatGroupFrame
+                                    {({ actions, trailing, content, currentSessionId: tileSessionId }) => (
+                                      <PaneFrame
                                         title={
                                           sessions.find((session: SessionSummary) => session.id === tileSessionId)?.title
                                           ?? t("mainToolbar.newChat")
@@ -2044,12 +2056,16 @@ export function App() {
                                         onSessionDrop={(sessionId, target) =>
                                           handleSessionDrop(group.id, sessionId, target)}
                                         canSplit={chatGroups.canSplit}
-                                        panelOpen={group.panelOpen}
-                                        onTogglePanel={() => chatGroups.setPanelOpen(group.id, !group.panelOpen)}
+                                        /* A conversation lays out its own transcript and composer to
+                                           the hairline, and its work panel lands in the frame's aside
+                                           slot — the two things this pane's content brings. */
+                                        asideSlot
+                                        bodyInset="none"
+                                        trailing={trailing}
                                         actions={actions}
                                         {...(chatGroups.canSplit ? {
-                                          onSplit: (axis: ChatGroupSplitAxis) => chatGroups.split(group.id, axis),
-                                          splitFits: (axis: ChatGroupSplitAxis) => chatGroups.splitFits(
+                                          onSplit: (axis: PaneSplitAxis) => chatGroups.split(group.id, axis),
+                                          splitFits: (axis: PaneSplitAxis) => chatGroups.splitFits(
                                             group.id, axis, measuredCanvasSize(chatGroupCanvasRef.current),
                                           ),
                                         } : {})}
@@ -2060,7 +2076,7 @@ export function App() {
                                         } : {})}
                                       >
                                         {content}
-                                      </ChatGroupFrame>
+                                      </PaneFrame>
                                     )}
                                   </ChatGroupSession>
                                   </div>
@@ -2070,7 +2086,7 @@ export function App() {
                                     leave between tiles, so the bar's strip is exactly
                                     the gap and steals nothing from either transcript. */}
                                 {chatGroups.gutters.map((gutter) => (
-                                  <ChatGroupGutter
+                                  <PaneGutter
                                     key={gutter.key}
                                     gutter={gutter}
                                     canvasRef={chatGroupCanvasRef}

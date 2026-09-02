@@ -60,7 +60,7 @@ test.describe("side-chat tab", () => {
   });
 
   test("opens the side-chat tab and renders the dedicated SideChatView", async () => {
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
 
     // The launcher exposes side chat as a first-class workspace item.
@@ -84,7 +84,7 @@ test.describe("side-chat tab", () => {
   });
 
   test("side-chat renders tool / thinking / permission through the shared TranscriptRenderer", async () => {
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await page.getByTestId(chatSidePanelLauncherTestId("side-chat")).click();
     await expect(page.getByTestId("side-chat-view")).toBeVisible();
 

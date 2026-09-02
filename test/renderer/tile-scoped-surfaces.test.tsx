@@ -26,7 +26,7 @@ import {
 import { MOCK_DEFAULT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../src/contract/app-contract.js";
 import { BLOCKING_SURFACE_SELECTOR } from "../../src/shared/test-ids.js";
-import { CHAT_SESSION_DRAG_TYPE } from "../../src/ui/renderer/components/chat-group-drop.js";
+import { CHAT_SESSION_DRAG_TYPE } from "../../src/ui/renderer/components/pane-drop.js";
 
 /** The permission namespace's subscriptions, as the mock records them. */
 function permissionSubscription(api: MockLvisApi, name: string): ReturnType<typeof vi.fn> {
@@ -769,7 +769,7 @@ describe("cards raised by one of three tiles", () => {
   const band = (tile: { element: HTMLElement }) =>
     tile.element.querySelector('[data-testid="approval-waiting-band"]');
   const tileCell = (node: Element) =>
-    node.closest<HTMLElement>('[data-testid^="chat-group-cell:"]');
+    node.closest<HTMLElement>('[data-testid^="pane-cell:"]');
   /**
    * The tiles that did not ask: nothing covers them, their composers are not
    * inert, and each takes the keyboard — focus lands, typed text stays.
@@ -1306,7 +1306,7 @@ describe("opening a conversation while another is mid-turn", () => {
         expect(band?.textContent).toContain("숨은 타일의 카드");
       });
       const hiddenTile = container.querySelector<HTMLElement>(
-        `[data-testid="chat-group-cell:${MAIN_CHAT_GROUP_ID}"]`,
+        `[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`,
       );
       expect(hiddenTile?.getAttribute("data-hidden")).toBe("true");
       expect(hiddenTile?.textContent).not.toContain("숨은 타일의 카드");
@@ -1349,7 +1349,7 @@ describe("opening a conversation while another is mid-turn", () => {
       await waitFor(() => expect(mountedTileIds(container).length).toBe(2));
 
       const hiddenTile = container.querySelector<HTMLElement>(
-        `[data-testid="chat-group-cell:${MAIN_CHAT_GROUP_ID}"]`,
+        `[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`,
       )!;
       expect(hiddenTile.getAttribute("data-hidden")).toBe("true");
       // Still exactly one card, and it is no longer the one inside the tile
@@ -1406,7 +1406,7 @@ describe("opening a conversation while another is mid-turn", () => {
       });
 
       const hiddenTile = container.querySelector<HTMLElement>(
-        `[data-testid="chat-group-cell:${MAIN_CHAT_GROUP_ID}"]`,
+        `[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`,
       )!;
       expect(hiddenTile.getAttribute("data-hidden")).toBe("true");
       await waitFor(() => {
@@ -1436,7 +1436,7 @@ describe("opening a conversation while another is mid-turn", () => {
 
     // A centre drop asks the tile to SHOW this conversation, which is the one
     // thing a mid-turn tile cannot do — the same refusal the sidebar hit.
-    const frame = second!.element.querySelector('[data-testid="chat-group"]')!;
+    const frame = second!.element.querySelector('[data-testid="pane"]')!;
     vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
       left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, x: 0, y: 0,
       toJSON: () => ({}),

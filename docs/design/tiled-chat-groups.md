@@ -260,7 +260,7 @@ than a second hook.
 
 A split has no id, so a gutter is named by its position: the path of child
 indices down to the split that owns it, plus the index of the pair it sits
-between. `ChatGroupGutter.key` is that position written as a string — it is
+between. `PaneGutter.key` is that position written as a string — it is
 how the DOM addresses a gutter, and it survives a resize because a resize
 changes shares, not shape. Either side of a gutter may itself be a split.
 
@@ -397,7 +397,7 @@ own lane and take clicks meant for it.
 
 Because a band takes its height out of the grid, its cap comes from the grid's
 own arithmetic rather than from a share of the viewport: the shortest tile must
-still clear `CHAT_GROUP_MIN_HEIGHT` plus the cell inset and the tile row's
+still clear `PANE_MIN_HEIGHT` plus the cell inset and the tile row's
 bottom gutter — the floor a split or a gutter drag already holds it to — and the
 band gets what is left, down to `WINDOW_DOCK_MIN_HEIGHT`, below which the card
 scrolls inside itself instead of taking more. A fraction of the window would be
@@ -407,7 +407,7 @@ and leaves 59px frames with no transcript at all, while the cap holds the band
 at 144px and the frames at 282px. The cap is a ceiling, not a size: with one
 short card the band settles at 112px on its own and the frames keep 298px.
 
-`CHAT_GROUP_MIN_HEIGHT` is the measured floor, not a round number: it is the
+`PANE_MIN_HEIGHT` is the measured floor, not a round number: it is the
 frame height at which a tile still holds a header, a composer, AND one visible
 turn. Shrinking the window with one tile up, the turn goes first — at a 290px
 frame the transcript viewport is 11px, at 270px it is 0 and the composer starts

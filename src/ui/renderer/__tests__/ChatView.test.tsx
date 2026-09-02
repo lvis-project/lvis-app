@@ -1057,7 +1057,7 @@ describe("ChatView", () => {
     });
 
     const openButton = await waitFor(() => {
-      const button = container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle)) as HTMLButtonElement | null;
+      const button = container.querySelector(testIdSelector(TEST_IDS.panePanelToggle)) as HTMLButtonElement | null;
       expect(button).not.toBeNull();
       return button!;
     });
@@ -1153,7 +1153,7 @@ describe("ChatView", () => {
     expect(container.querySelector('[data-testid="chat-side-panel-subagent-viewer"]')).toBeNull();
 
     await act(async () => {
-      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))!);
     });
     const subagentLauncher = await waitFor(() => {
       const button = container.querySelector('[data-testid="chat-side-panel-launcher-subagent"]') as HTMLButtonElement | null;
@@ -1239,11 +1239,11 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("[File #1]");
       expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
-      expect(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))).not.toBeNull();
+      expect(container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))).not.toBeNull();
     });
 
     await act(async () => {
-      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))!);
     });
 
     await waitFor(() => {

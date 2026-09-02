@@ -29,10 +29,10 @@ import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 /** Which pane the window is ON — the one the frame marks focused. */
 const focusedPaneId = (container: HTMLElement) =>
   container
-    .querySelector('[data-testid="chat-group"][data-focused="true"]')
-    ?.closest('[data-testid^="chat-group-cell:"]')
+    .querySelector('[data-testid="pane"][data-focused="true"]')
+    ?.closest('[data-testid^="pane-cell:"]')
     ?.getAttribute("data-testid")
-    ?.slice("chat-group-cell:".length) ?? null;
+    ?.slice("pane-cell:".length) ?? null;
 
 /** The rendered path text, which is what the user actually reads. */
 const path = (container: HTMLElement) =>
