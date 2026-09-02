@@ -14,6 +14,7 @@ import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-
 import { SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { formatIpcError } from "../format-ipc-error.js";
+import { formatBytes } from "../../../lib/turn-summary-format.js";
 
 interface CrashDumpMeta {
   name: string;
@@ -48,12 +49,6 @@ interface DiagnosticsApi {
 
 function api(): DiagnosticsApi {
   return (window as unknown as { lvisApi: DiagnosticsApi }).lvisApi;
-}
-
-function humanBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const LOG_LEVELS = ["all", "error", "warn", "info", "debug"] as const;
@@ -118,7 +113,7 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
         includeCrashDumps,
       });
       if (res.ok) {
-        setExportMsg(t("auditTab.bundleExportSuccess", { bytes: humanBytes(res.bytes) }));
+        setExportMsg(t("auditTab.bundleExportSuccess", { bytes: formatBytes(res.bytes) }));
       } else if ("canceled" in res && res.canceled) {
         setExportMsg(t("auditTab.bundleExportCanceled"));
       } else {
@@ -275,7 +270,7 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
                     <td className="px-3 py-1.5 text-muted-foreground font-mono text-[10px] whitespace-nowrap">
                       {c.mtime.slice(0, 19).replace("T", " ")}
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{humanBytes(c.size)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{formatBytes(c.size)}</td>
                   </tr>
                 ))}
               </tbody>
