@@ -26,8 +26,20 @@ export const MIN_DOCKED_TRANSCRIPT_WIDTH = 320;
  * split tile, a hand-shrunk work-mode window).
  */
 export const DOCK_ENTER_WIDTH = SIDE_PANEL_MIN_RESERVE + MIN_DOCKED_TRANSCRIPT_WIDTH;
-/** Exit width — 60px dead-band above enter to avoid flip-flop near the boundary. */
-export const DOCK_EXIT_WIDTH = DOCK_ENTER_WIDTH + 60;
+/**
+ * Every narrow threshold exits this much above where it enters, so a drag that
+ * hovers on the boundary cannot flip-flop the layout.
+ */
+const NARROW_DEAD_BAND_PX = 60;
+export const DOCK_EXIT_WIDTH = DOCK_ENTER_WIDTH + NARROW_DEAD_BAND_PX;
+
+/**
+ * Settings panel width below which its sidebar + content master-detail is too
+ * cramped and collapses to a two-depth stack (≈ Tailwind `sm`). Panel width,
+ * not viewport: the inline Settings panel can be narrow on a wide display.
+ */
+export const SETTINGS_NARROW_ENTER_WIDTH = 640;
+export const SETTINGS_NARROW_EXIT_WIDTH = SETTINGS_NARROW_ENTER_WIDTH + NARROW_DEAD_BAND_PX;
 
 type SidePanelLayoutMode = "docked" | "overlay";
 
