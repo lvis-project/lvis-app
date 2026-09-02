@@ -49,6 +49,8 @@ import {
 } from "./storage/feature-namespace.js";
 import { hasExactKeys, isRecord } from "../shared/is-record.js";
 import { isNonNegativeSafeInteger, isPositiveSafeInteger } from "../shared/safe-integer.js";
+import { createSerialQueue } from "../lib/with-file-lock.js";
+
 
 const STORE_VERSION = 1;
 /** Feature namespace shared by the connection store and the bridge server (`command-receipts.json`). */
@@ -555,27 +557,6 @@ function pairingRecord(value: StoredPairing): TelegramPairingRecord {
 }
 
 /**
- * Serialize mutations so a read-modify-write pair can never interleave with
- * another one and drop a persisted epoch bump.
- */
-function createMutex(): <T>(work: () => Promise<T>) => Promise<T> {
-  let tail: Promise<void> = Promise.resolve();
-  return async <T>(work: () => Promise<T>): Promise<T> => {
-    const previous = tail;
-    let release!: () => void;
-    tail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    try {
-      return await work();
-    } finally {
-      release();
-    }
-  };
-}
-
-/**
  * Call `open()` before any read. State is held in memory so the egress fence
  * can resolve an approval synchronously.
  */
@@ -588,7 +569,12 @@ export function createTelegramConnectionStore(
   const randomUuid = options.randomUuid ?? nodeRandomUuid;
   const deriveConversationDigest = options.conversationDigestFor;
   const listeners = new Set<ChangeListener>();
-  const runExclusive = createMutex();
+  /**
+   * Serialize mutations so a read-modify-write pair can never interleave with
+   * another one and drop a persisted epoch bump.
+   */
+  const runExclusive = createSerialQueue();
+
   let document: StoreDocument | undefined;
 
   if (!FILE_NAME.test(fileName)) throw invalid();

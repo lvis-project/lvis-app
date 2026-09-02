@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { logPluginLifecycle, PluginPhase } from "./lifecycle-log.js";
 import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
-import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
+import { FileLockReleaseError, withFileLock, withInProcessFileQueue } from "../lib/with-file-lock.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { resolveTrustedRegistryManifestPath } from "./registry-manifest-trust.js";
 import { isRecord, isStringArray } from "../shared/is-record.js";
@@ -435,14 +435,14 @@ export function resolveManifestPathsFromRegistry(
     });
 }
 
-// ─── In-process async mutex ──────────────────────────────────────────
+// ─── Registry transaction ────────────────────────────────────────────
 //
-// Serialize in-process contenders before acquiring the cross-process lock.
-// The lock target is a stable sibling anchor: withFileLock may create its
-// target, so it must never point at registry.json (a missing registry means
-// empty state, while an empty registry file is corruption).
+// Serialize in-process contenders (withInProcessFileQueue) before acquiring
+// the cross-process lock. The lock target is a stable sibling anchor:
+// withFileLock may create its target, so it must never point at registry.json
+// (a missing registry means empty state, while an empty registry file is
+// corruption).
 
-const registryLocks = new Map<string, Promise<void>>();
 const registryMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 
 async function withRegistryTransaction<T>(
@@ -450,8 +450,7 @@ async function withRegistryTransaction<T>(
   mutator: (registry: PluginRegistry) => T,
 ): Promise<T> {
   const key = resolve(registryPath);
-  const prev = registryLocks.get(key) ?? Promise.resolve();
-  const next = prev.then(async () => {
+  return withInProcessFileQueue(key, async () => {
     try {
       const committed = await withFileLock(
         `${key}.lock-anchor`,
@@ -511,15 +510,8 @@ async function withRegistryTransaction<T>(
       return committed.mutationResult;
     }
   });
-  // Next acquirer chains off this turn's completion, regardless of success.
-  const tail = next.then(() => undefined, () => undefined);
-  registryLocks.set(key, tail);
-  try {
-    return await next;
-  } finally {
-    if (registryLocks.get(key) === tail) registryLocks.delete(key);
-  }
 }
+
 
 function isCommittedAtomicWriteError(error: unknown): error is Error & { committed: true } {
   return error instanceof Error && (error as { committed?: unknown }).committed === true;

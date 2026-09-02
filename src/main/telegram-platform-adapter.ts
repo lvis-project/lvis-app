@@ -29,6 +29,7 @@ import {
 } from "../engine/shared-conversation-projection.js";
 import { isSharedApprovalToolIdentifier } from "../shared/permission-review-status.js";
 import { isPositiveSafeInteger, requirePositiveInteger } from "../shared/safe-integer.js";
+import { sleep } from "../shared/abortable-deadline.js";
 import { TELEGRAM_BOT_TOKEN_PATH_GRAMMAR } from "../shared/telegram-connection.js";
 
 const MAX_TELEGRAM_BOT_TOKEN_CHARS = 256;
@@ -457,7 +458,7 @@ export function createTelegramOutboundTransport(
   const endpoint = `https://api.telegram.org/bot${botToken}/sendMessage`;
   const isChannelCurrent = options.isChannelCurrent;
   const now = options.now ?? monotonicNow;
-  const wait = options.wait ?? defaultTelegramWait;
+  const wait = options.wait ?? sleep;
   const log = options.log;
   const lastDeliveryAttemptAt = new Map<string, number>();
   let lastGlobalDeliveryAttemptAt: number | undefined;
@@ -945,13 +946,6 @@ function readTelegramNow(now: () => number): number {
 function telegramDeliveryDelay(previousAttemptAt: number, currentTime: number, minIntervalMs: number): number {
   const elapsed = Math.max(0, currentTime - previousAttemptAt);
   return Math.max(0, minIntervalMs - elapsed);
-}
-
-function defaultTelegramWait(milliseconds: number, _signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    timer.unref();
-  });
 }
 
 function waitForTelegramDelay(

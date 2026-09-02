@@ -6,46 +6,40 @@
  * bound aggregate memory when different plugin IDs install concurrently, so
  * production plugin and MCP install orchestration share this one FIFO slot.
  */
-let tail: Promise<void> = Promise.resolve();
+import { createSerialQueue } from "../lib/with-file-lock.js";
+
+const slot = createSerialQueue();
 
 export async function withMarketplaceArtifactResourceSlot<T>(
   operation: () => Promise<T>,
   options: { signal?: AbortSignal } = {},
 ): Promise<T> {
-  const predecessor = tail;
-  let release!: () => void;
-  tail = new Promise<void>((resolve) => {
-    release = resolve;
-  });
   const signal = options.signal;
-  if (signal?.aborted) {
-    void predecessor.then(release, release);
-    throw abortedWhileQueued();
-  }
+  if (signal?.aborted) throw abortedWhileQueued();
+  let started = false;
+  const turn = slot(async () => {
+    // A caller that gave up while queued must not consume the slot.
+    if (signal?.aborted) throw abortedWhileQueued();
+    started = true;
+    return operation();
+  });
+  if (!signal) return turn;
+  // Only the wait is abortable: once `operation` runs, its own signal handling
+  // decides, and this gate no longer stands between the caller and the result.
   let onAbort: (() => void) | undefined;
-  const aborted = signal
-    ? new Promise<never>((_resolve, reject) => {
-        onAbort = () => reject(abortedWhileQueued());
-        signal.addEventListener("abort", onAbort, { once: true });
-      })
-    : null;
+  const abortedWhileWaiting = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      if (!started) reject(abortedWhileQueued());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
   try {
-    if (aborted) await Promise.race([predecessor, aborted]);
-    else await predecessor;
+    return await Promise.race([turn, abortedWhileWaiting]);
   } catch (err) {
-    void predecessor.then(release, release);
+    if (!started) void turn.catch(() => undefined);
     throw err;
   } finally {
-    if (onAbort) signal?.removeEventListener("abort", onAbort);
-  }
-  if (signal?.aborted) {
-    release();
-    throw abortedWhileQueued();
-  }
-  try {
-    return await operation();
-  } finally {
-    release();
+    if (onAbort) signal.removeEventListener("abort", onAbort);
   }
 }
 
