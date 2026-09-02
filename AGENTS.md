@@ -310,10 +310,12 @@ there breaks the build. Concretely, and measured over `web/`:
   name that merely starts with an allowed one, and a new name sharing a line
   with an allowed one. Adding a fourth entry is a review decision, not a way
   around the rule: justify the domain word or pick a different one.
-- Shared test support that several suites import lives in `src/testing/` and is
-  named for what it provides — `sign-envelope-fixture.ts`,
+- Shared test support that several suites import lives in
+  `src/__tests__/support/` and is named for what it provides —
+  `tmp-dir-teardown.ts`, `sign-envelope-fixture.ts`,
   `host-shell-sandbox-fixtures.ts` — never for being fake. Nothing outside
-  tests imports it (0 inbound production imports).
+  tests imports it (0 inbound production imports). Look there before writing
+  a helper a second time.
 - A production seam that exists for tests is suffixed `ForTest` and carries a
   leading underscore marking it as outside the module's API:
   `__resetSessionStoreForTest`, `_resetForTest`. One suffix spelling; see
@@ -554,7 +556,7 @@ matches none, and both results look like measurements. State a number only for
 the scope you ran it over; a query that cannot run is not a query that returned
 zero.
 
-    # <gate scan> — every file the naming gate reads (1634)
+    # <gate scan> — every file the naming gate reads (1582)
     git ls-files | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' \
       | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)'
 
@@ -631,9 +633,10 @@ zero.
     git ls-files | grep -E '\.(ts|tsx)$' \
       | xargs grep -nE '^(export )?(declare )?(const )?enum [A-Za-z]'
 
-    # src/testing/: 0 inbound imports from outside a test
-    <file set> | grep -v '^src/testing/' \
-      | xargs grep -nE "from ['\"][^'\"]*/testing/"
+    # src/__tests__/support/: 0 inbound imports from outside a test. The file
+    # set already drops every `__tests__/` path, so no exclusion is needed —
+    # an exclusion of a directory that does not exist reads as 0 forever.
+    <file set> | xargs grep -nE "from ['\"][^'\"]*__tests__/support/"
 
     # PermissionDecisionCard.tsx: 3 importing modules. The generated i18n
     # message module shares the stem and is not one of them.
