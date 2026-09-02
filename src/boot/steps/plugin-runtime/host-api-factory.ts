@@ -59,7 +59,7 @@ import { auditPluginEmitDenial } from "../../../plugins/emit-denial-audit.js";
 import { getDeclaredEmittedEvents } from "../../../plugins/runtime/manifest-validation.js";
 import { applyConfigDefaults } from "../../../plugins/config-schema.js";
 import { shouldRestartAfterPluginConfigWrite } from "../../../plugins/config-restart-policy.js";
-import { OVERLAY_V1 } from "../../../shared/ipc-channels.js";
+import { OVERLAY_V1, WORK_BOARD } from "../../../shared/ipc-channels.js";
 import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
@@ -76,6 +76,7 @@ import type {
 } from "../../../plugins/types.js";
 import type { SettingsService } from "../../../data/settings-store.js";
 import type { RoutinesStore } from "../../../main/routines-store.js";
+import type { WorkBoardStore } from "../../../main/work-board-store.js";
 import { emitEvent, onEvent } from "../../types.js";
 import { t } from "../../../i18n/index.js";
 import { createLogger } from "../../../lib/logger.js";
@@ -102,11 +103,30 @@ import {
   triggerConversationDedupe,
   triggerConversationRateLimiter,
   triggerDenyAuditThrottle,
+  TriggerConversationRateLimiter,
 } from "./trigger-gate.js";
+import { getDeclaredWorkProposalKinds } from "../../../plugins/runtime/manifest-validation.js";
+import type {
+  WorkProposalChangedEventPayload,
+  WorkProposalInput,
+  WorkProposalResult,
+} from "../../../shared/work-board-types.js";
 import type { LateBindingRefs } from "../plugin-runtime.js";
 import { sha256Hex } from "../../../lib/hex-digest-equal.js";
+import { proposalId } from "../../../work-board/board-file.js";
 
 const log = createLogger("lvis");
+
+/**
+ * Churn budget for `proposeWork`, in its own bucket.
+ *
+ * The declared-kind slot ceiling bounds how many cards a plugin can have OPEN;
+ * it does not bound how often it rewrites the one it has. This is the
+ * secondary defence against upsert thrash — the same sliding-window class the
+ * overlay trigger uses, with its own counters so a chatty proposer cannot
+ * spend the overlay budget or the reverse.
+ */
+const workProposalRateLimiter = new TriggerConversationRateLimiter();
 
 function assertActiveHostApi(
   pluginId: string,
@@ -263,6 +283,14 @@ export interface CreateHostApiFactoryDeps {
   approvalGate: import("../../../permissions/approval-gate.js").ApprovalGate;
   permissionManager?: import("../../../permissions/permission-manager.js").PermissionManager;
   routinesStore: RoutinesStore;
+  /**
+   * Late-bound Work Board store — `setupWorkBoard` runs AFTER
+   * `initPluginRuntime`, so this reads the boot context rather than capturing a
+   * value that does not exist yet. Plugins only start well after both, so a
+   * `proposeWork` that finds nothing here is a boot-order defect, not a state
+   * to degrade around.
+   */
+  getWorkBoardStore: () => WorkBoardStore | undefined;
 }
 
 /**
@@ -304,6 +332,7 @@ export function createHostApiFactory(
     approvalGate,
     permissionManager,
     routinesStore,
+    getWorkBoardStore,
   } = deps;
 
   /**
@@ -360,6 +389,33 @@ export function createHostApiFactory(
       hostIncarnation.registerDisposer(disposeOnce);
       hostEffects?.registerDisposer(disposeOnce);
       return disposeOnce;
+    };
+    /**
+     * The Work Board store, or a loud failure. Plugins start long after
+     * `setupWorkBoard`, so an absent store is a boot-order defect — degrading
+     * to a silent no-op would make a plugin's proposal vanish with no signal.
+     */
+    const requireWorkBoardStore = (): WorkBoardStore => {
+      const store = getWorkBoardStore();
+      if (!store) {
+        throw new Error(
+          `[plugin:${pluginId}] hostApi.proposeWork: work board store is not constructed`,
+        );
+      }
+      return store;
+    };
+    /** Tell renderer windows the proposal set moved, so the board re-lists. */
+    const notifyProposalChanged = (
+      id: string,
+      change: WorkProposalChangedEventPayload["change"],
+    ): void => {
+      const target = liveMainWindow();
+      if (target.isDestroyed()) return;
+      target.webContents.send(WORK_BOARD.proposalChanged, {
+        proposalId: id,
+        change,
+        changedAt: new Date().toISOString(),
+      } satisfies WorkProposalChangedEventPayload);
     };
     const assertIssuedCapabilityActive = (memberPath: string): void => {
       if (!hostIncarnation.isActive()) {
@@ -1593,6 +1649,49 @@ export function createHostApiFactory(
           return false;
         }
         return routinesStore.list().some((r) => r.source === source);
+      },
+
+      // ─── Recommended work — hostApi.proposeWork() / withdrawWorkProposal() ──
+      // The plugin-facing door to the host's Work Board. What arrives here is
+      // TEXT AND A KEY; identity and the grant are the host's, and the start
+      // action is the board's own plan → approve → execute sequence, so nothing
+      // executable crosses this boundary.
+      //
+      // Authorization is INFERRED from the installed manifest's declared
+      // `workProposals.kinds`, exactly as emit authorization is inferred from
+      // `emittedEvents` — no capability string, and a kind the plugin did not
+      // declare is refused rather than defaulted.
+      proposeWork: async (input: WorkProposalInput): Promise<WorkProposalResult> => {
+        if (!input || typeof input !== "object" || typeof input.kind !== "string") {
+          return { status: "invalid", field: "kind" };
+        }
+        if (workProposalRateLimiter.isOverCap(pluginId)) {
+          return { status: "rate_limited" };
+        }
+        const result = await requireWorkBoardStore().upsertProposal(
+          {
+            pluginId,
+            // `name ?? id` is the manifest's own documented rule for an
+            // authored manifest that omits the display name — not a stand-in
+            // for a missing value.
+            pluginLabel: manifest.name ?? pluginId,
+            grantedKinds: getDeclaredWorkProposalKinds(manifest, pluginId),
+          },
+          input,
+        );
+        workProposalRateLimiter.record(pluginId);
+        if (result.status === "ok") notifyProposalChanged(result.proposal.id, "posted");
+        return result;
+      },
+
+      withdrawWorkProposal: async (kind: string, key: string): Promise<boolean> => {
+        if (typeof kind !== "string" || typeof key !== "string") return false;
+        const withdrawn = await requireWorkBoardStore().withdrawProposal(pluginId, kind, key);
+        // The id is derived from the CALLER's plugin id, so a plugin naming
+        // another's kind and key cannot address that proposal at all — there is
+        // nothing to refuse, only nothing to find.
+        if (withdrawn) notifyProposalChanged(proposalId(pluginId, kind, key.trim()), "withdrawn");
+        return withdrawn;
       },
         }),
         {

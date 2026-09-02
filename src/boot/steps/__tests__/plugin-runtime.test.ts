@@ -382,6 +382,8 @@ describe("initPluginRuntime partition policy", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const handler = vi.fn(async () => {});
@@ -454,6 +456,8 @@ describe("initPluginRuntime partition policy", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const onEnable = runtimeTestState.capturedRuntimeOptions?.onEnable as
@@ -537,6 +541,8 @@ describe("initPluginRuntime partition policy", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     // Post-`startAll` loop: every plugin that can render a UI view.
@@ -633,6 +639,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -830,6 +838,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: approvalGate as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -933,6 +943,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: approvalGate as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1028,6 +1040,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1088,6 +1102,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1236,6 +1252,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1366,6 +1384,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1476,6 +1496,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1550,6 +1572,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1635,6 +1659,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1743,6 +1769,8 @@ describe("initPluginRuntime HostApi factory", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions
@@ -1830,6 +1858,8 @@ describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () =>
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => records } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
     });
     const createHostApi = runtimeTestState.capturedRuntimeOptions
       ?.createHostApi as CreateHostApi | undefined;
@@ -1941,6 +1971,8 @@ describe("initPluginRuntime sandbox union ordering", () => {
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
       routinesStore: { list: () => [] } as never,
+      // This harness has no Work Board; the proposal verbs are not exercised here.
+      getWorkBoardStore: () => undefined,
       deferStart: true,
       refreshSandboxUnionDomains,
     });

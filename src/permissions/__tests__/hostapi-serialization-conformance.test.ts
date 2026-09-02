@@ -387,6 +387,18 @@ const HOSTAPI_MARSHALLING: Record<string, MarshallingDecision> = {
     args: "source: string",
     returns: "Promise<boolean>",
   },
+  // Text and a key across, a discriminated envelope back. Nothing in either
+  // direction is a handle, so nothing has to survive the boundary but JSON.
+  proposeWork: {
+    jsonRepresentable: true,
+    args: "input: WorkProposalInput",
+    returns: "Promise<WorkProposalResult>",
+  },
+  withdrawWorkProposal: {
+    jsonRepresentable: true,
+    args: "kind: string, key: string",
+    returns: "Promise<boolean>",
+  },
   // ─── agentApproval.* ──────────────────────────────────────────────────────
   "agentApproval.request": {
     jsonRepresentable: true,
@@ -600,6 +612,18 @@ describe("hostApi marshalling — the surface a process boundary must carry", ()
       ["getSecret", await hostApi.getSecret("surface-probe-secret")],
       ["config.get", hostApi.config.get("surface-probe-key")],
       ["hasRoutineBySource", await hostApi.hasRoutineBySource("surface-probe")],
+      [
+        "proposeWork",
+        await hostApi.proposeWork({
+          kind: "surface-probe",
+          key: "surface-probe",
+          title: "surface probe",
+          summary: "surface probe",
+          state: "surface probe",
+          taskBrief: "surface probe",
+        }),
+      ],
+      ["withdrawWorkProposal", await hostApi.withdrawWorkProposal("surface-probe", "surface-probe")],
     ];
 
     for (const [path, value] of observed) {

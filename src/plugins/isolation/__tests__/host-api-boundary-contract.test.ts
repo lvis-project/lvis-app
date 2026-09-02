@@ -1,7 +1,7 @@
 /**
  * The boundary contract, held against the surface SOT.
  *
- * Two enumerations have to describe the same 36 members: the effect
+ * Two enumerations have to describe the same 38 members: the effect
  * classification (`HOSTAPI_EFFECT_BY_PATH`, which the completeness test already
  * ties to the REAL hostApi object) and the marshalling contract this work
  * introduces. If they drift, a member exists that the boundary has no decision

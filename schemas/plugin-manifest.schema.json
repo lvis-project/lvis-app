@@ -527,6 +527,50 @@
                 }
               }
             },
+            "workProposals": {
+              "type": "object",
+              "description": "Recommended-work channel declaration. Declaration IS authorization (no capability string): a plugin may post a proposal only in a kind declared here, and may hold at most ONE OPEN PROPOSAL PER DECLARED KIND — the declared list doubles as the nag ceiling. Absent or empty = the plugin may post nothing. A malformed block grants nothing rather than the entries that happened to parse.",
+              "additionalProperties": false,
+              "required": [
+                "kinds"
+              ],
+              "properties": {
+                "reasoning": {
+                  "type": "string",
+                  "description": "Human-readable justification surfaced to the user.",
+                  "maxLength": 400
+                },
+                "kinds": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 4,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "Slot id, unique within the plugin. Namespaced by the host as <pluginId>:<kind>.",
+                        "pattern": "^[a-z][a-z0-9-]{0,31}$",
+                        "not": {
+                          "pattern": "[\\r\\n]"
+                        }
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "User-facing name of the slot, shown in the install disclosure and on the card.",
+                        "minLength": 1,
+                        "maxLength": 60
+                      }
+                    }
+                  }
+                }
+              }
+            },
             "notificationEvents": {
               "type": "array",
               "items": {

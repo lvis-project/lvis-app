@@ -208,6 +208,7 @@ describe("preload contextBridge world shape lock", () => {
           ],
         },
         "lvisApi": {
+          "acceptWorkProposal": "function",
           "acknowledgeRoutineResult": "function",
           "acpSubscriptionCancelLogin": "function",
           "acpSubscriptionChooseRuntime": "function",
@@ -288,6 +289,7 @@ describe("preload contextBridge world shape lock", () => {
           ],
           "dismissRoutine": "function",
           "dismissTrigger": "function",
+          "dismissWorkProposal": "function",
           "dlp": [
             "getStats",
           ],
@@ -332,6 +334,7 @@ describe("preload contextBridge world shape lock", () => {
           "listSessionTasks": "function",
           "listSkills": "function",
           "listWorkBoard": "function",
+          "listWorkProposals": "function",
           "logs": [
             "tail",
           ],
@@ -422,6 +425,7 @@ describe("preload contextBridge world shape lock", () => {
           "onWorkBoardRunFinished": "function",
           "onWorkBoardRunProgress": "function",
           "onWorkBoardRunStarted": "function",
+          "onWorkProposalChanged": "function",
           "openExternalUrl": "function",
           "permission": [
             "addRule",

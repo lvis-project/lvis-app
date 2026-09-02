@@ -177,6 +177,8 @@ async function overlayHostApi(input: {
     shellOpenExternal: vi.fn(),
     approvalGate: { requestAndWait: vi.fn() } as never,
     routinesStore: { list: () => [] } as never,
+    // This harness has no Work Board; the proposal verbs are not exercised here.
+    getWorkBoardStore: () => undefined,
   });
   const createHostApi = (
     runtimeTestState.capturedRuntimeOptions as { createHostApi?: CreateHostApi } | null

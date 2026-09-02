@@ -50,6 +50,7 @@ import type {
   WorkItemChangedEventPayload,
   WorkItemGetResult,
   WorkItemResolved,
+  WorkProposalChangedEventPayload,
 } from "../../main/work-board-store.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 
@@ -326,5 +327,75 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
     if (existing.status !== "found") return { events: [] };
     const storage = createDirStorage(openFeatureNamespace("work-board").dir);
     return { events: await readRunTranscript(storage, itemId, runId) };
+  });
+
+  // ─── Recommended work (plugin-proposed cards) ────
+  // Plugins post and withdraw through HostApi (main-side); the renderer only
+  // READS the open set and answers it — accept, which promotes the proposal
+  // into an ordinary work item, or dismiss, which closes the card for good.
+  // There is deliberately no renderer write path that creates a proposal: a
+  // proposal is a plugin's claim, and the user's own additions are work items.
+
+  const broadcastProposalChanged = (
+    proposalId: string,
+    change: WorkProposalChangedEventPayload["change"],
+  ): void => {
+    const payload: WorkProposalChangedEventPayload = {
+      proposalId,
+      change,
+      changedAt: new Date().toISOString(),
+    };
+    for (const win of getAppWindows?.() ?? [getMainWindow()]) {
+      if (!win || win.isDestroyed()) continue;
+      win.webContents.send(WORK_BOARD.proposalChanged, payload);
+    }
+  };
+
+  ipcMain.handle(WORK_BOARD.listProposals, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, WORK_BOARD.listProposals, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!workBoardStore) return NO_STORE;
+    return workBoardStore.listProposals();
+  });
+
+  // Accept runs the ORDINARY create path, so the new item lands in the active
+  // project exactly as a hand-typed one does. Proposals themselves are not
+  // project-scoped — a plugin watching a mailbox has no project — so the
+  // project is decided here, at accept time, from the renderer's own workspace.
+  ipcMain.handle(WORK_BOARD.acceptProposal, async (e, proposalId: string, projectRoot?: string) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, WORK_BOARD.acceptProposal, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!workBoardStore) return NO_STORE;
+    if (typeof proposalId !== "string" || proposalId.length === 0) {
+      return { status: "invalid", reason: "proposalId is required" };
+    }
+    const resolved = resolveAuthorizedWorkspaceProject(projectRoot);
+    if (!resolved.authorized || !resolved.project) {
+      return { status: "invalid", reason: PROJECT_NOT_ALLOWED_REASON };
+    }
+    const result = await workBoardStore.acceptProposal(proposalId, {
+      projectRoot: resolved.project.projectRoot,
+      projectName: resolved.project.projectName,
+    });
+    if (result.status === "accepted") {
+      broadcastItemChanged(result.itemId, "created");
+      broadcastProposalChanged(proposalId, "accepted");
+    }
+    return result;
+  });
+
+  ipcMain.handle(WORK_BOARD.dismissProposal, async (e, proposalId: string) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, WORK_BOARD.dismissProposal, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!workBoardStore) return NO_STORE;
+    const result = await workBoardStore.dismissProposal(proposalId);
+    if (result.status === "dismissed") broadcastProposalChanged(proposalId, "dismissed");
+    return result;
   });
 }

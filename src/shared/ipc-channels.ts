@@ -65,6 +65,15 @@ export const WORK_BOARD = {
   // Renderer → main: read a past run's persisted transcript
   // (sessions/<itemId>/<runId>.jsonl) for the run-history view.
   runTranscript: "lvis:work-board:run-transcript",
+  // ─── Recommended work (plugin-proposed cards) ───────────────────────────
+  // Renderer → main: list the open proposals, accept one (creating the work
+  // item it becomes), or dismiss one.
+  listProposals: "lvis:work-board:list-proposals",
+  acceptProposal: "lvis:work-board:accept-proposal",
+  dismissProposal: "lvis:work-board:dismiss-proposal",
+  // Main → renderer: the proposal set moved — a plugin posted or withdrew one,
+  // or the user accepted or dismissed one — so the board re-lists.
+  proposalChanged: "lvis:work-board:proposal-changed",
 } as const;
 
 export const PERMISSIONS = {

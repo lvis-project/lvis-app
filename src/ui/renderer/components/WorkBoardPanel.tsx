@@ -33,6 +33,7 @@ import type {
   WorkItemResolved,
   WorkItemStatusStored,
   WorkItemUpdateInput,
+  WorkProposal,
 } from "../../../shared/work-board-types.js";
 import { MAX_ITEMS } from "../../../shared/work-board-types.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
@@ -1118,6 +1119,204 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
   );
 }
 
+// ─── Recommended work (plugin-proposed cards) ──────────────────────────────────
+//
+// A proposal is a plugin's claim that the user should consider something. It
+// carries text and a key and NOTHING EXECUTABLE — so 시작 does not run
+// anything the plugin supplied: it promotes the proposal into an ordinary work
+// item through the ordinary create path and then hands that item to the host's
+// own plan → approve → execute run, where the user still reads and approves the
+// plan before a single tool fires.
+//
+// Every string on this card was authored by a plugin. It is rendered as plain
+// text — no markdown, so no link or HTML surface — and the source plugin is
+// always named, because a card sitting inside the host's own board otherwise
+// reads as the host's own recommendation.
+
+function ProposalDetailPart({ heading, children }: { heading: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-2">
+      <h5 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{heading}</h5>
+      <div className="mt-1 text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">{children}</div>
+    </div>
+  );
+}
+
+function ProposalCard({
+  proposal,
+  busy,
+  onStart,
+  onLater,
+  onDismiss,
+}: {
+  proposal: WorkProposal;
+  busy: boolean;
+  onStart: (proposal: WorkProposal) => void;
+  onLater: (proposal: WorkProposal) => void;
+  onDismiss: (proposal: WorkProposal) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <article
+      className="rounded-lg border border-border/(--opacity-strong) bg-background p-3 shadow-sm"
+      data-testid="work-board-proposal-card"
+      data-proposal-id={proposal.id}
+    >
+      <div className="flex min-w-0 items-center gap-1.5">
+        <PriorityChip priority={proposal.priority} />
+        <span
+          className="min-w-0 line-clamp-1 text-sm font-semibold leading-snug text-foreground"
+          data-testid="work-board-proposal-title"
+        >
+          {proposal.title}
+        </span>
+      </div>
+      <p
+        className="mt-1.5 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+        data-testid="work-board-proposal-summary"
+      >
+        {proposal.summary}
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline" data-testid="work-board-proposal-source">
+          {t("workBoard.proposalSourceLabel", { plugin: proposal.pluginLabel })}
+        </Badge>
+        <span className="text-[11px] text-muted-foreground">{formatDue(proposal.dueAt)}</span>
+      </div>
+
+      {expanded && (
+        <div className="mt-2 border-t pt-2" data-testid="work-board-proposal-detail">
+          <ProposalDetailPart heading={t("workBoard.proposalStateHeading")}>
+            <p data-testid="work-board-proposal-state">{proposal.state}</p>
+          </ProposalDetailPart>
+          {proposal.evidence.length > 0 && (
+            <ProposalDetailPart heading={t("workBoard.proposalEvidenceHeading")}>
+              <ul className="space-y-0.5" data-testid="work-board-proposal-evidence">
+                {proposal.evidence.map((row) => (
+                  <li key={`${row.label}:${row.detail}`}>
+                    <span className="text-muted-foreground">{row.label}</span> — {row.detail}
+                  </li>
+                ))}
+              </ul>
+            </ProposalDetailPart>
+          )}
+          {proposal.blockers.length > 0 && (
+            <ProposalDetailPart heading={t("workBoard.proposalBlockersHeading")}>
+              <ul className="space-y-0.5" data-testid="work-board-proposal-blockers">
+                {proposal.blockers.map((row) => (
+                  <li key={row.reason}>
+                    {row.reason}
+                    {row.resolution ? ` — ${row.resolution}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </ProposalDetailPart>
+          )}
+        </div>
+      )}
+
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-[11px]"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          data-testid="work-board-proposal-expand"
+        >
+          {expanded ? t("workBoard.proposalCollapse") : t("workBoard.proposalExpand")}
+        </Button>
+        <div className="flex flex-wrap justify-end gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px]"
+            disabled={busy}
+            onClick={() => onDismiss(proposal)}
+            data-testid="work-board-proposal-dismiss"
+          >
+            {t("workBoard.proposalDismiss")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px]"
+            disabled={busy}
+            onClick={() => onLater(proposal)}
+            data-testid="work-board-proposal-later"
+          >
+            {t("workBoard.proposalLater")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 px-2 text-[11px]"
+            disabled={busy}
+            onClick={() => onStart(proposal)}
+            data-testid="work-board-proposal-start"
+          >
+            {busy ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <Play className="mr-1 h-3 w-3" />
+            )}
+            {t("workBoard.proposalStart")}
+          </Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * The 추천 작업 band above the lanes.
+ *
+ * Renders nothing at all when no proposal is open: an always-present empty
+ * shell would spend the top of the board on a permanent "nothing here".
+ */
+function ProposalsSection({
+  proposals,
+  pendingId,
+  onStart,
+  onLater,
+  onDismiss,
+}: {
+  proposals: WorkProposal[];
+  pendingId: string | null;
+  onStart: (proposal: WorkProposal) => void;
+  onLater: (proposal: WorkProposal) => void;
+  onDismiss: (proposal: WorkProposal) => void;
+}) {
+  if (proposals.length === 0) return null;
+  return (
+    <section
+      className="rounded-lg border bg-muted/(--opacity-light) shadow-sm"
+      data-testid="work-board-proposals"
+    >
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-4 py-2.5">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {t("workBoard.proposalsHeading")}
+        </h3>
+        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+          {proposals.length}
+        </span>
+      </div>
+      <div className="space-y-2 p-3">
+        {proposals.map((proposal) => (
+          <ProposalCard
+            key={proposal.id}
+            proposal={proposal}
+            busy={pendingId === proposal.id}
+            onStart={onStart}
+            onLater={onLater}
+            onDismiss={onDismiss}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // ─── Reports section (daily / weekly generation) ───────────────────────────────
 //
 // Generates a personal work report on demand: the daily / weekly buttons call
@@ -1240,6 +1439,8 @@ function ReportResultBlock({
 
 export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
   const [items, setItems] = useState<WorkItemResolved[]>([]);
+  const [proposals, setProposals] = useState<WorkProposal[]>([]);
+  const [pendingProposalId, setPendingProposalId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -1275,6 +1476,21 @@ export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
     });
     return unsub;
   }, [api, refresh]);
+
+  const refreshProposals = useCallback(async () => {
+    if (typeof api.listWorkProposals !== "function") return;
+    const result = await api.listWorkProposals();
+    if (!mountedRef.current) return;
+    setProposals("status" in result && result.status === "ok" ? result.proposals : []);
+  }, [api]);
+
+  useEffect(() => {
+    void refreshProposals();
+    if (typeof api.onWorkProposalChanged !== "function") return undefined;
+    return api.onWorkProposalChanged(() => {
+      void refreshProposals();
+    });
+  }, [api, refreshProposals]);
 
   const handleTransition = useCallback(
     async (id: number, to: WorkItemStatusStored) => {
@@ -1324,6 +1540,58 @@ export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
     return unsub;
   }, [api, refresh]);
 
+  /**
+   * Promote a proposal into a work item. Returns the new item id so the caller
+   * decides what happens next — 시작 hands it straight to the run, 나중에 stops
+   * here and leaves it sitting in 진행 예정.
+   */
+  const acceptProposal = useCallback(
+    async (proposal: WorkProposal): Promise<number | null> => {
+      if (typeof api.acceptWorkProposal !== "function") return null;
+      setPendingProposalId(proposal.id);
+      try {
+        const result = await api.acceptWorkProposal(proposal.id, project?.projectRoot);
+        if (!mountedRef.current) return null;
+        await refresh();
+        await refreshProposals();
+        return "status" in result && result.status === "accepted" ? result.itemId : null;
+      } finally {
+        if (mountedRef.current) setPendingProposalId(null);
+      }
+    },
+    [api, project, refresh, refreshProposals],
+  );
+
+  const onProposalStart = useCallback(
+    (proposal: WorkProposal) => {
+      void acceptProposal(proposal).then((itemId) => {
+        // The plugin supplied nothing executable: what runs is the host's own
+        // plan → approve → execute over the item the host just composed, and
+        // the user still approves the plan before anything fires.
+        if (itemId !== null) runItem(itemId);
+      });
+    },
+    [acceptProposal, runItem],
+  );
+
+  const onProposalLater = useCallback(
+    (proposal: WorkProposal) => void acceptProposal(proposal),
+    [acceptProposal],
+  );
+
+  const onProposalDismiss = useCallback(
+    (proposal: WorkProposal) => {
+      if (typeof api.dismissWorkProposal !== "function") return;
+      setPendingProposalId(proposal.id);
+      void api.dismissWorkProposal(proposal.id).finally(() => {
+        if (!mountedRef.current) return;
+        setPendingProposalId(null);
+        void refreshProposals();
+      });
+    },
+    [api, refreshProposals],
+  );
+
   const onStart = useCallback((id: number) => void handleTransition(id, "in_progress"), [handleTransition]);
   const onComplete = useCallback((id: number) => void handleComplete(id), [handleComplete]);
   const onReopen = useCallback((id: number) => void handleReopen(id), [handleReopen]);
@@ -1367,6 +1635,13 @@ export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
           </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          <ProposalsSection
+            proposals={proposals}
+            pendingId={pendingProposalId}
+            onStart={onProposalStart}
+            onLater={onProposalLater}
+            onDismiss={onProposalDismiss}
+          />
           <div className="grid min-h-0 gap-3 sm:grid-cols-3">
             <BoardColumn
               heading={t("workBoard.columnPlanned")}

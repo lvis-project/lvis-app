@@ -1121,6 +1121,29 @@ export type LvisApi = {
     | import("../../shared/work-board-types.js").WorkBoardReportResult
     | { ok: false; error: string }
   >;
+  // ─── Recommended work (plugin-proposed cards) ────
+  // Read-only from the renderer's side plus the two answers the user can give.
+  // Plugins post and withdraw over HostApi; there is no renderer create path.
+  listWorkProposals?: () => Promise<
+    | import("../../shared/work-board-types.js").WorkProposalListResult
+    | { ok: false; error: string }
+  >;
+  acceptWorkProposal?: (
+    proposalId: string,
+    projectRoot?: string,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkProposalAcceptResult
+    | { ok: false; error: string }
+  >;
+  dismissWorkProposal?: (
+    proposalId: string,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkProposalDismissResult
+    | { ok: false; error: string }
+  >;
+  onWorkProposalChanged?: (
+    handler: (payload: import("../../shared/work-board-types.js").WorkProposalChangedEventPayload) => void,
+  ) => () => void;
   // Read a past run's persisted transcript (plan+execute conversation) for the
   // run-history view. Resolves with the ordered events (empty when absent).
   getWorkBoardRunTranscript?: (

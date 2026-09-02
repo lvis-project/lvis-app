@@ -212,6 +212,12 @@ export function createNoopHostApi(
     }),
     // No routines SOT in a noop context — no routine can match any source.
     hasRoutineBySource: async () => false,
+    // A noop host has no board to post to. Refusing with the ordinary
+    // `kind_not_granted` envelope (rather than throwing) keeps a plugin's
+    // proposal path identical in a test harness and in the app: it branches on
+    // `status` either way.
+    proposeWork: async (input) => ({ status: "kind_not_granted", kind: input.kind }),
+    withdrawWorkProposal: async () => false,
     agentApproval: {
       request: async () => "deny-once" as const,
       respond: async () => {},

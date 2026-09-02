@@ -205,6 +205,13 @@ export interface InitPluginRuntimeInput {
    * therefore constructs it BEFORE calling initPluginRuntime.
    */
   routinesStore: RoutinesStore;
+  /**
+   * Work Board SOT — backs `hostApi.proposeWork` / `withdrawWorkProposal`.
+   * Late-bound (unlike `routinesStore`) because `setupWorkBoard` runs AFTER
+   * this step; plugins start later still, so the getter always answers by the
+   * time a proposal can arrive.
+   */
+  getWorkBoardStore: () => import("../../main/work-board-store.js").WorkBoardStore | undefined;
   /** Production defers activation until Skill/Hook/MCP lifecycle wiring exists. */
   deferStart?: boolean;
   /**
@@ -268,6 +275,7 @@ export async function initPluginRuntime(
     approvalGate,
     permissionManager,
     routinesStore,
+    getWorkBoardStore,
   } = input;
 
   // §B3 — host public preference reader, shared across all per-plugin HostApi
@@ -461,6 +469,7 @@ export async function initPluginRuntime(
     approvalGate,
     permissionManager,
     routinesStore,
+    getWorkBoardStore,
   });
   const { preparePluginStart, onDisable, onActiveStateChange, onEnable } =
     createLifecycleCallbacks({

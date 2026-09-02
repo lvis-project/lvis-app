@@ -617,6 +617,9 @@ export async function bootstrap(
     permissionManager,
     // Idempotency SOT for `hostApi.hasRoutineBySource` (constructed above).
     routinesStore,
+    // Recommended-work channel target for `hostApi.proposeWork`. Read lazily:
+    // setupWorkBoard() runs below this call, and plugins only start after it.
+    getWorkBoardStore: () => ctx.workBoardStore,
     onPluginUiRevisionChange: (pluginId) => {
       revokePluginWebviewsForPlugin(pluginId, (appSessionId) =>
         ctx.revokePluginOperationSession?.(appSessionId),

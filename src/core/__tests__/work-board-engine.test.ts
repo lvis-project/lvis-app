@@ -155,6 +155,59 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
     }
   });
 
+  it("runs an ACCEPTED PROPOSAL through the same gate, and one durable click never becomes a standing grant", async () => {
+    const { store, cleanup } = tempBoard();
+    try {
+      // A plugin proposes; the user accepts, which is the ordinary create path.
+      const posted = await store.upsertProposal(
+        { pluginId: "indexer", pluginLabel: "Indexer", grantedKinds: ["stale-index"] },
+        {
+          kind: "stale-index",
+          key: "folder:reports",
+          title: "Re-index the reports folder",
+          summary: "18 files changed since the last scan.",
+          state: "Last scanned 12 days ago.",
+          taskBrief: "Re-run the folder scan and report what changed.",
+        },
+      );
+      if (posted.status !== "ok") throw new Error("setup failed");
+      const accepted = await store.acceptProposal(posted.proposal.id);
+      if (accepted.status !== "accepted") throw new Error("setup failed");
+
+      const { runner, calls } = fakeRunner();
+      // The user picks the DURABLE choice at the plan prompt.
+      const { gate, requests } = fakeGate("allow-always");
+      const engine = createWorkBoardEngine({
+        store,
+        getRunner: () => runner,
+        approvalGate: gate,
+        emitProgress: () => {},
+      });
+
+      const first = await engine.runItem(accepted.itemId);
+      expect(first.status).toBe("completed");
+      // The plan phase is read-only, so nothing the plugin's text asked for can
+      // mutate anything before the user has read the plan.
+      expect(calls[0].profileMode).toBe("plan");
+      expect(calls[0].sourceTools).toContain("read_file");
+
+      // The gate was asked with the durable answer refused up front, and the
+      // engine clamps whatever comes back on top of that.
+      const req = requests[0] as Record<string, unknown>;
+      expect(req.allowedChoices).toEqual(["allow-once", "deny-once"]);
+      expect(req.durableApprovalRecordAllowed).toBe(false);
+
+      // The observable half of the clamp: a SECOND run asks again. If the
+      // durable choice had been honoured, one click would have disabled the
+      // plan-approval gate for every future run.
+      const second = await engine.runItem(accepted.itemId);
+      expect(second.status).toBe("completed");
+      expect(requests).toHaveLength(2);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("stops at denial — no execute spawn, runStatus=denied", async () => {
     const { store, cleanup } = tempBoard();
     try {

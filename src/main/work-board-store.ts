@@ -30,9 +30,16 @@ import {
 import { createDirStorage, type WorkBoardStorage } from "../work-board/storage.js";
 import {
   BOARD_VERSION,
+  PROPOSALS_FILE,
+  PROPOSALS_VERSION,
+  isLiveProposal,
   normalizeBoardDueDates,
+  normalizeProposalInput,
+  proposalId,
+  proposalToWorkItemInput,
   resolveWorkItemStatus,
   type BoardFile,
+  type ProposalsFile,
 } from "../work-board/board-file.js";
 import { appendActivity } from "../work-board/activity-log.js";
 import { projectRootEquals } from "../shared/project-identity.js";
@@ -60,6 +67,7 @@ export {
   type WorkItemReopenResult,
   type WorkItemDeleteResult,
   type WorkItemChangedEventPayload,
+  type WorkProposalChangedEventPayload,
 } from "../shared/work-board-types.js";
 
 import {
@@ -80,6 +88,13 @@ import {
   type WorkItemCompleteResult,
   type WorkItemReopenResult,
   type WorkItemDeleteResult,
+  type WorkProposal,
+  type WorkProposalAcceptResult,
+  type WorkProposalDismissResult,
+  type WorkProposalInput,
+  type WorkProposalListResult,
+  type WorkProposalResult,
+  MAX_PROPOSALS,
 } from "../shared/work-board-types.js";
 
 /** Max title length (defensive bound against runaway records). */
@@ -161,6 +176,27 @@ function isValidRecord(r: unknown): r is WorkItem {
   if (x.output !== undefined && typeof x.output !== "string") return false;
   if (x.runSessionId !== undefined && typeof x.runSessionId !== "string") return false;
   if (x.runUpdatedAt !== undefined && typeof x.runUpdatedAt !== "string") return false;
+  return true;
+}
+
+/**
+ * Validate a proposal loaded from disk. Same contract as {@link isValidRecord}:
+ * one tampered row is dropped rather than poisoning the whole read. The
+ * untrusted text fields are checked for TYPE only — their content was already
+ * bounded when the proposal was accepted, and re-deriving the caps here would
+ * put a second definition of "well-formed" next to the first.
+ */
+function isValidProposal(r: unknown): r is WorkProposal {
+  if (!r || typeof r !== "object") return false;
+  const x = r as Record<string, unknown>;
+  for (const field of ["id", "kind", "key", "pluginId", "pluginLabel", "title", "summary", "state", "taskBrief", "createdAt", "updatedAt", "expiresAt"]) {
+    if (typeof x[field] !== "string" || (x[field] as string).length === 0) return false;
+  }
+  if (!isPriority(x.priority)) return false;
+  if (!Array.isArray(x.evidence) || !Array.isArray(x.blockers)) return false;
+  if (x.dueAt !== undefined && typeof x.dueAt !== "string") return false;
+  if (x.dismissedAt !== undefined && typeof x.dismissedAt !== "string") return false;
+  if (x.acceptedItemId !== undefined && typeof x.acceptedItemId !== "number") return false;
   return true;
 }
 
@@ -760,5 +796,198 @@ export class WorkBoardStore {
       });
       return { status: "deleted" as const, itemId: id };
     });
+  }
+
+  // ── Recommended-work proposals ────────────────────────────────────────────
+  //
+  // A separate file in the SAME feature directory (`proposals.json` beside
+  // `board.json`), so the domain still backs up and clears as one unit while
+  // the plugin write path never reaches a row the user owns.
+  //
+  // The two refusals a plugin can hit — an ungranted kind, and a second open
+  // proposal in a kind that already has one — are BOTH decided here rather
+  // than at the UI or the HostApi surface. The ceiling is a property of the
+  // stored set, and a ceiling enforced where the set is not visible is a
+  // ceiling that stops holding the moment a second caller appears.
+
+  /** `proposals.json`, beside whichever `board.json` this store was built on. */
+  private proposalsPath(): string {
+    return join(dirname(this.filePath), PROPOSALS_FILE);
+  }
+
+  /**
+   * Read `proposals.json`, dropping rows that are past their expiry and rows
+   * that do not parse. Expiry is a read-time sweep rather than a timer: a
+   * proposal whose plugin died still stops being shown.
+   */
+  private async readProposals(nowMs: number): Promise<ProposalsFile> {
+    const raw = await readJsonFileOrEmpty<ProposalsFile>(
+      this.proposalsPath(),
+      () => ({ version: PROPOSALS_VERSION, proposals: [] }),
+      (parsed) => {
+        const file = parsed as ProposalsFile;
+        if (!Array.isArray(file.proposals)) {
+          return { version: PROPOSALS_VERSION, proposals: [] };
+        }
+        return { version: PROPOSALS_VERSION, proposals: file.proposals.filter(isValidProposal) };
+      },
+    );
+    return {
+      version: PROPOSALS_VERSION,
+      proposals: raw.proposals.filter((p) => Date.parse(p.expiresAt) > nowMs),
+    };
+  }
+
+  private async writeProposals(file: ProposalsFile): Promise<void> {
+    await writeFileAtomicAtPath(
+      this.proposalsPath(),
+      `${JSON.stringify(file, null, 2)}\n`,
+    );
+  }
+
+  /** Every proposal still showable right now, newest update first. */
+  async listProposals(): Promise<WorkProposalListResult> {
+    const nowMs = this.now();
+    const file = await this.readProposals(nowMs);
+    const live = file.proposals
+      .filter((p) => isLiveProposal(p, nowMs))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return { status: "ok", proposals: live.map((p) => ({ ...p })) };
+  }
+
+  /**
+   * Post or refresh one plugin's proposal for one of its granted kinds.
+   *
+   * `origin` is the HOST's answer to "who is calling and what may they
+   * propose" — the plugin supplies neither. Re-posting the same `key`
+   * refreshes the card in place (and re-arms its TTL); a different key while
+   * that kind already holds a live proposal is refused as `slot_busy`.
+   *
+   * A card the user already dismissed or accepted keeps that mark through a
+   * refresh: re-posting must not be a way to put a closed card back.
+   */
+  async upsertProposal(
+    origin: { pluginId: string; pluginLabel: string; grantedKinds: readonly string[] },
+    input: WorkProposalInput,
+  ): Promise<WorkProposalResult> {
+    const normalized = normalizeProposalInput(input);
+    if (!normalized.ok) return { status: "invalid", field: normalized.field };
+    if (!origin.grantedKinds.includes(input.kind)) {
+      return { status: "kind_not_granted", kind: input.kind };
+    }
+
+    const path = this.proposalsPath();
+    return withInProcessFileQueue(path, async () => {
+      const nowMs = this.now();
+      const file = await this.readProposals(nowMs);
+      const id = proposalId(origin.pluginId, input.kind, input.key.trim());
+      const existingIdx = file.proposals.findIndex((p) => p.id === id);
+      const slotTaken = file.proposals.some(
+        (p) =>
+          p.pluginId === origin.pluginId
+          && p.kind === input.kind
+          && p.id !== id
+          && isLiveProposal(p, nowMs),
+      );
+      if (slotTaken) return { status: "slot_busy" as const, kind: input.kind };
+      if (existingIdx === -1 && file.proposals.length >= MAX_PROPOSALS) {
+        return { status: "cap_reached" as const };
+      }
+
+      const iso = new Date(nowMs).toISOString();
+      const prior = existingIdx === -1 ? undefined : file.proposals[existingIdx];
+      const proposal: WorkProposal = {
+        id,
+        kind: input.kind,
+        key: input.key.trim(),
+        pluginId: origin.pluginId,
+        pluginLabel: origin.pluginLabel,
+        ...normalized.text,
+        priority: normalized.priority,
+        ...(normalized.dueAt !== undefined ? { dueAt: normalized.dueAt } : {}),
+        createdAt: prior?.createdAt ?? iso,
+        updatedAt: iso,
+        expiresAt: new Date(nowMs + normalized.ttlMs).toISOString(),
+        ...(prior?.dismissedAt !== undefined ? { dismissedAt: prior.dismissedAt } : {}),
+        ...(prior?.acceptedItemId !== undefined ? { acceptedItemId: prior.acceptedItemId } : {}),
+      };
+      if (existingIdx === -1) file.proposals.push(proposal);
+      else file.proposals[existingIdx] = proposal;
+      await this.writeProposals(file);
+      return { status: "ok" as const, proposal: { ...proposal } };
+    });
+  }
+
+  /**
+   * Retract a proposal the CALLER posted. `pluginId` comes from the HostApi
+   * identity binding, so a plugin naming another plugin's kind and key simply
+   * finds nothing — there is no cross-plugin reach to refuse, because the id
+   * it would have to match is derived from its own id.
+   *
+   * Resolves `false` when no matching live proposal existed. Idempotent.
+   */
+  async withdrawProposal(pluginId: string, kind: string, key: string): Promise<boolean> {
+    if (typeof kind !== "string" || typeof key !== "string") return false;
+    const path = this.proposalsPath();
+    return withInProcessFileQueue(path, async () => {
+      const nowMs = this.now();
+      const file = await this.readProposals(nowMs);
+      const id = proposalId(pluginId, kind, key.trim());
+      const idx = file.proposals.findIndex(
+        (p) => p.id === id && p.pluginId === pluginId && isLiveProposal(p, nowMs),
+      );
+      if (idx === -1) return false;
+      file.proposals.splice(idx, 1);
+      await this.writeProposals(file);
+      return true;
+    });
+  }
+
+  /** Close a card the user does not want. Sticky: a re-post keeps the mark. */
+  async dismissProposal(id: string): Promise<WorkProposalDismissResult> {
+    const path = this.proposalsPath();
+    return withInProcessFileQueue(path, async () => {
+      const nowMs = this.now();
+      const file = await this.readProposals(nowMs);
+      const idx = file.proposals.findIndex((p) => p.id === id && isLiveProposal(p, nowMs));
+      if (idx === -1) return { status: "not_found" as const, proposalId: id };
+      file.proposals[idx] = {
+        ...file.proposals[idx],
+        dismissedAt: new Date(nowMs).toISOString(),
+      };
+      await this.writeProposals(file);
+      return { status: "dismissed" as const, proposalId: id };
+    });
+  }
+
+  /**
+   * Turn an accepted proposal into a work item through the ORDINARY create
+   * path — same validation, same activity row, same MAX_ITEMS budget as a
+   * card the user typed. The proposal keeps `acceptedItemId` so the card stops
+   * showing and the item it became stays traceable to its source.
+   */
+  async acceptProposal(
+    id: string,
+    project?: { projectRoot?: string; projectName?: string },
+  ): Promise<WorkProposalAcceptResult> {
+    const nowMs = this.now();
+    const file = await this.readProposals(nowMs);
+    const proposal = file.proposals.find((p) => p.id === id && isLiveProposal(p, nowMs));
+    if (!proposal) return { status: "not_found", proposalId: id };
+
+    const created = await this.create(proposalToWorkItemInput(proposal, project));
+    if (created.status !== "created") {
+      return { status: "invalid", reason: created.reason };
+    }
+
+    await withInProcessFileQueue(this.proposalsPath(), async () => {
+      const current = await this.readProposals(this.now());
+      const idx = current.proposals.findIndex((p) => p.id === id);
+      if (idx === -1) return;
+      current.proposals[idx] = { ...current.proposals[idx], acceptedItemId: created.itemId };
+      await this.writeProposals(current);
+    });
+
+    return { status: "accepted", itemId: created.itemId, item: created.item };
   }
 }
