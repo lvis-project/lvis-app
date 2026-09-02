@@ -1,14 +1,7 @@
 // Horizontal auto-scroll for text that would otherwise be truncated.
 
 import { useEffect, useRef, useState } from "react";
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
+import { usePrefersReducedMotion } from "../hooks/use-prefers-reduced-motion.js";
 
 /**
  * Renders `text` on a single line. When the text fits its container it is shown
@@ -35,25 +28,7 @@ export function MarqueeText({
   const contentRef = useRef<HTMLSpanElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
-  const [reducedMotion, setReducedMotion] = useState(prefersReducedMotion);
-
-  useEffect(() => {
-    if (
-      typeof window === "undefined" ||
-      typeof window.matchMedia !== "function"
-    ) {
-      return;
-    }
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const updatePreference = () => setReducedMotion(mediaQuery.matches);
-    updatePreference();
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", updatePreference);
-      return () => mediaQuery.removeEventListener("change", updatePreference);
-    }
-    mediaQuery.addListener?.(updatePreference);
-    return () => mediaQuery.removeListener?.(updatePreference);
-  }, []);
+  const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     if (reducedMotion) {

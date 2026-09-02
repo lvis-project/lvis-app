@@ -240,17 +240,8 @@ export function ThemeProvider({
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mql = window.matchMedia("(prefers-color-scheme: light)");
     const onChange = () => setOsTick((n) => n + 1);
-    if (typeof mql.addEventListener === "function") {
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    }
-    if (typeof (mql as unknown as { addListener?: (cb: () => void) => void }).addListener === "function") {
-      (mql as unknown as { addListener: (cb: () => void) => void }).addListener(onChange);
-      return () => {
-        (mql as unknown as { removeListener: (cb: () => void) => void }).removeListener(onChange);
-      };
-    }
-    return undefined;
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
   }, [followSystem, bundleId]);
 
   const persistAppearance = useCallback(
