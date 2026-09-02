@@ -7,6 +7,7 @@ import type {
 } from "../plugins/marketplace.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
+import { isE2eTestRuntime } from "./dev-flags.js";
 import { withAllPluginInstallLocks } from "../plugins/install-lifecycle.js";
 const log = createLogger("lvis");
 
@@ -123,7 +124,7 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   } = input;
   const decision = resolveManagedPluginBootstrap({
     marketplace,
-    e2eTestMode: process.env.LVIS_E2E === "1" && process.env.NODE_ENV === "test",
+    e2eTestMode: isE2eTestRuntime(),
   });
   if (!decision.enabled) {
     log.warn(`boot: managed plugin bootstrap skipped: ${decision.reason}`);

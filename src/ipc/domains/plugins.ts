@@ -21,7 +21,7 @@ import { stripSecretFields } from "../../plugins/config-schema.js";
 import { shouldBlockPluginSecretRead, validateApiKeyLikeSecretValue } from "../../plugins/secret-shape.js";
 import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/config-change-bus.js";
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
-import { isDevModeUnlocked } from "../../boot/dev-flags.js";
+import { isDevModeUnlocked, isE2eTestRuntime } from "../../boot/dev-flags.js";
 import {
   IPC_NOTIFICATION_CLICKED,
   NOTIFICATION_KINDS,
@@ -1172,7 +1172,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, CHANNELS.plugins.e2eBundleSnapshot, e);
         return UNAUTHORIZED_FRAME;
       }
-      if (process.env.LVIS_E2E !== "1") {
+      if (!isE2eTestRuntime()) {
         return { ok: false as const, error: "production-disabled" };
       }
       return handlePluginBundleE2eSnapshot(

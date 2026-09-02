@@ -2,6 +2,7 @@
 // object lives in internal-api-surface.ts; this module retains the public
 // builder exports used by preload.ts.
 import { ipcRenderer } from "electron";
+import { isE2eTestRuntime } from "../boot/dev-flags.js";
 import {
   CHANNELS,
   UI,
@@ -224,7 +225,7 @@ export function buildLvisNamespaceExtras() {
   },
   env: {
     isDev: process.env.LVIS_DEV === "1",
-    isE2E: process.env.LVIS_E2E === "1",
+    isE2E: isE2eTestRuntime(),
     enableDevConsole: process.env.LVIS_DEV_CONSOLE === "1",
     debugStream:
       process.env.VITE_DEBUG_STREAM === "1" ||
