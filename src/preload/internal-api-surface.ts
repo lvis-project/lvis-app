@@ -1287,6 +1287,18 @@ export function buildInternalApiSurface() {
       | import("../shared/work-board-types.js").WorkBoardReportResult
       | { ok: false; error: string }
     >,
+  // Run the daily / weekly briefing: a read-only sub-agent survey of the user's
+  // work whose findings are filed onto the board as proposals. Resolves with
+  // the ids of the cards it wrote (ok), a nothing-found envelope, an error
+  // envelope, or no-engine.
+  runWorkBoardBriefing: async (
+    kind: import("../shared/work-board-types.js").WorkBoardBriefingKind,
+    projectRoot?: string,
+  ) =>
+    ipcRenderer.invoke(WORK_BOARD.runBriefing, kind, projectRoot) as Promise<
+      | import("../shared/work-board-types.js").WorkBoardBriefingResult
+      | { ok: false; error: string }
+    >,
   // ─── Recommended work (plugin-proposed cards) ────
   // Read the open proposals, promote one into a work item, or close it. There
   // is no renderer path that CREATES a proposal — a proposal is a plugin's

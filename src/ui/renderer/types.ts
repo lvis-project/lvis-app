@@ -1122,6 +1122,16 @@ export type LvisApi = {
     | import("../../shared/work-board-types.js").WorkBoardReportResult
     | { ok: false; error: string }
   >;
+  // Run the daily / weekly briefing — the reports surface in the opposite
+  // direction. It surveys the user's work and files what it found onto the
+  // board as proposals, resolving with the ids of the cards it wrote.
+  runWorkBoardBriefing?: (
+    kind: import("../../shared/work-board-types.js").WorkBoardBriefingKind,
+    projectRoot?: string,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkBoardBriefingResult
+    | { ok: false; error: string }
+  >;
   // ─── Recommended work (plugin-proposed cards) ────
   // Read-only from the renderer's side plus the two answers the user can give.
   // Plugins post and withdraw over HostApi; there is no renderer create path.

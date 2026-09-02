@@ -32,12 +32,21 @@
  * {@link WorkBoardReporter}, returning the generated markdown. When the
  * reporter is absent (boot did not construct it) it returns
  * `{ ok: false, error: "no-reporter" }`.
+ *
+ * The `run-briefing` channel runs the same two windows in the opposite
+ * direction: instead of summarizing the board, it drives a read-only sub-agent
+ * survey of the user's work and files what it found back as proposals, naming
+ * every card it wrote on the `proposalChanged` channel.
  */
 import { ipcMain } from "electron";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { fanOutToAllWindows } from "../window-fanout.js";
 import type { IpcDeps } from "../types.js";
-import type { WorkItemRunResult } from "../../shared/work-board-types.js";
+import type {
+  WorkBoardBriefingKind,
+  WorkBoardBriefingResult,
+  WorkItemRunResult,
+} from "../../shared/work-board-types.js";
 import { WORK_BOARD } from "../../shared/ipc-channels.js";
 import { createDirStorage } from "../../work-board/storage.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
@@ -398,4 +407,46 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
     if (result.status === "dismissed") broadcastProposalChanged(proposalId, "dismissed");
     return result;
   });
+
+  // ─── Run briefing (survey → proposals) ───────────
+  // Renderer → main: run the daily / weekly briefing. The engine surveys the
+  // user's work with a read-only sub-agent and files what it found as
+  // proposals — the opposite direction from `generate-report`, which
+  // summarizes what the board already holds. Registered here, after
+  // `broadcastProposalChanged`, because every card the briefing writes is
+  // announced on that same channel so each window re-lists without polling.
+  ipcMain.handle(
+    WORK_BOARD.runBriefing,
+    async (e, kind: WorkBoardBriefingKind, projectRoot?: string) => {
+      if (!validateHostRendererSender(e)) {
+        auditUnauthorized(auditLogger, WORK_BOARD.runBriefing, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (!workBoardEngine) return NO_ENGINE;
+      const briefingKind: WorkBoardBriefingKind = kind === "weekly" ? "weekly" : "daily";
+      const resolved = resolveAuthorizedWorkspaceProject(projectRoot);
+      if (!resolved.authorized || !resolved.project) {
+        return {
+          status: "error",
+          kind: briefingKind,
+          reason: PROJECT_NOT_ALLOWED_REASON,
+        } satisfies WorkBoardBriefingResult;
+      }
+      try {
+        const result = await workBoardEngine.runBriefing(briefingKind, {
+          projectRoot: resolved.project.projectRoot,
+          includeUnscoped: resolved.project.isDefault === true,
+        });
+        if (result.status === "ok") {
+          for (const id of [...result.filed, ...result.refreshed]) {
+            broadcastProposalChanged(id, "posted");
+          }
+        }
+        return result;
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return { status: "error", kind: briefingKind, reason } satisfies WorkBoardBriefingResult;
+      }
+    },
+  );
 }

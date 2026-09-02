@@ -62,6 +62,11 @@ export const WORK_BOARD = {
   // Renderer → main: generate a daily / weekly personal work report from the
   // board state + activity log + learned memory. Returns the markdown.
   generateReport: "lvis:work-board:generate-report",
+  // Renderer → main: run the daily / weekly briefing — a read-only sub-agent
+  // survey of the user's work whose findings are filed back onto the board as
+  // proposals. The opposite direction from generateReport, which summarizes
+  // what the board already holds.
+  runBriefing: "lvis:work-board:run-briefing",
   // Renderer → main: read a past run's persisted transcript
   // (sessions/<itemId>/<runId>.jsonl) for the run-history view.
   runTranscript: "lvis:work-board:run-transcript",

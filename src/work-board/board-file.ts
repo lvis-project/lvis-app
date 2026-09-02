@@ -306,6 +306,45 @@ export function normalizeProposalInput(input: WorkProposalInput): NormalizedProp
 }
 
 /**
+ * Compose the stored proposal row from a normalized payload plus whatever the
+ * prior row under the same id carried.
+ *
+ * Two write paths reach this: a plugin's `proposeWork`, and the host's own
+ * briefing. They must not drift on the part that decides what the user sees —
+ * `dismissedAt` and `acceptedItemId` are STICKY across a re-post, so re-filing
+ * is a refresh and never a way to put a card the user already closed, or
+ * already turned into a work item, back in front of them.
+ */
+export function composeProposal(args: {
+  id: string;
+  kind: string;
+  key: string;
+  pluginId: string;
+  pluginLabel: string;
+  normalized: Extract<NormalizedProposal, { ok: true }>;
+  nowMs: number;
+  prior?: WorkProposal;
+}): WorkProposal {
+  const { id, kind, key, pluginId, pluginLabel, normalized, nowMs, prior } = args;
+  const iso = new Date(nowMs).toISOString();
+  return {
+    id,
+    kind,
+    key,
+    pluginId,
+    pluginLabel,
+    ...normalized.text,
+    priority: normalized.priority,
+    ...(normalized.dueAt !== undefined ? { dueAt: normalized.dueAt } : {}),
+    createdAt: prior?.createdAt ?? iso,
+    updatedAt: iso,
+    expiresAt: new Date(nowMs + normalized.ttlMs).toISOString(),
+    ...(prior?.dismissedAt !== undefined ? { dismissedAt: prior.dismissedAt } : {}),
+    ...(prior?.acceptedItemId !== undefined ? { acceptedItemId: prior.acceptedItemId } : {}),
+  };
+}
+
+/**
  * Compose the work item a proposal becomes when the user accepts it.
  *
  * The HOST writes the detail — `state`, then the evidence rows, then the

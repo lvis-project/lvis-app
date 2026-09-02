@@ -32,6 +32,7 @@ import {
   BOARD_VERSION,
   PROPOSALS_FILE,
   PROPOSALS_VERSION,
+  composeProposal,
   isLiveProposal,
   normalizeBoardDueDates,
   normalizeProposalInput,
@@ -94,6 +95,8 @@ import {
   type WorkProposalInput,
   type WorkProposalListResult,
   type WorkProposalResult,
+  BRIEFING_PROPOSAL_SOURCE_ID,
+  BRIEFING_PROPOSAL_SOURCE_LABEL,
   MAX_PROPOSALS,
 } from "../shared/work-board-types.js";
 
@@ -894,23 +897,17 @@ export class WorkBoardStore {
         return { status: "cap_reached" as const };
       }
 
-      const iso = new Date(nowMs).toISOString();
       const prior = existingIdx === -1 ? undefined : file.proposals[existingIdx];
-      const proposal: WorkProposal = {
+      const proposal = composeProposal({
         id,
         kind: input.kind,
         key: input.key.trim(),
         pluginId: origin.pluginId,
         pluginLabel: origin.pluginLabel,
-        ...normalized.text,
-        priority: normalized.priority,
-        ...(normalized.dueAt !== undefined ? { dueAt: normalized.dueAt } : {}),
-        createdAt: prior?.createdAt ?? iso,
-        updatedAt: iso,
-        expiresAt: new Date(nowMs + normalized.ttlMs).toISOString(),
-        ...(prior?.dismissedAt !== undefined ? { dismissedAt: prior.dismissedAt } : {}),
-        ...(prior?.acceptedItemId !== undefined ? { acceptedItemId: prior.acceptedItemId } : {}),
-      };
+        normalized,
+        nowMs,
+        ...(prior ? { prior } : {}),
+      });
       if (existingIdx === -1) file.proposals.push(proposal);
       else file.proposals[existingIdx] = proposal;
       await this.writeProposals(file);
@@ -957,6 +954,78 @@ export class WorkBoardStore {
       };
       await this.writeProposals(file);
       return { status: "dismissed" as const, proposalId: id };
+    });
+  }
+
+  /**
+   * File the action items one briefing run surveyed, as proposals under the
+   * host's own reserved source id.
+   *
+   * The per-kind slot ceiling `upsertProposal` enforces deliberately does NOT
+   * apply here. That ceiling is a nag budget: it stops an unattended plugin
+   * from stacking cards nobody asked for. A briefing runs because the user
+   * pressed the button, and a list of things to do is its entire output — so
+   * what bounds this path is the caller's per-run cap plus the host-wide
+   * {@link MAX_PROPOSALS}.
+   *
+   * Duplicate suppression falls out of the proposal id, which is derived from
+   * the caller-supplied `key`: an action item whose key is already stored
+   * REFRESHES that row in place — same id, same sticky dismissed/accepted
+   * marks — so running the briefing twice cannot produce two cards for one
+   * piece of work, and cannot re-open one the user already closed.
+   *
+   * Returns the ids it wrote, split by whether the row was new (`filed`) or
+   * already there (`refreshed`), so the caller can both report a count and
+   * name each changed card to the renderer.
+   */
+  async fileBriefingProposals(
+    inputs: readonly WorkProposalInput[],
+  ): Promise<{ filed: string[]; refreshed: string[] }> {
+    const path = this.proposalsPath();
+    return withInProcessFileQueue(path, async () => {
+      const nowMs = this.now();
+      const file = await this.readProposals(nowMs);
+      const filed: string[] = [];
+      const refreshed: string[] = [];
+
+      for (const input of inputs) {
+        const normalized = normalizeProposalInput(input);
+        if (!normalized.ok) {
+          log.warn(
+            "briefing proposal rejected (field=%s) — row dropped",
+            normalized.field,
+          );
+          continue;
+        }
+        const key = input.key.trim();
+        const id = proposalId(BRIEFING_PROPOSAL_SOURCE_ID, input.kind, key);
+        const existingIdx = file.proposals.findIndex((p) => p.id === id);
+        if (existingIdx === -1 && file.proposals.length >= MAX_PROPOSALS) {
+          log.warn("briefing proposal dropped — host proposal cap reached");
+          break;
+        }
+        const prior = existingIdx === -1 ? undefined : file.proposals[existingIdx];
+        const proposal = composeProposal({
+          id,
+          kind: input.kind,
+          key,
+          pluginId: BRIEFING_PROPOSAL_SOURCE_ID,
+          pluginLabel: BRIEFING_PROPOSAL_SOURCE_LABEL,
+          normalized,
+          nowMs,
+          ...(prior ? { prior } : {}),
+        });
+        if (existingIdx === -1) {
+          file.proposals.push(proposal);
+          filed.push(id);
+        } else {
+          file.proposals[existingIdx] = proposal;
+          refreshed.push(id);
+        }
+      }
+
+      if (filed.length > 0 || refreshed.length > 0) await this.writeProposals(file);
+      return { filed, refreshed };
     });
   }
 
