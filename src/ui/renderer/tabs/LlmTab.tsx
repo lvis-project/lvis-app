@@ -2528,6 +2528,53 @@ export function LlmTab(props: LlmTabProps) {
   };
 
   /**
+   * The handshake's outcome at a glance, beside the name — one dot and one
+   * word, the same shape as the status chip, so no dot on the card head ever
+   * stands without the word that says what it means.
+   *
+   * It reads the same `modelLists` entry the subline reads, so the chip and the
+   * sentence can never disagree. A row with no API path has no handshake to
+   * report, and one still loading or waiting on a key has not had one yet —
+   * neither is a failure, so both stay muted rather than red.
+   */
+  const modelSyncDot = (row: ProviderConnection) => {
+    const state = row.apiVendorId && row.modelListKey && row.apiConfigured
+      ? modelLists[row.modelListKey]
+      : undefined;
+    const syncState = state?.status === "ready"
+      ? "synced"
+      : state?.status === "error"
+        ? "failed"
+        : "unknown";
+    const tone = {
+      synced: "bg-success",
+      failed: "bg-destructive",
+      unknown: "bg-muted-foreground/(--opacity-half)",
+    }[syncState];
+    const word = {
+      synced: t("llmTab.modelSyncChipSynced"),
+      failed: t("llmTab.modelSyncChipFailed"),
+      unknown: t("llmTab.modelSyncChipUnknown"),
+    }[syncState];
+    const sentence = {
+      synced: t("llmTab.modelSyncDotSynced"),
+      failed: t("llmTab.modelSyncDotFailed"),
+      unknown: t("llmTab.modelSyncDotUnknown"),
+    }[syncState];
+    return (
+      <span
+        title={sentence}
+        className={`inline-flex items-center gap-1.5 text-[11px] ${syncState === "failed" ? "text-destructive" : "text-muted-foreground"}`}
+        data-state={syncState}
+        data-testid="llm-provider-sync-dot"
+      >
+        <span className={`size-1.5 shrink-0 rounded-full ${tone}`} aria-hidden={true} />
+        {word}
+      </span>
+    );
+  };
+
+  /**
    * The API-key route, as a third way in beside the sign-in buttons.
    *
    * It sits with them because it IS one of them — the same decision, taken the
@@ -2648,7 +2695,7 @@ export function LlmTab(props: LlmTabProps) {
           activeSelection={subscription.props.activeSelection}
           chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
           actions={subscription.props.actions}
-          leading={<>{statusChip(row)}{modeBadge(row)}{unsavedBadge(row)}</>}
+          leading={<>{modelSyncDot(row)}{statusChip(row)}{modeBadge(row)}{unsavedBadge(row)}</>}
           subline={<>{connectionSubline(row)}{chatAvailabilityNote(row)}{pickModelGuidance(row)}</>}
           authAction={<>{apiKeyChip(row)}{rowRefreshControl(row)}</>}
           {...(rowFormOpen(row) ? { trailing: credentialFormFor(row) } : {})}
@@ -2683,6 +2730,7 @@ export function LlmTab(props: LlmTabProps) {
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="flex min-w-0 flex-wrap items-center gap-2">
                   <span className="truncate text-sm font-medium">{row.label}</span>
+                  {modelSyncDot(row)}
                   {modeBadge(row)}
                   {unsavedBadge(row)}
                   {row.apiVendorId && marketplaceVendorIds.has(row.apiVendorId) ? (
