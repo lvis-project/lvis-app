@@ -6,19 +6,22 @@
  * or `rm()`, and the call is rejected until the lock clears. That typically
  * happens within a few hundred milliseconds.
  *
- * Two ladders defend against this class and they CANNOT be merged into one:
+ * Three ladders defend against this class and they CANNOT be merged into one:
  * `replaceStagedFile` (lib/atomic-file.ts) is synchronous and waits with
  * `Atomics.wait`; `retryOnTransientFsLock` (plugins/plugin-artifact-store.ts)
- * is asynchronous and waits with `setTimeout`. This module owns what they can
- * share — the delay curve, the attempt budgets, and the retryable code sets —
- * so the two can never again disagree by accident. They previously did: the
- * sync side budgeted 60ms against a class documented to clear in a few hundred
- * milliseconds, i.e. it could not outlast the thing it existed for.
+ * is asynchronous and waits with `setTimeout`; `renameWithTransientRetry`
+ * (tools/file-tools.ts) is asynchronous inside a tool turn. This module owns
+ * what they can share — the delay curve, the attempt budgets, and the
+ * retryable code sets — so they can never again disagree by accident. They
+ * previously did: the sync side budgeted 60ms against a class documented to
+ * clear in a few hundred milliseconds, i.e. it could not outlast the thing it
+ * existed for; the tool side kept a private 10/25/50/100/200 curve.
  *
- * The two budgets below are DIFFERENT ON PURPOSE, and that is not the same
- * failure as the drift this module exists to prevent. Drift is two copies
- * nobody reconciled; this is one authority expressing two justified budgets,
- * each named for the constraint that sets it.
+ * The budgets are DIFFERENT ON PURPOSE, and that is not the same failure as
+ * the drift this module exists to prevent. Drift is two copies nobody
+ * reconciled; this is one authority expressing justified budgets, each named
+ * for the constraint that sets it (the tool-turn budget lives beside its
+ * ladder, since only that caller has the constraint).
  */
 
 /** Delay before retry `attempt` (1-based): 50/100/150/200 then held at 250. */
