@@ -2528,9 +2528,11 @@ export function LlmTab(props: LlmTabProps) {
   };
 
   /**
-   * The handshake's outcome at a glance, beside the name.
+   * The handshake's outcome at a glance, beside the name — one dot and one
+   * word, the same shape as the status chip, so no dot on the card head ever
+   * stands without the word that says what it means.
    *
-   * It reads the same `modelLists` entry the subline reads, so the dot and the
+   * It reads the same `modelLists` entry the subline reads, so the chip and the
    * sentence can never disagree. A row with no API path has no handshake to
    * report, and one still loading or waiting on a key has not had one yet —
    * neither is a failure, so both stay muted rather than red.
@@ -2549,20 +2551,26 @@ export function LlmTab(props: LlmTabProps) {
       failed: "bg-destructive",
       unknown: "bg-muted-foreground/(--opacity-half)",
     }[syncState];
-    const label = {
+    const word = {
+      synced: t("llmTab.modelSyncChipSynced"),
+      failed: t("llmTab.modelSyncChipFailed"),
+      unknown: t("llmTab.modelSyncChipUnknown"),
+    }[syncState];
+    const sentence = {
       synced: t("llmTab.modelSyncDotSynced"),
       failed: t("llmTab.modelSyncDotFailed"),
       unknown: t("llmTab.modelSyncDotUnknown"),
     }[syncState];
     return (
       <span
-        role="img"
-        aria-label={label}
-        title={label}
-        className={`size-1.5 shrink-0 rounded-full ${tone}`}
+        title={sentence}
+        className={`inline-flex items-center gap-1.5 text-[11px] ${syncState === "failed" ? "text-destructive" : "text-muted-foreground"}`}
         data-state={syncState}
         data-testid="llm-provider-sync-dot"
-      />
+      >
+        <span className={`size-1.5 shrink-0 rounded-full ${tone}`} aria-hidden={true} />
+        {word}
+      </span>
     );
   };
 

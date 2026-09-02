@@ -1879,8 +1879,10 @@ describe("LlmTab OpenAI model catalogue", () => {
 
     await waitFor(() => expect(syncDotIn("openai")).toHaveAttribute("data-state", "synced"));
     const dot = syncDotIn("openai");
-    expect(dot).toHaveAttribute("role", "img");
-    expect(dot).toHaveAttribute("aria-label", expect.stringMatching(/Model list synced|모델 목록 동기화됨/));
+    // A dot never stands alone on the card head: the word beside it says what it means,
+    // and the full sentence rides on the title.
+    expect(dot).toHaveTextContent(/^(Synced|동기화됨)$/);
+    expect(dot).toHaveAttribute("title", expect.stringMatching(/Model list synced|모델 목록 동기화됨/));
     // The sentence stays; the dot is a summary of it, not a replacement.
     expect(screen.getByTestId("llm-tab:connection-subline:openai"))
       .toHaveAttribute("data-provider-sync-status", "ready");
@@ -1890,8 +1892,9 @@ describe("LlmTab OpenAI model catalogue", () => {
     await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), { model: "" });
 
     await waitFor(() => expect(syncDotIn("openai")).toHaveAttribute("data-state", "failed"));
+    expect(syncDotIn("openai")).toHaveTextContent(/^(Sync failed|동기화 실패)$/);
     expect(syncDotIn("openai"))
-      .toHaveAttribute("aria-label", expect.stringMatching(/Model list sync failed|모델 목록 동기화 실패/));
+      .toHaveAttribute("title", expect.stringMatching(/Model list sync failed|모델 목록 동기화 실패/));
     expect(screen.getByTestId("llm-tab:connection-subline:openai"))
       .toHaveAttribute("data-provider-sync-status", "error");
   });
@@ -1910,7 +1913,8 @@ describe("LlmTab OpenAI model catalogue", () => {
     expect(rowOrder()).toEqual(["codex"]);
     const dot = syncDotIn("codex");
     expect(dot).toHaveAttribute("data-state", "unknown");
-    expect(dot).toHaveAttribute("aria-label", expect.stringMatching(/Model list not synced|모델 목록 미동기화/));
+    expect(dot).toHaveTextContent(/^(Not synced|미동기화)$/);
+    expect(dot).toHaveAttribute("title", expect.stringMatching(/Model list not synced|모델 목록 미동기화/));
   });
 
   it("distinguishes a failure that left a catalogue standing from one that did not", async () => {
