@@ -6,6 +6,7 @@ import {
   pickFirstTaskProposal,
   type FirstTaskProposal,
 } from "./first-task-proposals.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export interface PostTourFirstTaskProps {
   /** Local renderer callback only; this never submits chat or invokes a tool. */
@@ -44,7 +45,7 @@ export function PostTourFirstTask({
       onPrefillComposer(proposal.composerPrompt);
       setDismissed(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       console.error("[post-tour-first-task] composer prefill failed", error);
       setPrefillError(message);
     }

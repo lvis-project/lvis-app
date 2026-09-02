@@ -5,6 +5,7 @@ import type {
   PermissionReviewSuggestionPayload,
   UserApprovalHitPayload,
 } from "../../../shared/permissions-events.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export type PermissionReviewSuggestionState =
   (PermissionReviewSuggestionPayload & { busy?: boolean; error?: string }) | null;
@@ -161,7 +162,7 @@ export function usePermissionToasts(): UsePermissionToastsResult {
           ? {
               ...current,
               busy: false,
-              error: err instanceof Error ? err.message : String(err),
+              error: errorMessage(err),
             }
           : current,
       );

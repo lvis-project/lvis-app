@@ -20,6 +20,7 @@ import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { LvisApi } from "../types.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 /** Dim-yellow ANSI wrapper for host-emitted diagnostic lines in the buffer. */
 function diagnostic(text: string): string {
@@ -96,7 +97,7 @@ export function PtyTerminalView({ api, tabId }: { api: LvisApi; tabId: string })
       })
       .catch((err: unknown) => {
         if (!disposed) {
-          term.write(diagnostic(`[terminal error] ${err instanceof Error ? err.message : String(err)}`));
+          term.write(diagnostic(`[terminal error] ${errorMessage(err)}`));
         }
       });
 

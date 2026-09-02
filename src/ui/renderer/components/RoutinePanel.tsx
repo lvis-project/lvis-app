@@ -26,6 +26,7 @@ import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, Rout
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;
@@ -232,7 +233,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         setPluginScopeError(message || t("routinePanel.errorLoadPlugins"));
       });
     return () => {
