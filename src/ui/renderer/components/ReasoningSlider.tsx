@@ -37,7 +37,7 @@ export type ReasoningLevel = 0 | 1 | 2 | 3;
  * three places — this constant removes the pair that could silently disagree,
  * where the slider offers a level the clamp then throws away.
  */
-export const REASONING_LEVEL_MAX = 3;
+const REASONING_LEVEL_MAX = 3;
 
 /**
  * The reasoning level as ONE value the composer's controls all read.

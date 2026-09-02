@@ -40,6 +40,7 @@ import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { ApprovalDock, WINDOW_DOCK_MIN_HEIGHT } from "./components/permissions/ApprovalDock.js";
+import { AskUserQuestionCard } from "./components/AskUserQuestionCard.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import type { ApprovalRequest } from "./types.js";
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
@@ -520,6 +521,19 @@ export function App() {
     [approvalQueue, approvalClaims, approvalClaimsVersion],
   );
   const windowApprovalHead = unclaimedApprovals[0] ?? null;
+  // A question a hidden tile is holding. Unlike an approval, a question was
+  // delivered to ONE tile and lives only there, so when that tile stops being
+  // drawn there is no second copy anywhere — the gate would sit out its
+  // deadline with nothing on screen. The tile keeps owning it (answering still
+  // goes back through its own queue); the window only lends it a surface.
+  const strandedQuestion = useMemo(() => {
+    for (const tile of tileSessions) {
+      if (!tile.hidden) continue;
+      const head = tile.askQuestions[0];
+      if (head !== undefined) return { chatGroupId: tile.chatGroupId, request: head };
+    }
+    return null;
+  }, [tileSessions]);
   // Approval-memory hit + permission review suggestion. Both report on the
   // WINDOW's permission settings, not on one conversation, so they are
   // subscribed and rendered once here — per tile they would raise the same
@@ -1863,6 +1877,19 @@ export function App() {
                       }}
                       onRoutineAcknowledge={handleRoutineAcknowledge}
                     />
+                    {strandedQuestion !== null && (
+                      <div data-testid={TEST_IDS.questionOverlay}>
+                        <AskUserQuestionCard
+                          key={strandedQuestion.request.id}
+                          api={api}
+                          request={strandedQuestion.request}
+                          onResolved={(id) => {
+                            chatGroupSessions.read(strandedQuestion.chatGroupId)
+                              ?.resolveAskQuestion(id);
+                          }}
+                        />
+                      </div>
+                    )}
                     <ApprovalDock
                       placement="window-chrome"
                       queue={unclaimedApprovals}

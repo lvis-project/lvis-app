@@ -448,19 +448,17 @@ describe("model card (status-row model cell)", () => {
     expect(onOpenModelSettings).not.toHaveBeenCalled();
   });
 
-  it("fills the bulb by level, and never outside it", async () => {
-    // The numbers are the geometry, not a restatement of the source: the bulb
-    // occupies y 2..14 of the icon's 24-unit box, so a full gauge clips 2/24
-    // from the top and an empty one 14/24, and the bottom clip is the base
-    // lines below the bulb at every level. A gauge measured over the whole box
-    // would put level 1 at 66.67% from the top — inside the base lines, where
-    // nothing is drawn — and level 1 would render identically to level 0.
-    const cases: Array<{ budget: number; enabled: boolean; level: string; top: number }> = [
-      { budget: 10_000, enabled: false, level: "0", top: 58.3333 },
-      { budget: 4_000, enabled: true, level: "1", top: 41.6667 },
-      { budget: 10_000, enabled: true, level: "2", top: 25 },
-      { budget: 24_000, enabled: true, level: "3", top: 8.3333 },
+  it("colours the bulb by level, and draws no fill at all when off", async () => {
+    // Three depths, three different yellows, and OFF is the absence of the
+    // fill layer rather than a fourth colour — an unlit bulb has to be
+    // unmistakable, and any colour at level 0 reads as another depth.
+    const cases: Array<{ budget: number; enabled: boolean; level: string; fill: string | null }> = [
+      { budget: 10_000, enabled: false, level: "0", fill: null },
+      { budget: 4_000, enabled: true, level: "1", fill: "var(--reasoning-fill-1)" },
+      { budget: 10_000, enabled: true, level: "2", fill: "var(--reasoning-fill-2)" },
+      { budget: 24_000, enabled: true, level: "3", fill: "var(--reasoning-fill-3)" },
     ];
+    const seen = new Set<string>();
     for (const testCase of cases) {
       getSettings.mockResolvedValue({
         llm: {
@@ -476,35 +474,26 @@ describe("model card (status-row model cell)", () => {
         expect(getByTestId("iab-status-reasoning").getAttribute("data-level"))
           .toBe(testCase.level);
       });
-      const clip = getByTestId("iab-reasoning-gauge")
-        .querySelectorAll("svg")[1]!
-        .getAttribute("style") ?? "";
-      const [top, bottom] = [...clip.matchAll(/([\d.]+)%/g)].map((m) => Number(m[1]));
-      expect(top).toBeCloseTo(testCase.top, 3);
-      // 1 - 14/24: the base lines are never part of the gauge.
-      expect(bottom).toBeCloseTo(41.6667, 3);
+      const gauge = getByTestId("iab-reasoning-gauge");
+      const layers = gauge.querySelectorAll("svg");
+      if (testCase.fill === null) {
+        // The outline, and nothing behind it.
+        expect(layers).toHaveLength(1);
+      } else {
+        expect(layers).toHaveLength(2);
+        expect(layers[0]!.style.fill).toBe(testCase.fill);
+        // The fill is the FIRST layer, so the glyph's own lines draw over it.
+        // Painted on top, a solid colour swallows the bulb's outline and the
+        // control stops reading as a bulb at 12px.
+        expect(layers[1]!.style.fill).toBe("");
+        seen.add(layers[0]!.style.fill);
+      }
       unmount();
     }
-  });
-
-  it("reads its geometry off the glyph it actually draws", async () => {
-    // BULB_TOP/BULB_BOTTOM are the bulb's extent inside lucide's lightbulb
-    // path. lucide redraws icons in minor releases and the dependency is a
-    // caret range, so a redraw would silently move the band the gauge fills
-    // while every gate in the repo stayed green — nothing else reads the path.
-    // Asserting against what is actually rendered is what makes that loud.
-    const { getByTestId, findByTestId } = renderBar({ enableThinkingChat: true });
-    await findByTestId("iab-reasoning-gauge");
-    const paths = [...getByTestId("iab-reasoning-gauge")
-      .querySelectorAll("svg")[0]!
-      .querySelectorAll("path")]
-      .map((path) => path.getAttribute("d") ?? "");
-
-    // The bulb: starts at y 14 and arcs over a circle of radius 6 centred at
-    // y 8, so the glyph spans y 2..14 — the band the gauge fills.
-    expect(paths.some((d) => d.startsWith("M15 14") && d.includes("A6 6 0 0 0 6 8"))).toBe(true);
-    // The base lines, at y 18 and 22: below the bulb, never part of the gauge.
-    expect(paths.filter((d) => /^M\d+ (18|22)/.test(d))).toHaveLength(2);
+    // Each depth is its own step of the ladder — one shared token for two
+    // levels would leave the pair indistinguishable, which is the failure the
+    // rising fill line already had.
+    expect(seen.size).toBe(3);
   });
 
   it("the reasoning chip is a second way into the same card, and goes with reasoning", async () => {

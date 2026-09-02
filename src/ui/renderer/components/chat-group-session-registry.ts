@@ -4,6 +4,7 @@ import type { RestoredSubAgentRow } from "../hooks/use-workflow-tools.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { SendMode } from "../hooks/use-send-message.js";
 import type { SessionProjectSummary } from "../hooks/use-sessions.js";
+import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 
 /**
  * What the WINDOW still needs from a conversation once the conversation lives
@@ -35,6 +36,15 @@ export interface ChatGroupSessionHandle {
   clearForNewChat: () => void;
   /** Drop the workflow-tool state (questions, spawns) a new session invalidates. */
   resetForNewSession: () => void;
+  /**
+   * The `ask_user_question` gates this tile is holding. Published, not kept
+   * private, because a hidden tile draws nothing: the window has to be able to
+   * put them somewhere the user can answer them. Same identity contract as
+   * `entries` — React state, replaced only when the list changes.
+   */
+  askQuestions: readonly AskUserQuestionRequest[];
+  /** Retire one of them, wherever it was answered from. */
+  resolveAskQuestion: (id: string) => void;
   restoreSubAgentSpawns: (restored: readonly RestoredSubAgentRow[]) => void;
   /**
    * Start a turn in this conversation.
@@ -97,6 +107,8 @@ type Listener = () => void;
 const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
   entries: [] as readonly ChatEntry[],
   streaming: false,
+  askQuestions: [] as readonly AskUserQuestionRequest[],
+  resolveAskQuestion: () => {},
   applyLoadedSession: () => {},
   applyInitialSession: () => {},
   clearForNewChat: () => {},
@@ -125,6 +137,12 @@ export interface TileSession {
   streaming: boolean;
   /** Mounted but not drawn — see {@link ChatGroupSessionHandle.hidden}. */
   hidden: boolean;
+  /**
+   * The gates this tile holds. On the tile list rather than read through the
+   * handle because the window has to RE-DECIDE where they are drawn whenever a
+   * tile is hidden, and only a subscribed list wakes it for that.
+   */
+  askQuestions: readonly AskUserQuestionRequest[];
 }
 
 /**
@@ -292,6 +310,7 @@ export class ChatGroupSessionRegistry {
       && previous.streaming === handle.streaming
       && previous.currentSessionId === handle.currentSessionId
       && previous.hidden === handle.hidden
+      && previous.askQuestions === handle.askQuestions
       && previous.currentSessionProject === handle.currentSessionProject
       && previous.fallbackToast === handle.fallbackToast
       && this.snapshots.has(chatGroupId);
@@ -329,13 +348,15 @@ export class ChatGroupSessionRegistry {
       sessionId: handle.currentSessionId,
       streaming: handle.streaming,
       hidden: handle.hidden,
+      askQuestions: handle.askQuestions,
     }));
     const same = next.length === this.tiles.length && next.every((tile, index) => {
       const previous = this.tiles[index]!;
       return previous.chatGroupId === tile.chatGroupId
         && previous.sessionId === tile.sessionId
         && previous.streaming === tile.streaming
-        && previous.hidden === tile.hidden;
+        && previous.hidden === tile.hidden
+        && previous.askQuestions === tile.askQuestions;
     });
     if (same) return;
     this.tiles = Object.freeze(next.map((tile) => Object.freeze(tile)));
@@ -369,6 +390,8 @@ export class ChatGroupSessionRegistry {
     return Object.freeze({
       entries: handle.entries,
       streaming: handle.streaming,
+      askQuestions: handle.askQuestions,
+      resolveAskQuestion: (id: string) => live()?.resolveAskQuestion(id),
       applyLoadedSession: (loaded: ChatEntry[]) => live()?.applyLoadedSession(loaded),
       applyInitialSession: (loaded: ChatEntry[]) => live()?.applyInitialSession(loaded),
       clearForNewChat: () => live()?.clearForNewChat(),
