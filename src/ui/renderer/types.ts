@@ -1912,10 +1912,17 @@ export interface LvisUiApi {
   ) => () => void;
 }
 
+/** The preload platform bridge (`window.lvisPlatform`). */
+export type LvisPlatformApi = {
+  isDarwin: boolean;
+};
+
 declare global {
   interface Window {
     lvisApi: LvisApi;
     lvisHost: LvisHostApi;
+    /** Absent outside Electron (jsdom, Storybook) — there is no native chrome to adapt to. */
+    lvisPlatform?: LvisPlatformApi;
     lvisDrop: LvisDropApi;
     lvis: {
       permission: LvisPermissionApi;
