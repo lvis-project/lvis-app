@@ -56,7 +56,7 @@ function makeSideLoop() {
     }),
     newConversation: vi.fn(),
     loadSession: vi.fn(() => true),
-    getSessionId: vi.fn(() => "side-1"),
+    getSessionId: vi.fn(() => "34fd6270-309d-4e47-878b-75c0742a6ac2"),
     getHistory: vi.fn(() => ({ getMessages: vi.fn(() => []) })),
     listSessions: vi.fn(() => []),
     abortCurrentTurn: vi.fn(),
@@ -67,7 +67,7 @@ function makeMainLoop() {
   return {
     runTurn: vi.fn(),
     abortCurrentTurn: vi.fn(),
-    getSessionId: vi.fn(() => "main-1"),
+    getSessionId: vi.fn(() => "89df5053-7dd8-4550-85c5-1a11011f7868"),
   };
 }
 
@@ -175,7 +175,7 @@ describe("side-chat IPC domain", () => {
     register(side, makeMainLoop());
     const handler = handlers.get(CHANNELS.sidechat.new)!;
     const result = await handler(ev("file:///index.html"));
-    expect(result).toEqual({ ok: true, sessionId: "side-1" });
+    expect(result).toEqual({ ok: true, sessionId: "34fd6270-309d-4e47-878b-75c0742a6ac2" });
     expect(side.newConversation).toHaveBeenCalledTimes(1);
   });
 
@@ -210,7 +210,7 @@ describe("side-chat IPC domain", () => {
     const newHandler = handlers.get(CHANNELS.sidechat.new)!;
     const result = await newHandler(ev("file:///index.html"));
 
-    expect(result).toEqual({ ok: true, sessionId: "side-1" });
+    expect(result).toEqual({ ok: true, sessionId: "34fd6270-309d-4e47-878b-75c0742a6ac2" });
     // The in-flight turn was aborted + awaited BEFORE the loop was mutated —
     // no new-session-receives-prior-turn-frames leak.
     expect(order).toEqual(["abort", "turn-settled", "newConversation"]);
@@ -245,7 +245,7 @@ describe("side-chat IPC domain", () => {
     const sendPromise = sendHandler(ev("file:///index.html"), { input: "long turn" });
 
     const loadHandler = handlers.get(CHANNELS.sidechat.load)!;
-    const result = await loadHandler(ev("file:///index.html"), "side-42");
+    const result = await loadHandler(ev("file:///index.html"), "a17050c7-bb84-4fde-8554-b9ef7a678a92");
 
     expect(result).toMatchObject({ ok: true });
     expect(order).toEqual(["abort", "turn-settled", "loadSession"]);
