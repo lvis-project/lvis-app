@@ -71,11 +71,12 @@ function isPluginPreparing(cards: PluginCards, pluginId: string): boolean {
  * refs and the drain effects together preserves the login-first / open-on-authed
  * contract (architecture.md §9.4a).
  *
- * Selecting a view ALWAYS renders it inline, for plugin views and the app's
+ * Selecting a view ALWAYS opens it in a PANE, for plugin views and the app's
  * own built-in tabs alike, in every appMode. Nothing here opens a window:
  * a mode is a layout, not a destination, and having one mode answer a
  * navigation click with a second window left the main window unable to say
- * where it was.
+ * where it was. The plugin's surface is that pane's body — the frame around it
+ * is the same one a conversation gets.
  */
 export function usePluginViewRouting({
   api,
@@ -138,10 +139,10 @@ export function usePluginViewRouting({
     [t],
   );
 
-  // Every view renders inline: selecting one switches the main window's active
-  // view in every appMode. This is the default and only behavior, for plugin
-  // views and built-in tabs alike, and there is no per-view detach
-  // declaration to opt out of it.
+  // Every view opens in a pane: selecting one moves `activeView`, which is the
+  // FOCUSED pane's location, in every appMode. This is the default and only
+  // behavior, for plugin views and built-in tabs alike, and there is no
+  // per-view detach declaration to opt out of it.
   //
   // Auth is a HOST-managed lifecycle (architecture.md §9.4a): the agent never
   // calls login/logout, and auth plugin view selection is login-first and
@@ -181,7 +182,10 @@ export function usePluginViewRouting({
         const loginTool = card?.auth?.loginTool;
         const authState = pluginAuthStatuses.get(pluginId)?.kind;
         const openPluginView = () => {
-          // Always inline, regardless of appMode.
+          // Into the focused pane, regardless of appMode. `setPaneContent`
+          // behind this refuses a second copy: a view already open in another
+          // pane focuses THAT pane, because two guests in one plugin partition
+          // would be two surfaces disagreeing about one plugin's state.
           setActiveView(parsed.key);
         };
 
@@ -277,11 +281,12 @@ export function usePluginViewRouting({
     });
   }, [pluginAuthStatuses]);
 
-  // If the currently-open plugin view belongs to a plugin that just got
-  // uninstalled, fall back to home so the renderer doesn't render a "view
-  // not found" placeholder for a stale plugin id. A plugin that is merely
-  // still starting is not that case — leaving it here would undo the
-  // navigation `handleViewSelect` just made for a preparing plugin.
+  // If the open plugin view belongs to a plugin that just got uninstalled, put
+  // the pane back on home rather than leave it framing a "view not found"
+  // placeholder for a stale plugin id — the conversation it was covering comes
+  // back. A plugin that is merely still starting is not that case: leaving it
+  // here would undo the navigation `handleViewSelect` just made for a
+  // preparing plugin.
   useEffect(() => {
     if (!activeView.startsWith("plugin:")) return;
     if (activePluginView) return;

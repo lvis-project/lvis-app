@@ -1,5 +1,5 @@
 /**
- * The built-in views are panes.
+ * The routed views are panes — the app's own, and a plugin's.
  *
  * A view used to draw its own page: an `<h2>` at the top of the body, its
  * global controls beside that heading, and its own page padding. The
@@ -148,6 +148,102 @@ describe("a view's global actions live in the pane header", () => {
     // nothing to fill the space.
     expect(header?.querySelector('[data-testid^="chat-group-action-"]')).toBeNull();
     expect(container.querySelector('[data-testid="memory-search-panel"] input')).not.toBeNull();
+  });
+});
+
+describe("a plugin view is a pane body", () => {
+  const PLUGIN_ID = "token-plugin";
+  const PLUGIN_VIEW_KEY = `plugin:${PLUGIN_ID}:main`;
+  const PLUGIN_LABEL = "Token Plugin";
+  const PLUGIN_DESCRIPTION = "What this extension is for";
+
+  /**
+   * A plugin whose runtime is loaded and whose one UI extension is registered —
+   * the state in which its view is a place the window can be.
+   */
+  const pluginFixture = {
+    pluginCards: [{
+      id: PLUGIN_ID,
+      name: PLUGIN_LABEL,
+      description: PLUGIN_DESCRIPTION,
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      loadStatus: "loaded" as const,
+    }],
+    pluginUiExtensions: [{
+      pluginId: PLUGIN_ID,
+      extension: {
+        id: "main",
+        slot: "sidebar",
+        kind: "embedded-module",
+        title: PLUGIN_LABEL,
+        description: PLUGIN_DESCRIPTION,
+        entry: "dist/ui.js",
+      },
+      entryUrl: "file:///token-plugin/dist/ui.js",
+    }],
+  };
+
+  async function openPluginView() {
+    const rendered = await renderApp({
+      hasApiKey: true,
+      settings: settingsWithActiveView(PLUGIN_VIEW_KEY),
+      ...pluginFixture,
+    });
+    await waitFor(() => {
+      expect(pane(rendered.container)).not.toBeNull();
+      expect(rendered.container.querySelector('[data-testid="plugin-page-shell"]')).not.toBeNull();
+    });
+    return rendered;
+  }
+
+  it("frames the plugin under its manifest label, with its description on the title", async () => {
+    const { container } = await openPluginView();
+
+    expect(paneTitle(container)).toBe(PLUGIN_LABEL);
+    // The description was a second line of page chrome under the heading. It is
+    // the title's tooltip now — still there, costing the pane no height.
+    expect(
+      pane(container)?.querySelector('[data-testid="chat-group-header"] h2')?.getAttribute("title"),
+    ).toBe(PLUGIN_DESCRIPTION);
+    // The glyph the sidebar row draws for this plugin, resolved from the same
+    // manifest fields. Read as "an icon is drawn": which one is the resolver's
+    // business.
+    expect(
+      pane(container)?.querySelector('[data-testid="chat-group-header"] svg'),
+    ).not.toBeNull();
+  });
+
+  it("draws one box — the frame's — around the plugin surface", async () => {
+    const { container } = await openPluginView();
+
+    // The host's own page shell is gone: what carries `plugin-page-shell` is
+    // the body wrapper INSIDE the frame, so the plugin's surface has exactly
+    // one outline and one header, not a card inside a card.
+    const shell = container.querySelector('[data-testid="plugin-page-shell"]');
+    expect(pane(container)?.contains(shell as Node)).toBe(true);
+    expect(shell?.querySelector("h2")).toBeNull();
+    expect(pane(container)?.querySelectorAll("h2").length).toBe(1);
+  });
+
+  it("unmounts the plugin surface when the pane goes back to the conversation", async () => {
+    // The conversation is the ONE surface kept mounted while hidden — its
+    // stream subscription and composer draft live in it. A plugin guest is a
+    // whole renderer process, so it leaves with its pane and pays for the
+    // return with a reload.
+    const { container } = await openPluginView();
+    expect(atHome(container)).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(pane(container)?.querySelector('[data-testid="chat-group-close"]') as HTMLElement);
+    });
+
+    await waitFor(() => {
+      expect(atHome(container)).toBe(true);
+      expect(container.querySelector('[data-testid="plugin-page-shell"]')).toBeNull();
+    });
+    expect(pane(container)).toBeNull();
   });
 });
 

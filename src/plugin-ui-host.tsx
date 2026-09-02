@@ -19,8 +19,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "./i18n/index.js";
 import { pluginPartitionName } from "./shared/plugin-partition.js";
-import { getPluginViewLabel } from "./shared/plugin-view-label.js";
-import { PageShell } from "./ui/renderer/components/PageShell.js";
 
 export type PluginUiExtensionView = {
   pluginId: string;
@@ -105,14 +103,20 @@ function readPluginAssetUrls(): { shellUrl: string; preloadUrl: string } {
   return { shellUrl, preloadUrl };
 }
 
+/**
+ * The plugin surface, drawn as a pane BODY.
+ *
+ * The pane's frame is the whole chrome: its header carries the plugin's name,
+ * its glyph and — as the title's tooltip — the extension's description, and its
+ * outline is the box. Nothing here draws a heading or a card of its own; one
+ * inside the frame's would be the box-inside-box this used to be.
+ */
 export function PluginUiHostView({
   view,
-  showChrome = true,
   authError = null,
   preparing = false,
 }: {
   view: PluginUiExtensionView | null;
-  showChrome?: boolean;
   authError?: string | null;
   /**
    * The destination names a plugin whose runtime is still starting, so there is
@@ -141,6 +145,20 @@ export function PluginUiHostView({
   // onError do not fire. Wire native DOM listeners via the ref callback
   // with stable refs so add/remove identity matches.
   const onFinishRef = useRef(() => setLoading(false));
+  // A click inside the guest lands in ANOTHER renderer process. The host DOM
+  // sees no click and no bubbling focus event, so the pane frame's focus
+  // capture never fires and the focus border stays on whichever pane had it —
+  // the pane the user is actually working in cannot say so.
+  //
+  // What the host DOES see is its own <webview> element taking DOM focus.
+  // `focus` does not bubble, so it stops at the tag; re-raising it as
+  // `focusin` — the event React's `onFocus` listens for — carries it out to the
+  // frame the same way a click on any other pane's body does, and needs no
+  // plugin-shaped prop on any pane in between.
+  const onGuestFocusRef = useRef((event: Event) => {
+    (event.currentTarget as HTMLElement | null)
+      ?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+  });
   const onFailRef = useRef((event: Electron.DidFailLoadEvent) => {
     // A plugin UI may contain child frames. A failed navigation in one of
     // those frames must not retire the top-level guest webContents.
@@ -219,6 +237,7 @@ export function PluginUiHostView({
     if (prev) {
       prev.removeEventListener("did-finish-load", onFinishRef.current);
       prev.removeEventListener("did-fail-load", onFailRef.current);
+      prev.removeEventListener("focus", onGuestFocusRef.current);
       const onDidAttach = onDidAttachRef.current;
       if (onDidAttach) prev.removeEventListener("did-attach", onDidAttach);
       const onLifecycleRegister = onLifecycleRegisterRef.current;
@@ -232,6 +251,7 @@ export function PluginUiHostView({
     if (node) {
       node.addEventListener("did-finish-load", onFinishRef.current);
       node.addEventListener("did-fail-load", onFailRef.current);
+      node.addEventListener("focus", onGuestFocusRef.current);
       const onDidAttach = () => {
         // `did-attach` event has no documented payload — use the webview-tag
         // method `getWebContentsId()` (canonical Electron API) instead of
@@ -392,70 +412,33 @@ export function PluginUiHostView({
     }
   }
 
-  // When showChrome=false, render bare content without host page chrome (for detached views).
-  if (!showChrome) {
-    return (
-      <div className="relative h-full w-full overflow-hidden">
-        <div className="flex h-full flex-col overflow-hidden">
-          {authError ? (
-            <div className="border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {authError}
-            </div>
-          ) : null}
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {content}
-          </div>
-        </div>
-        {loading ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
-            {t("be_pluginUiHost.loading")}
+  // The body fills the pane. It used to be clamped to the chat reading column
+  // (--reading-column-max, ~928px), a clamp added because the plugin UIs were
+  // authored for the ~800px detached window they opened in and stretched at
+  // full width. That treated the symptom: the panel was pinned narrow so nobody
+  // saw layouts that could not adapt, and widening the window past ~1180px
+  // changed nothing on screen. The plugins now own their own measure — each
+  // caps its content column and stays fluid below the cap — so the clamp had
+  // nothing left to hide and only wasted width. The contract is in
+  // docs/guides/plugin-development.md: the host gives the panel the pane, the
+  // plugin decides how much of it its content should use.
+  return (
+    <div className="relative h-full w-full overflow-hidden" data-testid="plugin-page-shell">
+      <div className="flex h-full flex-col overflow-hidden">
+        {authError ? (
+          <div className="border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {authError}
           </div>
         ) : null}
-      </div>
-    );
-  }
-
-  const authErrorBanner = authError ? (
-    <div className="mb-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-      {authError}
-    </div>
-  ) : null;
-
-  // Default: inline plugin views use the shared page shell. The webview is
-  // already its own framed surface, so host-level Card/border chrome creates a
-  // visible box-inside-box regression across every plugin view.
-  //
-  // `maxWidth="none"` hands the plugin the whole main pane. This used to be
-  // "reading" (--reading-column-max, ~928px), a clamp added because the plugin UIs
-  // were authored for the ~800px detached window they opened in and stretched
-  // at full pane width. That treated the symptom: the panel was pinned narrow
-  // so nobody saw layouts that could not adapt, and widening the window past
-  // ~1180px changed nothing on screen.
-  //
-  // The plugins now own their own measure (each caps its content column and
-  // stays fluid below the cap), so the clamp has nothing left to hide and its
-  // only remaining effect was to waste width. The contract is documented in
-  // docs/guides/plugin-development.md: the host gives the panel the pane,
-  // the plugin decides how much of it its content should use.
-  return (
-    <PageShell
-      title={view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}
-      description={view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
-      maxWidth="none"
-      contentClassName="flex min-h-0 flex-1 flex-col px-2 pb-2"
-      data-testid="plugin-page-shell"
-    >
-      {authErrorBanner}
-      <div className="relative h-full w-full overflow-hidden">
-        <div className="h-full overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {content}
         </div>
-        {loading ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
-            {t("be_pluginUiHost.loading")}
-          </div>
-        ) : null}
       </div>
-    </PageShell>
+      {loading ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
+          {t("be_pluginUiHost.loading")}
+        </div>
+      ) : null}
+    </div>
   );
 }

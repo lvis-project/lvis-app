@@ -9,6 +9,7 @@
  *   3. Falls back to error text when asset URLs are missing.
  *   4. Shows error text when registration fails.
  *   5. Ignores failed child-frame navigations without retiring the guest.
+ *   6. Carries the guest's focus out to the pane frame around it.
  *
  * JSDOM has no real Electron webview — tests assert JSX shape and event
  * handling only, not actual Electron IPC or preload execution.
@@ -17,6 +18,8 @@ import "./setup.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { act } from "@testing-library/react";
 import { createRoot, type Root } from "react-dom/client";
+import { TooltipProvider } from "../../src/components/ui/tooltip.js";
+import { PaneFrame } from "../../src/ui/renderer/components/ChatGroupFrame.js";
 import { PluginUiHostView, type PluginUiExtensionView } from "../../src/plugin-ui-host.js";
 
 const SHELL_URL = "file:///c:/dist/src/plugin-ui-shell.html";
@@ -348,6 +351,53 @@ describe("PluginUiHostView — webview security attributes", () => {
 
     const partition = mountHost(VIEW).querySelector("webview")?.getAttribute("partition") ?? "";
     expect(partition).toMatch(/^persist:plugin:[0-9a-f]{8}$/);
+  });
+});
+
+describe("PluginUiHostView — focus follow-through", () => {
+  /**
+   * A click inside the guest happens in ANOTHER renderer process: no click and
+   * no bubbling focus event reaches host DOM, so the frame's focus capture
+   * cannot see it and the focus border stays on whichever pane had it. The
+   * <webview> host element taking DOM focus is the one thing that does cross,
+   * and `focus` does not bubble — so it is re-raised as `focusin`, which is the
+   * event the frame's `onFocus` listens for.
+   *
+   * The real gesture is a mouse click in the guest, which jsdom cannot produce;
+   * what is pinned here is the host-side half — the element's own focus event
+   * reaching the frame's handler.
+   */
+  it("raises the webview's own focus into the frame's onFocus", () => {
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview: vi.fn().mockResolvedValue({ ok: true }),
+    });
+    const onFocus = vi.fn();
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    activeRoot = root;
+    act(() => {
+      root.render(
+        <TooltipProvider>
+          <PaneFrame title="Test" onFocus={onFocus}>
+            <PluginUiHostView view={VIEW} />
+          </PaneFrame>
+        </TooltipProvider>,
+      );
+    });
+
+    const webview = container.querySelector("webview");
+    expect(webview).not.toBeNull();
+    expect(onFocus).not.toHaveBeenCalled();
+
+    act(() => {
+      webview!.dispatchEvent(new FocusEvent("focus"));
+    });
+
+    expect(onFocus).toHaveBeenCalled();
   });
 });
 

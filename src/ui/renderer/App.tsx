@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { MAX_CHAT_GROUPS } from "../../contract/app-contract.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -52,6 +52,7 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import { Button } from "../../components/ui/button.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { getPluginInstallAliases } from "./utils/plugin-install-aliases.js";
+import { pluginIconFor } from "./utils/plugin-icon.js";
 import {
   parsePluginDoctorViewKey,
   parsePluginSettingsViewKey,
@@ -1756,9 +1757,32 @@ export function App() {
                       </div>
                       {/* Renders the active main-pane content. One branch per view
                           keeps the router readable; a built-in view — Settings
-                          included — goes into the same frame a conversation gets
-                          (`viewPane`), plugins still into their own PageShell. */}
+                          included — and a plugin surface all go into the same
+                          frame a conversation gets (`paneShell`). */}
                       {(() => {
+                        /*
+                         * Where a routed pane sits.
+                         *
+                         * The tile row's own insets around one frame, so a routed
+                         * pane's outline lands where a conversation tile's does.
+                         * Moving it onto the tiled canvas itself is a later
+                         * change.
+                         *
+                         * `data-view` says which view this shell is holding.
+                         * `main-pane-shell` alone cannot: the conversation
+                         * surface is one too, and it is in the DOM at the same
+                         * time.
+                         */
+                        const paneShell = (view: InlineViewKey, frame: ReactNode) => (
+                          <div
+                            className="flex min-h-0 min-w-0 flex-1 flex-col pb-(--chrome-gap) pl-(--chrome-gap-tight) pr-(--chrome-gap) pt-0"
+                            data-testid="main-pane-shell"
+                            data-view={view}
+                          >
+                            {frame}
+                          </div>
+                        );
+
                         /*
                          * A built-in view, drawn as a pane.
                          *
@@ -1768,11 +1792,6 @@ export function App() {
                          * that heading. Closing it does not close the pane: it
                          * puts the pane back on `home`, so the conversation the
                          * view was covering comes back (design §3).
-                         *
-                         * The outer element keeps `main-pane-shell` and the tile
-                         * row's own insets, so the pane's outline lands where the
-                         * conversation tiles' outlines do. Moving it onto the
-                         * tiled canvas itself is a later change.
                          *
                          * `bodyInset` is where the view's page margin lives, and
                          * it lives in exactly one place per view: `page` for a
@@ -1788,25 +1807,16 @@ export function App() {
                           bodyInset: "none" | "page" = "page",
                         ) => {
                           const PaneIcon = BUILTIN_VIEW_ICONS[view];
-                          return (
-                            <div
-                              className="flex min-h-0 min-w-0 flex-1 flex-col pb-(--chrome-gap) pl-(--chrome-gap-tight) pr-(--chrome-gap) pt-0"
-                              data-testid="main-pane-shell"
-                              /* Which view this shell is holding. `main-pane-shell`
-                                 alone cannot say: the conversation surface is one
-                                 too, and it is in the DOM at the same time. */
-                              data-view={view}
+                          return paneShell(view, (
+                            <PaneFrame
+                              title={t(BUILTIN_LABEL_KEYS[view])}
+                              icon={<PaneIcon className="h-4 w-4" />}
+                              bodyInset={bodyInset}
+                              onClose={handleActivateHome}
                             >
-                              <PaneFrame
-                                title={t(BUILTIN_LABEL_KEYS[view])}
-                                icon={<PaneIcon className="h-4 w-4" />}
-                                bodyInset={bodyInset}
-                                onClose={handleActivateHome}
-                              >
-                                {body}
-                              </PaneFrame>
-                            </div>
-                          );
+                              {body}
+                            </PaneFrame>
+                          ));
                         };
 
                         if (activeView === "memory") {
@@ -1896,13 +1906,49 @@ export function App() {
                         // as a missing plugin.
                         const pluginKey: PluginViewKey = activeView;
                         void pluginKey;
-                        return (
-                          <PluginUiHostView
-                            view={activePluginView ?? null}
-                            preparing={activePluginPreparing}
-                            authError={activePluginAuthError ?? null}
-                          />
-                        );
+                        /*
+                         * The plugin surface is a pane BODY, framed exactly like
+                         * a built-in view: the header carries the extension's
+                         * label and the glyph its sidebar row draws — both from
+                         * the manifest, so the host holds no plugin-specific code
+                         * (architecture.md §9) — and the extension's description,
+                         * which used to be a second line of page chrome, is the
+                         * title's tooltip.
+                         *
+                         * It is UNMOUNTED whenever it is not what the pane holds,
+                         * not kept behind `display:none`. The conversation is the
+                         * one surface that must survive being covered — its
+                         * stream subscription, its composer draft and its scroll
+                         * position all live in it — and a guest kept alive
+                         * off-screen is a whole renderer process holding a
+                         * partition open for a view nobody is looking at. The
+                         * price is that coming back reloads the guest.
+                         */
+                        const PluginPaneIcon = pluginIconFor({
+                          icon: activePluginView?.icon,
+                          iconText: activePluginView?.iconText,
+                        });
+                        return paneShell(activeView, (
+                          <PaneFrame
+                            title={activePluginView
+                              ? getPluginViewLabel(activePluginView)
+                              : t("be_pluginUiHost.pluginUiTitle")}
+                            description={activePluginView?.extension.description
+                              ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
+                            icon={(
+                              <Suspense fallback={<span className="h-4 w-4" />}>
+                                <PluginPaneIcon className="h-4 w-4" />
+                              </Suspense>
+                            )}
+                            onClose={handleActivateHome}
+                          >
+                            <PluginUiHostView
+                              view={activePluginView ?? null}
+                              preparing={activePluginPreparing}
+                              authError={activePluginAuthError ?? null}
+                            />
+                          </PaneFrame>
+                        ));
                       })()}
                     </ErrorBoundary>
                   </div>
