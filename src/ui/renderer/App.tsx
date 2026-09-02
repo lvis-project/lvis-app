@@ -12,6 +12,7 @@ import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
 import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
 import { MarketplaceAnnouncementBanner } from "./components/MarketplaceAnnouncementBanner.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
+import { DevComponentLabels } from "./components/DevComponentLabels.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
@@ -475,6 +476,7 @@ export function App() {
   } = useProjectPreferences(api);
   const [slashPickerOpen, setSlashPickerOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [devLabelsOn, setDevLabelsOn] = useState(false);
   const [workspaceProjects, setWorkspaceProjects] = useState<ProjectIdentity[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectIdentity | undefined>(undefined);
 
@@ -1514,7 +1516,10 @@ export function App() {
                     api={api}
                     open={devToolsOpen}
                     onClose={() => setDevToolsOpen(false)}
+                    labelsOn={devLabelsOn}
+                    onToggleLabels={() => setDevLabelsOn((v) => !v)}
                   />
+                  {devLabelsOn && <DevComponentLabels />}
                   {searchOpen && (
                     <UnifiedSearchPanel
                       api={api}
