@@ -1,15 +1,19 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, fireEvent, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { ComposerStatusRow, InputActionBar } from "../InputActionBar.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
-import type { AssistantContextMenuAction } from "../../../../shared/assistant-context-menu.js";
+import type {
+  DynamicNativeMenuAction,
+  DynamicNativeMenuPayload,
+  NativeMenuItem,
+} from "../../../../shared/native-context-menu.js";
 import type { InputStatusRow } from "../../hooks/use-input-status-row.js";
 import { TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
 
-const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "" };
+const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "", isDefault: true };
 const codingPreset: RolePreset = { id: "coding", name: "코딩", systemPromptAdd: "Code carefully." };
 
 // ThinkingButton (now part of the unified bar) reads its depth from the
@@ -29,31 +33,46 @@ const defaultStatusRow: InputStatusRow = {
   pendingApprovals: 0,
 };
 
+/**
+ * The command menu is the OS's own; what the renderer owns is the payload it
+ * hands main and what it runs when main names an id back. The persona rows
+ * live in that payload now, so this is the bridge the persona tests drive.
+ */
 function installNativeMenuMock() {
   const previous = (window as unknown as { lvis?: unknown }).lvis;
-  let handler: ((action: AssistantContextMenuAction) => void) | null = null;
-  const unsubscribe = vi.fn();
-  const showAssistantContextMenu = vi.fn(async () => ({ ok: true as const }));
-  const onAssistantContextAction = vi.fn((cb: (action: AssistantContextMenuAction) => void) => {
+  let handler: ((action: DynamicNativeMenuAction) => void) | null = null;
+  const showDynamicMenu = vi.fn(async (_payload: DynamicNativeMenuPayload) => ({ ok: true as const }));
+  const onDynamicMenuAction = vi.fn((cb: (action: DynamicNativeMenuAction) => void) => {
     handler = cb;
-    return unsubscribe;
+    return () => { handler = null; };
   });
   (window as unknown as { lvis?: unknown }).lvis = {
     ...(previous && typeof previous === "object" ? previous : {}),
-    ui: { showAssistantContextMenu, onAssistantContextAction },
+    ui: { showDynamicMenu, onDynamicMenuAction },
+    mcp: { servers: vi.fn(async () => []) },
+  };
+  const previousApi = (window as unknown as { lvisApi?: Record<string, unknown> }).lvisApi;
+  (window as unknown as { lvisApi?: unknown }).lvisApi = {
+    ...previousApi,
+    listSkills: vi.fn(async () => ({ skills: [] })),
   };
   return {
-    showAssistantContextMenu,
-    emit: (action: AssistantContextMenuAction) => handler?.(action),
+    showDynamicMenu,
+    lastPayload: () => showDynamicMenu.mock.calls.at(-1)![0],
+    emit: (action: DynamicNativeMenuAction) => handler?.(action),
     restore: () => {
       if (previous === undefined) {
         delete (window as unknown as { lvis?: unknown }).lvis;
       } else {
         (window as unknown as { lvis?: unknown }).lvis = previous;
       }
+      (window as unknown as { lvisApi?: unknown }).lvisApi = previousApi;
     },
   };
 }
+
+const flattenItems = (items: NativeMenuItem[]): NativeMenuItem[] =>
+  items.flatMap((item) => [item, ...flattenItems(item.submenu ?? [])]);
 
 type BarProps = Parameters<typeof InputActionBar>[0];
 type RowProps = Parameters<typeof ComposerStatusRow>[0];
@@ -70,7 +89,6 @@ function renderBar(overrides: Partial<BarProps & RowProps> = {}) {
     onAttach: vi.fn(),
     attachDisabled: false,
     rolePresets: [mockPreset],
-    activePreset: mockPreset,
     activePresetId: "default",
     onSelectPreset: vi.fn(),
     isBusy: false,
@@ -125,15 +143,17 @@ describe("InputActionBar (unified bar)", () => {
     expect(getByTestId("iab-trailing")).toBeTruthy();
   });
 
-  it("leading cluster order is [command] → [persona] → [attach] (ring moved to status row)", () => {
+  it("leading cluster order is [command] → [attach] — no persona button of its own", () => {
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
     const picker = leading.querySelector(testIdSelector(TEST_IDS.slashPickerTrigger));
-    const persona = leading.querySelector("[data-testid='iab-assistant-context-button']");
     const attach = leading.querySelector("[data-testid='iab-attach-button']");
-    expect(picker && persona && attach).toBeTruthy();
-    expect(picker!.compareDocumentPosition(persona!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(persona!.compareDocumentPosition(attach!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(picker && attach).toBeTruthy();
+    expect(picker!.compareDocumentPosition(attach!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The persona moved INTO the command menu; a second button beside it would
+    // split "what shapes the next message" across two controls again.
+    expect(leading.querySelector("[data-testid='iab-assistant-context-button']")).toBeNull();
+    expect(leading.querySelectorAll("button")).toHaveLength(2);
     // The ring is NO LONGER in the leading action cluster.
     expect(leading.querySelector("[data-testid='ring-slot']")).toBeNull();
   });
@@ -275,32 +295,32 @@ describe("InputActionBar (unified bar)", () => {
     });
   });
 
-  it("opens the assistant context picker through the native menu bridge", () => {
+  it("the command button opens ONE native menu whose first entry is the persona submenu", async () => {
     const nativeMenu = installNativeMenuMock();
     try {
       const { getByTestId } = renderBar({
         rolePresets: [mockPreset, codingPreset],
-        activePreset: codingPreset,
         activePresetId: "coding",
       });
-      fireEvent.click(getByTestId("iab-assistant-context-button"));
-      const payload = nativeMenu.showAssistantContextMenu.mock.calls[0]?.[0];
+      fireEvent.click(getByTestId(TEST_IDS.slashPickerTrigger));
+      await waitFor(() => expect(nativeMenu.showDynamicMenu).toHaveBeenCalledOnce());
+      const payload = nativeMenu.lastPayload();
       expect(typeof payload.requestId).toBe("string");
-      expect(nativeMenu.showAssistantContextMenu).toHaveBeenCalledWith(
-        expect.objectContaining({
-          personas: [
-            { id: "default", name: "기본" },
-            { id: "coding", name: "코딩" },
-          ],
-          activePersonaId: "coding",
-        }),
-      );
+      const top = payload.sections[0]!.items;
+      // 페르소나 first, then 커맨드 · 플러그인 · 스킬 in the order the builder keeps.
+      expect(top[0]!.id).toBe("category:persona");
+      expect(top[1]!.id).toBe("category:command");
+      // Every persona is a radio row; the active one, and only it, is checked.
+      expect(top[0]!.submenu).toEqual([
+        { id: "persona:default", label: "기본", checked: false },
+        { id: "persona:coding", label: "코딩", checked: true },
+      ]);
     } finally {
       nativeMenu.restore();
     }
   });
 
-  it("routes native persona actions back to the existing selector", () => {
+  it("choosing a persona row applies it through the same selector the old button used", async () => {
     const nativeMenu = installNativeMenuMock();
     const onSelectPreset = vi.fn();
     try {
@@ -308,11 +328,14 @@ describe("InputActionBar (unified bar)", () => {
         rolePresets: [mockPreset, codingPreset],
         onSelectPreset,
       });
-      fireEvent.click(getByTestId("iab-assistant-context-button"));
-      const firstRequestId = nativeMenu.showAssistantContextMenu.mock.calls[0]?.[0]?.requestId;
-      nativeMenu.emit({ requestId: "other", kind: "persona", id: "ignored" });
+      fireEvent.click(getByTestId(TEST_IDS.slashPickerTrigger));
+      await waitFor(() => expect(nativeMenu.showDynamicMenu).toHaveBeenCalledOnce());
+      const payload = nativeMenu.lastPayload();
+      expect(flattenItems(payload.sections[0]!.items).some((row) => row.id === "persona:coding")).toBe(true);
+      // A reply for another request must not apply anything.
+      act(() => { nativeMenu.emit({ requestId: "other", id: "persona:coding" }); });
       expect(onSelectPreset).not.toHaveBeenCalled();
-      nativeMenu.emit({ requestId: firstRequestId, kind: "persona", id: "coding" });
+      act(() => { nativeMenu.emit({ requestId: payload.requestId, id: "persona:coding" }); });
       expect(onSelectPreset).toHaveBeenCalledWith("coding");
     } finally {
       nativeMenu.restore();

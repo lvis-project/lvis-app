@@ -1,16 +1,17 @@
 import { test, expect } from "./fixtures";
 
 /**
- * Regression: the assistant-context button used to be pushed beyond the
- * right edge of the input action bar when the permission chip grew wide.
+ * Regression: a leading action-bar button used to be pushed beyond the right
+ * edge of the input action bar when the permission chip grew wide.
  *
- * The assistant context picker is now an Electron native menu, so submenu DOM
- * geometry is intentionally not observable from the renderer. This spec keeps
- * the user-visible invariant: fixed controls remain inside the action bar and
- * the variable permission slot is the part that yields under narrow widths.
+ * The command menu (persona, commands, plugins, skills) is an Electron native
+ * menu, so its geometry is intentionally not observable from the renderer.
+ * This spec keeps the user-visible invariant: fixed controls remain inside the
+ * action bar and the variable permission slot is the part that yields under
+ * narrow widths.
  */
 
-const ROLE_BUTTON = '[data-testid="iab-assistant-context-button"]';
+const COMMAND_BUTTON = '[data-testid="slash-picker-trigger"]';
 const ACTION_BAR = '[data-testid="input-action-bar"]';
 const TRAILING = '[data-testid="iab-trailing"]';
 const STATUS_ROW = '[data-testid="iab-status-row"]';
@@ -29,7 +30,7 @@ async function resizeWindow(
   }, { w: width, h: height });
 }
 
-test("assistant context button stays inside the action bar at narrow width", async ({ app, mainWindow }) => {
+test("command button stays inside the action bar at narrow width", async ({ app, mainWindow }) => {
   await resizeWindow(app as never, 460, 520);
   await mainWindow.waitForTimeout(250);
   await mainWindow.evaluate(() => {
@@ -38,10 +39,10 @@ test("assistant context button stays inside the action bar at narrow width", asy
     }));
   });
 
-  await mainWindow.locator(ROLE_BUTTON).waitFor({ state: "visible", timeout: 30_000 });
+  await mainWindow.locator(COMMAND_BUTTON).waitFor({ state: "visible", timeout: 30_000 });
 
-  const geometry = await mainWindow.evaluate(({ roleButton, actionBar, trailing, statusRow, permission }) => {
-    const btn = document.querySelector(roleButton) as HTMLElement | null;
+  const geometry = await mainWindow.evaluate(({ commandButton, actionBar, trailing, statusRow, permission }) => {
+    const btn = document.querySelector(commandButton) as HTMLElement | null;
     const bar = document.querySelector(actionBar) as HTMLElement | null;
     const trail = document.querySelector(trailing) as HTMLElement | null;
     const status = document.querySelector(statusRow) as HTMLElement | null;
@@ -71,7 +72,7 @@ test("assistant context button stays inside the action bar at narrow width", asy
       permissionOverflowX: permissionStyle.overflowX,
     };
   }, {
-    roleButton: ROLE_BUTTON,
+    commandButton: COMMAND_BUTTON,
     actionBar: ACTION_BAR,
     trailing: TRAILING,
     statusRow: STATUS_ROW,

@@ -30,6 +30,25 @@ const skills: SkillEntry[] = [
   { name: "code-review", description: "Review the current diff" },
 ];
 
+const personas = [
+  { id: "default", name: "기본", systemPromptAdd: "", isDefault: true },
+  { id: "coding", name: "코딩", systemPromptAdd: "Code carefully." },
+];
+
+/** The builder's inputs with nothing installed and no persona chosen. */
+const bare = {
+  personas,
+  activePersonaId: "default",
+  plugins: [],
+  mcpTools: [],
+  mcpPrompts: [],
+  skills: [],
+  onSelectPersona: () => {},
+  onInsert: () => {},
+  onSelectPlugin: () => {},
+  onRunMcpPrompt: () => {},
+};
+
 describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)", () => {
   it("CATEGORY_ORDER lists every category in order", () => {
     expect(CATEGORY_ORDER).toEqual([
@@ -72,15 +91,7 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
     // The deleted panel drew two lines per row. A native menu keeps the second
     // one in `sublabel`, so dropping it here would silently cost the user every
     // description while every other assertion still passed.
-    const sections = buildComposerMenuSections({
-      plugins: [],
-      mcpTools,
-      mcpPrompts,
-      skills,
-      onInsert: () => {},
-      onSelectPlugin: () => {},
-      onRunMcpPrompt: () => {},
-    });
+    const sections = buildComposerMenuSections({ ...bare, mcpTools, mcpPrompts, skills });
     const rows = new Map(sections.flatMap((s) => s.items).map((row) => [row.id, row]));
     expect(rows.get("category:mcp-prompts")!.submenu!.map((r) => r.sublabel))
       .toEqual(["Sort inbound issues", undefined]);
@@ -89,19 +100,14 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
   });
 
   it("leaves out a category with nothing in it rather than drawing an empty submenu", () => {
-    const sections = buildComposerMenuSections({
-      plugins: [],
-      mcpTools: [],
-      mcpPrompts: [],
-      skills: [],
-      onInsert: () => {},
-      onSelectPlugin: () => {},
-      onRunMcpPrompt: () => {},
-    });
-    // Only the built-in commands survive: nothing installed, so no plugins, no
-    // MCP, no skills.
+    const sections = buildComposerMenuSections(bare);
+    // Only the persona and the built-in commands survive: nothing installed, so
+    // no plugins, no MCP, no skills.
     expect(sections).toHaveLength(1);
-    expect(sections[0]!.items.map((row) => row.id)).toEqual(["category:command"]);
+    expect(sections[0]!.items.map((row) => row.id)).toEqual(["category:persona", "category:command"]);
+    // …and that applies to the persona list too, should it ever be empty.
+    expect(buildComposerMenuSections({ ...bare, personas: [] })[0]!.items.map((row) => row.id))
+      .toEqual(["category:command"]);
   });
 
   it("holds only what goes INTO a message — never a row that navigates the window", () => {
@@ -110,18 +116,17 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
     // also pushed the three things the button is for below the fold. They are
     // still reachable by typing in the "/" menu, which `filterActions` serves.
     const sections = buildComposerMenuSections({
+      ...bare,
       plugins: [{ viewKey: "plugin:meeting:panel", label: "미팅 열기" }],
       mcpTools,
       mcpPrompts,
       skills,
-      onInsert: () => {},
-      onSelectPlugin: () => {},
-      onRunMcpPrompt: () => {},
     });
     // One section: no flat block above the divider any more.
     expect(sections).toHaveLength(1);
     const ids = sections[0]!.items.map((row) => row.id);
     expect(ids).toEqual([
+      "category:persona",
       "category:command",
       "category:plugin",
       "category:mcp",
@@ -131,6 +136,28 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
     // Every row is a category that opens a submenu — nothing acts on click.
     expect(sections[0]!.items.every((row) => (row.submenu?.length ?? 0) > 0)).toBe(true);
     expect(ids.some((id) => id.startsWith("shortcut:"))).toBe(false);
+  });
+
+  it("draws the personas as radio rows, the active one checked, and reports the id on pick", () => {
+    const picked: string[] = [];
+    const sections = buildComposerMenuSections({
+      ...bare,
+      activePersonaId: "coding",
+      onSelectPersona: (id) => picked.push(id),
+    });
+    const persona = sections[0]!.items[0]!;
+    expect(persona.id).toBe("category:persona");
+    expect(persona.label.length).toBeGreaterThan(0);
+    // Every row carries a state — that is what makes main draw it as a radio
+    // item — and exactly the active one is on. The rows that are NOT personas
+    // carry none, so they stay plain commands.
+    expect(persona.submenu!.map((row) => [row.id, row.label, row.checked])).toEqual([
+      ["persona:default", "기본", false],
+      ["persona:coding", "코딩", true],
+    ]);
+    expect(sections[0]!.items[1]!.submenu!.every((row) => row.checked === undefined)).toBe(true);
+    void persona.submenu![0]!.onSelect!();
+    expect(picked).toEqual(["default"]);
   });
 
   it("SLASH_COMMANDS is the one built-in command list: unique commands, each with a catalog label", () => {

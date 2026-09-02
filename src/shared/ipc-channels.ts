@@ -129,8 +129,6 @@ export const MARKETPLACE = {
 } as const;
 
 export const UI = {
-  assistantContextMenu: "lvis:ui:assistant-context-menu",
-  assistantContextAction: "lvis:ui:assistant-context-action",
   nativeContextMenu: "lvis:ui:native-context-menu",
   nativeContextAction: "lvis:ui:native-context-action",
   dynamicMenu: "lvis:ui:dynamic-menu",

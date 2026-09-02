@@ -42,7 +42,6 @@ export const en = {
   "mainDialog.installLocalPluginMessage": "Select the build folder that contains plugin.json",
   "mainDialog.unauthorizedFrame": "Unauthorized frame.",
   "mainDialog.pluginDisableNotPermitted": "This plugin is managed by your organization and cannot be disabled.",
-  "mainDialog.noPersonasAvailable": "No personas available",
   "mainDialog.exportConversationTitle": "Export conversation",
   "mainDialog.deleteConversationMessage": "Delete this conversation?",
   "mainDialog.deleteConversationDetail": "The transcript and its checkpoints are removed from disk. This cannot be undone.",

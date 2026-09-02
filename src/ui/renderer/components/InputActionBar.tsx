@@ -6,7 +6,7 @@
  * here rather than in a second turn-control row below it. Layout:
  *
  *   ACTION ROW (single line, inside the box):
- *     LEADING:  [⌘ slash/command picker] → [persona] → [attach]
+ *     LEADING:  [⌘ slash/command picker (persona is its first submenu)] → [attach]
  *     TRAILING: [? shortcuts] → [send / stop — one button]
  *
  * The turn control is a SINGLE icon button, not a send button next to a
@@ -28,8 +28,8 @@
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { ArrowUp, Brain, Check, ChevronRight, HelpCircle, Lightbulb, Paperclip, Square, User } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowUp, Brain, Check, ChevronRight, HelpCircle, Lightbulb, Paperclip, Square } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -44,7 +44,6 @@ import { isIpcErrorResult } from "../types.js";
 import { modelCardChoices, type ModelCardChoice } from "../hooks/use-settings.js";
 import type { AppSettings } from "../types.js";
 import type { RolePreset } from "../../../data/role-presets.js";
-import type { AssistantContextMenuAction } from "../../../shared/assistant-context-menu.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
 import type { InputStatusRow } from "../hooks/use-input-status-row.js";
@@ -68,9 +67,9 @@ export interface InputActionBarProps {
 
   attachDisabledReason?: "limit" | "no-api-key" | "subscription-unsupported" | "runtime-pending";
   attachDisabledSubscriptionProvider?: string;
-  // Leading — role preset (persona), placed before the ring.
+  // Leading — role preset (persona). Chosen inside the command menu, as its
+  // first submenu; there is no button of its own.
   rolePresets: RolePreset[];
-  activePreset: RolePreset | null | undefined;
   activePresetId: string;
   onSelectPreset: (id: string) => void;
 
@@ -142,7 +141,6 @@ export function InputActionBar({
   attachDisabledReason = "limit",
   attachDisabledSubscriptionProvider,
   rolePresets,
-  activePreset,
   activePresetId,
   onSelectPreset,
   isBusy,
@@ -151,42 +149,6 @@ export function InputActionBar({
   onSend,
   onCancel,
 }: InputActionBarProps) {
-  const { t } = useTranslation();
-  const assistantMenuRequestIdRef = useRef<string | null>(null);
-  const hasAssistantContext = !!activePreset && !activePreset.isDefault;
-  const assistantTitle = [
-    activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
-  ].filter(Boolean).join(" / ") || t("inputActionBar.selectPersona");
-
-  const handleAssistantContextAction = useCallback((action: AssistantContextMenuAction) => {
-    if (action.requestId !== assistantMenuRequestIdRef.current) return;
-    assistantMenuRequestIdRef.current = null;
-    if (action.kind === "persona" && typeof action.id === "string") onSelectPreset(action.id);
-  }, [onSelectPreset]);
-
-  useEffect(() => {
-    return window.lvis?.ui?.onAssistantContextAction?.(handleAssistantContextAction);
-  }, [handleAssistantContextAction]);
-
-  const openAssistantContextMenu = useCallback((event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    const nativeMenu = window.lvis?.ui?.showAssistantContextMenu;
-    if (!nativeMenu) return;
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    const requestId =
-      globalThis.crypto?.randomUUID?.() ??
-      `assistant-context-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    assistantMenuRequestIdRef.current = requestId;
-    void nativeMenu({
-      requestId,
-      x: Math.round(event.clientX || rect.left),
-      y: Math.round(event.clientY || rect.top),
-      personas: rolePresets.map((preset) => ({ id: preset.id, name: preset.name })),
-      activePersonaId: activePresetId,
-    });
-  }, [activePresetId, rolePresets]);
-
   return (
     <div
       data-testid="input-action-bar"
@@ -196,10 +158,14 @@ export function InputActionBar({
       data-tour-anchor="input-action-bar"
       className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 py-2"
     >
-      {/* Leading cluster — [command/slash] → [persona] → [attach].
-          The token ring lives in the status row under the box. */}
+      {/* Leading cluster — [command/slash] → [attach]. The persona is the
+          command menu's first submenu, not a button of its own. The token ring
+          lives in the status row under the box. */}
       <div className="flex shrink-0 flex-nowrap items-center gap-0.5" data-testid="iab-leading">
         <SlashPicker
+          personas={rolePresets}
+          activePersonaId={activePresetId}
+          onSelectPersona={onSelectPreset}
           plugins={plugins}
           onSelectPlugin={onSelectPlugin}
           onInsert={onInsertSlashCommand}
@@ -207,24 +173,6 @@ export function InputActionBar({
           open={slashPickerOpen}
           onOpenChange={onSlashPickerOpenChange}
         />
-
-        {/* Native persona context menu. Electron draws this outside the
-            renderer DOM, so submenus are not clipped by the chat pane. */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="relative h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
-          title={assistantTitle}
-          aria-label={assistantTitle}
-          data-testid="iab-assistant-context-button"
-          onClick={openAssistantContextMenu}
-          onContextMenu={openAssistantContextMenu}
-        >
-          <User className="h-3.5 w-3.5" />
-          {hasAssistantContext && (
-            <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-action-view" />
-          )}
-        </Button>
 
         <AttachButton
           onAttach={onAttach}

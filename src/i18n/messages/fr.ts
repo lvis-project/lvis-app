@@ -29,7 +29,6 @@ export const fr: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginMessage": "Sélectionnez le dossier de build contenant plugin.json",
   "mainDialog.unauthorizedFrame": "Cadre non autorisé.",
   "mainDialog.pluginDisableNotPermitted": "Ce plugin est géré par votre organisation et ne peut pas être désactivé.",
-  "mainDialog.noPersonasAvailable": "Aucune persona disponible",
   "mainDialog.exportConversationTitle": "Exporter la conversation",
   "mainDialog.deleteConversationMessage": "Supprimer cette conversation ?",
   "mainDialog.deleteConversationDetail": "La transcription et ses points de contrôle sont supprimés du disque. Cette action est irréversible.",

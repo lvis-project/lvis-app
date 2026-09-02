@@ -29,7 +29,6 @@ export const de: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginMessage": "Wähle den Build-Ordner aus, der plugin.json enthält",
   "mainDialog.unauthorizedFrame": "Nicht autorisierter Frame.",
   "mainDialog.pluginDisableNotPermitted": "Dieses Plugin wird von Ihrer Organisation verwaltet und kann nicht deaktiviert werden.",
-  "mainDialog.noPersonasAvailable": "Keine Personas verfügbar",
   "mainDialog.exportConversationTitle": "Konversation exportieren",
   "mainDialog.deleteConversationMessage": "Diese Unterhaltung löschen?",
   "mainDialog.deleteConversationDetail": "Das Transkript und seine Checkpoints werden von der Festplatte entfernt. Dies kann nicht rückgängig gemacht werden.",

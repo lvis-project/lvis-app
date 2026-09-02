@@ -20,6 +20,7 @@ import { Command as CommandIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { PluginEntry } from "./PluginGridButton.js";
+import type { RolePreset } from "../../../data/role-presets.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 import type { McpPromptEntry } from "./slash-picker-data.js";
@@ -29,6 +30,10 @@ import { useNativeMenu } from "../hooks/use-native-context-menu.js";
 import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface SlashPickerProps {
+  /** Every selectable persona, the "no persona" default included — the first submenu. */
+  personas: RolePreset[];
+  activePersonaId: string;
+  onSelectPersona: (id: string) => void;
   /** Installed plugins — surfaced as their own submenu. */
   plugins: PluginEntry[];
   /** Open a plugin's view by its view key. */
@@ -42,6 +47,9 @@ export interface SlashPickerProps {
 }
 
 export function SlashPicker({
+  personas,
+  activePersonaId,
+  onSelectPersona,
   plugins,
   onSelectPlugin,
   onInsert,
@@ -66,10 +74,13 @@ export function SlashPicker({
       // connected now, and a tile that never opens it pays nothing.
       const runtime = await loadSlashPickerRuntime();
       const sections = buildComposerMenuSections({
+        personas,
+        activePersonaId,
         plugins,
         mcpTools: runtime.mcpTools,
         mcpPrompts: runtime.mcpPrompts,
         skills: runtime.skills,
+        onSelectPersona,
         onInsert,
         onSelectPlugin,
         onRunMcpPrompt,
@@ -88,7 +99,17 @@ export function SlashPicker({
       // set, the next ⌘K would only toggle it back off and look swallowed.
       onOpenChange(false);
     }
-  }, [plugins, onInsert, onSelectPlugin, onRunMcpPrompt, showMenu, onOpenChange]);
+  }, [
+    personas,
+    activePersonaId,
+    plugins,
+    onSelectPersona,
+    onInsert,
+    onSelectPlugin,
+    onRunMcpPrompt,
+    showMenu,
+    onOpenChange,
+  ]);
 
   // ⌘K sets the flag; raising the menu is the same path as a click. This runs
   // in an effect, not the render body: a render can be started and discarded,

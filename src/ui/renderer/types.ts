@@ -49,10 +49,6 @@ import type {
 } from "../../shared/assistant-context.js";
 import type { MarketplacePackageAsset } from "../../shared/marketplace-package-assets.js";
 import type {
-  AssistantContextMenuAction,
-  AssistantContextMenuPayload,
-} from "../../shared/assistant-context-menu.js";
-import type {
   NativeContextMenuAction,
   NativeContextMenuPayload,
   DynamicNativeMenuAction,
@@ -1902,12 +1898,6 @@ export interface LvisDropApi {
 }
 
 export interface LvisUiApi {
-  showAssistantContextMenu: (
-    payload: AssistantContextMenuPayload,
-  ) => Promise<{ ok: true } | { ok: false; error: string }>;
-  onAssistantContextAction: (
-    cb: (action: AssistantContextMenuAction) => void,
-  ) => () => void;
   showNativeContextMenu: (
     payload: NativeContextMenuPayload,
   ) => Promise<{ ok: true } | { ok: false; error: string }>;

@@ -93,53 +93,6 @@ describe("ui IPC handlers", () => {
     await setup();
   });
 
-  it("shows the assistant context native menu with normalized template and popup coordinates", () => {
-    const event = makeEvent();
-
-    const result = invoke(UI.assistantContextMenu, event, {
-      requestId: "req-1",
-      x: 10.4,
-      y: 20.6,
-      personas: [{ id: "default", name: "기본" }],
-      activePersonaId: "default",
-    });
-
-    expect(result).toEqual({ ok: true });
-    expect(popupMock).toHaveBeenCalledWith({
-      window: expect.objectContaining({ isDestroyed: expect.any(Function) }),
-      x: 10,
-      y: 21,
-    });
-    const template = firstTemplate();
-    expect(template[0]?.label).toBe("Persona");
-    expect(template[0]?.submenu?.[0]).toMatchObject({
-      label: "기본",
-      type: "radio",
-      checked: true,
-    });
-  });
-
-  it("emits typed actions for each native menu click", () => {
-    const event = makeEvent();
-
-    invoke(UI.assistantContextMenu, event, {
-      requestId: "req-2",
-      x: 1,
-      y: 2,
-      personas: [{ id: "coding", name: "코딩" }],
-      activePersonaId: "",
-    });
-
-    const template = firstTemplate();
-    template[0]?.submenu?.[0]?.click?.();
-
-    expect(sendMock).toHaveBeenCalledWith(UI.assistantContextAction, {
-      requestId: "req-2",
-      kind: "persona",
-      id: "coding",
-    });
-  });
-
   it("builds generic native commands in canonical order and emits typed click actions", () => {
     const event = makeEvent();
 
@@ -253,33 +206,18 @@ describe("ui IPC handlers", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed payloads without opening a menu", () => {
-    const result = invoke(UI.assistantContextMenu, makeEvent(), {
-      requestId: "req-3",
-      x: 1,
-      y: 2,
-      personas: "bad",
-    });
-
-    expect(result).toEqual({ ok: false, error: "invalid-assistant-context-menu" });
-    expect(popupMock).not.toHaveBeenCalled();
-  });
-
   it("rejects plugin shell or child-frame senders", () => {
+    const wellFormed = { requestId: "req-4", x: 1, y: 2, kind: "message", commands: ["message.copy"] };
     const pluginResult = invoke(
-      UI.assistantContextMenu,
+      UI.nativeContextMenu,
       makeEvent("file:///app/plugin-ui-shell.html"),
-      { requestId: "req-4", x: 1, y: 2, personas: [] },
+      wellFormed,
     );
     expect(pluginResult).toEqual({ ok: false, error: "unauthorized-frame" });
 
     const iframeEvent = makeEvent("file:///app/index.html");
     getURLMock.mockReturnValue("file:///app/host.html");
-    const iframeResult = invoke(
-      UI.assistantContextMenu,
-      iframeEvent,
-      { requestId: "req-5", x: 1, y: 2, personas: [] },
-    );
+    const iframeResult = invoke(UI.nativeContextMenu, iframeEvent, { ...wellFormed, requestId: "req-5" });
 
     expect(iframeResult).toEqual({ ok: false, error: "unauthorized-frame" });
     expect(auditLogMock).toHaveBeenCalled();
@@ -323,6 +261,44 @@ describe("dynamic native menu", () => {
     expect(sendMock).toHaveBeenCalledWith(UI.dynamicMenuAction, {
       requestId: "11111111-2222-4333-8444-555555555555",
       id: "command:/new",
+    });
+  });
+
+  it("draws the persona submenu first, its rows as radio items with the active one checked", () => {
+    // The composer's command menu as the renderer sends it: 페르소나 leads, then
+    // 커맨드 · 플러그인 · 스킬. A row that carries a state is a radio item; the
+    // rows below it carry none and stay plain commands.
+    const result = invoke(UI.dynamicMenu, makeEvent(), payload([{
+      items: [
+        {
+          id: "category:persona",
+          label: "페르소나",
+          submenu: [
+            { id: "persona:default", label: "기본", checked: false },
+            { id: "persona:coding", label: "코딩", checked: true },
+          ],
+        },
+        { id: "category:command", label: "커맨드", submenu: [{ id: "command:/new", label: "/new" }] },
+        { id: "category:plugin", label: "플러그인", submenu: [{ id: "plugin:meeting", label: "미팅" }] },
+        { id: "category:skills", label: "스킬", submenu: [{ id: "skill:review", label: "review" }] },
+      ],
+    }]));
+    expect(result).toEqual({ ok: true });
+
+    const template = firstTemplate();
+    expect(template.map((item) => item.label)).toEqual(["페르소나", "커맨드", "플러그인", "스킬"]);
+    expect(template[0]!.submenu!.map((row) => [row.label, row.type, row.checked])).toEqual([
+      ["기본", "radio", false],
+      ["코딩", "radio", true],
+    ]);
+    expect(template[1]!.submenu![0]).not.toHaveProperty("type");
+    expect(template[1]!.submenu![0]).not.toHaveProperty("checked");
+
+    // Choosing a persona row echoes its id, the same way any leaf does.
+    template[0]!.submenu![0]!.click!();
+    expect(sendMock).toHaveBeenCalledWith(UI.dynamicMenuAction, {
+      requestId: "11111111-2222-4333-8444-555555555555",
+      id: "persona:default",
     });
   });
 
