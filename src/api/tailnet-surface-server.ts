@@ -31,6 +31,7 @@ import type {
   TailnetPairedShareAuthorization,
   TailnetPairedShareAuthorizer,
 } from "../main/tailnet-paired-share-authorizer.js";
+import type { TailnetShareActorId } from "../main/tailnet-pairing-share-store.js";
 import {
   createTailnetControllerActor,
   type ConversationCommandPort,
@@ -97,8 +98,21 @@ export interface TailnetControllerOptions {
 export interface TailnetPairingOptions {
   claimInvitation(
     code: string,
-    actorId: `tailnet:${string}`,
+    actorId: TailnetShareActorId,
   ): Promise<{ readonly expiresAt: number } | null>;
+  /**
+   * Pair the desktop's own identity without a code. False when `login` is not
+   * the tailnet login this desktop is signed in as — the comparison belongs on
+   * the main side, which is where the environment probe lives.
+   *
+   * Only the answer crosses this boundary. The pending pairing's deadline stays
+   * where it is enforced: the browser is told to wait for the desktop, and the
+   * desktop is where the approval and the expiry both live.
+   */
+  claimOwnDevice?(
+    login: string,
+    actorId: TailnetShareActorId,
+  ): Promise<boolean>;
 }
 /**
  * Same-origin browser adapter. It is intentionally opt-in and requires the
@@ -715,7 +729,7 @@ async function routeTailnetWeb(
   maxStreamLifetimeMs: number,
 ): Promise<void> {
   if (path === "/tailnet/v2/web" || path === "/") {
-    routeTailnetWebDocument(req, res, options, web, currentScope, controllerBroker, mutationRequestLimiter);
+    await routeTailnetWebDocument(req, res, options, web, currentScope, controllerBroker, mutationRequestLimiter);
     return;
   }
   if (path === "/tailnet/v2/web/pairing/claim") {
@@ -785,7 +799,7 @@ async function routeTailnetWeb(
   sendTailnetWebJson(res, web, 404, { ok: false, error: "not-found" });
 }
 
-function routeTailnetWebDocument(
+async function routeTailnetWebDocument(
   req: IncomingMessage,
   res: ServerResponse,
   options: TailnetSurfaceServerOptions,
@@ -793,7 +807,7 @@ function routeTailnetWebDocument(
   currentScope: TailnetObserverScopeReader,
   controllerBroker: TailnetControllerBroker | undefined,
   requestLimiter: TailnetRequestLimiter,
-): void {
+): Promise<void> {
   if ((req.method ?? "GET") !== "GET") {
     req.resume();
     sendTailnetWebJson(res, web, 405, { ok: false, error: "method-not-allowed" });
@@ -832,7 +846,7 @@ function routeTailnetWebDocument(
     "observe",
   );
   if (pairedShare === null || pairedShare === undefined) {
-    sendTailnetWebPairingDocument(req, res, options, web);
+    await sendTailnetWebPairingDocument(req, res, options, web);
     return;
   }
 
@@ -884,19 +898,26 @@ function routeTailnetWebDocument(
  * missing is the pairing that turns that identity into a share. The page is
  * given its own share-less cookie and CSRF secret so the redemption POST can
  * carry the same same-origin proof every other web route requires.
+ *
+ * The owner's own device is the exception: the tailnet already proved it is
+ * this desktop's login, so it is paired here and shown the waiting state
+ * instead of being asked to carry a code between two of its owner's screens.
+ * Only the transcription goes away — the pairing is `pending` either way and
+ * the desktop still has to approve it.
  */
-function sendTailnetWebPairingDocument(
+async function sendTailnetWebPairingDocument(
   req: IncomingMessage,
   res: ServerResponse,
   options: TailnetSurfaceServerOptions,
   web: TailnetWebRuntime,
-): void {
+): Promise<void> {
   if (options.pairing === undefined) {
     // No route on this listener can redeem a code, so an entry form would be a
     // dead end. Name the state the operator has to fix instead of drawing one.
     sendTailnetWebJson(res, web, 403, { ok: false, error: "pairing-share-required" });
     return;
   }
+  const ownDevicePaired = await claimOwnTailnetDevice(req, options);
   const previousCookie = readTailnetWebCookie(req.headers);
   if (previousCookie !== undefined) web.sessions.revoke(previousCookie);
   let entry;
@@ -915,8 +936,37 @@ function sendTailnetWebPairingDocument(
     res,
     web,
     entry,
-    (nonce) => renderTailnetWebPairingDocument(nonce, csrfToken),
+    (nonce) => renderTailnetWebPairingDocument(
+      nonce,
+      ownDevicePaired ? { kind: "awaiting-approval" } : { kind: "code-entry", csrfToken },
+    ),
   );
+}
+
+/**
+ * Pair the requesting identity when it is this desktop's own tailnet login.
+ *
+ * The role check is the one the code path uses, so a capability-mode tailnet
+ * still states who may ask to pair at all. A host that cannot read its own
+ * Tailscale login, or a store that cannot record the pairing, answers no and
+ * the browser gets the ordinary code form: that is the correct outcome, not a
+ * fallback — nothing about this identity has been established.
+ */
+async function claimOwnTailnetDevice(
+  req: IncomingMessage,
+  options: TailnetSurfaceServerOptions,
+): Promise<boolean> {
+  const claimOwnDevice = options.pairing?.claimOwnDevice;
+  if (claimOwnDevice === undefined) return false;
+  const login = authorizedTailnetLogin(req.headers, options.authorization, "pairing");
+  if (login === undefined) return false;
+  const actorId = options.pairedSharing?.actorIdFor(login);
+  if (actorId === null || actorId === undefined) return false;
+  try {
+    return await claimOwnDevice(login, actorId);
+  } catch {
+    return false;
+  }
 }
 
 function routeTailnetWebSnapshot(
@@ -1406,8 +1456,39 @@ function sendTailnetWebDocumentResponse(
 function clearTailnetWebCookie(): string {
   return WEB_COOKIE_NAME + "=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0";
 }
-function renderTailnetWebPairingDocument(nonce: string, csrfToken: string): string {
-  const bootstrap = JSON.stringify({ csrfToken });
+/**
+ * The two states the pairing page can be served in.
+ *
+ * `awaiting-approval` is not a second page: it is the state the code-entry page
+ * already moves itself into once a claim is accepted, rendered up front for a
+ * device that never had to type a code.
+ */
+type TailnetWebPairingState =
+  | { readonly kind: "code-entry"; readonly csrfToken: string }
+  | { readonly kind: "awaiting-approval" };
+
+/** Said by both states, so the rendered page and the claimed page cannot drift. */
+const WEB_PAIRING_AWAITING_TEXT = "데스크톱에서 승인을 기다리는 중…";
+const WEB_PAIRING_RELOAD_MS = 5_000;
+
+function renderTailnetWebPairingDocument(nonce: string, state: TailnetWebPairingState): string {
+  const body = state.kind === "code-entry"
+    ? [
+      "<p class=\"muted\">이 기기는 아직 연결되어 있지 않습니다. 데스크톱에서 발급한 초대 코드를 입력하세요.</p>",
+      "<form id=\"pairing\">",
+      "<label for=\"code\">초대 코드</label>",
+      "<input id=\"code\" name=\"code\" autocomplete=\"off\" spellcheck=\"false\" maxlength=\"64\" placeholder=\"lvis-pair-v1.…\">",
+      "<div class=\"row\"><button id=\"submit\" type=\"submit\">연결</button></div>",
+      "</form>",
+      "<p id=\"status\" class=\"muted\" aria-live=\"polite\"></p>",
+    ]
+    : [
+      "<p class=\"muted\">이 기기는 이 데스크톱과 같은 Tailscale 계정으로 확인되었습니다. 초대 코드는 필요하지 않습니다.</p>",
+      "<p id=\"status\" class=\"muted\" aria-live=\"polite\">" + WEB_PAIRING_AWAITING_TEXT + "</p>",
+    ];
+  const script = state.kind === "code-entry"
+    ? renderTailnetWebPairingClaimScript(state.csrfToken)
+    : ["  window.setTimeout(() => window.location.reload(), " + WEB_PAIRING_RELOAD_MS + ");"];
   return [
     "<!doctype html>",
     "<html lang=\"ko\">",
@@ -1429,15 +1510,21 @@ function renderTailnetWebPairingDocument(nonce: string, csrfToken: string): stri
     "<body>",
     "<main>",
     "<h1>LVIS Tailnet</h1>",
-    "<p class=\"muted\">이 기기는 아직 연결되어 있지 않습니다. 데스크톱에서 발급한 초대 코드를 입력하세요.</p>",
-    "<form id=\"pairing\">",
-    "<label for=\"code\">초대 코드</label>",
-    "<input id=\"code\" name=\"code\" autocomplete=\"off\" spellcheck=\"false\" maxlength=\"64\" placeholder=\"lvis-pair-v1.…\">",
-    "<div class=\"row\"><button id=\"submit\" type=\"submit\">연결</button><span id=\"status\" class=\"muted\" aria-live=\"polite\"></span></div>",
-    "</form>",
+    ...body,
     "</main>",
     "<script nonce=\"" + nonce + "\">",
     "(() => {",
+    ...script,
+    "})();",
+    "</script>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+}
+
+function renderTailnetWebPairingClaimScript(csrfToken: string): readonly string[] {
+  const bootstrap = JSON.stringify({ csrfToken });
+  return [
     "  const boot = " + bootstrap + ";",
     "  const form = document.getElementById(\"pairing\");",
     "  const code = document.getElementById(\"code\");",
@@ -1469,10 +1556,9 @@ function renderTailnetWebPairingDocument(nonce: string, csrfToken: string): stri
     "      return;",
     "    }",
     "    if (response.status === 202) {",
-    "      status.textContent = \"데스크톱에서 승인을 기다리는 중…\";",
-    "      form.parentNode.appendChild(status);",
+    "      status.textContent = \"" + WEB_PAIRING_AWAITING_TEXT + "\";",
     "      form.hidden = true;",
-    "      window.setTimeout(() => window.location.reload(), 5000);",
+    "      window.setTimeout(() => window.location.reload(), " + WEB_PAIRING_RELOAD_MS + ");",
     "      return;",
     "    }",
     "    let error = null;",
@@ -1481,11 +1567,7 @@ function renderTailnetWebPairingDocument(nonce: string, csrfToken: string): stri
     "    status.textContent = MESSAGES[error] || \"연결하지 못했습니다. 코드를 다시 확인하세요.\";",
     "  }",
     "  form.addEventListener(\"submit\", (event) => { void claim(event); });",
-    "})();",
-    "</script>",
-    "</body>",
-    "</html>",
-  ].join("\n");
+  ];
 }
 
 function renderTailnetWebDocument(nonce: string, state: TailnetWebPageState): string {

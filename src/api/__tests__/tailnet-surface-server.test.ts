@@ -1682,6 +1682,85 @@ describe("Tailnet Web root and browser pairing", () => {
     expect(await nativeFromBrowser.json()).toMatchObject({ error: "browser-pairing-not-ready" });
   });
 
+  it("skips the code for the desktop's own device and still waits for its approval", async () => {
+    const claimInvitation = vi.fn(async () => ({ expiresAt: 4_102_444_800_000 }));
+    const claimOwnDevice = vi.fn(async () => true);
+    const sharing = pairedSharing({ observe: false, control: false });
+    const { server } = await fixture({
+      pairedSharing: sharing.authorizer,
+      pairing: { claimInvitation, claimOwnDevice },
+      web: { origin: WEB_ORIGIN },
+    });
+
+    const page = await requestTailnetGet(server, "/", {
+      ...tailnetRoleHeaders(["observer", "pairing"]),
+      ...NAVIGATION_HEADERS,
+    });
+    expect(page.status).toBe(200);
+    expect(claimOwnDevice).toHaveBeenCalledWith("owner@example.com", PAIRED_ACTOR_ID);
+    expect(claimInvitation).not.toHaveBeenCalled();
+    expect(page.body).toContain("데스크톱에서 승인을 기다리는 중");
+    expect(page.body).not.toContain("<form");
+    expect(page.body).not.toContain("/tailnet/v2/web/pairing/claim");
+
+    // Only the transcription was skipped. The pairing is pending, so the page
+    // this device is waiting on is still one the desktop has to grant.
+    const cookieToken = /__Host-lvis-tailnet-v2=([A-Za-z0-9_-]{43})/
+      .exec(responseHeader(page.headers["set-cookie"]))?.[1];
+    expect(cookieToken).toBeTypeOf("string");
+    const snapshot = await fetch(url(server, "/tailnet/v2/web/snapshot"), {
+      headers: {
+        ...tailnetRoleHeaders(["observer"]),
+        Cookie: "__Host-lvis-tailnet-v2=" + cookieToken,
+        Origin: WEB_ORIGIN,
+        "Sec-Fetch-Site": "same-origin",
+      },
+    });
+    expect(snapshot.status).toBe(401);
+  });
+
+  it("still asks a different tailnet login for a code", async () => {
+    const GUEST_ACTOR_ID: `tailnet:${string}` = `tailnet:${"f".repeat(64)}`;
+    const claimOwnDevice = vi.fn(async (login: string) => login === "owner@example.com");
+    const sharing = pairedSharing({ observe: false, control: false });
+    const { server } = await fixture({
+      pairedSharing: {
+        ...sharing.authorizer,
+        actorIdFor: (login) => login === "owner@example.com" ? PAIRED_ACTOR_ID : GUEST_ACTOR_ID,
+      },
+      pairing: { claimInvitation: vi.fn(async () => null), claimOwnDevice },
+      web: { origin: WEB_ORIGIN },
+    });
+
+    const page = await requestTailnetGet(server, "/", {
+      ...tailnetRoleHeaders(["observer", "pairing"], "guest@example.com"),
+      ...NAVIGATION_HEADERS,
+    });
+    expect(page.status).toBe(200);
+    expect(claimOwnDevice).toHaveBeenCalledWith("guest@example.com", GUEST_ACTOR_ID);
+    expect(page.body).toContain("/tailnet/v2/web/pairing/claim");
+    expect(page.body).toContain("<form");
+  });
+
+  it("asks for a code when the desktop cannot say whose device this is", async () => {
+    // What main answers when the probe read no login of its own.
+    const claimOwnDevice = vi.fn(async () => false);
+    const sharing = pairedSharing({ observe: false, control: false });
+    const { server } = await fixture({
+      pairedSharing: sharing.authorizer,
+      pairing: { claimInvitation: vi.fn(async () => null), claimOwnDevice },
+      web: { origin: WEB_ORIGIN },
+    });
+
+    const page = await requestTailnetGet(server, "/", {
+      ...tailnetRoleHeaders(["observer", "pairing"]),
+      ...NAVIGATION_HEADERS,
+    });
+    expect(page.status).toBe(200);
+    expect(claimOwnDevice).toHaveBeenCalledOnce();
+    expect(page.body).toContain("/tailnet/v2/web/pairing/claim");
+  });
+
   it("names the unredeemable state rather than drawing a form that cannot work", async () => {
     const sharing = pairedSharing({ observe: false, control: false });
     const { server } = await fixture({

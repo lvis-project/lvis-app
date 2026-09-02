@@ -33,6 +33,20 @@ function runtime(): ConversationSurfaceRuntime {
   } as ConversationSurfaceRuntime;
 }
 
+/** A probe reading whose only question is which login this desktop is signed in as. */
+function tailscaleEnvironment(login: string | null) {
+  return {
+    state: "ready" as const,
+    cliPath: "tailscale",
+    login,
+    dnsName: null,
+    tailnetName: null,
+    serveConfigured: false,
+    serveTargetPort: null,
+    detail: null,
+  };
+}
+
 function options(
   env: NodeJS.ProcessEnv,
   startServer = vi.fn(async (input: { port: number }) => ({
@@ -228,6 +242,103 @@ describe("Tailnet observer lifecycle", () => {
     )).resolves.toEqual({ expiresAt: 123_456 });
     expect(claimInvitation).toHaveBeenCalledOnce();
   });
+
+  it("pairs the desktop's own signed-in login without a code, still only as pending", async () => {
+    const ACTOR = ("tailnet:" + "b".repeat(64)) as `tailnet:${string}`;
+    const OWNER_LOGIN = "owner@example.test";
+    let pairing: { readonly state: "pending"; readonly expiresAt: number } | null = null;
+    const createInvitation = vi.fn(async () => ({
+      id: "44444444-4444-4444-8444-444444444444",
+      code: "lvis-pair-v1." + "c".repeat(43),
+      expiresAt: 4_102_444_800_000,
+    }));
+    const claimInvitation = vi.fn(async () => {
+      pairing = { state: "pending", expiresAt: 123_456 };
+      return { pairingId: "55555555-5555-4555-8555-555555555555", expiresAt: 123_456 };
+    });
+    const pairedRuntime = {
+      store: { createInvitation, claimInvitation, currentPairing: () => pairing },
+      authorizer: { actorIdFor: vi.fn(), authorize: vi.fn(), subscribe: vi.fn(() => () => {}) },
+    } as unknown as TailnetPairedSharingRuntime;
+    const f = options({
+      LVIS_TAILNET_OBSERVER: "1",
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
+      LVIS_TAILNET_PAIRED_SHARING: "1",
+      LVIS_TAILNET_WEB: "1",
+      LVIS_TAILNET_WEB_ORIGIN: WEB_ORIGIN,
+    });
+
+    await expect(maybeStartTailnetObserverServer({
+      ...f.input,
+      dependencies: {
+        ...f.input.dependencies,
+        probeEnvironment: async () => tailscaleEnvironment(OWNER_LOGIN),
+      },
+      tailnetPairedSharingRuntime: pairedRuntime,
+    })).resolves.toEqual({ port: DEFAULT_TAILNET_OBSERVER_PORT });
+
+    const claimOwnDevice = (f.startServer.mock.calls[0]?.[0] as {
+      pairing?: {
+        claimOwnDevice?: (login: string, actorId: `tailnet:${string}`) => Promise<unknown>;
+      };
+    }).pairing?.claimOwnDevice;
+    expect(claimOwnDevice).toBeTypeOf("function");
+
+    // The owner's own device pairs, but through the ordinary invitation: the
+    // pairing is pending and the desktop still has to activate it.
+    await expect(claimOwnDevice?.(OWNER_LOGIN, ACTOR)).resolves.toBe(true);
+    expect(createInvitation).toHaveBeenCalledOnce();
+    // The deadline stays on this side: what crossed the boundary is only that a
+    // pairing exists, and it is `pending` — the desktop still has to activate it.
+    expect(pairing).toEqual({ state: "pending", expiresAt: 123_456 });
+
+    // The waiting page reloads on a timer; re-entry must not spend a second
+    // invitation on a claim that the existing pairing would refuse.
+    await expect(claimOwnDevice?.(OWNER_LOGIN, ACTOR)).resolves.toBe(true);
+    expect(createInvitation).toHaveBeenCalledOnce();
+
+    // Another account on the same tailnet is not this desktop's device.
+    await expect(claimOwnDevice?.("guest@example.test", ACTOR)).resolves.toBe(false);
+    expect(createInvitation).toHaveBeenCalledOnce();
+  });
+
+  it("pairs nobody without a code when it cannot read its own Tailscale login", async () => {
+    const createInvitation = vi.fn();
+    const pairedRuntime = {
+      store: {
+        createInvitation,
+        claimInvitation: vi.fn(),
+        currentPairing: () => null,
+      },
+      authorizer: { actorIdFor: vi.fn(), authorize: vi.fn(), subscribe: vi.fn(() => () => {}) },
+    } as unknown as TailnetPairedSharingRuntime;
+    const f = options({
+      LVIS_TAILNET_OBSERVER: "1",
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
+      LVIS_TAILNET_PAIRED_SHARING: "1",
+    });
+
+    await maybeStartTailnetObserverServer({
+      ...f.input,
+      dependencies: {
+        ...f.input.dependencies,
+        probeEnvironment: async () => tailscaleEnvironment(null),
+      },
+      tailnetPairedSharingRuntime: pairedRuntime,
+    });
+
+    const claimOwnDevice = (f.startServer.mock.calls[0]?.[0] as {
+      pairing?: {
+        claimOwnDevice?: (login: string, actorId: `tailnet:${string}`) => Promise<unknown>;
+      };
+    }).pairing?.claimOwnDevice;
+    await expect(claimOwnDevice?.(
+      "owner@example.test",
+      ("tailnet:" + "b".repeat(64)) as `tailnet:${string}`,
+    )).resolves.toBe(false);
+    expect(createInvitation).not.toHaveBeenCalled();
+  });
+
   it("fails closed when P2 bootstrap could not create the shared runtime", async () => {
     const f = options({
       LVIS_TAILNET_OBSERVER: "1",
