@@ -461,7 +461,6 @@ export function ChatComposerDock({
           onSelectPlugin={onSelectPlugin}
           onInsertSlashCommand={onInsertSlashCommand}
           onRunMcpPrompt={onRunMcpPrompt}
-          commandActions={commandActions}
           slashPickerOpen={slashPickerOpen}
           onSlashPickerOpenChange={onSlashPickerOpenChange}
           ringSlot={ringSlot}

@@ -73,7 +73,6 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
     // one in `sublabel`, so dropping it here would silently cost the user every
     // description while every other assertion still passed.
     const sections = buildComposerMenuSections({
-      actions: [],
       plugins: [],
       mcpTools,
       mcpPrompts,
@@ -91,7 +90,6 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
 
   it("leaves out a category with nothing in it rather than drawing an empty submenu", () => {
     const sections = buildComposerMenuSections({
-      actions: [],
       plugins: [],
       mcpTools: [],
       mcpPrompts: [],
@@ -100,11 +98,39 @@ describe("slash-picker-data — category model (mcp tools, mcp prompts, skills)"
       onSelectPlugin: () => {},
       onRunMcpPrompt: () => {},
     });
-    // Only the built-in commands survive: no actions, no plugins, no MCP, no
-    // skills. The empty shortcut section is dropped too, so what is left is one
-    // section holding one category.
+    // Only the built-in commands survive: nothing installed, so no plugins, no
+    // MCP, no skills.
     expect(sections).toHaveLength(1);
     expect(sections[0]!.items.map((row) => row.id)).toEqual(["category:command"]);
+  });
+
+  it("holds only what goes INTO a message — never a row that navigates the window", () => {
+    // This menu hangs off the composer. The view shortcuts it used to open with
+    // are navigation and belong to the sidebar; ten of them above the divider
+    // also pushed the three things the button is for below the fold. They are
+    // still reachable by typing in the "/" menu, which `filterActions` serves.
+    const sections = buildComposerMenuSections({
+      plugins: [{ viewKey: "plugin:meeting:panel", label: "미팅 열기" }],
+      mcpTools,
+      mcpPrompts,
+      skills,
+      onInsert: () => {},
+      onSelectPlugin: () => {},
+      onRunMcpPrompt: () => {},
+    });
+    // One section: no flat block above the divider any more.
+    expect(sections).toHaveLength(1);
+    const ids = sections[0]!.items.map((row) => row.id);
+    expect(ids).toEqual([
+      "category:command",
+      "category:plugin",
+      "category:mcp",
+      "category:mcp-prompts",
+      "category:skills",
+    ]);
+    // Every row is a category that opens a submenu — nothing acts on click.
+    expect(sections[0]!.items.every((row) => (row.submenu?.length ?? 0) > 0)).toBe(true);
+    expect(ids.some((id) => id.startsWith("shortcut:"))).toBe(false);
   });
 
   it("SLASH_COMMANDS is the one built-in command list: unique commands, each with a catalog label", () => {

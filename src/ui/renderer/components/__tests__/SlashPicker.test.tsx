@@ -56,7 +56,6 @@ const flatten = (items: NativeMenuItem[]): NativeMenuItem[] =>
 
 function renderPicker(overrides: Partial<Parameters<typeof SlashPicker>[0]> = {}) {
   const props: Parameters<typeof SlashPicker>[0] = {
-    actions: [],
     plugins: [],
     onSelectPlugin: vi.fn(),
     onInsert: vi.fn(),
@@ -69,11 +68,9 @@ function renderPicker(overrides: Partial<Parameters<typeof SlashPicker>[0]> = {}
 }
 
 describe("SlashPicker", () => {
-  it("puts the shortcuts flat and the long lists behind their own submenus", async () => {
+  it("opens with the submenus and nothing else — no flat block of view shortcuts", async () => {
     const bridge = installMenuBridge();
-    const run = vi.fn();
     const { getByTestId } = renderPicker({
-      actions: [{ id: "board", label: "업무 보드", run }],
       plugins: [{ viewKey: "meeting", label: "미팅" } as never],
     });
 
@@ -81,30 +78,31 @@ describe("SlashPicker", () => {
     await waitFor(() => expect(bridge.showDynamicMenu).toHaveBeenCalledOnce());
     const payload = bridge.showDynamicMenu.mock.calls[0]![0] as DynamicNativeMenuPayload;
 
-    // What the user reaches for constantly is one click away; what depends on
-    // what is installed is one level down. A native menu cannot filter, so this
-    // shape is the whole navigation.
-    const [shortcuts, categories] = payload.sections;
-    expect(shortcuts!.items.map((item) => item.label)).toEqual(["업무 보드"]);
-    expect(shortcuts!.items.every((item) => item.submenu === undefined)).toBe(true);
-    expect(categories!.items.every((item) => (item.submenu?.length ?? 0) > 0)).toBe(true);
+    // One section. The menu hangs off the composer, so it holds what goes INTO
+    // a message; going home or opening a plugin's page is navigation and has
+    // the sidebar. Ten such rows above the divider also pushed the three things
+    // the button is for below the fold.
+    expect(payload.sections).toHaveLength(1);
+    const categories = payload.sections[0]!;
+    expect(categories.items.every((item) => (item.submenu?.length ?? 0) > 0)).toBe(true);
 
     // An empty category is left out rather than shown empty: a row that never
     // opens teaches the user the menu is broken.
-    const categoryIds = categories!.items.map((item) => item.id);
+    const categoryIds = categories.items.map((item) => item.id);
     expect(categoryIds).toContain("category:command");
     expect(categoryIds).toContain("category:plugin");
     expect(categoryIds).not.toContain("category:mcp");
     expect(categoryIds).not.toContain("category:skills");
+    // Nothing anywhere in the menu acts on click without opening a submenu.
+    expect(flatten(categories.items).some((item) => item.id.startsWith("shortcut:")))
+      .toBe(false);
   });
 
   it("runs the row main names back, and only that row", async () => {
     const bridge = installMenuBridge();
-    const run = vi.fn();
     const onInsert = vi.fn();
     const onSelectPlugin = vi.fn();
     const { getByTestId } = renderPicker({
-      actions: [{ id: "board", label: "업무 보드", run }],
       plugins: [{ viewKey: "meeting", label: "미팅" } as never],
       onInsert,
       onSelectPlugin,
@@ -119,11 +117,11 @@ describe("SlashPicker", () => {
     // handlers are live. Fired after a legitimate one, it would be rejected by
     // the pending entry already being consumed, and the requestId comparison —
     // the thing under test — would never run.
-    act(() => { bridge.fire({ requestId: "some-other-request", id: "shortcut:board" }); });
-    expect(run).not.toHaveBeenCalled();
+    act(() => { bridge.fire({ requestId: "some-other-request", id: "plugin:meeting" }); });
+    expect(onSelectPlugin).not.toHaveBeenCalled();
 
-    act(() => { bridge.fire({ requestId: payload.requestId, id: "shortcut:board" }); });
-    expect(run).toHaveBeenCalledOnce();
+    act(() => { bridge.fire({ requestId: payload.requestId, id: "plugin:meeting" }); });
+    expect(onSelectPlugin).toHaveBeenCalledOnce();
 
     // …and the pending entry is single-shot: the row that already reported is
     // not re-runnable.
@@ -131,7 +129,6 @@ describe("SlashPicker", () => {
     expect(onInsert).not.toHaveBeenCalled();
 
     expect(rows.some((row) => row.id === "plugin:meeting")).toBe(true);
-    expect(onSelectPlugin).not.toHaveBeenCalled();
   });
 
   it("opens the same menu when the shortcut raises it", async () => {
@@ -143,7 +140,6 @@ describe("SlashPicker", () => {
     rerender(
       <TooltipProvider>
         <SlashPicker
-          actions={[]}
           plugins={[]}
           onSelectPlugin={vi.fn()}
           onInsert={vi.fn()}
@@ -164,7 +160,6 @@ describe("SlashPicker", () => {
     rerender(
       <TooltipProvider>
         <SlashPicker
-          actions={[]}
           plugins={[]}
           onSelectPlugin={vi.fn()}
           onInsert={vi.fn()}

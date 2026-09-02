@@ -148,17 +148,23 @@ export function filterSkills(skills: SkillEntry[], query: string): SkillEntry[] 
  * The composer's command menu as native menu rows.
  *
  * The picker used to be a search box over a flat list; a native menu cannot
- * filter as you type, so the shape carries the weight instead. What the user
- * reaches for constantly — the view shortcuts — stays flat at the top, and each
- * long, install-dependent list (plugins, MCP tools and prompts, skills) sits
- * behind its own submenu. Typing to find something is still the "/" menu in the
- * composer, which is unchanged.
+ * filter as you type, so the shape carries the weight instead. Each long,
+ * install-dependent list (commands, plugins, MCP tools and prompts, skills)
+ * sits behind its own submenu. Typing to find something is still the "/" menu
+ * in the composer, which is unchanged.
+ *
+ * This menu hangs off the COMPOSER, so it holds what a person puts into a
+ * message. The view shortcuts it used to open with — go home, show the work
+ * board, open a plugin's page — move the window somewhere else instead; they
+ * are navigation, and they already have the sidebar. Ten of them above the
+ * divider also meant the three things the button is for opened below the fold.
+ * They keep their place in the "/" menu, where a typed query is what surfaces
+ * them.
  *
  * A category with nothing in it is left out rather than shown empty: an
  * always-present row that never opens teaches the user it is broken.
  */
 export function buildComposerMenuSections(input: {
-  actions: QuickAction[];
   plugins: PluginEntry[];
   mcpTools: McpToolEntry[];
   mcpPrompts: McpPromptEntry[];
@@ -167,12 +173,6 @@ export function buildComposerMenuSections(input: {
   onSelectPlugin: (viewKey: string) => void;
   onRunMcpPrompt: (prompt: McpPromptEntry) => void;
 }): Array<{ items: NativeMenuRow[] }> {
-  const shortcuts: NativeMenuRow[] = input.actions.map((action) => ({
-    id: `shortcut:${action.id}`,
-    label: action.label,
-    onSelect: () => action.run(),
-  }));
-
   const categories: NativeMenuRow[] = [];
   const push = (category: Category, rows: NativeMenuRow[]): void => {
     if (rows.length === 0) return;
@@ -210,7 +210,5 @@ export function buildComposerMenuSections(input: {
     onSelect: () => input.onInsert(`/${skill.name} `),
   })));
 
-  return [{ items: shortcuts }, { items: categories }].filter(
-    (section) => section.items.length > 0,
-  );
+  return categories.length === 0 ? [] : [{ items: categories }];
 }
