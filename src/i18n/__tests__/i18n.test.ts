@@ -53,11 +53,7 @@ describe("locale", () => {
   it("isLocale only accepts supported codes", () => {
     expect(isLocale("en")).toBe(true);
     expect(isLocale("ko")).toBe(true);
-    expect(isLocale("ja")).toBe(true);
-    expect(isLocale("zh")).toBe(true);
-    expect(isLocale("es")).toBe(true);
-    expect(isLocale("fr")).toBe(true);
-    expect(isLocale("de")).toBe(true);
+    expect(isLocale("ja")).toBe(false);
     expect(isLocale("it")).toBe(false);
     expect(isLocale(null)).toBe(false);
   });
@@ -66,7 +62,7 @@ describe("locale", () => {
     expect(DEFAULT_VISIBLE_LOCALES).toEqual(["en"]);
     expect(isDefaultVisibleLocale("en")).toBe(true);
     expect(isDefaultVisibleLocale("ko")).toBe(false);
-    expect(MARKETPLACE_ELIGIBLE_LOCALES).toEqual(["ko", "ja", "zh", "es", "fr", "de"]);
+    expect(MARKETPLACE_ELIGIBLE_LOCALES).toEqual(["ko"]);
     expect(isMarketplaceEligibleLocale("ko")).toBe(true);
     expect(isMarketplaceEligibleLocale("en")).toBe(false);
     expect(isMarketplaceEligibleLocale("it")).toBe(false);
@@ -80,7 +76,7 @@ describe("locale", () => {
     expect(normalizeLocale("en-US")).toBe("en");
     expect(normalizeLocale("ko_KR")).toBe("ko");
     expect(normalizeLocale("KO")).toBe("ko");
-    expect(normalizeLocale("fr-FR")).toBe("fr");
+    expect(normalizeLocale("fr-FR")).toBe("en");
     expect(normalizeLocale("xx")).toBe("en");
     expect(normalizeLocale(undefined)).toBe("en");
   });
@@ -89,8 +85,8 @@ describe("locale", () => {
     // Electron's getPreferredSystemLanguages() returns BCP-47 tags like these.
     expect(normalizeLocale("ko-KR")).toBe("ko");
     expect(normalizeLocale("en-GB")).toBe("en");
-    expect(normalizeLocale("zh-Hans-CN")).toBe("zh");
-    expect(normalizeLocale("ja-JP")).toBe("ja");
+    expect(normalizeLocale("ko-Kore-KR")).toBe("ko");
+    expect(normalizeLocale("ja-JP")).toBe("en");
   });
 });
 
@@ -113,8 +109,6 @@ describe("translate", () => {
   it("keeps marketplace language-pack locales lazy until explicitly loaded", () => {
     expect(isLocaleMessagesLoaded("en")).toBe(true);
     expect(isLocaleMessagesLoaded("ko")).toBe(false);
-    expect(isLocaleMessagesLoaded("ja")).toBe(false);
-    expect(isLocaleMessagesLoaded("zh")).toBe(false);
   });
 
   it("loads Korean as a language-pack catalog on demand", async () => {
@@ -132,18 +126,18 @@ describe("translate", () => {
   it("coalesces concurrent lazy locale loads", async () => {
     const catalog = { ...messages.en, "common.cancel": "Concurrent OK" };
     const loader = vi.fn(() => Promise.resolve(catalog));
-    const restore = __setLocaleLoaderForTest("ja", loader);
+    const restore = __setLocaleLoaderForTest("ko", loader);
 
     try {
-      const first = loadLocaleMessages("ja");
-      const second = loadLocaleMessages("ja");
+      const first = loadLocaleMessages("ko");
+      const second = loadLocaleMessages("ko");
 
       const [firstCatalog, secondCatalog] = await Promise.all([first, second]);
 
       expect(loader).toHaveBeenCalledTimes(1);
       expect(firstCatalog).toBe(secondCatalog);
       expect(firstCatalog).toBe(catalog);
-      expect(isLocaleMessagesLoaded("ja")).toBe(true);
+      expect(isLocaleMessagesLoaded("ko")).toBe(true);
     } finally {
       restore();
     }
@@ -154,15 +148,15 @@ describe("translate", () => {
     const loader = vi.fn()
       .mockRejectedValueOnce(new Error("temporary chunk failure"))
       .mockResolvedValueOnce(retryCatalog);
-    const restore = __setLocaleLoaderForTest("ja", loader);
+    const restore = __setLocaleLoaderForTest("ko", loader);
 
     try {
-      await expect(loadLocaleMessages("ja")).rejects.toThrow("temporary chunk failure");
-      expect(isLocaleMessagesLoaded("ja")).toBe(false);
+      await expect(loadLocaleMessages("ko")).rejects.toThrow("temporary chunk failure");
+      expect(isLocaleMessagesLoaded("ko")).toBe(false);
 
-      await expect(loadLocaleMessages("ja")).resolves.toBe(retryCatalog);
+      await expect(loadLocaleMessages("ko")).resolves.toBe(retryCatalog);
       expect(loader).toHaveBeenCalledTimes(2);
-      expect(translate("ja", "common.cancel")).toBe("Retry OK");
+      expect(translate("ko", "common.cancel")).toBe("Retry OK");
     } finally {
       restore();
     }
@@ -172,11 +166,6 @@ describe("translate", () => {
     await Promise.all(SUPPORTED_LOCALES.map((locale) => loadLocaleMessages(locale)));
     expect(translate("en", "common.cancel")).toBe("Cancel");
     expect(translate("ko", "common.cancel")).toBe("취소");
-    expect(translate("ja", "common.cancel")).toBe("キャンセル");
-    expect(translate("zh", "common.cancel")).toBe("取消");
-    expect(translate("es", "common.cancel")).toBe("Cancelar");
-    expect(translate("fr", "common.cancel")).toBe("Annuler");
-    expect(translate("de", "common.cancel")).toBe("Abbrechen");
   });
 
   it("falls back to English then to the key on a miss", async () => {
@@ -218,10 +207,20 @@ describe("translate", () => {
     }
   });
 
-  it("does not expose Japanese and Chinese as English fallback catalogs", async () => {
-    await Promise.all([loadLocaleMessages("ja"), loadLocaleMessages("zh")]);
-    expect(translate("ja", "chatTab.streamSmoothingTitle")).not.toBe("Stream Smoothing");
-    expect(translate("zh", "chatTab.streamSmoothingTitle")).not.toBe("Stream Smoothing");
+  it("lets generated surface text override the seed on a key collision", async () => {
+    const restore = __setLocaleLoaderForTest("ko", async () => {
+      const [{ ko }, { koMessages }] = await Promise.all([
+        import("../messages/ko.js"),
+        import("../messages/generated-locales/ko.js"),
+      ]);
+      return { ...ko, ...koMessages, "common.cancel": "generated wins" };
+    });
+    try {
+      await loadLocaleMessages("ko");
+      expect(translate("ko", "common.cancel")).toBe("generated wins");
+    } finally {
+      restore();
+    }
   });
 });
 
@@ -239,6 +238,6 @@ describe("runtime t()", () => {
     setLocale("ko-KR");
     expect(getLocale()).toBe("ko");
     setLocale("de-DE");
-    expect(getLocale()).toBe("de");
+    expect(getLocale()).toBe("en");
   });
 });

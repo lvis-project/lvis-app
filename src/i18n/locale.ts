@@ -11,7 +11,7 @@
  */
 
 /** Locales LVIS can render without broad English fallback. */
-export const SUPPORTED_LOCALES = ["en", "ko", "ja", "zh", "es", "fr", "de"] as const;
+export const SUPPORTED_LOCALES = ["en", "ko"] as const;
 
 /** A supported UI locale code (BCP-47 primary subtag). */
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
@@ -20,10 +20,8 @@ export type Locale = (typeof SUPPORTED_LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = "en";
 
 /**
- * Locales shown in the default in-app language picker while translated
- * language packs move toward marketplace packages. The full `SUPPORTED_LOCALES`
- * union remains broad so existing settings and lazy catalogs keep working
- * during the migration.
+ * Locales shown in the default in-app language picker. Every other supported
+ * locale is a marketplace language pack, lazily loaded once installed.
  */
 export const DEFAULT_VISIBLE_LOCALES = ["en"] as const satisfies readonly Locale[];
 
@@ -49,11 +47,6 @@ const MARKETPLACE_ELIGIBLE_LOCALE_SET = new Set<string>(
 export const LOCALE_INFO: Record<Locale, { nativeName: string; englishName: string }> = {
   en: { nativeName: "English", englishName: "English" },
   ko: { nativeName: "한국어", englishName: "Korean" },
-  ja: { nativeName: "日本語", englishName: "Japanese" },
-  zh: { nativeName: "简体中文", englishName: "Chinese (Simplified)" },
-  es: { nativeName: "Español", englishName: "Spanish" },
-  fr: { nativeName: "Français", englishName: "French" },
-  de: { nativeName: "Deutsch", englishName: "German" },
 };
 
 /** Type guard: is `value` one of the supported locale codes? */

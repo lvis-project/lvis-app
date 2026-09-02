@@ -18,7 +18,7 @@ import {
   stableJson,
   validateHubWireBundle,
   writeImmutable,
-} from "./a2a-p4-5-harness-lib.mjs";
+} from "../../scripts/a2a-p4-5-harness-lib.mjs";
 
 const fullSha = "1".repeat(40);
 const digest = "a".repeat(64);

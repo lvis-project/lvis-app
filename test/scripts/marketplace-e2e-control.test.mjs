@@ -24,7 +24,7 @@ import {
   validateLifecycleEvidence,
   validateSafeSourceArchive,
   walkSafeTree,
-} from "./marketplace-e2e-control.mjs";
+} from "../../scripts/marketplace-e2e-control.mjs";
 
 function fixtureRoot() {
   const root = mkdtempSync(join(tmpdir(), "marketplace-e2e-control-"));
@@ -90,7 +90,7 @@ test("creates deterministic ustar from regular non-linked files only", () => {
 
 test("archives through a pinned no-follow descriptor instead of reopening a checked path", () => {
   const source = readFileSync(
-    fileURLToPath(new URL("./marketplace-e2e-control.mjs", import.meta.url)),
+    fileURLToPath(new URL("../../scripts/marketplace-e2e-control.mjs", import.meta.url)),
     "utf8",
   );
   assert.match(source, /openSync\(\s*entry\.absolute,/u);
@@ -251,7 +251,7 @@ test("stage CLI binds clean exact checkouts and contract identity into separate 
   });
   const output = join(root, "staged");
   const control = fileURLToPath(
-    new URL("./marketplace-e2e-control.mjs", import.meta.url),
+    new URL("../../scripts/marketplace-e2e-control.mjs", import.meta.url),
   );
 
   execFileSync(process.execPath, [

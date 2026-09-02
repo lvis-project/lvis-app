@@ -149,12 +149,12 @@ than trusted. Every query below that says `<file set>` means this pipeline;
 
 ### Files
 
-- A `.ts` module in `src/` is kebab-case: 944 of 944 in the file set. 938 of
-  those are hand-written. The other six are generated and sit inside the
+- A `.ts` module in `src/` is kebab-case: 902 of 902 in the file set. 901 of
+  those are hand-written. The other one is generated and sits inside the
   measured set because the scope pipeline excludes only
   `src/i18n/messages/generated/` — `src/i18n/messages/generated-locales/` holds
-  one file per locale (`de.ts`, `ko.ts`), written by
-  `scripts/i18n-generate-extra-locales.ts`. They satisfy the rule; they are not
+  one file per lazy locale (`ko.ts`), written by
+  `scripts/i18n-build-catalog.mjs`. It satisfies the rule; it is not
   evidence for it. The 192 files the pipeline does exclude — 121 camelCase, 61
   `be_`-prefixed, 10 single-word — belong to their generator too. Do not
   hand-edit either set and do not cite either as precedent.
@@ -169,7 +169,7 @@ than trusted. Every query below that says `<file set>` means this pipeline;
   all, is kebab-case: `chat-side-panel-layout.tsx`, `preview-renderers.tsx`.
   `src/components/ui/*` is vendored primitive code and keeps its upstream
   kebab names.
-- `export default` is not used in `src/`: 0 declarations in the file set's 944
+- `export default` is not used in `src/`: 0 declarations in the file set's 902
   `.ts`, 2 in its 163 `.tsx`. So "the file name matches the default
   export" does not arise there: the file name matches the single component the
   file exists to hold. When such a file grows a second exported component,
@@ -310,10 +310,12 @@ there breaks the build. Concretely, and measured over `web/`:
   name that merely starts with an allowed one, and a new name sharing a line
   with an allowed one. Adding a fourth entry is a review decision, not a way
   around the rule: justify the domain word or pick a different one.
-- Shared test support that several suites import lives in `src/testing/` and is
-  named for what it provides — `sign-envelope-fixture.ts`,
+- Shared test support that several suites import lives in
+  `src/__tests__/support/` and is named for what it provides —
+  `tmp-dir-teardown.ts`, `sign-envelope-fixture.ts`,
   `host-shell-sandbox-fixtures.ts` — never for being fake. Nothing outside
-  tests imports it (0 inbound production imports).
+  tests imports it (0 inbound production imports). Look there before writing
+  a helper a second time.
 - A production seam that exists for tests is suffixed `ForTest` and carries a
   leading underscore marking it as outside the module's API:
   `__resetSessionStoreForTest`, `_resetForTest`. One suffix spelling; see
@@ -554,7 +556,7 @@ matches none, and both results look like measurements. State a number only for
 the scope you ran it over; a query that cannot run is not a query that returned
 zero.
 
-    # <gate scan> — every file the naming gate reads (1634)
+    # <gate scan> — every file the naming gate reads (1582)
     git ls-files | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' \
       | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)'
 
@@ -570,7 +572,7 @@ zero.
       #   PascalCase  grep -E '^[A-Z]' | grep -vcE '^[A-Z][A-Z0-9_]*$'
       #   underscore  grep -vcE '^[A-Z]|^[a-z]'
 
-    # Files: 944 of 944 .ts kebab; 163 .tsx of which 132 PascalCase
+    # Files: 902 of 902 .ts kebab; 163 .tsx of which 132 PascalCase
     <file set> | grep '\.ts$'  | xargs -n1 basename | grep -cE '^[a-z0-9]+(-[a-z0-9]+)*\.ts$'
     <file set> | grep '\.tsx$' | xargs -n1 basename | grep -cE '^[A-Z]'
 
@@ -584,7 +586,7 @@ zero.
     # Files: 192 generated .ts — 121 camelCase, 61 be_-prefixed, 10 single-word
     git ls-files 'src/i18n/messages/generated/**' | grep '\.ts$' | xargs -n1 basename
 
-    # Files: the 6 generated .ts the file set does NOT exclude, so 944 - 6 = 938
+    # Files: the 1 generated .ts the file set does NOT exclude, so 902 - 1 = 901
     # hand-written. The scope pipeline drops `generated/`, not `generated-locales/`.
     <file set> | grep '^src/i18n/messages/generated-locales/'
 
@@ -631,9 +633,10 @@ zero.
     git ls-files | grep -E '\.(ts|tsx)$' \
       | xargs grep -nE '^(export )?(declare )?(const )?enum [A-Za-z]'
 
-    # src/testing/: 0 inbound imports from outside a test
-    <file set> | grep -v '^src/testing/' \
-      | xargs grep -nE "from ['\"][^'\"]*/testing/"
+    # src/__tests__/support/: 0 inbound imports from outside a test. The file
+    # set already drops every `__tests__/` path, so no exclusion is needed —
+    # an exclusion of a directory that does not exist reads as 0 forever.
+    <file set> | xargs grep -nE "from ['\"][^'\"]*__tests__/support/"
 
     # PermissionDecisionCard.tsx: 3 importing modules. The generated i18n
     # message module shares the stem and is not one of them.

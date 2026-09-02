@@ -28,8 +28,9 @@
  *
  * Move the logic there and delete this script when that happens.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { walkSourceFiles } from "./lib/source-walk.mjs";
 
 const SRC_DIR = join(process.cwd(), "src", "ui");
 
@@ -57,31 +58,25 @@ const GRANDFATHERED = new Set(["25", "35"]);
 
 const violations = [];
 
-function walk(dir) {
-  // withFileTypes carries the entry type on the dirent itself — avoids a
-  // separate statSync(p) between the directory listing and the readFileSync,
-  // which CodeQL flags as a file-system race (the path could be swapped for a
-  // symlink/other inode in that window).
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "node_modules") continue;
-      walk(p);
-    } else if (entry.isFile() && /\.(tsx|ts)$/.test(entry.name)) {
-      const content = readFileSync(p, "utf8");
-      const lines = content.split("\n");
-      lines.forEach((line, i) => {
-        for (const m of line.matchAll(RAW_ALPHA)) {
-          if (GRANDFATHERED.has(m[1])) continue;
-          violations.push(`${relative(process.cwd(), p)}:${i + 1}  ${m[0]}`);
-        }
-      });
-    }
+function scan(dir) {
+  const files = walkSourceFiles(dir, {
+    skipDirs: new Set(["__tests__", "node_modules"]),
+    extensions: [".ts", ".tsx"],
+  });
+  for (const p of files) {
+    const content = readFileSync(p, "utf8");
+    const lines = content.split("\n");
+    lines.forEach((line, i) => {
+      for (const m of line.matchAll(RAW_ALPHA)) {
+        if (GRANDFATHERED.has(m[1])) continue;
+        violations.push(`${relative(process.cwd(), p)}:${i + 1}  ${m[0]}`);
+      }
+    });
   }
 }
 
 try {
-  walk(SRC_DIR);
+  scan(SRC_DIR);
 } catch (e) {
   console.warn(`[opacity-token-check] skipped: ${e.message}`);
   process.exit(0);

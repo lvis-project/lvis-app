@@ -320,7 +320,7 @@ describe("MarketplaceTab", () => {
         marketplace: {
           installedProviderIds: ["ollama"],
           installedThemeBundleIds: ["high-contrast"],
-          installedLanguagePacks: ["ja"],
+          installedLanguagePacks: [],
         },
       }),
       listMarketplacePlugins: vi.fn().mockResolvedValue(packages),
@@ -375,7 +375,7 @@ describe("MarketplaceTab", () => {
     fireEvent.click(languageAction);
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
-        marketplace: { installedLanguagePacks: ["ja", "ko"] },
+        marketplace: { installedLanguagePacks: ["ko"] },
       });
     });
 

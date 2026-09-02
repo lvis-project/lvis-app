@@ -19,6 +19,7 @@ import {
   DEFAULT_VISIBLE_BUNDLES,
 } from "../theme/index.js";
 import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
+import { getLocale, setLocale } from "../../../i18n/runtime.js";
 
 // Marketplace/legacy theme bundles (theme/bundles/index.ts) resolve via async
 // dynamic import. In isolation these tests pass well under the 1000ms default,
@@ -162,8 +163,12 @@ describe("AppearanceTab — bundle card grid", () => {
     const originalLanguage = navigator.language;
     Object.defineProperty(navigator, "language", {
       configurable: true,
-      value: "ja-JP",
+      value: "ko-KR",
     });
+    // The renderer suite renders in Korean; a Korean UI has nothing to
+    // recommend, so this scenario runs under the English default.
+    const originalLocale = getLocale();
+    setLocale("en");
     const onOpenMarketplace = vi.fn();
     try {
       const { api } = makeMockLvisApi();
@@ -172,12 +177,13 @@ describe("AppearanceTab — bundle card grid", () => {
       const { getByTestId, queryByTestId } = renderWithBundle(DEFAULT_BUNDLE_ID, onOpenMarketplace);
       await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-      expect(queryByTestId("language-option-ja")).toBeNull();
+      expect(queryByTestId("language-option-ko")).toBeNull();
       expect(getByTestId("appearance-tab:language-recommendation"))
-        .toHaveTextContent("Japanese 언어 팩이 시스템 언어와 일치합니다.");
-      fireEvent.click(getByTestId("appearance-tab:language-recommendation-open:ja"));
+        .toHaveTextContent("Korean language pack matches your system language.");
+      fireEvent.click(getByTestId("appearance-tab:language-recommendation-open:ko"));
       expect(onOpenMarketplace).toHaveBeenCalledWith("language-pack");
     } finally {
+      setLocale(originalLocale);
       Object.defineProperty(navigator, "language", {
         configurable: true,
         value: originalLanguage,

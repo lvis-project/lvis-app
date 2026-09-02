@@ -6,7 +6,7 @@
  * installers depend on OS-specific signing, native dependency rebuilds, and
  * target tooling, so the three-platform release path is the CI OS matrix.
  */
-import { spawnSync } from "node:child_process";
+import { runCommand } from "./hooks/spawn-command.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -147,18 +147,7 @@ function parseArgs(argv) {
 }
 
 function run(cmd, args, opts = {}) {
-  process.stdout.write(`[installer] $ ${cmd} ${args.join(" ")}\n`);
-  const result = spawnSync(cmd, args, {
-    cwd: root,
-    stdio: "inherit",
-    ...opts,
-  });
-  if (result.error) {
-    throw new Error(`${cmd} ${args.join(" ")} failed to spawn: ${result.error.message}`);
-  }
-  if (result.status !== 0) {
-    throw new Error(`${cmd} ${args.join(" ")} exited with code ${result.status}`);
-  }
+  runCommand(cmd, args, { cwd: root, label: "installer", ...opts });
 }
 
 function assertNativeTarget(target) {

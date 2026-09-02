@@ -63,6 +63,7 @@ import {
   type RunTranscriptWriter,
 } from "../work-board/run-transcript.js";
 import type { SubAgentActivityUpdate } from "../engine/subagent-runner.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("work-board-engine");
 
@@ -832,7 +833,7 @@ export function createWorkBoardEngine(
         runSessionId: execResult.childSessionId,
       };
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = errorMessage(err);
       log.warn("runItem error (id=%d): %s", itemId, reason);
       await store
         .setRunResult(itemId, { runStatus: "error" })
@@ -904,7 +905,7 @@ export function createWorkBoardEngine(
       const { filed, refreshed } = await store.fileBriefingProposals(parsed.items);
       return { status: "ok", kind, filed, refreshed };
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = errorMessage(err);
       log.warn("runBriefing error (kind=%s): %s", kind, reason);
       return { status: "error", kind, reason };
     } finally {

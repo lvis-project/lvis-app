@@ -36,3 +36,26 @@ export function spawnSyncPortable(command, args, options) {
   const invocation = normalizeSpawnInvocation(command, args);
   return spawnSync(invocation.command, invocation.args, options);
 }
+
+/**
+ * Run a command with inherited stdio, echo it under `label`, and throw on a
+ * spawn failure or a non-zero exit. The build, release, screenshot and
+ * pre-push scripts each carried a private copy of this loop; the copies
+ * agreed on everything but the log prefix, and one of them exited the
+ * process instead of throwing, which skipped its caller's cleanup.
+ */
+export function runCommand(command, args, { cwd, label, env = process.env, ...options } = {}) {
+  console.log(`[${label}] $ ${command} ${args.join(" ")}`);
+  const result = spawnSyncPortable(command, args, {
+    cwd,
+    env,
+    stdio: ["ignore", "inherit", "inherit"],
+    ...options,
+  });
+  if (result.error) {
+    throw new Error(`${command} ${args.join(" ")} failed to spawn: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(" ")} exited with code ${result.status} in ${cwd}`);
+  }
+}

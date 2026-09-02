@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,6 +8,7 @@ import {
   countKnipIssuesByType,
   formatKnipIssue,
   normalizeKnipIssues,
+  readJsonFile,
   writeKnipBaselineAtomicSync,
 } from "./lib/knip-baseline.mjs";
 
@@ -55,14 +55,6 @@ function fail(message, details = []) {
   process.exitCode = 1;
 }
 
-function readJson(path, label) {
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch (error) {
-    throw new Error(`${label} is not readable JSON: ${error.message}`);
-  }
-}
-
 function runKnip(options) {
   const result = spawnSync(
     process.execPath,
@@ -94,12 +86,12 @@ function runKnip(options) {
 
 try {
   const options = parseOptions(process.argv.slice(2));
-  const packageJson = readJson(join(options.root, "package.json"), "package.json");
+  const packageJson = readJsonFile(join(options.root, "package.json"), "package.json");
   const expectedKnipVersion = packageJson.devDependencies?.knip;
   if (typeof expectedKnipVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(expectedKnipVersion)) {
     throw new Error("package.json must pin an exact Knip devDependency version");
   }
-  const installedKnipPackage = readJson(
+  const installedKnipPackage = readJsonFile(
     resolve(dirname(options.knipBinary), "..", "package.json"),
     "installed Knip package.json",
   );
@@ -132,7 +124,7 @@ try {
     );
     console.log(`[knip-gate] wrote ${issues.length} entries to knip-baseline.json`);
   } else {
-    const baseline = readJson(options.baseline, "knip-baseline.json");
+    const baseline = readJsonFile(options.baseline, "knip-baseline.json");
     if (baseline.schemaVersion !== KNIP_BASELINE_SCHEMA_VERSION) {
       throw new Error(`unsupported Knip baseline schema ${baseline.schemaVersion}`);
     }

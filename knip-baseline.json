@@ -1174,11 +1174,6 @@
     },
     {
       "type": "files",
-      "file": "scripts/i18n-generate-extra-locales.ts",
-      "name": "scripts/i18n-generate-extra-locales.ts"
-    },
-    {
-      "type": "files",
       "file": "scripts/recover-electron-native-reaper.mjs",
       "name": "scripts/recover-electron-native-reaper.mjs"
     },
