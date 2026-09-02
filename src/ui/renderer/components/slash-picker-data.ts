@@ -48,6 +48,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { cmd: "/sessions", labelKey: "slashPickerPanel.cmdSessions" },
   { cmd: "/load", labelKey: "slashPickerPanel.cmdLoad" },
   { cmd: "/compact", labelKey: "slashPickerPanel.cmdCompact" },
+  { cmd: "/goal", labelKey: "slashPickerPanel.cmdGoal" },
   { cmd: "/remember", labelKey: "slashPickerPanel.cmdRemember" },
   { cmd: "/memory", labelKey: "slashPickerPanel.cmdMemory" },
   { cmd: "/vendor", labelKey: "slashPickerPanel.cmdVendor" },

@@ -16,6 +16,7 @@ import { createToolSearchTool } from "../tools/tool-search.js";
 import { createAskUserQuestionTool } from "../tools/ask-user-question.js";
 import { createRoutineScheduleTool } from "../tools/routine-schedule.js";
 import { createSessionTasksTool } from "../tools/session-tasks.js";
+import { createSessionGoalTool } from "../tools/session-goal.js";
 import {
   createAgentInterruptTool,
   createAgentSpawnTool,
@@ -36,6 +37,7 @@ import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
 import type { RoutinesStore } from "../main/routines-store.js";
 import type { SessionTasksStore } from "../main/session-tasks-store.js";
+import type { SessionGoalStore } from "../main/session-goal-store.js";
 import type { SubAgentRunner } from "../engine/subagent-runner.js";
 import type { SkillStore } from "../main/skill-store.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
@@ -173,6 +175,7 @@ export interface WorkflowToolDeps {
   getAskUserQuestionGate?: () => AskUserQuestionGate | undefined;
   routinesStore?: RoutinesStore;
   sessionTasksStore?: SessionTasksStore;
+  sessionGoalStore?: SessionGoalStore;
   /** Lazy-resolved sub-agent runner — populated after ConversationLoop wiring. */
   getSubAgentRunner?: () => SubAgentRunner | undefined;
   /** Host-only A2A runtime; agent_send still rejects every non-child context. */
@@ -228,6 +231,9 @@ export function registerBuiltinTools(
   }
   if (workflowDeps?.sessionTasksStore) {
     builtins.push(createSessionTasksTool(workflowDeps.sessionTasksStore));
+  }
+  if (workflowDeps?.sessionGoalStore) {
+    builtins.push(createSessionGoalTool(workflowDeps.sessionGoalStore));
   }
   if (workflowDeps?.getSubAgentRunner && workflowDeps.emitAgentSpawn) {
     const agentProfileStore = workflowDeps.agentProfileStore;

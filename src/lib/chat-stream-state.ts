@@ -523,9 +523,13 @@ export function appendUserEntry(
  */
 export function applyUserMessageFrame(
   entries: ChatEntry[],
-  frame: { text?: string; origin?: string; messageId?: string },
+  frame: { text?: string; origin?: string; messageId?: string; hostSubmitted?: boolean },
 ): ChatEntry[] {
-  if (isExternalSurfaceInputOrigin(frame.origin)) {
+  // `hostSubmitted` is the host saying it started this turn itself (a session
+  // goal reviving), so there is no optimistic bubble waiting for it here. The
+  // origin cannot answer that: it says where the TEXT came from, not who
+  // pressed send, and the same origin is used by turns this surface did echo.
+  if (frame.hostSubmitted === true || isExternalSurfaceInputOrigin(frame.origin)) {
     const text = typeof frame.text === "string" ? frame.text : "";
     if (text.length === 0) return entries;
     return [

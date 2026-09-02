@@ -768,6 +768,29 @@ describe("applyUserMessageFrame", () => {
     }
   });
 
+  it("appends the row for a turn the host submitted itself", () => {
+    // A session goal reviving: the host started the turn, so no bubble was
+    // echoed here and the announced row is the only one this transcript gets.
+    const next = applyUserMessageFrame([], {
+      text: "Continuing the goal 2/50",
+      origin: "agent-message",
+      messageId: "m-1",
+      hostSubmitted: true,
+    });
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({ kind: "user", text: "Continuing the goal 2/50" });
+  });
+
+  it("still adds no row for an agent-message turn that is not host-submitted", () => {
+    // The sub-agent parent wake shares the origin but presents its input as a
+    // report; adding a plain bubble there would double it.
+    const entries: ChatEntry[] = [{ kind: "user", text: "already echoed" }];
+    expect(applyUserMessageFrame(entries, {
+      text: "child report",
+      origin: "agent-message",
+    })).toHaveLength(1);
+  });
+
   it("binds the host's row identity onto the bubble this surface echoed", () => {
     const entries = appendUserEntry([], "already echoed");
     const next = applyUserMessageFrame(entries, {

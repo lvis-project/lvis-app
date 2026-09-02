@@ -9,6 +9,7 @@
  * retriever + idle scheduler.
  */
 import { SessionTasksStore } from "../../main/session-tasks-store.js";
+import { SessionGoalStore } from "../../main/session-goal-store.js";
 import { AskUserQuestionGate } from "../../main/ask-user-question-gate.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
@@ -64,6 +65,13 @@ export async function setupWorkflowStores(
     load: (sessionId) => sessionOwner(sessionId).loadSessionMetadata(sessionId)?.tasks ?? [],
     save: (sessionId, items) => sessionOwner(sessionId).saveSessionTasks(sessionId, items),
   });
+  // The goal rides in the SAME sidecar as the task list, resolved through the
+  // same owner lookup: the two are one session's bookkeeping and must never
+  // land in two different files.
+  const sessionGoalStore = new SessionGoalStore({
+    load: (sessionId) => sessionOwner(sessionId).loadSessionMetadata(sessionId)?.goal ?? null,
+    save: (sessionId, goal) => sessionOwner(sessionId).saveSessionGoal(sessionId, goal),
+  });
   const skillStore = new SkillStore();
   const agentProfileStore = new AgentProfileStore();
   const personaPromptStore = new PersonaPromptStore();
@@ -87,6 +95,7 @@ export async function setupWorkflowStores(
   const workflowDeps: WorkflowToolDeps = {
     routinesStore,
     sessionTasksStore,
+    sessionGoalStore,
     skillStore,
     agentProfileStore,
     skillOverlay,
@@ -158,6 +167,7 @@ export async function setupWorkflowStores(
   });
 
   ctx.sessionTasksStore = sessionTasksStore;
+  ctx.sessionGoalStore = sessionGoalStore;
   ctx.skillStore = skillStore;
   ctx.agentProfileStore = agentProfileStore;
   ctx.personaPromptStore = personaPromptStore;

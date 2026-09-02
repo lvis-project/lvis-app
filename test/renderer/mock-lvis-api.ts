@@ -167,6 +167,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitSkillLoaded: (event: { name: string; description: string; sessionId: string }) => void;
   /** `onSessionTasksChanged` push — the assistant's checklist for one session. */
   emitSessionTasksChanged: (payload: { sessionId: string; items: unknown[] }) => void;
+  /** `onSessionGoalChanged` push — the goal one session is working towards, or its absence. */
+  emitSessionGoalChanged: (payload: { sessionId: string; goal: unknown }) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFired: (r: unknown) => void;
@@ -254,6 +256,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const notificationToastHandlers = new Set<(payload: unknown) => void>();
   const notificationClickedHandlers = new Set<(payload: unknown) => void>();
   const sessionTasksHandlers = new Set<(payload: unknown) => void>();
+  const sessionGoalHandlers = new Set<(payload: unknown) => void>();
 
   const api: MockLvisApi = {
     notifyPluginTheme: vi.fn(async () => ({ ok: true })),
@@ -512,6 +515,14 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       sessionTasksHandlers.add(handler);
       return () => sessionTasksHandlers.delete(handler);
     }),
+    getSessionGoal: vi.fn(async () => null),
+    pauseSessionGoal: vi.fn(async () => ({ ok: true })),
+    resumeSessionGoal: vi.fn(async () => ({ ok: true })),
+    clearSessionGoal: vi.fn(async () => ({ ok: true })),
+    onSessionGoalChanged: vi.fn((handler: (payload: unknown) => void) => {
+      sessionGoalHandlers.add(handler);
+      return () => sessionGoalHandlers.delete(handler);
+    }),
     onChatStream: vi.fn((h: (ev: ChatStreamEvent) => void) => {
       chatStreamHandlers.add(h);
       return () => chatStreamHandlers.delete(h);
@@ -766,6 +777,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitAgentSpawnEvent: (event) => agentSpawnEventHandlers.forEach((h) => h(event)),
     emitSkillLoaded: (event) => skillLoadedHandlers.forEach((h) => h(event)),
     emitSessionTasksChanged: (payload) => sessionTasksHandlers.forEach((h) => h(payload)),
+    emitSessionGoalChanged: (payload) => sessionGoalHandlers.forEach((h) => h(payload)),
     emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
     emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
     emitRoutineFired: (r) => routineFiredHandlers.forEach((h) => h(r)),

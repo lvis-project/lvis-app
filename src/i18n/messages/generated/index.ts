@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 189
+ * Fragments: 192
  */
 import { en as en_app } from "./app.js";
 import { en as en_appearanceTab } from "./appearanceTab.js";
@@ -63,6 +63,8 @@ import { en as en_be_routineEngine } from "./be_routineEngine.js";
 import { en as en_be_routineSchedule } from "./be_routineSchedule.js";
 import { en as en_be_runtimeIndex } from "./be_runtimeIndex.js";
 import { en as en_be_sandboxCapability } from "./be_sandboxCapability.js";
+import { en as en_be_sessionGoal } from "./be_sessionGoal.js";
+import { en as en_be_sessionGoalRevival } from "./be_sessionGoalRevival.js";
 import { en as en_be_sessionTasks } from "./be_sessionTasks.js";
 import { en as en_be_shellPathPolicy } from "./be_shellPathPolicy.js";
 import { en as en_be_shutdownRoutines } from "./be_shutdownRoutines.js";
@@ -153,6 +155,7 @@ import { en as en_rolesTab } from "./rolesTab.js";
 import { en as en_rosePine } from "./rosePine.js";
 import { en as en_routinePanel } from "./routinePanel.js";
 import { en as en_savedToast } from "./savedToast.js";
+import { en as en_sessionGoalPanel } from "./sessionGoalPanel.js";
 import { en as en_sessionResumeDivider } from "./sessionResumeDivider.js";
 import { en as en_sessionTasksPanel } from "./sessionTasksPanel.js";
 import { en as en_settingsContent } from "./settingsContent.js";
@@ -254,6 +257,8 @@ export const generatedEn: Record<string, string> = {
   ...en_be_routineSchedule,
   ...en_be_runtimeIndex,
   ...en_be_sandboxCapability,
+  ...en_be_sessionGoal,
+  ...en_be_sessionGoalRevival,
   ...en_be_sessionTasks,
   ...en_be_shellPathPolicy,
   ...en_be_shutdownRoutines,
@@ -344,6 +349,7 @@ export const generatedEn: Record<string, string> = {
   ...en_rosePine,
   ...en_routinePanel,
   ...en_savedToast,
+  ...en_sessionGoalPanel,
   ...en_sessionResumeDivider,
   ...en_sessionTasksPanel,
   ...en_settingsContent,

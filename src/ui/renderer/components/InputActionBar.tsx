@@ -334,6 +334,8 @@ export interface ComposerStatusRowProps {
   ringSlot: ReactNode;
   /** The session's tasks chip, drawn right after the ring; absent when the plan is empty. */
   tasksSlot?: ReactNode;
+  /** The session's goal chip, drawn after the tasks chip; absent when there is no goal. */
+  goalSlot?: ReactNode;
   /** Opens Settings → LLM — the model card's way to the full catalogue. */
   onOpenModelSettings: () => void;
   /** Opens Settings → Permissions when the permission cell is clicked. */
@@ -352,6 +354,7 @@ export function ComposerStatusRow({
   statusRow,
   ringSlot,
   tasksSlot,
+  goalSlot,
   onOpenModelSettings,
   onOpenPermissions,
   onOpenApprovalQueue,
@@ -382,6 +385,7 @@ export function ComposerStatusRow({
         {ringSlot}
       </span>
       {tasksSlot}
+      {goalSlot}
 
       <div className="ml-auto flex min-w-0 flex-nowrap items-center gap-1.5">
         {/* Pending approvals — its OWN button, BEFORE the permission cell. */}

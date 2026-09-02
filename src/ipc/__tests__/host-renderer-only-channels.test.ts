@@ -192,6 +192,8 @@ const HOST_ONLY_CHANNELS: ReadonlyArray<readonly [string, string, unknown[]]> = 
   // Routines and the session tasks list.
   ["routines", ROUTINES.list, []],
   ["session-tasks", CHANNELS.sessionTasks.list, []],
+  ["session-goal", CHANNELS.sessionGoal.get, []],
+  ["session-goal", CHANNELS.sessionGoal.pause, []],
   // Host identity + runtime versions. Read-only, but the response carries
   // `userDataPath` and is returned unprojected.
   ["app", CHANNELS.app.info, []],
@@ -234,6 +236,7 @@ beforeEach(async () => {
     { registerSideChatHandlers },
     { registerRoutineHandlers },
     { registerSessionTasksHandlers },
+    { registerSessionGoalHandlers },
     { registerAppHandlers },
     { registerWorkBoardHandlers },
     { registerPromptHandlers },
@@ -251,6 +254,7 @@ beforeEach(async () => {
     import("../domains/sidechat.js"),
     import("../domains/routines.js"),
     import("../domains/session-tasks.js"),
+    import("../domains/session-goal.js"),
     import("../domains/app.js"),
     import("../domains/work-board.js"),
     import("../domains/prompts.js"),
@@ -268,6 +272,7 @@ beforeEach(async () => {
   registerSideChatHandlers(deps);
   registerRoutineHandlers(deps);
   registerSessionTasksHandlers(deps);
+  registerSessionGoalHandlers(deps);
   registerAppHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerPromptHandlers(deps);

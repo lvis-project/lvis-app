@@ -61,6 +61,7 @@ import { registerPermissionsHandlers } from "./domains/permissions.js";
 import { registerWindowHandlers } from "./domains/window.js";
 import { registerRoutineHandlers } from "./domains/routines.js";
 import { registerSessionTasksHandlers } from "./domains/session-tasks.js";
+import { registerSessionGoalHandlers } from "./domains/session-goal.js";
 import { registerAppHandlers } from "./domains/app.js";
 import { registerWorkBoardHandlers } from "./domains/work-board.js";
 import { registerAttachHandlers } from "./domains/attach.js";
@@ -131,6 +132,7 @@ export function registerIpcHandlers(
   registerWindowHandlers(deps);
   registerRoutineHandlers(deps);
   registerSessionTasksHandlers(deps);
+  registerSessionGoalHandlers(deps);
   registerAppHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerAttachHandlers(deps);

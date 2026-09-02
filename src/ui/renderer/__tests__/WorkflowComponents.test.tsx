@@ -11,6 +11,7 @@ import { AskUserQuestionCard } from "../components/AskUserQuestionCard.js";
 import { QuestionOverlay } from "../components/QuestionOverlay.js";
 import { RoutinePanel } from "../components/RoutinePanel.js";
 import { SessionTasksPanel } from "../components/SessionTasksPanel.js";
+import { SessionGoalPanel } from "../components/SessionGoalPanel.js";
 import { SkillBadge } from "../components/SkillBadge.js";
 import { t } from "../../../i18n/runtime.js";
 import type { LvisApi } from "../types.js";
@@ -28,6 +29,8 @@ function fakeApi(overrides: Partial<LvisApi> = {}): LvisApi {
     onRoutineFired: noopUnsub as never,
     listSessionTasks: () => Promise.resolve([]),
     onSessionTasksChanged: noopUnsub as never,
+    getSessionGoal: () => Promise.resolve(null),
+    onSessionGoalChanged: noopUnsub as never,
     respondAskUserQuestion: stub as never,
     onAskUserQuestion: noopUnsub as never,
     onAgentSpawnEvent: noopUnsub as never,
@@ -841,5 +844,107 @@ describe("SkillBadge", () => {
       </TooltipProvider>,
     );
     expect(container.textContent).toContain(t("skillBadge.loadedLabel", { name: "report-writing" }));
+  });
+});
+
+describe("SessionGoalPanel", () => {
+  const GOAL = {
+    text: "ship the release",
+    status: "running" as const,
+    round: 3,
+    ceiling: 50,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+  async function mount(api: LvisApi) {
+    const rendered = render(<SessionGoalPanel api={api} sessionId="session-goal" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    return rendered;
+  }
+
+  it("hides when the session has no goal", async () => {
+    const { container } = await mount(fakeApi());
+    expect(container.querySelector('[data-testid="session-goal-panel"]')).toBeNull();
+  });
+
+  it("shows the goal and the round it is on", async () => {
+    const { container } = await mount(fakeApi({ getSessionGoal: () => Promise.resolve(GOAL) as never }));
+    expect(container.querySelector('[data-testid="session-goal-text"]')?.textContent)
+      .toBe("ship the release");
+    expect(container.querySelector('[data-testid="session-goal-round"]')?.textContent)
+      .toBe("3/50");
+  });
+
+  it("stops the loop from the chip while the goal is running", async () => {
+    const pause = vi.fn().mockResolvedValue({ ok: true });
+    const { container } = await mount(fakeApi({
+      getSessionGoal: () => Promise.resolve(GOAL) as never,
+      pauseSessionGoal: pause as never,
+    }));
+    const button = container.querySelector('[data-testid="session-goal-action"]')!;
+    expect(button.getAttribute("data-action")).toBe("pause");
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(pause).toHaveBeenCalledWith("session-goal");
+  });
+
+  it("offers resume while paused and continue once the budget is spent", async () => {
+    const resume = vi.fn().mockResolvedValue({ ok: true });
+    const paused = await mount(fakeApi({
+      getSessionGoal: () => Promise.resolve({ ...GOAL, status: "paused" }) as never,
+      resumeSessionGoal: resume as never,
+    }));
+    expect(
+      paused.container.querySelector('[data-testid="session-goal-action"]')?.getAttribute("data-action"),
+    ).toBe("resume");
+
+    const spent = await mount(fakeApi({
+      getSessionGoal: () => Promise.resolve({ ...GOAL, round: 50 }) as never,
+      resumeSessionGoal: resume as never,
+    }));
+    const chip = spent.container.querySelector('[data-testid="session-goal-panel"]')!;
+    expect(chip.getAttribute("data-at-ceiling")).toBe("true");
+    const button = spent.container.querySelector('[data-testid="session-goal-action"]')!;
+    expect(button.getAttribute("data-action")).toBe("resume");
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(resume).toHaveBeenCalledWith("session-goal");
+  });
+
+  it("dismisses a completed goal", async () => {
+    const clear = vi.fn().mockResolvedValue({ ok: true });
+    const { container } = await mount(fakeApi({
+      getSessionGoal: () => Promise.resolve({ ...GOAL, status: "complete" }) as never,
+      clearSessionGoal: clear as never,
+    }));
+    const button = container.querySelector('[data-testid="session-goal-action"]')!;
+    expect(button.getAttribute("data-action")).toBe("dismiss");
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(clear).toHaveBeenCalledWith("session-goal");
+  });
+
+  it("follows the live push and ignores another tile's", async () => {
+    let push: ((payload: unknown) => void) | undefined;
+    const { container } = await mount(fakeApi({
+      getSessionGoal: () => Promise.resolve(GOAL) as never,
+      onSessionGoalChanged: ((handler: (payload: unknown) => void) => {
+        push = handler;
+        return () => undefined;
+      }) as never,
+    }));
+    await act(async () => {
+      push!({ sessionId: "another-tile", goal: { ...GOAL, round: 41 } });
+    });
+    expect(container.querySelector('[data-testid="session-goal-round"]')?.textContent).toBe("3/50");
+    await act(async () => {
+      push!({ sessionId: "session-goal", goal: { ...GOAL, round: 4 } });
+    });
+    expect(container.querySelector('[data-testid="session-goal-round"]')?.textContent).toBe("4/50");
   });
 });

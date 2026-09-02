@@ -34,6 +34,7 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../shared/render-html-preview.js";
 import type { SessionTaskItem } from "../shared/session-tasks.js";
+import type { SessionGoal } from "../shared/session-goal.js";
 import type { ChatStreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
@@ -1391,6 +1392,23 @@ export function buildInternalApiSurface() {
     const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
     ipcRenderer.on(CHANNELS.sessionTasks.changed, listener);
     return () => ipcRenderer.removeListener(CHANNELS.sessionTasks.changed, listener);
+  },
+
+  // session_goal — the objective this session is working towards
+  getSessionGoal: async (sessionId: string) =>
+    ipcRenderer.invoke(CHANNELS.sessionGoal.get, sessionId),
+  pauseSessionGoal: async (sessionId: string) =>
+    ipcRenderer.invoke(CHANNELS.sessionGoal.pause, sessionId),
+  resumeSessionGoal: async (sessionId: string) =>
+    ipcRenderer.invoke(CHANNELS.sessionGoal.resume, sessionId),
+  clearSessionGoal: async (sessionId: string) =>
+    ipcRenderer.invoke(CHANNELS.sessionGoal.clear, sessionId),
+  onSessionGoalChanged: (
+    handler: (payload: { sessionId: string; goal: SessionGoal | null }) => void,
+  ) => {
+    const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
+    ipcRenderer.on(CHANNELS.sessionGoal.changed, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.sessionGoal.changed, listener);
   },
 
   // agent_spawn — sub-agent lifecycle event stream

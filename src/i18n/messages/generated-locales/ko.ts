@@ -54,6 +54,8 @@ import { ko as ko_be_routineEngine } from "../generated/be_routineEngine.js";
 import { ko as ko_be_routineSchedule } from "../generated/be_routineSchedule.js";
 import { ko as ko_be_runtimeIndex } from "../generated/be_runtimeIndex.js";
 import { ko as ko_be_sandboxCapability } from "../generated/be_sandboxCapability.js";
+import { ko as ko_be_sessionGoal } from "../generated/be_sessionGoal.js";
+import { ko as ko_be_sessionGoalRevival } from "../generated/be_sessionGoalRevival.js";
 import { ko as ko_be_sessionTasks } from "../generated/be_sessionTasks.js";
 import { ko as ko_be_shellPathPolicy } from "../generated/be_shellPathPolicy.js";
 import { ko as ko_be_shutdownRoutines } from "../generated/be_shutdownRoutines.js";
@@ -144,6 +146,7 @@ import { ko as ko_rolesTab } from "../generated/rolesTab.js";
 import { ko as ko_rosePine } from "../generated/rosePine.js";
 import { ko as ko_routinePanel } from "../generated/routinePanel.js";
 import { ko as ko_savedToast } from "../generated/savedToast.js";
+import { ko as ko_sessionGoalPanel } from "../generated/sessionGoalPanel.js";
 import { ko as ko_sessionResumeDivider } from "../generated/sessionResumeDivider.js";
 import { ko as ko_sessionTasksPanel } from "../generated/sessionTasksPanel.js";
 import { ko as ko_settingsContent } from "../generated/settingsContent.js";
@@ -245,6 +248,8 @@ export const koMessages: Record<string, string> = {
   ...ko_be_routineSchedule,
   ...ko_be_runtimeIndex,
   ...ko_be_sandboxCapability,
+  ...ko_be_sessionGoal,
+  ...ko_be_sessionGoalRevival,
   ...ko_be_sessionTasks,
   ...ko_be_shellPathPolicy,
   ...ko_be_shutdownRoutines,
@@ -335,6 +340,7 @@ export const koMessages: Record<string, string> = {
   ...ko_rosePine,
   ...ko_routinePanel,
   ...ko_savedToast,
+  ...ko_sessionGoalPanel,
   ...ko_sessionResumeDivider,
   ...ko_sessionTasksPanel,
   ...ko_settingsContent,

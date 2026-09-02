@@ -366,6 +366,13 @@ export interface ConversationLoopDeps {
   broadcastPermissionConfigChanged?: () => void;
   permissionManager?: import("../../permissions/permission-manager.js").PermissionManager;
   routineEngine?: RoutineEngine;
+  /**
+   * The session-goal store, present on the loops that can actually revive
+   * themselves (the primary chat and its tiles). Absent on routine and
+   * side-chat loops, which have no revival driver — `/goal` says so there
+   * rather than registering a goal nothing would act on.
+   */
+  sessionGoalStore?: import("../../main/session-goal-store.js").SessionGoalStore;
 
   idleScheduler?: IdleSchedulerService;
   /** Agent 6: post-turn hook chain (compact → saveSession → extractMemory → audit → idle-poke) */

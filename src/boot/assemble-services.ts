@@ -88,6 +88,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     workBoardEngine: ctx.workBoardEngine,
     workBoardReport: ctx.workBoardReporter,
     sessionTasksStore: ctx.sessionTasksStore,
+    sessionGoalStore: ctx.sessionGoalStore,
     getSubAgentRunner: () => ctx.subAgentRunnerRef.fn,
     askUserQuestionGate: ctx.askUserQuestionGate,
     skillStore: ctx.skillStore,

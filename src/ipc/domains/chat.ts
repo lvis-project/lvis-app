@@ -72,6 +72,7 @@ import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 import { createConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
+import { createSessionGoalRevival } from "../../main/session-goal-revival.js";
 import type { ConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
 import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
@@ -809,16 +810,56 @@ export function registerChatHandlers(deps: IpcDeps): void {
         conversationId: loop.getSessionId(),
         ...(streamId === undefined ? {} : { turnId: createPlatformTurnId(streamId) }),
       });
+    const turns = createGroupTurns(loop, surfaceRuntime, buildGroupSink, groupDeps);
     const context: ChatGroupContext = {
       loop,
       deps: groupDeps,
       surfaceRuntime,
       commandPort,
       buildSink: buildGroupSink,
-      turns: createGroupTurns(loop, surfaceRuntime, buildGroupSink, groupDeps),
+      turns,
       unsubscribeStream,
     };
     groupContexts.set(chatGroupId, context);
+    // Session goal — once this group's turn lease releases, a running goal
+    // takes it straight back for one more turn. Registered per group because
+    // the goal belongs to the session a tile is holding, not to the window.
+    if (deps.sessionGoalStore) {
+      const revival = createSessionGoalRevival({
+        goals: deps.sessionGoalStore,
+        currentSessionId: () => loop.getSessionId(),
+        // Released tiles and closed windows own no turns: a goal must not
+        // resurrect a conversation that is no longer on screen.
+        isAttached: () => {
+          if (groupContexts.get(chatGroupId) !== context) return false;
+          const window = getMainWindow();
+          return window !== null && !window.isDestroyed();
+        },
+        isBusy: () => surfaceRuntime.activity.isBusy(),
+        hasActiveTurn: () => loop.hasActiveTurn(),
+        tryTakeTurn: (body) => surfaceRuntime.activity.tryTrackTurn(body),
+        runTurn: async ({ input, displayText }) => {
+          await runStreamedTurn(loop, input, buildGroupSink(turns.allocateStreamId()), {
+            ...STREAM_TURN_OPTIONS,
+            // Host-authored continuation text, not the user's — the same
+            // non-user origin the sub-agent parent wake injects with, so an
+            // autonomous loop's tool calls keep non-keyboard provenance.
+            inputOrigin: "agent-message",
+            displayText,
+            // No surface echoed a bubble for this turn — the host started it —
+            // so the announced row is the only one the transcript will get.
+            hostSubmitted: true,
+          });
+        },
+      });
+      surfaceRuntime.activity.onTurnSettled(revival.reviveIfDue);
+      // A resume (or a goal set while the session sits idle) has no turn to
+      // follow. Without this the button would move the chip and change
+      // nothing, which is worse than not having the button.
+      deps.sessionGoalStore.onChange((sessionId) => {
+        if (sessionId === loop.getSessionId()) revival.reviveIfDue();
+      });
+    }
     return context;
   };
 
@@ -1120,7 +1161,16 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.chat.abort, async (e, chatGroupId?: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.abort, e); return UNAUTHORIZED_FRAME; }
-    await interruptActiveTurn(groupOf(chatGroupId));
+    const group = groupOf(chatGroupId);
+    // Stopping the turn stops the goal too. Without this the session would
+    // revive the moment the interrupted turn settles, which reads as the app
+    // ignoring the button the user just pressed. `pause`, not clear: the round
+    // count is kept so resuming carries on from where it stopped.
+    const goalSessionId = group.loop.getSessionId();
+    if (deps.sessionGoalStore?.get(goalSessionId)?.status === "running") {
+      await deps.sessionGoalStore.pause(goalSessionId);
+    }
+    await interruptActiveTurn(group);
     return { ok: true };
   });
 
