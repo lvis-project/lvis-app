@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, Loader2, ShieldQuestion } from "lucide-rea
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 
 type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
 
@@ -62,7 +63,9 @@ function StatusIcon({ entry }: { entry: PermissionReviewEntry }) {
  * `attached` is the variant rendered inside the tool row that the verdict
  * belongs to (ToolGroupCard). Tool name and source are already on that row, so
  * the chip carries only the verdict — which is also the exact field set that
- * survives persistence, keeping live and reloaded transcripts identical.
+ * survives persistence, keeping live and reloaded transcripts identical. The
+ * reviewer's one-line rationale (`reason`) rides on the chip as a tooltip;
+ * without one the chip is a plain cell — nothing to hover, nothing to focus.
  */
 export function PermissionReviewStatusCard({
   entry,
@@ -77,18 +80,27 @@ export function PermissionReviewStatusCard({
     entry.source === "builtin" ? tComp("permissionReviewStatusCard.sourceBuiltin") :
     tComp("permissionReviewStatusCard.sourceUnknown");
   if (variant === "attached") {
-    return (
+    const reason = entry.reason;
+    const chip = (
       <div
         data-testid="permission-review-status-card"
         data-status={entry.status}
         data-variant="attached"
         role="status"
         aria-live="polite"
+        tabIndex={reason ? 0 : undefined}
         className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] [&_svg]:h-3 [&_svg]:w-3 ${toneClass(entry)}`}
       >
         <StatusIcon entry={entry} />
         <span className="min-w-0 truncate font-medium">{statusLabel(entry)}</span>
       </div>
+    );
+    if (!reason) return chip;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{chip}</TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">{reason}</TooltipContent>
+      </Tooltip>
     );
   }
   return (
