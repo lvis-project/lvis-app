@@ -457,6 +457,11 @@
     --p-red-700:    0 62.8% 30.6%;
     --p-yellow-100: 48 96% 89%;
     --p-yellow-200: 48 97% 77%;
+    /* The middle and deep ends of the same ramp. Hue drifts only 48 → 42, so
+       every step still reads as yellow; going further would land in orange,
+       which is what `--warning` already means elsewhere. */
+    --p-yellow-400: 45 96% 58%;
+    --p-yellow-600: 42 96% 45%;
     --p-yellow-800: 30 80% 25%;
     --p-green-500: 142 71% 45%;
 
@@ -531,12 +536,17 @@
      * bulb is. Three steps of ONE hue rather than a rising fill line: at 12px
      * a fill edge moving a few pixels is not a difference the eye catches,
      * while pale-to-deep is legible at a glance and survives being small.
-     * Mixed toward white and black rather than toward the surface, so the
-     * ladder stays a yellow ladder on a dark ground as well as a light one —
-     * an alpha ramp would fade the low end into the composer bar instead. */
-    --reasoning-fill-1: color-mix(in oklab, hsl(var(--warning)) 42%, white);
-    --reasoning-fill-2: hsl(var(--warning));
-    --reasoning-fill-3: color-mix(in oklab, hsl(var(--warning)) 72%, black);
+     *
+     * Off the fixed yellow ramp, NOT off `--warning`. Bundles are free to
+     * choose what "warning" looks like, and the light ones pick a dark orange
+     * for contrast against white — a ladder derived from it measured out as
+     * peach → orange → brown, which is not a yellow ladder and not what the
+     * gauge means. This is an information ramp, like the categorical
+     * `--chart-*` palette, so it is the same in every bundle; what keeps it
+     * legible on either ground is the glyph's own outline drawn over it. */
+    --reasoning-fill-1: hsl(var(--p-yellow-200));
+    --reasoning-fill-2: hsl(var(--p-yellow-400));
+    --reasoning-fill-3: hsl(var(--p-yellow-600));
 
     /* Brand gradient — violet → blue. The single source for the onboarding
      * brand avatar and primary CTA fills. --gradient-brand-soft is the faint
