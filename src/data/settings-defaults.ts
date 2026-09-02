@@ -134,6 +134,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     sidePanelSplitPreviewPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitSubagentPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidebarActiveTab: DEFAULT_SIDEBAR_TAB,
+    sidebarClosedGroups: [],
     // `home` is the only built-in that is inline-only and always present.
     activeView: "home",
     // Ask the normalizer what an absent tab means rather than restating it.

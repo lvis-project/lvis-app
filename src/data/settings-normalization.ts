@@ -40,7 +40,7 @@ import {
   normalizeLocale,
 } from "../i18n/index.js";
 import { normalizeAppMode } from "../shared/initial-app-mode.js";
-import { isSidebarTab } from "../shared/sidebar-tab.js";
+import { isSidebarTab, normalizeSidebarGroupList } from "../shared/sidebar-tab.js";
 import { isInlineViewKey } from "../shared/view-key.js";
 import { normalizeSettingsTab } from "../shared/settings-tabs.js";
 import {
@@ -1102,6 +1102,7 @@ export function normalizeSystem(input: unknown): SystemSettings {
     sidePanelWidth?: unknown;
     sidebarWidth?: unknown;
     sidebarActiveTab?: unknown;
+    sidebarClosedGroups?: unknown;
     activeView?: unknown;
     settingsTab?: unknown;
     pinnedProjectRoots?: unknown;
@@ -1169,6 +1170,15 @@ export function normalizeSystem(input: unknown): SystemSettings {
     );
   }
   acceptField(result, "sidebarActiveTab", obj.sidebarActiveTab, isSidebarTab, "system", STORED_FIELD);
+  const rawSidebarClosedGroups = obj.sidebarClosedGroups;
+  if (Array.isArray(rawSidebarClosedGroups)) {
+    result.sidebarClosedGroups = normalizeSidebarGroupList(rawSidebarClosedGroups);
+  } else if (rawSidebarClosedGroups !== undefined) {
+    log.warn(
+      `system.sidebarClosedGroups invalid (received ${JSON.stringify(rawSidebarClosedGroups)}), using default %s`,
+      DEFAULT_SETTINGS.system.sidebarClosedGroups,
+    );
+  }
   acceptField(result, "activeView", obj.activeView, isActiveViewKey, "system", STORED_FIELD);
   const rawSettingsTab = obj.settingsTab;
   if (rawSettingsTab !== undefined) {

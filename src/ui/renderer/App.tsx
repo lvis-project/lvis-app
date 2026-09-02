@@ -61,7 +61,7 @@ import { buildQuickActions } from "./components/command-actions.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { useAppMode } from "./hooks/use-app-mode.js";
 import { SIDEBAR_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js";
-import { useSidebarTab } from "./hooks/use-sidebar-tab.js";
+import { useSidebarGroups, useSidebarTab } from "./hooks/use-sidebar-tab.js";
 import { useActiveView } from "./hooks/use-active-view.js";
 import { useSettingsTab } from "./hooks/use-settings-tab.js";
 import { useProjectPreferences } from "./hooks/use-project-preferences.js";
@@ -84,7 +84,6 @@ import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
-import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 import { toViewLocation, viewLocationBreadcrumb, type ViewLocation } from "./utils/view-location.js";
 import { useViewHistory } from "./hooks/use-view-history.js";
@@ -218,6 +217,8 @@ export function App() {
   } = usePanelWidth(api, SIDEBAR_WIDTH_PREF);
   // Sidebar Chats/Projects tab — persisted the same way as sidebarWidth.
   const { activeTab: sidebarActiveTab, setActiveTab: setSidebarActiveTab } = useSidebarTab(api);
+  // Which sidebar nav groups are folded — persisted the same way.
+  const { closedGroups: closedSidebarGroups, setGroupOpen: setSidebarGroupOpen } = useSidebarGroups(api);
 
   // The tiled chat groups — the geometry. See `useChatGroups` and
   // docs/design/tiled-chat-groups.md.
@@ -962,19 +963,6 @@ export function App() {
     );
   }, [pluginCards, pluginViews]);
 
-  // Marketplace URL — sourced from settings (marketplace.cloudBaseUrl).
-  const { marketplaceUrl, loaded: marketplaceUrlLoaded } = useMarketplaceUrl(api);
-  // Ready only when settings have been fetched AND the URL is non-empty.
-  const marketplaceUrlReady = marketplaceUrlLoaded && marketplaceUrl.length > 0;
-
-  // Open marketplace in the system browser.
-  // Guard against an empty URL during the initial settings load — calling
-  // shell.openExternal("") produces undefined behaviour on some platforms.
-  const onOpenMarketplace = useCallback(() => {
-    if (!marketplaceUrlReady) return;
-    void api.openExternalUrl(marketplaceUrl);
-  }, [api, marketplaceUrl, marketplaceUrlReady]);
-
   useEffect(() => {
     if (typeof api.onNotificationClicked !== "function") return undefined;
     return api.onNotificationClicked((payload) => {
@@ -1372,8 +1360,8 @@ export function App() {
                 onProjectError={handleProjectError}
                 projects={workspaceProjects}
                 streaming={streaming}
-                onOpenMarketplace={onOpenMarketplace}
-                marketplaceUrlReady={marketplaceUrlReady}
+                closedSidebarGroups={closedSidebarGroups}
+                onSidebarGroupOpenChange={setSidebarGroupOpen}
                 collapsed={sidebarCollapsed}
                 onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
                 width={sidebarWidth}

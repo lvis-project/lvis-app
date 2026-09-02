@@ -24,7 +24,6 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     onOpenSettings: vi.fn(),
     onNewChat: vi.fn(),
     streaming: false,
-    onOpenMarketplace: vi.fn(),
     collapsed: false,
     onToggleCollapse: vi.fn(),
     onOpenUnifiedSearch: vi.fn(),

@@ -7,7 +7,7 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Sidebar } from "../Sidebar.js";
 import type { SessionSummary } from "../../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../../shared/project-identity.js";
-import type { SidebarTab } from "../../hooks/use-sidebar-tab.js";
+import type { SidebarGroup, SidebarTab } from "../../hooks/use-sidebar-tab.js";
 import type {
   NativeContextMenuAction,
   NativeContextMenuPayload,
@@ -33,6 +33,12 @@ function activateTab(trigger: HTMLElement) {
 
 function Harness(props: Parameters<typeof Sidebar>[0]) {
   const [tab, setTab] = useState<SidebarTab>(props.activeSidebarTab ?? "chats");
+  // Same shape for the folded nav groups: App.tsx holds them through
+  // useSidebarGroups, so the harness holds them locally to make a header
+  // click really fold/open its group.
+  const [closedGroups, setClosedGroups] = useState<ReadonlySet<SidebarGroup>>(
+    props.closedSidebarGroups ?? new Set(),
+  );
   return (
     <Sidebar
       {...props}
@@ -40,6 +46,16 @@ function Harness(props: Parameters<typeof Sidebar>[0]) {
       onActiveSidebarTabChange={(next) => {
         setTab(next);
         props.onActiveSidebarTabChange?.(next);
+      }}
+      closedSidebarGroups={closedGroups}
+      onSidebarGroupOpenChange={(group, open) => {
+        setClosedGroups((current) => {
+          const next = new Set(current);
+          if (open) next.delete(group);
+          else next.add(group);
+          return next;
+        });
+        props.onSidebarGroupOpenChange?.(group, open);
       }}
     />
   );
@@ -108,7 +124,6 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     onOpenSettings: vi.fn(),
     onNewChat: vi.fn(),
     streaming: false,
-    onOpenMarketplace: vi.fn(),
     collapsed: false,
     onToggleCollapse: vi.fn(),
     onOpenUnifiedSearch: vi.fn(),
@@ -436,7 +451,6 @@ describe("Sidebar conversation pinning", () => {
             onOpenSettings={vi.fn()}
             onNewChat={vi.fn()}
             streaming={false}
-            onOpenMarketplace={vi.fn()}
             collapsed={false}
             onToggleCollapse={vi.fn()}
             onOpenUnifiedSearch={vi.fn()}
@@ -1006,6 +1020,131 @@ describe("Sidebar collapsed rail", () => {
     // falls into the error boundary — which is what this asserts against.
     const { getByTestId, restore } = renderSidebar({ collapsed: true });
     expect(getByTestId("sidebar-cluster")).toBeTruthy();
+    restore();
+  });
+
+  it("shows icons only — no nav label is left to overflow the rail", () => {
+    const { getByTestId, restore } = renderSidebar({
+      collapsed: true,
+      failedPluginCards: [FAILED_PLUGIN_CARD],
+    });
+    const buttons = getByTestId("primary-sidebar").querySelectorAll("button");
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(button.textContent?.trim()).toBe("");
+    }
+    // Group rows are not rendered as a submenu in the rail.
+    expect(getByTestId("sidebar-group-features")).toBeTruthy();
+    expect(getByTestId("sidebar-group-plugins")).toBeTruthy();
+    expect(document.querySelector('[data-testid="toolbar-work-board"]')).toBeNull();
+    restore();
+  });
+
+  it("expands the sidebar and opens the group when a rail group is clicked", () => {
+    const onToggleCollapse = vi.fn();
+    const onSidebarGroupOpenChange = vi.fn();
+    const { getByTestId, restore } = renderSidebar({
+      collapsed: true,
+      closedSidebarGroups: new Set<SidebarGroup>(["features"]),
+      onToggleCollapse,
+      onSidebarGroupOpenChange,
+    });
+
+    fireEvent.click(getByTestId("sidebar-group-features"));
+
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+    expect(onSidebarGroupOpenChange).toHaveBeenCalledWith("features", true);
+    restore();
+  });
+
+  it("expands the sidebar onto the Projects tab when the rail's folder is clicked", () => {
+    const onToggleCollapse = vi.fn();
+    const onActiveSidebarTabChange = vi.fn();
+    const { getByTestId, restore } = renderSidebar({
+      collapsed: true,
+      onToggleCollapse,
+      onActiveSidebarTabChange,
+    });
+
+    fireEvent.click(getByTestId("sidebar-projects-collapsed"));
+
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+    expect(onActiveSidebarTabChange).toHaveBeenCalledWith("projects");
+    restore();
+  });
+});
+
+const FAILED_PLUGIN_CARD: NonNullable<Parameters<typeof Sidebar>[0]["failedPluginCards"]>[number] = {
+  id: "notes",
+  name: "Notes",
+  description: "Notes fixture",
+  publisher: "Test fixture",
+  sampleTools: [],
+  capabilities: [],
+  tools: [],
+  loadStatus: "failed",
+};
+
+describe("Sidebar nav groups", () => {
+  it("has no home row and no marketplace row", () => {
+    const { queryByTestId, queryByText, restore } = renderSidebar();
+    expect(queryByTestId("sidebar-home")).toBeNull();
+    expect(queryByTestId("sidebar-marketplace")).toBeNull();
+    expect(queryByText("홈")).toBeNull();
+    expect(queryByText("Home")).toBeNull();
+    expect(queryByText("마켓플레이스")).toBeNull();
+    expect(queryByText("Marketplace")).toBeNull();
+    restore();
+  });
+
+  it("folds and opens the Features group from its header, keeping aria-expanded in step", () => {
+    const onSidebarGroupOpenChange = vi.fn();
+    const { getByTestId, queryByTestId, restore } = renderSidebar({ onSidebarGroupOpenChange });
+    const header = getByTestId("sidebar-group-features");
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(header.getAttribute("aria-controls")).toBe("sidebar-group-features-items");
+    expect(getByTestId("sidebar-group-features-items").querySelector('[data-testid="toolbar-work-board"]')).toBeTruthy();
+    expect(getByTestId("sidebar-routines")).toBeTruthy();
+    expect(getByTestId("sidebar-starred")).toBeTruthy();
+
+    fireEvent.click(header);
+    expect(onSidebarGroupOpenChange).toHaveBeenLastCalledWith("features", false);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(queryByTestId("sidebar-group-features-items")).toBeNull();
+    expect(queryByTestId("toolbar-work-board")).toBeNull();
+
+    fireEvent.click(header);
+    expect(onSidebarGroupOpenChange).toHaveBeenLastCalledWith("features", true);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(getByTestId("toolbar-work-board")).toBeTruthy();
+    restore();
+  });
+
+  it("starts folded when the shell says so", () => {
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      closedSidebarGroups: new Set<SidebarGroup>(["features"]),
+    });
+    expect(getByTestId("sidebar-group-features").getAttribute("aria-expanded")).toBe("false");
+    expect(queryByTestId("toolbar-work-board")).toBeNull();
+    restore();
+  });
+
+  it("renders the Plugins group only when there is a plugin row, and folds it", () => {
+    const empty = renderSidebar();
+    expect(empty.queryByTestId("sidebar-group-plugins")).toBeNull();
+    empty.restore();
+    cleanup();
+
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      failedPluginCards: [FAILED_PLUGIN_CARD],
+    });
+    const header = getByTestId("sidebar-group-plugins");
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(getByTestId("sidebar-group-plugins-items").textContent).toContain("Notes");
+
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(queryByTestId("sidebar-group-plugins-items")).toBeNull();
     restore();
   });
 });

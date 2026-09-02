@@ -2,10 +2,13 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type Mouse
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import { ViewHistoryNav, type ViewPathNavProps } from "./ViewPathNav.js";
 import {
+  Blocks,
   CalendarDays,
+  ChevronRight,
   Folder,
   KanbanSquare,
   KeyRound,
+  LayoutGrid,
   MessageSquareText,
   MoreHorizontal,
   PanelLeftClose,
@@ -15,7 +18,6 @@ import {
   Plus,
   Repeat2,
   Search,
-  ShoppingBag,
   Wrench,
 } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
@@ -27,7 +29,7 @@ import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { toPluginDoctorViewKey, toPluginSettingsViewKey } from "../utils/plugin-doctor-view.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
-import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
+import type { SidebarGroup, SidebarTab } from "../hooks/use-sidebar-tab.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 import {
   useNativeContextMenu,
@@ -86,13 +88,12 @@ export interface SidebarProps {
   onNewChat: () => void;
   streaming: boolean;
   /**
-   * Change 3: Marketplace jump button. Opens the plugin marketplace overlay.
-   * Moved from PluginGridButton (InputActionBar) → Sidebar so marketplace is
-   * reachable from the persistent nav rail (PluginGridButton removed in change 2).
+   * Nav groups the user has folded (Features / Plugins). Owned by the shell and
+   * persisted with the other sidebar preferences; absent = every group open.
    */
-  onOpenMarketplace: () => void;
-  /** `true` once the marketplace URL has finished loading. Controls button enabled state. */
-  marketplaceUrlReady?: boolean;
+  closedSidebarGroups?: ReadonlySet<SidebarGroup>;
+  /** Fold or open a nav group — persists through the shell. */
+  onSidebarGroupOpenChange?: (group: SidebarGroup, open: boolean) => void;
   /**
    * Collapse state is owned by the shell (App.tsx). The collapse/expand toggle
    * is the FIRST button in the cluster strip next to the traffic lights (see
@@ -171,15 +172,14 @@ function isDarwinPlatform(): boolean {
  * hover. Both are theme tokens — a bundle switch re-tints every surface and
  * the color-token gate stays clean (no raw literals).
  */
-type NavTone = "accent" | "muted" | "home" | "marketplace" | "settings";
+type NavTone = "accent" | "muted" | "settings";
 
 /**
  * Per-tone styling: `hover` (inactive hover tint), `active` (selected bg+text),
- * `bar` (the left active-indicator bar color). The footer trio (Home /
- * Marketplace / Settings) each carry a distinct color so the ACTIVE state
- * matches that item's hover tint (e.g. Home = blue/info on both hover AND
- * active, not the shared primary). All theme tokens — the color-token gate
- * stays clean.
+ * `bar` (the left active-indicator bar color). The footer Settings row
+ * carries its own color so its ACTIVE state matches its hover tint (green/
+ * success on both, not the shared primary). All theme tokens — the
+ * color-token gate stays clean.
  */
 const NAV_TONE: Record<NavTone, { hover: string; active: string; bar: string }> = {
   accent: {
@@ -189,16 +189,6 @@ const NAV_TONE: Record<NavTone, { hover: string; active: string; bar: string }> 
   },
   muted: {
     hover: "hover:bg-muted hover:text-foreground",
-    active: "bg-primary/(--opacity-subtle) text-primary",
-    bar: "bg-primary",
-  },
-  home: {
-    hover: "hover:bg-info/(--opacity-light) hover:text-foreground",
-    active: "bg-info/(--opacity-light) text-info",
-    bar: "bg-info",
-  },
-  marketplace: {
-    hover: "hover:bg-primary/(--opacity-subtle) hover:text-foreground",
     active: "bg-primary/(--opacity-subtle) text-primary",
     bar: "bg-primary",
   },
@@ -313,6 +303,84 @@ function NavItem({
   }
 
   return btn;
+}
+
+// ─── NavGroup ────────────────────────────────────────────────────────────────
+
+interface NavGroupProps {
+  group: SidebarGroup;
+  label: string;
+  icon: React.ReactNode;
+  open: boolean;
+  /** A row inside this group is the current page — lights the rail icon. */
+  containsActive: boolean;
+  collapsed: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Rail click: the sidebar expands and the group opens there. */
+  onExpandSidebar: () => void;
+  children: React.ReactNode;
+}
+
+/**
+ * A foldable section of nav rows with a `>` header. In the collapsed rail the
+ * group is one square icon: clicking it expands the sidebar and opens the group
+ * in the expanded card, instead of trying to fit a submenu into the rail.
+ */
+function NavGroup({
+  group,
+  label,
+  icon,
+  open,
+  containsActive,
+  collapsed,
+  onOpenChange,
+  onExpandSidebar,
+  children,
+}: NavGroupProps) {
+  const itemsId = `sidebar-group-${group}-items`;
+  if (collapsed) {
+    return (
+      <NavItem
+        viewKey={group}
+        label={label}
+        icon={icon}
+        isActive={containsActive}
+        onClick={() => {
+          onExpandSidebar();
+          onOpenChange(true);
+        }}
+        collapsed
+        data-testid={`sidebar-group-${group}`}
+      />
+    );
+  }
+  return (
+    <div className="space-y-0.5">
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+        aria-controls={itemsId}
+        data-testid={`sidebar-group-${group}`}
+        className={[
+          "w-full flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
+          "text-muted-foreground hover:bg-muted hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        ].join(" ")}
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className={`h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+        />
+        <span className="min-w-0 truncate text-left">{label}</span>
+      </button>
+      {open ? (
+        <div id={itemsId} data-testid={itemsId} className="space-y-0.5">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -539,23 +607,6 @@ function PluginNavItem({
   );
 }
 
-// ─── Section divider ──────────────────────────────────────────────────────────
-
-function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: string }) {
-  if (collapsed) {
-    return <div className="border-t border-border my-1 mx-2" />;
-  }
-  return (
-    <div className="border-t border-border my-1">
-      {label && (
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-3 py-1.5">
-          {label}
-        </p>
-      )}
-    </div>
-  );
-}
-
 // ─── Project sessions ───────────────────────────────────────────────────────
 
 // One page of conversation rows. The lists have no upper bound, so the sidebar
@@ -563,6 +614,9 @@ function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: stri
 // Chats list, opened by a button in each Projects group. Neither CAPS the list,
 // which is what left the remainder unreachable.
 const SESSION_PAGE_SIZE = 6;
+
+/** No group folded — what a sidebar rendered without shell wiring shows. */
+const NO_CLOSED_GROUPS: ReadonlySet<SidebarGroup> = new Set();
 
 /** How far ahead of the scroller's edge the next page is prepared. */
 const SESSION_REVEAL_MARGIN = "200px 0px";
@@ -966,6 +1020,7 @@ function ProjectSessionList({
   conversationActions,
   projectActions,
   scrollViewportRef,
+  onExpandSidebar,
 }: {
   collapsed: boolean;
   sessions: SessionSummary[];
@@ -1000,6 +1055,8 @@ function ProjectSessionList({
    * ancestor by selector.
    */
   scrollViewportRef: RefObject<HTMLDivElement | null>;
+  /** Collapsed rail: expand the sidebar so the folders can be shown. */
+  onExpandSidebar?: () => void;
 }) {
   const { t } = useTranslation();
   const openNativeContextMenu = useNativeContextMenu();
@@ -1126,7 +1183,8 @@ function ProjectSessionList({
   // renders no projects at all, and it has nowhere to host the adjacency
   // warning `workspace.pickRoot` can demand before an add completes — a
   // right-click "add project" there would silently do nothing for exactly the
-  // folders that most need a confirmation.
+  // folders that most need a confirmation. A click expands the sidebar onto
+  // the Projects tab, where the folders are.
   if (collapsed) {
     return (
       <NavItem
@@ -1134,7 +1192,10 @@ function ProjectSessionList({
         label={t("sidebar.projectsLabel")}
         icon={<Folder className="h-4 w-4" />}
         isActive={false}
-        onClick={() => {}}
+        onClick={() => {
+          onExpandSidebar?.();
+          onActiveTabChange("projects");
+        }}
         collapsed
         data-testid="sidebar-projects-collapsed"
       />
@@ -1607,8 +1668,8 @@ export function Sidebar({
   onNewChat,
   onNewChatForProject,
   streaming,
-  onOpenMarketplace,
-  marketplaceUrlReady = false,
+  closedSidebarGroups = NO_CLOSED_GROUPS,
+  onSidebarGroupOpenChange,
   collapsed,
   onToggleCollapse,
   width = SIDEBAR_DEFAULT_WIDTH,
@@ -1663,6 +1724,19 @@ export function Sidebar({
   const hasPluginEntries = pluginViews.length > 0
     || failedPluginCards.length > 0
     || inactivePluginCards.length > 0;
+  // A rail group icon lights when the current page is one of its rows.
+  const featuresContainActive =
+    activeView === "work-board" || activeView === "routines" || activeView === "insights" || activeView === "starred";
+  const pluginsContainActive =
+    pluginViews.some((view) => toViewKey(view) === activeView)
+    || failedPluginCards.some((plugin) => toPluginDoctorViewKey(plugin.id) === activeView)
+    || inactivePluginCards.some((plugin) => toPluginSettingsViewKey(plugin.id) === activeView);
+  // The rail's groups and its projects icon open INTO the expanded card:
+  // `onToggleCollapse` is the shell's only lever, and from the collapsed state
+  // toggling is expanding.
+  const expandSidebar = useCallback(() => {
+    if (collapsed) onToggleCollapse();
+  }, [collapsed, onToggleCollapse]);
   // Subscription readiness is distinct from API-key presence: when a login
   // runtime is selected, never describe its verification state as an API-key
   // problem or invite the user to configure an unrelated credential.
@@ -1846,51 +1920,59 @@ export function Sidebar({
         )}
       </div>
 
-      {/* ── Primary nav + plugins (scrollable) ──────────────────────── */}
+      {/* ── Nav groups + projects (scrollable) ──────────────────────── */}
       <div id={navListId} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* PRIMARY NAV group */}
+        {/* FEATURES group — the built-in views */}
         <div className={`px-2 py-2 space-y-0.5 ${compact ? "flex flex-col items-center" : ""}`}>
-          <NavItem
-            viewKey="work-board"
-            label={t("mainToolbar.workBoard")}
-            icon={<KanbanSquare className="h-4 w-4" />}
-            isActive={activeView === "work-board"}
-            onClick={() => onSelect("work-board")}
+          <NavGroup
+            group="features"
+            label={t("sidebar.featuresLabel")}
+            icon={<LayoutGrid className="h-4 w-4" />}
+            open={!closedSidebarGroups.has("features")}
+            containsActive={featuresContainActive}
             collapsed={compact}
-            data-testid="toolbar-work-board"
-          />
-          <NavItem
-            viewKey="routines"
-            label={t("mainToolbar.routines")}
-            icon={<Repeat2 className="h-4 w-4" />}
-            isActive={activeView === "routines"}
-            onClick={() => onSelect("routines")}
-            collapsed={compact}
-            data-testid="sidebar-routines"
-          />
-          {/* 메모리 panel intentionally removed from the sidebar surface
-              (2026-07 shell refinement). MEMORY.md remains viewable + editable
-              in Settings → 역할/메모리 (RolesTab memory section); the "memory"
-              view itself stays routable (main content region + UnifiedSearch deep-link)
-              so no navigation breaks. */}
-          <NavItem
-            viewKey="insights"
-            label={t("mainToolbar.insights")}
-            icon={<CalendarDays className="h-4 w-4" />}
-            isActive={activeView === "insights" || activeView === "starred"}
-            onClick={() => onSelect("insights")}
-            collapsed={compact}
-            data-testid="sidebar-starred"
-            data-viewkey="insights"
-          />
+            onOpenChange={(open) => onSidebarGroupOpenChange?.("features", open)}
+            onExpandSidebar={expandSidebar}
+          >
+            <NavItem
+              viewKey="work-board"
+              label={t("mainToolbar.workBoard")}
+              icon={<KanbanSquare className="h-4 w-4" />}
+              isActive={activeView === "work-board"}
+              onClick={() => onSelect("work-board")}
+              collapsed={false}
+              data-testid="toolbar-work-board"
+            />
+            <NavItem
+              viewKey="routines"
+              label={t("mainToolbar.routines")}
+              icon={<Repeat2 className="h-4 w-4" />}
+              isActive={activeView === "routines"}
+              onClick={() => onSelect("routines")}
+              collapsed={false}
+              data-testid="sidebar-routines"
+            />
+            {/* 메모리 panel intentionally removed from the sidebar surface
+                (2026-07 shell refinement). MEMORY.md remains viewable + editable
+                in Settings → 역할/메모리 (RolesTab memory section); the "memory"
+                view itself stays routable (main content region + UnifiedSearch deep-link)
+                so no navigation breaks. */}
+            <NavItem
+              viewKey="insights"
+              label={t("mainToolbar.insights")}
+              icon={<CalendarDays className="h-4 w-4" />}
+              isActive={activeView === "insights" || activeView === "starred"}
+              onClick={() => onSelect("insights")}
+              collapsed={false}
+              data-testid="sidebar-starred"
+              data-viewkey="insights"
+            />
+          </NavGroup>
         </div>
 
-        {/* PLUGINS + PROJECTS group — scrollable flex-1 */}
+        {/* PLUGINS group + PROJECTS — scrollable flex-1 */}
         {(
           <>
-            {hasPluginEntries ? (
-              <SectionDivider collapsed={compact} label={compact ? undefined : t("sidebar.pluginsLabel")} />
-            ) : null}
             {/* Radix ScrollArea wraps viewport content in a `display: table` div,
                 which sizes to max-content — long unbreakable titles then blow the
                 content wider than the card and get HARD-clipped by the viewport,
@@ -1901,39 +1983,52 @@ export function Sidebar({
               className="flex-1 min-h-0 [&_[data-radix-scroll-area-viewport]>div]:!block [&_[data-radix-scroll-area-viewport]>div]:!min-w-0"
             >
               <div className={`px-2 py-1 space-y-0.5 ${compact ? "flex flex-col items-center" : ""}`}>
-                {pluginViews.map((view) => {
-                  const viewKey = toViewKey(view);
-                  const isUnauthed =
-                    view.extension !== undefined &&
-                    pluginAuthStatuses?.get(view.pluginId)?.kind === "unauthed";
-                  return (
-                    <PluginNavItem
-                      key={viewKey}
-                      view={view}
-                      isActive={activeView === viewKey}
-                      isUnauthed={Boolean(isUnauthed)}
-                      onSelect={onSelect}
-                      collapsed={compact}
-                    />
-                  );
-                })}
-                {failedPluginCards.map((plugin) => (
-                  <FailedPluginNavItem
-                    key={`doctor:${plugin.id}`}
-                    plugin={plugin}
-                    onSelect={onSelect}
+                {hasPluginEntries ? (
+                  <NavGroup
+                    group="plugins"
+                    label={t("sidebar.pluginsLabel")}
+                    icon={<Blocks className="h-4 w-4" />}
+                    open={!closedSidebarGroups.has("plugins")}
+                    containsActive={pluginsContainActive}
                     collapsed={compact}
-                  />
-                ))}
-                {inactivePluginCards.map((plugin) => (
-                  <InactivePluginNavItem
-                    key={`inactive:${plugin.id}`}
-                    plugin={plugin}
-                    onSelect={onSelect}
-                    collapsed={compact}
-                  />
-                ))}
-                <div className={compact ? "pt-1" : pluginViews.length > 0 ? "pt-2" : ""}>
+                    onOpenChange={(open) => onSidebarGroupOpenChange?.("plugins", open)}
+                    onExpandSidebar={expandSidebar}
+                  >
+                    {pluginViews.map((view) => {
+                      const viewKey = toViewKey(view);
+                      const isUnauthed =
+                        view.extension !== undefined &&
+                        pluginAuthStatuses?.get(view.pluginId)?.kind === "unauthed";
+                      return (
+                        <PluginNavItem
+                          key={viewKey}
+                          view={view}
+                          isActive={activeView === viewKey}
+                          isUnauthed={Boolean(isUnauthed)}
+                          onSelect={onSelect}
+                          collapsed={false}
+                        />
+                      );
+                    })}
+                    {failedPluginCards.map((plugin) => (
+                      <FailedPluginNavItem
+                        key={`doctor:${plugin.id}`}
+                        plugin={plugin}
+                        onSelect={onSelect}
+                        collapsed={false}
+                      />
+                    ))}
+                    {inactivePluginCards.map((plugin) => (
+                      <InactivePluginNavItem
+                        key={`inactive:${plugin.id}`}
+                        plugin={plugin}
+                        onSelect={onSelect}
+                        collapsed={false}
+                      />
+                    ))}
+                  </NavGroup>
+                ) : null}
+                <div className={compact ? "pt-1" : hasPluginEntries ? "pt-2" : ""}>
                   {/* No standalone "Projects" section divider here — the Chats/
                       Projects TabsList inside ProjectSessionList already frames
                       this section, so a redundant label above it would be
@@ -1958,6 +2053,7 @@ export function Sidebar({
                     conversationActions={conversationActions}
                     projectActions={projectActions}
                     scrollViewportRef={navScrollViewportRef}
+                    onExpandSidebar={expandSidebar}
                   />
                 </div>
               </div>
@@ -1966,37 +2062,21 @@ export function Sidebar({
         )}
       </div>
 
-      {/* ── Footer — Home + Marketplace + Settings ───────────────────── */}
-      {/* Bottom-pinned (`mt-auto`). The Home-top divider (this footer's
-          `border-t`) and the Home row share the SAME uniform spacing rhythm as
-          the primary nav group above (`py-2` + `space-y-0.5`) — no bespoke
-          margin correction. The divider LINE is kept; only the earlier
-          composer-seam-alignment padding was removed so the footer reads as one
-          uniform nav rhythm at every window height. */}
+      {/* ── Footer — Settings ────────────────────────────────────────── */}
+      {/* Bottom-pinned (`mt-auto`). The footer's `border-t` divider and its
+          row share the SAME uniform spacing rhythm as the nav groups above
+          (`py-2` + `space-y-0.5`) — no bespoke margin correction. */}
       <div className={`border-t border-border px-2 py-2 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
-        {/* Home used to sit here. The conversation list IS the home surface —
-            a row that navigates to "the chat" while the chats are listed a few
-            pixels above it was naming the same destination twice. */}
-        {/* Marketplace jump — styled as a NavItem, disabled until URL ready */}
-        <NavItem
-          viewKey="marketplace"
-          label={t("sidebar.marketplace")}
-          icon={<ShoppingBag className="h-4 w-4" />}
-          isActive={false}
-          onClick={() => {
-            if (marketplaceUrlReady) onOpenMarketplace();
-          }}
-          collapsed={compact}
-          tone="marketplace"
-          data-testid="sidebar-marketplace"
-          data-tour-anchor="sidebar-marketplace"
-        />
+        {/* Home and the marketplace jump used to sit here. The conversation
+            list IS the home surface — a row that navigates to "the chat" while
+            the chats are listed a few pixels above it was naming the same
+            destination twice — and the marketplace is reached from Settings →
+            Plugins, where installing is done. */}
         <NavItem
           viewKey="settings"
           label={t("mainToolbar.settings")}
           icon={<KeyRound className={settingsNeedsApiKey || runtimeUnavailable ? "h-4 w-4 text-destructive" : "h-4 w-4"} />}
-          // Active when settings render inline (work mode). Marketplace stays
-          // false — it's an overlay launcher that never sets activeView.
+          // Active when settings render inline (work mode).
           isActive={activeView === "settings"}
           onClick={onOpenSettings}
           collapsed={compact}

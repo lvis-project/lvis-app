@@ -32,9 +32,28 @@ describe("App inline navigation", () => {
     await waitFor(() => expect(chatBtn.getAttribute("aria-pressed")).toBe("true"));
   }
 
+  // Chat mode collapses the sidebar to its icon rail, where the built-in views
+  // sit behind the Features group icon: clicking it expands the sidebar and
+  // opens the group, which is where the rows become clickable.
+  async function openFeaturesFromRail(container: HTMLElement) {
+    const group = await waitFor(() => {
+      const el = container.querySelector('[data-testid="sidebar-group-features"]');
+      expect(el).not.toBeNull();
+      return el as HTMLButtonElement;
+    });
+    expect(container.querySelector('[data-testid="toolbar-work-board"]')).toBeNull();
+    await act(async () => {
+      fireEvent.click(group);
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="toolbar-work-board"]')).not.toBeNull();
+    });
+  }
+
   it("renders a built-in view inline in chat mode and lights up its sidebar entry", async () => {
     const { container } = await renderApp({ hasApiKey: true });
     await switchToChatMode(container);
+    await openFeaturesFromRail(container);
 
     const workBoardNav = container.querySelector('[data-testid="toolbar-work-board"]') as HTMLButtonElement;
     expect(workBoardNav).toBeTruthy();
@@ -102,6 +121,7 @@ describe("App inline navigation", () => {
     });
 
     await switchToChatMode(container);
+    await openFeaturesFromRail(container);
 
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="sidebar-routines"]') as HTMLButtonElement);

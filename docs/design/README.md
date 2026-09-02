@@ -24,7 +24,7 @@ This page owns the current contract for Design. Use it as the first review surfa
 
 - `src/ui/renderer/components/ChatGroupFrame.tsx` — the frame, its header controls, the split tree, and the shared conversation action set
 - `src/ui/renderer/App.tsx` — tile layout, focus, and the wiring from the sidebar to the tile holding a session
-- `src/ui/renderer/components/Sidebar.tsx` — conversation and project rows, their actions, and the reveal-on-scroll list
+- `src/ui/renderer/components/Sidebar.tsx` — the foldable Features and Plugins nav groups (in the collapsed rail a group or the projects folder is one icon that expands the sidebar and opens there), conversation and project rows, their actions, and the reveal-on-scroll list
 - `src/ui/renderer/components/ChatSidePanel.tsx` — the work panel card and its tabs
 - `src/ui/renderer/tabs/`
 - `src/ui/renderer/__tests__/`
