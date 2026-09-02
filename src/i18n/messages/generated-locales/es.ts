@@ -1079,7 +1079,7 @@ export const esMessages: Record<string, string> = {
   "composer.attachLimitWarning": "⚠ Se alcanzó el límite de archivos adjuntos de {max}: para agregar más, elimine un marcador [...#N] del área de texto",
   "composer.defaultPlaceholder": "Escriba su pregunta... (Cmd/Ctrl+V para pegar desde el portapapeles)",
   "composerPlaceholder.apiKeyMissing": "Primero configure su clave API...",
-  "composerPlaceholder.defaultHint": "Escriba un mensaje (Ingrese para enviar · Cmd/Ctrl+V para adjuntar) · /command disponible",
+  "composerPlaceholder.defaultHint": "typing, ⌘+V, /",
   "composerPlaceholder.streamingHint": "Se agregará a la cola de mensajes (interrumpa inmediatamente con ⌘⏎)",
   "constants.execModeAllowDesc": "Las herramientas fuera de los bloques duros están permitidas automáticamente; el acceso fuera de los directorios permitidos requiere una aprobación por separado",
   "constants.execModeAllowLabel": "Permitir todo",

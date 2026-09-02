@@ -1072,7 +1072,7 @@ export const zhMessages: Record<string, string> = {
   "composer.attachLimitWarning": "⚠ 已达到 {max} 的附件限制 — 要添加更多附件，请从文本区域删除 [...#N] 标记",
   "composer.defaultPlaceholder": "输入您的问题...（Cmd/Ctrl+V 从剪贴板粘贴）",
   "composerPlaceholder.apiKeyMissing": "请先设置您的 API 密钥...",
-  "composerPlaceholder.defaultHint": "输入消息（Enter 发送·Cmd/Ctrl+V 附加）· /command 可用",
+  "composerPlaceholder.defaultHint": "typing, ⌘+V, /",
   "composerPlaceholder.streamingHint": "将被添加到消息队列（用⌘⏎立即中断）",
   "composerProjectSelector.addProject": "添加新项目",
   "composerProjectSelector.cancelButton": "取消",

@@ -4,7 +4,7 @@ import { test, expect } from './fixtures';
  * Composer placeholder ↔ Suggested-replies coexistence guard.
  *
  * Regression: PR #969 + #971 wired the suggested-replies chip row, but the
- * Composer's placeholder ("질문 입력 ... /command 사용 가능") rendered in
+ * Composer's placeholder (then "질문 입력 ... /command 사용 가능") rendered in
  * the same vertical strip — when the LLM emitted chips the user saw both
  * "캘린더 직접 열게 | 나중에 할게" chips AND the long static hint.
  *

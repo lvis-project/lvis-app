@@ -1070,7 +1070,7 @@ export const deMessages: Record<string, string> = {
   "composer.attachLimitWarning": "⚠ Anhangslimit von {max} erreicht – um weitere hinzuzufügen, löschen Sie eine [...#N]-Markierung aus dem Textbereich",
   "composer.defaultPlaceholder": "Geben Sie Ihre Frage ein... (Befehl/Strg+V zum Einfügen aus der Zwischenablage)",
   "composerPlaceholder.apiKeyMissing": "Bitte richten Sie zuerst Ihren API-Schlüssel ein...",
-  "composerPlaceholder.defaultHint": "Geben Sie eine Nachricht ein (Eingabetaste zum Senden · Cmd/Strg+V zum Anhängen) · /command verfügbar",
+  "composerPlaceholder.defaultHint": "typing, ⌘+V, /",
   "composerPlaceholder.streamingHint": "Wird zur Nachrichtenwarteschlange hinzugefügt (sofort mit ⌘⏎ unterbrechen)",
   "constants.execModeAllowDesc": "Werkzeuge außerhalb harter Blöcke werden automatisch zugelassen; Der Zugriff außerhalb erlaubter Verzeichnisse bedarf einer gesonderten Genehmigung",
   "constants.execModeAllowLabel": "Alles zulassen",

@@ -22,10 +22,10 @@ test('boots in English: composer placeholder renders the English catalog', async
 
   const placeholder = await textarea.getAttribute('placeholder');
 
-  // English `composerPlaceholder.defaultHint` — proves the en catalog resolved
-  // (the ko default hint starts with "질문 입력").
-  expect(placeholder).toContain('Type a message');
-  expect(placeholder).not.toContain('질문 입력');
+  // The default hint is the same three tokens in every catalog, so it no
+  // longer distinguishes locales; the Settings heading test below carries the
+  // English proof. This test guards that the hint itself resolved (no raw key).
+  expect(placeholder).toBe('typing, ⌘+V, /');
 });
 
 test('boots in English: inline settings heading is "Settings"', async ({ app, mainWindow }) => {
