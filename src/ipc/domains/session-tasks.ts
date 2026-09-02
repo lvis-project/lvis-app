@@ -1,8 +1,8 @@
 /**
- * Session-todo IPC handlers — `lvis:session-todo:*`.
+ * Session-tasks IPC handlers — `lvis:session-tasks:*`.
  *
- * Read + clear over the per-session todo list, plus the main -> renderer
- * `changed` push so the renderer reflects a todo update without polling.
+ * Read + clear over the per-session task list, plus the main -> renderer
+ * `changed` push so the renderer reflects a task update without polling.
  *
  * `sessionId` is REQUIRED. The window can hold several conversations at once,
  * so "the current session" is not a fact main can answer — resolving an absent
@@ -17,7 +17,7 @@ import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
 /**
- * The conversation a session-todo call names, or `null` when it names none.
+ * The conversation a session-tasks call names, or `null` when it names none.
  *
  * A refusal rather than a throw: `ipcMain.handle` would turn a throw into a
  * rejected promise in the renderer, and the panel's read is fire-and-forget —
@@ -28,45 +28,45 @@ function namedSession(sessionId: unknown): string | null {
   return typeof sessionId === "string" && sessionId.trim() ? sessionId : null;
 }
 
-export function registerSessionTodoHandlers(deps: IpcDeps): void {
-  const { sessionTodoStore, auditLogger, getMainWindow } = deps;
+export function registerSessionTasksHandlers(deps: IpcDeps): void {
+  const { sessionTasksStore, auditLogger, getMainWindow } = deps;
 
-  ipcMain.handle(CHANNELS.sessionTodo.list, (e, sessionId: unknown) => {
+  ipcMain.handle(CHANNELS.sessionTasks.list, (e, sessionId: unknown) => {
     if (!validateHostRendererSender(e)) {
-      auditUnauthorized(auditLogger, CHANNELS.sessionTodo.list, e);
+      auditUnauthorized(auditLogger, CHANNELS.sessionTasks.list, e);
       return UNAUTHORIZED_FRAME;
     }
     const sid = namedSession(sessionId);
     if (sid === null) {
-      log.warn("session-todo list without a session id");
+      log.warn("session-tasks list without a session id");
       return [];
     }
-    if (!sessionTodoStore) return [];
-    return sessionTodoStore.list(sid);
+    if (!sessionTasksStore) return [];
+    return sessionTasksStore.list(sid);
   });
-  ipcMain.handle(CHANNELS.sessionTodo.clear, (e, sessionId: unknown) => {
+  ipcMain.handle(CHANNELS.sessionTasks.clear, (e, sessionId: unknown) => {
     if (!validateHostRendererSender(e)) {
-      auditUnauthorized(auditLogger, CHANNELS.sessionTodo.clear, e);
+      auditUnauthorized(auditLogger, CHANNELS.sessionTasks.clear, e);
       return UNAUTHORIZED_FRAME;
     }
     const sid = namedSession(sessionId);
     if (sid === null) {
-      log.warn("session-todo clear without a session id");
+      log.warn("session-tasks clear without a session id");
       return { ok: false, error: "session-id-required" };
     }
-    if (!sessionTodoStore) return { ok: false, error: "no-session-todo-store" };
-    sessionTodoStore.clear(sid);
+    if (!sessionTasksStore) return { ok: false, error: "no-session-tasks-store" };
+    sessionTasksStore.clear(sid);
     return { ok: true };
   });
-  if (sessionTodoStore) {
-    sessionTodoStore.onChange((sessionId, items) => {
+  if (sessionTasksStore) {
+    sessionTasksStore.onChange((sessionId, items) => {
       try {
-        getMainWindow()?.webContents.send(CHANNELS.sessionTodo.changed, {
+        getMainWindow()?.webContents.send(CHANNELS.sessionTasks.changed, {
           sessionId,
           items,
         });
       } catch (err) {
-        log.warn("session-todo emit failed: %s", (err as Error).message);
+        log.warn("session-tasks emit failed: %s", (err as Error).message);
       }
     });
   }

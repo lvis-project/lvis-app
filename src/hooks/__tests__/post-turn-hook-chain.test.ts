@@ -638,7 +638,7 @@ describe("PostTurnHookChain", () => {
     });
   });
 
-  describe("mark-session-todo-for-clear step", () => {
+  describe("mark-session-tasks-for-clear step", () => {
     function makeChain(markForClearIfCompleted: ReturnType<typeof vi.fn>) {
       const settingsService = {
         get: vi.fn((key: string) => {
@@ -648,7 +648,7 @@ describe("PostTurnHookChain", () => {
       } as unknown as SettingsService;
       return new PostTurnHookChain({
         settingsService,
-        sessionTodoStore: { markForClearIfCompleted },
+        sessionTasksStore: { markForClearIfCompleted },
       });
     }
 
@@ -657,7 +657,7 @@ describe("PostTurnHookChain", () => {
       const chain = makeChain(markForClearIfCompleted);
 
       await chain.run({
-        sessionId: "session-todo-mark",
+        sessionId: "session-tasks-mark",
         messages: createMessages(),
         input: "끝났어",
         output: "완료했습니다",
@@ -666,7 +666,7 @@ describe("PostTurnHookChain", () => {
       });
 
       expect(markForClearIfCompleted).toHaveBeenCalledOnce();
-      expect(markForClearIfCompleted).toHaveBeenCalledWith("session-todo-mark");
+      expect(markForClearIfCompleted).toHaveBeenCalledWith("session-tasks-mark");
     });
 
     it("is failure-isolated: a throwing mark step does not break the chain", async () => {
@@ -677,7 +677,7 @@ describe("PostTurnHookChain", () => {
       const chain = makeChain(markForClearIfCompleted);
 
       const result = await chain.run({
-        sessionId: "session-todo-mark-throws",
+        sessionId: "session-tasks-mark-throws",
         messages: createMessages(),
         input: "끝났어",
         output: "완료했습니다",

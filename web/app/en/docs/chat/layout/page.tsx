@@ -13,11 +13,11 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="Chat Screen Layout"
-        description="App.tsx wraps the main screen in CustomTitleBar + MainToolbar, floats a collapsible Sidebar, and the main content region inside it mounts ChatView. SessionTodoPanel · MessageQueuePanel stack directly above the composer, and ChatView reads session/queue/TODO state together through useChatContext()."
+        description="App.tsx wraps the main screen in CustomTitleBar + MainToolbar, floats a collapsible Sidebar, and the main content region inside it mounts ChatView. SessionTasksPanel · MessageQueuePanel stack directly above the composer, and ChatView reads session/queue/TODO state together through useChatContext()."
         tags={[
           "App + Sidebar + main content region",
           "ChatView",
-          "MessageQueuePanel + SessionTodoPanel",
+          "MessageQueuePanel + SessionTasksPanel",
         ]}
       />
 
@@ -26,7 +26,7 @@ export default function Page() {
         items={[
           { title: "① CustomTitleBar + MainToolbar", body: <>Window controls + session/plugin/permission toolbar. Mounted by <code>src/ui/renderer/App.tsx</code>.</>, tone: "teal" },
           { title: "② ChatView body", body: <>Conversation + tool cards + thinking + question cards. <code>src/ui/renderer/ChatView.tsx</code>.</> },
-          { title: "③ Queue + TODO panels", body: <>External signal queue + session TODOs. They sit directly above the composer (<code>src/ui/renderer/components/ChatComposerDock.tsx</code>) and draw nothing when they have no items.</>, tone: "citron" },
+          { title: "③ Queue + Tasks panels", body: <>External signal queue + session tasks. They sit directly above the composer (<code>src/ui/renderer/components/ChatComposerDock.tsx</code>) and draw nothing when they have no items.</>, tone: "citron" },
         ]}
       />
 

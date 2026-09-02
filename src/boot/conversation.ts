@@ -32,7 +32,7 @@ import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
-import type { SessionTodoStore } from "../main/session-todo-store.js";
+import type { SessionTasksStore } from "../main/session-tasks-store.js";
 import type { LLMProvider } from "../engine/llm/types.js";
 import type { SubscriptionChatRuntimeSelection } from "../shared/subscription-runtime.js";
 import { isDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
@@ -135,11 +135,11 @@ export function createPostTurnHookChain(opts: {
    */
   auditLogger?: AuditLogger;
   /**
-   * Same SessionTodoStore instance the conversation loop holds — the hook
+   * Same SessionTasksStore instance the conversation loop holds — the hook
    * marks a completed plan here and the loop's `clearIfPending` executes it at
    * the next turn boundary.
    */
-  sessionTodoStore?: SessionTodoStore;
+  sessionTasksStore?: SessionTasksStore;
 }): { postTurnHookChain: PostTurnHookChain; auditLogger: AuditLogger } {
 
   const auditLogger = opts.auditLogger ?? new AuditLogger();
@@ -149,7 +149,7 @@ export function createPostTurnHookChain(opts: {
     idleScheduler: opts.idleScheduler,
     settingsService: opts.settingsService,
     memoryCaptureService: opts.memoryCaptureService,
-    sessionTodoStore: opts.sessionTodoStore,
+    sessionTasksStore: opts.sessionTasksStore,
   });
   return { postTurnHookChain, auditLogger };
 }
@@ -250,7 +250,7 @@ export interface ConversationDeps {
    * that nothing consumes. Routine loops use a separate factory and never
    * carry this store.
    */
-  sessionTodoStore: SessionTodoStore;
+  sessionTasksStore: SessionTasksStore;
   /** Issue #260: optional notification service for turn-end auto-fire. */
   notificationService?: NotificationService;
   auditLogger?: AuditLogger;
@@ -536,7 +536,7 @@ export function createConversationLoop(deps: ConversationDeps,
     pluginOperationGrants: deps.pluginOperationGrants,
     pluginOperationIdentityProvider: deps.pluginOperationIdentityProvider,
     skillOverlay: deps.skillOverlay,
-    sessionTodoStore: deps.sessionTodoStore,
+    sessionTasksStore: deps.sessionTasksStore,
     notificationService: deps.notificationService,
     auditLogger: deps.auditLogger,
     rewireReviewerAgent: deps.rewireReviewerAgent,

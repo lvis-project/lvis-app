@@ -55,8 +55,8 @@ export function StackDiagram({ locale = "ko" }: { locale?: "ko" | "en" }) {
         fill: "#f6f7fb",
         stroke: "#4b5573",
         title: "데스크톱 앱",
-        sub: "사용자가 마주하는 첫 화면. 채팅 · 큐 · TODO · 권한 검토.",
-        nodes: ["채팅", "메시지 큐", "TODO 패널", "권한 검토", "도구 목록"],
+        sub: "사용자가 마주하는 첫 화면. 채팅 · 큐 · Tasks · 권한 검토.",
+        nodes: ["채팅", "메시지 큐", "Tasks 패널", "권한 검토", "도구 목록"],
         eyebrow: "Layer 1",
       },
       {
@@ -97,8 +97,8 @@ export function StackDiagram({ locale = "ko" }: { locale?: "ko" | "en" }) {
         fill: "#f6f7fb",
         stroke: "#4b5573",
         title: "Desktop app",
-        sub: "The first screen users see. Chat, queue, TODO, permission review.",
-        nodes: ["Chat", "Message queue", "TODO panel", "Permission review", "Tool list"],
+        sub: "The first screen users see. Chat, queue, Tasks, permission review.",
+        nodes: ["Chat", "Message queue", "Tasks panel", "Permission review", "Tool list"],
         eyebrow: "Layer 1",
       },
       {

@@ -255,7 +255,7 @@ export interface AppServices {
   /** Workflow tools — exposed for IPC handlers + shutdown wiring. */
   routinesStore?: import("../main/routines-store.js").RoutinesStore;
   routinesScheduler?: import("../main/routines-scheduler.js").RoutinesScheduler;
-  sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
+  sessionTasksStore?: import("../main/session-tasks-store.js").SessionTasksStore;
   /** Late-bound sub-agent runner lookup for read-only transcript/status IPC surfaces. */
   getSubAgentRunner?: () =>
     | import("../engine/subagent-runner.js").SubAgentRunner | undefined;

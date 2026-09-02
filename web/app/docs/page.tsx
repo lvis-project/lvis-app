@@ -13,7 +13,7 @@ const stats = [
 ];
 
 const layers = [
-  { tag: "Desktop Host", label: "LVIS App", note: "ChatView · MainToolbar · MessageQueuePanel · SessionTodoPanel" },
+  { tag: "Desktop Host", label: "LVIS App", note: "ChatView · MainToolbar · MessageQueuePanel · SessionTasksPanel" },
   { tag: "Plugin Runtime", label: "5 plugins", note: "ms-graph · local-indexer · meeting · work-assistant · 사내 포털" },
   { tag: "Storage", label: "~/.lvis", note: "0o700 dir · 0o600 file · audit/<YYYY-MM-DD>.jsonl" },
   { tag: "Server", label: "Marketplace", note: "FastAPI · React 19 · Ed25519 · ApiKey sha256" },

@@ -382,7 +382,7 @@ vi.mock("../../main/work-board-store.js", () => ({
     reconcileInterruptedRuns = vi.fn(async () => {});
   },
 }));
-vi.mock("../../main/session-todo-store.js", () => ({ SessionTodoStore: class {},
+vi.mock("../../main/session-tasks-store.js", () => ({ SessionTasksStore: class {},
 }));
 vi.mock("../../main/ask-user-question-gate.js", () => ({
   AskUserQuestionGate: class {
@@ -675,7 +675,7 @@ describe("bootstrap() integration lock", () => {
         "routinesStore",
         "runPluginShutdownHandlers",
         "scriptHookManager",
-        "sessionTodoStore",
+        "sessionTasksStore",
         "settingsService",
         "shutdown",
         "sideChatConversationLoop",

@@ -4,18 +4,18 @@ import { Callout } from "@/components/docs/callout";
 import { PageNav } from "@/components/docs/page-nav";
 import { shotUrl, shots } from "@/lib/screenshots";
 
-export const metadata = { title: "메시지 큐 & TODO" };
+export const metadata = { title: "메시지 큐 & Tasks" };
 
 export default function Page() {
   return (
     <article>
       <PageHero
         eyebrow="Host · Chat"
-        title="메시지 큐 & TODO 패널"
-        description="컴포저 바로 위에 쌓이는 두 개의 패널 — SessionTodoPanel (세션 TODO) 과 MessageQueuePanel (대기 중인 외부 신호). 둘 다 ChatComposerDock 이 렌더하고, 담을 항목이 없으면 아무것도 그리지 않습니다."
+        title="메시지 큐 & Tasks 패널"
+        description="컴포저 바로 위에 쌓이는 두 개의 패널 — SessionTasksPanel (세션 Tasks) 과 MessageQueuePanel (대기 중인 외부 신호). 둘 다 ChatComposerDock 이 렌더하고, 담을 항목이 없으면 아무것도 그리지 않습니다."
         tags={[
           "ChatComposerDock 이 렌더",
-          "MessageQueuePanel + SessionTodoPanel",
+          "MessageQueuePanel + SessionTasksPanel",
           "비어 있으면 표시 안 함",
         ]}
       />
@@ -30,10 +30,10 @@ export default function Page() {
         구현: <code>src/ui/renderer/components/MessageQueuePanel.tsx</code>. 사용자가 카드를 클릭하면 채팅 본문에 ask-user question card 또는 도구 호출로 전환.
       </p>
 
-      <h2 id="todo">SessionTodoPanel</h2>
+      <h2 id="tasks">SessionTasksPanel</h2>
       <p>
-        세션 단위 TODO. 사용자가 직접 추가한 항목과 에이전트가 컨텍스트에서 만든 항목이 같은 리스트.
-        구현: <code>src/ui/renderer/components/SessionTodoPanel.tsx</code>. 각 항목은 출처 라벨이 함께 표시.
+        세션 단위 Tasks. 사용자가 직접 추가한 항목과 에이전트가 컨텍스트에서 만든 항목이 같은 리스트.
+        구현: <code>src/ui/renderer/components/SessionTasksPanel.tsx</code>. 각 항목은 출처 라벨이 함께 표시.
       </p>
 
       <h2 id="dispatch">신호가 패널에 닿기까지</h2>

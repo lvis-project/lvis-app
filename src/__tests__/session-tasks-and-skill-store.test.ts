@@ -1,5 +1,5 @@
 /**
- * Unit tests for SessionTodoStore + SkillStore.
+ * Unit tests for SessionTasksStore + SkillStore.
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -7,9 +7,9 @@ import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  SessionTodoEmptyPlanError,
-  SessionTodoStore,
-} from "../main/session-todo-store.js";
+  SessionTasksEmptyPlanError,
+  SessionTasksStore,
+} from "../main/session-tasks-store.js";
 import { SkillStore, parseFrontmatter } from "../main/skill-store.js";
 import { cleanupTmpDir } from "../__tests__/support/tmp-dir-teardown.js";
 
@@ -19,9 +19,9 @@ const REPO_ROOT = resolvePath(
 );
 const BUILTIN_SKILLS_DIR = resolvePath(REPO_ROOT, "resources/skills");
 
-describe("SessionTodoStore", () => {
+describe("SessionTasksStore", () => {
   it("auto-generates ids and merges by id", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     const r1 = store.write("s", [
       { content: "a", status: "pending" },
       { content: "b", status: "pending" },
@@ -38,7 +38,7 @@ describe("SessionTodoStore", () => {
   });
 
   it("inserts, moves, deletes, then marks and clears a fully completed plan", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     const events: Array<{ sid: string; len: number }> = [];
     store.onChange((sid, items) => events.push({ sid, len: items.length }));
     const initial = store.write("s", [
@@ -87,7 +87,7 @@ describe("SessionTodoStore", () => {
   });
 
   it("does not mark unfinished plans for clear", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     const events: Array<{ sid: string; len: number }> = [];
     store.onChange((sid, items) => events.push({ sid, len: items.length }));
 
@@ -106,7 +106,7 @@ describe("SessionTodoStore", () => {
   });
 
   it("markForClearIfCompleted defensively unmarks when re-run on a no-longer-completed plan", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     const [a] = store.write("s", [{ content: "a", status: "completed" }]);
     expect(store.markForClearIfCompleted("s")).toBe(true);
 
@@ -122,7 +122,7 @@ describe("SessionTodoStore", () => {
   });
 
   it("write() resets a stale pending-clear mark so a changed plan is re-evaluated", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     const events: Array<{ sid: string; len: number }> = [];
     store.onChange((sid, items) => events.push({ sid, len: items.length }));
     const [a] = store.write("s", [{ content: "a", status: "completed" }]);
@@ -140,7 +140,7 @@ describe("SessionTodoStore", () => {
   });
 
   it("manual clear() drops a pending-clear mark", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     store.write("s", [{ content: "a", status: "completed" }]);
     expect(store.markForClearIfCompleted("s")).toBe(true);
 
@@ -153,7 +153,7 @@ describe("SessionTodoStore", () => {
   });
 
   it("rejects a delete-only update that would empty the plan", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     const events: Array<{ sid: string; len: number }> = [];
     store.onChange((sid, items) => events.push({ sid, len: items.length }));
     const [a, b] = store.write("s", [
@@ -166,14 +166,14 @@ describe("SessionTodoStore", () => {
         { id: a.id, status: "deleted" },
         { id: b.id, status: "deleted" },
       ]),
-    ).toThrow(SessionTodoEmptyPlanError);
+    ).toThrow(SessionTasksEmptyPlanError);
 
     expect(store.list("s").map((item) => item.content)).toEqual(["a", "b"]);
     expect(events).toEqual([{ sid: "s", len: 2 }]);
   });
 
   it("emits change events with the merged list", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     const events: number[] = [];
     store.onChange((_sid, items) => events.push(items.length));
     store.write("s2", [{ content: "x", status: "pending" }]);
@@ -182,7 +182,7 @@ describe("SessionTodoStore", () => {
   });
 
   it("clear() emits an empty list and drops the session regardless of status", () => {
-    const store = new SessionTodoStore();
+    const store = new SessionTasksStore();
     const events: Array<{ sid: string; len: number }> = [];
     store.onChange((sid, items) => events.push({ sid, len: items.length }));
     store.write("s3", [

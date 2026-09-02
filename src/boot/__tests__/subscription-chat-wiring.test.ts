@@ -93,7 +93,7 @@ describe("subscription chat boot wiring", () => {
       systemPromptBuilder: {},
       routineEngine: {},
       postTurnHookChain: {},
-      sessionTodoStore: {},
+      sessionTasksStore: {},
       ...bindings,
     } as unknown as Parameters<typeof createConversationLoop>[0]);
     const side = createSideChatConversationLoop({

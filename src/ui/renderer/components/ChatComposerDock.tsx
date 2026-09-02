@@ -3,7 +3,7 @@ import { KeyRound, ShieldQuestion, Store } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useCallback, useEffect, useState, type RefObject } from "react";
-import { SessionTodoPanel } from "./SessionTodoPanel.js";
+import { SessionTasksPanel } from "./SessionTasksPanel.js";
 import { MessageQueuePanel } from "./MessageQueuePanel.js";
 import { DeferredApprovalChip } from "./DeferredApprovalChip.js";
 import { StatusBar, type StatusBarProps } from "./StatusBar.js";
@@ -197,7 +197,7 @@ export function resolveComposerRuntimeGates({
 }
 
 /**
- * Presentational composer dock: the todo/queue panels, the deferred-approval
+ * Presentational composer dock: the tasks/queue panels, the deferred-approval
  * chip, the composer toast surface, the unified input box (Composer +
  * InputActionBar), and the ask-user question overlay. Moved verbatim from
  * ChatView so every data-testid + i18n key + gating expression is unchanged;
@@ -497,11 +497,11 @@ export function ChatComposerDock({
           <ComposerStatusRow
             statusRow={inputStatusRow}
             ringSlot={ringSlot}
-            // The session's todo list is a chip on this row, next to the
+            // The session's task list is a chip on this row, next to the
             // ring: it describes the work this conversation is doing, which
             // is what the row is for. Up in the queue dock it floated over an
             // empty toast reserve whenever there was nothing to notify.
-            todoSlot={<SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />}
+            tasksSlot={<SessionTasksPanel api={workflowApi} sessionId={currentSessionId} />}
             onOpenModelSettings={onOpenModelSettings}
             onOpenPermissions={onOpenPermissions}
             onOpenApprovalQueue={onOpenApprovalQueue}

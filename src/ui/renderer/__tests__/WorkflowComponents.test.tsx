@@ -10,7 +10,7 @@ import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { AskUserQuestionCard } from "../components/AskUserQuestionCard.js";
 import { QuestionOverlay } from "../components/QuestionOverlay.js";
 import { RoutinePanel } from "../components/RoutinePanel.js";
-import { SessionTodoPanel } from "../components/SessionTodoPanel.js";
+import { SessionTasksPanel } from "../components/SessionTasksPanel.js";
 import { SkillBadge } from "../components/SkillBadge.js";
 import { t } from "../../../i18n/runtime.js";
 import type { LvisApi } from "../types.js";
@@ -26,8 +26,8 @@ function fakeApi(overrides: Partial<LvisApi> = {}): LvisApi {
     removeRoutine: stub as never,
     listRoutineSessions: () => Promise.resolve([]),
     onRoutineFired: noopUnsub as never,
-    listSessionTodos: () => Promise.resolve([]),
-    onSessionTodoChanged: noopUnsub as never,
+    listSessionTasks: () => Promise.resolve([]),
+    onSessionTasksChanged: noopUnsub as never,
     respondAskUserQuestion: stub as never,
     onAskUserQuestion: noopUnsub as never,
     onAgentSpawnEvent: noopUnsub as never,
@@ -384,14 +384,14 @@ describe("RoutinePanel", () => {
   });
 });
 
-describe("SessionTodoPanel", () => {
+describe("SessionTasksPanel", () => {
   // The chip is the trigger; the list opens in a popover (portalled to body,
   // so assertions on the list go through `document.body` / screen queries).
   // Requires the chip to be rendered already (items loaded), so callers await
   // the chip text first.
   async function openPanel(container: HTMLElement) {
-    const header = container.querySelector('[data-testid="session-todo-panel"]');
-    if (!header) throw new Error("session-todo chip not rendered");
+    const header = container.querySelector('[data-testid="session-tasks-panel"]');
+    if (!header) throw new Error("session-tasks chip not rendered");
     await act(async () => {
       header.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -399,26 +399,26 @@ describe("SessionTodoPanel", () => {
 
   it("hides when no items", async () => {
     const api = fakeApi();
-    const { container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
+    const { container } = render(<SessionTasksPanel api={api} sessionId="session-tasks" />);
     // Async initial fetch resolves to []; panel should not render.
     await act(async () => {
       await Promise.resolve();
     });
-    expect(container.querySelector('[data-testid="session-todo-panel"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-tasks-panel"]')).toBeNull();
   });
 
   it("renders items with per-row status pills when present", async () => {
     const api = fakeApi({
-      listSessionTodos: () =>
+      listSessionTasks: () =>
         Promise.resolve([
           { id: "t1", content: "step 1", status: "pending" },
           { id: "t2", content: "step 2", status: "completed" },
         ]),
     });
-    const { container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
-    await screen.findByTestId("session-todo-panel");
+    const { container } = render(<SessionTasksPanel api={api} sessionId="session-tasks" />);
+    await screen.findByTestId("session-tasks-panel");
     await openPanel(container);
-    const list = await screen.findByTestId("session-todo-list");
+    const list = await screen.findByTestId("session-tasks-list");
     // The chip repeats the focus item's title, so rows are read from the list.
     expect(list.textContent).toContain("step 1");
     expect(list.textContent).toContain("step 2");
@@ -428,45 +428,45 @@ describe("SessionTodoPanel", () => {
     expect(list.textContent).toContain("완료");
     // The removed transient header badges must no longer render.
     expect(list.textContent).not.toContain("수정");
-    expect(container.querySelector('[data-testid="session-todo-continuation"]')).toBeNull();
-    expect(container.querySelector('[data-testid="session-todo-fresh"]')).toBeNull();
-    expect(container.querySelector('[data-testid="session-todo-added"]')).toBeNull();
-    expect(container.querySelector('[data-testid="session-todo-updated"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-tasks-continuation"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-tasks-fresh"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-tasks-added"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-tasks-updated"]')).toBeNull();
   });
 
   it("pulses the in-progress row in the expanded view so it's the focal point", async () => {
     const api = fakeApi({
-      listSessionTodos: () =>
+      listSessionTasks: () =>
         Promise.resolve([
           { id: "t1", content: "done thing", status: "completed" },
           { id: "t2", content: "current thing", status: "in_progress" },
           { id: "t3", content: "next thing", status: "pending" },
         ]),
     });
-    const { findByTestId, queryAllByTestId, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
-    await screen.findByTestId("session-todo-panel");
+    const { findByTestId, queryAllByTestId, container } = render(<SessionTasksPanel api={api} sessionId="session-tasks" />);
+    await screen.findByTestId("session-tasks-panel");
     await openPanel(container);
-    const active = await findByTestId("session-todo-active-row");
+    const active = await findByTestId("session-tasks-active-row");
     expect(active.className).toContain("animate-pulse");
     // Only the in-progress row gets the active testid — pending/completed
     // must not.
-    expect(queryAllByTestId("session-todo-active-row")).toHaveLength(1);
+    expect(queryAllByTestId("session-tasks-active-row")).toHaveLength(1);
   });
 
   it("shows the active item next to the count when collapsed, with pulse", async () => {
     const api = fakeApi({
-      listSessionTodos: () =>
+      listSessionTasks: () =>
         Promise.resolve([
           { id: "t1", content: "done thing", status: "completed" },
           { id: "t2", content: "current thing", status: "in_progress" },
           { id: "t3", content: "next thing", status: "pending" },
         ]),
     });
-    const { findByText, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
+    const { findByText, container } = render(<SessionTasksPanel api={api} sessionId="session-tasks" />);
     // Panel starts collapsed by default — the active item should already show
     // next to the count without any toggle.
     await findByText("current thing");
-    const collapsed = container.querySelector('[data-testid="session-todo-collapsed-active"]');
+    const collapsed = container.querySelector('[data-testid="session-tasks-collapsed-active"]');
     expect(collapsed).not.toBeNull();
     expect(collapsed!.textContent).toBe("current thing");
     expect(collapsed!.className).toContain("animate-pulse");
@@ -474,17 +474,17 @@ describe("SessionTodoPanel", () => {
 
   it("falls back to the first pending item in the collapsed header when nothing is in progress", async () => {
     const api = fakeApi({
-      listSessionTodos: () =>
+      listSessionTasks: () =>
         Promise.resolve([
           { id: "t1", content: "first pending", status: "pending" },
           { id: "t2", content: "second pending", status: "pending" },
         ]),
     });
-    const { findByText, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
+    const { findByText, container } = render(<SessionTasksPanel api={api} sessionId="session-tasks" />);
     // Starts collapsed; with no in_progress item the header surfaces the first
     // non-completed item instead of going blank.
     await findByText("first pending");
-    const collapsed = container.querySelector('[data-testid="session-todo-collapsed-active"]');
+    const collapsed = container.querySelector('[data-testid="session-tasks-collapsed-active"]');
     expect(collapsed).not.toBeNull();
     expect(collapsed!.textContent).toBe("first pending");
     // A pending (not in-progress) focus item must not pulse.
@@ -503,10 +503,10 @@ describe("SessionTodoPanel", () => {
       return { ok: true };
     });
     const api = fakeApi({
-      listSessionTodos: () =>
+      listSessionTasks: () =>
         Promise.resolve([{ id: "t1", content: "only step", status: "in_progress" }]),
-      clearSessionTodos: clearSpy as never,
-      onSessionTodoChanged: ((handler: (p: {
+      clearSessionTasks: clearSpy as never,
+      onSessionTasksChanged: ((handler: (p: {
         sessionId: string;
         items: Array<{ id: string; content: string; status: string }>;
       }) => void) => {
@@ -515,13 +515,13 @@ describe("SessionTodoPanel", () => {
       }) as never,
     });
     const { queryByTestId, findByTestId, container } = render(
-      <SessionTodoPanel api={api} sessionId="session-dismiss" />,
+      <SessionTasksPanel api={api} sessionId="session-dismiss" />,
     );
-    await screen.findByTestId("session-todo-panel");
+    await screen.findByTestId("session-tasks-panel");
     await openPanel(container);
-    await screen.findByTestId("session-todo-list");
+    await screen.findByTestId("session-tasks-list");
     // Not yet all-complete: the dismiss X must be absent.
-    expect(queryByTestId("session-todo-dismiss")).toBeNull();
+    expect(queryByTestId("session-tasks-dismiss")).toBeNull();
 
     // Mark the single item completed → 1/1 → dismiss X appears.
     await act(async () => {
@@ -530,16 +530,16 @@ describe("SessionTodoPanel", () => {
         items: [{ id: "t1", content: "only step", status: "completed" }],
       });
     });
-    const dismiss = await findByTestId("session-todo-dismiss");
+    const dismiss = await findByTestId("session-tasks-dismiss");
 
-    // Clicking it calls clearSessionTodos; the resulting empty-list emit
+    // Clicking it calls clearSessionTasks; the resulting empty-list emit
     // removes the panel entirely (returns null at items.length === 0).
     await act(async () => {
       dismiss.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
     expect(clearSpy).toHaveBeenCalledWith("session-dismiss");
-    expect(queryByTestId("session-todo-panel")).toBeNull();
+    expect(queryByTestId("session-tasks-panel")).toBeNull();
   });
 
   it("keeps a stale list snapshot from clobbering a live push (no header badges)", async () => {
@@ -552,8 +552,8 @@ describe("SessionTodoPanel", () => {
       resolveList = resolve;
     });
     const api = fakeApi({
-      listSessionTodos: () => listPromise,
-      onSessionTodoChanged: ((handler: (p: {
+      listSessionTasks: () => listPromise,
+      onSessionTasksChanged: ((handler: (p: {
         sessionId: string;
         items: Array<{ id: string; content: string; status: string }>;
       }) => void) => {
@@ -562,14 +562,14 @@ describe("SessionTodoPanel", () => {
       }) as never,
     });
     const { queryByText, container } = render(
-      <SessionTodoPanel api={api} sessionId="session-race" />,
+      <SessionTasksPanel api={api} sessionId="session-race" />,
     );
 
     const firstItems = [{ id: "n1", content: "live plan", status: "pending" }];
     await act(async () => {
       pushPayload!({ sessionId: "session-race", items: firstItems });
     });
-    await screen.findByTestId("session-todo-panel");
+    await screen.findByTestId("session-tasks-panel");
 
     await act(async () => {
       resolveList([{ id: "old", content: "stale list snapshot", status: "pending" }]);
@@ -578,8 +578,8 @@ describe("SessionTodoPanel", () => {
     // Live push wins over the late initial fetch; removed transient header
     // badges never render.
     expect(queryByText("stale list snapshot")).toBeNull();
-    expect(container.querySelector('[data-testid="session-todo-fresh"]')).toBeNull();
-    expect(container.querySelector('[data-testid="session-todo-continuation"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-tasks-fresh"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-tasks-continuation"]')).toBeNull();
   });
 
   it("ignores malformed push events without a session id", async () => {
@@ -588,8 +588,8 @@ describe("SessionTodoPanel", () => {
       items: Array<{ id: string; content: string; status: string }>;
     }) => void) | null = null;
     const api = fakeApi({
-      listSessionTodos: () => Promise.resolve([]),
-      onSessionTodoChanged: ((handler: (p: {
+      listSessionTasks: () => Promise.resolve([]),
+      onSessionTasksChanged: ((handler: (p: {
         sessionId?: string;
         items: Array<{ id: string; content: string; status: string }>;
       }) => void) => {
@@ -598,7 +598,7 @@ describe("SessionTodoPanel", () => {
       }) as never,
     });
     const { queryByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-strict" />,
+      <SessionTasksPanel api={api} sessionId="session-strict" />,
     );
     await act(async () => {
       await Promise.resolve();
@@ -606,20 +606,20 @@ describe("SessionTodoPanel", () => {
         items: [{ id: "bad", content: "missing session", status: "pending" }],
       });
     });
-    expect(queryByTestId("session-todo-panel")).toBeNull();
+    expect(queryByTestId("session-tasks-panel")).toBeNull();
   });
 
   it("ignores malformed push payloads with a valid session id", async () => {
     let pushPayload: ((p: unknown) => void) | null = null;
     const api = fakeApi({
-      listSessionTodos: () => Promise.resolve([]),
-      onSessionTodoChanged: ((handler: (p: unknown) => void) => {
+      listSessionTasks: () => Promise.resolve([]),
+      onSessionTasksChanged: ((handler: (p: unknown) => void) => {
         pushPayload = handler;
         return () => undefined;
       }) as never,
     });
     const { queryByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-strict" />,
+      <SessionTasksPanel api={api} sessionId="session-strict" />,
     );
     await act(async () => {
       await Promise.resolve();
@@ -629,26 +629,26 @@ describe("SessionTodoPanel", () => {
         items: [{ id: "bad", content: "bad status", status: "not-a-status" }],
       });
     });
-    expect(queryByTestId("session-todo-panel")).toBeNull();
+    expect(queryByTestId("session-tasks-panel")).toBeNull();
   });
 
   it("ignores an array push payload (an array is not a record)", async () => {
     let pushPayload: ((p: unknown) => void) | null = null;
     const api = fakeApi({
-      listSessionTodos: () => Promise.resolve([]),
-      onSessionTodoChanged: ((handler: (p: unknown) => void) => {
+      listSessionTasks: () => Promise.resolve([]),
+      onSessionTasksChanged: ((handler: (p: unknown) => void) => {
         pushPayload = handler;
         return () => undefined;
       }) as never,
     });
     const { queryByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-strict" />,
+      <SessionTasksPanel api={api} sessionId="session-strict" />,
     );
     await act(async () => {
       await Promise.resolve();
       pushPayload!([{ id: "ghost", content: "array payload", status: "pending" }]);
     });
-    expect(queryByTestId("session-todo-panel")).toBeNull();
+    expect(queryByTestId("session-tasks-panel")).toBeNull();
   });
 
   it("ignores push events until the active chat session id is known", async () => {
@@ -657,8 +657,8 @@ describe("SessionTodoPanel", () => {
       items: Array<{ id: string; content: string; status: string }>;
     }) => void) | null = null;
     const api = fakeApi({
-      listSessionTodos: () => Promise.resolve([]),
-      onSessionTodoChanged: ((handler: (p: {
+      listSessionTasks: () => Promise.resolve([]),
+      onSessionTasksChanged: ((handler: (p: {
         sessionId: string;
         items: Array<{ id: string; content: string; status: string }>;
       }) => void) => {
@@ -667,7 +667,7 @@ describe("SessionTodoPanel", () => {
       }) as never,
     });
     const { queryByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="" />,
+      <SessionTasksPanel api={api} sessionId="" />,
     );
     await act(async () => {
       await Promise.resolve();
@@ -676,20 +676,20 @@ describe("SessionTodoPanel", () => {
         items: [{ id: "ghost", content: "wrong session", status: "pending" }],
       });
     });
-    expect(queryByTestId("session-todo-panel")).toBeNull();
+    expect(queryByTestId("session-tasks-panel")).toBeNull();
   });
 
-  it("ignores malformed initial session-todo snapshots", async () => {
+  it("ignores malformed initial session-tasks snapshots", async () => {
     const api = fakeApi({
-      listSessionTodos: () => Promise.resolve(null) as never,
+      listSessionTasks: () => Promise.resolve(null) as never,
     });
     const { queryByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-strict" />,
+      <SessionTasksPanel api={api} sessionId="session-strict" />,
     );
     await act(async () => {
       await Promise.resolve();
     });
-    expect(queryByTestId("session-todo-panel")).toBeNull();
+    expect(queryByTestId("session-tasks-panel")).toBeNull();
   });
 
   it("clears the panel when the store emits an empty list, then repopulates on the next plan", async () => {
@@ -698,9 +698,9 @@ describe("SessionTodoPanel", () => {
       items: Array<{ id: string; content: string; status: string }>;
     }) => void) | null = null;
     const api = fakeApi({
-      listSessionTodos: () =>
+      listSessionTasks: () =>
         Promise.resolve([{ id: "old", content: "old plan", status: "completed" }]),
-      onSessionTodoChanged: ((handler: (p: {
+      onSessionTasksChanged: ((handler: (p: {
         sessionId: string;
         items: Array<{ id: string; content: string; status: string }>;
       }) => void) => {
@@ -709,14 +709,14 @@ describe("SessionTodoPanel", () => {
       }) as never,
     });
     const { findByText, queryByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-clear" />,
+      <SessionTasksPanel api={api} sessionId="session-clear" />,
     );
-    await screen.findByTestId("session-todo-panel");
+    await screen.findByTestId("session-tasks-panel");
 
     await act(async () => {
       pushPayload!({ sessionId: "session-clear", items: [] });
     });
-    expect(queryByTestId("session-todo-panel")).toBeNull();
+    expect(queryByTestId("session-tasks-panel")).toBeNull();
 
     await act(async () => {
       pushPayload!({
@@ -725,7 +725,7 @@ describe("SessionTodoPanel", () => {
       });
     });
     await findByText("new topic");
-    expect(queryByTestId("session-todo-panel")).toBeInTheDocument();
+    expect(queryByTestId("session-tasks-panel")).toBeInTheDocument();
   });
 
   it("ignores push events emitted for a different session id", async () => {
@@ -734,9 +734,9 @@ describe("SessionTodoPanel", () => {
       items: Array<{ id: string; content: string; status: string }>;
     }) => void) | null = null;
     const api = fakeApi({
-      listSessionTodos: () =>
+      listSessionTasks: () =>
         Promise.resolve([{ id: "t1", content: "session-A item", status: "pending" }]),
-      onSessionTodoChanged: ((handler: (p: {
+      onSessionTasksChanged: ((handler: (p: {
         sessionId: string;
         items: Array<{ id: string; content: string; status: string }>;
       }) => void) => {
@@ -745,9 +745,9 @@ describe("SessionTodoPanel", () => {
       }) as never,
     });
     const { queryByText, queryAllByText, container } = render(
-      <SessionTodoPanel api={api} sessionId="session-A" />,
+      <SessionTasksPanel api={api} sessionId="session-A" />,
     );
-    await screen.findByTestId("session-todo-panel");
+    await screen.findByTestId("session-tasks-panel");
     await openPanel(container);
     await screen.findAllByText("session-A item");
     // A foreign session emits — must NOT clobber the visible list.
@@ -768,19 +768,19 @@ describe("SessionTodoPanel", () => {
       resolveList = r;
     });
     const fetchSpy = vi.fn(() => fetchPromise);
-    const api = fakeApi({ listSessionTodos: fetchSpy as never });
+    const api = fakeApi({ listSessionTasks: fetchSpy as never });
     const { rerender, queryByText, container } = render(
-      <SessionTodoPanel api={api} sessionId="session-A" />,
+      <SessionTasksPanel api={api} sessionId="session-A" />,
     );
     resolveList([{ id: "t1", content: "first", status: "pending" }]);
-    await screen.findByTestId("session-todo-panel");
+    await screen.findByTestId("session-tasks-panel");
     await openPanel(container);
     await screen.findAllByText("first");
     // Swap session id — synchronously the panel should clear its visible
     // items so a stale row never lingers between sessions. The pending
-    // listSessionTodos for the new id will repopulate when it resolves.
+    // listSessionTasks for the new id will repopulate when it resolves.
     fetchSpy.mockReturnValueOnce(Promise.resolve([]));
-    rerender(<SessionTodoPanel api={api} sessionId="session-B" />);
+    rerender(<SessionTasksPanel api={api} sessionId="session-B" />);
     await act(async () => {
       await Promise.resolve();
     });
@@ -789,13 +789,13 @@ describe("SessionTodoPanel", () => {
 
   it("applies a transition class to status pills so changes don't snap", async () => {
     const api = fakeApi({
-      listSessionTodos: () =>
+      listSessionTasks: () =>
         Promise.resolve([{ id: "t1", content: "smooth pill", status: "pending" }]),
     });
     const { container } = render(
-      <SessionTodoPanel api={api} sessionId="s" />,
+      <SessionTasksPanel api={api} sessionId="s" />,
     );
-    await screen.findByTestId("session-todo-panel");
+    await screen.findByTestId("session-tasks-panel");
     await openPanel(container);
     await screen.findAllByText("smooth pill");
     // The list is a portalled popover, so it is not under `container`.

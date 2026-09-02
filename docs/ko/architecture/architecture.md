@@ -4733,7 +4733,7 @@ v4 §8 "승인이 기본" 모델을 강화한다.
 - **큐 cap**: Renderer approval FIFO queue 는 `DEFAULT_APPROVAL_QUEUE_MAX = 50` 이며 cap 도달 시 새 push 를 drop-newest 한다. 이미 사용자가 보고 있는 head-of-queue 를 보존하기 위한 DoS 방어다.
 - **승인 UI**: 사용자-facing 승인은 한 요청씩 결정한다. `clear` 는 행정적 queue reset 용도이며 unseen request 를 일괄 승인하지 않는다.
 - **DLP arg mask**: 승인 화면에 노출되는 인자 중 이메일·전화번호·사번·카드번호 패턴은 `****` 로 마스킹(로그는 원문 암호화 보관). §12.X PII scrubber 규칙 공유.
-- **순서 보존 tool 실행**: 같은 assistant 메시지에 들어온 tool 호출 배열은 현행 `ToolExecutor.executeAll()` 경로에서 LLM 이 나열한 순서대로 하나씩 실행된다. 이는 `todo_session_write` 같은 상태/워크플로우 도구가 다음 작업 도구보다 앞에 배치되면 UI 상태가 먼저 갱신된다는 계약을 보장한다. 독립 호출도 같은 메시지에 묶을 수 있지만, host 는 side effect 안정성을 위해 순서 실행한다.
+- **순서 보존 tool 실행**: 같은 assistant 메시지에 들어온 tool 호출 배열은 현행 `ToolExecutor.executeAll()` 경로에서 LLM 이 나열한 순서대로 하나씩 실행된다. 이는 `session_tasks` 같은 상태/워크플로우 도구가 다음 작업 도구보다 앞에 배치되면 UI 상태가 먼저 갱신된다는 계약을 보장한다. 독립 호출도 같은 메시지에 묶을 수 있지만, host 는 side effect 안정성을 위해 순서 실행한다.
 
 #### §9.X Plugin System — 계약 CI (신규 v5)
 

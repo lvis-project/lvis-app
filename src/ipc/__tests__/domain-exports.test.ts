@@ -87,7 +87,7 @@ import * as chat from "../domains/chat.js";
 import * as dev from "../domains/dev.js";
 import * as app from "../domains/app.js";
 import * as routines from "../domains/routines.js";
-import * as sessionTodo from "../domains/session-todo.js";
+import * as sessionTasks from "../domains/session-tasks.js";
 import * as permissions from "../domains/permissions.js";
 import * as plugins from "../domains/plugins.js";
 import * as prompts from "../domains/prompts.js";
@@ -109,7 +109,7 @@ describe("IPC domain runtime named-export lock", () => {
       dev: keys(dev),
       app: keys(app),
       routines: keys(routines),
-      "session-todo": keys(sessionTodo),
+      "session-tasks": keys(sessionTasks),
       permissions: keys(permissions),
       plugins: keys(plugins),
       prompts: keys(prompts),
@@ -160,8 +160,8 @@ describe("IPC domain runtime named-export lock", () => {
         "routines": [
           "registerRoutineHandlers",
         ],
-        "session-todo": [
-          "registerSessionTodoHandlers",
+        "session-tasks": [
+          "registerSessionTasksHandlers",
         ],
         "settings": [
           "registerSettingsHandlers",

@@ -13,7 +13,7 @@ import { createDynamicTool } from "../../tools/base.js";
 import { createReadToolResultChunkTool } from "../../tools/tool-result-chunk.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { MAX_AGENT_SPAWNS_PER_ROUND } from "../../shared/subagent-policy.js";
-import { SessionTodoStore } from "../../main/session-todo-store.js";
+import { SessionTasksStore } from "../../main/session-tasks-store.js";
 import { MemoryManager } from "../../memory/memory-manager.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 import { SkillStore } from "../../main/skill-store.js";
@@ -254,12 +254,12 @@ describe("ConversationLoop queryLoop", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const sessionTodoStore = new SessionTodoStore();
-    sessionTodoStore.write("s-main", [
+    const sessionTasksStore = new SessionTasksStore();
+    sessionTasksStore.write("s-main", [
       { content: "stale from previous turn", status: "completed" },
     ]);
     // The prior turn's post-turn hook marked this completed plan for clear.
-    sessionTodoStore.markForClearIfCompleted("s-main");
+    sessionTasksStore.markForClearIfCompleted("s-main");
     const loop = new ConversationLoop({
       settingsService: {
         get: () => fakeLlmSettings(),
@@ -275,7 +275,7 @@ describe("ConversationLoop queryLoop", () => {
         saveSession: () => {},
         listSessions: () => [],
       },
-      sessionTodoStore,
+      sessionTasksStore,
     } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
     (loop as { sessionId: string }).sessionId = "s-main";
@@ -283,7 +283,7 @@ describe("ConversationLoop queryLoop", () => {
     await loop.runTurn("다음 질문", undefined, undefined, { inputOrigin: "user-keyboard",
     });
 
-    expect(sessionTodoStore.list("s-main")).toEqual([]);
+    expect(sessionTasksStore.list("s-main")).toEqual([]);
   });
 
   it("executes a pending clear UNCONDITIONALLY for non-user-origin turns (no origin gate)", async () => {
@@ -294,13 +294,13 @@ describe("ConversationLoop queryLoop", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const sessionTodoStore = new SessionTodoStore();
-    sessionTodoStore.write("s-main", [
+    const sessionTasksStore = new SessionTasksStore();
+    sessionTasksStore.write("s-main", [
       { content: "completed user plan", status: "completed" },
     ]);
     // A prior turn marked the plan; the origin gate is gone, so even a
     // plugin-emitted (non-user-keyboard, non-queue-auto) turn must clear it.
-    sessionTodoStore.markForClearIfCompleted("s-main");
+    sessionTasksStore.markForClearIfCompleted("s-main");
     const loop = new ConversationLoop({
       settingsService: {
         get: () => fakeLlmSettings(),
@@ -316,7 +316,7 @@ describe("ConversationLoop queryLoop", () => {
         saveSession: () => {},
         listSessions: () => [],
       },
-      sessionTodoStore,
+      sessionTasksStore,
     } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
     (loop as { sessionId: string }).sessionId = "s-main";
@@ -324,7 +324,7 @@ describe("ConversationLoop queryLoop", () => {
     await loop.runTurn("plugin prompt", undefined, undefined, { inputOrigin: "plugin-emitted",
     });
 
-    expect(sessionTodoStore.list("s-main")).toEqual([]);
+    expect(sessionTasksStore.list("s-main")).toEqual([]);
   });
 
   it("does not clear a completed plan mid-turn when no prior mark exists", async () => {
@@ -335,8 +335,8 @@ describe("ConversationLoop queryLoop", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const sessionTodoStore = new SessionTodoStore();
-    sessionTodoStore.write("s-main", [
+    const sessionTasksStore = new SessionTasksStore();
+    sessionTasksStore.write("s-main", [
       { content: "completed this very turn", status: "completed" },
     ]);
     // No markForClearIfCompleted yet — the plan was completed during a turn
@@ -357,7 +357,7 @@ describe("ConversationLoop queryLoop", () => {
         saveSession: () => {},
         listSessions: () => [],
       },
-      sessionTodoStore,
+      sessionTasksStore,
     } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
     (loop as { sessionId: string }).sessionId = "s-main";
@@ -365,7 +365,7 @@ describe("ConversationLoop queryLoop", () => {
     await loop.runTurn("다음 질문", undefined, undefined, { inputOrigin: "user-keyboard",
     });
 
-    expect(sessionTodoStore.list("s-main").map((item) => item.content)).toEqual([
+    expect(sessionTasksStore.list("s-main").map((item) => item.content)).toEqual([
       "completed this very turn"],
     );
   });
@@ -378,8 +378,8 @@ describe("ConversationLoop queryLoop", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const sessionTodoStore = new SessionTodoStore();
-    sessionTodoStore.write("s-main", [
+    const sessionTasksStore = new SessionTasksStore();
+    sessionTasksStore.write("s-main", [
       { content: "still running from previous turn", status: "in_progress" },
     ]);
     const loop = new ConversationLoop({
@@ -397,7 +397,7 @@ describe("ConversationLoop queryLoop", () => {
         saveSession: () => {},
         listSessions: () => [],
       },
-      sessionTodoStore,
+      sessionTasksStore,
     } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
     (loop as { sessionId: string }).sessionId = "s-main";
@@ -405,7 +405,7 @@ describe("ConversationLoop queryLoop", () => {
     await loop.runTurn("다음 질문", undefined, undefined, { inputOrigin: "user-keyboard",
     });
 
-    expect(sessionTodoStore.list("s-main").map((item) => item.content)).toEqual([
+    expect(sessionTasksStore.list("s-main").map((item) => item.content)).toEqual([
       "still running from previous turn"],
     );
   });

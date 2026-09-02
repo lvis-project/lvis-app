@@ -18,7 +18,7 @@ import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
-import { SessionTodoStore } from "../../main/session-todo-store.js";
+import { SessionTasksStore } from "../../main/session-tasks-store.js";
 
 const FAKE_DISK_MESSAGES = [
   { role: "user" as const, content: [{ type: "text" as const, text: "q1" }] },
@@ -67,7 +67,7 @@ function makeLoop(
     routeEngine: new RouteEngine(),
     toolRegistry,
     memoryManager,
-    sessionTodoStore: new SessionTodoStore(),
+    sessionTasksStore: new SessionTasksStore(),
   } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
   return { loop, memoryManager, savedSessions, savedMetadata };

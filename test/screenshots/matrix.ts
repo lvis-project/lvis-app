@@ -1054,7 +1054,7 @@ export const scenarios: Record<string, ScenarioEntry> = {
     uiLocale: 'ko',
     reviewerMode: 'disabled',
     captureViewport: { width: 1440, height: 780 },
-    // Two model calls: the first writes the session TODO list, the second is a
+    // Two model calls: the first writes the session task list, the second is a
     // long answer streamed slowly so messages typed while it runs land in the
     // queue instead of starting a turn of their own. Both panels are then on
     // screen at once, which is what this key shows.
@@ -1065,8 +1065,8 @@ export const scenarios: Record<string, ScenarioEntry> = {
         parts: [
           {
             kind: 'tool',
-            id: 'capture-todo',
-            name: 'todo_session_write',
+            id: 'capture-tasks',
+            name: 'session_tasks',
             input: {
               items: [
                 { id: 't1', content: '읽을 자료 목록 정리', status: 'completed' },
@@ -1099,7 +1099,7 @@ export const scenarios: Record<string, ScenarioEntry> = {
       await openWorkMode(page);
       await sendChatMessage(page, '읽을 자료들 정리하고 요약 초안까지 만들어 줘.');
       await page
-        .locator('[data-testid="session-todo-panel"]')
+        .locator('[data-testid="session-tasks-panel"]')
         .first()
         .waitFor({ state: 'visible', timeout: 30_000 });
       // The second turn is streaming by now. Anything sent while it runs is
@@ -1110,14 +1110,14 @@ export const scenarios: Record<string, ScenarioEntry> = {
         .locator('[data-testid="message-queue-panel"]')
         .first()
         .waitFor({ state: 'visible', timeout: 15_000 });
-      // The TODO dock collapses to a one-line focus row once a turn is under
+      // The tasks chip collapses to a one-line focus row once a turn is under
       // way; expand it so the checklist this key is about is in frame.
-      const todoPanel = page.locator('[data-testid="session-todo-panel"]').first();
-      if (await todoPanel.locator('[data-testid="session-todo-collapsed-active"]').count()) {
-        await todoPanel.locator('button').first().click();
+      const tasksPanel = page.locator('[data-testid="session-tasks-panel"]').first();
+      if (await tasksPanel.locator('[data-testid="session-tasks-collapsed-active"]').count()) {
+        await tasksPanel.locator('button').first().click();
       }
       // A phrase that appears only in the streamed answer, not in the checklist
-      // above it — so this waits for the transcript, not for a TODO row.
+      // above it — so this waits for the transcript, not for a task row.
       await page
         .locator('[data-testid="assistant-message-body"]')
         .first()

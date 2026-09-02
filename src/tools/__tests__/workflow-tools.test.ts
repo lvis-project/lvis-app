@@ -1,6 +1,6 @@
 /**
  * Unit tests for workflow system tools (S1+S2):
- * ask_user_question, routine_schedule, todo_session_write, agent_spawn,
+ * ask_user_question, routine_schedule, session_tasks, agent_spawn,
  * agent_status, agent_interrupt, skill_load.
  *
  * Each test stubs the service dependency and exercises the tool's
@@ -22,7 +22,7 @@ const BUILTIN_SKILLS_DIR = resolvePath(REPO_ROOT, "resources/skills");
 import type { ToolExecutionContext } from "../base.js";
 import { createAskUserQuestionTool } from "../ask-user-question.js";
 import { createRoutineScheduleTool } from "../routine-schedule.js";
-import { createTodoSessionWriteTool } from "../todo-session-write.js";
+import { createSessionTasksTool } from "../session-tasks.js";
 import {
   createAgentInterruptTool,
   createAgentSpawnTool,
@@ -42,7 +42,7 @@ import { createAgentGuideTool } from "../agent-guide.js";
 import { en as agentListEn } from "../../i18n/messages/generated/be_agentList.js";
 import { en as agentSpawnEn } from "../../i18n/messages/generated/be_agentSpawn.js";
 import { RoutinesStore } from "../../main/routines-store.js";
-import { SessionTodoStore } from "../../main/session-todo-store.js";
+import { SessionTasksStore } from "../../main/session-tasks-store.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 import { AgentProfileStore } from "../../main/agent-profile-store.js";
@@ -342,25 +342,25 @@ describe("routine_schedule tool", () => {
   });
 });
 
-describe("todo_session_write tool", () => {
+describe("session_tasks tool", () => {
   it("description anti-claims user task registration requests (issue #648)", () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     expect(tool.description).toContain("영구 업무 항목 등록");
     expect(tool.description).toContain("내부 단계 추적");
     expect(tool.description).toContain("사용하지 마세요");
   });
 
   it("rejects empty items array", async () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     const r = await tool.execute({ items: [] }, ctx());
     expect(r.isError).toBe(true);
   });
 
   it("rejects execution when session metadata is missing", async () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     const r = await tool.execute(
       { items: [{ content: "step", status: "pending" }] },
       { cwd: process.cwd(), extraAllowedDirectories: [], metadata: {} },
@@ -371,8 +371,8 @@ describe("todo_session_write tool", () => {
   });
 
   it("merges items by id and preserves order", async () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     const r1 = await tool.execute(
       {
         items: [
@@ -407,8 +407,8 @@ describe("todo_session_write tool", () => {
   });
 
   it("rejects a no-op re-mark without mutating the store", async () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     const r1 = await tool.execute(
       { items: [{ content: "step 1", status: "in_progress" }] },
       ctx("s-noop"),
@@ -424,15 +424,15 @@ describe("todo_session_write tool", () => {
     const body = JSON.parse(r2.output);
     expect(r2.isError).toBe(true);
     expect(body.changed).toBe(false);
-    expect(body.error).toContain("Do not retry todo_session_write");
+    expect(body.error).toContain("Do not retry session_tasks");
     // Fail-safe: a no-op call never reaches the store.
     expect(writeSpy).not.toHaveBeenCalled();
     writeSpy.mockRestore();
   });
 
   it("still writes when at least one item actually advances", async () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     const r1 = await tool.execute(
       {
         items: [
@@ -463,8 +463,8 @@ describe("todo_session_write tool", () => {
   });
 
   it("treats deleting a non-existent item as a no-op", async () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     const writeSpy = vi.spyOn(store, "write");
     const r = await tool.execute(
       { items: [{ id: "ghost", status: "deleted" }] },
@@ -478,8 +478,8 @@ describe("todo_session_write tool", () => {
   });
 
   it("supports ordered insertion and deletion", async () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     const r1 = await tool.execute(
       {
         items: [
@@ -516,9 +516,9 @@ describe("todo_session_write tool", () => {
     expect(after3.map((i) => i.content)).toEqual(["step 2", "step 3"]);
   });
 
-  it("rejects deleting every session todo item", async () => {
-    const store = new SessionTodoStore();
-    const tool = createTodoSessionWriteTool(store);
+  it("rejects deleting every session task item", async () => {
+    const store = new SessionTasksStore();
+    const tool = createSessionTasksTool(store);
     const r1 = await tool.execute(
       {
         items: [{ content: "step 1", status: "pending" }],

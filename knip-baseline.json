@@ -859,8 +859,8 @@
     },
     {
       "type": "exports",
-      "file": "src/shared/session-todo.ts",
-      "name": "SESSION_TODO_ITEM_STATUSES"
+      "file": "src/shared/session-tasks.ts",
+      "name": "SESSION_TASK_ITEM_STATUSES"
     },
     {
       "type": "exports",

@@ -1,10 +1,10 @@
 /**
- * E2E: SessionTodoPanel appears inside ChatView when the assistant emits
- * `lvis:session-todo:changed` with in-progress items.
+ * E2E: SessionTasksPanel appears inside ChatView when the assistant emits
+ * `lvis:session-tasks:changed` with in-progress items.
  *
  * Strategy: simulate the main-process IPC event with the active chat session
  * id and one in_progress item, then assert that
- * [data-testid="session-todo-panel"] is visible within the chat container —
+ * [data-testid="session-tasks-panel"] is visible within the chat container —
  * NOT as a top-level overlay.
  *
  * We use a light structural assertion (presence of the panel and active row)
@@ -31,28 +31,28 @@ async function currentSessionId(mainWindow: Page): Promise<string> {
   });
 }
 
-test('session-todo-panel is NOT present when no todos exist', async ({ mainWindow }) => {
+test('session-tasks-panel is NOT present when no tasks exist', async ({ mainWindow }) => {
   // The panel renders null when items list is empty — should not be in DOM
-  const panel = mainWindow.locator('[data-testid="session-todo-panel"]');
+  const panel = mainWindow.locator('[data-testid="session-tasks-panel"]');
   const visible = await panel.isVisible().catch(() => false);
   expect(visible).toBe(false);
 });
 
-test('session-todo-panel appears inside ChatView after session-todo:changed event', async ({ app, mainWindow }) => {
+test('session-tasks-panel appears inside ChatView after session-tasks:changed event', async ({ app, mainWindow }) => {
   const sessionId = await currentSessionId(mainWindow);
-  // Emit a session-todo:changed event with one in_progress item via the
-  // preload bridge that the renderer's api.onSessionTodoChanged subscribes to.
+  // Emit a session-tasks:changed event with one in_progress item via the
+  // preload bridge that the renderer's api.onSessionTasksChanged subscribes to.
   await app.evaluate(({ BrowserWindow }, sid) => {
     const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
     if (!win) return false;
     const item = { id: 'e2e-1', content: 'E2E: Write the fix', status: 'in_progress' };
-    win.webContents.send('lvis:session-todo:changed', { sessionId: sid, items: [item] });
+    win.webContents.send('lvis:session-tasks:changed', { sessionId: sid, items: [item] });
     return true;
   }, sessionId);
 
   // Panel should now be visible — it lives inside the chat root grid, not as
   // a top-level overlay.
-  const panel = mainWindow.locator('[data-testid="session-todo-panel"]');
+  const panel = mainWindow.locator('[data-testid="session-tasks-panel"]');
   const found = await panel
     .waitFor({ state: 'visible', timeout: 8_000 })
     .then(() => true)
@@ -60,19 +60,19 @@ test('session-todo-panel appears inside ChatView after session-todo:changed even
 
   expect(
     found,
-    'session-todo-panel must appear inside ChatView after session-todo:changed; ' +
-    'check that SessionTodoPanel is mounted in ChatView.tsx and that the IPC bridge fires',
+    'session-tasks-panel must appear inside ChatView after session-tasks:changed; ' +
+    'check that SessionTasksPanel is mounted in ChatView.tsx and that the IPC bridge fires',
   ).toBe(true);
 
   await expect(panel).toBeVisible();
 
   // Closed by default: the active item rides on the chip.
-  const collapsedActive = mainWindow.locator('[data-testid="session-todo-collapsed-active"]');
+  const collapsedActive = mainWindow.locator('[data-testid="session-tasks-collapsed-active"]');
   await expect(collapsedActive).toBeVisible();
 
   // Opening the chip's popover should reveal the active row.
   await panel.click();
-  const activeRow = mainWindow.locator('[data-testid="session-todo-active-row"]');
+  const activeRow = mainWindow.locator('[data-testid="session-tasks-active-row"]');
   await expect(activeRow).toBeVisible();
 
   // The chip sits on the composer's status row, right after the context
@@ -81,7 +81,7 @@ test('session-todo-panel appears inside ChatView after session-todo:changed even
     const row = document.querySelector<HTMLElement>('[data-testid="iab-status-row"]');
     const ring = document.querySelector<HTMLElement>('[data-testid="iab-status-ring"]');
     const frame = document.querySelector<HTMLElement>('[data-testid="composer-frame"]');
-    const chip = document.querySelector<HTMLElement>('[data-testid="session-todo-panel"]');
+    const chip = document.querySelector<HTMLElement>('[data-testid="session-tasks-panel"]');
     if (!row || !ring || !frame || !chip) return null;
     const r = ring.getBoundingClientRect();
     const f = frame.getBoundingClientRect();
@@ -96,59 +96,59 @@ test('session-todo-panel appears inside ChatView after session-todo:changed even
     };
   });
 
-  expect(geometry, 'session todo chip geometry must be measurable').not.toBeNull();
+  expect(geometry, 'session tasks chip geometry must be measurable').not.toBeNull();
   expect(geometry!.inRow).toBe(true);
   expect(geometry!.afterRing).toBe(true);
   expect(geometry!.chipLeft).toBeGreaterThanOrEqual(geometry!.ringRight);
   expect(geometry!.chipTop).toBeGreaterThanOrEqual(geometry!.frameBottom - 1);
 });
 
-test('session-todo-panel drops transient header badges and dismisses at completion', async ({ app, mainWindow }) => {
+test('session-tasks-panel drops transient header badges and dismisses at completion', async ({ app, mainWindow }) => {
   const sessionId = await currentSessionId(mainWindow);
-  const emitTodos = async (items: Array<{ id: string; content: string; status: string }>) => {
+  const emitTasks = async (items: Array<{ id: string; content: string; status: string }>) => {
     await app.evaluate(({ BrowserWindow }, payload) => {
       const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
       if (!win) return false;
-      win.webContents.send('lvis:session-todo:changed', payload);
+      win.webContents.send('lvis:session-tasks:changed', payload);
       return true;
     }, { sessionId, items });
   };
 
-  await emitTodos([{ id: 'fresh-1', content: 'fresh step', status: 'pending' }]);
-  const panel = mainWindow.locator('[data-testid="session-todo-panel"]');
+  await emitTasks([{ id: 'fresh-1', content: 'fresh step', status: 'pending' }]);
+  const panel = mainWindow.locator('[data-testid="session-tasks-panel"]');
   await expect(panel).toBeVisible();
   // The transient header badge systems were removed — none of them render.
-  await expect(mainWindow.locator('[data-testid="session-todo-fresh"]')).toHaveCount(0);
-  await expect(mainWindow.locator('[data-testid="session-todo-continuation"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-tasks-fresh"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-tasks-continuation"]')).toHaveCount(0);
   // A not-yet-complete plan must not surface the dismiss affordance.
-  await expect(mainWindow.locator('[data-testid="session-todo-dismiss"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-tasks-dismiss"]')).toHaveCount(0);
 
-  await emitTodos([
+  await emitTasks([
     { id: 'fresh-1', content: 'fresh step', status: 'pending' },
     { id: 'fresh-2', content: 'added step', status: 'pending' },
   ]);
-  await expect(mainWindow.locator('[data-testid="session-todo-added"]')).toHaveCount(0);
-  await expect(mainWindow.locator('[data-testid="session-todo-dismiss"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-tasks-added"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-tasks-dismiss"]')).toHaveCount(0);
 
   // Every item completed → 2/2 → the dismiss X appears.
-  await emitTodos([
+  await emitTasks([
     { id: 'fresh-1', content: 'fresh step', status: 'completed' },
     { id: 'fresh-2', content: 'added step', status: 'completed' },
   ]);
-  await expect(mainWindow.locator('[data-testid="session-todo-completed"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-tasks-completed"]')).toHaveCount(0);
   // The X lives in the chip's popover: open it first.
   await panel.click();
-  const dismiss = mainWindow.locator('[data-testid="session-todo-dismiss"]');
+  const dismiss = mainWindow.locator('[data-testid="session-tasks-dismiss"]');
   await expect(dismiss).toBeVisible();
 
-  // Clicking it routes through clearSessionTodos, whose empty-list emit
+  // Clicking it routes through clearSessionTasks, whose empty-list emit
   // removes the panel (no local hide hack).
   await dismiss.click();
   await expect(panel).toHaveCount(0);
 
   // A fresh plan repopulates with no header badges.
-  await emitTodos([{ id: 'next-1', content: 'next topic step', status: 'pending' }]);
+  await emitTasks([{ id: 'next-1', content: 'next topic step', status: 'pending' }]);
   await expect(panel).toBeVisible();
-  await expect(mainWindow.locator('[data-testid="session-todo-fresh"]')).toHaveCount(0);
-  await expect(mainWindow.locator('[data-testid="session-todo-continuation"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-tasks-fresh"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-tasks-continuation"]')).toHaveCount(0);
 });

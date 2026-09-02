@@ -220,18 +220,18 @@ describe("ChatView", () => {
     });
   });
 
-  it("draws the session todo chip in the composer status row, not in the queue dock", async () => {
-    const { container, emitSessionTodoChanged } = await renderApp({
+  it("draws the session tasks chip in the composer status row, not in the queue dock", async () => {
+    const { container, emitSessionTasksChanged } = await renderApp({
       hasApiKey: true,
       history: {
-        sessionId: "sess-todo-dock",
+        sessionId: "sess-tasks-dock",
         messages: [
           { index: 0, role: "user", content: "할 일 만들어 줘" },
           { index: 1, role: "assistant", content: "만들었습니다" },
         ],
       },
       mainActiveState: {
-        mainActiveSessionId: "sess-todo-dock",
+        mainActiveSessionId: "sess-tasks-dock",
         mainActiveMode: "resume",
         updatedAt: "2026-05-16T00:00:00.000Z",
       },
@@ -240,8 +240,8 @@ describe("ChatView", () => {
       expect(container.querySelector('[data-testid="composer-frame"]')).not.toBeNull();
     });
     act(() => {
-      emitSessionTodoChanged({
-        sessionId: "sess-todo-dock",
+      emitSessionTasksChanged({
+        sessionId: "sess-tasks-dock",
         items: [
           { id: "t1", content: "첫 번째", status: "in_progress" },
           { id: "t2", content: "두 번째", status: "pending" },
@@ -249,7 +249,7 @@ describe("ChatView", () => {
       });
     });
     await waitFor(() => {
-      const chip = container.querySelector('[data-testid="session-todo-panel"]');
+      const chip = container.querySelector('[data-testid="session-tasks-panel"]');
       const frame = container.querySelector('[data-testid="composer-frame"]');
       const queueDock = container.querySelector('[data-testid="composer-queue-dock"]');
       const statusRow = container.querySelector('[data-testid="iab-status-row"]');

@@ -1,6 +1,6 @@
 /**
- * SessionTodoStore — in-memory backing for the assistant's current-turn
- * checklist (`todo_session_write` LLM tool), keyed by active ChatSession so
+ * SessionTasksStore — in-memory backing for the assistant's current-turn
+ * checklist (`session_tasks` LLM tool), keyed by active ChatSession so
  * renderer pushes route to the right view. Distinct from user `task_*`
  * persistence: never written to disk.
  *
@@ -29,31 +29,31 @@
  */
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../lib/logger.js";
-import type { SessionTodoItem, SessionTodoUpdate } from "../shared/session-todo.js";
+import type { SessionTaskItem, SessionTaskUpdate } from "../shared/session-tasks.js";
 const log = createLogger("lvis");
 
-export type SessionTodoListener = (
+export type SessionTasksListener = (
   sessionId: string,
-  items: SessionTodoItem[],
+  items: SessionTaskItem[],
 ) => void;
 
-export class SessionTodoEmptyPlanError extends Error {
+export class SessionTasksEmptyPlanError extends Error {
   constructor() {
-    super("SessionTodoStore.write cannot remove every session TO-DO item");
-    this.name = "SessionTodoEmptyPlanError";
+    super("SessionTasksStore.write cannot remove every session task item");
+    this.name = "SessionTasksEmptyPlanError";
   }
 }
 
-export class SessionTodoStore {
-  private readonly sessions = new Map<string, SessionTodoItem[]>();
-  private readonly listeners = new Set<SessionTodoListener>();
+export class SessionTasksStore {
+  private readonly sessions = new Map<string, SessionTaskItem[]>();
+  private readonly listeners = new Set<SessionTasksListener>();
   /**
    * Sessions whose fully-completed plan was marked by the post-turn hook and
    * is awaiting clear at the next turn boundary. Never observable to listeners.
    */
   private readonly pendingClear = new Set<string>();
 
-  list(sessionId: string): SessionTodoItem[] {
+  list(sessionId: string): SessionTaskItem[] {
     const items = this.sessions.get(sessionId) ?? [];
     return items.map((i) => ({ ...i }));
   }
@@ -67,7 +67,7 @@ export class SessionTodoStore {
    *
    * Returns the merged ordered list.
    */
-  write(sessionId: string, updates: SessionTodoUpdate[]): SessionTodoItem[] {
+  write(sessionId: string, updates: SessionTaskUpdate[]): SessionTaskItem[] {
     const existing = this.sessions.get(sessionId) ?? [];
     const byId = new Map(existing.map((i) => [i.id, i]));
     const order: string[] = existing.map((i) => i.id);
@@ -80,7 +80,7 @@ export class SessionTodoStore {
         removeFromOrder(order, id);
         continue;
       }
-      const item: SessionTodoItem = {
+      const item: SessionTaskItem = {
         id,
         content: u.content ?? existing?.content ?? "",
         status: u.status,
@@ -93,11 +93,11 @@ export class SessionTodoStore {
       });
       byId.set(id, item);
     }
-    const merged: SessionTodoItem[] = order
+    const merged: SessionTaskItem[] = order
       .map((id) => byId.get(id))
-      .filter((x): x is SessionTodoItem => Boolean(x));
+      .filter((x): x is SessionTaskItem => Boolean(x));
     if (merged.length === 0 && existing.length > 0) {
-      throw new SessionTodoEmptyPlanError();
+      throw new SessionTasksEmptyPlanError();
     }
     if (merged.length === 0) return [];
     this.sessions.set(sessionId, merged);
@@ -108,7 +108,7 @@ export class SessionTodoStore {
       try {
         l(sessionId, merged.map((i) => ({ ...i })));
       } catch (err) {
-        log.warn("session-todo listener threw: %s", (err as Error).message);
+        log.warn("session-tasks listener threw: %s", (err as Error).message);
       }
     }
     return merged.map((i) => ({ ...i }));
@@ -166,7 +166,7 @@ export class SessionTodoStore {
     }
   }
 
-  onChange(listener: SessionTodoListener): () => void {
+  onChange(listener: SessionTasksListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }

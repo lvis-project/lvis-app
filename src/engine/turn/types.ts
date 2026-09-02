@@ -438,7 +438,7 @@ export interface ConversationLoopDeps {
    * as completed (`markForClearIfCompleted`), so a finished plan clears at the
    * turn boundary regardless of input origin. Unfinished plans stay visible.
    */
-  sessionTodoStore?: { clearIfPending(sessionId: string): boolean };
+  sessionTasksStore?: { clearIfPending(sessionId: string): boolean };
   /**
    * Issue #260: optional system notification service. When supplied, the
    * loop fires a `turn-end` notification when runTurn resolves successfully

@@ -15,7 +15,7 @@ import { createRequestPluginTool } from "../tools/request-plugin.js";
 import { createToolSearchTool } from "../tools/tool-search.js";
 import { createAskUserQuestionTool } from "../tools/ask-user-question.js";
 import { createRoutineScheduleTool } from "../tools/routine-schedule.js";
-import { createTodoSessionWriteTool } from "../tools/todo-session-write.js";
+import { createSessionTasksTool } from "../tools/session-tasks.js";
 import {
   createAgentInterruptTool,
   createAgentSpawnTool,
@@ -35,7 +35,7 @@ import { createAgentGuideTool } from "../tools/agent-guide.js";
 import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
 import type { RoutinesStore } from "../main/routines-store.js";
-import type { SessionTodoStore } from "../main/session-todo-store.js";
+import type { SessionTasksStore } from "../main/session-tasks-store.js";
 import type { SubAgentRunner } from "../engine/subagent-runner.js";
 import type { SkillStore } from "../main/skill-store.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
@@ -172,7 +172,7 @@ export interface WorkflowToolDeps {
   /** Lazy-resolved gate — populated after BrowserWindow is ready. */
   getAskUserQuestionGate?: () => AskUserQuestionGate | undefined;
   routinesStore?: RoutinesStore;
-  sessionTodoStore?: SessionTodoStore;
+  sessionTasksStore?: SessionTasksStore;
   /** Lazy-resolved sub-agent runner — populated after ConversationLoop wiring. */
   getSubAgentRunner?: () => SubAgentRunner | undefined;
   /** Host-only A2A runtime; agent_send still rejects every non-child context. */
@@ -226,8 +226,8 @@ export function registerBuiltinTools(
   if (workflowDeps?.routinesStore) {
     builtins.push(createRoutineScheduleTool(workflowDeps.routinesStore));
   }
-  if (workflowDeps?.sessionTodoStore) {
-    builtins.push(createTodoSessionWriteTool(workflowDeps.sessionTodoStore));
+  if (workflowDeps?.sessionTasksStore) {
+    builtins.push(createSessionTasksTool(workflowDeps.sessionTasksStore));
   }
   if (workflowDeps?.getSubAgentRunner && workflowDeps.emitAgentSpawn) {
     const agentProfileStore = workflowDeps.agentProfileStore;

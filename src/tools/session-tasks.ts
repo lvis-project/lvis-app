@@ -1,20 +1,20 @@
 /**
- * `todo_session_write` LLM tool — assistant's current-turn checklist.
+ * `session_tasks` LLM tool — assistant's current-turn checklist.
  * Distinct from user `task_*` (persistent): in-memory only, scoped to the
  * active ChatSession id, and cleared at the next explicit user/user-queued
  * turn boundary only after every item is completed.
  */
 import { createDynamicTool, type Tool } from "./base.js";
 import {
-  SessionTodoEmptyPlanError,
-  type SessionTodoStore,
-} from "../main/session-todo-store.js";
+  SessionTasksEmptyPlanError,
+  type SessionTasksStore,
+} from "../main/session-tasks-store.js";
 import {
-  isSessionTodoUpdateStatus,
-  SESSION_TODO_UPDATE_STATUSES,
-  type SessionTodoItem,
-  type SessionTodoUpdate,
-} from "../shared/session-todo.js";
+  isSessionTaskUpdateStatus,
+  SESSION_TASK_UPDATE_STATUSES,
+  type SessionTaskItem,
+  type SessionTaskUpdate,
+} from "../shared/session-tasks.js";
 import { t } from "../i18n/index.js";
 
 /**
@@ -27,8 +27,8 @@ import { t } from "../i18n/index.js";
  * repeating. A delete of an already-absent item remains an idempotent no-op.
  */
 function updateChangesPlan(
-  u: SessionTodoUpdate,
-  current: Map<string, SessionTodoItem>,
+  u: SessionTaskUpdate,
+  current: Map<string, SessionTaskItem>,
 ): boolean {
   // Reorder intent — we do not compute the resulting order here, so never
   // suppress it.
@@ -45,16 +45,16 @@ function updateChangesPlan(
 }
 
 function isMissingDeleteNoOp(
-  u: SessionTodoUpdate,
-  current: Map<string, SessionTodoItem>,
+  u: SessionTaskUpdate,
+  current: Map<string, SessionTaskItem>,
 ): boolean {
   return !!u.id && u.status === "deleted" && !current.has(u.id) && !u.beforeId && !u.afterId;
 }
 
-export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
+export function createSessionTasksTool(store: SessionTasksStore): Tool {
   return createDynamicTool({
-    name: "todo_session_write",
-    description: t("be_todoSessionWrite.toolDescription"),
+    name: "session_tasks",
+    description: t("be_sessionTasks.toolDescription"),
     source: "builtin",
     // category="read" — the assistant's own current-turn checklist lives
     // entirely in an in-memory store this conversation owns; there is no
@@ -77,11 +77,11 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
             type: "object",
             required: ["status"],
             properties: {
-              id: { type: "string", description: t("be_todoSessionWrite.schemaIdDesc") },
-              content: { type: "string", description: t("be_todoSessionWrite.schemaContentDesc") },
-              status: { type: "string", enum: SESSION_TODO_UPDATE_STATUSES },
-              beforeId: { type: "string", description: t("be_todoSessionWrite.schemaBeforeIdDesc") },
-              afterId: { type: "string", description: t("be_todoSessionWrite.schemaAfterIdDesc") },
+              id: { type: "string", description: t("be_sessionTasks.schemaIdDesc") },
+              content: { type: "string", description: t("be_sessionTasks.schemaContentDesc") },
+              status: { type: "string", enum: SESSION_TASK_UPDATE_STATUSES },
+              beforeId: { type: "string", description: t("be_sessionTasks.schemaBeforeIdDesc") },
+              afterId: { type: "string", description: t("be_sessionTasks.schemaAfterIdDesc") },
             },
           },
         },
@@ -97,7 +97,7 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       const sessionId = ctx.metadata.sessionId;
       const a = (rawInput ?? {}) as Record<string, unknown>;
       const itemsRaw = Array.isArray(a.items) ? (a.items as unknown[]) : [];
-      const updates: SessionTodoUpdate[] = [];
+      const updates: SessionTaskUpdate[] = [];
       for (const it of itemsRaw) {
         if (!it || typeof it !== "object") continue;
         const obj = it as Record<string, unknown>;
@@ -108,7 +108,7 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
         const status = obj.status;
         // new items require content; updates by id allow content omission
         if (!id && !content?.trim()) continue;
-        if (!isSessionTodoUpdateStatus(status)) continue;
+        if (!isSessionTaskUpdateStatus(status)) continue;
         updates.push({ id, content, status, beforeId, afterId });
       }
       if (updates.length === 0) {
@@ -138,7 +138,7 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
           output: JSON.stringify({
             items: store.list(sessionId),
             changed: false,
-            error: "No item changed state. Do not retry todo_session_write with the same status; continue with work tools and only update the TO-DO when an item actually advances.",
+            error: "No item changed state. Do not retry session_tasks with the same status; continue with work tools and only update the TO-DO when an item actually advances.",
           }),
           isError: true,
         };
@@ -147,12 +147,12 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       try {
         merged = store.write(sessionId, updates);
       } catch (err) {
-        if (!(err instanceof SessionTodoEmptyPlanError)) {
+        if (!(err instanceof SessionTasksEmptyPlanError)) {
           throw err;
         }
         return {
           output: JSON.stringify({
-            error: "todo_session_write cannot delete every item; mark remaining items completed instead",
+            error: "session_tasks cannot delete every item; mark remaining items completed instead",
           }),
           isError: true,
         };

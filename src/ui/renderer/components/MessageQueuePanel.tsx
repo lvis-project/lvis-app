@@ -1,6 +1,6 @@
 /**
  * MessageQueuePanel — the queued-turn strip that sits directly above the
- * composer, next to SessionTodoPanel.
+ * composer, next to SessionTasksPanel.
  *
  * Colour contract: the panel's hue is `info`, and every foreground it paints
  * comes from a foreground token (`text-info`, `text-info-foreground`,
@@ -60,10 +60,10 @@ export function MessageQueuePanel({ store, onSendNow, heldByApproval }: MessageQ
 
   return (
     <div
-      /* Full-bleed band across <main>, like SessionTodoPanel above it: dock
+      /* Full-bleed band across <main>, like SessionTasksPanel above it: dock
          strips are BANDS and the composer is the inset card. That split is a
-         deliberate system decision, pinned for the todo strip by
-         session-todo-in-chat.spec.ts — do not inset this one either, or the
+         deliberate system decision, pinned for the tasks strip by
+         session-tasks-in-chat.spec.ts — do not inset this one either, or the
          two siblings stop agreeing. Dashed border = "not committed yet", the
          shared language; the hue is what separates them (info here, warning
          there). */

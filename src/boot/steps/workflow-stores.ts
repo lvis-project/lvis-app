@@ -2,13 +2,13 @@
  * Boot step — workflow system stores, workflow tool deps, and builtin tool
  * registration (§4.2 Step 4 + §4.4, extracted from boot.ts C18).
  *
- * Constructs the workflow-tool-backing stores (session todos, skills, agent
+ * Constructs the workflow-tool-backing stores (session tasks, skills, agent
  * profiles, persona prompts, skill overlay/approvals, ask-user gate), assembles
  * the {@link WorkflowToolDeps} closure bundle (late-binding the sub-agent runner
  * through a ref), registers the builtin + meta tools, and wires the knowledge
  * retriever + idle scheduler.
  */
-import { SessionTodoStore } from "../../main/session-todo-store.js";
+import { SessionTasksStore } from "../../main/session-tasks-store.js";
 import { AskUserQuestionGate } from "../../main/ask-user-question-gate.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
@@ -45,7 +45,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     auditService,
   } = ctx;
 
-  const sessionTodoStore = new SessionTodoStore();
+  const sessionTasksStore = new SessionTasksStore();
   const skillStore = new SkillStore();
   const agentProfileStore = new AgentProfileStore();
   const personaPromptStore = new PersonaPromptStore();
@@ -68,7 +68,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
   const subAgentRunnerRef: { fn: SubAgentRunner | undefined } = { fn: undefined };
   const workflowDeps: WorkflowToolDeps = {
     routinesStore,
-    sessionTodoStore,
+    sessionTasksStore,
     skillStore,
     agentProfileStore,
     skillOverlay,
@@ -139,7 +139,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     auditService,
   });
 
-  ctx.sessionTodoStore = sessionTodoStore;
+  ctx.sessionTasksStore = sessionTasksStore;
   ctx.skillStore = skillStore;
   ctx.agentProfileStore = agentProfileStore;
   ctx.personaPromptStore = personaPromptStore;

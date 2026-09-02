@@ -1,5 +1,5 @@
 /**
- * Session-todo IPC boundary — the conversation is named, never resolved.
+ * Session-tasks IPC boundary — the conversation is named, never resolved.
  *
  * The window can hold several conversations at once, so an unnamed call has no
  * answer. These cover the rejection and the fact that no loop is consulted for
@@ -26,15 +26,15 @@ async function setup() {
   vi.clearAllMocks();
   const store = {
     list: vi.fn((sessionId: string) => [
-      { id: "1", title: `todo for ${sessionId}`, status: "pending" },
+      { id: "1", title: `task for ${sessionId}`, status: "pending" },
     ]),
     clear: vi.fn(),
     onChange: vi.fn(),
   };
   const getSessionId = vi.fn(() => PRIMARY_SESSION);
-  const { registerSessionTodoHandlers } = await import("../session-todo.js");
-  registerSessionTodoHandlers({
-    sessionTodoStore: store,
+  const { registerSessionTasksHandlers } = await import("../session-tasks.js");
+  registerSessionTasksHandlers({
+    sessionTasksStore: store,
     conversationLoop: { getSessionId },
     auditLogger: { log: vi.fn() },
     getMainWindow: () => null,
@@ -46,21 +46,21 @@ beforeEach(() => {
   handlers.clear();
 });
 
-describe("session-todo IPC", () => {
-  it("lists the named session's todos", async () => {
+describe("session-tasks IPC", () => {
+  it("lists the named session's tasks", async () => {
     const { store } = await setup();
 
     await expect(
-      invokeFileIpcHandler(handlers, CHANNELS.sessionTodo.list, "tile-2-session"),
-    ).resolves.toEqual([{ id: "1", title: "todo for tile-2-session", status: "pending" }]);
+      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.list, "tile-2-session"),
+    ).resolves.toEqual([{ id: "1", title: "task for tile-2-session", status: "pending" }]);
     expect(store.list).toHaveBeenCalledWith("tile-2-session");
   });
 
-  it("clears the named session's todos", async () => {
+  it("clears the named session's tasks", async () => {
     const { store } = await setup();
 
     await expect(
-      invokeFileIpcHandler(handlers, CHANNELS.sessionTodo.clear, "tile-2-session"),
+      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.clear, "tile-2-session"),
     ).resolves.toEqual({ ok: true });
     expect(store.clear).toHaveBeenCalledWith("tile-2-session");
   });
@@ -74,7 +74,7 @@ describe("session-todo IPC", () => {
   ])("refuses a list that names no session (%s) instead of resolving one", async (_name, argument) => {
     const { store, getSessionId } = await setup();
 
-    await expect(invokeFileIpcHandler(handlers, CHANNELS.sessionTodo.list, argument))
+    await expect(invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.list, argument))
       .resolves.toEqual([]);
     expect(getSessionId).not.toHaveBeenCalled();
     expect(store.list).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe("session-todo IPC", () => {
   ])("refuses a clear that names no session (%s) instead of resolving one", async (_name, argument) => {
     const { store, getSessionId } = await setup();
 
-    await expect(invokeFileIpcHandler(handlers, CHANNELS.sessionTodo.clear, argument))
+    await expect(invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.clear, argument))
       .resolves.toEqual({ ok: false, error: "session-id-required" });
     expect(getSessionId).not.toHaveBeenCalled();
     expect(store.clear).not.toHaveBeenCalled();

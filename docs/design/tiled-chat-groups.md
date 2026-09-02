@@ -397,7 +397,7 @@ its cards use. An MCP app's `ui/message` and `ui/update-model-context` resolve
 their card's own session across every live loop rather than comparing it to the
 primary one. Away-authority arms the tile the renderer names and refuses a tile
 the window is not showing rather than resolving it to the primary loop; the
-session-todo channel refuses an unnamed session for the same reason.
+session-tasks channel refuses an unnamed session for the same reason.
 
 **About the window, so subscribed once.** The approval-memory hit and the
 permission-review suggestion report on the window's permission settings, not on

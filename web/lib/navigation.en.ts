@@ -16,7 +16,7 @@ export const navigationEn: NavGroup[] = [
     eyebrow: "Host · Chat",
     items: [
       { title: "Chat Screen Layout", href: "/en/docs/chat/layout" },
-      { title: "Message Queue & TODO", href: "/en/docs/chat/message-queue" },
+      { title: "Message Queue & Tasks", href: "/en/docs/chat/message-queue" },
       { title: "Tool & Thinking Display", href: "/en/docs/chat/tool-thinking" },
       { title: "Question Cards", href: "/en/docs/chat/question-cards" },
       { title: "Plugin Panel", href: "/en/docs/chat/plugin-panel" },

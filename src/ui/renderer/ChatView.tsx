@@ -169,7 +169,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
   const { t } = useTranslation();
   const approvals = useApprovalSurface();
   const approvalHead = pendingApprovals[0] ?? null;
-  // We still need the api for SessionTodoPanel; obtain it via singleton.
+  // We still need the api for SessionTasksPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -795,7 +795,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
           <span>{t("chatView.tpmNearingWarning")}</span>
         </div>
       )}
-      {/* Assistant todo panel — anchored above the input cluster, below the
+      {/* Assistant tasks panel — anchored above the input cluster, below the
           chat scroll area. Stays visible regardless of where the user has
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next

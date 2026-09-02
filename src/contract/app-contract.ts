@@ -551,10 +551,10 @@ export const CHANNELS = {
   view: {
     activate: "lvis:view:activate",
   },
-  sessionTodo: {
-    list: "lvis:session-todo:list",
-    clear: "lvis:session-todo:clear",
-    changed: "lvis:session-todo:changed",
+  sessionTasks: {
+    list: "lvis:session-tasks:list",
+    clear: "lvis:session-tasks:clear",
+    changed: "lvis:session-tasks:changed",
   },
   agentSpawn: {
     event: "lvis:agent-spawn:event",

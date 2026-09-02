@@ -377,8 +377,8 @@ export interface ComposerStatusRowProps {
   statusRow: InputStatusRow;
   /** Token progress ring, composed by the caller (ring + cost detail). Leftmost. */
   ringSlot: ReactNode;
-  /** The session's todo chip, drawn right after the ring; absent when the plan is empty. */
-  todoSlot?: ReactNode;
+  /** The session's tasks chip, drawn right after the ring; absent when the plan is empty. */
+  tasksSlot?: ReactNode;
   /** Opens Settings → LLM — the model card's way to the full catalogue. */
   onOpenModelSettings: () => void;
   /** Opens Settings → Permissions when the permission cell is clicked. */
@@ -396,7 +396,7 @@ export interface ComposerStatusRowProps {
 export function ComposerStatusRow({
   statusRow,
   ringSlot,
-  todoSlot,
+  tasksSlot,
   onOpenModelSettings,
   onOpenPermissions,
   onOpenApprovalQueue,
@@ -430,7 +430,7 @@ export function ComposerStatusRow({
       <span className="shrink-0" data-testid="iab-status-ring">
         {ringSlot}
       </span>
-      {todoSlot}
+      {tasksSlot}
 
       <div className="ml-auto flex min-w-0 flex-nowrap items-center gap-1.5">
         {/* Pending approvals — its OWN button, BEFORE the permission cell. */}

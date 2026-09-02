@@ -165,8 +165,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitAgentSpawnEvent: (event: AgentSpawnEvent) => void;
   /** `lvis:skill-load:event` — window-wide, stamped with the turn's session. */
   emitSkillLoaded: (event: { name: string; description: string; sessionId: string }) => void;
-  /** `onSessionTodoChanged` push — the assistant's checklist for one session. */
-  emitSessionTodoChanged: (payload: { sessionId: string; items: unknown[] }) => void;
+  /** `onSessionTasksChanged` push — the assistant's checklist for one session. */
+  emitSessionTasksChanged: (payload: { sessionId: string; items: unknown[] }) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFired: (r: unknown) => void;
@@ -253,7 +253,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const pluginRuntimeUpdatedHandlers = new Set<(payload: { pluginId: string }) => void>();
   const notificationToastHandlers = new Set<(payload: unknown) => void>();
   const notificationClickedHandlers = new Set<(payload: unknown) => void>();
-  const sessionTodoHandlers = new Set<(payload: unknown) => void>();
+  const sessionTasksHandlers = new Set<(payload: unknown) => void>();
 
   const api: MockLvisApi = {
     notifyPluginTheme: vi.fn(async () => ({ ok: true })),
@@ -506,11 +506,11 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatContinueLastUser: vi.fn(async (_sessionId: string) => ({ ok: true })),
     chatRetryEffort: vi.fn(async () => ({ ok: true })),
     chatExport: vi.fn(async () => ({ ok: true, filePath: "/tmp/out.md" })),
-    listSessionTodos: vi.fn(async () => []),
-    clearSessionTodos: vi.fn(async () => ({ ok: true })),
-    onSessionTodoChanged: vi.fn((handler: (payload: unknown) => void) => {
-      sessionTodoHandlers.add(handler);
-      return () => sessionTodoHandlers.delete(handler);
+    listSessionTasks: vi.fn(async () => []),
+    clearSessionTasks: vi.fn(async () => ({ ok: true })),
+    onSessionTasksChanged: vi.fn((handler: (payload: unknown) => void) => {
+      sessionTasksHandlers.add(handler);
+      return () => sessionTasksHandlers.delete(handler);
     }),
     onChatStream: vi.fn((h: (ev: ChatStreamEvent) => void) => {
       chatStreamHandlers.add(h);
@@ -765,7 +765,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
     emitAgentSpawnEvent: (event) => agentSpawnEventHandlers.forEach((h) => h(event)),
     emitSkillLoaded: (event) => skillLoadedHandlers.forEach((h) => h(event)),
-    emitSessionTodoChanged: (payload) => sessionTodoHandlers.forEach((h) => h(payload)),
+    emitSessionTasksChanged: (payload) => sessionTasksHandlers.forEach((h) => h(payload)),
     emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
     emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
     emitRoutineFired: (r) => routineFiredHandlers.forEach((h) => h(r)),

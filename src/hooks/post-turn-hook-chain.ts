@@ -91,7 +91,7 @@ export interface PostTurnHookChainDeps {
    * turn boundary (the conversation loop executes via `clearIfPending`). Marking
    * never emits, so the panel persists through the completing turn.
    */
-  sessionTodoStore?: { markForClearIfCompleted(sessionId: string): boolean };
+  sessionTasksStore?: { markForClearIfCompleted(sessionId: string): boolean };
 }
 
 export interface PostTurnHookResult {
@@ -250,11 +250,11 @@ export class PostTurnHookChain {
     //    panel stays visible through the turn that completed it; the
     //    conversation loop clears it unconditionally at the next turn start.
     try {
-      if (this.deps.sessionTodoStore?.markForClearIfCompleted(ctx.sessionId)) {
-        log.info(`mark-session-todo-for-clear: marked session ${ctx.sessionId} for next-turn clear`);
+      if (this.deps.sessionTasksStore?.markForClearIfCompleted(ctx.sessionId)) {
+        log.info(`mark-session-tasks-for-clear: marked session ${ctx.sessionId} for next-turn clear`);
       }
     } catch (err) {
-      log.warn("mark-session-todo-for-clear failed: %s", err);
+      log.warn("mark-session-tasks-for-clear failed: %s", err);
     }
 
     // 7. Idle poke.
