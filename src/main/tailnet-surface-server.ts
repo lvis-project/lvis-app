@@ -40,6 +40,10 @@ import {
   createTailnetPairedSharingRuntime,
   type TailnetPairedSharingRuntime,
 } from "./tailnet-paired-sharing-runtime.js";
+import type {
+  TailnetPairingShareStore,
+  TailnetShareActorId,
+} from "./tailnet-pairing-share-store.js";
 
 export const DEFAULT_TAILNET_OBSERVER_PORT = 46_173;
 
@@ -147,6 +151,13 @@ interface TailnetObserverServerDependencies {
    * whether the developer running them happens to have an observer configured.
    */
   readConfigFile: () => Promise<TailnetObserverConfigFile | null>;
+  /**
+   * How this desktop's own Tailscale state is read when a remote asks whether
+   * it is the owner's own device. Injected for the same reason as the config
+   * file: the question must not become "is Tailscale running on the machine
+   * the tests happen to run on".
+   */
+  probeEnvironment: () => Promise<TailscaleEnvironment>;
 }
 
 export interface StartTailnetObserverServerOptions {
@@ -442,8 +453,40 @@ function dependencies(
   return {
     startServer: startTailnetSurfaceServer,
     readConfigFile: () => readTailnetObserverConfigFile(),
+    probeEnvironment: () => probeTailscaleEnvironment(),
     ...overrides,
   };
+}
+
+/**
+ * Pair a device that is signed in to this desktop's own Tailscale account,
+ * without a code.
+ *
+ * Serve fills the login header from the tailnet, and the probe says which login
+ * this desktop itself is signed in as. When they are the same account, carrying
+ * a 56-character code from one of the owner's screens to another proves nothing
+ * the tailnet has not already proved. Approval is not what this skips: the
+ * invitation minted here is claimed the ordinary way, so the pairing lands
+ * `pending` and the desktop still has to activate it.
+ */
+async function claimOwnTailnetDevice(input: {
+  readonly store: TailnetPairingShareStore;
+  readonly probeEnvironment: () => Promise<TailscaleEnvironment>;
+  readonly login: string;
+  readonly actorId: TailnetShareActorId;
+}): Promise<boolean> {
+  const environment = await input.probeEnvironment();
+  // Neither login is logged or echoed; this comparison is all they are read for.
+  // A probe that could not read one leaves `login` null, which matches nothing,
+  // and the remote is asked for a code — the correct answer, not a fallback:
+  // without the probe nothing has established whose device this is.
+  if (environment.login !== input.login) return false;
+  // A pairing this actor already has is the answer; minting a second invitation
+  // on every five-second reload would spend the invitation budget and then be
+  // refused by `claimInvitation` for being already paired.
+  if (input.store.currentPairing(input.actorId) !== null) return true;
+  const invitation = await input.store.createInvitation();
+  return await input.store.claimInvitation(invitation.code, input.actorId) !== null;
 }
 
 async function startForBoot(
@@ -487,6 +530,12 @@ async function startForBoot(
       : {
           pairing: {
             claimInvitation: pairedSharingRuntime.store.claimInvitation.bind(pairedSharingRuntime.store),
+            claimOwnDevice: (login: string, actorId: TailnetShareActorId) => claimOwnTailnetDevice({
+              store: pairedSharingRuntime.store,
+              probeEnvironment: resolved.probeEnvironment,
+              login,
+              actorId,
+            }),
           },
         }),
     ...(config.controllerEnabled

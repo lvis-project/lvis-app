@@ -1955,11 +1955,6 @@
     {
       "type": "types",
       "file": "src/main/tailnet-pairing-share-store.ts",
-      "name": "TailnetOwnerPairingSummary"
-    },
-    {
-      "type": "types",
-      "file": "src/main/tailnet-pairing-share-store.ts",
       "name": "TailnetOwnerShareSummary"
     },
     {

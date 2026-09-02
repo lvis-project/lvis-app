@@ -121,6 +121,29 @@ describe("TailnetPairingShareStore", () => {
     expect(await store.claimInvitation(expiredInvitation.code, OTHER_ACTOR)).toBeNull();
   });
 
+  it("reports the pairing an account already holds so a re-entry mints no second invitation", async () => {
+    const now = { value: 70_000 };
+    const { store } = await makeStore(now);
+    expect(store.currentPairing(ACTOR)).toBeNull();
+
+    const invitation = await store.createInvitation(100);
+    const claim = await store.claimInvitation(invitation.code, ACTOR);
+    expect(store.currentPairing(ACTOR)).toMatchObject({
+      id: claim!.pairingId,
+      state: "pending",
+      expiresAt: claim!.expiresAt,
+    });
+    expect(store.currentPairing(OTHER_ACTOR)).toBeNull();
+
+    // An approved pairing has no deadline and is still reported: with no share
+    // yet, the owner's browser comes back to the same page.
+    expect(await store.activatePairing(claim!.pairingId)).toBe(true);
+    expect(store.currentPairing(ACTOR)).toMatchObject({ state: "active", expiresAt: null });
+
+    expect(await store.revokePairing(claim!.pairingId)).toBe(true);
+    expect(store.currentPairing(ACTOR)).toBeNull();
+  });
+
   it("replaces an old public scope, applies control as a separate share grant, and makes old bindings fail closed", async () => {
     const now = { value: 90_000 };
     const { store } = await makeStore(now);

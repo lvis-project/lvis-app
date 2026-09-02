@@ -573,6 +573,35 @@ export class TailnetPairingShareStore {
     });
   }
 
+  /**
+   * The pairing this actor already holds, pending or active.
+   *
+   * The code-free owner path re-enters on every reload of the waiting page, and
+   * an approved pairing that has no share yet lands there too. Without this
+   * read each pass would mint another invitation and then fail the claim it
+   * had just paid for, spending the invitation budget on nothing.
+   */
+  currentPairing(resolvedActorId: TailnetShareActorId): TailnetOwnerPairingSummary | null {
+    if (!actorId(resolvedActorId)) return null;
+    const state = this.requireState();
+    const now = this.checkedNow();
+    const pairing = state.pairings.find((entry): entry is StoredPairing & { state: "pending" | "active" } => (
+      entry.actorId === resolvedActorId
+      && (
+        entry.state === "active"
+        || (entry.state === "pending" && entry.expiresAt !== null && entry.expiresAt > now)
+      )
+    ));
+    return pairing === undefined
+      ? null
+      : Object.freeze({
+          id: pairing.id,
+          actorFingerprint: fingerprint(pairing.actorId),
+          state: pairing.state,
+          expiresAt: pairing.expiresAt,
+        });
+  }
+
   async activatePairing(pairingId: string): Promise<boolean> {
     if (!uuid(pairingId)) return false;
     return await this.mutate((state, now) => {
