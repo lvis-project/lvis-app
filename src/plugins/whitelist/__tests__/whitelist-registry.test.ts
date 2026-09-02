@@ -440,6 +440,23 @@ describe("WhitelistRegistry — stale grace windows", () => {
 });
 
 describe("WhitelistRegistry — uninitialized fail-closed", () => {
+  it("records offline + no cache as unreachable, with no fail-open annotation", async () => {
+    // Both registries load through `loadSignedDocumentSnapshot`; the fail mode
+    // is the required parameter that keeps this line different from the
+    // revocation registry's `(fail-open: nothing blocked)`.
+    const audits: string[] = [];
+    await whitelistRegistry.init({
+      userDataDir: freshUserData(),
+      online: false,
+      audit: (line) => audits.push(line),
+    });
+    const line = audits.find((entry) => entry.includes("whitelist_unreachable reason=no-cache-and-offline"));
+    expect(line).toBeDefined();
+    expect(line).not.toContain("fail-open");
+    const decision = whitelistRegistry.isAllowed("meeting", "llm.apiKey.openai");
+    expect(decision).toEqual({ kind: "deny", reason: "whitelist-unreachable" });
+  });
+
   it("denies all calls before init() runs", () => {
     whitelistRegistry.resetForTesting();
     const decision = whitelistRegistry.isAllowed("meeting", "llm.apiKey.openai");

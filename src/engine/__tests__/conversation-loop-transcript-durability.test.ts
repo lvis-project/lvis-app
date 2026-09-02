@@ -37,7 +37,7 @@ import { historyToEntries } from "../../ui/renderer/utils/history.js";
 import { computeToolActivity } from "../../ui/renderer/utils/tool-activity.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
-const SESSION_ID = "durability-session";
+const SESSION_ID = "b5a06893-46a9-493a-8a3e-f277ba673230";
 
 class ScriptedProvider implements LLMProvider {
   readonly vendor = "openai" as const;

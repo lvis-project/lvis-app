@@ -21,6 +21,7 @@ import {
   existsSync,
   readdirSync,
   statSync,
+  symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +35,7 @@ import {
   filterPermissionAuditLines,
   GENESIS_MARKER,
   MemorySecretStore,
+  readStableRegularFileUtf8,
   SafeStorageSecretStore,
   type SafeStorageLike,
   sealDayFromFile,
@@ -124,6 +126,36 @@ describe("FileSecretStore", () => {
     const store = new FileSecretStore(dir);
     writeFileSync(join(dir, "oversized"), "x".repeat(65));
     expect(() => store.read("oversized", 64)).toThrow(/read byte limit/);
+  });
+
+  it("stages the secret under the shared atomic writer's hidden name, with the file mode it declares", () => {
+    // The secret store kept its own temp+fsync+rename copy that never retried a
+    // Windows transient lock; it now writes through `writeUtf8FileAtomicSync`,
+    // whose staging name is `.<name>.<pid>.<uuid>.tmp` and never survives.
+    const dir = join(workDir, "secrets");
+    const store = new FileSecretStore(dir);
+    store.write("audit-hmac.key", "value");
+    expect(readdirSync(dir)).toEqual(["audit-hmac.key"]);
+    if (process.platform !== "win32") {
+      expect(statSync(join(dir, "audit-hmac.key")).mode & 0o777).toBe(0o600);
+    }
+  });
+});
+
+describe("readStableRegularFileUtf8", () => {
+  it.skipIf(process.platform === "win32")("refuses a symlinked path — the check the journal and the secret store share", () => {
+    const target = join(workDir, "real.txt");
+    writeFileSync(target, "real");
+    symlinkSync(target, join(workDir, "link.txt"));
+    // O_NOFOLLOW refuses the open itself (ELOOP); the identity check behind it
+    // is the second line of defence for a swap after the open.
+    expect(() => readStableRegularFileUtf8(join(workDir, "link.txt"), 1024, "fixture"))
+      .toThrow(/ELOOP|fixture path is not a stable regular file/);
+    expect(readStableRegularFileUtf8(target, 1024, "fixture")).toBe("real");
+  });
+
+  it("returns null only for an absent path", () => {
+    expect(readStableRegularFileUtf8(join(workDir, "absent"), 1024, "fixture")).toBe(null);
   });
 });
 

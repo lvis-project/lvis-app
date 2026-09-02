@@ -29,7 +29,7 @@ import {
 
 // ─── Minimal stubs ────────────────────────────────────────────────────────────
 
-const RESUME_SESSION_ID = "test-session-id";
+const RESUME_SESSION_ID = "08001f8f-a6f5-4bb9-820d-df1e8366af93";
 const resumeMemory = (storedMessages: GenericMessage[] | null = null) =>
   makeConversationLoopMemoryManager(storedMessages, RESUME_SESSION_ID);
 const resumeDeps = (overrides: Partial<ConversationLoopDeps> = {}) =>
@@ -87,7 +87,7 @@ describe("ConversationLoop.resetAndResume", () => {
   it("returns ok:false for unknown session", () => {
     const loop = new ConversationLoop(resumeDeps({ memoryManager: resumeMemory(null) }),
     );
-    const result = loop.resetAndResume("nonexistent-id");
+    const result = loop.resetAndResume("afeff8fc-a07a-452d-8ab3-5457c56ee572");
     expect(result.ok).toBe(false);
     expect(result.compacted).toBe(false);
     expect(result.compactedAt).toBeNull();
@@ -103,7 +103,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
     // Simulate prior usage so we can confirm reset
-    const result = loop.resetAndResume("test-session-id");
+    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect(loop.getHistory().length).toBe(2);
@@ -121,7 +121,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(history);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("test-session-id");
+    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(false);
@@ -136,7 +136,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, settingsService: settings }),
     );
 
-    const result = loop.resetAndResume("test-session-id");
+    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(false);
@@ -147,8 +147,8 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(history);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    loop.resetAndResume("test-session-id");
-    expect(loop.getSessionId()).toBe("test-session-id");
+    loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
+    expect(loop.getSessionId()).toBe("08001f8f-a6f5-4bb9-820d-df1e8366af93");
   });
 
   it("advances the session epoch for A → B → A, even when the session id repeats", () => {
@@ -163,13 +163,13 @@ describe("ConversationLoop.resetAndResume", () => {
 
     expect(initialEpoch).toBe(0);
 
-    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
     expect(loop.getSessionEpoch()).toBe(initialEpoch + 1);
 
     loop.newConversation();
     expect(loop.getSessionEpoch()).toBe(initialEpoch + 2);
 
-    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
     expect(loop.getSessionEpoch()).toBe(initialEpoch + 3);
   });
 
@@ -184,7 +184,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const state = loop as unknown as { lastTurnScope: Set<string> | null };
 
     state.lastTurnScope = new Set(["previous-plugin"]);
-    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(loop.loadSession("08001f8f-a6f5-4bb9-820d-df1e8366af93")).toBe(true);
     expect(state.lastTurnScope).toBeNull();
 
     state.lastTurnScope = new Set(["loaded-plugin"]);
@@ -200,14 +200,14 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = {
       ...resumeMemory(null),
       loadSession: vi.fn((id: string) => {
-        if (id === "child-session") return childHistory;
-        if (id === "parent-session") return parentHistory;
+        if (id === "3e323a73-28d0-4dce-8229-3b0eca68d32a") return childHistory;
+        if (id === "a1bdc27a-c758-4a74-8955-5e9188412366") return parentHistory;
         return null;
       }),
       loadSessionMetadata: vi.fn((id: string) => {
-        if (id === "child-session") {
+        if (id === "3e323a73-28d0-4dce-8229-3b0eca68d32a") {
           return {
-            parentSessionId: "parent-session",
+            parentSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
             summaryPreamble: "요약된 부모 맥락",
           };
         }
@@ -222,12 +222,12 @@ describe("ConversationLoop.resetAndResume", () => {
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, systemPromptBuilder }),
     );
 
-    const result = loop.resetAndResume("child-session");
+    const result = loop.resetAndResume("3e323a73-28d0-4dce-8229-3b0eca68d32a");
 
     expect(result.ok).toBe(true);
     expect(mem.loadSession).toHaveBeenCalledTimes(1);
-    expect(mem.loadSession).toHaveBeenCalledWith("child-session");
-    expect(mem.loadSession).not.toHaveBeenCalledWith("parent-session");
+    expect(mem.loadSession).toHaveBeenCalledWith("3e323a73-28d0-4dce-8229-3b0eca68d32a");
+    expect(mem.loadSession).not.toHaveBeenCalledWith("a1bdc27a-c758-4a74-8955-5e9188412366");
     // The store stamps a row identity on restore; the claim here is that the
     // CHILD's rows loaded and the parent's did not.
     expect(loop.getHistory().getMessages()).toMatchObject(childHistory);
@@ -247,7 +247,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(msgs);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("test-session-id");
+    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
     expect(result.ok).toBe(true);
     // cumulativeUsage 가 estimate 로 set 됐는지 — token preflight 가 정확한 ratio 평가 가능
     expect(loop.getCumulativeUsage().inputTokens).toBe(estimateMessagesTokens(msgs),
@@ -277,7 +277,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(msgs);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("test-session-id");
+    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens,
@@ -319,7 +319,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(msgs);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("test-session-id");
+    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens,
@@ -361,7 +361,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const mem = resumeMemory(msgs);
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
-    const result = loop.resetAndResume("test-session-id");
+    const result = loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     expect(result.ok).toBe(true);
     expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens,
@@ -399,7 +399,7 @@ describe("ConversationLoop.resetAndResume", () => {
     };
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-    expect(loop.resetAndResume("test-session-id").ok).toBe(true);
+    expect(loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93").ok).toBe(true);
     await loop.runTurn("new question", undefined, undefined, { inputOrigin: "user-keyboard",
     });
 
@@ -456,7 +456,7 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
     const mem = resumeMemory(longHistory);
 
     const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
-    loop.resetAndResume("test-session-id");
+    loop.resetAndResume("08001f8f-a6f5-4bb9-820d-df1e8366af93");
 
     // Inject a fake provider that returns a valid 12-section summary
     const fakeSummary = [

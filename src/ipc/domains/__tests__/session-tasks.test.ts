@@ -6,6 +6,7 @@
  * one, which is what keeps a clear from emptying a tile the caller never meant.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionUuid } from "../../../__tests__/support/session-uuid.js";
 import { CHANNELS } from "../../../contract/app-contract.js";
 import { invokeFileIpcHandler } from "./test-helpers.js";
 
@@ -19,7 +20,8 @@ vi.mock("electron", () => ({
   },
 }));
 
-const PRIMARY_SESSION = "primary-session";
+const PRIMARY_SESSION = sessionUuid("primary-session");
+const TILE_SESSION = sessionUuid("tile-2-session");
 
 async function setup() {
   handlers.clear();
@@ -51,18 +53,18 @@ describe("session-tasks IPC", () => {
     const { store } = await setup();
 
     await expect(
-      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.list, "tile-2-session"),
-    ).resolves.toEqual([{ id: "1", content: "task for tile-2-session", status: "pending" }]);
-    expect(store.list).toHaveBeenCalledWith("tile-2-session");
+      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.list, TILE_SESSION),
+    ).resolves.toEqual([{ id: "1", content: `task for ${TILE_SESSION}`, status: "pending" }]);
+    expect(store.list).toHaveBeenCalledWith(TILE_SESSION);
   });
 
   it("clears the named session's tasks", async () => {
     const { store } = await setup();
 
     await expect(
-      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.clear, "tile-2-session"),
+      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.clear, TILE_SESSION),
     ).resolves.toEqual({ ok: true });
-    expect(store.clear).toHaveBeenCalledWith("tile-2-session");
+    expect(store.clear).toHaveBeenCalledWith(TILE_SESSION);
   });
 
   // A refusal in the channel's own shape, not a throw: the panel's read is

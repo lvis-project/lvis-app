@@ -21,6 +21,8 @@ import {
   _resetForTest,
   _setTamperedSnapshotForTest,
   devNoSandboxAllowed,
+  isE2eTestRuntime,
+  isPackagedElectronProcess,
   isPackagedForbiddenEnvVar,
   setIsPackaged,
   shouldWarnPackagedFlagsIgnored,
@@ -132,5 +134,27 @@ describe("dev-flags tamper snapshot", () => {
     // Clear override → returns real snapshot again.
     _setTamperedSnapshotForTest(null);
     expect(tamperedVarsAtBoot()).toEqual(realSnapshot);
+  });
+});
+
+describe("isPackagedElectronProcess — the pre-boot answer the logger uses", () => {
+  it("is packaged when Electron runs without defaultApp, whatever LVIS_DEV says", () => {
+    // logger.ts and services.ts used to treat LVIS_DEV=1 as "not packaged";
+    // dev-flags ignores the flag in a packaged build, and now so do they.
+    expect(isPackagedElectronProcess({ versions: { electron: "32.0.0" } })).toBe(true);
+    expect(isPackagedElectronProcess({ versions: { electron: "32.0.0" }, defaultApp: true })).toBe(false);
+    expect(isPackagedElectronProcess({ versions: {} })).toBe(false);
+    expect(isPackagedElectronProcess({})).toBe(false);
+  });
+});
+
+describe("isE2eTestRuntime", () => {
+  it("requires LVIS_E2E=1 AND NODE_ENV=test — LVIS_E2E alone is not the harness", () => {
+    // The plugin bundle-snapshot IPC and the preload env flag accepted
+    // LVIS_E2E=1 on its own; the whitelist and managed-bootstrap gates did not.
+    expect(isE2eTestRuntime({ LVIS_E2E: "1", NODE_ENV: "test" })).toBe(true);
+    expect(isE2eTestRuntime({ LVIS_E2E: "1" })).toBe(false);
+    expect(isE2eTestRuntime({ LVIS_E2E: "1", NODE_ENV: "development" })).toBe(false);
+    expect(isE2eTestRuntime({ NODE_ENV: "test" })).toBe(false);
   });
 });

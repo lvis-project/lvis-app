@@ -72,6 +72,99 @@ export type CodexSpawnAppServer = (
 ) => ChildProcess;
 export type CodexAppServerRequestId = string | number;
 
+/**
+ * argv for every `codex app-server` LVIS spawns. The subscription client
+ * (`codex-app-server-client.ts`) and the conversation runtime below start the
+ * same binary behind the same hardening boundary — `--disable` names the
+ * surfaces (plugins, remote control, hooks) the isolated runtime may not
+ * grow — so the list exists once: a flag added here reaches both, and the two
+ * processes can no longer come up with different boundaries.
+ */
+export const CODEX_APP_SERVER_ARGV: readonly string[] = Object.freeze([
+  "app-server",
+  // Tokens live in `auth.json` under the isolated CODEX_HOME. The keyring
+  // store needs the user's login keychain, which the isolated HOME (see
+  // sanitizedCodexConversationEnvironment) deliberately hides: macOS
+  // resolves the default keychain from $HOME and the sign-in ends in
+  // "A default keychain could not be found".
+  "-c",
+  'cli_auth_credentials_store="file"',
+  "--strict-config",
+  "--disable",
+  "plugins",
+  "--disable",
+  "remote_control",
+  "--disable",
+  "remote_plugin",
+  "--disable",
+  "hooks",
+  "--listen",
+  "stdio://",
+]);
+
+/** A spawned app-server whose stdio pipes both came up. */
+export type CodexAppServerChild = ChildProcess & {
+  stdin: NonNullable<ChildProcess["stdin"]>;
+  stdout: NonNullable<ChildProcess["stdout"]>;
+};
+
+export function hasCodexStdioStreams(child: ChildProcess): child is CodexAppServerChild {
+  return child.stdin !== null && child.stdout !== null;
+}
+
+/**
+ * Wire a spawned app-server to the newline-delimited JSON it speaks on stdio.
+ * `onLine` receives each parsed message; `onAbort` fires with the error code
+ * the owner should close its transport with — `codex-runtime-start-failed`
+ * when the process itself errors, `codex-operation-failed` for a stream
+ * error, an exit, an over-long line or bytes that are not JSON. The owner
+ * still decides what "abort" means (which child is current, how it is
+ * killed), which is why this only reports.
+ *
+ * The stdout buffer is bounded by {@link CODEX_MAX_RPC_LINE_BYTES}; a line
+ * that exceeds it is a protocol failure, not something to keep accumulating.
+ * stderr is drained so a broken runtime cannot block on a full pipe, and is
+ * never logged: it can carry auth and account context.
+ */
+export function attachCodexStdioTransport(
+  child: CodexAppServerChild,
+  onLine: (message: unknown) => void,
+  onAbort: (code: "codex-runtime-start-failed" | "codex-operation-failed") => void,
+): void {
+  const decoder = new StringDecoder("utf8");
+  let buffer = "";
+  child.stdout.on("data", (chunk: Buffer | string) => {
+    buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
+    if (Buffer.byteLength(buffer, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
+      buffer = "";
+      onAbort("codex-operation-failed");
+      return;
+    }
+    for (;;) {
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line) continue;
+      let message: unknown;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        buffer = "";
+        onAbort("codex-operation-failed");
+        return;
+      }
+      onLine(message);
+    }
+  });
+  child.stdout.once("error", () => onAbort("codex-operation-failed"));
+  child.stdin.once("error", () => onAbort("codex-operation-failed"));
+  child.stderr?.on("data", () => {});
+  child.stderr?.once("error", () => onAbort("codex-operation-failed"));
+  child.once("error", () => onAbort("codex-runtime-start-failed"));
+  child.once("exit", () => onAbort("codex-operation-failed"));
+}
+
 export type CodexConversationRuntimeErrorCode =
   | "codex-runtime-unavailable"
   | "codex-runtime-start-failed"
@@ -726,8 +819,6 @@ export class CodexConversationRuntime {
   private activeTurn: ActiveTurn | null = null;
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<number, PendingRequest>();
-  private stdoutDecoder = new StringDecoder("utf8");
-  private stdoutBuffer = "";
 
   constructor(options: CodexConversationRuntimeOptions) {
     this.resolveExecutable = options.resolveExecutable
@@ -1034,27 +1125,7 @@ export class CodexConversationRuntime {
     try {
       child = this.spawn(
         executable,
-        [
-          "app-server",
-          // Tokens live in `auth.json` under the isolated CODEX_HOME. The keyring
-          // store needs the user's login keychain, which the isolated HOME (see
-          // sanitizedCodexConversationEnvironment) deliberately hides: macOS
-          // resolves the default keychain from $HOME and the sign-in ends in
-          // "A default keychain could not be found".
-          "-c",
-          'cli_auth_credentials_store="file"',
-          "--strict-config",
-          "--disable",
-          "plugins",
-          "--disable",
-          "remote_control",
-          "--disable",
-          "remote_plugin",
-          "--disable",
-          "hooks",
-          "--listen",
-          "stdio://",
-        ],
+        CODEX_APP_SERVER_ARGV,
         {
           cwd: workspaceDir,
           stdio: ["pipe", "pipe", "pipe"],
@@ -1066,27 +1137,19 @@ export class CodexConversationRuntime {
     } catch {
       throw new CodexConversationRuntimeError("codex-runtime-start-failed");
     }
-    if (!child.stdin || !child.stdout) {
+    if (!hasCodexStdioStreams(child)) {
       forceKillManagedChildProcess(child, "codex conversation missing transport streams");
       throw new CodexConversationRuntimeError("codex-runtime-start-failed");
     }
 
     this.child = child;
-    this.stdoutDecoder = new StringDecoder("utf8");
-    this.stdoutBuffer = "";
-    const abort = (code: CodexConversationRuntimeErrorCode): void => {
-      this.abortTransport(new CodexConversationRuntimeError(code), child);
-    };
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      if (this.child === child) this.consumeStdout(chunk, child);
-    });
-    child.stdout.once("error", () => abort("codex-operation-failed"));
-    child.stdin.once("error", () => abort("codex-operation-failed"));
-    // Never log App Server stderr: auth and account context can be present there.
-    child.stderr?.on("data", () => {});
-    child.stderr?.once("error", () => abort("codex-operation-failed"));
-    child.once("error", () => abort("codex-runtime-start-failed"));
-    child.once("exit", () => abort("codex-operation-failed"));
+    attachCodexStdioTransport(
+      child,
+      (message) => {
+        if (this.child === child) this.handleMessage(message, child);
+      },
+      (code) => this.abortTransport(new CodexConversationRuntimeError(code), child),
+    );
 
     try {
       const initialized = this.request("initialize", {
@@ -1255,30 +1318,6 @@ export class CodexConversationRuntime {
       return Buffer.byteLength(JSON.stringify(message), "utf8") <= CODEX_MAX_RPC_LINE_BYTES;
     } catch {
       return false;
-    }
-  }
-
-  private consumeStdout(chunk: Buffer | string, child: ChildProcess): void {
-    const text = typeof chunk === "string" ? chunk : this.stdoutDecoder.write(chunk);
-    this.stdoutBuffer += text;
-    if (Buffer.byteLength(this.stdoutBuffer, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
-      this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
-      return;
-    }
-    for (;;) {
-      const newline = this.stdoutBuffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = this.stdoutBuffer.slice(0, newline).trim();
-      this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
-      if (!line) continue;
-      let message: unknown;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
-        return;
-      }
-      this.handleMessage(message, child);
     }
   }
 
@@ -1715,7 +1754,6 @@ export class CodexConversationRuntime {
     this.threadId = null;
     this.threadDynamicTools = null;
     this.pendingThreadDynamicTools = null;
-    this.stdoutBuffer = "";
     const active = this.activeTurn;
     if (active) this.rejectActiveTurn(active, error);
     for (const [id, pending] of this.pendingRequests) {

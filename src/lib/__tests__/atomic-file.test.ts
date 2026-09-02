@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   PRIVATE_DIR_MODE,
   PRIVATE_FILE_MODE,
+  isCommittedAtomicWriteError,
   isMissingPathError,
   replaceUtf8FileAtomicSyncIf,
   writeUtf8FileAtomicSync,
@@ -141,8 +142,18 @@ describe("writeUtf8FileAtomicSync", () => {
       code: "ATOMIC_FILE_DIRECTORY_SYNC_FAILED",
       committed: true,
     });
+    expect(isCommittedAtomicWriteError(thrown)).toBe(true);
     expect(readFileSync(target, "utf8")).toBe("committed");
     expect(readdirSync(dir)).toEqual(["committed.json"]);
+  });
+
+  it("recognises only the Error this module throws as committed", () => {
+    // The permission-settings copy accepted any object carrying
+    // `committed: true`; the registry copy required an Error. This module
+    // throws an Error, so the strict form is the truth.
+    expect(isCommittedAtomicWriteError({ committed: true })).toBe(false);
+    expect(isCommittedAtomicWriteError(Object.assign(new Error("x"), { committed: true }))).toBe(true);
+    expect(isCommittedAtomicWriteError(new Error("x"))).toBe(false);
   });
 
   it("retries transient Windows replacement failures and commits whole bytes", () => {

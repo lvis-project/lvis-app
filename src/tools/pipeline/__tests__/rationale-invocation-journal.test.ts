@@ -814,10 +814,11 @@ describe("DurableHostInvocationStartCasStore", () => {
     const valid = readFileSync(filePath, "utf8");
 
     writeFileSync(filePath, "x".repeat(1_025), "utf8");
+    // The over-limit message is the shared stable reader's (hmac-chain).
     await expect(journalStore(filePath, { maxBytes: 1_024 }).recoverAfterCrash({
       persistAudit: () => {},
       now: 11,
-    })).rejects.toThrow(/size is invalid/);
+    })).rejects.toThrow(/invocation journal exceeds read byte limit/);
 
     writeFileSync(filePath, valid.slice(0, -2), "utf8");
     await expect(journalStore(filePath, { maxBytes: 1_024 }).recoverAfterCrash({

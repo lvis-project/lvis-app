@@ -133,7 +133,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     const loop = new ConversationLoop(
       makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
     );
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -168,7 +168,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     const history: GenericMessage[] = [{ role: "user", content: "short history" }];
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("provider-projection-preflight");
+    loop.resetAndResume("600d7495-e531-406e-8c73-da41ce614754");
     const projection = {
       totalTokens: threshold + 1,
       systemPromptTokens: 0,
@@ -237,7 +237,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
         setActiveRolePrompt: vi.fn(),
       } as never,
     }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -277,7 +277,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -298,7 +298,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     });
     expect(messages[0]?.meta?.checkpointMeta?.contextTokensAfter).toBeGreaterThan(100);
     expect((mem as { saveCheckpointSnapshot: ReturnType<typeof vi.fn> }).saveCheckpointSnapshot)
-      .toHaveBeenCalledWith("sess-1", 1, expect.any(Array));
+      .toHaveBeenCalledWith("abe633f3-a47a-4758-874e-abe9160daf36", 1, expect.any(Array));
   });
 });
 
@@ -321,7 +321,7 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
 
     const mem = makeMemoryManager(shortHistory);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -359,7 +359,7 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
 
     const mem = makeMemoryManager(shortHistory);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -398,7 +398,7 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
 
     const mem = makeMemoryManager(shortHistory);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -431,7 +431,7 @@ describe("queryLoop — rate-limit reactive compact", () => {
     ];
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-rate-limit");
+    loop.resetAndResume("3db55c54-315c-4806-83d0-954cb477fc3f");
 
     const message =
       "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 161755, Requested 45096. Please try again in 2.055s.";
@@ -491,7 +491,7 @@ describe("queryLoop — rate-limit reactive compact", () => {
   it("does not compact for request-per-minute rate limits", async () => {
     const settings = makeSettings(true, "gpt-5.4-mini", "openai");
     const loop = new ConversationLoop(makeDeps({ settingsService: settings }));
-    loop.resetAndResume("sess-rpm");
+    loop.resetAndResume("976a47ca-22a3-466f-89cf-d23575553788");
 
     const message = "Rate limit reached on requests per minute (RPM): Limit 100, Used 100, Requested 1.";
     const provider = new ScriptedProvider([
@@ -528,7 +528,7 @@ describe("queryLoop — rate-limit reactive compact", () => {
   it("does not repeat TPM reactive compact before a clean turn re-arms recovery", async () => {
     const settings = makeSettings(true, "gpt-5.4-mini", "openai");
     const loop = new ConversationLoop(makeDeps({ settingsService: settings }));
-    loop.resetAndResume("sess-repeat-tpm");
+    loop.resetAndResume("963e666f-23d2-4eae-86eb-c025879ef0c9");
 
     const message =
       "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 161755, Requested 45096. Please try again in 2.055s.";
@@ -600,7 +600,7 @@ describe("runPreflightGuard — request projection source", () => {
         setActiveRolePrompt: vi.fn(),
       } as never,
     }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -633,7 +633,7 @@ describe("runPreflightGuard — message count is not a trigger", () => {
 
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -663,7 +663,7 @@ describe("runPreflightGuard — skip conditions", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -691,7 +691,7 @@ describe("runPreflightGuard — skip conditions", () => {
     const loop = new ConversationLoop(
       makeDeps({ settingsService: settings, memoryManager: mem, disableSessionPersistence: true }),
     );
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -719,7 +719,7 @@ describe("runPreflightGuard — force-recover hard-cap (#917)", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-budget");
+    loop.resetAndResume("ce88811d-036a-41cb-8b23-b1f47019842f");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
@@ -754,7 +754,7 @@ describe("runPreflightGuard — force-recover hard-cap (#917)", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     const mem = makeMemoryManager(history);
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-rearm");
+    loop.resetAndResume("22c2d4bb-b1aa-4a8e-8cf6-2b448106ba8d");
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;

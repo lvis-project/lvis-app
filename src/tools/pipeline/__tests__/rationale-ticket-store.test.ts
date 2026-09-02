@@ -38,7 +38,7 @@ const eligibilityContext = {
 } as const;
 
 function fixture(
-  sessionId = "session-1",
+  sessionId = "84097828-fc31-48c8-8292-10df48901a85",
   suffix = "1",
 ): RationaleRequiredControl {
   const anchor = createRequestAnchor({
@@ -161,7 +161,7 @@ describe("InProcessRationaleTicketStore", () => {
 
     const created = createStored(store, control);
     expect(created).toMatchObject({
-      sessionId: "session-1",
+      sessionId: "84097828-fc31-48c8-8292-10df48901a85",
       version: 0,
       ticket: {
         ticketId: control.ticketId,
@@ -172,33 +172,33 @@ describe("InProcessRationaleTicketStore", () => {
     expect(Object.isFrozen(created)).toBe(true);
     expect(Object.isFrozen(created.control)).toBe(true);
     expect(store.get({
-      sessionId: "session-1",
+      sessionId: "84097828-fc31-48c8-8292-10df48901a85",
       ticketId: control.ticketId,
       now: NOW,
     })).toBe(created);
     expect(store.get({
-      sessionId: "other-session",
+      sessionId: "5f711b23-ee4f-4cbb-88e0-53b872bbda82",
       ticketId: control.ticketId,
       now: NOW,
     })).toBeNull();
     expect(() => store.create({
-      sessionId: "other-session",
+      sessionId: "5f711b23-ee4f-4cbb-88e0-53b872bbda82",
       control,
       now: NOW,
     })).toThrow(/control\/session binding/);
 
     expect(store.create({
-      sessionId: "session-1",
+      sessionId: "84097828-fc31-48c8-8292-10df48901a85",
       control,
       now: NOW + 1,
     })).toBeNull();
     expect(store.get({
-      sessionId: "session-1",
+      sessionId: "84097828-fc31-48c8-8292-10df48901a85",
       ticketId: control.ticketId,
       now: NOW + 1,
     })).toBeNull();
     expect(store.create({
-      sessionId: "session-1",
+      sessionId: "84097828-fc31-48c8-8292-10df48901a85",
       control,
       now: NOW + 2,
     })).toBeNull();
@@ -219,7 +219,7 @@ describe("InProcessRationaleTicketStore", () => {
     const store = new InProcessRationaleTicketStore({
       onAudit: (event) => audit.push(event),
     });
-    const control = fixture("session-tombstone-expiry", "tombstone-expiry");
+    const control = fixture("f0100278-9f5c-47d3-87cd-caa530ab3542", "tombstone-expiry");
     const initial = createStored(store, control);
     const expectation = createRationaleTicketCasExpectation(initial);
 
@@ -252,7 +252,7 @@ describe("InProcessRationaleTicketStore", () => {
     const store = new InProcessRationaleTicketStore({
       onAudit: (event) => audit.push(event),
     });
-    const control = fixture("session-receipt", "receipt");
+    const control = fixture("34725366-0fca-4f9b-8464-ee7e996d74c7", "receipt");
     const pending = toPendingReady(store, createStored(store, control));
 
     expect(() => store.transition({
@@ -278,7 +278,7 @@ describe("InProcessRationaleTicketStore", () => {
       ticket: { state: "allowed_once", terminalReason: "allowed-once" },
     });
     expect(store.get({
-      sessionId: "session-receipt",
+      sessionId: "34725366-0fca-4f9b-8464-ee7e996d74c7",
       ticketId: control.ticketId,
       now: NOW + 4,
     })).toBeNull();
@@ -306,7 +306,7 @@ describe("InProcessRationaleTicketStore", () => {
     const store = new InProcessRationaleTicketStore({
       onAudit: (event) => audit.push(event),
     });
-    const control = fixture("session-reviewer-auto", "reviewer-auto");
+    const control = fixture("038f9292-1648-43cb-8d0b-a6673fb1b3d5", "reviewer-auto");
     const requested = required(store.requestRationale(
       createRationaleTicketCasExpectation(createStored(store, control)),
       NOW + 1,
@@ -349,7 +349,7 @@ describe("InProcessRationaleTicketStore", () => {
       NOW + 3,
     )).toBe(true);
     expect(store.get({
-      sessionId: "session-reviewer-auto",
+      sessionId: "038f9292-1648-43cb-8d0b-a6673fb1b3d5",
       ticketId: control.ticketId,
       now: NOW + 3,
     })).toBeNull();
@@ -372,7 +372,7 @@ describe("InProcessRationaleTicketStore", () => {
   it("handles failed rationale, deny, cancel, and expiry as terminal cleanup", () => {
     const store = new InProcessRationaleTicketStore({ onAudit: () => {} });
 
-    const failedControl = fixture("session-failed", "failed");
+    const failedControl = fixture("61a38f06-4729-4bb1-8713-11bcfc344f5b", "failed");
     const failedInitial = createStored(store, failedControl);
     const requested = required(store.requestRationale(
       createRationaleTicketCasExpectation(failedInitial),
@@ -397,12 +397,12 @@ describe("InProcessRationaleTicketStore", () => {
       terminalReason: "user-deny",
     });
     expect(store.get({
-      sessionId: "session-failed",
+      sessionId: "61a38f06-4729-4bb1-8713-11bcfc344f5b",
       ticketId: failedControl.ticketId,
       now: NOW + 4,
     })).toBeNull();
 
-    const cancelControl = fixture("session-cancel", "cancel");
+    const cancelControl = fixture("5624fd6c-b8e0-4a21-8913-212ba5af311c", "cancel");
     const cancelPending = toPendingReady(store, createStored(store, cancelControl));
     const cancelled = required(store.cancel(
       createRationaleTicketCasExpectation(cancelPending),
@@ -413,7 +413,7 @@ describe("InProcessRationaleTicketStore", () => {
       terminalReason: "user-cancel",
     });
 
-    const timeoutControl = fixture("session-timeout", "timeout");
+    const timeoutControl = fixture("47b1f557-196f-46df-82f5-eebdcd474ee7", "timeout");
     const timeoutPending = toPendingReady(store, createStored(store, timeoutControl));
     const timedOut = required(store.modalTimeout(
       createRationaleTicketCasExpectation(timeoutPending),
@@ -424,10 +424,10 @@ describe("InProcessRationaleTicketStore", () => {
       terminalReason: "modal-timeout",
     });
 
-    const expireControl = fixture("session-expire", "expire");
+    const expireControl = fixture("74bc0b55-11e2-455a-8f0c-f0c62008c50f", "expire");
     createStored(store, expireControl);
     expect(store.get({
-      sessionId: "session-expire",
+      sessionId: "74bc0b55-11e2-455a-8f0c-f0c62008c50f",
       ticketId: expireControl.ticketId,
       now: expireControl.anchor.expiresAt,
     })).toBeNull();
@@ -439,13 +439,13 @@ describe("InProcessRationaleTicketStore", () => {
       onAudit: (event) => audit.push(event),
     });
 
-    const staleControl = fixture("session-stale", "stale");
+    const staleControl = fixture("9f9c6f7c-805d-4e10-8681-b887151bbcf3", "stale");
     const staleInitial = createStored(store, staleControl);
     const staleExpectation = createRationaleTicketCasExpectation(staleInitial);
     required(store.requestRationale(staleExpectation, NOW + 1));
     expect(store.requestRationale(staleExpectation, NOW + 2)).toBeNull();
     expect(store.get({
-      sessionId: "session-stale",
+      sessionId: "9f9c6f7c-805d-4e10-8681-b887151bbcf3",
       ticketId: staleControl.ticketId,
       now: NOW + 2,
     })).toBeNull();
@@ -455,7 +455,7 @@ describe("InProcessRationaleTicketStore", () => {
       terminalReason: "stale-replay",
     }));
 
-    const identityControl = fixture("session-identity", "identity");
+    const identityControl = fixture("1b9a80fc-c4f3-4363-852b-277a64dac7bc", "identity");
     const identityInitial = createStored(store, identityControl);
     expect(store.requestRationale({
       ...createRationaleTicketCasExpectation(identityInitial),
@@ -467,14 +467,14 @@ describe("InProcessRationaleTicketStore", () => {
       terminalReason: "identity-mismatch",
     }));
 
-    const scopedControl = fixture("session-owned", "owned");
+    const scopedControl = fixture("d882c130-438a-4c28-81d6-200f91a8cd21", "owned");
     const scopedInitial = createStored(store, scopedControl);
     expect(store.requestRationale({
       ...createRationaleTicketCasExpectation(scopedInitial),
-      sessionId: "different-session",
+      sessionId: "30c6cee6-cac1-489d-8dae-f2f837ff17f6",
     }, NOW + 1)).toBeNull();
     expect(store.get({
-      sessionId: "session-owned",
+      sessionId: "d882c130-438a-4c28-81d6-200f91a8cd21",
       ticketId: scopedControl.ticketId,
       now: NOW + 1,
     })).toBe(scopedInitial);
@@ -489,9 +489,9 @@ describe("InProcessRationaleTicketStore", () => {
     const store = new InProcessRationaleTicketStore({
       onAudit: (event) => audit.push(event),
     });
-    const first = fixture("session-close", "close-a");
-    const second = fixture("session-close", "close-b");
-    const other = fixture("session-other", "other");
+    const first = fixture("e8388133-375c-4f08-8f18-41665da4070f", "close-a");
+    const second = fixture("e8388133-375c-4f08-8f18-41665da4070f", "close-b");
+    const other = fixture("3bac543f-73e5-4d6a-8162-2013fa0c384e", "other");
     createStored(store, first);
     const secondInitial = createStored(store, second);
     required(store.requestRationale(
@@ -500,24 +500,24 @@ describe("InProcessRationaleTicketStore", () => {
     ));
     const otherInitial = createStored(store, other);
 
-    const closed = store.closeSession("session-close", NOW + 5);
+    const closed = store.closeSession("e8388133-375c-4f08-8f18-41665da4070f", NOW + 5);
     expect(closed).toHaveLength(2);
     expect(closed.every((snapshot) =>
       snapshot.ticket.state === "cancelled" &&
       snapshot.ticket.terminalReason === "session-close"
     )).toBe(true);
     expect(store.get({
-      sessionId: "session-close",
+      sessionId: "e8388133-375c-4f08-8f18-41665da4070f",
       ticketId: first.ticketId,
       now: NOW + 5,
     })).toBeNull();
     expect(store.get({
-      sessionId: "session-other",
+      sessionId: "3bac543f-73e5-4d6a-8162-2013fa0c384e",
       ticketId: other.ticketId,
       now: NOW + 5,
     })).toBe(otherInitial);
 
-    const receiptControl = fixture("session-close", "close-receipt");
+    const receiptControl = fixture("e8388133-375c-4f08-8f18-41665da4070f", "close-receipt");
     const pending = toPendingReady(
       store,
       createStored(store, receiptControl, NOW + 6),
@@ -528,7 +528,7 @@ describe("InProcessRationaleTicketStore", () => {
       NOW + 10,
     ) as HostConsumedAllowOnceReceipt;
     expect(store.isAuthenticConsumedAllowOnceReceipt(receipt, NOW + 10)).toBe(true);
-    expect(store.closeSession("session-close", NOW + 11)).toEqual([]);
+    expect(store.closeSession("e8388133-375c-4f08-8f18-41665da4070f", NOW + 11)).toEqual([]);
     expect(store.isAuthenticConsumedAllowOnceReceipt(receipt, NOW + 11)).toBe(false);
     expect(audit).toContainEqual(expect.objectContaining({
       operation: "receipt-revoked",
@@ -540,7 +540,7 @@ describe("InProcessRationaleTicketStore", () => {
       createRationaleTicketCasExpectation(otherInitial),
       NOW + 12,
     ));
-    expect(store.closeSession("session-close", NOW + 13)).toEqual([]);
+    expect(store.closeSession("e8388133-375c-4f08-8f18-41665da4070f", NOW + 13)).toEqual([]);
   });
   it.each([
     {
@@ -566,7 +566,7 @@ describe("InProcessRationaleTicketStore", () => {
           if (shouldFail) return failAudit();
         },
       });
-      const control = fixture("session-create-atomic", "create-atomic");
+      const control = fixture("3cc929ba-6681-4a0e-85d0-5f27007283c9", "create-atomic");
 
       expect(() => createStored(store, control)).toThrow(expectedError);
       expect(store.activeTicketIds(control.anchor.sessionId)).toEqual([]);
@@ -601,7 +601,7 @@ describe("InProcessRationaleTicketStore", () => {
         }
       },
     });
-    const control = fixture("session-transition-atomic", "transition-atomic");
+    const control = fixture("562ad4b1-ca6f-426f-8f49-f6545bfe6032", "transition-atomic");
     const initial = createStored(store, control);
     const expectation = createRationaleTicketCasExpectation(initial);
 
@@ -636,7 +636,7 @@ describe("InProcessRationaleTicketStore", () => {
         }
       },
     });
-    const control = fixture("session-allow-atomic", "allow-atomic");
+    const control = fixture("21082466-2c6c-4822-8793-a670e5fa5b89", "allow-atomic");
     const pending = toPendingReady(store, createStored(store, control));
     const expectation = createRationaleTicketCasExpectation(pending);
 
@@ -681,7 +681,7 @@ describe("InProcessRationaleTicketStore", () => {
         }
       },
     });
-    const control = fixture("session-revoke-atomic", "revoke-atomic");
+    const control = fixture("92b3fd65-f3e3-4ddb-8f55-0be10a9fd667", "revoke-atomic");
     const pending = toPendingReady(store, createStored(store, control));
     const receipt = store.consumeAllowOnce(
       createRationaleTicketCasExpectation(pending),
@@ -712,7 +712,7 @@ describe("InProcessRationaleTicketStore", () => {
         }
       },
     });
-    const control = fixture("session-terminal-atomic", "terminal-atomic");
+    const control = fixture("fee7bcfe-4b02-47f1-8275-ad0bd3d6e8c9", "terminal-atomic");
     const initial = createStored(store, control);
     const expectation = createRationaleTicketCasExpectation(initial);
 
@@ -746,5 +746,16 @@ describe("InProcessRationaleTicketStore", () => {
 describe("RATIONALE_TICKET_TERMINAL_STATES", () => {
   it("lists the states a ticket never leaves", () => {
     expect([...RATIONALE_TICKET_TERMINAL_STATES].sort()).toEqual(["allowed_once", "cancelled", "denied", "expired", "rejected"]);
+  });
+});
+
+describe("InProcessRationaleTicketStore — session id rule is the host's", () => {
+  it("rejects a 257-character id the old length-only check accepted, accepts a namespaced one", () => {
+    const store = new InProcessRationaleTicketStore({ onAudit: () => {} });
+    expect(() => createStored(store, fixture("a".repeat(256), "long")))
+      .toThrow(/invalid rationale ticket session id/);
+    const namespaced = "sub-x-12434f55-fbb9-4a54-b1a7-fb9638d8eebd";
+    createStored(store, fixture(namespaced, "namespaced"));
+    expect(store.activeTicketIds(namespaced)).toHaveLength(1);
   });
 });

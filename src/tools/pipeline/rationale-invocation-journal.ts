@@ -1,17 +1,13 @@
 import {
   chmodSync,
   closeSync,
-  constants,
-  fstatSync,
-  lstatSync,
   mkdirSync,
   openSync,
-  readSync,
 } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { platform } from "node:process";
-import { computeLineHmac, type SecretStore } from "../../audit/hmac-chain.js";
-import { writeUtf8FileAtomicSync, isMissingPathError } from "../../lib/atomic-file.js";
+import { computeLineHmac, readStableRegularFileUtf8, type SecretStore } from "../../audit/hmac-chain.js";
+import { writeUtf8FileAtomicSync } from "../../lib/atomic-file.js";
 import { withFileLock } from "../../lib/with-file-lock.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import {
@@ -166,62 +162,10 @@ function equal(left: unknown, right: unknown): boolean {
   return canonicalStringify(left) === canonicalStringify(right);
 }
 
-function sameFileIdentity(
-  left: { readonly dev: bigint; readonly ino: bigint },
-  right: { readonly dev: bigint; readonly ino: bigint },
-): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
 function readStableUtf8(filePath: string, maxBytes: number): string | null {
-  const flags = constants.O_RDONLY |
-    (platform === "win32" ? 0 : constants.O_NOFOLLOW);
-  let fd: number | undefined;
-  try {
-    try {
-      fd = openSync(filePath, flags);
-    } catch (error) {
-      if (isMissingPathError(error)) return null;
-      throw error;
-    }
-    const before = fstatSync(fd, { bigint: true });
-    const pathAtOpen = lstatSync(filePath, { bigint: true });
-    if (!before.isFile() || pathAtOpen.isSymbolicLink() ||
-        !pathAtOpen.isFile() || !sameFileIdentity(pathAtOpen, before)) {
-      throw new Error("invocation journal identity changed before read");
-    }
-    const size = Number(before.size);
-    if (!Number.isSafeInteger(size) || size <= 0 || size > maxBytes) {
-      throw new Error("invocation journal size is invalid");
-    }
-
-    const buffer = Buffer.alloc(size);
-    let completed = 0;
-    while (completed < size) {
-      const read = readSync(fd, buffer, completed, size - completed, completed);
-      if (read === 0) {
-        throw new Error("invocation journal was truncated during read");
-      }
-      completed += read;
-    }
-
-    const after = fstatSync(fd, { bigint: true });
-    const pathAfter = lstatSync(filePath, { bigint: true });
-    if (!after.isFile() || pathAfter.isSymbolicLink() || !pathAfter.isFile() ||
-        !sameFileIdentity(before, after) || !sameFileIdentity(after, pathAfter) ||
-        before.size !== after.size || before.mtimeNs !== after.mtimeNs ||
-        before.ctimeNs !== after.ctimeNs) {
-      throw new Error("invocation journal changed during read");
-    }
-
-    const text = buffer.toString("utf8");
-    if (!Buffer.from(text, "utf8").equals(buffer)) {
-      throw new Error("invocation journal is not valid UTF-8");
-    }
-    return text;
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
+  const text = readStableRegularFileUtf8(filePath, maxBytes, "invocation journal");
+  if (text === "") throw new Error("invocation journal size is invalid");
+  return text;
 }
 
 function emptySnapshot(): InvocationJournalSnapshot {

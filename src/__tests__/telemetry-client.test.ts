@@ -14,13 +14,13 @@
  * No filesystem, no Electron, no process.env.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { PluginTelemetryClient } from "../telemetry/client.js";
+import { PluginTelemetryClient, loadOrCreateDeviceUuid, relocateDeviceUuid } from "../telemetry/client.js";
 import { scrubPii } from "../telemetry/client.js";
 import type { TelemetrySettings } from "../data/settings-store.js";
 import { cleanupTmpDir } from "../__tests__/support/tmp-dir-teardown.js";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { mkdtempSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -216,5 +216,54 @@ describe("PluginTelemetryClient", () => {
     const body = JSON.parse(init.body as string) as { events: Array<Record<string, unknown>> };
     expect(body.events[0].errorClass).toBe("NetworkError");
     expect(body.events[0].message).toBeUndefined();
+  });
+});
+
+describe("relocateDeviceUuid — the device keeps its id when its home moves", () => {
+  const UUID = "11111111-1111-4111-8111-111111111111";
+
+  /** A device whose id already sits in the old root, with the move already done. */
+  function afterRelocation(run: (paths: { oldPath: string; newPath: string }) => void): void {
+    const root = mkdtempSync(join(tmpdir(), "lvis-device-uuid-"));
+    try {
+      const oldPath = join(root, "userData", ".lvis", "device-uuid");
+      const newPath = join(root, "home", ".lvis", "telemetry", "device-uuid");
+      mkdirSync(dirname(oldPath), { recursive: true });
+      writeFileSync(oldPath, UUID);
+      expect(relocateDeviceUuid(oldPath, newPath)).toBe(true);
+      run({ oldPath, newPath });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  it("carries the uuid over and removes the emptied old root", () => {
+    afterRelocation(({ oldPath, newPath }) => {
+      expect(loadOrCreateDeviceUuid(newPath)).toBe(UUID);
+      expect(existsSync(oldPath)).toBe(false);
+      expect(existsSync(dirname(oldPath))).toBe(false);
+    });
+  });
+
+  it("is a no-op on a second run", () => {
+    afterRelocation(({ oldPath, newPath }) => {
+      expect(relocateDeviceUuid(oldPath, newPath)).toBe(false);
+      expect(loadOrCreateDeviceUuid(newPath)).toBe(UUID);
+    });
+  });
+
+  /*
+   * Recreating the old file is ALSO the assertion that the move removed it:
+   * "wx" fails when the path exists, so a surviving old file fails here rather
+   * than in a separate existsSync — which would be asking the directory twice
+   * about a file this test then writes, the check-then-use race CodeQL flags.
+   */
+  it("never lets a stale old file clobber the newer id", () => {
+    afterRelocation(({ oldPath, newPath }) => {
+      mkdirSync(dirname(oldPath), { recursive: true });
+      writeFileSync(oldPath, "stale", { flag: "wx" });
+      expect(relocateDeviceUuid(oldPath, newPath)).toBe(false);
+      expect(loadOrCreateDeviceUuid(newPath)).toBe(UUID);
+    });
   });
 });

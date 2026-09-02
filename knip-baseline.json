@@ -594,11 +594,6 @@
     },
     {
       "type": "exports",
-      "file": "src/permissions/permission-audit-runner.ts",
-      "name": "getDefaultAuditDir"
-    },
-    {
-      "type": "exports",
       "file": "src/permissions/permission-settings-store.ts",
       "name": "REVIEWER_PROVIDERS"
     },
@@ -876,11 +871,6 @@
       "type": "exports",
       "file": "src/skills/skill-registry.ts",
       "name": "writeSkillRegistry"
-    },
-    {
-      "type": "exports",
-      "file": "src/telemetry/client.ts",
-      "name": "loadOrCreateDeviceUuid"
     },
     {
       "type": "exports",

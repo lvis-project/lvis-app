@@ -9,6 +9,7 @@ import {
   CodexAppServerClient,
   type CodexAppServerClientOptions,
 } from "../codex-app-server-client.js";
+import { CODEX_APP_SERVER_ARGV } from "../codex-conversation-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 interface RpcRequest {
@@ -213,22 +214,9 @@ describe("CodexAppServerClient", () => {
     expect(harness.spawnCalls).toHaveLength(1);
     expect(harness.spawnCalls[0]).toMatchObject({
       command: "C:\\test\\codex.exe",
-      args: [
-        "app-server",
-        "-c",
-        'cli_auth_credentials_store="file"',
-        "--strict-config",
-        "--disable",
-        "plugins",
-        "--disable",
-        "remote_control",
-        "--disable",
-        "remote_plugin",
-        "--disable",
-        "hooks",
-        "--listen",
-        "stdio://",
-      ],
+      // The one argv the conversation runtime also spawns with — the
+      // hardening boundary cannot differ between the two processes.
+      args: [...CODEX_APP_SERVER_ARGV],
       options: {
         cwd: harness.workspaceDir,
         shell: false,

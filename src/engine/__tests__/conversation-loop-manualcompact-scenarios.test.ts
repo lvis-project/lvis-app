@@ -47,7 +47,7 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     ];
 
     const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(small) }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
     (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce({
@@ -70,7 +70,7 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
       { role: "assistant", content: "answer" },
     ];
     const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(history) }));
-    loop.resetAndResume("manual-provider-projection");
+    loop.resetAndResume("41a56357-be2a-42c7-819b-0bf0bc843b39");
     const projection = {
       totalTokens: 12_345,
       systemPromptTokens: 0,
@@ -111,7 +111,7 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     const loop = new ConversationLoop(
       makeDeps({ memoryManager: makeMemoryManager(history), memoryReviewer }),
     );
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
     const provider = {
       ...makeProviderStub(),
       // The fixture's inactive API-key provider remains Claude. The Codex
@@ -163,7 +163,7 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     const loop = new ConversationLoop(
       makeDeps({ memoryManager: makeMemoryManager(history), memoryReviewer }),
     );
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
     const provider = {
       ...makeProviderStub(),
       subscriptionRuntime: { kind: "subscription" as const, provider: "kimi-code" as const },
@@ -203,7 +203,7 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     ];
 
     const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(history) }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
     (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce({
@@ -233,7 +233,7 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     ];
 
     const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(history) }));
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
     (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce({
@@ -281,7 +281,7 @@ describe("manualCompact — #811 m2 PreCompact / PostCompact lifecycle events", 
     const loop = new ConversationLoop(
       makeDeps({ memoryManager: makeMemoryManager(history), scriptHookManager: mgr as never }),
     );
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
     (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce({
@@ -327,7 +327,7 @@ describe("manualCompact — #811 m2 PreCompact / PostCompact lifecycle events", 
     const loop = new ConversationLoop(
       makeDeps({ memoryManager: makeMemoryManager(small), scriptHookManager: mgr as never }),
     );
-    loop.resetAndResume("sess-1");
+    loop.resetAndResume("abe633f3-a47a-4758-874e-abe9160daf36");
     (loop as unknown as { provider: ReturnType<typeof makeProviderStub> }).provider = makeProviderStub();
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce({

@@ -14,6 +14,7 @@ import { isAbsolute, join } from "node:path";
 import { platform } from "node:process";
 import lockfile from "proper-lockfile";
 import { computeLineHmac, GENESIS_MARKER, type SecretStore } from "./hmac-chain.js";
+import { isValidSessionId } from "../memory/memory-manager.js";
 import { assertRationaleCanonicalJson } from "../tools/pipeline/rationale-control.js";
 import {
   validateInvocationAuditRecord,
@@ -41,7 +42,6 @@ const CHECKPOINT_MAX_BYTES = 4 * 1024;
 const LOCK_STALE_MS = 30_000;
 const LOCK_RETRY_DELAY_MS = 25;
 const DEFAULT_LOCK_RETRIES = 5;
-const SAFE_SESSION_ID_RE = /^[^\u0000-\u001f\u007f-\u009f]{1,256}$/u;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/u;
 const HMAC_RE = /^[a-f0-9]{64}$/u;
 const LOCK_SLEEP_CELL = new Int32Array(new SharedArrayBuffer(4));
@@ -168,7 +168,7 @@ function assertTime(at: number): void {
 }
 
 function assertSessionId(sessionId: string): void {
-  if (sessionId.trim() !== sessionId || !SAFE_SESSION_ID_RE.test(sessionId)) {
+  if (!isValidSessionId(sessionId)) {
     throw new TypeError("invalid rationale audit session id");
   }
 }

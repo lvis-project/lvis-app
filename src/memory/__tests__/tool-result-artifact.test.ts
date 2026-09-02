@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MAX_TOOL_RESULT_ARTIFACT_BYTES, MemoryManager } from "../memory-manager.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
-const SESSION_ID = "artifact-session-0001";
+const SESSION_ID = "3138f9c6-89f0-4645-85ea-2c205f9523f4";
 const TRUNCATED = {
   originalLines: 240,
   originalTokens: 12_345,
@@ -136,7 +136,7 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
       },
     });
 
-    const forkId = "artifact-session-fork";
+    const forkId = "4ba882ce-d6c4-4534-81a6-444672f37669";
     await mm.saveSession(forkId, hydrated);
     expect(mm.loadToolResultArtifact(forkId, "toolu_artifact_1")?.content).toBe(raw);
   });

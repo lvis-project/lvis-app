@@ -53,7 +53,7 @@ const permissionContext = {
 
 function requestAnchor() {
   const anchor = createRequestAnchor({
-    sessionId: "session-rationale-resume",
+    sessionId: "ef975fd1-380d-4acf-8e50-7f1535885ebc",
     turnId: "turn-rationale-resume",
     inputMessageId: "message-rationale-resume",
     inputOrigin: "user-keyboard",
@@ -275,7 +275,7 @@ async function fixture() {
     }],
     {
       executionCwd: process.cwd(),
-      sessionId: "session-rationale-resume",
+      sessionId: "ef975fd1-380d-4acf-8e50-7f1535885ebc",
       permissionContext,
       rationaleRuntime: hostRuntime(),
     },
@@ -286,7 +286,7 @@ async function fixture() {
   const control = initial.control.control;
   const ticketStore = new InProcessRationaleTicketStore({ onAudit: () => {} });
   let snapshot = ticketStore.create({
-    sessionId: "session-rationale-resume",
+    sessionId: "ef975fd1-380d-4acf-8e50-7f1535885ebc",
     control,
   });
   if (!snapshot) throw new Error("ticket create failed");
@@ -353,7 +353,7 @@ async function fixture() {
   };
   const options: RationaleResumeExecuteOptions = {
     executionCwd: process.cwd(),
-    sessionId: "session-rationale-resume",
+    sessionId: "ef975fd1-380d-4acf-8e50-7f1535885ebc",
     permissionContext,
     rationaleResumeRuntime: resumeRuntime,
     callbacks: {

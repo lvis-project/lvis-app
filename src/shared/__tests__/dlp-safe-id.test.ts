@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { maskSensitiveData } from "../dlp.js";
-import { createDlpSafeUuid, dlpSafeCandidate, isSafeStructuralId } from "../dlp-safe-id.js";
+import {
+  createDlpSafeUuid,
+  createNamespacedSessionId,
+  dlpSafeCandidate,
+  isSafeStructuralId,
+  SESSION_ID_NAMESPACE_KINDS,
+} from "../dlp-safe-id.js";
 import { UUID_PATTERN } from "../uuid.js";
 
 const SAFE_UUID = "abcdefab-cdef-4abc-8def-abcdefabcdef";
@@ -159,5 +165,19 @@ describe("isSafeStructuralId", () => {
   it("rejects an id the DLP scanner would mask", () => {
     expect(maskSensitiveData(UNSAFE_UUID).detections.length).toBeGreaterThan(0);
     expect(isSafeStructuralId(UNSAFE_UUID)).toBe(false);
+  });
+});
+
+describe("createNamespacedSessionId", () => {
+  it("mints <kind>-<tag>-<uuid> for exactly the kinds the validator is built from", () => {
+    expect([...SESSION_ID_NAMESPACE_KINDS]).toEqual(["sub", "a2a-wire"]);
+    const id = createNamespacedSessionId("sub", "e3b0c442");
+    expect(id).toMatch(/^sub-e3b0c442-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(createNamespacedSessionId("a2a-wire", "1a2b3c4d")).toMatch(/^a2a-wire-1a2b3c4d-/);
+  });
+
+  it("refuses a tag outside [a-z0-9] — the id could not be read back", () => {
+    expect(() => createNamespacedSessionId("sub", "A-b")).toThrow(/session-id-tag-rejected/);
+    expect(() => createNamespacedSessionId("sub", "")).toThrow(/session-id-tag-rejected/);
   });
 });

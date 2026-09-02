@@ -21,6 +21,7 @@ import {
   RATIONALE_TICKET_TERMINAL_STATES,
 } from "./rationale-ticket-lifecycle.js";
 import { UUID_PATTERN } from "../../shared/uuid.js";
+import { isValidSessionId } from "../../memory/memory-manager.js";
 
 function seal<T>(value: T, label: string): T {
   return cloneRationaleCanonicalJson(value, label) as T;
@@ -132,11 +133,7 @@ function assertFiniteNow(now: number): void {
 }
 
 function assertSessionId(sessionId: string): void {
-  if (
-    typeof sessionId !== "string" ||
-    sessionId.length === 0 ||
-    sessionId.length > 256
-  ) {
+  if (!isValidSessionId(sessionId)) {
     throw new TypeError("invalid rationale ticket session id");
   }
 }

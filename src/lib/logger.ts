@@ -30,6 +30,7 @@
 import pino from "pino";
 import prettyStream from "pino-pretty";
 import { createLogFileSink, type LogFileSink, type LogFileSinkOptions } from "./log-file-sink.js";
+import { isPackagedElectronProcess } from "../boot/dev-flags.js";
 
 const isTest = process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
 const isProduction = process.env.NODE_ENV === "production";
@@ -40,21 +41,18 @@ const isProduction = process.env.NODE_ENV === "production";
 // Precedence (highest to lowest):
 //   1. LVIS_LOG_FORMAT=json  → always JSON
 //   2. NODE_ENV=production   → JSON
-//   3. process.defaultApp absent + not a dev run → packaged Electron → JSON
+//   3. packaged Electron     → JSON
 //   4. default               → pino-pretty (safe for any unpackaged dev run)
 //
 // Note: scripts/run-electron.mjs sets NODE_ENV=development for `bun run start`;
-// production builds rely on the isPackagedElectron signal (process.defaultApp
-// absence) rather than NODE_ENV, since packaged Electron does not set
-// NODE_ENV=production automatically.
-// Guard with isElectronRuntime so plain Node / tsx environments (e.g. scripts,
-// unit tests run outside Electron) never get isPackagedElectron=true.
-const isElectronRuntime = !!(process as NodeJS.Process & { versions?: { electron?: string } }).versions?.electron;
-const isPackagedElectron =
-  isElectronRuntime &&
-  !(process as NodeJS.Process & { defaultApp?: boolean }).defaultApp &&
-  process.env.LVIS_DEV !== "1" &&
-  !isTest;
+// production builds rely on the packaged signal rather than NODE_ENV, since
+// packaged Electron does not set NODE_ENV=production automatically.
+// "Packaged" is dev-flags' answer (`isPackagedElectronProcess`), asked here
+// from process facts because this module loads before boot seeds
+// `setIsPackaged(app.isPackaged)`; a packaged binary with LVIS_DEV=1 in its
+// environment is still packaged. `!isTest` keeps the Electron-hosted vitest
+// runner on the console path.
+const isPackagedElectron = isPackagedElectronProcess(process) && !isTest;
 const useJsonFormat =
   process.env.LVIS_LOG_FORMAT === "json" || isProduction || isPackagedElectron;
 

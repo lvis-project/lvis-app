@@ -112,10 +112,15 @@ afterEach(() => {
 describe("RevocationRegistry — fail-open", () => {
   it("allows everything when no document was ever obtained (offline, no cache)", async () => {
     const userDataDir = freshUserData();
-    await revocationRegistry.init({ userDataDir, online: false });
+    const audits: string[] = [];
+    await revocationRegistry.init({ userDataDir, online: false, audit: (line) => audits.push(line) });
 
     expect(revocationRegistry.evaluate("meeting", "1.0.0")).toEqual({ kind: "allow" });
     expect(revocationRegistry.status().hasDocument).toBe(false);
+    // The shared loader is told `failMode: "open"`; the audit line says so.
+    expect(audits).toContainEqual(
+      "revocation_unreachable reason=no-cache-and-offline (fail-open: nothing blocked)",
+    );
   });
 
   it("allows everything when the cached document's signature does not verify", async () => {

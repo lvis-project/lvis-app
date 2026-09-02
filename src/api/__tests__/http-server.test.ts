@@ -15,6 +15,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { request as httpRequest } from "node:http";
 import {
+  createSseFrameWriter,
   startLocalApiHttpServer,
   type LocalApiHttpServer,
 } from "../http-server.js";
@@ -606,5 +607,55 @@ describe("http-server — GET /v1/events (SSE)", () => {
     expect(broadcaster.subscriberCount()).toBe(0);
     controller.abort();
     await reader.cancel().catch(() => {});
+  });
+});
+
+describe("http-server — createSseFrameWriter (shared with the tailnet stream)", () => {
+  function fakeResponse(writeReturns: boolean) {
+    const res = {
+      destroyed: false,
+      writableEnded: false,
+      writes: [] as string[],
+      write(frame: string) {
+        res.writes.push(frame);
+        return writeReturns;
+      },
+      destroy() {
+        res.destroyed = true;
+      },
+      end() {
+        res.writableEnded = true;
+      },
+    };
+    return res;
+  }
+
+  it("terminates a client whose buffer is full instead of queueing behind drain", () => {
+    const res = fakeResponse(false);
+    let cleaned = false;
+    const cleanup = vi.fn(() => {
+      cleaned = true;
+    });
+    const writer = createSseFrameWriter(res as never, cleanup, () => cleaned);
+    expect(writer.writeOrClose("data: 1\n\n")).toBe(false);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(res.destroyed).toBe(true);
+    // After teardown a write is refused even though the fake is still "writable".
+    expect(writer.writeOrClose("data: 2\n\n")).toBe(false);
+    expect(res.writes).toEqual(["data: 1\n\n"]);
+  });
+
+  it("endStream runs cleanup and ends an open response once", () => {
+    const res = fakeResponse(true);
+    let cleaned = false;
+    const cleanup = vi.fn(() => {
+      cleaned = true;
+    });
+    const writer = createSseFrameWriter(res as never, cleanup, () => cleaned);
+    expect(writer.writeOrClose("data: 1\n\n")).toBe(true);
+    writer.endStream();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(res.writableEnded).toBe(true);
+    expect(res.destroyed).toBe(false);
   });
 });

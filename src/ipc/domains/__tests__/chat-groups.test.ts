@@ -8,6 +8,7 @@
  * to "main" — while four tiles quietly shared one conversation.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { sessionUuid } from "../../../__tests__/support/session-uuid.js";
 import { CHANNELS, MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 
@@ -91,7 +92,7 @@ function fakeLoop(id: string, seed: unknown[] = []): FakeLoop {
   let messages = [...seed];
   const loop: FakeLoop = {
     id,
-    sessionId: `session-of-${id}`,
+    sessionId: sessionUuid(`session-of-${id}`),
     hasProvider: vi.fn(() => id !== MAIN_CHAT_GROUP_ID),
     abortCurrentTurn: vi.fn(),
     newConversation: vi.fn(),
@@ -206,7 +207,7 @@ describe("lvis:chat:* with chat groups", () => {
     const retried = await invoke(CHANNELS.chat.retryEffort, {}, "group-2");
     expect(retried).toEqual({ ok: false, error: "no-user-message" });
     // And the session check is against the group's session, not the primary's.
-    const mismatched = await invoke(CHANNELS.chat.continueLastUser, { sessionId: "session-of-main" }, "group-2");
+    const mismatched = await invoke(CHANNELS.chat.continueLastUser, { sessionId: sessionUuid("session-of-main") }, "group-2");
     expect(mismatched).toEqual({ ok: false, error: "session-mismatch" });
   });
 
@@ -225,7 +226,7 @@ describe("lvis:chat:* with chat groups", () => {
     // The primary is a different conversation and a rewind in one tile is not
     // an edit of another.
     expect(main.getHistory().getMessages()).toHaveLength(2);
-    expect(memoryManager.saveSession).toHaveBeenCalledWith("session-of-group-2", []);
+    expect(memoryManager.saveSession).toHaveBeenCalledWith(sessionUuid("session-of-group-2"), []);
   });
 
   it("refuses a rewind while that tile is mid-turn", async () => {
@@ -269,18 +270,18 @@ describe("lvis:chat:* with chat groups", () => {
 
     // The primary's conversation cannot be pulled into the second tile...
     // ...and the refusal names the holder, so the renderer can bring it forward.
-    const refused = await invoke(CHANNELS.chat.sessionResume, "session-of-main", "group-2");
+    const refused = await invoke(CHANNELS.chat.sessionResume, sessionUuid("session-of-main"), "group-2");
     expect(refused).toMatchObject({ ok: false, error: "session-open-in-other-group", holderChatGroupId: MAIN_CHAT_GROUP_ID });
     expect(second.resetAndResume).not.toHaveBeenCalled();
     // ...and the second tile's cannot be pulled into the primary.
-    const refusedBack = await invoke(CHANNELS.chat.sessionResume, "session-of-group-2", MAIN_CHAT_GROUP_ID);
+    const refusedBack = await invoke(CHANNELS.chat.sessionResume, sessionUuid("session-of-group-2"), MAIN_CHAT_GROUP_ID);
     expect(refusedBack).toMatchObject({ ok: false, error: "session-open-in-other-group", holderChatGroupId: "group-2" });
     expect(main.resetAndResume).not.toHaveBeenCalled();
 
     // A conversation no tile holds loads normally.
-    const loaded = await invoke(CHANNELS.chat.sessionResume, "session-archived", "group-2");
+    const loaded = await invoke(CHANNELS.chat.sessionResume, sessionUuid("session-archived"), "group-2");
     expect(loaded).toMatchObject({ ok: true });
-    expect(second.resetAndResume).toHaveBeenCalledWith("session-archived");
+    expect(second.resetAndResume).toHaveBeenCalledWith(sessionUuid("session-archived"));
   });
 
   it("names the holder even while the asking tile is busy — bringing another tile forward touches nothing here", async () => {
@@ -290,9 +291,9 @@ describe("lvis:chat:* with chat groups", () => {
 
     // The first resume holds group-2's session-mutation lease until it settles;
     // the two calls below are issued while it is still held.
-    const first = invoke(CHANNELS.chat.sessionResume, "session-archived", "group-2");
-    const refused = invoke(CHANNELS.chat.sessionResume, "session-of-main", "group-2");
-    const busy = invoke(CHANNELS.chat.sessionResume, "session-older", "group-2");
+    const first = invoke(CHANNELS.chat.sessionResume, sessionUuid("session-archived"), "group-2");
+    const refused = invoke(CHANNELS.chat.sessionResume, sessionUuid("session-of-main"), "group-2");
+    const busy = invoke(CHANNELS.chat.sessionResume, sessionUuid("session-older"), "group-2");
     await expect(refused).resolves.toMatchObject({ ok: false, error: "session-open-in-other-group", holderChatGroupId: MAIN_CHAT_GROUP_ID });
     // A conversation nobody holds is what the lease refuses.
     await expect(busy).resolves.toMatchObject({ ok: false, error: "streaming-active" });
@@ -304,11 +305,11 @@ describe("lvis:chat:* with chat groups", () => {
     const { invoke, memoryManager } = await registerWithGroups();
     invoke(CHANNELS.chat.hasProvider, "group-2");
 
-    await invoke(CHANNELS.chat.sessionResume, "session-archived", "group-2");
+    await invoke(CHANNELS.chat.sessionResume, sessionUuid("session-archived"), "group-2");
     expect(memoryManager.markMainActiveResume).not.toHaveBeenCalled();
 
-    await invoke(CHANNELS.chat.sessionResume, "session-older", MAIN_CHAT_GROUP_ID);
-    expect(memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-older");
+    await invoke(CHANNELS.chat.sessionResume, sessionUuid("session-older"), MAIN_CHAT_GROUP_ID);
+    expect(memoryManager.markMainActiveResume).toHaveBeenCalledWith(sessionUuid("session-older"));
   });
 
   it("releasing the primary keeps its loop and hands it a blank conversation", async () => {

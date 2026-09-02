@@ -8,6 +8,7 @@
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { SettingsService } from "../data/settings-store.js";
+import { getIsPackaged } from "./dev-flags.js";
 import { DEFAULT_LOCALE, normalizeLocale, setLocale, tryLoadLocaleMessages,
 } from "../i18n/index.js";
 import { MemoryManager } from "../memory/memory-manager.js";
@@ -41,19 +42,15 @@ const log = createLogger("lvis");
  * console-only behaviour so `~/.lvis/logs/` is not polluted during development.
  * `LVIS_LOG_FILE=1` force-enables it for local diagnosis of the file path.
  *
- * Mirrors logger.ts's isPackagedElectron detection: packaged Electron leaves
- * `process.defaultApp` undefined; dev runs (`bun run start`) set LVIS_DEV=1.
+ * "Packaged" is dev-flags' cached `app.isPackaged`: `main.ts` seeds it before
+ * `boot.ts` reaches this step, and a packaged binary launched with LVIS_DEV=1
+ * keeps its log file — the flag is user-controllable and packaged builds
+ * ignore it.
  */
 function shouldEnableFileLogSink(): boolean {
   if (process.env.LVIS_LOG_FILE === "1") return true;
   if (process.env.NODE_ENV === "production") return true;
-  const isElectron = !!(process as NodeJS.Process & { versions?: { electron?: string } }).versions
-    ?.electron;
-  const isPackaged =
-    isElectron &&
-    !(process as NodeJS.Process & { defaultApp?: boolean }).defaultApp &&
-    process.env.LVIS_DEV !== "1";
-  return isPackaged;
+  return getIsPackaged();
 }
 
 export interface CoreServices {

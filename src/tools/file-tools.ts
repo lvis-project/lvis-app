@@ -45,6 +45,7 @@ import {
   type ToolExecutionResult,
 } from "./base.js";
 import { sleep } from "../shared/abortable-deadline.js";
+import { RENAME_FILE_LOCK_CODES, transientFsLockDelayMs } from "../lib/transient-fs-lock-retry.js";
 
 type ToolErrorResult = ToolExecutionResult & { isError: true };
 type Result<T> = { ok: true; value: T } | { ok: false; error: ToolErrorResult };
@@ -921,25 +922,27 @@ async function atomicTextWrite(target: string, content: string): Promise<void> {
   }
 }
 
+/**
+ * Attempt budget for a tool write: a turn is waiting on it, so it neither
+ * blocks the main thread (sync budget) nor runs unattended (background
+ * budget). The curve and the retryable codes are the shared policy.
+ */
+const TOOL_WRITE_RENAME_ATTEMPTS = 6;
+
 async function renameWithTransientRetry(source: string, target: string): Promise<void> {
-  const delaysMs = [10, 25, 50, 100, 200];
-  for (let attempt = 0; ; attempt += 1) {
+  for (let attempt = 1; ; attempt += 1) {
     try {
       await rename(source, target);
       return;
     } catch (err) {
-      if (attempt >= delaysMs.length || !isTransientRenameError(err)) {
-        throw err;
-      }
-      await sleep(delaysMs[attempt]);
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      const retryable = code !== undefined
+        && RENAME_FILE_LOCK_CODES.has(code)
+        && attempt < TOOL_WRITE_RENAME_ATTEMPTS;
+      if (!retryable) throw err;
+      await sleep(transientFsLockDelayMs(attempt));
     }
   }
-}
-
-function isTransientRenameError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const code = (err as { code?: unknown }).code;
-  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
 }
 
 function toolError(output: string): ToolErrorResult {

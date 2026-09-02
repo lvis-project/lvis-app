@@ -1,5 +1,4 @@
 import type { ChildProcess } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
 import {
   type CodexSubscriptionConnectionState,
   type CodexSubscriptionLoginMethod,
@@ -11,8 +10,11 @@ import {
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH } from "../shared/subscription-runtime.js";
 import {
+  attachCodexStdioTransport,
+  CODEX_APP_SERVER_ARGV,
   CODEX_MAX_RPC_LINE_BYTES,
   CODEX_RPC_REQUEST_TIMEOUT_MS,
+  hasCodexStdioStreams,
   isCodexAppServerRequestId,
   isCodexJsonRecord,
   resolveBundledCodexExecutable,
@@ -119,8 +121,6 @@ export class CodexAppServerClient {
   private startPromise: Promise<void> | null = null;
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<number, PendingJsonRpcRequest>();
-  private stdoutDecoder = new StringDecoder("utf8");
-  private stdoutBuffer = "";
   private accountStatus: CodexSubscriptionStatus = blankStatus("ready");
   private pendingLogin: PendingLogin | null = null;
   private completedLoginError: CodexAppServerErrorCode | null = null;
@@ -349,27 +349,7 @@ export class CodexAppServerClient {
     try {
       child = this.spawn(
         executable,
-        [
-          "app-server",
-          // Tokens live in `auth.json` under the isolated CODEX_HOME. The keyring
-          // store needs the user's login keychain, which the isolated HOME (see
-          // sanitizedCodexConversationEnvironment) deliberately hides: macOS
-          // resolves the default keychain from $HOME and the sign-in ends in
-          // "A default keychain could not be found".
-          "-c",
-          'cli_auth_credentials_store="file"',
-          "--strict-config",
-          "--disable",
-          "plugins",
-          "--disable",
-          "remote_control",
-          "--disable",
-          "remote_plugin",
-          "--disable",
-          "hooks",
-          "--listen",
-          "stdio://",
-        ],
+        CODEX_APP_SERVER_ARGV,
         {
           cwd: workspaceDir,
           stdio: ["pipe", "pipe", "pipe"],
@@ -381,7 +361,7 @@ export class CodexAppServerClient {
     } catch {
       throw new CodexAppServerError("codex-runtime-start-failed");
     }
-    if (!child.stdin || !child.stdout) {
+    if (!hasCodexStdioStreams(child)) {
       try {
         child.kill();
       } catch {
@@ -391,22 +371,13 @@ export class CodexAppServerClient {
     }
 
     this.child = child;
-    this.stdoutDecoder = new StringDecoder("utf8");
-    this.stdoutBuffer = "";
-    const abort = (code: CodexAppServerErrorCode): void => {
-      this.abortTransport(new CodexAppServerError(code), child);
-    };
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      if (this.child === child) this.consumeStdout(chunk, child);
-    });
-    child.stdout.once("error", () => abort("codex-operation-failed"));
-    child.stdin.once("error", () => abort("codex-operation-failed"));
-    // Drain stderr so a broken runtime cannot block on a full pipe. Its content
-    // may contain sensitive login context, so it is intentionally not logged.
-    child.stderr?.on("data", () => {});
-    child.stderr?.once("error", () => abort("codex-operation-failed"));
-    child.once("error", () => abort("codex-runtime-start-failed"));
-    child.once("exit", () => abort("codex-operation-failed"));
+    attachCodexStdioTransport(
+      child,
+      (message) => {
+        if (this.child === child) this.handleMessage(message, child);
+      },
+      (code) => this.abortTransport(new CodexAppServerError(code), child),
+    );
 
     try {
       // The App Server expects initialized immediately after initialize (the
@@ -501,32 +472,6 @@ export class CodexAppServerClient {
     }
   }
 
-  private consumeStdout(chunk: Buffer | string, child: ChildProcess): void {
-    const text = typeof chunk === "string"
-      ? chunk
-      : this.stdoutDecoder.write(chunk);
-    this.stdoutBuffer += text;
-    if (Buffer.byteLength(this.stdoutBuffer, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
-      this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
-      return;
-    }
-    for (;;) {
-      const newline = this.stdoutBuffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = this.stdoutBuffer.slice(0, newline).trim();
-      this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
-      if (!line) continue;
-      let message: unknown;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
-        return;
-      }
-      this.handleMessage(message, child);
-    }
-  }
-
   private handleMessage(message: unknown, child: ChildProcess): void {
     if (!isCodexJsonRecord(message)) {
       this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
@@ -617,7 +562,6 @@ export class CodexAppServerClient {
     if (expectedChild && this.child !== expectedChild) return;
     this.child = null;
     this.startPromise = null;
-    this.stdoutBuffer = "";
     this.pendingLogin = null;
     this.accountStatus = blankStatus("ready");
     this.completedLoginError = null;

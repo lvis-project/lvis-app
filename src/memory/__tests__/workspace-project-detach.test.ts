@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryManager, type SessionMetadata } from "../memory-manager.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
-const SESSION_A = "workspace-detach-a";
-const SESSION_B = "workspace-detach-b";
-const SESSION_OTHER = "workspace-detach-other";
+const SESSION_A = "6b010d95-2319-4c22-80b1-87fbf1568da3";
+const SESSION_B = "93751cfb-3595-44b7-816f-04ec4745b7c9";
+const SESSION_OTHER = "a94ace0c-e21b-4190-864c-332f9298bf79";
 const ROOT = "C:\\Work\\Alpha";
 
 let dir: string;
@@ -108,7 +108,7 @@ describe("MemoryManager workspace project detachment", () => {
   });
 
   it("cancels a detached wire task while preserving its host-visible identity", async () => {
-    const originSessionId = "wire-origin-session";
+    const originSessionId = "de1234a4-c30f-4aa2-82f2-e0bee683cd70";
     const wireMetadata: SessionMetadata = {
       sessionKind: "subagent",
       projectRoot: ROOT,
@@ -167,7 +167,7 @@ describe("MemoryManager workspace project detachment", () => {
   ] as const)("preserves the first terminal wire outcome after detach and stale writes (%s)", async (
     terminalState,
   ) => {
-    const originSessionId = "wire-terminal-origin";
+    const originSessionId = "a6ae42cf-e89d-45ff-8536-7b7dc55e4a1a";
     const terminalMetadata: SessionMetadata = {
       sessionKind: "subagent",
       projectRoot: ROOT,
@@ -212,7 +212,7 @@ describe("MemoryManager workspace project detachment", () => {
     "TASK_STATE_REJECTED",
     "TASK_STATE_CANCELED",
   ] as const)("accepts a rootless terminal wire record (%s)", async (terminalState) => {
-    const originSessionId = "rootless-wire-origin";
+    const originSessionId = "5875f03b-d5c6-4758-8d4a-1dd8c059bea0";
     await memory.saveSessionMetadata(SESSION_A, {
       sessionKind: "subagent",
       sourceTools: [],
@@ -237,7 +237,7 @@ describe("MemoryManager workspace project detachment", () => {
       sessionKind: "subagent",
       projectRoot: ROOT,
       sourceTools: ["noop"],
-      originSessionId: "ordinary-origin",
+      originSessionId: "900abcdb-a00b-4967-8f4d-12ad8d6ba5ca",
       a2aWireHandlerId: undefined,
       a2aWireInternalOrigin: undefined,
       subAgentTitle: "ordinary sub-agent",
@@ -258,7 +258,7 @@ describe("MemoryManager workspace project detachment", () => {
   });
 
   it("clears detached wire terminal tombstones when a session is deleted", async () => {
-    const originSessionId = "wire-delete-origin";
+    const originSessionId = "de9fa73e-4c21-40d7-839f-4fe4c6652c73";
     await memory.saveSessionMetadata(SESSION_A, {
       sessionKind: "subagent",
       projectRoot: ROOT,
@@ -295,7 +295,7 @@ describe("MemoryManager workspace project detachment", () => {
         ...raw,
         sessionKind: "subagent",
         sourceTools: ["noop"],
-        originSessionId: "wire-origin-session",
+        originSessionId: "de1234a4-c30f-4aa2-82f2-e0bee683cd70",
         a2aWireHandlerId: "wire-handler",
         subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
       }),

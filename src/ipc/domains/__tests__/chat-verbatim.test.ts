@@ -234,7 +234,7 @@ class SessionMutationGate<T> {
 
 describe("lvis:chat:get-verbatim-tool-result", () => {
   const CHANNEL = "lvis:chat:get-verbatim-tool-result";
-  const SESSION_ID = "session-abc";
+  const SESSION_ID = "df98a854-4084-4ba1-8fbc-f00faea193bf";
 
   it("returns verbatim content + lineCount for matching in-session tool_result", async () => {
     const content = "line1\nline2\nline3";
@@ -253,7 +253,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "other-session", toolUseId: "tu-1" }, "main");
+    const result = invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "5f711b23-ee4f-4cbb-88e0-53b872bbda82", toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -449,7 +449,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
 
 describe("lvis:chat:get-sub-agent-transcript", () => {
   const CHANNEL = "lvis:chat:get-sub-agent-transcript";
-  const SESSION_ID = "session-abc";
+  const SESSION_ID = "df98a854-4084-4ba1-8fbc-f00faea193bf";
 
   function makeAgentSpawnMessages() {
     return [
@@ -460,7 +460,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
           {
             id: "tu-agent",
             name: "agent_spawn",
-            input: { title: "Research", instructions: "collect", resumeId: "child-resume" },
+            input: { title: "Research", instructions: "collect", resumeId: "sub-6e7c039b-33d44823-24c4-43ce-8492-9c72860b19e1" },
           },
         ],
       },
@@ -470,7 +470,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
         toolName: "agent_spawn",
         content: JSON.stringify({
           spawnId: "spawn-live",
-          childSessionId: "child-1",
+          childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
           summary: "done",
         }),
       },
@@ -480,7 +480,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
   it("hydrates only when the active parent transcript contains the requested sub-agent reference", async () => {
     const getPersistedTranscript = vi.fn(() => ({
       ok: true,
-      childSessionId: "child-1",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
       messages: [{ role: "assistant", content: "done" }],
     }));
     const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
@@ -488,17 +488,17 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
 
     const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
-      childSessionId: "child-1",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
     }, "main");
 
     expect(result).toEqual({
       ok: true,
-      childSessionId: "child-1",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
       messages: [{ role: "assistant", content: "done" }],
     });
     expect(getPersistedTranscript).toHaveBeenCalledWith({
       originSessionId: SESSION_ID,
-      childSessionId: "child-1",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
     });
   });
 
@@ -520,7 +520,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
   it("uses childSessionId alone when a grouped sub-agent row has a direct child link", async () => {
     const getPersistedTranscript = vi.fn(() => ({
       ok: true,
-      childSessionId: "child-1",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
       messages: [{ role: "assistant", content: "done" }],
     }));
     const loop = makeConversationLoop(SESSION_ID, makeAgentSpawnMessages());
@@ -528,24 +528,24 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
 
     const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
-      childSessionId: "child-1",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
     }, "main");
 
     expect(result).toEqual({
       ok: true,
-      childSessionId: "child-1",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
       messages: [{ role: "assistant", content: "done" }],
     });
     expect(getPersistedTranscript).toHaveBeenCalledWith({
       originSessionId: SESSION_ID,
-      childSessionId: "child-1",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
     });
   });
 
   it("uses artifact-rehydrated parent agent_spawn handles for the childSessionId gate", async () => {
     const getPersistedTranscript = vi.fn(() => ({
       ok: true,
-      childSessionId: "child-artifact",
+      childSessionId: "sub-6e7c039b-5edf391c-3311-4102-8f7e-ff9f491ec606",
       messages: [{ role: "assistant", content: "artifact-backed child transcript" }],
     }));
     const messages = makeAgentSpawnMessages();
@@ -571,7 +571,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
           ? {
               ...(message as any),
               content: JSON.stringify({
-                childSessionId: "child-artifact",
+                childSessionId: "sub-6e7c039b-5edf391c-3311-4102-8f7e-ff9f491ec606",
                 summary: "done",
               }),
             }
@@ -581,13 +581,13 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
 
     const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
-      childSessionId: "child-artifact",
+      childSessionId: "sub-6e7c039b-5edf391c-3311-4102-8f7e-ff9f491ec606",
     }, "main");
 
     expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(SESSION_ID, expect.any(Array));
     expect(result).toEqual({
       ok: true,
-      childSessionId: "child-artifact",
+      childSessionId: "sub-6e7c039b-5edf391c-3311-4102-8f7e-ff9f491ec606",
       messages: [{ role: "assistant", content: "artifact-backed child transcript" }],
     });
   });
@@ -599,8 +599,8 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     await setupHandlers(loop, { getSubAgentRunner: () => ({ getPersistedTranscript }) });
 
     const result = invokeRegisteredHandler(handlers, CHANNEL, {
-      originSessionId: "other-session",
-      childSessionId: "child-1",
+      originSessionId: "5f711b23-ee4f-4cbb-88e0-53b872bbda82",
+      childSessionId: "sub-6e7c039b-1ae80cfb-d8c8-4a02-806d-4f4d2872a62d",
     }, "main");
 
     expect(result).toEqual({ ok: false, error: "origin-session-not-active" });
@@ -614,7 +614,9 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
 
     const result = invokeRegisteredHandler(handlers, CHANNEL, {
       originSessionId: SESSION_ID,
-      childSessionId: "child-from-another-run",
+      // Well-formed, and even carrying this parent's origin tag — the only
+      // thing wrong with it is that the transcript never named it.
+      childSessionId: "sub-6e7c039b-cafeb2d0-9bb2-4190-8f4f-26b2ebe2e507",
     }, "main");
 
     expect(result).toEqual({ ok: false, error: "sub-agent-reference-not-found" });
@@ -624,7 +626,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
 
 describe("lvis:chat active main state", () => {
   it("marks fresh state when a new main chat starts", async () => {
-    const loop = makeConversationLoop("session-active", []);
+    const loop = makeConversationLoop("d1c00b95-b0af-4bd6-8179-4210161fffc3", []);
     const deps = await setupHandlers(loop);
 
     await invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main");
@@ -641,7 +643,7 @@ describe("lvis:chat active main state", () => {
     // session metadata. "No project" (null fields) is the normal persisted
     // state, so the sidebar renders it ungrouped and Insights buckets it
     // under "No project" rather than a synthetic "default" label.
-    const loop = makeConversationLoop("session-active", []);
+    const loop = makeConversationLoop("d1c00b95-b0af-4bd6-8179-4210161fffc3", []);
     const deps = await setupHandlers(loop);
 
     await invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main");
@@ -656,14 +658,14 @@ describe("lvis:chat active main state", () => {
     // waiting for the first turn to complete.
     mkdirSync(EXPLICIT_TEST_PROJECT_ROOT, { recursive: true });
     const explicitProjectRoot = realpathSync(EXPLICIT_TEST_PROJECT_ROOT);
-    const loop = makeConversationLoop("session-active", []);
+    const loop = makeConversationLoop("d1c00b95-b0af-4bd6-8179-4210161fffc3", []);
     const deps = await setupHandlers(loop);
 
     await invokeRegisteredHandler(handlers, "lvis:chat:new", { projectRoot: explicitProjectRoot, projectName: "spoofed-project-name" }, "main");
 
     expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledTimes(1);
     const [savedId, savedMeta] = (deps.memoryManager.saveSessionMetadata as any).mock.calls[0];
-    expect(savedId).toBe("session-active");
+    expect(savedId).toBe("d1c00b95-b0af-4bd6-8179-4210161fffc3");
     // sanitizeRuntimeAllowedDirectories normalizes the authorized root's
     // slash/case form — compare case/separator-insensitively rather than
     // asserting the exact literal input string.
@@ -677,26 +679,26 @@ describe("lvis:chat active main state", () => {
   });
 
   it("marks explicit main session resume but ignores routine session resume", async () => {
-    const mainLoop = makeConversationLoop("session-main", []);
+    const mainLoop = makeConversationLoop("8ce2040c-ee54-4799-8044-8683bfd037ae", []);
     mainLoop.resetAndResume.mockReturnValue({ ok: true });
     const mainDeps = await setupHandlers(mainLoop);
 
-    await invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "session-main", "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "8ce2040c-ee54-4799-8044-8683bfd037ae", "main");
 
-    expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-main");
+    expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("8ce2040c-ee54-4799-8044-8683bfd037ae");
 
-    const routineLoop = makeConversationLoop("session-routine", []);
+    const routineLoop = makeConversationLoop("5b31b09a-de06-4171-8492-94fbff746a81", []);
     routineLoop.getSessionKind.mockReturnValue("routine");
     routineLoop.resetAndResume.mockReturnValue({ ok: true });
     const routineDeps = await setupHandlers(routineLoop);
 
-    await invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "session-routine", "main");
+    await invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "5b31b09a-de06-4171-8492-94fbff746a81", "main");
 
     expect(routineDeps.memoryManager.markMainActiveResume).not.toHaveBeenCalled();
   });
 
   it("rejects unsafe session ids before resuming", async () => {
-    const loop = makeConversationLoop("session-main", []);
+    const loop = makeConversationLoop("8ce2040c-ee54-4799-8044-8683bfd037ae", []);
     const deps = await setupHandlers(loop);
 
     const result = await invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "../evil", "main") as { ok: boolean };
@@ -707,7 +709,7 @@ describe("lvis:chat active main state", () => {
   });
 
   it("marks main active after main turns but not after routine turns", async () => {
-    const mainLoop = makeConversationLoop("session-main", [{ role: "user", content: "existing" }]);
+    const mainLoop = makeConversationLoop("8ce2040c-ee54-4799-8044-8683bfd037ae", [{ role: "user", content: "existing" }]);
     mainLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     const mainDeps = await setupHandlers(mainLoop);
 
@@ -717,9 +719,9 @@ describe("lvis:chat active main state", () => {
       userActivation: true,
     }, "main");
 
-    expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-main");
+    expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("8ce2040c-ee54-4799-8044-8683bfd037ae");
 
-    const routineLoop = makeConversationLoop("session-routine", [{ role: "user", content: "existing" }]);
+    const routineLoop = makeConversationLoop("5b31b09a-de06-4171-8492-94fbff746a81", [{ role: "user", content: "existing" }]);
     routineLoop.getSessionKind.mockReturnValue("routine");
     routineLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     const routineDeps = await setupHandlers(routineLoop);
@@ -737,24 +739,24 @@ describe("lvis:chat active main state", () => {
 
 describe("lvis:chat:session-history parent provenance", () => {
   it("does not load or merge the parent transcript when a child has parentSessionId", async () => {
-    const loop = makeConversationLoop("active-session", []);
+    const loop = makeConversationLoop("a3386854-f241-42c9-8979-fd37d7cb633f", []);
     const deps = await setupHandlers(loop);
     deps.memoryManager.loadSession.mockImplementation((sessionId: string) => {
-      if (sessionId === "child-session") {
+      if (sessionId === "sub-8410443e-3e323a73-28d0-4dce-8229-3b0eca68d32a") {
         return [{ role: "user", content: "child only" }];
       }
-      if (sessionId === "parent-session") {
+      if (sessionId === "a1bdc27a-c758-4a74-8955-5e9188412366") {
         return [{ role: "user", content: "parent should not render" }];
       }
       return [];
     });
     deps.memoryManager.loadSessionMetadata.mockReturnValue({
-      parentSessionId: "parent-session",
+      parentSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
       summaryPreamble: "요약된 부모 맥락",
       title: "Child",
     });
 
-    const result = await invokeRegisteredHandler(handlers, "lvis:chat:session-history", "child-session") as {
+    const result = await invokeRegisteredHandler(handlers, "lvis:chat:session-history", "sub-8410443e-3e323a73-28d0-4dce-8229-3b0eca68d32a") as {
       ok: boolean;
       messages: Array<{ content: string }>;
       preambleChars?: number;
@@ -764,14 +766,14 @@ describe("lvis:chat:session-history parent provenance", () => {
     expect(result.messages.map((message) => message.content)).toEqual(["child only"]);
     expect(result.preambleChars).toBe("요약된 부모 맥락".length);
     expect(deps.memoryManager.loadSession).toHaveBeenCalledTimes(1);
-    expect(deps.memoryManager.loadSession).toHaveBeenCalledWith("child-session");
-    expect(deps.memoryManager.loadSession).not.toHaveBeenCalledWith("parent-session");
+    expect(deps.memoryManager.loadSession).toHaveBeenCalledWith("sub-8410443e-3e323a73-28d0-4dce-8229-3b0eca68d32a");
+    expect(deps.memoryManager.loadSession).not.toHaveBeenCalledWith("a1bdc27a-c758-4a74-8955-5e9188412366");
   });
 });
 
 describe("lvis:chat:fork", () => {
   it("carries the active rolling summary preamble into a normal fork", async () => {
-    const loop = makeConversationLoop("session-fork-source", [
+    const loop = makeConversationLoop("02bde5ab-2204-4072-8851-84a51c4ff368", [
       { role: "user", content: "old context" },
       { role: "assistant", content: "old answer" },
     ]);
@@ -798,7 +800,7 @@ describe("lvis:chat:fork", () => {
   it("rehydrates artifact-backed tool_result stubs before saving a forked session", async () => {
     const compactedResultText = "[tool_result truncated by host (Issue #902): tool=long_output_query, toolUseId=\"tu-art\", originalBytes=12000]";
     const rawContent = "artifact-backed result\n".repeat(120);
-    const loop = makeConversationLoop("session-fork-source", [
+    const loop = makeConversationLoop("02bde5ab-2204-4072-8851-84a51c4ff368", [
       { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "long_output_query", input: {} }] },
       makeToolResultMsg({
         toolUseId: "tu-art",
@@ -830,7 +832,7 @@ describe("lvis:chat:fork", () => {
 
     expect(result.ok).toBe(true);
     expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(
-      "session-fork-source",
+      "02bde5ab-2204-4072-8851-84a51c4ff368",
       expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: compactedResultText })]),
     );
     expect(deps.memoryManager.saveSession).toHaveBeenCalledWith(
@@ -840,7 +842,7 @@ describe("lvis:chat:fork", () => {
   });
 
   it("holds a session-mutation lease across fork persistence awaits", async () => {
-    const loop = makeConversationLoop("session-fork-source", [
+    const loop = makeConversationLoop("02bde5ab-2204-4072-8851-84a51c4ff368", [
       { role: "user", content: "source prompt" },
       { role: "assistant", content: "source answer" },
     ]);
@@ -871,7 +873,7 @@ describe("lvis:chat:fork", () => {
       ok: false,
       error: "streaming-active",
     });
-    await expect(invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "session-fork-source", "main")).resolves.toEqual(
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "02bde5ab-2204-4072-8851-84a51c4ff368", "main")).resolves.toEqual(
       expect.objectContaining({ ok: false, error: "streaming-active" }),
     );
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -888,7 +890,7 @@ describe("lvis:chat:fork", () => {
 
 describe("lvis:chat:continue-last-user", () => {
   const CHANNEL = "lvis:chat:continue-last-user";
-  const SESSION_ID = "session-continue";
+  const SESSION_ID = "00e839f0-e00d-4caf-8f28-2eceb20d8bfe";
 
   it("rejects stale session ids before replaying the last user turn", async () => {
     const loop = makeConversationLoop(SESSION_ID, [
@@ -896,7 +898,7 @@ describe("lvis:chat:continue-last-user", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "other-session" }, "main");
+    const result = await invokeRegisteredHandler(handlers, CHANNEL, { sessionId: "5f711b23-ee4f-4cbb-88e0-53b872bbda82" }, "main");
 
     expect(result).toEqual({ ok: false, error: "session-mismatch" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -936,7 +938,7 @@ describe("lvis:chat:send provenance", () => {
   it("classifies imported trigger envelopes as plugin-emitted and forwards originSource", async () => {
     // No parser mock: the staged-origin table parses the real envelope, so this
     // asserts the actual source-tag derivation rather than a stub of it.
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
@@ -958,7 +960,7 @@ describe("lvis:chat:send provenance", () => {
   });
 
   it("classifies mcp-prompt envelopes as mcp-prompt-emitted and forwards originSource", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
@@ -979,7 +981,7 @@ summarize the repo
   });
 
   it("rejects a staged origin whose envelope is absent", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     await setupHandlers(loop);
 
     const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
@@ -995,7 +997,7 @@ summarize the repo
   // non-staged claimed origin would launder server/plugin-authored text into a
   // fully trusted turn: no force-ask, no untrusted framing, no provenance card.
   it("rejects a staged envelope sent under a non-staged origin", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     await setupHandlers(loop);
 
     const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
@@ -1024,7 +1026,7 @@ B${i}
 </mcp-resource>`;
 
   it("allows a turn at the resource-attachment bound", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
@@ -1049,7 +1051,7 @@ B${i}
   });
 
   it("refuses a turn over the bound instead of dropping the extras", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
@@ -1067,7 +1069,7 @@ B${i}
   });
 
   it("counts fences, not parts, so joining them into one part is not a bypass", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
@@ -1089,7 +1091,7 @@ B${i}
   // verbatim — must not have their message refused and be told to remove resources
   // they never attached, with no way to find out why.
   it("never refuses a turn for fences the user typed themselves", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
@@ -1108,7 +1110,7 @@ B${i}
   });
 
   it("rejects chat sends that omit explicit inputOrigin", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     await setupHandlers(loop);
 
     const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", { input: "/permission auto" }, "main");
@@ -1118,7 +1120,7 @@ B${i}
   });
 
   it("rejects user-keyboard chat sends without an active user gesture", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     await setupHandlers(loop);
 
     const result = await invokeRegisteredHandler(handlers, "lvis:chat:send", {
@@ -1131,7 +1133,7 @@ B${i}
   });
 
   it("accepts user-keyboard chat sends only with an active user gesture", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
@@ -1150,7 +1152,7 @@ B${i}
   });
 
   it("resolves personaPromptId through PersonaPromptStore at the chat boundary", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     const personaPromptStore = {
       get: vi.fn(async () => ({
@@ -1185,7 +1187,7 @@ B${i}
   });
 
   it("rejects the original input when the session changes during persona resolution", async () => {
-    const loop = makeConversationLoop("session-before-persona", []);
+    const loop = makeConversationLoop("4bd6ffd9-1846-440d-8323-0d5d600848d7", []);
     const personaEntered = new SessionMutationGate<void>();
     const personaGate = new SessionMutationGate<{
       id: string;
@@ -1215,7 +1217,7 @@ B${i}
     }, "main") as Promise<unknown>;
 
     await personaEntered.promise;
-    loop.getSessionId.mockReturnValue("session-after-persona");
+    loop.getSessionId.mockReturnValue("9eebb178-4d79-433a-887e-68f286fcff1b");
     personaGate.resolve({
       id: "reviewer",
       name: "Reviewer",
@@ -1230,7 +1232,7 @@ B${i}
     expect(runner.peekParentMailbox).not.toHaveBeenCalled();
   });
   it("fails closed when selected personaPromptId is missing from the prompt store", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     const personaPromptStore = { get: vi.fn(async () => null) };
     await setupHandlers(loop, { personaPromptStore });
 
@@ -1246,7 +1248,7 @@ B${i}
   });
 
   it("rejects personaPromptId on queue-auto chat sends", async () => {
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     const personaPromptStore = { get: vi.fn() };
     await setupHandlers(loop, { personaPromptStore });
 
@@ -1263,7 +1265,7 @@ B${i}
 
   it("forwards permission mode change callbacks to the chat stream", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockImplementation(async (_input, callbacks) => {
       callbacks.onPermissionModeChanged("allow");
       return { text: "ok", toolCalls: [], stopReason: "end_turn" };
@@ -1294,7 +1296,7 @@ B${i}
 
   it("keeps chat send alive when the renderer stream target is destroyed mid-turn", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
-    const loop = makeConversationLoop("session-provenance", []);
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", []);
     loop.runTurn.mockImplementation(async (_input, callbacks) => {
       callbacks.onTextDelta("before");
       callbacks.onError("permission deferred");
@@ -1342,7 +1344,7 @@ B${i}
   });
 
   it("resolves stored persona prompt id when edit-resending a user message", async () => {
-    const loop = makeConversationLoop("session-provenance", [
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", [
       {
         role: "user",
         content: "old text",
@@ -1414,7 +1416,7 @@ B${i}
       sent.push({ channel, payload });
     });
 
-    const editLoop = makeConversationLoop("session-edit-redaction", [
+    const editLoop = makeConversationLoop("10231d68-969e-4fcd-82e5-ce6830158729", [
       { role: "user", content: "old text", meta: { messageId: "row-old-text" } },
       { role: "assistant", content: "old answer", meta: { messageId: "row-old-answer" } },
     ]);
@@ -1446,7 +1448,7 @@ B${i}
       const image = { type: "image", image: "data:image/png;base64,abc", mimeType: "image/png" };
       const rawFence =
         '<mcp-resource trust="untrusted-server-data" uri="mcp://alice@example.com/resource">contact alice@example.com</mcp-resource>';
-      const replayLoop = makeConversationLoop("session-replay-redaction", [
+      const replayLoop = makeConversationLoop("f7b2cd7d-a877-45aa-8b50-756c10ca2d0c", [
         { role: "assistant", content: "earlier" },
         {
           role: "user",
@@ -1467,7 +1469,7 @@ B${i}
         return {};
       });
 
-      await invokeRegisteredHandler(handlers, "lvis:chat:continue-last-user", { sessionId: "session-replay-redaction" }, "main");
+      await invokeRegisteredHandler(handlers, "lvis:chat:continue-last-user", { sessionId: "f7b2cd7d-a877-45aa-8b50-756c10ca2d0c" }, "main");
 
       const replayInput = replayLoop.runTurn.mock.calls[0]?.[0] as string;
       const replayOptions = replayLoop.runTurn.mock.calls[0]?.[3] as Record<string, unknown>;
@@ -1488,7 +1490,7 @@ B${i}
           },
         ]);
 
-      const stagedLoop = makeConversationLoop("session-staged-redaction", [
+      const stagedLoop = makeConversationLoop("1a75feb0-5469-4d73-8f2e-484c2e309d77", [
         {
           role: "user",
           content: '<app-message source="app:010-1234-5678">\\nstaged body\\n</app-message>',
@@ -1507,7 +1509,7 @@ B${i}
       // DLP turns the source header into a non-parseable placeholder. The
       // replay must fail closed rather than treat the originally app-authored
       // message as user-keyboard input with its force-ask gate removed.
-      await expect(invokeRegisteredHandler(handlers, "lvis:chat:continue-last-user", { sessionId: "session-staged-redaction" }, "main"))
+      await expect(invokeRegisteredHandler(handlers, "lvis:chat:continue-last-user", { sessionId: "1a75feb0-5469-4d73-8f2e-484c2e309d77" }, "main"))
         .rejects.toThrow("missing-app-envelope");
       expect(stagedLoop.runTurn).not.toHaveBeenCalled();
       expect(sent.filter(({ payload }) => (payload as { type?: string }).type === "redact_notice"))
@@ -1549,7 +1551,7 @@ B${i}
     ];
 
     try {
-      const editLoop = makeConversationLoop("session-edit-restore", [...original]);
+      const editLoop = makeConversationLoop("3955cc67-b1d0-4ed9-8960-b8f6ae2ded0c", [...original]);
       const editDeps = await setupHandlers(editLoop);
       editDeps.settingsService.get.mockImplementation((key?: string) => {
         if (key === "llm") return fakeLlmSettings();
@@ -1563,7 +1565,7 @@ B${i}
       expect(editLoop.getHistory().restore).toHaveBeenCalledWith(original);
       expect(editLoop.getHistory().getMessages()).toEqual(original);
 
-      const retryLoop = makeConversationLoop("session-retry-restore", [
+      const retryLoop = makeConversationLoop("e325b22e-ab7b-4cd5-8835-a98b63689506", [
         { role: "user", content: stagedInput },
         { role: "assistant", content: "existing assistant text" },
       ]);
@@ -1590,7 +1592,7 @@ B${i}
   });
 
   it("resolves stored persona prompt id when retrying with effort settings", async () => {
-    const loop = makeConversationLoop("session-provenance", [
+    const loop = makeConversationLoop("f54c7bda-1854-4991-8708-8d60d079368a", [
       {
         role: "user",
         content: [
@@ -1639,7 +1641,7 @@ B${i}
 
 describe("sub-agent parent mailbox on manual turns", () => {
   it("joins durable child messages into the user's next parent turn and acknowledges them", async () => {
-    const loop = makeConversationLoop("parent-session", []);
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", []);
     loop.runTurn.mockResolvedValue({
       text: "parent response",
       toolCalls: [],
@@ -1676,11 +1678,11 @@ describe("sub-agent parent mailbox on manual turns", () => {
         subAgentReport: {},
       }),
     );
-    expect(acknowledgeParentMailbox).toHaveBeenCalledWith("parent-session", ["message-1"]);
+    expect(acknowledgeParentMailbox).toHaveBeenCalledWith("a1bdc27a-c758-4a74-8955-5e9188412366", ["message-1"]);
   });
 
   it("acknowledges a consumed mailbox before post-turn bookkeeping fails", async () => {
-    const loop = makeConversationLoop("parent-session", [
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", [
       { role: "user", content: "existing parent input" },
     ]);
     loop.getSessionProjectIsDefault.mockReturnValue(true);
@@ -1712,15 +1714,15 @@ describe("sub-agent parent mailbox on manual turns", () => {
 
     expect(acknowledgeParentMailbox).toHaveBeenCalledTimes(1);
     expect(acknowledgeParentMailbox).toHaveBeenCalledWith(
-      "parent-session",
+      "a1bdc27a-c758-4a74-8955-5e9188412366",
       ["message-bookkeeping-failure"],
     );
-    expect(deps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("parent-session");
+    expect(deps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("a1bdc27a-c758-4a74-8955-5e9188412366");
     expect(acknowledgeParentMailbox.mock.invocationCallOrder[0])
       .toBeLessThan(deps.memoryManager.markMainActiveResume.mock.invocationCallOrder[0]!);
   });
   it("holds the turn lease from mailbox peek through ACK and blocks session mutation", async () => {
-    const loop = makeConversationLoop("parent-session", []);
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", []);
     loop.runTurn.mockResolvedValue({
       text: "parent response",
       toolCalls: [],
@@ -1755,7 +1757,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
 
     await peekEntered.promise;
     await expect(reentrantNew).resolves.toEqual({ ok: false, error: "streaming-active" });
-    await expect(invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "parent-session", "main")).resolves.toEqual(
+    await expect(invokeRegisteredHandler(handlers, "lvis:chat:session-resume", "a1bdc27a-c758-4a74-8955-5e9188412366", "main")).resolves.toEqual(
       expect.objectContaining({ ok: false, error: "streaming-active" }),
     );
     await expect(invokeRegisteredHandler(handlers, "lvis:chat:fork", undefined, "main")).resolves.toEqual({
@@ -1785,7 +1787,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
     ackGate.resolve(1);
     await sendPromise;
     expect(runner.acknowledgeParentMailbox).toHaveBeenCalledWith(
-      "parent-session",
+      "a1bdc27a-c758-4a74-8955-5e9188412366",
       ["message-lease"],
     );
   });
@@ -1794,7 +1796,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
 
 describe("sub-agent autonomous parent wake", () => {
   it("starts a current idle parent turn through agent-message provenance and acknowledges after completion", async () => {
-    const loop = makeConversationLoop("parent-session", []);
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", []);
     (loop as typeof loop & { hasActiveTurn: ReturnType<typeof vi.fn> }).hasActiveTurn = vi.fn(() => false);
     loop.runTurn.mockResolvedValue({
       text: "parent response",
@@ -1818,7 +1820,7 @@ describe("sub-agent autonomous parent wake", () => {
     await setupHandlers(loop, { getSubAgentRunner: () => runner });
 
     expect(wakeHandler).toBeTypeOf("function");
-    await wakeHandler!("parent-session");
+    await wakeHandler!("a1bdc27a-c758-4a74-8955-5e9188412366");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       // The wake turn's input IS the report, prefixed once with the host's
@@ -1833,11 +1835,11 @@ describe("sub-agent autonomous parent wake", () => {
       }),
     );
     expect(loop.runTurn.mock.calls[0]?.[3]).not.toHaveProperty("initialGuidance");
-    expect(acknowledgeParentMailbox).toHaveBeenCalledWith("parent-session", ["message-1"]);
+    expect(acknowledgeParentMailbox).toHaveBeenCalledWith("a1bdc27a-c758-4a74-8955-5e9188412366", ["message-1"]);
   });
 
   it("acknowledges an autonomous mailbox before post-turn bookkeeping fails", async () => {
-    const loop = makeConversationLoop("parent-session", [
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", [
       { role: "user", content: "existing parent input" },
     ]);
     loop.getSessionProjectIsDefault.mockReturnValue(true);
@@ -1867,21 +1869,21 @@ describe("sub-agent autonomous parent wake", () => {
       new Error("wake-bookkeeping-failed"),
     );
 
-    await expect(wakeHandler!("parent-session")).rejects.toThrow(
+    await expect(wakeHandler!("a1bdc27a-c758-4a74-8955-5e9188412366")).rejects.toThrow(
       "wake-bookkeeping-failed",
     );
 
     expect(acknowledgeParentMailbox).toHaveBeenCalledTimes(1);
     expect(acknowledgeParentMailbox).toHaveBeenCalledWith(
-      "parent-session",
+      "a1bdc27a-c758-4a74-8955-5e9188412366",
       ["message-wake-bookkeeping-failure"],
     );
-    expect(deps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("parent-session");
+    expect(deps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("a1bdc27a-c758-4a74-8955-5e9188412366");
     expect(acknowledgeParentMailbox.mock.invocationCallOrder[0])
       .toBeLessThan(deps.memoryManager.markMainActiveResume.mock.invocationCallOrder[0]!);
   });
   it("single-flights autonomous wake before mailbox peek starts", async () => {
-    const loop = makeConversationLoop("parent-session", []);
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", []);
     (loop as any).hasActiveTurn = vi.fn(() => false);
     let finishTurn!: (result: any) => void;
     loop.runTurn.mockReturnValue(new Promise((resolve) => { finishTurn = resolve; }));
@@ -1899,7 +1901,7 @@ describe("sub-agent autonomous parent wake", () => {
     };
     await setupHandlers(loop, { getSubAgentRunner: () => runner });
 
-    const wakePromise = wakeHandler!("parent-session");
+    const wakePromise = wakeHandler!("a1bdc27a-c758-4a74-8955-5e9188412366");
 
     // trackStreamTurn publishes the lease synchronously, before its deferred
     // factory begins mailbox I/O.
@@ -1928,7 +1930,7 @@ describe("sub-agent autonomous parent wake", () => {
     expect(acknowledgeParentMailbox).toHaveBeenCalledTimes(1);
   });
   it("does not start or acknowledge when the requested parent is not current", async () => {
-    const loop = makeConversationLoop("current-parent", []);
+    const loop = makeConversationLoop("7d997d58-4f1b-4e93-86f3-81937b915655", []);
     (loop as typeof loop & { hasActiveTurn: ReturnType<typeof vi.fn> }).hasActiveTurn = vi.fn(() => false);
     const acknowledgeParentMailbox = vi.fn(async () => 0);
     let wakeHandler: ((parentSessionId: string) => Promise<void>) | undefined;
@@ -1941,14 +1943,14 @@ describe("sub-agent autonomous parent wake", () => {
     };
     await setupHandlers(loop, { getSubAgentRunner: () => runner });
 
-    await wakeHandler!("other-parent");
+    await wakeHandler!("bebd469f-b3d4-42a8-8340-f0a27e66162b");
 
     expect(loop.runTurn).not.toHaveBeenCalled();
     expect(runner.peekParentMailbox).not.toHaveBeenCalled();
     expect(acknowledgeParentMailbox).not.toHaveBeenCalled();
   });
   it("waits for the current stream lease once, then wakes a late mailbox delivery", async () => {
-    const loop = makeConversationLoop("parent-session", []);
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", []);
     (loop as any).hasActiveTurn = vi.fn(() => false);
     const manualTurn = new SessionMutationGate<any>();
     const manualEntered = new SessionMutationGate<void>();
@@ -1986,7 +1988,7 @@ describe("sub-agent autonomous parent wake", () => {
     }, "main") as Promise<unknown>;
     await manualEntered.promise;
 
-    const wakePromise = wakeHandler!("parent-session");
+    const wakePromise = wakeHandler!("a1bdc27a-c758-4a74-8955-5e9188412366");
     await Promise.resolve();
     expect(runner.peekParentMailbox).toHaveBeenCalledTimes(1);
     expect(loop.runTurn).toHaveBeenCalledTimes(1);
@@ -2007,13 +2009,13 @@ describe("sub-agent autonomous parent wake", () => {
     );
     expect(acknowledgeParentMailbox).toHaveBeenCalledTimes(1);
     expect(acknowledgeParentMailbox).toHaveBeenCalledWith(
-      "parent-session",
+      "a1bdc27a-c758-4a74-8955-5e9188412366",
       ["message-late"],
     );
   });
 
   it("waits for one same-session mutation lease and then wakes exactly once", async () => {
-    const loop = makeConversationLoop("parent-session", []);
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", []);
     (loop as any).hasActiveTurn = vi.fn(() => false);
     loop.runTurn.mockResolvedValue({
       text: "wake response",
@@ -2041,7 +2043,7 @@ describe("sub-agent autonomous parent wake", () => {
 
     const mutationPromise = invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main") as Promise<unknown>;
     await mutationEntered.promise;
-    const wakePromise = wakeHandler!("parent-session");
+    const wakePromise = wakeHandler!("a1bdc27a-c758-4a74-8955-5e9188412366");
     await Promise.resolve();
     expect(runner.peekParentMailbox).not.toHaveBeenCalled();
 
@@ -2055,10 +2057,10 @@ describe("sub-agent autonomous parent wake", () => {
   });
 
   it("does not wake after the captured mutation switches sessions", async () => {
-    const loop = makeConversationLoop("parent-session", []);
+    const loop = makeConversationLoop("a1bdc27a-c758-4a74-8955-5e9188412366", []);
     (loop as any).hasActiveTurn = vi.fn(() => false);
     loop.newConversation.mockImplementation(() => {
-      loop.getSessionId.mockReturnValue("other-session");
+      loop.getSessionId.mockReturnValue("5f711b23-ee4f-4cbb-88e0-53b872bbda82");
     });
     let wakeHandler: ((parentSessionId: string) => Promise<void>) | undefined;
     const runner = {
@@ -2080,7 +2082,7 @@ describe("sub-agent autonomous parent wake", () => {
 
     const mutationPromise = invokeRegisteredHandler(handlers, "lvis:chat:new", undefined, "main") as Promise<unknown>;
     await mutationEntered.promise;
-    const wakePromise = wakeHandler!("parent-session");
+    const wakePromise = wakeHandler!("a1bdc27a-c758-4a74-8955-5e9188412366");
     mutationGate.resolve(undefined);
     await mutationPromise;
     await wakePromise;
@@ -2109,7 +2111,7 @@ describe("sub-agent autonomous parent wake", () => {
  * suite green and the defect returns exactly as first reported.
  */
 describe("lvis:chat:continue-last-user — a resource turn's row", () => {
-  const SESSION_ID = "session-replay-resource";
+  const SESSION_ID = "7d9d1608-67c6-43cf-8379-e8bd1a188e3e";
   const FENCE = [
     `${MCP_RESOURCE_FENCE_OPEN} server="hr-mcp" uri="file:///policy.md">`,
     "SERVER BODY THE USER DID NOT WRITE",
@@ -2186,7 +2188,7 @@ describe("shared main-conversation lease on replay commands", () => {
       { role: "user", content: "previous question", meta: { messageId: "row-lease-user" } },
       { role: "assistant", content: "previous answer", meta: { messageId: "row-lease-assistant" } },
     ];
-    const loop = makeConversationLoop("shared-lease-session", messages);
+    const loop = makeConversationLoop("7b9c0647-fc72-47d5-8330-c8ea0a2f8274", messages);
     const turnEntered = new SessionMutationGate<void>();
     let finishTurn!: (result: { text: string; toolCalls: unknown[]; stopReason: string }) => void;
     loop.runTurn.mockImplementation(() => {
@@ -2208,7 +2210,7 @@ describe("shared main-conversation lease on replay commands", () => {
     await expect(invokeRegisteredHandler(handlers, CHANNELS.chat.editResend, "row-lease-user", "replacement", "main"))
       .resolves.toEqual({ ok: false, error: "streaming-active" });
     await expect(invokeRegisteredHandler(handlers, CHANNELS.chat.continueLastUser, {
-      sessionId: "shared-lease-session",
+      sessionId: "7b9c0647-fc72-47d5-8330-c8ea0a2f8274",
     }, "main")).resolves.toEqual({ ok: false, error: "streaming-active" });
     await expect(invokeRegisteredHandler(handlers, CHANNELS.chat.retryEffort, { enableThinking: true }, "main"))
       .resolves.toEqual({ ok: false, error: "streaming-active" });
@@ -2224,7 +2226,7 @@ describe("shared main-conversation lease on replay commands", () => {
 
 describe("an interrupt send while a turn is running", () => {
   function runningTurn() {
-    const loop = makeConversationLoop("interrupt-session", []);
+    const loop = makeConversationLoop("ad6a7bdb-a5ef-4f37-84d6-a0388b18191c", []);
     const turnEntered = new SessionMutationGate<void>();
     let finishTurn!: (result: { text: string; toolCalls: unknown[]; route: string; stopReason: string }) => void;
     loop.runTurn.mockImplementation(async () => ({ text: "second answer", toolCalls: [], route: "llm", stopReason: "end_turn" }));

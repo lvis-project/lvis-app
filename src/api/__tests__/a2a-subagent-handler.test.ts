@@ -31,7 +31,7 @@ import { A2ATaskStore } from "../a2a-task-store.js";
 import { UUID_PATTERN } from "../../shared/uuid.js";
 
 const HANDLER_ID = "profile-a";
-const TASK_ID = "sub-wire-task-1";
+const TASK_ID = "sub-7bc35644-8737bb97-eb8b-4e75-85c9-1e9b9abd3671";
 
 function clock() {
   let tick = 0;
@@ -830,12 +830,12 @@ describe("A2ASubAgentHandler", () => {
     const unknown = makeHarness();
     await expect(unknown.handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("message-unknown-preflight", {
-        taskId: "sub-unknown-preflight",
+        taskId: "sub-a3164e34-4366c618-04f5-4164-8dbd-1f7d593061f0",
         contextId: "context-unknown-preflight",
       }),
     })).rejects.toMatchObject({ definition: { code: -32001 } });
     await expect(unknown.handler.handle(A2AJsonRpcMethod.CANCEL_TASK, {
-      id: "sub-unknown-preflight",
+      id: "sub-a3164e34-4366c618-04f5-4164-8dbd-1f7d593061f0",
     })).rejects.toMatchObject({ definition: { code: -32001 } });
     expect(unknown.authorizeOperation).not.toHaveBeenCalled();
 
@@ -987,7 +987,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("blocks a continuation from committing an initial admission message id", async () => {
-    const initialTaskId = "sub-initial-admission-race";
+    const initialTaskId = "sub-c3b96ceb-30983f4c-46c8-4d84-819d-3483406e3ea2";
     const { handler, runner, store, authorizeOperation } = makeHarness();
     await seedWorkingTask(
       store,
@@ -1256,7 +1256,7 @@ describe("A2ASubAgentHandler", () => {
 
     await expect(foreign.handle(A2AJsonRpcMethod.GET_TASK, { id: TASK_ID }))
       .rejects.toMatchObject({ definition: { code: -32001 } });
-    await expect(foreign.handle(A2AJsonRpcMethod.GET_TASK, { id: "absent-task" }))
+    await expect(foreign.handle(A2AJsonRpcMethod.GET_TASK, { id: "f646f69a-6fa0-4e36-80f8-7ba2ed853ddf" }))
       .rejects.toMatchObject({ definition: { code: -32001 } });
     expect(owner.authorizeOperation).not.toHaveBeenCalled();
     expect(owner.audit).toHaveBeenCalledWith(expect.objectContaining({
@@ -1396,7 +1396,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("cancels a full-history wait through the message-less terminal fallback", async () => {
-    const taskId = "sub-full-history-cancel";
+    const taskId = "sub-0c79046a-e86618f5-4817-4b2b-89f9-d6b8e0a18c87";
     const { handler, runner, store } = makeHarness(HANDLER_ID, {
       maxHistoryMessages: 2,
     });
@@ -1781,7 +1781,7 @@ describe("A2ASubAgentHandler", () => {
 
     await expect(handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("message-retarget", {
-        taskId: "sub-other-task",
+        taskId: "sub-9309a050-25767e9a-fc68-4d2d-8fbc-0db619adcc76",
         contextId: "context-other",
       }),
     })).rejects.toMatchObject({ definition: { code: -32602 } });
@@ -1805,14 +1805,14 @@ describe("A2ASubAgentHandler", () => {
     await seedWorkingTask(
       store,
       HANDLER_ID,
-      "sub-list-1",
+      "sub-2fa270d9-89dd0aa8-f055-43ab-8b4b-65fc8b62caf5",
       "context-list",
       "message-list-1",
     );
     await seedWorkingTask(
       store,
       HANDLER_ID,
-      "sub-list-2",
+      "sub-271e6ece-df551ed9-eb46-4f78-894c-a578d89e3e29",
       "context-list",
       "message-list-2",
     );
@@ -1912,7 +1912,7 @@ describe("A2ASubAgentHandler", () => {
     async (reason) => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
-      const taskId = `sub-expiry-${reason}`;
+      const taskId = `sub-expiry${reason.replace(/[^a-z0-9]/g, "")}-00000000-0000-4000-8000-000000000000`;
       const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
         maxHistoryMessages: 2,
         now: () => new Date(Date.now()).toISOString(),
@@ -1966,7 +1966,7 @@ describe("A2ASubAgentHandler", () => {
   it("resets expiry only after a new authoritative INPUT_REQUIRED episode", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
-    const taskId = "sub-expiry-reset";
+    const taskId = "sub-e8991570-4ca34f95-5032-4b24-84b2-d8ada3f5a891";
     const contextId = "context-expiry-reset";
     const { handler, runner, store } = makeHarness(HANDLER_ID, {
       now: () => new Date(Date.now()).toISOString(),
@@ -2003,7 +2003,7 @@ describe("A2ASubAgentHandler", () => {
   it("reconciles nonterminal restart records before applying expiry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-07T00:00:00.000Z"));
-    const taskId = "sub-expiry-restart";
+    const taskId = "sub-ff9df4bc-6158373f-7216-4afe-8859-72e67db86ab3";
     const { handler, runner, store } = makeHarness(HANDLER_ID, {
       now: () => new Date(Date.now()).toISOString(),
     });
@@ -2033,7 +2033,7 @@ describe("A2ASubAgentHandler", () => {
   it("preserves an expired wait and retries after a runner cancellation failure", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
-    const taskId = "sub-expiry-retry";
+    const taskId = "sub-09577191-87d3057a-f089-4686-8cfe-c9ea71324647";
     const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
       now: () => new Date(Date.now()).toISOString(),
     });
@@ -2091,14 +2091,14 @@ describe("A2ASubAgentHandler", () => {
     });
     await seedInputRequiredTask(
       store,
-      "sub-expiry-nearest-a",
+      "sub-85e70efc-6c3136cd-d627-49c8-8047-2e9d382c7c39",
       "context-expiry-nearest-a",
       "message-expiry-nearest-a",
     );
     await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
     await seedInputRequiredTask(
       store,
-      "sub-expiry-nearest-b",
+      "sub-1a5b9379-cf43af38-8ae2-47a4-8870-c39bf5404f71",
       "context-expiry-nearest-b",
       "message-expiry-nearest-b",
     );
@@ -2114,7 +2114,7 @@ describe("A2ASubAgentHandler", () => {
   it("makes concurrent disposal callers await an in-flight expiry sweep", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
-    const taskId = "sub-expiry-dispose";
+    const taskId = "sub-b08bf3be-4a724840-cd90-4245-8916-8d0c8e581005";
     const { handler, runner, store } = makeHarness(HANDLER_ID, {
       now: () => new Date(Date.now()).toISOString(),
     });

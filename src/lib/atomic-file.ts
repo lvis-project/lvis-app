@@ -132,6 +132,18 @@ function syncParentDirectoryAfterRename(
 }
 
 /**
+ * Whether `error` is the one thrown above: the rename landed, only the
+ * parent-directory sync did not. A caller that can verify the bytes on disk
+ * treats it as a commit; every other error is a failed write. Strict
+ * `instanceof Error` because that is what this module throws — the two
+ * earlier per-store copies disagreed on whether a bare `{ committed: true }`
+ * object counted, and only one answer describes what is actually thrown.
+ */
+export function isCommittedAtomicWriteError(error: unknown): error is Error & { committed: true } {
+  return error instanceof Error && (error as { committed?: unknown }).committed === true;
+}
+
+/**
  * Durably replace a UTF-8 file without exposing a partially-written target.
  *
  * The temporary file lives beside the destination so the final rename stays

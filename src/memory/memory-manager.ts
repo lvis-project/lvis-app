@@ -15,6 +15,7 @@ import { maskSensitiveData } from "../shared/dlp.js";
 import { estimateTokens } from "../shared/token-estimate.js";
 import {
   A2ATaskState,
+  A2A_HANDLER_ID_PATTERN,
   A2A_PROJECTED_TASK_STATE_VALUES,
   isA2ATerminalTaskState,
   type A2AProjectedTaskState,
@@ -30,7 +31,7 @@ import {
 import { SessionSearchIndex, type IndexedSessionInput } from "./session-search-index.js";
 import { isRecord } from "../shared/is-record.js";
 import { escapeRegExp } from "../shared/escape-reg-exp.js";
-import { dlpSafeCandidate } from "../shared/dlp-safe-id.js";
+import { dlpSafeCandidate, SESSION_ID_NAMESPACE_KINDS } from "../shared/dlp-safe-id.js";
 import { UUID_PATTERN } from "../shared/uuid.js";
 import { SHA256_HEX, sha256Hex } from "../lib/hex-digest-equal.js";
 import { parseJsonlLines } from "../audit/jsonl-reader.js";
@@ -598,10 +599,23 @@ const MAX_A2A_WIRE_ID_CHARS = 256;
 const ACTIVE_SESSION_STATE_FILE = ".active-session.json";
 
 /**
- * Regex for session IDs used in file paths.
- * Allows alphanumerics, underscores, and hyphens — rejects path-traversal chars.
+ * The one shape a session id has, everywhere it is minted, persisted or read
+ * back: a lowercase UUID-shaped core, optionally namespaced as
+ * `<kind>-<tag>-` where `kind` is one of {@link SESSION_ID_NAMESPACE_KINDS}
+ * (built from that list, so the rule cannot drift from the minting code) and
+ * `tag` is `[a-z0-9]+`. Every producer draws through `createDlpSafeUuid` /
+ * `createNamespacedSessionId`, so this is a description of what exists, not a
+ * looser bound around it. The shape is what makes an id safe as a filename
+ * component; it also bounds the id, which is why no separate length cap is
+ * needed. Earlier there were four validators (this one accepted any
+ * `[A-Za-z0-9_-]+`, the A2A task store capped at 256, the rationale stores
+ * checked length or control characters only) and a 257-character id passed
+ * some of them.
  */
-const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
+const SESSION_ID_CORE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const SESSION_ID_REGEX = new RegExp(
+  `^(?:(?:${SESSION_ID_NAMESPACE_KINDS.join("|")})-[a-z0-9]+-)?${SESSION_ID_CORE}$`,
+);
 
 /**
  * Returns true when `id` is a valid session ID safe to use as a filename component.
@@ -613,6 +627,13 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 export function isValidSessionId(id: unknown): id is string {
   return typeof id === "string" && SESSION_ID_REGEX.test(id);
 }
+/** The wire handler id is an A2A handler name (`shared/a2a.ts`), not a session id. */
+function isValidA2AWireHandlerId(id: unknown): id is string {
+  return typeof id === "string"
+    && A2A_HANDLER_ID_PATTERN.test(id)
+    && maskSensitiveData(id).detections.length === 0;
+}
+/** The wire internal origin is a session id (`a2a-wire-<tag>-<uuid>`). */
 function isValidA2AWireMetadataId(id: unknown): id is string {
   return isValidSessionId(id)
     && id.length <= MAX_A2A_WIRE_ID_CHARS
@@ -1080,7 +1101,7 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     if (
       !hasA2AWireHandlerId
       || !hasA2AWireInternalOrigin
-      || !isValidA2AWireMetadataId(raw.a2aWireHandlerId)
+      || !isValidA2AWireHandlerId(raw.a2aWireHandlerId)
       || !isValidA2AWireMetadataId(raw.a2aWireInternalOrigin)
       || raw.a2aWireInternalOrigin !== originSessionId
       || (projectRoot === undefined && !isDetachedA2AWireTask)
@@ -2308,7 +2329,7 @@ export class MemoryManager {
       && safe.subAgentSuspensionPrompt === undefined;
     if (hasA2AWireHandlerId || hasA2AWireInternalOrigin) {
       if (
-        !isValidA2AWireMetadataId(safe.a2aWireHandlerId)
+        !isValidA2AWireHandlerId(safe.a2aWireHandlerId)
         || !isValidA2AWireMetadataId(safe.a2aWireInternalOrigin)
         || safe.a2aWireInternalOrigin !== safe.originSessionId
         || (safe.projectRoot === undefined && !isDetachedA2AWireTask)

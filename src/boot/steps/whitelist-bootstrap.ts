@@ -13,6 +13,7 @@ import type { AuditLogger } from "../../audit/audit-logger.js";
 import { createLogger } from "../../lib/logger.js";
 import { emitEvent } from "../types.js";
 import { t } from "../../i18n/index.js";
+import { isE2eTestRuntime } from "../dev-flags.js";
 
 const log = createLogger("whitelist-bootstrap");
 
@@ -33,10 +34,6 @@ function isOnlineByDefault(): boolean {
   // E2E + unit tests set this so they don't hit the public CDN.
   if (process.env.LVIS_WHITELIST_OFFLINE === "1") return false;
   return true;
-}
-
-function isE2eTestRuntime(): boolean {
-  return process.env.LVIS_E2E === "1" && process.env.NODE_ENV === "test";
 }
 
 function installE2eWhitelistPublicKeyOverride(): void {

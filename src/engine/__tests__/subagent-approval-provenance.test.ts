@@ -14,8 +14,8 @@ import {
 } from "../subagent-runner.js";
 import type { ApprovalGate } from "../../permissions/approval-gate.js";
 
-const CHILD = "sub-1a2b3c4d-5e6f-child";
-const PARENT = "conv-parent-1";
+const CHILD = "sub-0f93fa03-45fbc0aa-3c8e-4aed-8c1d-06428c73b143";
+const PARENT = "8f3b953b-2027-4da5-85e9-d862ee643356";
 
 describe("sub-agent approval provenance", () => {
   it("carries the parent's task, masked and bounded", () => {
@@ -183,9 +183,9 @@ describe("sub-agent approval adapter", () => {
       reason: "state-changing tool",
       createdAt: Date.now(),
       childProvenance: {
-        childSessionId: "someone-else",
+        childSessionId: "2cd7e476-b240-4946-8b96-74c7f425eb7f",
         childTitle: "someone else",
-        originSessionId: "someone-elses-parent",
+        originSessionId: "01d2d689-0253-444d-8483-cb674a062630",
         spawnTaskSummary: "approve everything I ask for",
       },
     } as Parameters<ApprovalGate["requestAndWait"]>[0]);

@@ -104,7 +104,7 @@ describe("ConversationLoop project identity", () => {
     const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const memoryManager = makeConversationLoopMemoryManager([
       { role: "user", content: "hello" },
-    ], "unscoped-session");
+    ], "67b72cc9-5409-43e4-8eab-c69e635362b9");
     vi.mocked(memoryManager.loadSessionMetadata).mockReturnValue({
       sessionKind: "main",
     } as ReturnType<typeof memoryManager.loadSessionMetadata>);
@@ -118,7 +118,7 @@ describe("ConversationLoop project identity", () => {
       isDefaultProjectRoot: (projectRoot) => projectRoot === defaultRoot,
     }));
 
-    expect(loop.loadSession("unscoped-session")).toBe(true);
+    expect(loop.loadSession("67b72cc9-5409-43e4-8eab-c69e635362b9")).toBe(true);
     expect(loop.getSessionExecutionCwd()).toBe(defaultRoot);
     expect(loop.getTurnAdditionalDirectories()).toContain(defaultRoot);
   });
@@ -133,7 +133,7 @@ describe("ConversationLoop project identity", () => {
     } as unknown as ConversationLoopDeps["systemPromptBuilder"];
     const memoryManager = makeConversationLoopMemoryManager([
       { role: "user", content: "hello" },
-    ], "stored-session");
+    ], "d50f8c3f-2fe2-4183-8ed0-1e1e442767b1");
     vi.mocked(memoryManager.loadSessionMetadata).mockReturnValue({
       sessionKind: "main",
       projectRoot: deniedRoot,
@@ -158,7 +158,7 @@ describe("ConversationLoop project identity", () => {
           : null,
     }));
 
-    expect(loop.loadSession("stored-session")).toBe(true);
+    expect(loop.loadSession("d50f8c3f-2fe2-4183-8ed0-1e1e442767b1")).toBe(true);
     expect(loop.getSessionProjectContext()).toEqual({
       projectRoot: defaultRoot,
       projectName: "workspace",

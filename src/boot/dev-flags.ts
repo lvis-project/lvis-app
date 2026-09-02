@@ -208,6 +208,38 @@ export function getIsPackaged(): boolean {
 }
 
 /**
+ * The same "is this the packaged binary?" question, answered from process
+ * facts alone, for the one module that has to ask it BEFORE boot can call
+ * {@link setIsPackaged}: `lib/logger.ts` is imported by `main.ts` ahead of the
+ * `app.isPackaged` seed, so it cannot read the cache (which would still hold
+ * its fail-safe default). Electron sets `process.defaultApp` only when it is
+ * running a directory or script (`electron .`), which is exactly the
+ * unpackaged case `app.isPackaged === false` describes; a packaged build has
+ * neither. Plain Node (no `versions.electron`) is never packaged.
+ *
+ * `LVIS_DEV=1` does NOT enter this answer. It is user-controllable on every
+ * desktop OS, and the rule this module exists for is that a packaged binary
+ * ignores it — the logger and the file-sink gate previously honoured it, so a
+ * packaged build launched with the flag chose the dev log format and dropped
+ * its log file.
+ */
+export function isPackagedElectronProcess(
+  proc: { versions?: { electron?: string }; defaultApp?: boolean } = process,
+): boolean {
+  return Boolean(proc.versions?.electron) && !proc.defaultApp;
+}
+
+/**
+ * The e2e harness, and only it: `LVIS_E2E=1` under `NODE_ENV=test`. Every
+ * e2e-only surface (whitelist key override, managed bootstrap skip, the
+ * bundle-snapshot IPC, the preload `env.isE2E` flag) reads this one predicate;
+ * two of them used to accept `LVIS_E2E=1` alone.
+ */
+export function isE2eTestRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.LVIS_E2E === "1" && env.NODE_ENV === "test";
+}
+
+/**
  * Local-catalog fetcher gate — packaged builds must never instantiate
  * `LocalCatalogMarketplaceFetcher`, which serves the catalog from a
  * user-writable `plugins/marketplace.json`. In production the only sanctioned

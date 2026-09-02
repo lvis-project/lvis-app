@@ -47,7 +47,6 @@
  * has silently become a no-op is otherwise invisible.
  */
 import { createLogger } from "../../lib/logger.js";
-import { verifyEnvelope } from "../envelope-verifier.js";
 // Reuses the whitelist's trust domain — see the comment on
 // `WHITELIST_PUBLIC_KEYS` in `marketplace-keys.ts` for why.
 import {
@@ -55,17 +54,13 @@ import {
   WHITELIST_PRIMARY_KEY_ID as REVOCATION_PRIMARY_KEY_ID,
 } from "../marketplace-keys.js";
 import type { PublicKeyInput } from "../envelope-verifier.js";
-import type { SignatureEnvelope, ResolvedSignedSnapshot } from "../types.js";
+import type { ResolvedSignedSnapshot } from "../types.js";
 import { appVersionSatisfiesMin } from "../../shared/semver-compare.js";
 import {
   parseRevocationDocument,
   type RevocationDocument,
 } from "./revocation-schema.js";
-import {
-  checkIssuedAt,
-  SignedDocumentCache,
-  type SignedDocCacheSnapshot,
-} from "../signed-doc-cache.js";
+import { loadSignedDocumentSnapshot, SignedDocumentCache } from "../signed-doc-cache.js";
 import {
   fetchSignedDocument,
   type FetchSignedDocumentOptions,
@@ -98,8 +93,6 @@ export class RevocationCache extends SignedDocumentCache {
     super(userDataDir, "marketplace-revocation", "revocation.json", "revocation.json.sig");
   }
 }
-
-type RevocationCacheSnapshot = SignedDocCacheSnapshot;
 
 /**
  * Hosted alongside `whitelist.json` on the same issuance repo (see the
@@ -212,143 +205,26 @@ class RevocationRegistry {
     const audit = opts.audit ?? (() => {});
     const telemetry = opts.telemetry ?? (() => {});
 
-    const cache = new RevocationCache(opts.userDataDir);
-    const cached = await cache.load().catch((err) => {
-      log.warn(`cache load failed: ${(err as Error).message}`);
-      return null;
-    });
-    let highestSeenIssuedAt: string | undefined = cached?.meta.highestSeenIssuedAt;
-
-    if (cached) {
-      const verified = this.verifyCachedSnapshot(cached);
-      // The cached body goes through the same `issuedAt` rules as a fetched
-      // one. The on-disk mark gating only the remote document would leave the
-      // shorter path — read a body off disk, check parse and signature, serve
-      // it — as the one that never meets the mark those very bytes are stored
-      // beside, and un-revoking by rollback is precisely what the mark exists
-      // to prevent.
-      const issuedAtRejection = verified
-        ? checkIssuedAt(verified.issuedAt, highestSeenIssuedAt, this.now())
-        : null;
-      if (verified && !issuedAtRejection) {
-        this.snapshot = { doc: verified, source: "cache" };
-        if (!highestSeenIssuedAt || Date.parse(verified.issuedAt) > Date.parse(highestSeenIssuedAt)) {
-          highestSeenIssuedAt = verified.issuedAt;
-        }
-        telemetry("revocation_cache_hit");
-      } else {
-        // Corrupt, unverifiable, or refused on `issuedAt` — discarded rather
-        // than left on disk. Keeping it means re-reading and re-refusing the
-        // same bytes on every boot, and means its `highestSeenIssuedAt`
-        // outlives the only document that ever justified it. The mark stays in
-        // memory for the rest of this `init()`, so the remote fetch below is
-        // still gated by it.
-        telemetry("revocation_cache_miss_offline", { reason: issuedAtRejection ?? "corrupt" });
-        if (issuedAtRejection) {
-          audit(
-            `revocation_cache_rejected reason=${issuedAtRejection}`
-              + ` received=${verified?.issuedAt ?? "unknown"}`
-              + ` highest=${highestSeenIssuedAt ?? "none"}`,
-          );
-        }
-        await cache.clear().catch((err) => {
-          log.warn(`cache clear failed: ${(err as Error).message}`);
-        });
-      }
-    }
-
-    if (!opts.online) {
-      // Offline — cache (if any) is all we have. Fail-open contract: an
-      // absent cache here means `evaluate()` returns "allow" for everything,
-      // which is the intended behavior (see module doc), not an error state
+    const { snapshot } = await loadSignedDocumentSnapshot<RevocationDocument>({
+      cache: new RevocationCache(opts.userDataDir),
+      online: opts.online,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      now: this.now,
+      parse: parseRevocationDocument,
+      publicKeys: this.publicKeys,
+      primaryKeyId: REVOCATION_PRIMARY_KEY_ID,
+      fetch: fetchRevocationDocument,
+      // Fail-open: an absent document means `evaluate()` allows everything.
+      // That is the intended behaviour (see module doc), not an error state
       // worth a toast the way the whitelist's equivalent path is.
-      if (!this.snapshot) {
-        telemetry("revocation_cache_miss_offline", { reason: "no-cache" });
-        audit(`revocation_unreachable reason=no-cache-and-offline (fail-open: nothing blocked)`);
-      }
-      return;
-    }
-
-    try {
-      const meta = await cache.loadMeta();
-      const outcome = await fetchRevocationDocument({
-        ifNoneMatch: meta.etag,
-        ...(opts.signal ? { signal: opts.signal } : {}),
-      });
-      if ("notModified" in outcome) {
-        telemetry("revocation_fetch_ok", { source: outcome.source, conditional: "304" });
-        await cache.storeMeta({ ...meta, lastFetchAt: this.now() }).catch(() => {});
-        return;
-      }
-      const envelope = JSON.parse(outcome.signature) as SignatureEnvelope;
-      const doc = parseRevocationDocument(outcome.body);
-      const verify = verifyEnvelope(
-        Buffer.from(outcome.body, "utf-8"),
-        envelope,
-        this.publicKeys,
-      );
-      if (!verify.ok) {
-        telemetry("revocation_fetch_failed", { reason: "signature_invalid" });
-        audit(`revocation_fetch_failed reason=signature_invalid detail=${verify.reason ?? "unknown"}`);
-        return;
-      }
-      // Rollback guard — see module doc: this is the load-bearing guard here,
-      // not a defense-in-depth extra. Without it a served OLDER (but still
-      // validly signed, e.g. via a compromised CDN cache or a replayed
-      // response) document would silently un-revoke a plugin.
-      //
-      // Paired with the plausibility bound that protects the mark itself: a
-      // document dated implausibly far ahead is discarded WITHOUT advancing
-      // `highestSeenIssuedAt`, because the mark is written to disk and would
-      // otherwise sit above every genuine document that follows, across
-      // restarts — leaving the device stuck on whatever it last enforced while
-      // newly issued revocations are refused.
-      const issuedAtRejection = checkIssuedAt(doc.issuedAt, highestSeenIssuedAt, this.now());
-      if (issuedAtRejection) {
-        telemetry("revocation_fetch_failed", { reason: issuedAtRejection });
-        audit(
-          `revocation_fetch_failed reason=${issuedAtRejection} received=${doc.issuedAt}`
-            + ` highest=${highestSeenIssuedAt ?? "none"}`
-            + ` deviceClock=${new Date(this.now()).toISOString()}`,
-        );
-        return;
-      }
-      const newMeta = {
-        etag: outcome.etag,
-        highestSeenIssuedAt: doc.issuedAt,
-        lastFetchAt: this.now(),
-      };
-      await cache.store({
-        body: outcome.body,
-        signature: outcome.signature,
-        meta: newMeta,
-      }).catch((err) => {
-        log.warn(`cache store failed: ${(err as Error).message}`);
-      });
-      this.snapshot = { doc, source: "remote" };
-      telemetry("revocation_fetch_ok", { source: outcome.source });
-      audit(
-        `revocation_loaded source=${outcome.source} issuedAt=${doc.issuedAt} `
-          + `minVersions=${Object.keys(doc.minVersions).length} blocked=${doc.blocked.length}`,
-      );
-    } catch (err) {
-      telemetry("revocation_fetch_failed", { reason: "network" });
-      audit(`revocation_fetch_failed reason=network detail=${(err as Error).message}`);
-      // Keep whatever snapshot the cache produced (may be null — fail-open).
-      //
-      // `revocation_fetch_failed{network}` alone cannot tell an operator which
-      // of two very different states this is: a device still enforcing a
-      // cached document that merely could not be refreshed, or a device
-      // holding no document at all and therefore blocking nothing. Only the
-      // second is fail-open in effect, so it gets its own counter — the same
-      // one, on the same branch, that `whitelist-registry.ts` emits.
-      if (!this.snapshot) {
-        telemetry("revocation_cache_miss_offline", { reason: "no-cache" });
-        audit(
-          `revocation_unreachable reason=fetch-failed-and-no-cache (fail-open: nothing blocked)`,
-        );
-      }
-    }
+      failMode: "open",
+      telemetryPrefix: "revocation",
+      telemetry,
+      audit,
+      loadedAuditDetail: (doc) =>
+        `minVersions=${Object.keys(doc.minVersions).length} blocked=${doc.blocked.length}`,
+    });
+    this.snapshot = snapshot;
 
     if (this.snapshot && this.status().stale) {
       audit(
@@ -434,28 +310,6 @@ class RevocationRegistry {
     );
   }
 
-  private verifyCachedSnapshot(cached: RevocationCacheSnapshot): RevocationDocument | null {
-    try {
-      const doc = parseRevocationDocument(cached.body);
-      const envelope = JSON.parse(cached.signature) as SignatureEnvelope;
-      const verify = verifyEnvelope(
-        Buffer.from(cached.body, "utf-8"),
-        envelope,
-        this.publicKeys,
-      );
-      if (!verify.ok) {
-        log.warn(`cached revocation signature invalid: ${verify.reason}`);
-        return null;
-      }
-      if (verify.key_id && verify.key_id !== REVOCATION_PRIMARY_KEY_ID) {
-        log.warn(`cached revocation signed by unexpected key_id=${verify.key_id}`);
-      }
-      return doc;
-    } catch (err) {
-      log.warn(`cached revocation parse/verify failed: ${(err as Error).message}`);
-      return null;
-    }
-  }
 }
 
 /** Process-wide singleton. Boot calls `init`; install/load call `evaluate`. */
