@@ -19,9 +19,9 @@ import "./setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { atHome, renderApp } from "./render-app.js";
-import { settingsWithActiveView } from "./helpers.js";
+import { activeSettingsTab, clickSettingsTab, settingsWithActiveView } from "./helpers.js";
 import { t } from "../../src/i18n/runtime.js";
-import { BUILTIN_LABEL_KEYS, type FeatureViewKey } from "../../src/ui/renderer/utils/view-location.js";
+import { BUILTIN_LABEL_KEYS, type PaneViewKey } from "../../src/ui/renderer/utils/view-location.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -45,12 +45,7 @@ function paneTitle(container: HTMLElement): string | null {
     ?.trim() ?? null;
 }
 
-/**
- * The conversations stay MOUNTED behind a view — a tile subscribes to its
- * group's stream when it mounts. "At home" is therefore whether the surface is
- * SHOWING, not whether it exists.
- */
-async function openView(view: FeatureViewKey, bodyTestId: string) {
+async function openView(view: PaneViewKey, bodyTestId: string) {
   const rendered = await renderApp({
     hasApiKey: true,
     settings: settingsWithActiveView(view),
@@ -63,7 +58,7 @@ async function openView(view: FeatureViewKey, bodyTestId: string) {
 }
 
 // view key → the body it draws, identified by something the view itself owns.
-const VIEWS: ReadonlyArray<readonly [FeatureViewKey, string]> = [
+const VIEWS: ReadonlyArray<readonly [PaneViewKey, string]> = [
   ["work-board", "work-board-panel"],
   ["routines", "routine-panel"],
   ["insights", "insights-scroll-root"],
@@ -176,5 +171,107 @@ describe("closing a view's pane", () => {
       expect(pane(container)).toBeNull();
     });
     expect(container.querySelector('[data-testid="view-path-current-home"]')).not.toBeNull();
+  });
+});
+
+/**
+ * Settings is a pane body too — with one difference the tests below pin.
+ *
+ * It is the only built-in view that lays out REGIONS of its own: a nav column
+ * and a detail pane, split by a full-height divider, which at a narrow pane
+ * width becomes a two-depth list→detail stack. That structure is the user's
+ * (they asked to keep it) and it needs the frame's hairline: an inset body
+ * would float the divider inside the outline instead of reaching it. So the
+ * frame gives Settings `bodyInset="none"` and the padding stays where Settings
+ * already put it, inside each of its two regions.
+ */
+const SETTINGS_SHELL = "[data-settings-layout]";
+
+async function openSettingsPane(settingsTab?: string) {
+  const rendered = await renderApp({
+    hasApiKey: true,
+    settings: settingsWithActiveView("settings", settingsTab),
+  });
+  await waitFor(() => {
+    expect(pane(rendered.container)).not.toBeNull();
+    expect(rendered.container.querySelector(SETTINGS_SHELL)).not.toBeNull();
+  });
+  return rendered;
+}
+
+describe("settings is a pane body", () => {
+  it("draws it inside a pane whose header carries its label and glyph", async () => {
+    const { container } = await openSettingsPane();
+
+    expect(container.querySelector('[data-testid="main-pane-shell"][data-view="settings"]')).not.toBeNull();
+    expect(paneTitle(container)).toBe(t(BUILTIN_LABEL_KEYS.settings));
+    expect(
+      pane(container)?.querySelector('[data-testid="chat-group-header"] svg'),
+    ).not.toBeNull();
+  });
+
+  it("names the place once — the panel keeps no title of its own", async () => {
+    const { container } = await openSettingsPane();
+    const label = t(BUILTIN_LABEL_KEYS.settings);
+
+    // The pane's own name appears in exactly one heading: the frame's. The
+    // panel used to repeat it at the top of its nav column, 36px below.
+    const named = [...(pane(container)?.querySelectorAll("h2") ?? [])]
+      .filter((h) => h.textContent?.trim() === label);
+    expect(named.length).toBe(1);
+    expect(named[0]?.closest('[data-testid="chat-group-header"]')).not.toBeNull();
+    // The ACTIVE PAGE's heading stays: it names the tab, a depth below the
+    // pane, exactly as the location path reads it (Settings › …).
+    expect(container.querySelector(`${SETTINGS_SHELL} h2`)).not.toBeNull();
+  });
+
+  it("insets the body by nothing, so its two regions reach the frame", async () => {
+    const { container } = await openSettingsPane();
+
+    const body = pane(container)?.querySelector('[data-body-inset]');
+    expect(body?.getAttribute("data-body-inset")).toBe("none");
+    expect(pane(container)?.querySelector('[data-body-inset="page"]')).toBeNull();
+    // Nothing but the panel's own root stands between the frame's body and the
+    // layout it draws, and that root adds no margin. The page wrapper the panel
+    // used to bring — three nested boxes ending in `px-3 pt-4 sm:px-4` — is
+    // gone, so the padding has exactly one home: the two regions themselves.
+    const shell = container.querySelector<HTMLElement>(SETTINGS_SHELL);
+    const between: HTMLElement[] = [];
+    for (let el = shell?.parentElement ?? null; el && el !== body; el = el.parentElement) between.push(el);
+    expect(between.length).toBe(1);
+    expect(between.every((el) => !/(?:^|\s)-?p[xytblre]?-/.test(el.className))).toBe(true);
+  });
+
+  it("keeps the tab the user picks, and reports it outward", async () => {
+    const { container, api } = await openSettingsPane();
+    expect(activeSettingsTab(container)).toBe("llm");
+
+    await act(async () => {
+      clickSettingsTab(container, "permissions");
+    });
+
+    await waitFor(() => {
+      expect(activeSettingsTab(container)).toBe("permissions");
+      // The move is persisted under the key it has always used, and the
+      // location path follows it — the pane did not swallow either.
+      expect(api.updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ system: expect.objectContaining({ settingsTab: "permissions" }) }),
+      );
+      expect(container.querySelector('[data-testid="view-path-current-settings:permissions"]')).not.toBeNull();
+    });
+  });
+
+  it("hands the pane back to the conversation when closed", async () => {
+    const { container } = await openSettingsPane();
+    expect(atHome(container)).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(pane(container)?.querySelector('[data-testid="chat-group-close"]') as HTMLElement);
+    });
+
+    await waitFor(() => {
+      expect(atHome(container)).toBe(true);
+      expect(container.querySelector(SETTINGS_SHELL)).toBeNull();
+    });
   });
 });

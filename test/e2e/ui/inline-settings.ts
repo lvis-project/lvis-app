@@ -73,9 +73,10 @@ export async function openInlineSettings(
     target.webContents.send('lvis:view:activate', { viewKey: 'settings', settingsTab: tab });
   }, initialTab);
 
-  // Locale-stable readiness gate: the sidebar heading only renders in the wide
-  // master-detail layout (in narrow mode the sidebar is the depth-1 list).
-  await expect(mainWindow.getByTestId('settings-sidebar-heading')).toBeVisible({ timeout: 15_000 });
+  // Locale-stable readiness gate: the settings shell is mounted. Its own layout
+  // marker says so in either layout — the panel used to carry a title of its
+  // own to gate on and does not any more, because the pane header names it now.
+  await expect(mainWindow.locator('[data-settings-layout]')).toBeVisible({ timeout: 15_000 });
   // The panel-width ResizeObserver may still be settling right after the resize;
   // wait until the shell has committed to the wide layout so tab content (not a
   // depth-1 category list) is what's on screen.

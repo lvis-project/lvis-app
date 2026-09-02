@@ -409,19 +409,10 @@ export function SettingsContent({
           isNarrow && mobileDepth === "detail" && "hidden",
         )}
       >
-      {/* Sidebar settings header. `pt-6` mirrors the right-pane stack
-          (scroll pt-2 + TabsContent mt-2 + SettingsPageHeader pt-2 = 24)
-          so the sidebar h2 baseline aligns with the right-pane h2 of
-          the active tab. `px-5` (20px) aligns the settings text-left with
-          the nav-trigger icon-left (TabsList p-2 + trigger px-3 = 20). */}
-      <div className="flex items-center gap-2 px-5 pt-6 mb-6">
-        <h2
-          data-testid="settings-sidebar-heading"
-          className="min-w-0 flex-1 truncate text-xl font-semibold leading-9 tracking-normal"
-        >
-          {t("settingsContent.sidebarHeading")}
-        </h2>
-      </div>
+      {/* No heading above this list. The pane's header carries "Settings" —
+          the same 36px band every other pane gets — so a second title here
+          would name the place twice, once large and once small. The list's own
+          `p-2` now sets its top, matching the right pane's `pt-2`. */}
       {/* VerticalTabsList bakes in the shadcn vertical-sidebar override
           (flex-col + justify-start + rounded-none + bg-transparent); only
           the instance-specific column behaviour stays here. */}
@@ -532,7 +523,18 @@ export function SettingsContent({
           </button>
         </div>
       )}
-      <div ref={rightPaneRef} className="flex min-w-0 flex-1 min-h-0 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] px-4 pt-2 pb-12 scroll-pb-12 sm:px-8 lvis-settings-scroll">
+      {/* The side inset widens with the PANE, not the window: settings is a
+          pane body now, so a wide display with a 448px pane must not give this
+          column the roomy `px-8`. `isNarrow` is the same container measurement
+          the two-depth nav above already switches on — one verdict, not a
+          viewport breakpoint racing a container one. */}
+      <div
+        ref={rightPaneRef}
+        className={cn(
+          "flex min-w-0 flex-1 min-h-0 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] pt-2 pb-12 scroll-pb-12 lvis-settings-scroll",
+          isNarrow ? "px-4" : "px-8",
+        )}
+      >
         {s.lastSaveError && (
           <div
             role="alert"

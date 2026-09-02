@@ -1,4 +1,15 @@
-import { PageShell } from "./components/PageShell.js";
+/**
+ * Settings as the app's own surface.
+ *
+ * It draws no page of its own. The pane it sits in IS the page: the frame's
+ * outline is its edge, the frame's 36px header carries its name, and the inset
+ * is whatever `SettingsContent`'s two regions set for themselves — the nav
+ * column's `p-2`/`px-3` and the right pane's `px-4`/`px-8`. The page margin
+ * this wrapper used to add on top of those (`px-3 pt-4 sm:px-4`) would have
+ * pushed the nav column's full-height divider off the frame's hairline, and
+ * its `sm:` measured the window while everything else in settings measures the
+ * pane.
+ */
 import { SettingsContent } from "./SettingsContent.js";
 import type { LvisApi } from "./types.js";
 import type { ExactDenyDraft } from "./exact-permission-decision.js";
@@ -32,22 +43,15 @@ export function SettingsInlineView({
   onDiscardExactDeny?: () => void;
 }) {
   return (
-    <PageShell
-      padded={false}
-      maxWidth="none"
-      className="px-3 pt-4 sm:px-4"
-      contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
-    >
-      <SettingsContent
-        api={api}
-        chatGroupId={chatGroupId}
-        onSaved={onSaved}
-        initialTab={initialTab}
-        onTabChange={onTabChange}
-        exactDenyDraft={exactDenyDraft}
-        onExactDenySaved={onExactDenySaved}
-        onDiscardExactDeny={onDiscardExactDeny}
-      />
-    </PageShell>
+    <SettingsContent
+      api={api}
+      chatGroupId={chatGroupId}
+      onSaved={onSaved}
+      initialTab={initialTab}
+      onTabChange={onTabChange}
+      exactDenyDraft={exactDenyDraft}
+      onExactDenySaved={onExactDenySaved}
+      onDiscardExactDeny={onDiscardExactDeny}
+    />
   );
 }

@@ -90,7 +90,7 @@ import {
   BUILTIN_VIEW_ICONS,
   toViewLocation,
   viewLocationBreadcrumb,
-  type FeatureViewKey,
+  type PaneViewKey,
   type ViewLocation,
 } from "./utils/view-location.js";
 import { useViewHistory } from "./hooks/use-view-history.js";
@@ -1755,9 +1755,9 @@ export function App() {
                             </PageShell>
                       </div>
                       {/* Renders the active main-pane content. One branch per view
-                          keeps the router readable; a built-in view goes into the
-                          same frame a conversation gets (`featurePane`), Settings
-                          and plugins still into their own PageShell. */}
+                          keeps the router readable; a built-in view — Settings
+                          included — goes into the same frame a conversation gets
+                          (`viewPane`), plugins still into their own PageShell. */}
                       {(() => {
                         /*
                          * A built-in view, drawn as a pane.
@@ -1773,8 +1773,20 @@ export function App() {
                          * row's own insets, so the pane's outline lands where the
                          * conversation tiles' outlines do. Moving it onto the
                          * tiled canvas itself is a later change.
+                         *
+                         * `bodyInset` is where the view's page margin lives, and
+                         * it lives in exactly one place per view: `page` for a
+                         * view whose body is one column of content, `none` for a
+                         * view that lays out its own regions to the hairline —
+                         * Settings, whose nav column's full-height divider has to
+                         * reach the frame's edge to read as two regions of one
+                         * pane rather than a card floating inside it.
                          */
-                        const featurePane = (view: FeatureViewKey, body: ReactNode) => {
+                        const viewPane = (
+                          view: PaneViewKey,
+                          body: ReactNode,
+                          bodyInset: "none" | "page" = "page",
+                        ) => {
                           const PaneIcon = BUILTIN_VIEW_ICONS[view];
                           return (
                             <div
@@ -1788,7 +1800,7 @@ export function App() {
                               <PaneFrame
                                 title={t(BUILTIN_LABEL_KEYS[view])}
                                 icon={<PaneIcon className="h-4 w-4" />}
-                                bodyInset="page"
+                                bodyInset={bodyInset}
                                 onClose={handleActivateHome}
                               >
                                 {body}
@@ -1798,7 +1810,7 @@ export function App() {
                         };
 
                         if (activeView === "memory") {
-                          return featurePane("memory", (
+                          return viewPane("memory", (
                             <MemorySearchPanel
                               api={api}
                               project={activeProject ?? defaultWorkspaceProject}
@@ -1812,7 +1824,7 @@ export function App() {
                         }
 
                         if (activeView === "insights" || activeView === "starred") {
-                          return featurePane(activeView, (
+                          return viewPane(activeView, (
                             <StarredView
                               api={api}
                               starred={starred}
@@ -1827,7 +1839,7 @@ export function App() {
                         }
 
                         if (activeView === "routines") {
-                          return featurePane("routines", (
+                          return viewPane("routines", (
                             <RoutinePanel
                               api={api}
                               onOpenSession={(sessionId) => {
@@ -1841,35 +1853,29 @@ export function App() {
                         }
 
                         if (activeView === "settings") {
-                          return (
-                            <PageShell
-                              padded={false}
-                              maxWidth="none"
-                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
-                              data-testid="main-pane-shell"
-                            >
-                              {/* Settings renders inline in EVERY appMode; there is no
-                                  detached settings window on this path. */}
-                              <SettingsInlineView
-                                api={api}
-                                /* The away-authority binding names a CONVERSATION, and
-                                   the focused pane is the one showing Settings — so it
-                                   is the conversation pane focus came from, not the
-                                   focused pane itself, that this means. */
-                                chatGroupId={chatGroups.focusedConversationId}
-                                initialTab={settingsTab}
-                                onSaved={handleInlineSettingsSaved}
-                                onTabChange={setSettingsTab}
-                                exactDenyDraft={exactDenyDraft ?? null}
-                                onExactDenySaved={handleExactDenySaved ?? (() => undefined)}
-                                onDiscardExactDeny={() => setExactDenyDraft(null)}
-                              />
-                            </PageShell>
-                          );
+                          // Settings renders inline in EVERY appMode; there is no
+                          // detached settings window on this path. It lays out its
+                          // own two regions, so the frame insets it by nothing.
+                          return viewPane("settings", (
+                            <SettingsInlineView
+                              api={api}
+                              /* The away-authority binding names a CONVERSATION, and
+                                 the focused pane is the one showing Settings — so it
+                                 is the conversation pane focus came from, not the
+                                 focused pane itself, that this means. */
+                              chatGroupId={chatGroups.focusedConversationId}
+                              initialTab={settingsTab}
+                              onSaved={handleInlineSettingsSaved}
+                              onTabChange={setSettingsTab}
+                              exactDenyDraft={exactDenyDraft ?? null}
+                              onExactDenySaved={handleExactDenySaved ?? (() => undefined)}
+                              onDiscardExactDeny={() => setExactDenyDraft(null)}
+                            />
+                          ), "none");
                         }
 
                         if (activeView === "work-board") {
-                          return featurePane("work-board", (
+                          return viewPane("work-board", (
                             <WorkBoardPanel api={api} project={activeProject ?? defaultWorkspaceProject} />
                           ));
                         }
