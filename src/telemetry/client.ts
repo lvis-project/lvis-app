@@ -24,7 +24,7 @@
  *     secret under "marketplace.apiKey". No new auth mechanism introduced.
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { TelemetrySettings } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
@@ -95,6 +95,34 @@ export function loadOrCreateDeviceUuid(uuidPath: string): string {
     log.warn("could not persist device_uuid: %s", (err as Error).message);
   }
   return id;
+}
+
+/**
+ * One-time move of a persisted device_uuid from `fromPath` to `toPath`.
+ *
+ * The uuid IS the device's telemetry identity: leaving it behind when its
+ * home moves would re-mint one and split every device across two ids. So
+ * the file is carried over exactly once — only when the old file exists and
+ * the new one does not — and the old parent directory is removed if the move
+ * emptied it. Any failure is logged and leaves both paths untouched;
+ * `loadOrCreateDeviceUuid` then proceeds from whatever `toPath` holds.
+ */
+export function relocateDeviceUuid(fromPath: string, toPath: string): boolean {
+  if (!existsSync(fromPath) || existsSync(toPath)) return false;
+  try {
+    mkdirSync(dirname(toPath), { recursive: true, mode: 0o700 });
+    copyFileSync(fromPath, toPath);
+    unlinkSync(fromPath);
+  } catch (err) {
+    log.warn("could not relocate device_uuid: %s", (err as Error).message);
+    return false;
+  }
+  try {
+    rmdirSync(dirname(fromPath));
+  } catch {
+    // Not empty, or already gone — either way the old directory is not ours to force.
+  }
+  return true;
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────

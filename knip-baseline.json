@@ -874,11 +874,6 @@
     },
     {
       "type": "exports",
-      "file": "src/telemetry/client.ts",
-      "name": "loadOrCreateDeviceUuid"
-    },
-    {
-      "type": "exports",
       "file": "src/tools/file-read-core.ts",
       "name": "BINARY_SAMPLE_BYTES"
     },

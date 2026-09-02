@@ -29,7 +29,8 @@ import { createUpdateCheckRunner } from "./update-check-runner.js";
 import { createAutoUpdater } from "../../main/auto-updater.js";
 import { startCrashReporter } from "../../main/crash-reporter.js";
 import { TelemetryService } from "../../main/telemetry.js";
-import { PluginTelemetryClient } from "../../telemetry/client.js";
+import { PluginTelemetryClient, relocateDeviceUuid } from "../../telemetry/client.js";
+import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { sendToWindow } from "../../ipc/safe-send.js";
 import { onEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -86,12 +87,17 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       }, 500);
     }
 
-    // S12 — PluginTelemetryClient.
+    // S12 — PluginTelemetryClient. The device id lives under `~/.lvis/telemetry/`
+    // like every other feature's user data; it used to sit in a second `.lvis`
+    // root under Electron's userData, and is carried over once so the device
+    // keeps its identity.
+    const deviceUuidPath = resolve(openFeatureNamespace("telemetry").dir, "device-uuid");
+    relocateDeviceUuid(resolve(app.getPath("userData"), ".lvis", "device-uuid"), deviceUuidPath);
     const ptClient = new PluginTelemetryClient({
       settings: () => settingsService.get("telemetry"),
       marketplaceBaseUrl: () => settingsService.get("marketplace").cloudBaseUrl,
       installToken: () => settingsService.getSecret("marketplace.apiKey"),
-      deviceUuidPath: resolve(app.getPath("userData"), ".lvis", "device-uuid"),
+      deviceUuidPath,
     });
     pluginTelemetry = ptClient;
     ptClient.start();

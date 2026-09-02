@@ -14,13 +14,13 @@
  * No filesystem, no Electron, no process.env.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { PluginTelemetryClient } from "../telemetry/client.js";
+import { PluginTelemetryClient, loadOrCreateDeviceUuid, relocateDeviceUuid } from "../telemetry/client.js";
 import { scrubPii } from "../telemetry/client.js";
 import type { TelemetrySettings } from "../data/settings-store.js";
 import { cleanupTmpDir } from "../__tests__/support/tmp-dir-teardown.js";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { mkdtempSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -216,5 +216,31 @@ describe("PluginTelemetryClient", () => {
     const body = JSON.parse(init.body as string) as { events: Array<Record<string, unknown>> };
     expect(body.events[0].errorClass).toBe("NetworkError");
     expect(body.events[0].message).toBeUndefined();
+  });
+});
+
+describe("relocateDeviceUuid — the device keeps its id when its home moves", () => {
+  it("carries the uuid over once, removes the emptied old root, and never overwrites", () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-device-uuid-"));
+    try {
+      const oldPath = join(root, "userData", ".lvis", "device-uuid");
+      const newPath = join(root, "home", ".lvis", "telemetry", "device-uuid");
+      mkdirSync(dirname(oldPath), { recursive: true });
+      writeFileSync(oldPath, "11111111-1111-4111-8111-111111111111");
+
+      expect(relocateDeviceUuid(oldPath, newPath)).toBe(true);
+      expect(loadOrCreateDeviceUuid(newPath)).toBe("11111111-1111-4111-8111-111111111111");
+      expect(existsSync(oldPath)).toBe(false);
+      expect(existsSync(dirname(oldPath))).toBe(false);
+
+      // A second run is a no-op, and an old file never clobbers a newer id.
+      expect(relocateDeviceUuid(oldPath, newPath)).toBe(false);
+      mkdirSync(dirname(oldPath), { recursive: true });
+      writeFileSync(oldPath, "stale");
+      expect(relocateDeviceUuid(oldPath, newPath)).toBe(false);
+      expect(loadOrCreateDeviceUuid(newPath)).toBe("11111111-1111-4111-8111-111111111111");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
