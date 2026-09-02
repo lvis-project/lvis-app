@@ -31,6 +31,7 @@ import {
 } from "../../permissions/manifest-integrity.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -248,7 +249,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     } catch (err) {
       log.warn(
         "manifest-violation IPC emit failed (non-fatal): %s",
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     }
   });

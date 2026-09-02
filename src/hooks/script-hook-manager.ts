@@ -52,6 +52,7 @@ import { areExternalTurnHooksAllowed } from "../shared/turn-extension-policy.js"
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { PluginHookTrustStore, PreparedPluginHookProjection } from "./plugin-hook-projection.js";
 import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("script-hook-manager");
 
@@ -400,7 +401,7 @@ export class ScriptHookManager {
       log.warn(
         "lifecycle hook dispatch for %s failed (non-blocking, ignored): %s",
         event,
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
       return { decision: "allow", reason: "lifecycle dispatch error (ignored)", results: [] };
     }
@@ -471,13 +472,11 @@ export class ScriptHookManager {
       // which is observe-only and swallows-then-allows.)
       log.warn(
         "UserPromptSubmit hook dispatch failed (fail-closed → deny): %s",
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
       return {
         decision: "deny",
-        reason: `UserPromptSubmit dispatch error (fail-closed → deny): ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+        reason: `UserPromptSubmit dispatch error (fail-closed → deny): ${errorMessage(err)}`,
         results: [],
       };
     }

@@ -27,6 +27,7 @@ import {
 } from "../../tools/file-read-core.js";
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
 import { buildRuntimeAllowedDirectories } from "../../permissions/allowed-directories.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 /** Line window read per preview request — matches read_file's default cap. */
 const PREVIEW_LINE_LIMIT = 5_000;
@@ -133,7 +134,7 @@ export function registerPreviewHandlers(deps: IpcDeps): void {
           ok: false,
           error: "read-failed",
           path: resolved,
-          message: err instanceof Error ? err.message : String(err),
+          message: errorMessage(err),
         };
       }
     },

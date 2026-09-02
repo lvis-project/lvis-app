@@ -10,6 +10,7 @@ import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import type { RoutineScope } from "../shared/routines-types.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../permissions/sensitive-paths.js";
+import { errorMessage } from "../shared/error-message.js";
 const log = createLogger("routine-engine");
 
 export interface Routine {
@@ -243,8 +244,8 @@ export class RoutineEngine {
         });
         summary = extractSummaryTag(result.text ?? "");
       } catch (err) {
-        log.warn("runRoutine error (id=%s): %s", input.id, err instanceof Error ? err.message : String(err));
-        summary = t("be_routineEngine.runRoutineError", { message: err instanceof Error ? err.message : String(err) });
+        log.warn("runRoutine error (id=%s): %s", input.id, errorMessage(err));
+        summary = t("be_routineEngine.runRoutineError", { message: errorMessage(err) });
       }
 
       return {

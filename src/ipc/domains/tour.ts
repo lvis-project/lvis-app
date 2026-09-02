@@ -15,6 +15,7 @@ import {
   type TourState,
 } from "../../main/tour-state-store.js";
 import type { IpcDeps } from "../types.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("tour-ipc");
 
@@ -48,7 +49,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
         return { ok: true, state };
       } catch (err) {
         log.warn(
-          { err: err instanceof Error ? err.message : String(err) },
+          { err: errorMessage(err) },
           "read failed; falling back to default",
         );
         return { ok: true, state: DEFAULT_TOUR_STATE };
@@ -86,7 +87,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
         return { ok: true, state };
       } catch (err) {
         log.error(
-          { err: err instanceof Error ? err.message : String(err) },
+          { err: errorMessage(err) },
           "mark-complete failed",
         );
         return {
@@ -128,7 +129,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
         return { ok: true, state };
       } catch (err) {
         log.error(
-          { err: err instanceof Error ? err.message : String(err) },
+          { err: errorMessage(err) },
           "dismiss failed",
         );
         return {

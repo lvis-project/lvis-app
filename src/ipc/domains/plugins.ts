@@ -115,6 +115,7 @@ import {
   handlePluginCards,
   handleMarketplaceList,
 } from "../handlers/plugins.js";
+import { errorMessage } from "../../shared/error-message.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
 const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
@@ -1700,7 +1701,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       // Scrubbed and bounded, like the resource path below: this is a SERVER's error
       // text going into an audit row, so it can carry host paths, a token the server
       // echoed back, or enough length to bury the rows around it.
-      const message = scrubShortError(err instanceof Error ? err.message : String(err));
+      const message = scrubShortError(errorMessage(err));
       auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get '${name}' failed: ${message}`);
       return { ok: false, error: "prompt-failed" };
     }
@@ -1787,7 +1788,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       auditAttach(
         "error",
         `[mcp-resource:${serverId}] attach ${uri.slice(0, 256)} failed: `
-          + scrubShortError(err instanceof Error ? err.message : String(err)),
+          + scrubShortError(errorMessage(err)),
       );
       return { ok: false, error: "resource-failed" };
     }
@@ -1928,7 +1929,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         auditAttach(
           "error",
           `[mcp-resource:${serverId}] template attach ${uriTemplate.slice(0, 256)} failed: `
-            + scrubShortError(err instanceof Error ? err.message : String(err)),
+            + scrubShortError(errorMessage(err)),
         );
         return { ok: false, error: "resource-failed" };
       }
@@ -2414,7 +2415,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     } catch (err) {
       logPluginLifecycle(
         "warn",
-        { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId, reason: scrubShortError(err instanceof Error ? err.message : String(err)) },
+        { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId, reason: scrubShortError(errorMessage(err)) },
         "plugin asset root re-bind failed",
       );
     }

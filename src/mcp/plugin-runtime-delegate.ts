@@ -47,6 +47,7 @@ import { checkRuntimeAdmission } from "../plugins/runtime/runtime-admission.js";
 import { createLogger } from "../lib/logger.js";
 import type { McpUiSlot, McpUiToolMeta } from "./types.js";
 import { RAW_RESULT_META } from "./protocol-constants.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("plugin-runtime-delegate");
 
@@ -166,11 +167,11 @@ export function pluginRuntimeToolDelegate(
         }
         return errorOutcome(
           violationAuditError
-            ? `${err.message}\nManifest violation audit failed: ${violationAuditError instanceof Error ? violationAuditError.message : String(violationAuditError)}`
+            ? `${err.message}\nManifest violation audit failed: ${errorMessage(violationAuditError)}`
             : err.message,
         );
       }
-      return errorOutcome(err instanceof Error ? err.message : String(err));
+      return errorOutcome(errorMessage(err));
     }
   };
 }

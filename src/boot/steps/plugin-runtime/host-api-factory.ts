@@ -114,6 +114,7 @@ import type {
 import type { LateBindingRefs } from "../plugin-runtime.js";
 import { sha256Hex } from "../../../lib/hex-digest-equal.js";
 import { proposalId } from "../../../work-board/board-file.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -1351,7 +1352,7 @@ export function createHostApiFactory(
         try {
           allowedHosts = normalizeAllowedHosts(declared);
         } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
+          const reason = errorMessage(err);
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),

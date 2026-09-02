@@ -29,6 +29,7 @@ import { MAX_SERVER_ID_LEN } from "../shared/mcp-app-partition.js";
 import { t } from "../i18n/index.js";
 import type { PluginMcpOwner, PluginMcpTrustStore, PreparedPluginMcpProjection } from "./plugin-mcp-projection.js";
 import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
+import { errorMessage } from "../shared/error-message.js";
 const log = createLogger("mcp-manager");
 
 const DEFAULT_CONFIG_PATH = join(lvisHome(), "mcp", "servers.json");
@@ -217,7 +218,7 @@ export class McpManager {
       if (result.status === "fulfilled") {
         connected.push(result.value);
       } else {
-        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        const message = errorMessage(result.reason);
         failed.push({ id: configs[i].id, error: message });
       log.warn(`Server connection failed (${configs[i].id}): %s`, message);
       }
@@ -284,7 +285,7 @@ export class McpManager {
         sessionId: "mcp-manager",
         type: "mcp_connect",
         input: JSON.stringify({ serverId: config.id, transport: config.transport }),
-        output: err instanceof Error ? err.message : String(err),
+        output: errorMessage(err),
       });
       throw err;
     }
@@ -357,7 +358,7 @@ export class McpManager {
               `bundled MCP candidate connection and cleanup failed (${projection.serverId})`,
             );
           }
-          const message = scrubSecrets(error instanceof Error ? error.message : String(error));
+          const message = scrubSecrets(errorMessage(error));
           degraded.push(Object.freeze({
             pluginId: owner.pluginId,
             generationId: owner.generationId,
@@ -477,7 +478,7 @@ export class McpManager {
     } catch (error) {
       log.warn(
         `bundled MCP candidate disconnect failed (${pending.serverId}, ${pending.context}): %s`,
-        scrubSecrets(error instanceof Error ? error.message : String(error)),
+        scrubSecrets(errorMessage(error)),
       );
       throw new Error(
         `bundled MCP candidate cleanup remains pending (${pending.serverId}, ${context})`,
@@ -771,7 +772,7 @@ export class McpManager {
         await this.connectServer(normalizedConfig);
         return { connected: true };
       } catch (err) {
-        const warning = err instanceof Error ? err.message : String(err);
+        const warning = errorMessage(err);
       log.warn(`Connection after server add failed (${normalizedId}): %s`, err);
         return { connected: false, warning };
       }
@@ -851,7 +852,7 @@ export class McpManager {
       return { connected: true };
     } catch (err) {
       // MEDIUM: scrub secrets from warning before surfacing to caller
-      const rawMsg = err instanceof Error ? err.message : String(err);
+      const rawMsg = errorMessage(err);
       const warning = scrubSecrets(rawMsg);
       log.warn(`Connection after API key set failed (${id}): %s`, warning);
       // MEDIUM: audit log on failure

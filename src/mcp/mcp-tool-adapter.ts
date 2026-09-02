@@ -43,6 +43,7 @@ import {
   type ToolSurface,
 } from "../plugins/runtime/tool-visibility.js";
 import type { McpToolSchema, McpUiPayload } from "./types.js";
+import { errorMessage } from "../shared/error-message.js";
 
 /**
  * MCP Apps spec default when a server declares no `_meta.ui.visibility`:
@@ -125,7 +126,7 @@ export function mcpToolToTool(
         };
       } catch (err) {
         return {
-          output: err instanceof Error ? err.message : String(err),
+          output: errorMessage(err),
           isError: true,
         };
       }

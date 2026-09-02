@@ -6,6 +6,7 @@ import { app } from "electron";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
 import type { SandboxGateAction, SandboxGateReason } from "./sandbox-gate.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -292,7 +293,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
               ? "abort-linux-runtime-probe-failed"
               : "degrade-linux-runtime-probe-failed"
             : failDecision.reason;
-          const cause = initErr instanceof Error ? initErr.message : String(initErr);
+          const cause = errorMessage(initErr);
           if (failDecision.action === "abort") {
             // EXPLICIT opt-in — fail-closed even on init failure.
             log.error(

@@ -38,6 +38,7 @@ import type {
   AudioCaptureHandle,
   AudioCaptureRequest,
 } from "../plugins/public-contract.js";
+import { errorMessage } from "../shared/error-message.js";
 
 export type { AudioCaptureDevice, AudioCaptureEnd, AudioCaptureFrame, AudioCaptureHandle, AudioCaptureRequest };
 
@@ -200,7 +201,7 @@ export class AudioCaptureService {
       this.#active = null;
       throw err instanceof AudioCaptureError
         ? err
-        : new AudioCaptureError(`could not start capture: ${err instanceof Error ? err.message : String(err)}`);
+        : new AudioCaptureError(`could not start capture: ${errorMessage(err)}`);
     }
 
     if (!opened.microphone && !opened.systemAudio) {

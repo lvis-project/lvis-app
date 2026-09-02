@@ -75,6 +75,7 @@ import { shellQuote } from "../lib/shell-resolver.js";
 import { scrubShortError } from "../shared/dlp.js";
 import { t } from "../i18n/index.js";
 import { sleep } from "../shared/abortable-deadline.js";
+import { errorMessage } from "../shared/error-message.js";
 const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
@@ -721,7 +722,7 @@ export class McpClient {
       );
     } catch (err) {
       this.state.status = "error";
-      this.state.lastError = err instanceof Error ? err.message : String(err);
+      this.state.lastError = errorMessage(err);
       // transport 정리
       await this.closeTransport();
       throw err;
@@ -779,7 +780,7 @@ export class McpClient {
       log.info(`${this.config.id} discovered ${prompts.length} prompt(s)`);
     } catch (err) {
       log.warn(
-        `${this.config.id} prompts/list discovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        `${this.config.id} prompts/list discovery failed (non-fatal): ${errorMessage(err)}`,
       );
     }
   }
@@ -870,7 +871,7 @@ export class McpClient {
       );
     } catch (err) {
       log.warn(
-        `${this.config.id} resources/list discovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        `${this.config.id} resources/list discovery failed (non-fatal): ${errorMessage(err)}`,
       );
     }
   }
@@ -968,7 +969,7 @@ export class McpClient {
       // the other, and a template failure must not cost the user their plain resources.
       log.warn(
         `${this.config.id} resources/templates/list discovery failed (non-fatal): `
-          + `${err instanceof Error ? err.message : String(err)}`,
+          + `${errorMessage(err)}`,
       );
     }
   }
@@ -1258,7 +1259,7 @@ export class McpClient {
           `[mcp-client] '${this.config.id}' does not support protocol ${MCP_PROTOCOL_VERSION} for tool '${name}' (-32022): ${err.message}`,
         );
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       throw new Error(`[mcp-client] ${t("be_mcpClient.toolCallFailed", { id: this.config.id, name, message })}`);
     }
   }
@@ -2660,7 +2661,7 @@ class HttpTransport implements McpTransport {
       if (err instanceof NetworkGuardError) {
         throw new NetworkGuardError(`network guard: ${err.message}`);
       }
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = errorMessage(err);
       throw new Error(`${t("be_mcpClient.httpFetchFailed", { reason })}`);
     }
 

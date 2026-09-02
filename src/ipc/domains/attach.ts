@@ -19,6 +19,7 @@ import {
   MAX_COMPOSER_IMAGE_BYTES,
   sniffComposerImageFormat,
 } from "../../shared/composer-image-input.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 // Convert the shared array into a Set once at module load for O(1) lookup
 // in the file-picker hot path. Source of truth lives in the shared module.
@@ -259,7 +260,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
       } catch (err) {
         return {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMessage(err),
         };
       }
     },
@@ -330,7 +331,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
       } catch (err) {
         return {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMessage(err),
         };
       }
     },
@@ -384,7 +385,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
       } catch (err) {
         return {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMessage(err),
         };
       }
     },

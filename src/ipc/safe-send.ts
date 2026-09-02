@@ -1,4 +1,5 @@
 import type { BrowserWindow, WebContents } from "electron";
+import { errorMessage } from "../shared/error-message.js";
 
 export interface SafeSendLogger {
   warn: (obj: Record<string, unknown>, message: string) => void;
@@ -19,7 +20,7 @@ export function sendToWebContents(
   } catch (err) {
     logger?.warn({
       channel,
-      error: err instanceof Error ? err.message : String(err),
+      error: errorMessage(err),
     }, "renderer IPC send skipped");
     return false;
   }

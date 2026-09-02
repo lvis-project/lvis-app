@@ -26,6 +26,7 @@ import type { Readable, Writable } from "node:stream";
 import { frameMessage, StdioFrameDecoder } from "../stdio-framing.js";
 import { RPC_INTERNAL_ERROR } from "../protocol-constants.js";
 import type { JsonRpcId, JsonRpcRequest, JsonRpcResponse } from "../mcp-client.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 /** What the loop dispatches each request to (a {@link PluginMcpServer} satisfies this). */
 export interface StdioRequestHandler {
@@ -71,7 +72,7 @@ export class StdioServerLoop {
         id: request.id,
         error: {
           code: RPC_INTERNAL_ERROR,
-          message: err instanceof Error ? err.message : String(err),
+          message: errorMessage(err),
         },
       };
     }

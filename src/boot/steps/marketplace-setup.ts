@@ -18,6 +18,7 @@ import { getLvisAppVersion } from "../../shared/app-version.js";
 import { activeHostApiVendor, createRefreshActiveLlmWildcard } from "./refresh-active-llm-wildcard.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -165,7 +166,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
       // and the boot-path awaiter must not brick startup over it.
       log.warn(
         "boot: ASRT network config live-refresh failed: %s",
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     });
 

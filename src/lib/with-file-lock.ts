@@ -16,6 +16,7 @@
 import lockfile from "proper-lockfile";
 import { mkdir, open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { errorMessage } from "../shared/error-message.js";
 
 /**
  * Serialize `fn` against every other call for the same path IN THIS PROCESS.
@@ -106,7 +107,7 @@ export class FileLockReleaseError<T> extends Error {
     readonly result: T,
     readonly releaseError: unknown,
   ) {
-    super(`file lock callback completed but release failed: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`);
+    super(`file lock callback completed but release failed: ${errorMessage(releaseError)}`);
     this.name = "FileLockReleaseError";
     this.cause = releaseError;
   }

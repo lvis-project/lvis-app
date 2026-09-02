@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createLogger } from "../lib/logger.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { errorMessage } from "../shared/error-message.js";
 
 const log = createLogger("lvis");
 const PROCESS_TREE_KILL_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.processTreeKillMs;
@@ -130,7 +131,7 @@ export function trackManagedChildProcess(
         {
           pid: child.pid ?? null,
           label: entry.label,
-          err: err instanceof Error ? err.message : String(err),
+          err: errorMessage(err),
         },
         "shutdown: failed to kill child registered after admission seal",
       );
@@ -186,7 +187,7 @@ export function forceKillManagedChildProcesses(reason: string): number {
         killProcessGroup,
         reason,
         code: code ?? null,
-        err: err instanceof Error ? err.message : String(err),
+        err: errorMessage(err),
       };
       if (code === "ESRCH") {
         // Already gone — count it as effectively killed for accounting,
@@ -250,7 +251,7 @@ export async function forceKillAndDrainManagedChildProcesses(
           killProcessGroup,
           reason,
           code: code ?? null,
-          err: err instanceof Error ? err.message : String(err),
+          err: errorMessage(err),
         };
         if (code === "EPERM") {
           log.error(fields, "shutdown: managed child process drain kill blocked by EPERM");
@@ -321,7 +322,7 @@ export function forceKillManagedChildProcess(child: ChildProcess, reason: string
         label: entry?.label ?? "untracked-child-process",
         reason,
         code: code ?? null,
-        err: err instanceof Error ? err.message : String(err),
+        err: errorMessage(err),
       }, "managed-child: force kill failed");
     }
   } finally {

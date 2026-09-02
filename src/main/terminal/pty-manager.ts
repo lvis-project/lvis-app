@@ -49,6 +49,7 @@ import { isActiveSandboxShellContained } from "../../permissions/sandbox-capabil
 import { deriveSandboxWritePaths } from "../../permissions/sandbox-write-jail.js";
 import { canonicalizePathForMatch } from "../../permissions/sensitive-paths.js";
 import { createSandboxProcessHome } from "../../permissions/sandbox-process-home.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 const log = createLogger("lvis");
 
@@ -317,7 +318,7 @@ async function spawnNewTerminal(
     return {
       ok: false,
       reason: "spawn-failed",
-      message: `Could not create isolated terminal HOME: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Could not create isolated terminal HOME: ${errorMessage(err)}`,
     };
   }
 
@@ -411,7 +412,7 @@ async function spawnNewTerminal(
     // worker-spawn's catch).
     if (wrapped) void cleanupAsrtSandboxAfterCommand();
     cleanupSandboxHome();
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     if (owner.cancelled) {
       log.info({ tabId }, "terminal: cancelled in-flight spawn");
     } else {
@@ -457,7 +458,7 @@ export function killTerminal(tabId: string): void {
   try {
     if (!session.exited) session.pty.kill();
   } catch (err) {
-    log.warn({ tabId, err: err instanceof Error ? err.message : String(err) }, "terminal: kill failed");
+    log.warn({ tabId, err: errorMessage(err) }, "terminal: kill failed");
   }
   if (session.exited) return;
   session.forceKillTimer = setTimeout(() => {
@@ -471,7 +472,7 @@ export function killTerminal(tabId: string): void {
       // the only owner here would allow a replacement PTY while this one may
       // still be alive and would strand its ASRT/HOME finalizers.
       log.warn(
-        { tabId, err: err instanceof Error ? err.message : String(err) },
+        { tabId, err: errorMessage(err) },
         "terminal: force kill failed",
       );
     }
@@ -518,7 +519,7 @@ export async function forceKillAllTerminalsForShutdown(timeoutMs = 1_000): Promi
       // Keep ownership until a late exit callback; the bounded wait below
       // prevents a broken native PTY from hanging application shutdown.
       log.warn(
-        { tabId, err: err instanceof Error ? err.message : String(err) },
+        { tabId, err: errorMessage(err) },
         "terminal: shutdown SIGKILL failed",
       );
     }
