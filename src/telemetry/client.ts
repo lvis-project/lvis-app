@@ -143,7 +143,11 @@ export interface PluginTelemetryClientDeps {
    * Absent when the user has not configured marketplace auth.
    */
   installToken: () => string | null | undefined;
-  /** Absolute path where device_uuid is stored (~/.lvis/device-uuid). */
+  /**
+   * Absolute path where device_uuid is stored: `~/.lvis/telemetry/device-uuid`,
+   * the telemetry feature namespace `post-boot.ts` opens. The path is resolved
+   * there, once; this is the only other place it is named.
+   */
   deviceUuidPath: string;
   /** Batch flush interval in ms (default: 5 min). */
   flushIntervalMs?: number;
