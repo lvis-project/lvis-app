@@ -570,6 +570,13 @@ export const CHANNELS = {
     clear: "lvis:session-tasks:clear",
     changed: "lvis:session-tasks:changed",
   },
+  sessionGoal: {
+    get: "lvis:session-goal:get",
+    pause: "lvis:session-goal:pause",
+    resume: "lvis:session-goal:resume",
+    clear: "lvis:session-goal:clear",
+    changed: "lvis:session-goal:changed",
+  },
   agentSpawn: {
     event: "lvis:agent-spawn:event",
   },

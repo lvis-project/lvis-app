@@ -64,3 +64,36 @@ describe("ConversationActivityCoordinator tryTrackTurn", () => {
     await first;
   });
 });
+
+describe("ConversationActivityCoordinator onTurnSettled", () => {
+  it("notifies after the lease is released, so a listener can start the next turn", async () => {
+    const coordinator = createConversationActivityCoordinator();
+    const busyWhenNotified: boolean[] = [];
+    coordinator.onTurnSettled(() => busyWhenNotified.push(coordinator.isBusy()));
+
+    await coordinator.trackTurn(async () => {});
+    await coordinator.trackTurn(async () => {});
+    expect(busyWhenNotified).toEqual([false, false]);
+  });
+
+  it("notifies for a turn that threw, and stops once unsubscribed", async () => {
+    const coordinator = createConversationActivityCoordinator();
+    let notified = 0;
+    const unsubscribe = coordinator.onTurnSettled(() => { notified += 1; });
+
+    await expect(coordinator.trackTurn(async () => { throw new Error("boom"); })).rejects.toThrow("boom");
+    expect(notified).toBe(1);
+
+    unsubscribe();
+    await coordinator.trackTurn(async () => {});
+    expect(notified).toBe(1);
+  });
+
+  it("does not notify for a mutation lease — only turns end turns", async () => {
+    const coordinator = createConversationActivityCoordinator();
+    let notified = 0;
+    coordinator.onTurnSettled(() => { notified += 1; });
+    await coordinator.trackMutation(async () => {});
+    expect(notified).toBe(0);
+  });
+});

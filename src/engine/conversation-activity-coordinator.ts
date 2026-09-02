@@ -39,6 +39,16 @@ export interface ConversationActivityCoordinator {
    * or another mutation already owns the main conversation.
    */
   trackMutation<T>(factory: () => Promise<T>): Promise<T> | null;
+  /**
+   * Subscribe to "this conversation's turn lease has just been released".
+   *
+   * A turn reaches the provider through several entry points (the send
+   * command port, the replay paths, the sub-agent wake), but every one of them
+   * holds THIS lease while it runs — so the release is the single place that
+   * means "a turn ended here". Listeners run after the lease is cleared, so a
+   * listener may start the next turn without racing its own predecessor.
+   */
+  onTurnSettled(listener: () => void): () => void;
 }
 
 /**
@@ -52,6 +62,11 @@ export function createConversationActivityCoordinator(
   let nextStreamId = 0;
   let activeTurn: Promise<unknown> | null = null;
   let activeMutation: Promise<unknown> | null = null;
+  const turnSettledListeners = new Set<() => void>();
+
+  const notifyTurnSettled = (): void => {
+    for (const listener of turnSettledListeners) listener();
+  };
 
   const isBusy = () => activeTurn !== null || activeMutation !== null;
 
@@ -67,6 +82,7 @@ export function createConversationActivityCoordinator(
     if (isBusy()) return null;
     const lease = Promise.resolve().then(factory).finally(() => {
       if (activeTurn === lease) activeTurn = null;
+      notifyTurnSettled();
     });
     activeTurn = lease;
     return lease;
@@ -92,5 +108,9 @@ export function createConversationActivityCoordinator(
     trackTurn,
     tryTrackTurn,
     trackMutation,
+    onTurnSettled: (listener: () => void) => {
+      turnSettledListeners.add(listener);
+      return () => turnSettledListeners.delete(listener);
+    },
   };
 }

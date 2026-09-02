@@ -675,6 +675,7 @@ describe("bootstrap() integration lock", () => {
         "routinesStore",
         "runPluginShutdownHandlers",
         "scriptHookManager",
+        "sessionGoalStore",
         "sessionTasksStore",
         "settingsService",
         "shutdown",

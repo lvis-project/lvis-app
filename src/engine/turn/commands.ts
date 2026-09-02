@@ -130,6 +130,36 @@ export async function handleCommand(
         result = await handlePermissionCommand(self, args, inputOrigin, callbacks);
         break;
       }
+      case "goal": {
+        const store = self.deps.sessionGoalStore;
+        if (!store) { result = t("be_conversationLoop.cmdGoalUnavailable"); break; }
+        const text = args.trim();
+        // The same upsert the `session_goal` tool performs: no goal yet and
+        // this sets one, a goal already there and this replaces its text with
+        // the rounds it has already spent left alone.
+        if (!text) {
+          const current = store.get(self.sessionId);
+          result = current === null
+            ? t("be_conversationLoop.cmdGoalUsage")
+            : t("be_conversationLoop.cmdGoalCurrent", {
+                goal: current.text,
+                status: current.status,
+                round: current.round,
+                ceiling: current.ceiling,
+              });
+          break;
+        }
+        try {
+          const goal = await store.set(self.sessionId, text);
+          result = t("be_conversationLoop.cmdGoalSet", {
+            goal: goal.text,
+            ceiling: goal.ceiling,
+          });
+        } catch (err) {
+          result = t("be_conversationLoop.cmdGoalRejected", { error: (err as Error).message });
+        }
+        break;
+      }
       case "help":
         result = t("be_conversationLoop.cmdHelp");
         break;

@@ -67,6 +67,11 @@ export async function runStreamedTurn(
     remoteControllerAuthority?: RemoteControllerAuthority;
     /** Carried by the replay paths so a folded turn keeps the row the user saw. */
     displayText?: string;
+    /**
+     * The host started this turn on its own (a session goal reviving itself),
+     * so no surface echoed a row for it and each must draw the announced one.
+     */
+    hostSubmitted?: true;
     /** Host-owned signal for a cancellable public remote turn. */
     abortSignal?: AbortSignal;
   },
@@ -137,7 +142,11 @@ export async function runStreamedTurn(
   send({
     kind: "user.message",
     origin: inputOrigin,
-    ownerDetail: { text: options.displayText ?? input, messageId: userMessageId },
+    ownerDetail: {
+      text: options.displayText ?? input,
+      messageId: userMessageId,
+      ...(options.hostSubmitted ? { hostSubmitted: options.hostSubmitted } : {}),
+    },
   });
   const result = await conversationLoop.runTurn(
     input,

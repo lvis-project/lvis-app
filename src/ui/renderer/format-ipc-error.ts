@@ -277,6 +277,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "no-reporter": "formatIpcError.noReporter",
   "no-starred-store": "formatIpcError.noStarredStore",
   "no-session-tasks-store": "formatIpcError.noSessionTasksStore",
+  "no-session-goal-store": "formatIpcError.noSessionGoalStore",
+  // Not the same as a missing store: the store answered, this session just has no goal.
+  "no-session-goal": "formatIpcError.noSessionGoal",
   "provider-not-installed": "formatIpcError.providerNotInstalled",
   "unknown-provider": "formatIpcError.unknownProvider",
   "reviewer-rewire-failed": "formatIpcError.reviewerRewireFailed",

@@ -206,6 +206,8 @@ export interface ConversationDeps {
   memoryReviewer?: Pick<MemoryReviewerService, "review">;
   permissionManager: PermissionManager;
   routineEngine: RoutineEngine;
+  /** Present only on loops that own a revival driver — see ConversationLoopDeps. */
+  sessionGoalStore?: import("../main/session-goal-store.js").SessionGoalStore;
   idleScheduler?: IdleSchedulerService;
   postTurnHookChain: PostTurnHookChain;
   bashAstValidator: BashAstValidator;
@@ -504,6 +506,7 @@ export function createConversationLoop(deps: ConversationDeps,
     permissionManager: deps.permissionManager,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
     routineEngine: deps.routineEngine,
+    sessionGoalStore: deps.sessionGoalStore,
     idleScheduler: deps.idleScheduler,
     postTurnHookChain: deps.postTurnHookChain,
     bashAstValidator: deps.bashAstValidator,

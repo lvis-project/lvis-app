@@ -60,6 +60,7 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
 import type { SessionTaskItem } from "../../shared/session-tasks.js";
+import type { SessionGoal } from "../../shared/session-goal.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
@@ -1266,6 +1267,13 @@ export type LvisApi = {
       sessionId: string;
       items: SessionTaskItem[];
     }) => void,
+  ) => () => void;
+  getSessionGoal: (sessionId: string) => Promise<SessionGoal | null>;
+  pauseSessionGoal: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+  resumeSessionGoal: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+  clearSessionGoal: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+  onSessionGoalChanged: (
+    h: (payload: { sessionId: string; goal: SessionGoal | null }) => void,
   ) => () => void;
   onAgentSpawnEvent: (
     h: (event: AgentSpawnEvent<ChatEntry>) => void,

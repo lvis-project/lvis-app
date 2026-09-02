@@ -56,6 +56,9 @@ function projectPlatformConversationEventToLegacyChatFrame(
         text: event.ownerDetail.text,
         origin: event.origin,
         messageId: event.ownerDetail.messageId,
+        ...(event.ownerDetail.hostSubmitted
+          ? { hostSubmitted: event.ownerDetail.hostSubmitted }
+          : {}),
       }));
     case "assistant.reasoning.delta":
       return streamFrame(streamChannel, withStreamId({

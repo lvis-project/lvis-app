@@ -6,6 +6,7 @@ import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
 import { isSessionTaskItem, type SessionTaskItem } from "../shared/session-tasks.js";
+import { isSessionGoal, type SessionGoal } from "../shared/session-goal.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
@@ -465,6 +466,13 @@ export interface SessionMetadata {
    * when the session has no list.
    */
   tasks?: SessionTaskItem[];
+  /**
+   * The goal this conversation is working towards (`session_goal` tool),
+   * together with the revival budget it is spending. Absent when the session
+   * has no goal. The round counter rides in the sidecar precisely so a restart
+   * resumes the budget instead of granting a fresh one.
+   */
+  goal?: SessionGoal;
 }
 
 function asTerminalA2ATaskState(value: unknown): A2AProjectedTaskState | undefined {
@@ -1145,6 +1153,18 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
         status: item.status,
       }))
     : [];
+  // Session goal: an all-or-nothing record. A half-valid goal would mean a
+  // revival budget nobody can account for, so a malformed one is no goal.
+  const goal = isSessionGoal(raw.goal)
+    ? {
+        text: raw.goal.text,
+        status: raw.goal.status,
+        round: raw.goal.round,
+        ceiling: raw.goal.ceiling,
+        createdAt: raw.goal.createdAt,
+        updatedAt: raw.goal.updatedAt,
+      }
+    : undefined;
   return {
     sessionKind: normalizeSessionKind(raw.sessionKind),
     routineId,
@@ -1185,6 +1205,7 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     subAgentSuspensionReason,
     subAgentSuspensionPrompt,
     tasks: tasks.length > 0 ? tasks : undefined,
+    goal,
     archivedAt: typeof raw.archivedAt === "string" ? raw.archivedAt : undefined,
     unreadSince: typeof raw.unreadSince === "string" ? raw.unreadSince : undefined,
   };
@@ -2297,6 +2318,23 @@ export class MemoryManager {
     const next: SessionMetadata = { ...current };
     if (tasks.length === 0) delete next.tasks;
     else next.tasks = tasks.map((item) => ({ ...item }));
+    await this.saveSessionMetadata(sessionId, next);
+  }
+
+  /**
+   * Replace the session's goal (`session_goal` tool). Read-modify-write for
+   * the same reason as {@link saveSessionTasks}. `null` removes the goal
+   * rather than storing a tombstone: a session with no goal is a session with
+   * no revival budget, and there is nothing else the absence could mean.
+   */
+  async saveSessionGoal(sessionId: string, goal: SessionGoal | null): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`saveSessionGoal: invalid sessionId "${sessionId}"`);
+    }
+    const current = this.loadSessionMetadata(sessionId) ?? {};
+    const next: SessionMetadata = { ...current };
+    if (goal === null) delete next.goal;
+    else next.goal = { ...goal };
     await this.saveSessionMetadata(sessionId, next);
   }
 

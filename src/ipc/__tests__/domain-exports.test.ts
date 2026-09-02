@@ -88,6 +88,7 @@ import * as dev from "../domains/dev.js";
 import * as app from "../domains/app.js";
 import * as routines from "../domains/routines.js";
 import * as sessionTasks from "../domains/session-tasks.js";
+import * as sessionGoal from "../domains/session-goal.js";
 import * as permissions from "../domains/permissions.js";
 import * as plugins from "../domains/plugins.js";
 import * as prompts from "../domains/prompts.js";
@@ -110,6 +111,7 @@ describe("IPC domain runtime named-export lock", () => {
       app: keys(app),
       routines: keys(routines),
       "session-tasks": keys(sessionTasks),
+      "session-goal": keys(sessionGoal),
       permissions: keys(permissions),
       plugins: keys(plugins),
       prompts: keys(prompts),
@@ -159,6 +161,9 @@ describe("IPC domain runtime named-export lock", () => {
         ],
         "routines": [
           "registerRoutineHandlers",
+        ],
+        "session-goal": [
+          "registerSessionGoalHandlers",
         ],
         "session-tasks": [
           "registerSessionTasksHandlers",

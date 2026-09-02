@@ -7,6 +7,8 @@ import type { IpcMainInvokeEvent } from "electron";
 import { IPC_APPROVAL_REQUEST } from "../permissions/approval-gate.js";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 import type { ChatEntry } from "../lib/chat-stream-state.js";
+import { SessionGoalStore } from "../main/session-goal-store.js";
+import type { SessionGoal } from "../shared/session-goal.js";
 
 export function makeMockWebContents() {
   return {
@@ -281,4 +283,33 @@ export function inspectFile(path: string): { ino: number; mode: number; text: st
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * A {@link SessionGoalStore} over an in-memory sidecar.
+ *
+ * One home rather than a copy per suite: the fake stands in for the persistence
+ * the real store commits to before it touches memory, and two copies of it are
+ * two ways for that contract to drift from the store it is standing in for.
+ *
+ * `disk` is returned so a test can prove a restart reads the goal back, and
+ * `now` so timestamps can be made deterministic; both are optional because
+ * most callers only need the store.
+ */
+export function makeSessionGoalStore(now?: () => string): {
+  store: SessionGoalStore;
+  /** The sidecar the store wrote through, keyed by session id. */
+  disk: Map<string, SessionGoal | null>;
+} {
+  const disk = new Map<string, SessionGoal | null>();
+  const persistence = {
+    load: (sessionId: string) => disk.get(sessionId) ?? null,
+    save: async (sessionId: string, goal: SessionGoal | null) => {
+      disk.set(sessionId, goal);
+    },
+  };
+  return {
+    store: now ? new SessionGoalStore(persistence, now) : new SessionGoalStore(persistence),
+    disk,
+  };
 }

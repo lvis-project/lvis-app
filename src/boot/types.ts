@@ -256,6 +256,7 @@ export interface AppServices {
   routinesStore?: import("../main/routines-store.js").RoutinesStore;
   routinesScheduler?: import("../main/routines-scheduler.js").RoutinesScheduler;
   sessionTasksStore?: import("../main/session-tasks-store.js").SessionTasksStore;
+  sessionGoalStore?: import("../main/session-goal-store.js").SessionGoalStore;
   /** Late-bound sub-agent runner lookup for read-only transcript/status IPC surfaces. */
   getSubAgentRunner?: () =>
     | import("../engine/subagent-runner.js").SubAgentRunner | undefined;

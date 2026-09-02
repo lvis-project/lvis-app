@@ -137,6 +137,14 @@ export type PlatformConversationEvent =
        * Owner-only for the same reason the round's id is.
        */
       readonly messageId: string;
+      /**
+       * The HOST started this turn, not a surface — so no surface has echoed a
+       * row for it and every one of them has to draw this frame. Set by the
+       * caller that submitted the turn, because that is the only place the
+       * fact is known; a surface cannot infer it from the origin, which says
+       * where the TEXT came from rather than who pressed send.
+       */
+      readonly hostSubmitted?: true;
     };
   }
   | { readonly kind: "assistant.reasoning.delta"; readonly ownerDetail: { readonly text: string } }

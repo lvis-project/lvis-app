@@ -23,6 +23,7 @@ import type { ToolExecutionContext } from "../base.js";
 import { createAskUserQuestionTool } from "../ask-user-question.js";
 import { createRoutineScheduleTool } from "../routine-schedule.js";
 import { createSessionTasksTool } from "../session-tasks.js";
+import { createSessionGoalTool } from "../session-goal.js";
 import {
   createAgentInterruptTool,
   createAgentSpawnTool,
@@ -44,6 +45,7 @@ import { en as agentSpawnEn } from "../../i18n/messages/generated/be_agentSpawn.
 import { RoutinesStore } from "../../main/routines-store.js";
 import { SessionTasksStore } from "../../main/session-tasks-store.js";
 import type { SessionTaskItem } from "../../shared/session-tasks.js";
+import { makeSessionGoalStore } from "../../__tests__/test-helpers.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 import { AgentProfileStore } from "../../main/agent-profile-store.js";
@@ -1971,5 +1973,103 @@ describe("agent_guide tool", () => {
     const parsed = JSON.parse(refused.output);
     expect(parsed.error).toBe("child-not-resumable");
     expect(parsed.guidance).toContain("agent_list");
+  });
+});
+
+describe("session_goal tool", () => {
+  function goalOf(r: { output: string }): {
+    goal: string;
+    status: string;
+    round: number;
+    ceiling: number;
+    atCeiling: boolean;
+  } {
+    return JSON.parse(r.output);
+  }
+
+  it("exposes the upsert contract in its schema — nothing is required", () => {
+    const tool = createSessionGoalTool(makeSessionGoalStore().store);
+    const schema = tool.toJsonSchema() as {
+      required?: string[];
+      properties: Record<string, { enum?: string[]; type: string }>;
+    };
+    expect(schema.required).toBeUndefined();
+    expect(schema.properties.goal.type).toBe("string");
+    expect(schema.properties.status.enum).toEqual(["complete", "pause", "resume"]);
+  });
+
+  it("sets a goal when there is none and updates it when there is", async () => {
+    const tool = createSessionGoalTool(makeSessionGoalStore().store);
+    const set = await tool.execute({ goal: "ship the release" }, ctx("g-upsert"));
+    expect(goalOf(set)).toMatchObject({
+      goal: "ship the release",
+      status: "running",
+      round: 0,
+      ceiling: 50,
+    });
+    const updated = await tool.execute({ goal: "ship the release today" }, ctx("g-upsert"));
+    expect(goalOf(updated).goal).toBe("ship the release today");
+  });
+
+  it("status=complete is what ends the loop", async () => {
+    const tool = createSessionGoalTool(makeSessionGoalStore().store);
+    await tool.execute({ goal: "ship it" }, ctx("g-complete"));
+    expect(goalOf(await tool.execute({ status: "complete" }, ctx("g-complete"))).status)
+      .toBe("complete");
+  });
+
+  it("pauses and resumes without losing the round count", async () => {
+    const store = makeSessionGoalStore().store;
+    const tool = createSessionGoalTool(store);
+    await tool.execute({ goal: "ship it" }, ctx("g-pause"));
+    await store.recordRevival("g-pause");
+    await store.recordRevival("g-pause");
+    expect(goalOf(await tool.execute({ status: "pause" }, ctx("g-pause"))).status).toBe("paused");
+    const resumed = goalOf(await tool.execute({ status: "resume" }, ctx("g-pause")));
+    expect(resumed).toMatchObject({ status: "running", round: 2 });
+  });
+
+  it("reports the ceiling back so the model can see the budget it is spending", async () => {
+    const store = makeSessionGoalStore().store;
+    const tool = createSessionGoalTool(store);
+    await tool.execute({ goal: "ship it" }, ctx("g-ceiling"));
+    for (let i = 0; i < 50; i += 1) await store.recordRevival("g-ceiling");
+    const at = goalOf(await tool.execute({ goal: "ship it now" }, ctx("g-ceiling")));
+    expect(at).toMatchObject({ round: 50, ceiling: 50, atCeiling: true });
+  });
+
+  it("refuses a status verb on a session with no goal", async () => {
+    const r = await createSessionGoalTool(makeSessionGoalStore().store).execute({ status: "pause" }, ctx("g-none"));
+    expect(r.isError).toBe(true);
+    expect(r.output).toContain("no goal yet");
+  });
+
+  it("refuses an empty call and an unknown status", async () => {
+    const tool = createSessionGoalTool(makeSessionGoalStore().store);
+    const empty = await tool.execute({}, ctx("g-empty"));
+    expect(empty.isError).toBe(true);
+    expect(empty.output).toContain("and/or status");
+    const bad = await tool.execute({ status: "abort" }, ctx("g-empty"));
+    expect(bad.isError).toBe(true);
+    expect(bad.output).toContain("complete, pause, resume");
+  });
+
+  it("reports a no-op call as a failure so the model does not repeat it", async () => {
+    const tool = createSessionGoalTool(makeSessionGoalStore().store);
+    await tool.execute({ goal: "ship it" }, ctx("g-noop"));
+    const same = await tool.execute({ goal: "ship it" }, ctx("g-noop"));
+    expect(same.isError).toBe(true);
+    expect(same.output).toContain("nothing changed");
+    await tool.execute({ status: "complete" }, ctx("g-noop"));
+    const again = await tool.execute({ status: "complete" }, ctx("g-noop"));
+    expect(again.isError).toBe(true);
+    expect(again.output).toContain("nothing changed");
+  });
+
+  it("refuses a call with no session id", async () => {
+    const tool = createSessionGoalTool(makeSessionGoalStore().store);
+    const r = await tool.execute({ goal: "ship it" }, { metadata: {} } as ToolExecutionContext);
+    expect(r.isError).toBe(true);
+    expect(r.output).toContain("missing sessionId");
   });
 });

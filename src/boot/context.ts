@@ -41,6 +41,7 @@ import type { WorkBoardStore } from "../main/work-board-store.js";
 import type { WorkBoardEngine } from "../core/work-board-engine.js";
 import type { WorkBoardReporter } from "../work-board/work-report.js";
 import type { SessionTasksStore } from "../main/session-tasks-store.js";
+import type { SessionGoalStore } from "../main/session-goal-store.js";
 import type { SkillStore } from "../main/skill-store.js";
 import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { PersonaPromptStore } from "../main/persona-prompt-store.js";
@@ -139,6 +140,7 @@ export class BootContext {
   declare dueSoonTimer: ReturnType<typeof setInterval> | undefined;
   declare startWorkBoardDueSoon: () => void;
   declare sessionTasksStore: SessionTasksStore;
+  declare sessionGoalStore: SessionGoalStore;
   declare skillStore: SkillStore;
   declare agentProfileStore: AgentProfileStore;
   declare personaPromptStore: PersonaPromptStore;
@@ -291,6 +293,7 @@ const BOOT_CONTEXT_FIELDS = [
   "dueSoonTimer",
   "startWorkBoardDueSoon",
   "sessionTasksStore",
+  "sessionGoalStore",
   "skillStore",
   "agentProfileStore",
   "personaPromptStore",
