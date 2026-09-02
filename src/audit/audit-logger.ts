@@ -290,7 +290,29 @@ export interface PluginInstallEscalationAudit {
   catalogSnapshotHash: string;
 }
 
+/**
+ * Token usage as persisted on an audit row. UsageDashboard / computeCost
+ * contract, not raw AI SDK total input: Claude stores fresh input here and
+ * cache in the cache fields; OpenAI / Gemini style providers keep provider
+ * prompt tokens, which include cache. `usage-stats.ts` reads rows back through
+ * this same shape.
+ */
+export interface AuditTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
+
+/** One provider request segment of a turn's usage, kept unmerged for tiered pricing. */
+export interface AuditUsageByModelSegment {
+  vendorProvider: string;
+  vendorModel: string;
+  tokenUsage: AuditTokenUsage;
+}
+
 export interface AuditEntry {
+
   timestamp: string;
   sessionId: string;
   type: "turn" | "tool_call" | "approval" | "warn" | "error" | "mcp_connect" | "mcp_apikey_set" | "kill_switch" | "dlp" | "info" | "diagnostics-export";
@@ -329,27 +351,9 @@ export interface AuditEntry {
      *  policy-enforced cap from user cancellation in post-incident analysis. */
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error" | "indeterminate";
   }>;
-  tokenUsage?: {
-    /**
-     * UsageDashboard / computeCost contract, not raw AI SDK total input:
-     * Claude stores fresh input here and cache in the cache fields; OpenAI /
-     * Gemini style providers keep provider prompt tokens, which include cache.
-     */
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-  };
-  usageByModel?: Array<{
-    vendorProvider: string;
-    vendorModel: string;
-    tokenUsage: {
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadTokens?: number;
-      cacheWriteTokens?: number;
-    };
-  }>;
+  tokenUsage?: AuditTokenUsage;
+  usageByModel?: AuditUsageByModelSegment[];
+
   /** Non-billable subscription telemetry, persisted separately from API usage. */
   subscriptionUsage?: SubscriptionUsageTelemetry[];
   toolExposure?: {

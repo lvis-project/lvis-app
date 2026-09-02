@@ -9,6 +9,8 @@
  *
  * Issue: #802 (code-reviewer LOW finding — inline duplicates across 3+ sites).
  */
+import type { RiskLevel } from "./permission-review-status.js";
+
 
 /**
  * Approval-scope literal. Hoisted from inline `"session" | "persistent"`
@@ -36,7 +38,8 @@ export type UserApprovalDecision = "allow" | "deny";
  * downstream consumers (the chat-toast subscriber) can rely on a
  * concrete verdict literal.
  */
-export type UserApprovalVerdict = "low" | "medium" | "high";
+export type UserApprovalVerdict = RiskLevel;
+
 
 /**
  * Resolve the host-sealed risk level used by exact permission decisions.
