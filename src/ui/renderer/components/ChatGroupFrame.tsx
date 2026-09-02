@@ -82,7 +82,7 @@ export type ChatGroupSplitAxis = SplitAxis;
 const SPLIT_EDGE: Record<ChatGroupSplitAxis, DropEdge> = { row: "right", column: "bottom" };
 
 /**
- * The chat group: an outlined work container with its own header.
+ * The pane: an outlined work container with its own header.
  *
  * DESIGN.md "Workbench model" is the reference. Two things it settles show up
  * directly in this file.
@@ -93,14 +93,14 @@ const SPLIT_EDGE: Record<ChatGroupSplitAxis, DropEdge> = { row: "right", column:
  * glance, and the frame is what answers it. That is why `focused` draws on the
  * border rather than on anything inside. DESIGN.md principle 2 discourages
  * box-in-box, and this is its stated exception: a distinct REPEATED item earns
- * a frame, and the chat group earns it precisely because it repeats.
+ * a frame, and the pane earns it precisely because it repeats.
  *
  * OWNERSHIP. Pin, export, and import act on a CONVERSATION, so they belong to
  * the part that owns the conversation — this header — not to the window band
  * they used to sit in. The work-panel toggle is here for the same reason: each
  * group owns its own panel, so the control that opens it cannot be global.
  */
-export interface ChatGroupAction {
+interface PaneAction {
   /** Stable id — also the `data-testid` suffix and the menu command key. */
   id: string;
   label: string;
@@ -111,6 +111,9 @@ export interface ChatGroupAction {
   /** When present the control opens a menu of these instead of firing. */
   items?: Array<{ id: string; label: string; onSelect: () => void | Promise<void> }>;
 }
+
+/** A conversation's header action: the pane action, named for its one consumer today. */
+export type ChatGroupAction = PaneAction;
 
 export interface ChatGroupFrameProps {
   /** Leading edge of the header. The conversation's own title. */
@@ -163,6 +166,65 @@ export interface ChatGroupFrameProps {
   children: ReactNode;
 }
 
+/**
+ * What every pane's frame takes, whatever the pane shows.
+ *
+ * The chrome — outline, header band, split control, trailing cluster, drop
+ * indicator, focus border — is the same for a conversation, a built-in view,
+ * settings, or a plugin surface. Only what the header LEADS with, what it
+ * carries as actions, and what the body is inset by differ, and those are the
+ * props. The tree operations (split, close, maximize, drop) are common to every
+ * kind because they act on the TILE, not on its content.
+ */
+interface PaneFrameProps {
+  /** Leading edge of the header. */
+  title: string;
+  /** Drawn ahead of the title: the same glyph the sidebar row uses for this
+   *  content, so the pane and the row that opened it read as one thing. */
+  icon?: ReactNode;
+  /** The content's own actions, after the contributed slot and before split. */
+  actions?: PaneAction[];
+  /** Extra controls at the head of the trailing cluster, before maximize and
+   *  close — what THIS kind of pane owns as a tile (the conversation's work
+   *  panel toggle). */
+  trailing?: ReactNode;
+  /** Whether this pane currently has focus — drives the border, see above. */
+  focused?: boolean;
+  /** Raised when anything inside the pane is interacted with, so the frame
+   *  can take focus. */
+  onFocus?: () => void;
+  /** Whether another tile still fits — see `ChatGroupFrameProps.canSplit`. */
+  canSplit?: boolean;
+  /** Split off another tile beside (`row`) or under (`column`) this one. */
+  onSplit?: (axis: ChatGroupSplitAxis) => void;
+  /** Whether a split on that axis leaves both halves above the tile floors. */
+  splitFits?: (axis: ChatGroupSplitAxis) => boolean;
+  /** Take a conversation dropped on this tile — any pane can receive one. */
+  onSessionDrop?: (sessionId: string, target: DropTarget) => void;
+  /** Close this tile. Absent on the last one. */
+  onClose?: () => void;
+  /** Show only this tile, or give the others their space back. */
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
+  /**
+   * How far the body stands in from the frame.
+   *
+   * `none`: the content draws to the hairline — a conversation lays out its own
+   * transcript and composer. `page`: the inset a built-in view's `PageShell`
+   * gives its content today (`padded`, `p-4`), so a view moved into a pane keeps
+   * the margin it had. No pane takes `page` yet; the built-in views arrive in
+   * their own change, and the recipe is settled here so they inherit rather
+   * than each restate it.
+   */
+  bodyInset?: "none" | "page";
+  /**
+   * Whether to publish the aside slot (`useChatGroupPanelSlot`) beside the
+   * body, as tall as the tile. The conversation's work panel portals into it.
+   */
+  asideSlot?: boolean;
+  children: ReactNode;
+}
+
 const HEADER_BUTTON_CLASS =
   "h-(--chrome-icon-button) w-(--chrome-icon-button) aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground";
 
@@ -191,22 +253,25 @@ export function useChatGroupPanelSlot(): ChatGroupPanelSlot | null {
   return useContext(ChatGroupPanelSlotContext);
 }
 
-export function ChatGroupFrame({
+/** The frame every pane is drawn in. The chrome lives here and only here. */
+export function PaneFrame({
   title,
-  actions,
+  icon,
+  actions = [],
+  trailing,
   focused,
-  panelOpen,
-  onTogglePanel,
+  onFocus,
+  canSplit,
   onSplit,
   splitFits,
   onSessionDrop,
-  canSplit,
   onClose,
   maximized = false,
   onToggleMaximize,
-  onFocus,
+  bodyInset = "none",
+  asideSlot: publishAsideSlot = false,
   children,
-}: ChatGroupFrameProps) {
+}: PaneFrameProps) {
   const { t } = useTranslation();
   const [panelSlot, setPanelSlot] = useState<HTMLElement | null>(null);
   const [tile, setTile] = useState<HTMLElement | null>(null);
@@ -224,7 +289,6 @@ export function ChatGroupFrame({
       ? { row: splitFits ? splitFits("row") : true, column: splitFits ? splitFits("column") : true }
       : null);
   };
-  const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
 
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const carriesSession = (event: React.DragEvent) =>
@@ -289,6 +353,7 @@ export function ChatGroupFrame({
         data-testid="chat-group-header"
         className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap-tight) border-b border-border/(--opacity-half) px-(--chrome-gap)"
       >
+        {icon ? <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span> : null}
         <h2 className="min-w-0 flex-1 truncate text-caption font-medium text-foreground">
           {title}
         </h2>
@@ -406,30 +471,11 @@ export function ChatGroupFrame({
             </PopoverContent>
           </Popover>
         ) : null}
-        {/* Trailing cluster: the controls that act on this GROUP as a tile —
-            its work panel, its share of the area, its presence. The panel's
-            own tabs live on the panel card, not here. */}
+        {/* Trailing cluster: the controls that act on this pane as a TILE —
+            what its kind owns (`trailing`), its share of the area, its
+            presence. A panel's own tabs live on the panel card, not here. */}
         <div className="flex h-full shrink-0 items-center gap-(--chrome-gap-tight)">
-        {/* The work panel is per-GROUP. It shows what THIS conversation is
-            doing, so a single window-level toggle could only ever be right for
-            one of the groups on screen. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={HEADER_BUTTON_CLASS}
-              onClick={onTogglePanel}
-              title={panelLabel}
-              aria-label={panelLabel}
-              aria-pressed={panelOpen}
-              data-testid={TEST_IDS.chatGroupPanelToggle}
-            >
-              {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{panelLabel}</TooltipContent>
-        </Tooltip>
+        {trailing}
         {onToggleMaximize ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -472,14 +518,23 @@ export function ChatGroupFrame({
       {/* The conversation list is the WINDOW's sidebar and only that. A second
           copy of it inside the frame said the same thing twice and cost the
           transcript the width to say it. */}
-      <ChatGroupPanelSlotContext.Provider value={panelSlots}>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+      <ChatGroupPanelSlotContext.Provider value={publishAsideSlot ? panelSlots : null}>
+        <div
+          className={bodyInset === "page"
+            ? "flex min-h-0 min-w-0 flex-1 flex-col p-4"
+            : "flex min-h-0 min-w-0 flex-1 flex-col"}
+          data-body-inset={bodyInset}
+        >
+          {children}
+        </div>
       </ChatGroupPanelSlotContext.Provider>
       </div>
       {/* The work panel lands here: `contents` makes what the view portals
           in the tile's own flex item (a column beside the conversation) or,
           floating, a box positioned against the tile. */}
-      <div ref={setPanelSlot} className="contents" data-testid="chat-group-panel-slot" />
+      {publishAsideSlot ? (
+        <div ref={setPanelSlot} className="contents" data-testid="chat-group-panel-slot" />
+      ) : null}
       {dropTarget ? (
         <div
           aria-hidden={true}
@@ -489,6 +544,73 @@ export function ChatGroupFrame({
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * The conversation's pane: `PaneFrame` with what a conversation brings to it —
+ * its own header actions, the work-panel toggle at the head of the trailing
+ * cluster, and the aside slot that panel lands in.
+ */
+export function ChatGroupFrame({
+  title,
+  actions,
+  focused,
+  panelOpen,
+  onTogglePanel,
+  onSplit,
+  splitFits,
+  onSessionDrop,
+  canSplit,
+  onClose,
+  maximized = false,
+  onToggleMaximize,
+  onFocus,
+  children,
+}: ChatGroupFrameProps) {
+  const { t } = useTranslation();
+  const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
+
+  return (
+    <PaneFrame
+      title={title}
+      actions={actions}
+      asideSlot
+      bodyInset="none"
+      focused={focused}
+      onFocus={onFocus}
+      canSplit={canSplit}
+      onSplit={onSplit}
+      splitFits={splitFits}
+      onSessionDrop={onSessionDrop}
+      onClose={onClose}
+      maximized={maximized}
+      onToggleMaximize={onToggleMaximize}
+      trailing={
+        /* The work panel is per-GROUP. It shows what THIS conversation is
+           doing, so a single window-level toggle could only ever be right for
+           one of the groups on screen. */
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={HEADER_BUTTON_CLASS}
+              onClick={onTogglePanel}
+              title={panelLabel}
+              aria-label={panelLabel}
+              aria-pressed={panelOpen}
+              data-testid={TEST_IDS.chatGroupPanelToggle}
+            >
+              {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{panelLabel}</TooltipContent>
+        </Tooltip>
+      }
+    >
+      {children}
+    </PaneFrame>
   );
 }
 
