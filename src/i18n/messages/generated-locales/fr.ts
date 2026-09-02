@@ -1048,7 +1048,7 @@ export const frMessages: Record<string, string> = {
   "composer.attachLimitWarning": "⚠ Limite de pièces jointes de {max} atteinte — pour en ajouter davantage, supprimez un marqueur [...#N] de la zone de texte",
   "composer.defaultPlaceholder": "Tapez votre question... (Cmd/Ctrl+V pour coller depuis le presse-papiers)",
   "composerPlaceholder.apiKeyMissing": "Veuillez d'abord configurer votre clé API...",
-  "composerPlaceholder.defaultHint": "Tapez un message (Entrez pour envoyer · Cmd/Ctrl+V pour joindre) · /command disponible",
+  "composerPlaceholder.defaultHint": "typing, ⌘+V, /",
   "composerPlaceholder.streamingHint": "Sera ajouté à la file d'attente des messages (interrompre immédiatement avec ⌘⏎)",
   "constants.execModeAllowDesc": "Les outils en dehors des blocs durs sont automatiquement autorisés; l'accès en dehors des répertoires autorisés nécessite une approbation distincte",
   "constants.execModeAllowLabel": "Autoriser tout",

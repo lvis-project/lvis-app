@@ -1047,7 +1047,7 @@ export const jaMessages: Record<string, string> = {
   "composer.attachLimitWarning": "⚠ {max} の添付ファイル制限に達しました — さらに追加するには、テキストエリアから [...#N] マーカーを削除してください",
   "composer.defaultPlaceholder": "質問を入力してください... (クリップボードから貼り付けるには Cmd/Ctrl+V)",
   "composerPlaceholder.apiKeyMissing": "まず API キーを設定してください...",
-  "composerPlaceholder.defaultHint": "メッセージを入力します (送信するには Enter · 添付するには Cmd/Ctrl+V) · /command が利用可能",
+  "composerPlaceholder.defaultHint": "typing, ⌘+V, /",
   "composerPlaceholder.streamingHint": "メッセージキューに追加されます (⌘⏎ですぐに中断)",
   "composerProjectSelector.addProject": "新しいプロジェクトを追加",
   "composerProjectSelector.cancelButton": "キャンセル",

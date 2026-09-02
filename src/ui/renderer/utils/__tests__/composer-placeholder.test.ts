@@ -55,7 +55,7 @@ describe("computeComposerPlaceholder", () => {
         streaming: false,
         suggestedReplies: DISMISSED,
       }),
-    ).toContain("질문 입력");
+    ).toContain("typing");
   });
 
   it("suggested-replies 가 비어 있으면 기본 placeholder 노출", () => {
@@ -65,7 +65,7 @@ describe("computeComposerPlaceholder", () => {
         streaming: false,
         suggestedReplies: EMPTY,
       }),
-    ).toBe("질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능");
+    ).toBe("typing, ⌘+V, /");
   });
 
   it("streaming + 활성 chip 이 동시에 있으면 추천 UI 가 placeholder 를 숨김", () => {
