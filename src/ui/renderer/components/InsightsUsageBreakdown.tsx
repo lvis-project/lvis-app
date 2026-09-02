@@ -1,17 +1,12 @@
 import type { UsageSummaryShape } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatTokensExact } from "../../../lib/cost-format.js";
 
 interface InsightsUsageBreakdownProps {
   summary: Partial<UsageSummaryShape> | null;
   monthLabel: string;
   loading?: boolean;
   error?: boolean;
-}
-
-function formatTokens(value: number | undefined): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(
-    Math.max(0, value ?? 0),
-  );
 }
 
 function byTokensDesc<T extends { totalTokens?: number }>(rows: readonly T[] | undefined): T[] {
@@ -62,7 +57,7 @@ export function InsightsUsageBreakdown({
                 {apiProviders.map((row) => (
                   <tr key={row.vendor} className="border-t">
                     <td className="break-all py-1.5 font-mono">{row.vendor}</td>
-                    <td className="py-1.5 text-right tabular-nums">{formatTokens(row.totalTokens)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{formatTokensExact(row.totalTokens)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -85,7 +80,7 @@ export function InsightsUsageBreakdown({
                   {subscriptionProviders.map((row) => (
                     <tr key={row.provider} className="border-t">
                       <td className="break-all py-1.5 font-mono">{row.provider}</td>
-                      <td className="py-1.5 text-right tabular-nums">{formatTokens(row.totalTokens)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{formatTokensExact(row.totalTokens)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -122,7 +117,7 @@ export function InsightsUsageBreakdown({
                     <td className="break-all py-1.5 font-mono">
                       <span className="text-muted-foreground">{row.vendor}/</span>{row.model}
                     </td>
-                    <td className="py-1.5 text-right tabular-nums">{formatTokens(row.totalTokens)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{formatTokensExact(row.totalTokens)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -147,7 +142,7 @@ export function InsightsUsageBreakdown({
                       <td className="break-all py-1.5 font-mono">
                         <span className="text-muted-foreground">{row.provider}/</span>{row.model}
                       </td>
-                      <td className="py-1.5 text-right tabular-nums">{formatTokens(row.totalTokens)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{formatTokensExact(row.totalTokens)}</td>
                     </tr>
                   ))}
                 </tbody>

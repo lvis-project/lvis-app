@@ -76,6 +76,7 @@ import {
   type SubscriptionProviderView,
 } from "./SubscriptionProvidersSection.js";
 import { TEST_IDS } from "../../../shared/test-ids.js";
+import { formatTokensExact } from "../../../lib/cost-format.js";
 
 export interface FallbackEntry {
   provider: LLMVendor;
@@ -2980,7 +2981,7 @@ export function LlmTab(props: LlmTabProps) {
                 <span className="text-xs font-medium tabular-nums">
                   {REASONING_EFFORT_STEPS[budgetToEffortIndex(thinkingBudget)]!.label}
                   <span className="ml-2 text-muted-foreground">
-                    · {t("llmTab.reasoningBudgetTokens", { count: thinkingBudget.toLocaleString() })}
+                    · {t("llmTab.reasoningBudgetTokens", { count: formatTokensExact(thinkingBudget) })}
                   </span>
                 </span>
               </div>

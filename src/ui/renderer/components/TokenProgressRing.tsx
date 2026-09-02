@@ -3,6 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { formatCostBadge, type EstimateBreakdown } from "../../../lib/cost-estimator.js";
+import { formatTokensExact } from "../../../lib/cost-format.js";
 
 interface TokenProgressRingProps {
   used: number;
@@ -137,15 +138,15 @@ export function TokenProgressRing({
         <div className="space-y-0.5">
           <div className="flex justify-between gap-3">
             <span>{t("tokenProgressRing.nextRequestLabel")}</span>
-            <span>{used.toLocaleString()}</span>
+            <span>{formatTokensExact(used)}</span>
           </div>
           <div className="flex justify-between gap-3">
             <span>{isTpmBound ? t("tokenProgressRing.effectiveLimitTpmLabel") : t("tokenProgressRing.effectiveLimitLabel")}</span>
-            <span>{displayBudget.toLocaleString()}</span>
+            <span>{formatTokensExact(displayBudget)}</span>
           </div>
           <div className="flex justify-between gap-3">
             <span>{t("tokenProgressRing.remainingLabel")}</span>
-            <span>{remaining.toLocaleString()}</span>
+            <span>{formatTokensExact(remaining)}</span>
           </div>
         </div>
         <div className="mt-1 border-t border-border/(--opacity-medium) pt-1 space-y-0.5">
@@ -156,13 +157,13 @@ export function TokenProgressRing({
           {typeof contextBudget === "number" && contextBudget > 0 && contextBudget !== displayBudget && (
             <div className="flex justify-between gap-3 opacity-70">
               <span>{t("tokenProgressRing.contextWindowLabel")}</span>
-              <span>{contextBudget.toLocaleString()} ({contextPct}%)</span>
+              <span>{formatTokensExact(contextBudget)} ({contextPct}%)</span>
             </div>
           )}
           {typeof tpmPct === "number" && (
             <div className={`flex justify-between gap-3 ${isTpmBound ? "text-warning" : "opacity-70"}`}>
               <span>{t("tokenProgressRing.tpmLabel")}</span>
-              <span>{tpmLimit!.toLocaleString()} ({tpmPct}%)</span>
+              <span>{formatTokensExact(tpmLimit!)} ({tpmPct}%)</span>
             </div>
           )}
         </div>
@@ -171,14 +172,14 @@ export function TokenProgressRing({
             <div className="flex justify-between gap-3">
               <span>{t("chatView.costInputLabel")}</span>
               <span>
-                {costEstimate.inputTokens.toLocaleString()} tok
+                {formatTokensExact(costEstimate.inputTokens)} tok
                 {costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.inputCost.toFixed(5)}`}
               </span>
             </div>
             <div className="flex justify-between gap-3">
               <span>{t("chatView.costOutputLabel")}</span>
               <span>
-                {costEstimate.outputTokens.toLocaleString()} tok
+                {formatTokensExact(costEstimate.outputTokens)} tok
                 {costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.outputCost.toFixed(5)}`}
               </span>
             </div>
