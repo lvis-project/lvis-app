@@ -16,7 +16,8 @@ import {
 } from "../../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../../contract/app-contract.js";
+import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS, MAX_PANES } from "../../../contract/app-contract.js";
+import { sameViewLocation, type ViewLocation } from "../utils/view-location.js";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import { CHROME_GAP_TIGHT } from "../../../shared/shell-geometry.js";
 import type { LvisApi } from "../types.js";
@@ -669,6 +670,13 @@ export interface ChatGroupState {
 }
 
 /**
+ * A pane showing its own conversation — the default, and every pane's content
+ * today. Shared rather than rebuilt so identity comparisons stay cheap; nothing
+ * mutates a location in place.
+ */
+const PANE_HOME: ViewLocation = { view: "home" };
+
+/**
  * The open chat groups, tiled.
  *
  * The geometry is a split tree — see `chat-group-tree.ts` and
@@ -678,8 +686,15 @@ export interface ChatGroupState {
  *
  * A group is bound to a conversation SOURCE, and every source is a distinct
  * ConversationLoop in main — `MAX_CHAT_GROUPS` is that ceiling, counted in
- * LEAVES and including the primary. It is the same ceiling in both modes,
- * because it counts loops.
+ * CONVERSATION PANES and including the primary. It is the same ceiling in both
+ * modes, because it counts loops. `MAX_PANES` is the other ceiling, counted in
+ * leaves: how many rectangles the canvas will hold. Both are four, and they are
+ * asked separately because they answer different questions.
+ *
+ * What each pane SHOWS is `contentById` — a `ViewLocation`, the same union the
+ * window's location has always used. Today every pane shows `{view:"home"}`,
+ * its own conversation, so the window's location and the focused pane's content
+ * are the same value; the router still swaps the whole main area.
  *
  * What chat mode holds to one is the number of tiles it DRAWS: `visibleTree`
  * collapses to the focused leaf. Groups behind it keep their conversations —
@@ -699,6 +714,38 @@ export function useChatGroups(appMode?: "chat" | "work") {
   // over — main lets every group go when the renderer navigates, so the
   // fresh count meets no stale loop.)
   const nextGroupIndex = useRef(2);
+  /**
+   * What each pane SHOWS, keyed by pane id.
+   *
+   * `{view:"home"}` — the default, and the only content any pane has today —
+   * means "this pane's own conversation"; every other `ViewLocation` is a
+   * feature panel, Settings or a plugin view drawn in its place. The same union
+   * the window's location already uses (`utils/view-location.ts`), so the
+   * breadcrumb, the persisted `system.activeView` key and the sidebar's
+   * `onSelect` all keep meaning exactly what they mean now — one pane deep
+   * rather than one window deep.
+   *
+   * Beside the tree, not inside it, exactly as `panelOpenIds` is: the tree is
+   * geometry, and a leaf that carried content would make every split, close and
+   * resize rewrite content it has no opinion about.
+   */
+  const [contentById, setContentById] = useState<Record<string, ViewLocation>>(
+    () => ({ [MAIN_CHAT_GROUP_ID]: PANE_HOME }),
+  );
+  /**
+   * The panes that MOUNT a conversation.
+   *
+   * Today that is every pane — a pane is still only ever created by opening a
+   * conversation in it. It is a separate fact from the tree because a pane that
+   * holds a conversation and is currently showing Settings is NOT the same as a
+   * pane that never had one: the first keeps its loop, its transcript and its
+   * turn, hidden; the second has no loop in main at all (main creates one
+   * lazily, on the first chat call a tile makes). The conversation ceiling
+   * counts THIS, since it is a ceiling on loops.
+   */
+  const [conversationIds, setConversationIds] = useState<ReadonlySet<string>>(
+    () => new Set([MAIN_CHAT_GROUP_ID]),
+  );
 
   const setPanelOpen = useCallback((id: string, open: boolean) => {
     setPanelOpenIds((current) => {
@@ -716,15 +763,22 @@ export function useChatGroups(appMode?: "chat" | "work") {
    * in the gesture rather than as a rejection after the fact.
    */
   const dropOnEdge = useCallback((targetGroupId: string, edge: DropEdge): string | null => {
-    if (countLeaves(tree) >= MAX_CHAT_GROUPS) return null;
+    // Two ceilings, both binding: the drop opens a conversation (a loop) AND a
+    // pane (a rectangle on the canvas). They are the same number today because
+    // every pane holds a conversation, and they are asked separately so that
+    // stops being an assumption the code relies on.
+    if (conversationIds.size >= MAX_CHAT_GROUPS) return null;
+    if (countLeaves(tree) >= MAX_PANES) return null;
     const id = `group-${nextGroupIndex.current}`;
     nextGroupIndex.current += 1;
     setTree((current) => splitLeaf(current, targetGroupId, edge, id));
+    setContentById((current) => ({ ...current, [id]: PANE_HOME }));
+    setConversationIds((current) => new Set(current).add(id));
     setFocusedId(id);
     // A tile added behind a maximized one would be a tile nobody can see.
     setMaximizedId(null);
     return id;
-  }, [tree]);
+  }, [tree, conversationIds]);
 
   /**
    * The header's split: halve `groupId` on `axis`, the new tile trailing —
@@ -780,7 +834,9 @@ export function useChatGroups(appMode?: "chat" | "work") {
     canvasSize: { width: number; height: number } | undefined,
   ): { chatGroupId: string; released: string | null } | null => {
     let released: string | null = null;
-    if (countLeaves(tree) >= MAX_CHAT_GROUPS) {
+    // Either ceiling forces the swap — the newcomer needs both a loop and a
+    // tile, so whichever is full is the one that has to give something back.
+    if (conversationIds.size >= MAX_CHAT_GROUPS || countLeaves(tree) >= MAX_PANES) {
       // The primary is never the spare. Releasing it does more than drop a
       // loop: main points that loop at a fresh conversation and clears the
       // persisted window-active session, so the next launch would open blank
@@ -801,6 +857,17 @@ export function useChatGroups(appMode?: "chat" | "work") {
       id,
     ));
     setPanelOpenIds((current) => (spare === null ? current : current.filter((each) => each !== spare)));
+    setContentById((current) => {
+      const next = { ...current, [id]: PANE_HOME };
+      if (spare !== null) delete next[spare];
+      return next;
+    });
+    setConversationIds((current) => {
+      const next = new Set(current);
+      if (spare !== null) next.delete(spare);
+      next.add(id);
+      return next;
+    });
     setFocusedId(id);
     // Where there is no room to draw both, the new group is shown ALONE rather
     // than halved below the tile floor — a shape no drag could produce, since
@@ -817,7 +884,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
       appMode === "chat" || splitFits(besideGroupId, "row", canvasSize) ? null : id,
     );
     return { chatGroupId: id, released };
-  }, [tree, focusedId, splitFits, appMode]);
+  }, [tree, focusedId, splitFits, appMode, conversationIds]);
 
   // Any tile but the last can go, the primary included: once split, the
   // primary is one tile among the others to the user, and a close that works
@@ -831,6 +898,18 @@ export function useChatGroups(appMode?: "chat" | "work") {
     setFocusedId((focused) => (survivors.includes(focused) ? focused : survivors[0]!));
     setMaximizedId((current) => (current === id ? null : current));
     setPanelOpenIds((current) => current.filter((each) => each !== id));
+    setContentById((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setConversationIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
   }, [tree]);
 
   const toggleMaximize = useCallback((id: string) => {
@@ -850,6 +929,60 @@ export function useChatGroups(appMode?: "chat" | "work") {
     setFocusedId(id);
     setMaximizedId((current) => (current === null ? null : id));
   }, []);
+
+  /**
+   * Show `location` in pane `id`.
+   *
+   * A non-home location may be open in ONE pane at a time. Choosing one that
+   * another pane already shows FOCUSES that pane instead of opening a second
+   * copy — the same rule a conversation already has ("one session, one tile").
+   * Two Settings panes would fight over the single persisted `system.settingsTab`,
+   * and two views of one plugin are two guests in one webview partition, so the
+   * duplicate would not merely be redundant, it would be two surfaces
+   * disagreeing about one piece of state.
+   *
+   * Home is exempt: every pane's home is ITS OWN conversation, not a shared
+   * place, so "already open elsewhere" does not apply.
+   */
+  const setPaneContent = useCallback((id: string, location: ViewLocation) => {
+    if (location.view !== "home") {
+      // Over the LIVE panes, not over the map's keys: a pane that is gone is
+      // not somewhere the user can be sent.
+      const openElsewhere = leafIds(tree).find(
+        (paneId) => paneId !== id && sameViewLocation(contentById[paneId] ?? PANE_HOME, location),
+      );
+      if (openElsewhere !== undefined) {
+        focus(openElsewhere);
+        return;
+      }
+    }
+    setContentById((current) => ({ ...current, [id]: location }));
+  }, [tree, contentById, focus]);
+
+  /**
+   * The pane whose CONVERSATION the window's conversation-scoped surfaces mean.
+   *
+   * The focused pane when it holds one; otherwise the conversation pane focus
+   * left last. Settings' away-authority binding is the case that needs it:
+   * opening Settings over a conversation must keep naming the conversation it
+   * was opened from, and once the focused pane is showing Settings, `focusedId`
+   * alone can no longer say which that was.
+   *
+   * "Last focused" is kept in a ref written from the render, not from `focus`:
+   * five call sites move `focusedId` (focus, split, drop, adopt, close), and a
+   * mirror maintained in each of them is one that a sixth would silently miss.
+   * The write is idempotent — it copies a value this render already holds.
+   */
+  const lastFocusedConversationRef = useRef(MAIN_CHAT_GROUP_ID);
+  if (conversationIds.has(focusedId)) lastFocusedConversationRef.current = focusedId;
+  const focusedConversationId = conversationIds.has(focusedId)
+    ? focusedId
+    // The remembered pane can itself have been closed, so it is checked rather
+    // than trusted; the primary is the last answer because its loop outlives
+    // its pane — main keeps it and hands it a blank conversation on release.
+    : conversationIds.has(lastFocusedConversationRef.current)
+      ? lastFocusedConversationRef.current
+      : leafIds(tree).find((id) => conversationIds.has(id)) ?? MAIN_CHAT_GROUP_ID;
 
   // Chat mode collapses to the focused tile rather than closing the others:
   // switching modes is a view change, and losing a conversation to it would
@@ -895,9 +1028,15 @@ export function useChatGroups(appMode?: "chat" | "work") {
 
   // Both halves can serve MAX_CHAT_GROUPS conversations now: main gives every
   // group its own ConversationLoop and labels every stream frame, and each tile
-  // owns its conversation state through ChatGroupSession. The ceiling is the
-  // number of loops, nothing weaker.
-  const canSplit = appMode !== "chat" && countLeaves(tree) < MAX_CHAT_GROUPS;
+  // owns its conversation state through ChatGroupSession.
+  //
+  // The header's split opens a conversation in a new pane, so it is offered
+  // only while BOTH ceilings have room — the same pair `dropOnEdge` enforces,
+  // asked here so the limit is visible in the gesture rather than as a control
+  // that does nothing when pressed.
+  const canSplit = appMode !== "chat"
+    && countLeaves(tree) < MAX_PANES
+    && conversationIds.size < MAX_CHAT_GROUPS;
 
   // Boundaries between tiles. Chat mode shows one leaf, so there are none.
   const gutters = useMemo(
@@ -930,6 +1069,10 @@ export function useChatGroups(appMode?: "chat" | "work") {
     tree,
     focusedId,
     focus,
+    contentById,
+    setPaneContent,
+    conversationIds,
+    focusedConversationId,
     setPanelOpen,
     canSplit,
     split,

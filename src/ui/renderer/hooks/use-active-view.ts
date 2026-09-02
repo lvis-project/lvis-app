@@ -2,8 +2,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import { parseInlineViewKey, type InlineViewKey } from "../../../shared/view-key.js";
 
+/**
+ * Where the window's location actually LIVES: the focused pane's content.
+ *
+ * `activeView` used to be this hook's own `useState`. It is DERIVED now — the
+ * hook owns the restore and the persistence of the location, the pane model
+ * owns the value. One place a location can be, rather than two that have to be
+ * kept equal. With one focused pane the two readings are identical, which is
+ * why nothing above this hook changes shape.
+ */
+export interface ActiveViewPane {
+  /** The focused pane's view. `activeView` IS this. */
+  view: InlineViewKey;
+  /** Show `next` in the focused pane. */
+  navigate: (next: InlineViewKey) => void;
+}
+
 export interface UseActiveViewResult {
-  /** Where the main window is. */
+  /** Where the main window is — the focused pane's view. */
   activeView: InlineViewKey;
   /**
    * Navigate — persists immediately, INCLUDING before the initial read has
@@ -92,8 +108,17 @@ export function useActiveView(
   api: LvisApi,
   /** View keys the app has actually loaded — `toViewKey` over `pluginViews`. */
   loadedPluginViewKeys: readonly string[],
+  /** The focused pane — the location this hook restores into and persists from. */
+  pane: ActiveViewPane,
 ): UseActiveViewResult {
-  const [activeView, setActiveViewState] = useState<InlineViewKey>("home");
+  const activeView = pane.view;
+  // The binding, as of the last render. Held in a ref so `setActiveView` and
+  // the restore path keep ONE identity for the life of the app: the pane model
+  // rebuilds `navigate` whenever pane content changes, and letting that reach
+  // the callbacks would re-run the settings read on every navigation and hand
+  // every dep-array-omitting call site a setter that no longer persists.
+  const paneRef = useRef(pane);
+  paneRef.current = pane;
   // Set by the first navigation and never cleared: the point after which the
   // user, not the stored value, says where the window is.
   //
@@ -117,10 +142,16 @@ export function useActiveView(
   // Mirrors `activeView` so the setter can resolve an updater and decide
   // whether to write WITHOUT doing either inside a state-updater callback,
   // which React is free to invoke more than once.
-  const activeViewRef = useRef<InlineViewKey>("home");
+  //
+  // Written from the pane on every render (the value is the source of truth, so
+  // the write is idempotent) AND ahead of the commit by `applyView`, so two
+  // navigations inside one tick still see each other — the same reading the
+  // local `useState` gave before the value moved into the pane model.
+  const activeViewRef = useRef<InlineViewKey>(activeView);
+  activeViewRef.current = activeView;
   const applyView = useCallback((next: InlineViewKey) => {
     activeViewRef.current = next;
-    setActiveViewState(next);
+    paneRef.current.navigate(next);
   }, []);
   // The ONE way a restore moves the window. Both restore paths go through it,
   // so the count cannot drift from the moves it describes — and a future
