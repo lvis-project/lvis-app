@@ -88,6 +88,7 @@ import {
   type CommittedPluginGenerationPublicationError,
 } from "./committed-generation-publication-error.js";
 import { sleep } from "../shared/abortable-deadline.js";
+import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 export { assertSafeArtifactSlug } from "./plugin-id.js";
 
 /** Shared last-line defense for every marketplace artifact consumer. */
@@ -1048,9 +1049,9 @@ export class PluginArtifactStore {
       const version = parsed.version ?? "unknown";
       const dir = resolve(this.cacheRoot, safeSlug, version);
       await mkdir(dir, { recursive: true });
-      await this.writeCacheFileAtomic(resolve(dir, "plugin.json"), raw);
+      await writeFileAtomicAtPath(resolve(dir, "plugin.json"), raw);
       if (registryEntry) {
-        await this.writeCacheFileAtomic(
+        await writeFileAtomicAtPath(
           resolve(dir, "registry-entry.json"),
           `${JSON.stringify({
             installSource: registryEntry.installSource,
@@ -1065,19 +1066,6 @@ export class PluginArtifactStore {
         `cacheVersion failed for ${slug}: ${(err as Error).message}`,
       );
     }
-  }
-
-  /**
-   * Atomically create a cache-metadata file: write the body to a sibling
-   * `.tmp` with an owner-only mode (0o600) then rename over the target. Mirrors
-   * the `~/.lvis/` atomic-write contract (project CLAUDE.md) — a crash never
-   * leaves a half-written snapshot, and the restrictive mode keeps the cache
-   * file out of other local users' reach (no shared-temp exposure).
-   */
-  private async writeCacheFileAtomic(filePath: string, body: string): Promise<void> {
-    const tmp = `${filePath}.tmp`;
-    await writeFile(tmp, body, { encoding: "utf-8", mode: 0o600 });
-    await rename(tmp, filePath);
   }
 
   async readCachedRegistryEntrySnapshot(
@@ -1114,7 +1102,7 @@ export class PluginArtifactStore {
       await mkdir(dir, { recursive: true });
       const entries = await this.readHistory(safeSlug);
       entries.push(entry);
-      await this.writeCacheFileAtomic(this.historyPath(safeSlug), `${JSON.stringify({ entries }, null, 2)}\n`);
+      await writeFileAtomicAtPath(this.historyPath(safeSlug), `${JSON.stringify({ entries }, null, 2)}\n`);
     } catch (err) {
       log.warn(
         `appendHistory failed for ${slug}: ${(err as Error).message}`,

@@ -18,7 +18,7 @@
 import AdmZip from "adm-zip";
 import { describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   ArtifactRollbackError,
@@ -790,6 +790,33 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
       // The cached snapshot is a byte copy of the document, so identity is the
       // portable `name`, not the flat `id` the host projects it to.
       expect(JSON.parse(raw)).toMatchObject({ name: "acme", version: "1.2.3" });
+    } finally {
+      await cleanupTmpDir(tmp);
+    }
+  });
+
+  it("does not stage through the predictable `<file>.tmp` a planted symlink could redirect", async () => {
+    // The cache writer used a fixed `${filePath}.tmp` + writeFile + rename; the
+    // shared atomic writer stages under a random O_EXCL name, so a symlink
+    // sitting at the old staging path is neither followed nor renamed over
+    // the target.
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const sourceManifest = resolve(tmp, "live", "plugin.json");
+      await mkdir(resolve(tmp, "live"), { recursive: true });
+      await writeFile(
+        sourceManifest,
+        JSON.stringify(agentPluginsDocument({ id: "acme", version: "1.2.3", name: "acme", entry: "x" })));
+      const cacheDir = resolve(tmp, "cache", "acme", "1.2.3");
+      await mkdir(cacheDir, { recursive: true });
+      const planted = resolve(tmp, "planted.json");
+      await writeFile(planted, "attacker");
+      await symlink(planted, resolve(cacheDir, "plugin.json.tmp"));
+      await store.cacheVersionFromManifest("acme", sourceManifest);
+      expect(await readFile(planted, "utf-8")).toBe("attacker");
+      expect(JSON.parse(await readFile(resolve(cacheDir, "plugin.json"), "utf-8"))).toMatchObject({ name: "acme" });
+      expect((await readdir(cacheDir)).filter((name) => name.endsWith(".tmp"))).toEqual(["plugin.json.tmp"]);
     } finally {
       await cleanupTmpDir(tmp);
     }
