@@ -397,6 +397,95 @@ export type PluginMarketplaceUninstallOptions = {
   };
 };
 
+/** ask_user_question — one FIFO request main pushes to the composer dock. */
+export type AskUserQuestionRequest = {
+  id: string;
+  sessionId: string;
+  questions: Array<{
+    question: string;
+    choices: string[];
+    recommendedIndex?: number;
+    altIndices?: number[];
+    allowMultiple?: boolean;
+    summaryHint?: string;
+  }>;
+  createdAt: number;
+};
+
+export type AskUserQuestionResponse = {
+  requestId: string;
+  answers?: Array<{
+    choice?: string;
+    /** Multi-select selections (only set when the question allowMultiple). */
+    choices?: string[];
+  }>;
+  dismissed?: boolean;
+};
+
+/** Which surface raised an in-app toast / OS notification. */
+type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
+
+/** What the notification points back at, so a click can land on its source. */
+type NotificationContextRef = {
+  sessionId?: string;
+  routineId?: string;
+  questionId?: string;
+  approvalId?: string;
+};
+
+export type NotificationToastPayload = {
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  contextRef?: NotificationContextRef;
+};
+
+/** An overlay trigger began running — main → renderer, before any item is shown. */
+export type OverlayTriggerStartedPayload = {
+  sessionId: string;
+  pluginId: string;
+  source: string;
+  visibility: "silent" | "summary-only" | "user-visible";
+  priority: "low" | "normal" | "high";
+  startedAt: string;
+};
+
+export type OverlayTriggerCompletedPayload = {
+  sessionId: string;
+  pluginId: string;
+  source: string;
+  visibility: "silent" | "summary-only" | "user-visible";
+  priority: "low" | "normal" | "high";
+  prompt: string;
+  summary: string;
+  completedAt: string;
+};
+
+export type OverlayTriggerExpiredPayload = { sessionId: string; pluginId: string; source: string };
+
+export type OverlayTriggerFailedPayload = {
+  sessionId: string;
+  pluginId: string;
+  source: string;
+  reason: "provider_error" | "tool_error" | "abort" | "unknown";
+  errorId: string;
+};
+
+export type OverlayTriggerImportedPayload = {
+  sessionId: string;
+  source: string;
+  prompt: string;
+  summary: string;
+  toolCallCount: number;
+  importedAt: string;
+  wrappedPrompt: string;
+};
+
+export type NotificationClickPayload = {
+  kind: NotificationKind;
+  contextRef?: NotificationContextRef;
+};
+
 export type LvisApi = {
   /**
    * Deterministic file:// URL of the bundled `plugin-preload.js`. Computed in
@@ -408,7 +497,6 @@ export type LvisApi = {
   approval: LvisApprovalApi;
   policy: LvisPolicyApi;
   mcp: LvisMcpApi;
-  attach: LvisAttachApi;
   remoteA2a: {
     targets: () => Promise<
       | { ok: true; targets: Array<{ targetAgentId: number; label: string }> }
@@ -666,7 +754,12 @@ export type LvisApi = {
    * conversation, and its stream subscription only sees that group's frames.
    * See docs/design/tiled-chat-groups.md.
    */
-  chatGroup?: (chatGroupId: string) => LvisApi;
+  /**
+   * One tile's view of the per-conversation channels. It rebinds those
+   * channels only — settings, plugins and the rest are window-wide — so a
+   * tile layers it over the base surface (`{ ...api, ...api.chatGroup(id) }`).
+   */
+  chatGroup?: (chatGroupId: string) => Partial<LvisApi>;
   /**
    * Let go of this group's conversation in main. Sent when its tile closes;
    * the primary group refuses it.
@@ -894,6 +987,53 @@ export type LvisApi = {
   // failed: clears running:true stuck OverlayItem when the LLM session throws
   onRoutineFailed: (handler: (event: { routineId: string; error: string }) => void) => () => void;
   // Overlay IPC bridges
+  // ─── Observability + privacy surfaces ─────────────────────────────────
+  // The IPC bridge resolves these to `unknown`; each result's shape is
+  // declared by its one consumer tab (AuditTab, DiagnosticsSection,
+  // PrivacyTab) until it is lifted here. Parameters are the contract.
+  dlp: {
+    getStats: (days: number) => Promise<unknown>;
+  };
+  audit: {
+    search: (filter: {
+      dateFrom?: string;
+      dateTo?: string;
+      type?: string;
+      textSearch?: string;
+      limit?: number;
+      offset?: number;
+    }) => Promise<unknown>;
+    getStats: (lastDays: number) => Promise<unknown>;
+  };
+  diagnostics: {
+    /** Build a redacted diagnostics ZIP and save via native dialog. */
+    export: (opts?: { dateFrom?: string; dateTo?: string; includeCrashDumps?: boolean }) => Promise<unknown>;
+    /** Crash-dump metadata (filename/time/size). */
+    crashList: () => Promise<unknown>;
+  };
+  logs: {
+    /** Recent N redacted log lines, optional level filter. */
+    tail: (args?: { lines?: number; level?: string }) => Promise<unknown>;
+  };
+  /** The same store `window.lvis.userApproval` fronts. */
+  userApproval: LvisUserApprovalApi;
+  // ─── Overlay trigger lifecycle ────────────────────────────────────────
+  dismissTrigger: (sessionId: string) => Promise<{
+  ok: boolean;
+  removed?: boolean;
+  error?: string;
+}>;
+  importTrigger: (sessionId: string) => Promise<{
+  ok: boolean;
+  imported?: number;
+  reason?: string;
+  error?: string;
+}>;
+  onTriggerStarted: (handler: (payload: OverlayTriggerStartedPayload) => void) => () => void;
+  onTriggerCompleted: (handler: (result: OverlayTriggerCompletedPayload) => void) => () => void;
+  onTriggerExpired: (handler: (payload: OverlayTriggerExpiredPayload) => void) => () => void;
+  onTriggerFailed: (handler: (payload: OverlayTriggerFailedPayload) => void) => () => void;
+  onTriggerImported: (handler: (payload: OverlayTriggerImportedPayload) => void) => () => void;
   onOverlayShow: (handler: (item: import("./context/OverlayContext.js").OverlayItem) => void) => () => void;
   onOverlayUpdate: (handler: (id: string, patch: Partial<import("./context/OverlayContext.js").OverlayItem>) => void) => () => void;
   onOverlayDismiss: (handler: (id: string) => void) => () => void;
@@ -1113,30 +1253,8 @@ export type LvisApi = {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;
   };
   // Workflow tools — routines
-  onAskUserQuestion: (
-    h: (req: {
-      id: string;
-      sessionId: string;
-      questions: Array<{
-        question: string;
-        choices: string[];
-        recommendedIndex?: number;
-        altIndices?: number[];
-        allowMultiple?: boolean;
-        summaryHint?: string;
-      }>;
-      createdAt: number;
-    }) => void,
-  ) => () => void;
-  respondAskUserQuestion: (response: {
-    requestId: string;
-    answers?: Array<{
-      choice?: string;
-      /** Multi-select selections (only set when the question allowMultiple). */
-      choices?: string[];
-    }>;
-    dismissed?: boolean;
-  }) => Promise<{ ok: boolean; error?: string }>;
+  onAskUserQuestion: (h: (req: AskUserQuestionRequest) => void) => () => void;
+  respondAskUserQuestion: (response: AskUserQuestionResponse) => Promise<{ ok: boolean; error?: string }>;
   /** Renderer is notified when the gate's 5-minute timeout fires. */
   onAskUserQuestionTimeout?: (
     h: (payload: { requestId: string }) => void,
@@ -1160,39 +1278,9 @@ export type LvisApi = {
     }) => void,
   ) => () => void;
   // ─── Notifications (#260) ────────────────────────
-  onNotificationToast?: (
-    h: (payload: {
-      kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
-      title: string;
-      body: string;
-      contextRef?: {
-        sessionId?: string;
-        routineId?: string;
-        questionId?: string;
-        approvalId?: string;
-      };
-    }) => void,
-  ) => () => void;
-  onNotificationClicked?: (
-    h: (payload: {
-      kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
-      contextRef?: {
-        sessionId?: string;
-        routineId?: string;
-        questionId?: string;
-        approvalId?: string;
-      };
-    }) => void,
-  ) => () => void;
-  notifyClick?: (payload: {
-    kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
-    contextRef?: {
-      sessionId?: string;
-      routineId?: string;
-      questionId?: string;
-      approvalId?: string;
-    };
-  }) => Promise<{ ok: boolean }>;
+  onNotificationToast?: (h: (payload: NotificationToastPayload) => void) => () => void;
+  onNotificationClicked?: (h: (payload: NotificationClickPayload) => void) => () => void;
+  notifyClick?: (payload: NotificationClickPayload) => Promise<{ ok: boolean }>;
 
   // ─── Main-window management ─────────────────────────────────────────────
   window?: {

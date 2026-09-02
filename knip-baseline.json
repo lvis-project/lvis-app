@@ -2855,11 +2855,6 @@
     {
       "type": "types",
       "file": "src/ui/renderer/types.ts",
-      "name": "LvisMcpApi"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/types.ts",
       "name": "LvisPermissionApi"
     },
     {

@@ -16,6 +16,8 @@ import type {
 } from "../shared/chat-origin.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { ChatStreamEvent } from "../lib/chat-stream-state.js";
+// Type-only: this builder implements part of the renderer-declared surface.
+import type { LvisApi } from "../ui/renderer/types.js";
 
 /**
  * The chat channels that address ONE conversation.
@@ -274,5 +276,5 @@ export function buildPublicSurface() {
      * the right conversation.
      */
     chatGroup: (chatGroupId: string) => buildSurfaceForChatGroup(chatGroupId),
-  };
+  } satisfies Partial<LvisApi>;
 }

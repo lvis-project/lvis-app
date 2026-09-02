@@ -38,6 +38,21 @@ import type { ChatStreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
+// Type-only: the renderer declares the surface it consumes; this file is the
+// one implementation and is checked against it (`satisfies` below), so a
+// handler shape that drifts on either side is a compile error here.
+import type {
+  AskUserQuestionRequest,
+  AskUserQuestionResponse,
+  LvisApi,
+  NotificationClickPayload,
+  NotificationToastPayload,
+  OverlayTriggerCompletedPayload,
+  OverlayTriggerExpiredPayload,
+  OverlayTriggerFailedPayload,
+  OverlayTriggerImportedPayload,
+  OverlayTriggerStartedPayload,
+} from "../ui/renderer/types.js";
 import {
   isSubscriptionRuntimeStatusUpdatedEvent,
   type SubscriptionRuntimeStatusUpdatedEvent,
@@ -173,24 +188,26 @@ export function normalizeMarketplacePackageActionResult(
   return normalized;
 }
 
+type RemoteA2AStatusPromise = ReturnType<LvisApi["remoteA2a"]["status"]>;
+
 function invokeRemoteA2AAction(
   action: "resume",
   taskHandle: string,
   userIntent: string,
-): Promise<unknown>;
+): RemoteA2AStatusPromise;
 function invokeRemoteA2AAction(
   action: "cancel" | "replay",
   taskHandle: string,
-): Promise<unknown>;
+): RemoteA2AStatusPromise;
 async function invokeRemoteA2AAction(
   action: "resume" | "cancel" | "replay",
   taskHandle: string,
   userIntent?: string,
-): Promise<unknown> {
+): RemoteA2AStatusPromise {
   return ipcRenderer.invoke(
     CHANNELS.remoteA2a.action,
     { action, taskHandle, ...(userIntent === undefined ? {} : { userIntent }), intentToken: ipcUserKeyboardIntent() },
-  );
+  ) as RemoteA2AStatusPromise;
 }
 
 export function buildInternalApiSurface() {
@@ -220,8 +237,8 @@ export function buildInternalApiSurface() {
   tailnetObserver: buildTailnetObserverApiSurface(),
   telegramConnection: buildTelegramConnectionApiSurface(),
   awayAuthority: buildAwayAuthorityApiSurface(),
-  onSettingsUpdated: (handler: (settings: unknown) => void) => {
-    const listener = (_event: unknown, settings: unknown) => handler(settings);
+  onSettingsUpdated: (handler: Parameters<LvisApi["onSettingsUpdated"]>[0]) => {
+    const listener = (_event: unknown, settings: Parameters<typeof handler>[0]) => handler(settings);
     ipcRenderer.on(SETTINGS.updated, listener);
     return () => ipcRenderer.removeListener(SETTINGS.updated, listener);
   },
@@ -565,84 +582,35 @@ export function buildInternalApiSurface() {
 
 
   // ─── Overlay trigger lifecycle ────────────────────────────────────────
-  onTriggerStarted: (
-    handler: (payload: {
-      sessionId: string;
-      pluginId: string;
-      source: string;
-      visibility: "silent" | "summary-only" | "user-visible";
-      priority: "low" | "normal" | "high";
-      startedAt: string;
-    }) => void,
-  ) => {
+  onTriggerStarted: (handler: (payload: OverlayTriggerStartedPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.trigger.started, listener);
     return () => ipcRenderer.removeListener(CHANNELS.trigger.started, listener);
   },
-  onTriggerCompleted: (
-    handler: (result: {
-      sessionId: string;
-      pluginId: string;
-      source: string;
-      visibility: "silent" | "summary-only" | "user-visible";
-      priority: "low" | "normal" | "high";
-      prompt: string;
-      summary: string;
-      completedAt: string;
-    }) => void,
-  ) => {
+  onTriggerCompleted: (handler: (result: OverlayTriggerCompletedPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.trigger.completed, listener);
     return () => ipcRenderer.removeListener(CHANNELS.trigger.completed, listener);
   },
-  onTriggerFailed: (
-    handler: (payload: {
-      sessionId: string;
-      pluginId: string;
-      source: string;
-      reason: "provider_error" | "tool_error" | "abort" | "unknown";
-      errorId: string;
-    }) => void,
-  ) => {
+  onTriggerFailed: (handler: (payload: OverlayTriggerFailedPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.trigger.failed, listener);
     return () => ipcRenderer.removeListener(CHANNELS.trigger.failed, listener);
   },
-  onTriggerExpired: (
-    handler: (payload: { sessionId: string; pluginId: string; source: string }) => void,
-  ) => {
+  onTriggerExpired: (handler: (payload: OverlayTriggerExpiredPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.trigger.expired, listener);
     return () => ipcRenderer.removeListener(CHANNELS.trigger.expired, listener);
   },
-  onTriggerImported: (
-    handler: (payload: {
-      sessionId: string;
-      source: string;
-      prompt: string;
-      summary: string;
-      toolCallCount: number;
-      importedAt: string;
-      wrappedPrompt: string;
-    }) => void,
-  ) => {
+  onTriggerImported: (handler: (payload: OverlayTriggerImportedPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.trigger.imported, listener);
     return () => ipcRenderer.removeListener(CHANNELS.trigger.imported, listener);
   },
   dismissTrigger: async (sessionId: string) =>
-    ipcRenderer.invoke(CHANNELS.trigger.dismiss, sessionId) as Promise<{
-      ok: boolean;
-      removed?: boolean;
-      error?: string;
-    }>,
+    ipcRenderer.invoke(CHANNELS.trigger.dismiss, sessionId) as ReturnType<LvisApi["dismissTrigger"]>,
   importTrigger: async (sessionId: string) =>
-    ipcRenderer.invoke(CHANNELS.trigger.import, sessionId) as Promise<{
-      ok: boolean;
-      imported?: number;
-      reason?: string;
-      error?: string;
-    }>,
+    ipcRenderer.invoke(CHANNELS.trigger.import, sessionId) as ReturnType<LvisApi["importTrigger"]>,
 
   // ─── Marketplace update notifications ────────────
   onMarketplaceUpdatesAvailable: (handler: (updates: Array<{
@@ -1062,8 +1030,8 @@ export function buildInternalApiSurface() {
   // ─── Approval Gate ─────────────────────────────
   approval: {
     /** main→renderer 단방향 이벤트 구독 */
-    onRequest: (cb: (req: unknown) => void) => {
-      const listener = (_event: unknown, req: unknown) => cb(req);
+    onRequest: (cb: Parameters<LvisApi["approval"]["onRequest"]>[0]) => {
+      const listener = (_event: unknown, req: Parameters<typeof cb>[0]) => cb(req);
       ipcRenderer.on(CHANNELS.approval.request, listener);
       return () => ipcRenderer.removeListener(CHANNELS.approval.request, listener);
     },
@@ -1072,8 +1040,8 @@ export function buildInternalApiSurface() {
      * like `onRequest` — the queue it reconciles is the window's one FIFO,
      * and the surface drawing the card is decided renderer-side.
      */
-    onSettled: (cb: (payload: unknown) => void) => {
-      const listener = (_event: unknown, payload: unknown) => cb(payload);
+    onSettled: (cb: Parameters<LvisApi["approval"]["onSettled"]>[0]) => {
+      const listener = (_event: unknown, payload: Parameters<typeof cb>[0]) => cb(payload);
       ipcRenderer.on(CHANNELS.approval.settled, listener);
       return () => ipcRenderer.removeListener(CHANNELS.approval.settled, listener);
     },
@@ -1174,30 +1142,13 @@ export function buildInternalApiSurface() {
   // ─── Workflow tools ──────────────────────────────
   // ask_user_question — main process pushes FIFO question requests to the
   // renderer's non-modal composer dock; the card resolves via this channel.
-  onAskUserQuestion: (
-    handler: (req: {
-      id: string;
-      sessionId: string;
-      questions: Array<{
-        question: string;
-        choices: string[];
-        recommendedIndex?: number;
-        altIndices?: number[];
-        allowMultiple?: boolean;
-        summaryHint?: string;
-      }>;
-      createdAt: number;
-    }) => void,
-  ) => {
+  onAskUserQuestion: (handler: (req: AskUserQuestionRequest) => void) => {
     const listener = (_e: unknown, req: Parameters<typeof handler>[0]) => handler(req);
     ipcRenderer.on(CHANNELS.askUserQuestion.request, listener);
     return () => ipcRenderer.removeListener(CHANNELS.askUserQuestion.request, listener);
   },
-  respondAskUserQuestion: async (response: {
-    requestId: string;
-    answers?: Array<{ choice?: string; choices?: string[] }>;
-    dismissed?: boolean;
-  }) => ipcRenderer.invoke(CHANNELS.askUserQuestion.respond, response),
+  respondAskUserQuestion: async (response: AskUserQuestionResponse) =>
+    ipcRenderer.invoke(CHANNELS.askUserQuestion.respond, response),
   // Timeout side-channel — main process notifies the renderer when an
   // ask_user_question request expired (5 min default) so the card can drop
   // the stale prompt before the user clicks into a no-op.
@@ -1384,13 +1335,13 @@ export function buildInternalApiSurface() {
   },
 
   // Overlay IPC bridges (main → renderer push)
-  onOverlayShow: (handler: (item: unknown) => void) => {
-    const listener = (_e: unknown, item: unknown) => handler(item);
+  onOverlayShow: (handler: Parameters<LvisApi["onOverlayShow"]>[0]) => {
+    const listener = (_e: unknown, item: Parameters<typeof handler>[0]) => handler(item);
     ipcRenderer.on(OVERLAY_V1.show, listener);
     return () => ipcRenderer.removeListener(OVERLAY_V1.show, listener);
   },
-  onOverlayUpdate: (handler: (id: string, patch: unknown) => void) => {
-    const listener = (_e: unknown, id: string, patch: unknown) => handler(id, patch);
+  onOverlayUpdate: (handler: Parameters<LvisApi["onOverlayUpdate"]>[0]) => {
+    const listener = (_e: unknown, id: string, patch: Parameters<typeof handler>[1]) => handler(id, patch);
     ipcRenderer.on(OVERLAY_V1.update, listener);
     return () => ipcRenderer.removeListener(OVERLAY_V1.update, listener);
   },
@@ -1443,47 +1394,18 @@ export function buildInternalApiSurface() {
   // OS notifications fire when backgrounded/minimized. Renderer also signals
   // back when an in-app toast / OS notification is clicked so main can focus
   // the window and the renderer can scroll/navigate to the source surface.
-  onNotificationToast: (
-    handler: (payload: {
-      kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
-      title: string;
-      body: string;
-      contextRef?: {
-        sessionId?: string;
-        routineId?: string;
-        questionId?: string;
-        approvalId?: string;
-      };
-    }) => void,
-  ) => {
+  onNotificationToast: (handler: (payload: NotificationToastPayload) => void) => {
     const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
     ipcRenderer.on(CHANNELS.notification.toast, listener);
     return () => ipcRenderer.removeListener(CHANNELS.notification.toast, listener);
   },
-  onNotificationClicked: (
-    handler: (payload: {
-      kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
-      contextRef?: {
-        sessionId?: string;
-        routineId?: string;
-        questionId?: string;
-        approvalId?: string;
-      };
-    }) => void,
-  ) => {
+  onNotificationClicked: (handler: (payload: NotificationClickPayload) => void) => {
     const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
     ipcRenderer.on(CHANNELS.notification.clicked, listener);
     return () => ipcRenderer.removeListener(CHANNELS.notification.clicked, listener);
   },
-  notifyClick: async (payload: {
-    kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
-    contextRef?: {
-      sessionId?: string;
-      routineId?: string;
-      questionId?: string;
-      approvalId?: string;
-    };
-  }) => ipcRenderer.invoke(CHANNELS.notification.clicked, payload),
+  notifyClick: async (payload: NotificationClickPayload) =>
+    ipcRenderer.invoke(CHANNELS.notification.clicked, payload),
 
   // ─── Main-window management ──────────────────────────────────────────────
   window: {
@@ -1526,5 +1448,5 @@ export function buildInternalApiSurface() {
         | { ok: false; error: string }
       >,
   },
-  };
+  } satisfies Partial<LvisApi>;
 }
