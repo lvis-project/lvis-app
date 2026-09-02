@@ -10,13 +10,17 @@ import { normalizeExecutionMode, type ExecutionModeDisplay } from "../../../shar
 /**
  * In-bar status sub-row data.
  *
- * The persistent model / permission / active-state cells that used to live in
- * the window StatusBar now render as a compact single line at the bottom of the
- * unified InputActionBar (the window StatusBar is notifications-only). This hook
+ * The persistent model / permission cells that used to live in the window
+ * StatusBar now render as a compact single line at the bottom of the unified
+ * InputActionBar (the window StatusBar is notifications-only). This hook
  * resolves those fields from the same IPC the old StatusBar producers used —
  * `getSettings()` (+ `onSettingsUpdated`) for vendor/model and
  * `window.lvis.permission` (`getMode` + `onModeChanged`) for the policy mode —
  * but returns plain values instead of upserting StatusBar items.
+ *
+ * Whether a chat model is configured at all is not a row cell any more: the
+ * shell derives it from its own settings store (`useSettings` in App) and the
+ * sidebar's Settings entry carries the alert when it is missing.
  *
  * Render-loop guard (the #1312 lesson): the effects depend only on the stable
  * `api` reference, never on caller-built closures. The subscription callbacks
@@ -25,8 +29,6 @@ import { normalizeExecutionMode, type ExecutionModeDisplay } from "../../../shar
  * cycle is possible here.
  */
 export interface InputStatusRow {
-  /** True once a model is configured — drives the green "active" dot. */
-  active: boolean;
   /** "OpenAI · gpt-5.4" style label (vendor · model), or vendor alone. */
   vendorModel: string;
   /** Permission policy mode for per-mode text color + label. */
@@ -37,7 +39,6 @@ export interface InputStatusRow {
 
 export function useInputStatusRow(api: LvisApi): InputStatusRow {
   const [vendorModel, setVendorModel] = useState("");
-  const [active, setActive] = useState(false);
   const [permissionMode, setPermissionMode] = useState<ExecutionModeDisplay>("unknown");
   const [pendingApprovals, setPendingApprovals] = useState(0);
 
@@ -53,14 +54,12 @@ export function useInputStatusRow(api: LvisApi): InputStatusRow {
         const model = typeof activeRuntime.model === "string" ? activeRuntime.model.trim() : "";
         const label = subscriptionRuntimeDescriptor(activeRuntime.provider).label;
         setVendorModel(model.length > 0 ? `${label} · ${model}` : label);
-        setActive(true);
         return;
       }
       const provider = settings.llm?.provider ?? "";
       const model = settings.llm?.vendors?.[provider]?.model ?? "";
       const vendorLabel = shortVendorLabel(provider);
       setVendorModel(model.length > 0 ? `${vendorLabel} · ${model}` : vendorLabel);
-      setActive(model.length > 0);
     };
 
     void api.getSettings().then(apply).catch(() => {
@@ -115,5 +114,5 @@ export function useInputStatusRow(api: LvisApi): InputStatusRow {
     };
   }, [api]);
 
-  return { active, vendorModel, permissionMode, pendingApprovals };
+  return { vendorModel, permissionMode, pendingApprovals };
 }

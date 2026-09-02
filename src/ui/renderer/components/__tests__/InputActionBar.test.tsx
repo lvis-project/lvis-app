@@ -22,12 +22,20 @@ const getSettings = vi.fn();
 const updateSettings = vi.fn();
 const onSettingsUpdated = vi.fn(() => () => {});
 const subscriptionUseApiForChat = vi.fn(async () => ({ ok: true }));
+// The permission card persists through the same two calls Settings → Permissions makes.
+const setMode = vi.fn();
+const reviewerDispatch = vi.fn();
 vi.mock("../../api-client.js", () => ({
-  getApi: () => ({ getSettings, updateSettings, onSettingsUpdated, subscriptionUseApiForChat }),
+  getApi: () => ({
+    getSettings,
+    updateSettings,
+    onSettingsUpdated,
+    subscriptionUseApiForChat,
+    permission: { setMode, reviewerDispatch },
+  }),
 }));
 
 const defaultStatusRow: InputStatusRow = {
-  active: true,
   vendorModel: "OpenAI · gpt-5.4",
   permissionMode: "default",
   pendingApprovals: 0,
@@ -389,16 +397,16 @@ describe("InputActionBar (unified bar)", () => {
     }
   });
 
-  it("renders the active-state dot green when active, muted when inactive", () => {
-    const { getByTestId, unmount } = renderBar({
-      statusRow: { ...defaultStatusRow, active: true },
-    });
-    expect(getByTestId("iab-status-active-dot").className).toContain("bg-success");
-    unmount();
-    const { getByTestId: getByTestId2 } = renderBar({
-      statusRow: { ...defaultStatusRow, active: false },
-    });
-    expect(getByTestId2("iab-status-active-dot").className).not.toContain("bg-success");
+  it("draws no connection dot and no separator between the model chip and the reasoning bulb", () => {
+    const { getByTestId, queryByTestId } = renderBar();
+    // The "model configured" fact moved to the sidebar's Settings entry.
+    expect(queryByTestId("iab-status-active-dot")).toBeNull();
+    // Model chip and bulb sit at the row's own gap: no "·" in between, and
+    // nothing at all after the bulb.
+    const model = getByTestId("iab-status-model");
+    const bulb = getByTestId("iab-status-reasoning");
+    expect(model.nextElementSibling).toBe(bulb);
+    expect(bulb.nextElementSibling).toBeNull();
   });
 
   it("renders the pending-approval count as a SEPARATE button before the permission cell", () => {
@@ -429,6 +437,89 @@ describe("InputActionBar (unified bar)", () => {
   });
 });
 
+describe("permission card (status-row permission cell)", () => {
+  beforeEach(() => {
+    setMode.mockReset();
+    reviewerDispatch.mockReset();
+    setMode.mockImplementation(async (mode: string) => ({ ok: true, mode }));
+    reviewerDispatch.mockResolvedValue({ ok: true });
+  });
+
+  it("opens the card listing every mode with the current one marked, instead of leaving for Settings", async () => {
+    const onOpenPermissions = vi.fn();
+    const { getByTestId, findByTestId } = renderBar({
+      statusRow: { ...defaultStatusRow, permissionMode: "auto" },
+      onOpenPermissions,
+    });
+    fireEvent.click(getByTestId("iab-status-permission"));
+    const card = await findByTestId("permission-quick-picker");
+    expect(onOpenPermissions).not.toHaveBeenCalled();
+    // The same four modes Settings → Permissions offers, one marked current.
+    const options = card.querySelectorAll("[role='option']");
+    expect(options.length).toBe(4);
+    const marked = card.querySelectorAll("[role='option'][aria-selected='true']");
+    expect(marked.length).toBe(1);
+    expect(marked[0].querySelector("[data-testid='permission-quick-picker-option:auto']")).toBeTruthy();
+    // Labels are the ones the cell itself shows (the suite renders in Korean).
+    expect(getByTestId("permission-quick-picker-option:auto").textContent).toContain("자동 검증");
+    expect(getByTestId("permission-quick-picker-option:strict").textContent).toContain("모두 확인");
+  });
+
+  it("persists a pick through setMode and the tab's two reviewer dispatches, then closes", async () => {
+    const { getByTestId, findByTestId, queryByTestId } = renderBar({
+      statusRow: { ...defaultStatusRow, permissionMode: "default" },
+    });
+    fireEvent.click(getByTestId("iab-status-permission"));
+    await findByTestId("permission-quick-picker");
+    fireEvent.click(getByTestId("permission-quick-picker-option:auto"));
+    await waitFor(() => expect(setMode).toHaveBeenCalledWith("auto"));
+    await waitFor(() => expect(reviewerDispatch).toHaveBeenCalledTimes(2));
+    expect(reviewerDispatch.mock.calls.map((c) => c[0])).toEqual(["mode llm", "interactive medium"]);
+    await waitFor(() => expect(queryByTestId("permission-quick-picker")).toBeNull());
+  });
+
+  it("stays open with the mark unmoved when the host refuses the pick", async () => {
+    setMode.mockResolvedValue({ ok: false, error: "invalid-mode" });
+    const { getByTestId, findByTestId } = renderBar({
+      statusRow: { ...defaultStatusRow, permissionMode: "default" },
+    });
+    fireEvent.click(getByTestId("iab-status-permission"));
+    await findByTestId("permission-quick-picker");
+    fireEvent.click(getByTestId("permission-quick-picker-option:allow"));
+    await waitFor(() => expect(setMode).toHaveBeenCalledWith("allow"));
+    expect(reviewerDispatch).not.toHaveBeenCalled();
+    expect(getByTestId("permission-quick-picker")).toBeTruthy();
+    expect(getByTestId("permission-quick-picker-option:default").closest("[role='option']")?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("picking the current mode just closes without a host call", async () => {
+    const { getByTestId, findByTestId, queryByTestId } = renderBar({
+      statusRow: { ...defaultStatusRow, permissionMode: "strict" },
+    });
+    fireEvent.click(getByTestId("iab-status-permission"));
+    await findByTestId("permission-quick-picker");
+    fireEvent.click(getByTestId("permission-quick-picker-option:strict"));
+    await waitFor(() => expect(queryByTestId("permission-quick-picker")).toBeNull());
+    expect(setMode).not.toHaveBeenCalled();
+  });
+
+  it("'more' leaves for Settings → Permissions and closes the card", async () => {
+    const onOpenPermissions = vi.fn();
+    const { getByTestId, findByTestId, queryByTestId } = renderBar({ onOpenPermissions });
+    fireEvent.click(getByTestId("iab-status-permission"));
+    await findByTestId("permission-quick-picker");
+    fireEvent.click(getByTestId("permission-quick-picker-more"));
+    expect(onOpenPermissions).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(queryByTestId("permission-quick-picker")).toBeNull());
+  });
+
+  it("offers no 'more' link where there is no Settings to go to", async () => {
+    const { getByTestId, findByTestId, queryByTestId } = renderBar({ onOpenPermissions: undefined });
+    fireEvent.click(getByTestId("iab-status-permission"));
+    await findByTestId("permission-quick-picker");
+    expect(queryByTestId("permission-quick-picker-more")).toBeNull();
+  });
+});
 
 describe("model card (status-row model cell)", () => {
   /** Settings where two models are pinned and offered, and one pinned id is offered by nothing. */

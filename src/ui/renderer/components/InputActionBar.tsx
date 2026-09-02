@@ -14,7 +14,12 @@
  * the composer is empty, and reverts to "send" the moment anything is typed.
  *
  *   STATUS ROW (compact single line, below the box):
- *     [ring] … [pending approvals] · [permission] · [model] · [reasoning] · [● active]
+ *     [ring] … [pending approvals] · [permission] · [model] [reasoning]
+ *
+ * The permission cell and the model cell each open a card of their own — the
+ * modes to switch between (the current one marked) and one link into the
+ * Settings section that owns them. Nothing in the row says whether a chat
+ * model is configured: that alert lives on the sidebar's Settings entry.
  *
  * The status row is outside the input box on purpose. Everything inside the
  * box is about the message being written; the model, the permission mode and
@@ -47,7 +52,9 @@ import type { RolePreset } from "../../../data/role-presets.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
 import type { InputStatusRow } from "../hooks/use-input-status-row.js";
-import type { ExecutionModeDisplay } from "../../../shared/permission-mode.js";
+import type { ExecutionMode, ExecutionModeDisplay } from "../../../shared/permission-mode.js";
+import { EXEC_MODE_OPTIONS } from "../constants.js";
+import { interactiveAutoApproveForExecMode, reviewerModeForExecMode } from "../tabs/PermissionsTab.js";
 
 export interface InputActionBarProps {
   // Leading — slash/command picker (folds plugins/mcp/skills inside its own
@@ -353,10 +360,7 @@ export function ComposerStatusRow({
   onToggleThinking,
 }: ComposerStatusRowProps) {
   const { t } = useTranslation();
-  const { active, vendorModel, permissionMode, pendingApprovals } = statusRow;
-  // Mode label ONLY — the pending-approval count is now its own separate
-  // button before the permission cell (no longer appended to the label text).
-  const permissionLabel = t(PERMISSION_LABEL_KEYS[permissionMode]);
+  const { vendorModel, permissionMode, pendingApprovals } = statusRow;
   // The row names the model only. Which vendor serves it is a detail of the
   // route, not of the sentence the person is about to send — it belongs in
   // the model card the cell opens, next to the models they can switch to.
@@ -371,8 +375,7 @@ export function ComposerStatusRow({
       className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pt-1 text-caption text-muted-foreground"
     >
       {/* Status sub-row order (user): ring on the LEFT; then a right-aligned
-          cluster — [대기 승인 N] · permission(mode only) · model ·
-          추론 slider · active-dot. */}
+          cluster — [대기 승인 N] · permission(mode only) · model 추론 slider. */}
 
       {/* Token progress ring — leftmost. */}
       <span className="shrink-0" data-testid="iab-status-ring">
@@ -412,28 +415,11 @@ export function ComposerStatusRow({
           </>
         )}
 
-        {/* Permission — mode label ONLY, per-mode color. */}
-        {onOpenPermissions ? (
-          <button
-            type="button"
-            onClick={onOpenPermissions}
-            data-testid="iab-status-permission"
-            data-mode={permissionMode}
-            className={`shrink-0 truncate transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${PERMISSION_TEXT_COLOR[permissionMode]}`}
-            title={permissionLabel}
-          >
-            {permissionLabel}
-          </button>
-        ) : (
-          <span
-            data-testid="iab-status-permission"
-            data-mode={permissionMode}
-            className={`shrink-0 truncate ${PERMISSION_TEXT_COLOR[permissionMode]}`}
-            title={permissionLabel}
-          >
-            {permissionLabel}
-          </span>
-        )}
+        {/* Permission — mode label ONLY, per-mode color. Clicking it opens the
+            permission card: the modes (the current one marked) and the way to
+            Settings → Permissions. The pending-approval count is its own
+            button before this cell, never appended to the label text. */}
+        <PermissionQuickPicker permissionMode={permissionMode} onOpenPermissions={onOpenPermissions} />
 
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
@@ -451,17 +437,116 @@ export function ComposerStatusRow({
           onToggleThinking={onToggleThinking}
           onOpenModelSettings={onOpenModelSettings}
         />
-
-        <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-
-        {/* Active-state dot — trailing (far right). */}
-        <span
-          data-testid="iab-status-active-dot"
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-input-bar-placeholder/(--opacity-muted)"}`}
-          aria-label={active ? t("inputActionBar.statusActive") : t("inputActionBar.statusInactive")}
-        />
       </div>
     </div>
+  );
+}
+
+/**
+ * The permission card: what the status row's permission cell opens.
+ *
+ * The same four modes Settings → Permissions offers, in the same order, the
+ * current one marked; a pick persists through the same `setMode` the tab
+ * uses and then sends the tab's two reviewer dispatches, so a mode chosen here
+ * leaves the reviewer exactly as the tab would. The row's own label follows
+ * the host's mode broadcast, so nothing here is optimistic. Settings is one
+ * more click away, not the first thing a permission click does.
+ */
+function PermissionQuickPicker({
+  permissionMode,
+  onOpenPermissions,
+}: {
+  permissionMode: ExecutionModeDisplay;
+  onOpenPermissions?: () => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const permissionLabel = t(PERMISSION_LABEL_KEYS[permissionMode]);
+
+  const pick = async (mode: ExecutionMode) => {
+    if (mode === permissionMode) {
+      setOpen(false);
+      return;
+    }
+    if (busy) return;
+    setBusy(true);
+    try {
+      const perm = getApi().permission;
+      // The card closes only once the pick took. A refused or failed change
+      // leaves it open with the current mark unmoved — the honest state.
+      const res = await perm.setMode(mode);
+      if (!res.ok) {
+        console.warn("[lvis] permission mode pick was refused: %s", res.message ?? res.error);
+        return;
+      }
+      const reviewer = await perm.reviewerDispatch(`mode ${reviewerModeForExecMode(mode)}`);
+      if (!reviewer.ok) {
+        console.warn("[lvis] reviewer mode did not follow the permission mode: %s", reviewer.error);
+        return;
+      }
+      const interactive = await perm.reviewerDispatch(`interactive ${interactiveAutoApproveForExecMode(mode)}`);
+      if (!interactive.ok) {
+        console.warn("[lvis] reviewer auto-approve did not follow the permission mode: %s", interactive.error);
+        return;
+      }
+      setOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const title = t("inputActionBar.permissionPickerTitle");
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-testid="iab-status-permission"
+          data-mode={permissionMode}
+          className={`shrink-0 truncate transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${PERMISSION_TEXT_COLOR[permissionMode]}`}
+          title={permissionLabel}
+        >
+          {permissionLabel}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" side="top" sideOffset={6} className="w-72 p-0" data-testid="permission-quick-picker">
+        <div className="px-3 pt-3 text-caption font-medium text-muted-foreground">{title}</div>
+        <ul className="px-1 py-1" role="listbox" aria-label={title} aria-busy={busy}>
+          {EXEC_MODE_OPTIONS.map((opt) => {
+            const current = opt.value === permissionMode;
+            return (
+              <li key={opt.value} role="option" aria-selected={current}>
+                <button
+                  type="button"
+                  onClick={() => void pick(opt.value)}
+                  disabled={busy}
+                  data-testid={`permission-quick-picker-option:${opt.value}`}
+                  title={opt.description}
+                  className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent disabled:opacity-50"
+                >
+                  <span className={`min-w-0 flex-1 truncate ${PERMISSION_TEXT_COLOR[opt.value]}`}>
+                    {t(PERMISSION_LABEL_KEYS[opt.value])}
+                  </span>
+                  {current ? <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /> : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        {onOpenPermissions ? (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onOpenPermissions(); }}
+            data-testid="permission-quick-picker-more"
+            className="flex w-full items-center justify-between border-t border-border/(--opacity-medium) px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent"
+          >
+            <span>{t("inputActionBar.permissionPickerMore")}</span>
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          </button>
+        ) : null}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -610,26 +695,23 @@ function ModelQuickPicker({
         </button>
       </PopoverTrigger>
       {reasoningAvailable ? (
-        <>
-          <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-          <button
-            type="button"
-            ref={chipRef}
-            data-testid="iab-status-reasoning"
-            data-level={level}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
-            title={`${reasoningLabel}: ${levelLabels[level]}`}
-            onClick={() => {
-              openedByChipRef.current = !open;
-              setOpen(!open);
-            }}
-            className={`-m-1.5 flex shrink-0 cursor-pointer items-center p-1.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
-          >
-            <ReasoningGauge level={level} />
-          </button>
-        </>
+        <button
+          type="button"
+          ref={chipRef}
+          data-testid="iab-status-reasoning"
+          data-level={level}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
+          title={`${reasoningLabel}: ${levelLabels[level]}`}
+          onClick={() => {
+            openedByChipRef.current = !open;
+            setOpen(!open);
+          }}
+          className={`-m-1.5 flex shrink-0 cursor-pointer items-center p-1.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
+        >
+          <ReasoningGauge level={level} />
+        </button>
       ) : null}
       <PopoverContent
         align="end"

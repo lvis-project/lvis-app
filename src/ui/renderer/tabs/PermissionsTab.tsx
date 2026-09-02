@@ -116,6 +116,22 @@ function preserveSettingsScrollPosition(): () => void {
  */
 const DENSE_SELECT_POPUP = "text-[11px]";
 
+/**
+ * The reviewer settings that follow an execution mode. `auto` is the only mode
+ * whose verdicts a reviewer produces, so choosing it turns the LLM reviewer on
+ * and lets it auto-approve interactive low/medium risk; every other mode turns
+ * both off. This tab and the composer's permission picker send the same two
+ * `reviewerDispatch` verbs after a successful `setMode`, derived from here, so
+ * the two surfaces cannot leave the reviewer in different states for one mode.
+ */
+export function reviewerModeForExecMode(m: ExecutionMode): PermissionReviewerMode {
+  return m === "auto" ? "llm" : "disabled";
+}
+
+export function interactiveAutoApproveForExecMode(m: ExecutionMode): PermissionReviewerInteractiveAutoApprove {
+  return m === "auto" ? "medium" : "off";
+}
+
 export function PermissionsTab({
   exactDenyDraft = null,
   onExactDenySaved,
@@ -412,12 +428,6 @@ export function PermissionsTab({
       setApprovalsBusy(false);
     }
   };
-
-  const reviewerModeForExecMode = (m: ExecutionMode): PermissionReviewerMode =>
-    m === "auto" ? "llm" : "disabled";
-  const interactiveAutoApproveForExecMode = (
-    m: ExecutionMode,
-  ): PermissionReviewerInteractiveAutoApprove => (m === "auto" ? "medium" : "off");
 
   const handleModeChange = async (m: ExecutionMode) => {
     const targetReviewerMode = reviewerModeForExecMode(m);

@@ -362,7 +362,10 @@ describe("subscription runtime composer readiness", () => {
       await waitFor(() => {
         const modelCell = container.querySelector('[data-testid="iab-status-model"]');
         expect(modelCell?.getAttribute("title")).toBe(expectedLabel);
-        expect(container.querySelector('[data-testid="iab-status-active-dot"]')?.className).toContain("bg-success");
+        // A selected subscription runtime counts as a configured model, so
+        // the sidebar's Settings entry carries no "no model" alert.
+        expect(container.querySelector('[data-testid="sidebar-settings"]')).toBeTruthy();
+        expect(container.querySelector('[data-testid="sidebar-settings-alert"]')).toBeNull();
       });
     },
   );
