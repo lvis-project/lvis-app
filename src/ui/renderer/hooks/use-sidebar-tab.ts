@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
-import {
-  DEFAULT_SIDEBAR_TAB,
-  isSidebarTab,
-  normalizeSidebarGroupList,
-  type SidebarGroup,
-  type SidebarTab,
-} from "../../../shared/sidebar-tab.js";
+import { DEFAULT_SIDEBAR_TAB, isSidebarTab, type SidebarTab } from "../../../shared/sidebar-tab.js";
 
-export type { SidebarGroup, SidebarTab };
+export type { SidebarTab };
 
 export interface UseSidebarTabResult {
   /** Active sidebar tab ("chats" = ungrouped conversation list, "projects" = named-project groups). */
@@ -60,57 +54,4 @@ export function useSidebarTab(api: LvisApi): UseSidebarTabResult {
   );
 
   return { activeTab, setActiveTab };
-}
-
-export interface UseSidebarGroupsResult {
-  /** Nav groups the user has folded. Absent = open. */
-  closedGroups: ReadonlySet<SidebarGroup>;
-  /** Fold or open one group — persists immediately, same family as the active tab. */
-  setGroupOpen: (group: SidebarGroup, open: boolean) => void;
-}
-
-/**
- * Persists which sidebar nav groups are folded, through the same
- * SystemSettings round-trip as `useSidebarTab` (mount-seed + guarded write).
- * Stored as the closed list so a group the store has never heard of is open.
- */
-export function useSidebarGroups(api: LvisApi): UseSidebarGroupsResult {
-  const [closedGroups, setClosedGroups] = useState<ReadonlySet<SidebarGroup>>(() => new Set());
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .getSettings()
-      .then((settings) => {
-        if (cancelled) return;
-        const stored = settings?.system?.sidebarClosedGroups;
-        if (Array.isArray(stored)) setClosedGroups(new Set(normalizeSidebarGroupList(stored)));
-      })
-      .catch(() => {
-        // Non-fatal: every group stays open. The next toggle persists.
-      })
-      .finally(() => {
-        if (!cancelled) setHydrated(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
-
-  const setGroupOpen = useCallback(
-    (group: SidebarGroup, open: boolean) => {
-      setClosedGroups((current) => {
-        if (current.has(group) === !open) return current;
-        const next = new Set(current);
-        if (open) next.delete(group);
-        else next.add(group);
-        if (hydrated) void api.updateSettings({ system: { sidebarClosedGroups: [...next] } });
-        return next;
-      });
-    },
-    [api, hydrated],
-  );
-
-  return { closedGroups, setGroupOpen };
 }

@@ -1646,7 +1646,6 @@ export const deMessages: Record<string, string> = {
   "mainToolbar.downloadingTooltip": "v{version} wird heruntergeladen – {percent}%",
   "mainToolbar.expandSidebar": "Seitenleiste erweitern",
   "mainToolbar.export": "Export",
-  "mainToolbar.home": "Heim",
   "mainToolbar.import": "Importieren",
   "mainToolbar.insights": "Einblicke",
   "mainToolbar.memory": "Erinnerung",

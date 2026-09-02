@@ -12,7 +12,7 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     appMode: "work" as const,
     onToggleAppMode: vi.fn(),
     viewNav: {
-      segments: [{ key: "home", label: "홈" }],
+      segments: [{ key: "home", label: "대화" }],
       canGoBack: false,
       canGoForward: false,
       onBack: vi.fn(),
@@ -51,7 +51,7 @@ describe("MainToolbar", () => {
     renderWithProvider(defaultProps());
     const crumb = document.querySelector("[data-testid='view-path-breadcrumb']");
     expect(crumb).toBeTruthy();
-    expect(crumb!.textContent).toContain("홈");
+    expect(crumb!.textContent).toContain("대화");
     // It is a path, not a Home button — no history controls come with it.
     expect(screen.queryByTestId(TEST_IDS.viewPathBack)).toBeNull();
   });

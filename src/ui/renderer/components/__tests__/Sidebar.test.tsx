@@ -7,7 +7,7 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Sidebar } from "../Sidebar.js";
 import type { SessionSummary } from "../../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../../shared/project-identity.js";
-import type { SidebarGroup, SidebarTab } from "../../hooks/use-sidebar-tab.js";
+import type { SidebarTab } from "../../hooks/use-sidebar-tab.js";
 import type {
   NativeContextMenuAction,
   NativeContextMenuPayload,
@@ -33,12 +33,6 @@ function activateTab(trigger: HTMLElement) {
 
 function Harness(props: Parameters<typeof Sidebar>[0]) {
   const [tab, setTab] = useState<SidebarTab>(props.activeSidebarTab ?? "chats");
-  // Same shape for the folded nav groups: App.tsx holds them through
-  // useSidebarGroups, so the harness holds them locally to make a header
-  // click really fold/open its group.
-  const [closedGroups, setClosedGroups] = useState<ReadonlySet<SidebarGroup>>(
-    props.closedSidebarGroups ?? new Set(),
-  );
   return (
     <Sidebar
       {...props}
@@ -46,16 +40,6 @@ function Harness(props: Parameters<typeof Sidebar>[0]) {
       onActiveSidebarTabChange={(next) => {
         setTab(next);
         props.onActiveSidebarTabChange?.(next);
-      }}
-      closedSidebarGroups={closedGroups}
-      onSidebarGroupOpenChange={(group, open) => {
-        setClosedGroups((current) => {
-          const next = new Set(current);
-          if (open) next.delete(group);
-          else next.add(group);
-          return next;
-        });
-        props.onSidebarGroupOpenChange?.(group, open);
       }}
     />
   );
@@ -1024,7 +1008,7 @@ describe("Sidebar collapsed rail", () => {
   });
 
   it("shows icons only — no nav label is left to overflow the rail", () => {
-    const { getByTestId, restore } = renderSidebar({
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
       collapsed: true,
       failedPluginCards: [FAILED_PLUGIN_CARD],
     });
@@ -1033,27 +1017,31 @@ describe("Sidebar collapsed rail", () => {
     for (const button of buttons) {
       expect(button.textContent?.trim()).toBe("");
     }
-    // Group rows are not rendered as a submenu in the rail.
+    // The groups are single icons; their rows wait in the flyout.
     expect(getByTestId("sidebar-group-features")).toBeTruthy();
     expect(getByTestId("sidebar-group-plugins")).toBeTruthy();
-    expect(document.querySelector('[data-testid="toolbar-work-board"]')).toBeNull();
+    expect(queryByTestId("toolbar-work-board")).toBeNull();
     restore();
   });
 
-  it("expands the sidebar and opens the group when a rail group is clicked", () => {
+  it("opens the group's flyout from the rail icon without expanding the sidebar", async () => {
     const onToggleCollapse = vi.fn();
-    const onSidebarGroupOpenChange = vi.fn();
-    const { getByTestId, restore } = renderSidebar({
+    const onSelect = vi.fn();
+    const { getByTestId, findByTestId, queryByTestId, restore } = renderSidebar({
       collapsed: true,
-      closedSidebarGroups: new Set<SidebarGroup>(["features"]),
       onToggleCollapse,
-      onSidebarGroupOpenChange,
+      onSelect,
     });
 
     fireEvent.click(getByTestId("sidebar-group-features"));
+    const menu = await findByTestId("sidebar-group-features-menu");
+    expect(menu.getAttribute("role")).toBe("menu");
+    expect(onToggleCollapse).not.toHaveBeenCalled();
 
-    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
-    expect(onSidebarGroupOpenChange).toHaveBeenCalledWith("features", true);
+    fireEvent.click(getByTestId("sidebar-routines"));
+    expect(onSelect).toHaveBeenCalledWith("routines");
+    await waitFor(() => expect(queryByTestId("sidebar-group-features-menu")).toBeNull());
+    expect(onToggleCollapse).not.toHaveBeenCalled();
     restore();
   });
 
@@ -1097,54 +1085,74 @@ describe("Sidebar nav groups", () => {
     restore();
   });
 
-  it("folds and opens the Features group from its header, keeping aria-expanded in step", () => {
-    const onSidebarGroupOpenChange = vi.fn();
-    const { getByTestId, queryByTestId, restore } = renderSidebar({ onSidebarGroupOpenChange });
-    const header = getByTestId("sidebar-group-features");
-    expect(header.getAttribute("aria-expanded")).toBe("true");
-    expect(header.getAttribute("aria-controls")).toBe("sidebar-group-features-items");
-    expect(getByTestId("sidebar-group-features-items").querySelector('[data-testid="toolbar-work-board"]')).toBeTruthy();
-    expect(getByTestId("sidebar-routines")).toBeTruthy();
-    expect(getByTestId("sidebar-starred")).toBeTruthy();
-
-    fireEvent.click(header);
-    expect(onSidebarGroupOpenChange).toHaveBeenLastCalledWith("features", false);
-    expect(header.getAttribute("aria-expanded")).toBe("false");
-    expect(queryByTestId("sidebar-group-features-items")).toBeNull();
-    expect(queryByTestId("toolbar-work-board")).toBeNull();
-
-    fireEvent.click(header);
-    expect(onSidebarGroupOpenChange).toHaveBeenLastCalledWith("features", true);
-    expect(header.getAttribute("aria-expanded")).toBe("true");
-    expect(getByTestId("toolbar-work-board")).toBeTruthy();
-    restore();
-  });
-
-  it("starts folded when the shell says so", () => {
-    const { getByTestId, queryByTestId, restore } = renderSidebar({
-      closedSidebarGroups: new Set<SidebarGroup>(["features"]),
+  it("opens the Features flyout from its row with menu semantics; a pick navigates and closes it", async () => {
+    const onSelect = vi.fn();
+    const { getByTestId, findByTestId, queryByTestId, restore } = renderSidebar({
+      onSelect,
+      activeView: "routines",
     });
-    expect(getByTestId("sidebar-group-features").getAttribute("aria-expanded")).toBe("false");
+    const trigger = getByTestId("sidebar-group-features");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    // The trigger says one of its rows is the page, since the rows are hidden.
+    expect(trigger.getAttribute("data-active")).toBe("true");
     expect(queryByTestId("toolbar-work-board")).toBeNull();
+
+    fireEvent.click(trigger);
+    const menu = await findByTestId("sidebar-group-features-menu");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.getAttribute("aria-controls")).toBe("sidebar-group-features-menu");
+    const rows = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((row) => row.getAttribute("data-testid"));
+    expect(rows).toEqual(["toolbar-work-board", "sidebar-routines", "sidebar-starred"]);
+    expect(getByTestId("sidebar-routines").getAttribute("aria-current")).toBe("page");
+
+    fireEvent.click(getByTestId("toolbar-work-board"));
+    expect(onSelect).toHaveBeenCalledWith("work-board");
+    await waitFor(() => expect(queryByTestId("sidebar-group-features-menu")).toBeNull());
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     restore();
   });
 
-  it("renders the Plugins group only when there is a plugin row, and folds it", () => {
+  it("walks the rows with the arrow keys, wrapping, and closes on Escape", async () => {
+    const { getByTestId, findByTestId, queryByTestId, restore } = renderSidebar();
+    fireEvent.click(getByTestId("sidebar-group-features"));
+    const menu = await findByTestId("sidebar-group-features-menu");
+    await waitFor(() => expect(document.activeElement).toBe(getByTestId("toolbar-work-board")));
+
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(getByTestId("sidebar-routines"));
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(document.activeElement).toBe(getByTestId("sidebar-starred"));
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(getByTestId("toolbar-work-board"));
+    fireEvent.keyDown(menu, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(getByTestId("sidebar-starred"));
+
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(queryByTestId("sidebar-group-features-menu")).toBeNull());
+    restore();
+  });
+
+  it("renders the Plugins group only when there is a plugin row, and lists it in the flyout", async () => {
     const empty = renderSidebar();
     expect(empty.queryByTestId("sidebar-group-plugins")).toBeNull();
     empty.restore();
     cleanup();
 
-    const { getByTestId, queryByTestId, restore } = renderSidebar({
+    const onSelect = vi.fn();
+    const { getByTestId, findByTestId, queryByTestId, restore } = renderSidebar({
       failedPluginCards: [FAILED_PLUGIN_CARD],
+      onSelect,
     });
-    const header = getByTestId("sidebar-group-plugins");
-    expect(header.getAttribute("aria-expanded")).toBe("true");
-    expect(getByTestId("sidebar-group-plugins-items").textContent).toContain("Notes");
+    fireEvent.click(getByTestId("sidebar-group-plugins"));
+    const menu = await findByTestId("sidebar-group-plugins-menu");
+    const row = menu.querySelector<HTMLElement>('[role="menuitem"]');
+    expect(row?.textContent).toContain("Notes");
+    expect(row?.textContent).toContain("Doctor");
 
-    fireEvent.click(header);
-    expect(header.getAttribute("aria-expanded")).toBe("false");
-    expect(queryByTestId("sidebar-group-plugins-items")).toBeNull();
+    fireEvent.click(row!);
+    expect(onSelect).toHaveBeenCalledWith("plugin-doctor:notes");
+    await waitFor(() => expect(queryByTestId("sidebar-group-plugins-menu")).toBeNull());
     restore();
   });
 });

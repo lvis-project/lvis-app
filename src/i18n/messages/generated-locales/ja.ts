@@ -1665,7 +1665,6 @@ export const jaMessages: Record<string, string> = {
   "mainToolbar.downloadingTooltip": "v{version} ダウンロード中 — {percent}%",
   "mainToolbar.expandSidebar": "サイドバーを展開する",
   "mainToolbar.export": "輸出",
-  "mainToolbar.home": "家",
   "mainToolbar.import": "輸入",
   "mainToolbar.insights": "洞察",
   "mainToolbar.memory": "メモリ",

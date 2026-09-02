@@ -42,8 +42,11 @@ export interface ViewPathNavProps {
   onSelectSegment: (target: ViewLocation) => void;
 }
 
+// A `--chrome-icon-button` square, like every control on the sidebar cluster
+// strip it renders in: px, not rem, so `collapsedBandLeadClearance`
+// (shared/shell-geometry.ts) can add the strip up at every type scale.
 const ICON_BUTTON_CLASS =
-  "h-7 w-7 shrink-0 rounded-lg text-muted-foreground transition-[color,background-color,transform] "
+  "h-(--chrome-icon-button) w-(--chrome-icon-button) shrink-0 rounded-lg text-muted-foreground transition-[color,background-color,transform] "
   + "duration-[var(--motion-fast)] ease-[var(--motion-ease-standard)] hover:bg-accent "
   + "hover:text-foreground active:scale-[0.96] disabled:opacity-40 motion-reduce:transition-none "
   + "motion-reduce:transform-none";
@@ -69,7 +72,7 @@ export function ViewHistoryNav({
     : t("viewPathNav.forward");
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5" data-testid="view-path-nav">
+    <div className="flex shrink-0 items-center gap-(--chrome-gap-hair)" data-testid="view-path-nav">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

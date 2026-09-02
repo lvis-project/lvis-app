@@ -7,7 +7,7 @@ import { ThemeProvider } from "./theme/index.js";
 import { OverlayContextProvider } from "./context/OverlayContext.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { MainToolbar } from "./MainToolbar.js";
-import { Sidebar } from "./components/Sidebar.js";
+import { Sidebar, isDarwinPlatform } from "./components/Sidebar.js";
 import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
 import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
 import { MarketplaceAnnouncementBanner } from "./components/MarketplaceAnnouncementBanner.js";
@@ -35,7 +35,7 @@ import { minimumCanvasHeight } from "./components/chat-group-tree.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
-import { COLLAPSED_RAIL_RESERVE, CONTENT_TITLE_INSET, SHELL_GUTTER } from "../../shared/shell-geometry.js";
+import { CONTENT_TITLE_INSET, SHELL_GUTTER, collapsedBandLeadClearance } from "../../shared/shell-geometry.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
@@ -61,7 +61,7 @@ import { buildQuickActions } from "./components/command-actions.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { useAppMode } from "./hooks/use-app-mode.js";
 import { SIDEBAR_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js";
-import { useSidebarGroups, useSidebarTab } from "./hooks/use-sidebar-tab.js";
+import { useSidebarTab } from "./hooks/use-sidebar-tab.js";
 import { useActiveView } from "./hooks/use-active-view.js";
 import { useSettingsTab } from "./hooks/use-settings-tab.js";
 import { useProjectPreferences } from "./hooks/use-project-preferences.js";
@@ -217,8 +217,6 @@ export function App() {
   } = usePanelWidth(api, SIDEBAR_WIDTH_PREF);
   // Sidebar Chats/Projects tab — persisted the same way as sidebarWidth.
   const { activeTab: sidebarActiveTab, setActiveTab: setSidebarActiveTab } = useSidebarTab(api);
-  // Which sidebar nav groups are folded — persisted the same way.
-  const { closedGroups: closedSidebarGroups, setGroupOpen: setSidebarGroupOpen } = useSidebarGroups(api);
 
   // The tiled chat groups — the geometry. See `useChatGroups` and
   // docs/design/tiled-chat-groups.md.
@@ -857,6 +855,9 @@ export function App() {
         const view = pluginViews.find((candidate) => toViewKey(candidate) === viewKey);
         return view ? getPluginViewLabel(view) : undefined;
       },
+      // A session on the workspace default is a plain chat (the sidebar's own
+      // rule for its Chats tab); only a named project names the root crumb.
+      sessionProject: activeProject && !activeProject.isDefault ? activeProject : undefined,
     };
     // Name the destination on the buttons. In chat mode the path itself does
     // not render, so without this the only navigation left says nothing about
@@ -873,7 +874,7 @@ export function App() {
       onForward: viewHistory.goForward,
       onSelectSegment: navigateToLocation,
     };
-  }, [location, t, pluginViews, viewHistory, navigateToLocation]);
+  }, [location, t, pluginViews, viewHistory, navigateToLocation, activeProject]);
 
 
   // The conversation action set. Built once so the chat-group header and the
@@ -1313,9 +1314,11 @@ export function App() {
                   thing's own title one row below — NOT with the sidebar card's
                   edge. `CONTENT_TITLE_INSET` is the distance from the card to
                   where a title starts: the gutter between the card and the
-                  content, plus the content surface's own leading padding. */}
+                  content, plus the content surface's own leading padding.
+                  Collapsed, the card retracts but its cluster strip stays bare
+                  on this band, so the path clears THAT strip instead. */}
               <CustomTitleBar
-                leadClearance={(sidebarCollapsed ? COLLAPSED_RAIL_RESERVE : sidebarWidth + SHELL_GUTTER) + CONTENT_TITLE_INSET}
+                leadClearance={sidebarCollapsed ? collapsedBandLeadClearance(isDarwinPlatform()) : sidebarWidth + SHELL_GUTTER + CONTENT_TITLE_INSET}
               >
                 <MainToolbar
                   viewNav={viewNav}
@@ -1360,8 +1363,6 @@ export function App() {
                 onProjectError={handleProjectError}
                 projects={workspaceProjects}
                 streaming={streaming}
-                closedSidebarGroups={closedSidebarGroups}
-                onSidebarGroupOpenChange={setSidebarGroupOpen}
                 collapsed={sidebarCollapsed}
                 onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
                 width={sidebarWidth}

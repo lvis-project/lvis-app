@@ -23,13 +23,14 @@ import {
 import { Button } from "../../../components/ui/button.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { toPluginDoctorViewKey, toPluginSettingsViewKey } from "../utils/plugin-doctor-view.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
-import type { SidebarGroup, SidebarTab } from "../hooks/use-sidebar-tab.js";
+import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 import {
   useNativeContextMenu,
@@ -41,7 +42,7 @@ import {
   type ProjectErrorReporter,
 } from "../hooks/use-add-project-folder.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
-import { CLUSTER_LEAD_PAD_DARWIN, RAIL_CONTROL_SIZE_CLASS } from "../../../shared/shell-geometry.js";
+import { CLUSTER_LEAD_PAD_DARWIN, RAIL_CONTROL_SIZE_CLASS, SHELL_GUTTER } from "../../../shared/shell-geometry.js";
 import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
@@ -87,13 +88,6 @@ export interface SidebarProps {
   onOpenSettings: () => void;
   onNewChat: () => void;
   streaming: boolean;
-  /**
-   * Nav groups the user has folded (Features / Plugins). Owned by the shell and
-   * persisted with the other sidebar preferences; absent = every group open.
-   */
-  closedSidebarGroups?: ReadonlySet<SidebarGroup>;
-  /** Fold or open a nav group — persists through the shell. */
-  onSidebarGroupOpenChange?: (group: SidebarGroup, open: boolean) => void;
   /**
    * Collapse state is owned by the shell (App.tsx). The collapse/expand toggle
    * is the FIRST button in the cluster strip next to the traffic lights (see
@@ -158,7 +152,7 @@ export interface SidebarProps {
 // out bare in the band when collapsed.
 // Returns false when the preload bridge is absent (jsdom / Storybook / SSR) —
 // no native chrome to align against there.
-function isDarwinPlatform(): boolean {
+export function isDarwinPlatform(): boolean {
   return (
     (window as unknown as { lvisPlatform?: { isDarwin: boolean } }).lvisPlatform?.isDarwin ?? false
   );
@@ -214,6 +208,8 @@ interface NavItemProps {
   title?: string;
   tooltipLabel?: string;
   trailingSlot?: React.ReactNode;
+  /** `menuitem` when the row sits inside a NavGroup flyout. */
+  role?: "menuitem";
 }
 
 function NavItem({
@@ -230,6 +226,7 @@ function NavItem({
   title,
   tooltipLabel,
   trailingSlot,
+  role,
 }: NavItemProps) {
   const toneStyle = NAV_TONE[tone];
   const btn = collapsed ? (
@@ -237,6 +234,7 @@ function NavItem({
     <button
       type="button"
       onClick={onClick}
+      role={role}
       aria-current={isActive ? "page" : undefined}
       aria-label={title}
       title={title}
@@ -263,6 +261,7 @@ function NavItem({
     <button
       type="button"
       onClick={onClick}
+      role={role}
       aria-current={isActive ? "page" : undefined}
       aria-label={title}
       title={title}
@@ -307,79 +306,125 @@ function NavItem({
 
 // ─── NavGroup ────────────────────────────────────────────────────────────────
 
+/** Sidebar nav groups: "features" holds the built-in views, "plugins" the installed plugin rows. */
+type SidebarGroup = "features" | "plugins";
+
 interface NavGroupProps {
   group: SidebarGroup;
   label: string;
   icon: React.ReactNode;
-  open: boolean;
-  /** A row inside this group is the current page — lights the rail icon. */
+  /** A row inside this group is the current page — lights the trigger. */
   containsActive: boolean;
   collapsed: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** Rail click: the sidebar expands and the group opens there. */
-  onExpandSidebar: () => void;
-  children: React.ReactNode;
+  /** The rows, rendered inside the flyout; `close` dismisses it after a pick. */
+  children: (close: () => void) => React.ReactNode;
 }
 
+const MENU_ROW_KEYS = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
+
 /**
- * A foldable section of nav rows with a `>` header. In the collapsed rail the
- * group is one square icon: clicking it expands the sidebar and opens the group
- * in the expanded card, instead of trying to fit a submenu into the rail.
+ * A nav group whose rows live in a FLYOUT anchored to its row and opening to
+ * the right — not an accordion that pushes the list down. That is what keeps
+ * the collapsed rail whole: its square icon opens the same flyout, so every
+ * destination stays one click away without expanding anything. Expanded shows
+ * label + chevron, collapsed the icon alone. Enter/Space open, arrows and
+ * Home/End walk the rows, Esc closes, a pick navigates and closes.
  */
-function NavGroup({
-  group,
-  label,
-  icon,
-  open,
-  containsActive,
-  collapsed,
-  onOpenChange,
-  onExpandSidebar,
-  children,
-}: NavGroupProps) {
-  const itemsId = `sidebar-group-${group}-items`;
-  if (collapsed) {
-    return (
-      <NavItem
-        viewKey={group}
-        label={label}
-        icon={icon}
-        isActive={containsActive}
-        onClick={() => {
-          onExpandSidebar();
-          onOpenChange(true);
-        }}
-        collapsed
-        data-testid={`sidebar-group-${group}`}
-      />
-    );
-  }
+function NavGroup({ group, label, icon, containsActive, collapsed, children }: NavGroupProps) {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuId = `sidebar-group-${group}-menu`;
+  const toneStyle = NAV_TONE.accent;
+  const triggerProps = {
+    type: "button" as const,
+    "aria-haspopup": "menu" as const,
+    "aria-expanded": open,
+    "aria-controls": open ? menuId : undefined,
+    "data-testid": `sidebar-group-${group}`,
+    "data-active": containsActive ? "true" : undefined,
+  };
+  const trigger = collapsed ? (
+    <button
+      {...triggerProps}
+      aria-label={label}
+      title={label}
+      className={[
+        `relative ${RAIL_CONTROL_SIZE_CLASS} aspect-square flex items-center justify-center rounded-md transition-colors`,
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        containsActive ? toneStyle.active : `text-muted-foreground ${toneStyle.hover}`,
+      ].join(" ")}
+    >
+      {containsActive && (
+        <span className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-full ${toneStyle.bar}`} />
+      )}
+      <span className="h-4 w-4 flex items-center justify-center">{icon}</span>
+    </button>
+  ) : (
+    <button
+      {...triggerProps}
+      className={[
+        "relative w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        containsActive ? `${toneStyle.active} font-medium` : `text-muted-foreground ${toneStyle.hover}`,
+      ].join(" ")}
+    >
+      {containsActive && (
+        <span className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full ${toneStyle.bar}`} />
+      )}
+      <span className="shrink-0 h-4 w-4 flex items-center justify-center">{icon}</span>
+      <span className="min-w-0 truncate flex-1 text-left">{label}</span>
+      <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60" />
+    </button>
+  );
+
+  // Arrow keys walk the rows, wrapping; Home/End jump. Esc is Radix's own.
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!MENU_ROW_KEYS.has(event.key)) return;
+    const rows = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    if (rows.length === 0) return;
+    const current = rows.indexOf(document.activeElement as HTMLElement);
+    const next =
+      event.key === "Home" ? 0
+      : event.key === "End" ? rows.length - 1
+      : event.key === "ArrowDown" ? (current + 1) % rows.length
+      : (current - 1 + rows.length) % rows.length;
+    event.preventDefault();
+    rows[next]?.focus();
+  };
+
   return (
-    <div className="space-y-0.5">
-      <button
-        type="button"
-        onClick={() => onOpenChange(!open)}
-        aria-expanded={open}
-        aria-controls={itemsId}
-        data-testid={`sidebar-group-${group}`}
-        className={[
-          "w-full flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
-          "text-muted-foreground hover:bg-muted hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        ].join(" ")}
+    <Popover open={open} onOpenChange={setOpen}>
+      {collapsed ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="right">{label}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      )}
+      <PopoverContent
+        ref={menuRef}
+        id={menuId}
+        role="menu"
+        aria-label={label}
+        side="right"
+        align="start"
+        sideOffset={SHELL_GUTTER}
+        className="w-56 p-1 space-y-0.5"
+        data-testid={menuId}
+        onKeyDown={onMenuKeyDown}
+        // Land on the first row rather than the panel, so arrows work at once.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+        }}
       >
-        <ChevronRight
-          aria-hidden="true"
-          className={`h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
-        />
-        <span className="min-w-0 truncate text-left">{label}</span>
-      </button>
-      {open ? (
-        <div id={itemsId} data-testid={itemsId} className="space-y-0.5">
-          {children}
-        </div>
-      ) : null}
-    </div>
+        {children(close)}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -399,10 +444,12 @@ function FailedPluginNavItem({
   plugin,
   onSelect,
   collapsed,
+  role,
 }: {
   plugin: PluginCardSummary;
   onSelect: (key: string) => void;
   collapsed: boolean;
+  role?: "menuitem";
 }) {
   const { t } = useTranslation();
   const viewKey = toPluginDoctorViewKey(plugin.id);
@@ -439,6 +486,8 @@ function FailedPluginNavItem({
           isActive={false}
           onClick={() => onSelect(viewKey)}
           collapsed={collapsed}
+
+          role={role}
           data-testid={sidebarViewTestId(viewKey)}
           data-viewkey={viewKey}
           title={title}
@@ -454,6 +503,8 @@ function FailedPluginNavItem({
         isActive={false}
         onClick={() => onSelect(viewKey)}
         collapsed={collapsed}
+
+        role={role}
         data-testid={sidebarViewTestId(viewKey)}
         data-viewkey={viewKey}
         title={title}
@@ -483,10 +534,12 @@ function InactivePluginNavItem({
   plugin,
   onSelect,
   collapsed,
+  role,
 }: {
   plugin: PluginCardSummary;
   onSelect: (key: string) => void;
   collapsed: boolean;
+  role?: "menuitem";
 }) {
   const { t } = useTranslation();
   const viewKey = toPluginSettingsViewKey(plugin.id);
@@ -515,6 +568,8 @@ function InactivePluginNavItem({
           isActive={false}
           onClick={() => onSelect(viewKey)}
           collapsed={collapsed}
+
+          role={role}
           data-testid={sidebarViewTestId(viewKey)}
           data-viewkey={viewKey}
           title={title}
@@ -537,6 +592,8 @@ function InactivePluginNavItem({
         isActive={false}
         onClick={() => onSelect(viewKey)}
         collapsed={collapsed}
+
+        role={role}
         data-testid={sidebarViewTestId(viewKey)}
         data-viewkey={viewKey}
         title={title}
@@ -555,12 +612,14 @@ function PluginNavItem({
   isUnauthed,
   onSelect,
   collapsed,
+  role,
 }: {
   view: PluginUiExtension;
   isActive: boolean;
   isUnauthed: boolean;
   onSelect: (key: string) => void;
   collapsed: boolean;
+  role?: "menuitem";
 }) {
   const { t } = useTranslation();
   const viewKey = toViewKey(view);
@@ -587,6 +646,8 @@ function PluginNavItem({
           isActive={isActive}
           onClick={() => onSelect(viewKey)}
           collapsed={collapsed}
+
+          role={role}
           data-testid={sidebarViewTestId(viewKey)}
           data-viewkey={viewKey}
         />
@@ -599,6 +660,8 @@ function PluginNavItem({
         isActive={isActive}
         onClick={() => onSelect(viewKey)}
         collapsed={collapsed}
+
+        role={role}
         data-testid={sidebarViewTestId(viewKey)}
         data-viewkey={viewKey}
         trailingSlot={trailingSlot}
@@ -614,9 +677,6 @@ function PluginNavItem({
 // Chats list, opened by a button in each Projects group. Neither CAPS the list,
 // which is what left the remainder unreachable.
 const SESSION_PAGE_SIZE = 6;
-
-/** No group folded — what a sidebar rendered without shell wiring shows. */
-const NO_CLOSED_GROUPS: ReadonlySet<SidebarGroup> = new Set();
 
 /** How far ahead of the scroller's edge the next page is prepared. */
 const SESSION_REVEAL_MARGIN = "200px 0px";
@@ -1668,8 +1728,6 @@ export function Sidebar({
   onNewChat,
   onNewChatForProject,
   streaming,
-  closedSidebarGroups = NO_CLOSED_GROUPS,
-  onSidebarGroupOpenChange,
   collapsed,
   onToggleCollapse,
   width = SIDEBAR_DEFAULT_WIDTH,
@@ -1731,9 +1789,9 @@ export function Sidebar({
     pluginViews.some((view) => toViewKey(view) === activeView)
     || failedPluginCards.some((plugin) => toPluginDoctorViewKey(plugin.id) === activeView)
     || inactivePluginCards.some((plugin) => toPluginSettingsViewKey(plugin.id) === activeView);
-  // The rail's groups and its projects icon open INTO the expanded card:
-  // `onToggleCollapse` is the shell's only lever, and from the collapsed state
-  // toggling is expanding.
+  // The rail's projects icon opens INTO the expanded card (the groups open a
+  // flyout instead): `onToggleCollapse` is the shell's only lever, and from
+  // the collapsed state toggling is expanding.
   const expandSidebar = useCallback(() => {
     if (collapsed) onToggleCollapse();
   }, [collapsed, onToggleCollapse]);
@@ -1928,45 +1986,58 @@ export function Sidebar({
             group="features"
             label={t("sidebar.featuresLabel")}
             icon={<LayoutGrid className="h-4 w-4" />}
-            open={!closedSidebarGroups.has("features")}
             containsActive={featuresContainActive}
             collapsed={compact}
-            onOpenChange={(open) => onSidebarGroupOpenChange?.("features", open)}
-            onExpandSidebar={expandSidebar}
           >
-            <NavItem
-              viewKey="work-board"
-              label={t("mainToolbar.workBoard")}
-              icon={<KanbanSquare className="h-4 w-4" />}
-              isActive={activeView === "work-board"}
-              onClick={() => onSelect("work-board")}
-              collapsed={false}
-              data-testid="toolbar-work-board"
-            />
-            <NavItem
-              viewKey="routines"
-              label={t("mainToolbar.routines")}
-              icon={<Repeat2 className="h-4 w-4" />}
-              isActive={activeView === "routines"}
-              onClick={() => onSelect("routines")}
-              collapsed={false}
-              data-testid="sidebar-routines"
-            />
-            {/* 메모리 panel intentionally removed from the sidebar surface
-                (2026-07 shell refinement). MEMORY.md remains viewable + editable
-                in Settings → 역할/메모리 (RolesTab memory section); the "memory"
-                view itself stays routable (main content region + UnifiedSearch deep-link)
-                so no navigation breaks. */}
-            <NavItem
-              viewKey="insights"
-              label={t("mainToolbar.insights")}
-              icon={<CalendarDays className="h-4 w-4" />}
-              isActive={activeView === "insights" || activeView === "starred"}
-              onClick={() => onSelect("insights")}
-              collapsed={false}
-              data-testid="sidebar-starred"
-              data-viewkey="insights"
-            />
+            {(close) => (
+              <>
+                <NavItem
+                  viewKey="work-board"
+                  label={t("mainToolbar.workBoard")}
+                  icon={<KanbanSquare className="h-4 w-4" />}
+                  isActive={activeView === "work-board"}
+                  onClick={() => {
+                    onSelect("work-board");
+                    close();
+                  }}
+                  collapsed={false}
+                  role="menuitem"
+                  data-testid="toolbar-work-board"
+                />
+                <NavItem
+                  viewKey="routines"
+                  label={t("mainToolbar.routines")}
+                  icon={<Repeat2 className="h-4 w-4" />}
+                  isActive={activeView === "routines"}
+                  onClick={() => {
+                    onSelect("routines");
+                    close();
+                  }}
+                  collapsed={false}
+                  role="menuitem"
+                  data-testid="sidebar-routines"
+                />
+                {/* 메모리 panel intentionally removed from the sidebar surface
+                    (2026-07 shell refinement). MEMORY.md remains viewable + editable
+                    in Settings → 역할/메모리 (RolesTab memory section); the "memory"
+                    view itself stays routable (main content region + UnifiedSearch deep-link)
+                    so no navigation breaks. */}
+                <NavItem
+                  viewKey="insights"
+                  label={t("mainToolbar.insights")}
+                  icon={<CalendarDays className="h-4 w-4" />}
+                  isActive={activeView === "insights" || activeView === "starred"}
+                  onClick={() => {
+                    onSelect("insights");
+                    close();
+                  }}
+                  collapsed={false}
+                  role="menuitem"
+                  data-testid="sidebar-starred"
+                  data-viewkey="insights"
+                />
+              </>
+            )}
           </NavGroup>
         </div>
 
@@ -1988,44 +2059,54 @@ export function Sidebar({
                     group="plugins"
                     label={t("sidebar.pluginsLabel")}
                     icon={<Blocks className="h-4 w-4" />}
-                    open={!closedSidebarGroups.has("plugins")}
                     containsActive={pluginsContainActive}
                     collapsed={compact}
-                    onOpenChange={(open) => onSidebarGroupOpenChange?.("plugins", open)}
-                    onExpandSidebar={expandSidebar}
                   >
-                    {pluginViews.map((view) => {
-                      const viewKey = toViewKey(view);
-                      const isUnauthed =
-                        view.extension !== undefined &&
-                        pluginAuthStatuses?.get(view.pluginId)?.kind === "unauthed";
+                    {(close) => {
+                      const pick = (key: string) => {
+                        onSelect(key);
+                        close();
+                      };
                       return (
-                        <PluginNavItem
-                          key={viewKey}
-                          view={view}
-                          isActive={activeView === viewKey}
-                          isUnauthed={Boolean(isUnauthed)}
-                          onSelect={onSelect}
-                          collapsed={false}
-                        />
+                        <>
+                          {pluginViews.map((view) => {
+                            const viewKey = toViewKey(view);
+                            const isUnauthed =
+                              view.extension !== undefined &&
+                              pluginAuthStatuses?.get(view.pluginId)?.kind === "unauthed";
+                            return (
+                              <PluginNavItem
+                                key={viewKey}
+                                view={view}
+                                isActive={activeView === viewKey}
+                                isUnauthed={Boolean(isUnauthed)}
+                                onSelect={pick}
+                                collapsed={false}
+                                role="menuitem"
+                              />
+                            );
+                          })}
+                          {failedPluginCards.map((plugin) => (
+                            <FailedPluginNavItem
+                              key={`doctor:${plugin.id}`}
+                              plugin={plugin}
+                              onSelect={pick}
+                              collapsed={false}
+                              role="menuitem"
+                            />
+                          ))}
+                          {inactivePluginCards.map((plugin) => (
+                            <InactivePluginNavItem
+                              key={`inactive:${plugin.id}`}
+                              plugin={plugin}
+                              onSelect={pick}
+                              collapsed={false}
+                              role="menuitem"
+                            />
+                          ))}
+                        </>
                       );
-                    })}
-                    {failedPluginCards.map((plugin) => (
-                      <FailedPluginNavItem
-                        key={`doctor:${plugin.id}`}
-                        plugin={plugin}
-                        onSelect={onSelect}
-                        collapsed={false}
-                      />
-                    ))}
-                    {inactivePluginCards.map((plugin) => (
-                      <InactivePluginNavItem
-                        key={`inactive:${plugin.id}`}
-                        plugin={plugin}
-                        onSelect={onSelect}
-                        collapsed={false}
-                      />
-                    ))}
+                    }}
                   </NavGroup>
                 ) : null}
                 <div className={compact ? "pt-1" : hasPluginEntries ? "pt-2" : ""}>

@@ -1665,7 +1665,6 @@ export const zhMessages: Record<string, string> = {
   "mainToolbar.downloadingTooltip": "v{version} 下载 — {percent}%",
   "mainToolbar.expandSidebar": "展开侧边栏",
   "mainToolbar.export": "出口",
-  "mainToolbar.home": "家",
   "mainToolbar.import": "进口",
   "mainToolbar.insights": "见解",
   "mainToolbar.memory": "记忆",

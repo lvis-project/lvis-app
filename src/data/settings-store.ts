@@ -39,7 +39,7 @@ import {
   type Locale,
 } from "../i18n/index.js";
 import { normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
-import { isSidebarTab, normalizeSidebarGroupList, type SidebarGroup, type SidebarTab } from "../shared/sidebar-tab.js";
+import { isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
 import { type InlineViewKey } from "../shared/view-key.js";
 import { normalizeSettingsTab, type SettingsTab } from "../shared/settings-tabs.js";
 import {
@@ -663,13 +663,6 @@ export interface SystemSettings {
    */
   sidebarActiveTab?: SidebarTab;
   /**
-   * Sidebar nav groups the user has folded ("features" = built-in views,
-   * "plugins" = installed plugin rows). Same durable-preference family as
-   * `sidebarActiveTab`. Default empty (every group open). SoT for the value
-   * set: `../shared/sidebar-tab.js`.
-   */
-  sidebarClosedGroups?: SidebarGroup[];
-  /**
    * Where the main window was when it last closed, so a restart resumes the
    * user's location instead of always landing on home. Same durable-preference
    * family as `sidebarActiveTab`. Default "home". SoT for the value set:
@@ -1154,15 +1147,6 @@ export class SettingsService {
         );
       }
       acceptField(next, "sidebarActiveTab", partial.system.sidebarActiveTab, isSidebarTab, "system", PATCHED_FIELD);
-      const rawSidebarClosedGroups = partial.system.sidebarClosedGroups;
-      if (Array.isArray(rawSidebarClosedGroups)) {
-        next.sidebarClosedGroups = normalizeSidebarGroupList(rawSidebarClosedGroups);
-      } else if (rawSidebarClosedGroups !== undefined) {
-        log.warn(
-          `system.sidebarClosedGroups patch ignored (received ${JSON.stringify(rawSidebarClosedGroups)}), keeping %s`,
-          this.settings.system.sidebarClosedGroups,
-        );
-      }
       acceptField(next, "activeView", partial.system.activeView, isActiveViewKey, "system", PATCHED_FIELD);
       const rawSettingsTab = partial.system.settingsTab;
       if (rawSettingsTab !== undefined) {

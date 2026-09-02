@@ -12,7 +12,7 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
-import { submitChatMessage } from "./helpers.js";
+import { clickSidebarNavRow, submitChatMessage } from "./helpers.js";
 
 
 /** A finished turn, so the transcript renders the turn action bar that owns the pin. */
@@ -118,8 +118,6 @@ describe("Pin flow", () => {
   });
 
   it("starred view from hamburger menu exposes the saved entries", async () => {
-    const userEvent = (await import("@testing-library/user-event")).default;
-    const user = userEvent.setup();
     const starred = [
       {
         id: "s-42",
@@ -136,11 +134,7 @@ describe("Pin flow", () => {
     });
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
     // Navigation moved from the hamburger menu to the persistent sidebar.
-    await user.click(await waitFor(() => {
-      const el = container.querySelector('[data-testid="sidebar-starred"]');
-      if (!el) throw new Error("sidebar starred nav item not found");
-      return el as HTMLElement;
-    }));
+    await clickSidebarNavRow("features", "sidebar-starred");
     await waitFor(() => {
       expect(container.textContent).toContain("remembered answer");
     });
@@ -166,20 +160,12 @@ describe("Pin flow", () => {
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
     // Put another page behind Insights. Opening a result must activate Chat,
     // not replay history back to this intermediate page.
-    await user.click(await waitFor(() => {
-      const el = container.querySelector('[data-testid="toolbar-work-board"]');
-      if (!el) throw new Error("work board nav item not found");
-      return el as HTMLElement;
-    }));
+    await clickSidebarNavRow("features", "toolbar-work-board");
     await waitFor(() => {
       expect(container.querySelector('[data-testid="view-path-current-work-board"]')).not.toBeNull();
     });
 
-    await user.click(await waitFor(() => {
-      const el = container.querySelector('[data-testid="sidebar-starred"]');
-      if (!el) throw new Error("sidebar starred nav item not found");
-      return el as HTMLElement;
-    }));
+    await clickSidebarNavRow("features", "sidebar-starred");
 
     const entryButton = await waitFor(() => {
       const el = Array.from(container.querySelectorAll("button")).find((button) =>

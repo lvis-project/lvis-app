@@ -1660,7 +1660,6 @@ export const esMessages: Record<string, string> = {
   "mainToolbar.downloadingTooltip": "v{version} descargando — {percent}%",
   "mainToolbar.expandSidebar": "Expandir barra lateral",
   "mainToolbar.export": "Exportar",
-  "mainToolbar.home": "Hogar",
   "mainToolbar.import": "Importar",
   "mainToolbar.insights": "Insights",
   "mainToolbar.memory": "Memoria",

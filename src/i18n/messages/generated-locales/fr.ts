@@ -1649,7 +1649,6 @@ export const frMessages: Record<string, string> = {
   "mainToolbar.downloadingTooltip": "v{version} téléchargement — {percent}%",
   "mainToolbar.expandSidebar": "Développer la barre latérale",
   "mainToolbar.export": "Exporter",
-  "mainToolbar.home": "Maison",
   "mainToolbar.import": "Importer",
   "mainToolbar.insights": "Aperçus",
   "mainToolbar.memory": "Mémoire",

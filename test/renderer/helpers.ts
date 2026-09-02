@@ -2,14 +2,14 @@
  * Common test helpers for renderer test files.
  */
 import { createElement, type ReactElement } from "react";
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../src/components/ui/tooltip.js";
 import type { MessageQueueStore } from "../../src/ui/renderer/state/message-queue-store.js";
 import { SETTINGS_TABS } from "../../src/shared/settings-tabs.js";
 import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
 import type { ActionPanelActivityState } from "../../src/ui/renderer/components/ActionPanel.js";
 import { ApprovalSurfaceClaims, type ApprovalSurfaceContextValue } from "../../src/ui/renderer/hooks/use-approval.js";
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
 export { relativeLuminance } from "../contrast-helpers.js";
 
 /**
@@ -279,4 +279,61 @@ export function emptyActionPanelActivity(): ActionPanelActivityState {
 /** Render a component that uses shadcn tooltips — they require the provider above them. */
 export function renderWithTooltipProvider(ui: ReactElement) {
   return render(createElement(TooltipProvider, null, ui));
+}
+
+/** Sidebar nav group whose flyout holds a row: the built-in views or the plugin rows. */
+export type SidebarNavGroup = "features" | "plugins";
+
+function sidebarGroupMenu(group: SidebarNavGroup): HTMLElement | null {
+  return document.querySelector(`[data-testid="sidebar-group-${group}-menu"]`);
+}
+
+/**
+ * Opens a sidebar nav group's flyout and returns its menu. The rows render in
+ * a portal, so they are read from `document`, never from the render container.
+ */
+export async function openSidebarGroup(group: SidebarNavGroup): Promise<HTMLElement> {
+  const trigger = await waitFor(() => {
+    const el = document.querySelector<HTMLButtonElement>(`[data-testid="sidebar-group-${group}"]`);
+    expect(el, `missing sidebar group ${group}`).not.toBeNull();
+    return el!;
+  });
+  if (trigger.getAttribute("aria-expanded") !== "true") {
+    await act(async () => {
+      fireEvent.click(trigger);
+    });
+  }
+  return await waitFor(() => {
+    const menu = sidebarGroupMenu(group);
+    expect(menu, `flyout of ${group} did not open`).not.toBeNull();
+    return menu!;
+  });
+}
+
+export async function closeSidebarGroup(group: SidebarNavGroup): Promise<void> {
+  const menu = sidebarGroupMenu(group);
+  if (!menu) return;
+  await act(async () => {
+    fireEvent.keyDown(menu, { key: "Escape" });
+  });
+  await waitFor(() => expect(sidebarGroupMenu(group)).toBeNull());
+}
+
+/** Picks a row the way the user does: open the flyout, click, and let it close. */
+export async function clickSidebarNavRow(group: SidebarNavGroup, rowTestId: string): Promise<void> {
+  const menu = await openSidebarGroup(group);
+  const row = menu.querySelector<HTMLButtonElement>(`[data-testid="${rowTestId}"]`);
+  expect(row, `missing [data-testid="${rowTestId}"] in the ${group} flyout`).not.toBeNull();
+  await act(async () => {
+    fireEvent.click(row!);
+  });
+  await waitFor(() => expect(sidebarGroupMenu(group)).toBeNull());
+}
+
+/** Whether a flyout row is the current page — opens and closes the flyout to read it. */
+export async function sidebarNavRowActive(group: SidebarNavGroup, rowTestId: string): Promise<boolean> {
+  const menu = await openSidebarGroup(group);
+  const active = menu.querySelector(`[data-testid="${rowTestId}"]`)?.getAttribute("aria-current") === "page";
+  await closeSidebarGroup(group);
+  return active;
 }

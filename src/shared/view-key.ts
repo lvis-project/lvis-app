@@ -31,7 +31,7 @@ export const BUILTIN_VIEWS = {
   insights: {},
 } as const satisfies Record<string, Record<string, never>>;
 
-type BuiltinViewKey = keyof typeof BUILTIN_VIEWS;
+export type BuiltinViewKey = keyof typeof BUILTIN_VIEWS;
 
 export type PluginViewKey = `plugin:${string}:${string}`;
 
