@@ -12,6 +12,7 @@ import {
   type TourStep,
 } from "../onboarding/default-tour-scenarios.js";
 import { BLOCKING_SURFACE_SELECTOR } from "../../../shared/test-ids.js";
+import { usePrefersReducedMotion } from "../hooks/use-prefers-reduced-motion.js";
 
 /**
  * Narrow API surface this component needs. Declared structurally so the
@@ -188,35 +189,6 @@ function ringStyle(
       : "var(--shadow-spotlight)",
     border: "1px solid hsl(var(--primary) / var(--opacity-stronger))",
   };
-}
-
-/**
- * Subscribe to `prefers-reduced-motion: reduce` so the component re-renders
- * when the OS toggle flips. Returns the current preference; defaults to
- * `false` in non-DOM test environments.
- */
-function usePrefersReducedMotion(): boolean {
-  const [reduce, setReduce] = useState<boolean>(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return false;
-    }
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  });
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return;
-    }
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onChange = () => setReduce(mq.matches);
-    // Safari < 14 only supports `addListener` / `removeListener`.
-    if (typeof mq.addEventListener === "function") {
-      mq.addEventListener("change", onChange);
-      return () => mq.removeEventListener("change", onChange);
-    }
-    mq.addListener(onChange);
-    return () => mq.removeListener(onChange);
-  }, []);
-  return reduce;
 }
 
 export function SpotlightTour({

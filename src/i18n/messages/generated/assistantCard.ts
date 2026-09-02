@@ -11,10 +11,6 @@ export const en = {
   "assistantCard.forkButton": "Fork",
   "assistantCard.starButton": "Pin",
   "assistantCard.streamingPlaceholder": "Composing response…",
-  "assistantCard.feedbackUp": "This was helpful",
-  "assistantCard.feedbackDown": "Needs improvement",
-  "assistantCard.reasonPlaceholder": "Reason (optional)",
-  "assistantCard.sendButton": "Send",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "assistantCard.systemNoticeContextError": "시스템 알림 — 모델 한도 초과",
@@ -28,8 +24,4 @@ export const ko: Record<keyof typeof en, string> = {
   "assistantCard.forkButton": "분기",
   "assistantCard.starButton": "핀 고정",
   "assistantCard.streamingPlaceholder": "응답을 작성하는 중...",
-  "assistantCard.feedbackUp": "도움이 됐어요",
-  "assistantCard.feedbackDown": "개선이 필요해요",
-  "assistantCard.reasonPlaceholder": "이유 (선택)",
-  "assistantCard.sendButton": "전송",
 };

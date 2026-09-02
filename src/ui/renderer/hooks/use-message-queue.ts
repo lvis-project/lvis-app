@@ -11,6 +11,7 @@ import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js"
 import { blockingSurfaceCovers } from "../components/permissions/ApprovalDock.js";
 import type { ChatStreamEvent } from "../../../lib/chat-stream-state.js";
 import type { ComposerHandle, ComposerSurface } from "../components/Composer.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 /**
  * Mid-turn guidance: the brake-point hand-off (`tool_end` → engine round
@@ -349,7 +350,7 @@ export function useMessageQueue({
           try {
             messageQueueStore.add(text);
           } catch (err) {
-            console.warn("[message-queue] add rejected:", (err as Error).message);
+            console.warn("[message-queue] add rejected:", errorMessage(err));
             return;
           }
         }

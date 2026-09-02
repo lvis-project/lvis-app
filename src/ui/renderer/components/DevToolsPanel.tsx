@@ -15,6 +15,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Slider } from "../../../components/ui/slider.js";
 import type { LvisApi } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatTokensExact } from "../../../lib/cost-format.js";
 
 interface PreflightStatus {
   runtimeOverride: number | null;
@@ -160,7 +161,7 @@ export function DevToolsPanel({ api, open, onClose, labelsOn, onToggleLabels }: 
         <div className="flex items-center justify-between gap-2">
           <label className="text-xs font-medium">{t("devToolsPanel.preflightThresholdLabel")}</label>
           <span className="text-xs font-mono tabular-nums">
-            {t("devToolsPanel.tokensValue", { count: sliderValue.toLocaleString() })}
+            {t("devToolsPanel.tokensValue", { count: formatTokensExact(sliderValue) })}
           </span>
         </div>
         <Slider
@@ -182,15 +183,15 @@ export function DevToolsPanel({ api, open, onClose, labelsOn, onToggleLabels }: 
         <Row label={t("devToolsPanel.providerModelLabel")} value={status ? `${status.provider}/${status.model}` : "—"} />
         <Row
           label={t("devToolsPanel.effectiveTriggerLabel")}
-          value={status ? t("devToolsPanel.tokensValue", { count: status.effective.toLocaleString() }) : "—"}
+          value={status ? t("devToolsPanel.tokensValue", { count: formatTokensExact(status.effective) }) : "—"}
         />
         <Row
           label={t("devToolsPanel.runtimeOverrideLabel")}
-          value={status?.runtimeOverride !== null && status?.runtimeOverride !== undefined ? `${status.runtimeOverride.toLocaleString()}` : t("devToolsPanel.noneValue")}
+          value={status?.runtimeOverride !== null && status?.runtimeOverride !== undefined ? `${formatTokensExact(status.runtimeOverride)}` : t("devToolsPanel.noneValue")}
         />
         <Row
           label={t("devToolsPanel.envOverrideLabel")}
-          value={status?.envOverride !== null && status?.envOverride !== undefined ? `${status.envOverride.toLocaleString()}` : t("devToolsPanel.unsetValue")}
+          value={status?.envOverride !== null && status?.envOverride !== undefined ? `${formatTokensExact(status.envOverride)}` : t("devToolsPanel.unsetValue")}
         />
       </div>
 

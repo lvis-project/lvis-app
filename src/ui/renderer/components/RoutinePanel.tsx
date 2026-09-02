@@ -26,6 +26,7 @@ import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, Rout
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;
@@ -232,7 +233,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         setPluginScopeError(message || t("routinePanel.errorLoadPlugins"));
       });
     return () => {
@@ -344,7 +345,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
         setError(result.error ?? t("routinePanel.errorAddRoutineFailed"));
       }
     } catch (err) {
-      setError((err as Error).message ?? t("routinePanel.errorAddRoutineFailed"));
+      setError(errorMessage(err) || t("routinePanel.errorAddRoutineFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -367,7 +368,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
       onAdded();
       onClose();
     } catch (err) {
-      setNaturalError((err as Error).message ?? t("routinePanel.errorNaturalParseFailed"));
+      setNaturalError(errorMessage(err) || t("routinePanel.errorNaturalParseFailed"));
     } finally {
       setNaturalParsing(false);
     }

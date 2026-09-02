@@ -227,6 +227,32 @@ export function TranscriptRenderer({
     classifyTurnEntries(activeEntries, streaming);
 
   const rendered: React.ReactNode[] = [];
+  // Reasoning, permission-review and tool-group rows draw the same whether
+  // the entry is the live tail of a turn or an unclassified straggler.
+  const pushSideEntry = (entry: (typeof activeEntries)[number], idx: number): boolean => {
+    if (entry.kind === "reasoning") {
+      rendered.push(<ReasoningCard key={idx} entry={entry} />);
+      return true;
+    }
+    if (entry.kind === "permission_review") {
+      if (!rendersOnToolRow(entry)) {
+        rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
+      }
+      return true;
+    }
+    if (entry.kind === "tool_group") {
+      rendered.push(
+        <ToolGroupCard
+          key={entry.groupId}
+          group={entry}
+          sessionId={currentSessionId}
+          permissionReviews={permissionReviewsByToolUseId}
+        />,
+      );
+      return true;
+    }
+    return false;
+  };
   let i = 0;
   while (i < activeEntries.length) {
     const entry = activeEntries[i];
@@ -642,22 +668,7 @@ export function TranscriptRenderer({
 
     // ── Live: last entry in turn while streaming — no TurnActionBar ──
     if (entryClassMap.get(i) === "live") {
-      if (entry.kind === "reasoning") {
-        rendered.push(<ReasoningCard key={idx} entry={entry} />);
-      } else if (entry.kind === "permission_review") {
-        if (!rendersOnToolRow(entry)) {
-          rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
-        }
-      } else if (entry.kind === "tool_group") {
-        rendered.push(
-          <ToolGroupCard
-            key={entry.groupId}
-            group={entry}
-            sessionId={currentSessionId}
-            permissionReviews={permissionReviewsByToolUseId}
-          />,
-        );
-      } else if (entry.kind === "assistant") {
+      if (!pushSideEntry(entry, idx) && entry.kind === "assistant") {
         rendered.push(
           <div key={idx} data-chat-entry-index={idx} className={`min-w-0 w-full max-w-full overflow-x-hidden rounded-lg${ringCls ? ` ${ringCls}` : ""}`}>
             <AssistantCard
@@ -719,22 +730,7 @@ export function TranscriptRenderer({
     }
 
     // ── Fallback: unclassified edge-case entries ──
-    if (entry.kind === "reasoning") {
-      rendered.push(<ReasoningCard key={idx} entry={entry} />);
-    } else if (entry.kind === "permission_review") {
-      if (!rendersOnToolRow(entry)) {
-        rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
-      }
-    } else if (entry.kind === "tool_group") {
-      rendered.push(
-        <ToolGroupCard
-          key={entry.groupId}
-          group={entry}
-          sessionId={currentSessionId}
-          permissionReviews={permissionReviewsByToolUseId}
-        />,
-      );
-    }
+    pushSideEntry(entry, idx);
     i++;
   }
   return rendered;

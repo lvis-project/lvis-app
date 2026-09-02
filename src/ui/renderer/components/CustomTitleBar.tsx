@@ -35,6 +35,7 @@ import { Button } from "../../../components/ui/button.js";
 import { useOptionalTheme } from "../theme/ThemeProvider.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { BAND_EDGE_PAD, BAND_LEAD_PAD_DARWIN } from "../../../shared/shell-geometry.js";
+import { getPlatformBridge } from "../api-client.js";
 
 // ─── Token → hex helpers ──────────────────────────────────────────────────
 // We read the CSS variable as an HSL triple (e.g. "222.2 84% 4.9%") and
@@ -63,14 +64,12 @@ function readCssVar(name: string): string {
 }
 
 // ─── Platform bridge ─────────────────────────────────────────────────────
-// Returns null when the Electron preload bridge is absent (jsdom / Storybook /
-// SSR). In those environments the component renders nothing — there is no
-// native window chrome to replace. In Electron production the bridge is always
-// injected by preload.ts; if it IS present but contains invalid data, we throw
-// so the misconfiguration is loud rather than silently defaulting.
-function tryGetPlatformBridge(): { isDarwin: boolean } | null {
-  return (window as unknown as { lvisPlatform?: { isDarwin: boolean } }).lvisPlatform ?? null;
-}
+// `getPlatformBridge()` is null when the Electron preload bridge is absent
+// (jsdom / Storybook / SSR). In those environments the component renders
+// nothing — there is no native window chrome to replace. In Electron
+// production the bridge is always injected by preload.ts; if it IS present but
+// contains invalid data, we throw so the misconfiguration is loud rather than
+// silently defaulting.
 
 function getWindowBridge(): {
   minimize: () => Promise<void>;
@@ -124,7 +123,7 @@ export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarPr
   // internal `if (!platformBridge) return;` so they noop when the bridge is
   // absent (jsdom / Storybook / SSR) without affecting hook count.
   const { t } = useTranslation();
-  const platformBridge = tryGetPlatformBridge();
+  const platformBridge = getPlatformBridge();
   const isDarwin = platformBridge?.isDarwin ?? false;
   const [isMaximized, setIsMaximized] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);

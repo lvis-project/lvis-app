@@ -8,6 +8,7 @@ import type {
 } from "../types.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import { t } from "../../../i18n/runtime.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 /**
  * Phase reported by `lvis:plugins:install-progress` IPC events. Renderer
@@ -59,7 +60,7 @@ export function usePluginMarketplace(api: LvisApi) {
       setMarketplace(l);
       setMarketStatus(t("usePluginMarketplace.pluginCount", { count: l.length }));
     } catch (e) {
-      setMarketStatus(t("usePluginMarketplace.loadFailed", { message: (e as Error).message }));
+      setMarketStatus(t("usePluginMarketplace.loadFailed", { message: errorMessage(e) }));
     }
   }, [api]);
 
@@ -84,7 +85,7 @@ export function usePluginMarketplace(api: LvisApi) {
       });
       setMarketStatus(t("usePluginMarketplace.installSuccess", { id }));
     } catch (e) {
-      setMarketStatus(t("usePluginMarketplace.installFailed", { message: (e as Error).message }));
+      setMarketStatus(t("usePluginMarketplace.installFailed", { message: errorMessage(e) }));
       throw e;
     } finally {
       setWorking(false);
@@ -103,7 +104,7 @@ export function usePluginMarketplace(api: LvisApi) {
       await refreshCards();
       setMarketStatus(t("usePluginMarketplace.uninstallSuccess", { id }));
     } catch (e) {
-      setMarketStatus(t("usePluginMarketplace.uninstallFailed", { message: (e as Error).message }));
+      setMarketStatus(t("usePluginMarketplace.uninstallFailed", { message: errorMessage(e) }));
     } finally {
       setWorking(false);
     }

@@ -15,6 +15,7 @@ import { SettingsPageHeader } from "../components/PageShell.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { formatDateTime } from "../../../shared/format-time.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
 
@@ -231,7 +232,7 @@ export function McpTab() {
       setConfigs(configsRes);
       setConfigPath(configPathRes);
     } catch (e) {
-      setError((e as Error).message ?? t("mcpTab.fetchError"));
+      setError(errorMessage(e) || t("mcpTab.fetchError"));
     } finally {
       setLoading(false);
     }
@@ -249,7 +250,7 @@ export function McpTab() {
         showBanner("success", t("mcpTab.killSuccess", { id }));
         void fetchAll();
       } catch (e) {
-        showBanner("error", e instanceof Error ? e.message : String(e));
+        showBanner("error", errorMessage(e));
       }
     },
     [fetchAll, showBanner],
@@ -267,7 +268,7 @@ export function McpTab() {
         showBanner("success", t("mcpTab.removeSuccess", { id }));
         notifySaved();
       } catch (e) {
-        showBanner("error", e instanceof Error ? e.message : String(e));
+        showBanner("error", errorMessage(e));
       } finally {
         removingIdRef.current = null;
         setRemovingId(null);
@@ -296,7 +297,7 @@ export function McpTab() {
       );
       notifySaved();
     } catch (e) {
-      showBanner("error", e instanceof Error ? e.message : String(e));
+      showBanner("error", errorMessage(e));
     } finally {
       setCredentialBusy(false);
     }
@@ -352,7 +353,7 @@ export function McpTab() {
         };
       }
     } catch (e) {
-      showBanner("error", e instanceof Error ? e.message : String(e));
+      showBanner("error", errorMessage(e));
       return;
     }
 
@@ -370,7 +371,7 @@ export function McpTab() {
       notifySaved();
       void fetchAll();
     } catch (e) {
-      showBanner("error", e instanceof Error ? e.message : String(e));
+      showBanner("error", errorMessage(e));
     } finally {
       setFormBusy(false);
     }

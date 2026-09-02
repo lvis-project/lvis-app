@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 interface DlpStats {
   totalHits: number;
@@ -89,7 +90,7 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
       setStats(s);
       setStatsError(null);
     } catch (e) {
-      setStatsError((e as Error).message ?? t("privacyTab.statsLoadFailed"));
+      setStatsError(errorMessage(e) || t("privacyTab.statsLoadFailed"));
     }
   }, [t]);
 

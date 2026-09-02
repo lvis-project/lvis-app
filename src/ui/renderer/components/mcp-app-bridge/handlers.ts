@@ -28,6 +28,7 @@ import {
   isSupportedMcpAppDisplayMode,
   type McpUiDisplayMode,
 } from "../../../../shared/mcp-app-display-mode.js";
+import { errorMessage } from "../../../../shared/error-message.js";
 
 // ─── onsandboxready ──────────────────────────────────────────────────────────
 
@@ -229,7 +230,7 @@ export function createOnCallTool({ callTool }: OnCallToolDeps): OnCallTool {
     } catch (err) {
       // The IPC itself failed (transport / unauthorized frame throw). Still an error
       // RESULT, never a rejected bridge request.
-      return errorResult(err instanceof Error ? err.message : String(err));
+      return errorResult(errorMessage(err));
     }
     if (!outcome.ok) return errorResult(outcome.message ?? outcome.error);
     return { content: [textBlock(outcome.result)] };

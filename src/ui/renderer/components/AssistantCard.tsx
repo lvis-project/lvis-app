@@ -1,9 +1,8 @@
-import { Loader2, Pin, RefreshCw, GitBranch, ThumbsUp, ThumbsDown, AlertTriangle, History } from "lucide-react";
+import { Loader2, Pin, RefreshCw, GitBranch, AlertTriangle, History } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
-import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
@@ -30,19 +29,14 @@ function AssistantCardImpl({
   entry,
   actions,
   isStarred,
-  onFeedback,
   isFinal = true,
 }: {
   entry: Extract<ChatEntry, { kind: "assistant" }>;
   actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
   isStarred?: boolean;
-  onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
   isFinal?: boolean;
 }) {
   const { t } = useTranslation();
-  const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
-  const [showReasonBox, setShowReasonBox] = useState(false);
-  const [reasonDraft, setReasonDraft] = useState("");
   // Issue #911 — host-emitted system notice (context-error / stream-error)
 
   // distinguish a real LLM reply from an error banner masquerading as one.
@@ -180,83 +174,6 @@ function AssistantCardImpl({
         </ReactMarkdown>
       </div>
 
-      {!entry.streaming && onFeedback ? (
-        <div className="mt-2 flex items-center gap-1 border-t border-border/(--opacity-medium) pt-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-5 w-5 ${feedbackRating === "up" ? "text-success" : "text-muted-foreground hover:text-foreground"}`}
-                onClick={() => {
-                  if (feedbackRating === "up") return;
-                  setFeedbackRating("up");
-                  setShowReasonBox(false);
-                  void onFeedback("up");
-                }}
-                aria-label={t("assistantCard.feedbackUp")}
-              >
-                <ThumbsUp key={feedbackRating === "up" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "up" ? "fill-success lvis-anim-pop" : ""}`} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("assistantCard.feedbackUp")}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-5 w-5 ${feedbackRating === "down" ? "text-destructive" : "text-muted-foreground hover:text-foreground"}`}
-                onClick={() => {
-                  if (feedbackRating === "down") return;
-                  setShowReasonBox(true);
-                }}
-                aria-label={t("assistantCard.feedbackDown")}
-              >
-                <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("assistantCard.feedbackDown")}</TooltipContent>
-          </Tooltip>
-          {showReasonBox && feedbackRating !== "down" ? (
-            <div className="ml-1 flex items-center gap-1">
-              <Input
-                type="text"
-                maxLength={200}
-                placeholder={t("assistantCard.reasonPlaceholder")}
-                value={reasonDraft}
-                onChange={(e) => setReasonDraft(e.target.value)}
-                className="h-6 w-40 px-2 text-xs"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    setFeedbackRating("down");
-                    setShowReasonBox(false);
-                    void onFeedback("down", reasonDraft.trim() || undefined);
-                  } else if (e.key === "Escape") {
-                    setShowReasonBox(false);
-                    setReasonDraft("");
-                  }
-                }}
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-6 px-2 text-xs"
-                onClick={() => {
-                  setFeedbackRating("down");
-                  setShowReasonBox(false);
-                  void onFeedback("down", reasonDraft.trim() || undefined);
-                }}
-              >
-                {t("assistantCard.sendButton")}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

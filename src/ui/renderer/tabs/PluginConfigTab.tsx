@@ -34,6 +34,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { buildNetworkAccessAcknowledgement } from "../../../shared/network-access.js";
 import { isReinstallFixableFailureKind } from "../../../shared/plugin-install-failure.js";
 import { formatBytes } from "../../../lib/turn-summary-format.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 type KV = { key: string; value: string };
 type BannerType = "error" | "success" | "warning";
@@ -260,7 +261,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
       }
       await refreshContributionTrust(row.pluginId);
     } catch (error) {
-      showBanner("error", (error as Error).message ?? t("pluginConfigTab.contributionTrustError"));
+      showBanner("error", errorMessage(error) || t("pluginConfigTab.contributionTrustError"));
     } finally {
       setTrustUpdating(null);
     }
@@ -298,7 +299,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
       });
       return cards;
     } catch (e) {
-      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorLoadPlugins"));
+      showBanner("error", errorMessage(e) || t("pluginConfigTab.errorLoadPlugins"));
       return null;
     } finally {
       setLoading(false);
@@ -320,7 +321,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
         }
         await refreshPlugins();
       } catch (e) {
-        showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorToggleEnabled"));
+        showBanner("error", errorMessage(e) || t("pluginConfigTab.errorToggleEnabled"));
       } finally {
         setTogglingId(null);
       }
@@ -426,7 +427,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
         setEntries(configToEntries(result.config));
         setSavedConfig(result.config as Record<string, unknown>);
       } catch (e) {
-        if (!cancelled) showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorLoadConfig"));
+        if (!cancelled) showBanner("error", errorMessage(e) || t("pluginConfigTab.errorLoadConfig"));
       }
     })();
     return () => { cancelled = true; };
@@ -437,7 +438,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
     try {
       k = sanitizePluginConfigKey(newKey.trim());
     } catch (e) {
-      showBanner("error", (e as Error).message);
+      showBanner("error", errorMessage(e));
       return;
     }
     if (entries.some((e) => e.key === k)) {
@@ -471,7 +472,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
       showBanner("success", t("pluginConfigTab.successSaved"));
       notifySaved();
     } catch (e) {
-      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorSave"));
+      showBanner("error", errorMessage(e) || t("pluginConfigTab.errorSave"));
     } finally {
       setSaving(false);
     }
@@ -548,7 +549,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
       showBanner("success", t("pluginConfigTab.successLocalInstall", { pluginId: result.pluginId }));
       void refreshPlugins();
     } catch (e) {
-      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorLocalInstall"));
+      showBanner("error", errorMessage(e) || t("pluginConfigTab.errorLocalInstall"));
     } finally {
       setLocalInstalling(false);
     }
@@ -617,7 +618,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
       }
       showBanner("success", t("pluginConfigTab.successDoctor", { displayName: plugin.name }));
     } catch (e) {
-      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorDoctor"));
+      showBanner("error", errorMessage(e) || t("pluginConfigTab.errorDoctor"));
     } finally {
       setDoctoringId(null);
     }
@@ -643,7 +644,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
       setSelectedId((current) => (current === pluginId ? null : current));
       showBanner("success", t("pluginConfigTab.successUninstall", { displayName }));
     } catch (e) {
-      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorUninstall"));
+      showBanner("error", errorMessage(e) || t("pluginConfigTab.errorUninstall"));
     } finally {
       setSaving(false);
       setUninstallTarget(null);
@@ -1194,7 +1195,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                             showBanner("success", t("pluginConfigTab.successSaved"));
                             notifySaved();
                           } catch (e) {
-                            showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorSave"));
+                            showBanner("error", errorMessage(e) || t("pluginConfigTab.errorSave"));
                           } finally {
                             setSaving(false);
                           }

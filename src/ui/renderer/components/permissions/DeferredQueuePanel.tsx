@@ -29,6 +29,7 @@ import {
   formatEvaluationLimits,
   PermissionEvaluationContextPanel,
 } from "./PermissionEvaluationContextPanel.js";
+import { errorMessage } from "../../../../shared/error-message.js";
 
 export interface DeferredQueuePanelProps {
   showEmpty?: boolean;
@@ -54,7 +55,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
       }
     } catch (err) {
       setPending([]);
-      setError(err instanceof Error ? err.message : "deferred-list failed");
+      setError(errorMessage(err));
     }
   }, []);
 
@@ -79,7 +80,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
         if (!r.ok) setError(r.error);
       } catch (err) {
         await refresh();
-        setError(err instanceof Error ? err.message : "deferred-resolve failed");
+        setError(errorMessage(err));
       } finally {
         setBusy(false);
       }

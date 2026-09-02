@@ -5,7 +5,7 @@ import type {
   ToolCategory,
   ToolSource,
 } from "../shared/permission-review-status.js";
-import type { LLMVendor } from "../shared/llm-vendor-defaults.js";
+import { isLLMVendor, type LLMVendor } from "../shared/llm-vendor-defaults.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import type { McpUiPayload } from "../mcp/types.js";
 import {
@@ -1190,4 +1190,239 @@ function getAdjacentToolGroupIndex(entries: ChatEntry[]): number {
     return entries.length - 1;
   }
   return -1;
+}
+
+// ─── Frame → transcript (shared by the main and the side chat) ───────────
+//
+// The two chat surfaces used to carry their own copies of "what does this
+// stream frame do to the entry list", and the copies drifted: the side chat
+// never dropped the provider-status placeholder, dropped `cancelled` and the
+// MCP UI payload on `tool_end`, and lost the per-tool breakdown on
+// `turn_summary`. Everything below is the one answer; the hooks keep only what
+// is theirs — the streamed-text accumulators, the stream-id guard, and the
+// compact/status flags around a frame.
+
+type TurnSummaryEntry = Extract<ChatEntry, { kind: "turn_summary" }>;
+
+/**
+ * The assistant placeholder that carries a provider status line ("retrying
+ * 2/5…") while nothing has streamed yet. Any real frame supersedes it — the
+ * first reasoning delta, a tool starting, a permission verdict, the turn
+ * closing — so the status never lingers above the actual reply.
+ */
+export function dropPendingLlmStatusAssistant(entries: ChatEntry[]): ChatEntry[] {
+  const idx = findLastIdx(
+    entries,
+    (entry): entry is AssistantEntry =>
+      entry.kind === "assistant" && entry.streaming === true && isLlmStatusAssistantText(entry.text),
+  );
+  if (idx < 0) return entries;
+  return [...entries.slice(0, idx), ...entries.slice(idx + 1)];
+}
+
+function isLlmStatusAssistantText(text: string): boolean {
+  const base = t("useChatState.llmStatusAttemptFirst");
+  return text === base || text.startsWith(base + " ");
+}
+
+/** A reasoning delta: the accumulated thought replaces any pending status line. */
+export function applyReasoningDelta(entries: ChatEntry[], thought: string): ChatEntry[] {
+  return upsertStreamingReasoning(dropPendingLlmStatusAssistant(entries), thought);
+}
+
+function isFiniteNonNegative(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function parseUsageByModel(value: unknown): TurnSummaryEntry["usageByModel"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parsed = value.flatMap((segment) => {
+    if (!segment || typeof segment !== "object") return [];
+    const s = segment as {
+      vendorProvider?: unknown;
+      vendorModel?: unknown;
+      tokenUsage?: {
+        inputTokens?: unknown;
+        outputTokens?: unknown;
+        cacheReadTokens?: unknown;
+        cacheWriteTokens?: unknown;
+      };
+    };
+    if (!isLLMVendor(s.vendorProvider) || typeof s.vendorModel !== "string" || s.vendorModel.length === 0) return [];
+    const usage = s.tokenUsage;
+    if (!usage || !isFiniteNonNegative(usage.inputTokens) || !isFiniteNonNegative(usage.outputTokens)) {
+      return [];
+    }
+    return [{
+      vendorProvider: s.vendorProvider,
+      vendorModel: s.vendorModel,
+      tokenUsage: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        ...(isFiniteNonNegative(usage.cacheReadTokens) ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+        ...(isFiniteNonNegative(usage.cacheWriteTokens) ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+      },
+    }];
+  });
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+/**
+ * The validated totals of a `turn_summary` frame, or `null` when any required
+ * count is missing or not a finite non-negative number.
+ */
+export function parseTurnSummaryEvent(ev: ChatStreamEvent): Pick<
+  TurnSummaryEntry,
+  | "turnDurationMs"
+  | "toolCount"
+  | "cumulativeToolMs"
+  | "tokensIn"
+  | "freshInputTokens"
+  | "tokensOut"
+  | "vendorProvider"
+  | "vendorModel"
+  | "usageByModel"
+  | "subscriptionUsage"
+> | null {
+  if (ev.type !== "turn_summary") return null;
+  const { turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, vendorProvider, vendorModel } = ev;
+  if (
+    !isFiniteNonNegative(turnDurationMs) ||
+    !isFiniteNonNegative(toolCount) ||
+    !isFiniteNonNegative(cumulativeToolMs) ||
+    !isFiniteNonNegative(tokensIn) ||
+    !isFiniteNonNegative(freshInputTokens) ||
+    !isFiniteNonNegative(tokensOut)
+  ) {
+    return null;
+  }
+  const usageByModel = parseUsageByModel(ev.usageByModel);
+  const subscriptionUsage = normalizeSubscriptionUsageList(ev.subscriptionUsage);
+  return {
+    turnDurationMs,
+    toolCount,
+    cumulativeToolMs,
+    tokensIn,
+    freshInputTokens,
+    tokensOut,
+    ...(isLLMVendor(vendorProvider) ? { vendorProvider } : {}),
+    ...(typeof vendorModel === "string" && vendorModel.length > 0 ? { vendorModel } : {}),
+    ...(usageByModel !== undefined ? { usageByModel } : {}),
+    ...(subscriptionUsage !== undefined ? { subscriptionUsage } : {}),
+  };
+}
+
+const TRANSCRIPT_FRAME_TYPES: ReadonlySet<ChatStreamEvent["type"]> = new Set<ChatStreamEvent["type"]>([
+  "permission_review",
+  "tool_start",
+  "tool_end",
+  "turn_summary",
+  "compact_notice",
+]);
+
+/** Frames whose transcript effect is a function of the frame and the entries alone. */
+export function isTranscriptFrame(ev: ChatStreamEvent): boolean {
+  return TRANSCRIPT_FRAME_TYPES.has(ev.type);
+}
+
+/**
+ * Apply one {@link isTranscriptFrame} frame to the entry list. A frame that
+ * fails its own field guard, or that this reducer does not own, leaves the
+ * list untouched — the caller's other branches (text, reasoning, round close,
+ * done, error) read hook-local state and stay in the hooks.
+ */
+export function applyTranscriptFrame(entries: ChatEntry[], ev: ChatStreamEvent): ChatEntry[] {
+  switch (ev.type) {
+    case "permission_review": {
+      if (!ev.reviewStatus || !ev.name || !ev.groupId || ev.toolUseId === undefined) return entries;
+      const { reviewStatus, name, toolCategory, source, groupId, toolUseId, displayOrder = 0, verdictLevel, reason, approvalPurpose } = ev;
+      return upsertPermissionReview(dropPendingLlmStatusAssistant(entries), {
+        status: reviewStatus,
+        toolName: name,
+        groupId,
+        toolUseId,
+        displayOrder,
+        ...(toolCategory ? { toolCategory } : {}),
+        ...(source ? { source } : {}),
+        ...(verdictLevel ? { verdictLevel } : {}),
+        ...(reason ? { reason } : {}),
+        ...(approvalPurpose ? { approvalPurpose } : {}),
+      });
+    }
+    case "tool_start": {
+      if (!ev.name || !ev.groupId || ev.toolUseId === undefined) return entries;
+      const { groupId, toolUseId, displayOrder = 0, name, input, source, toolCategory, pluginId, mcpServerId } = ev;
+      return applyToolStart(dropPendingLlmStatusAssistant(entries), {
+        groupId,
+        toolUseId,
+        displayOrder,
+        name,
+        input,
+        ...(source ? { source } : {}),
+        ...(toolCategory ? { category: toolCategory } : {}),
+        ...(pluginId ? { pluginId } : {}),
+        ...(mcpServerId ? { mcpServerId } : {}),
+      });
+    }
+    case "tool_end": {
+      if (!ev.name || !ev.groupId || ev.toolUseId === undefined) return entries;
+      const { groupId, toolUseId, result, isError, cancelled, uiPayload, durationMs, source, toolCategory, pluginId, mcpServerId, executionPlan } = ev;
+      return applyToolEnd(entries, {
+        groupId,
+        toolUseId,
+        result,
+        isError,
+        ...(cancelled ? { cancelled: true } : {}),
+        uiPayload,
+        durationMs,
+        ...(source ? { source } : {}),
+        ...(toolCategory ? { category: toolCategory } : {}),
+        ...(pluginId ? { pluginId } : {}),
+        ...(mcpServerId ? { mcpServerId } : {}),
+        ...(executionPlan !== undefined ? { executionPlan } : {}),
+      });
+    }
+    case "turn_summary": {
+      // Appended as its own entry so the footer survives session reload and
+      // historical rendering instead of being re-derived from per-tool frames.
+      const summary = parseTurnSummaryEvent(ev);
+      if (!summary) {
+        console.warn("Malformed turn_summary stream event ignored", ev);
+        return entries;
+      }
+      return [
+        ...entries,
+        {
+          kind: "turn_summary",
+          ...summary,
+          ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+          ...(ev.cacheWriteTokens !== undefined ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
+          ...(ev.breakdown ? { breakdown: ev.breakdown } : {}),
+        },
+      ];
+    }
+    case "compact_notice": {
+      // A structured checkpoint divider (plus the post-compact context estimate
+      // when the engine reports a reliable one) rather than string-matched prose.
+      const estimatedAfter = ev.estimatedAfter;
+      const checkpointEntry = {
+        kind: "checkpoint" as const,
+        removedMessages: ev.removedMessages ?? 0,
+        freedTokens: ev.freedTokens ?? 0,
+        ...(ev.trigger ? { trigger: ev.trigger } : {}),
+        ...(ev.summary ? { summary: ev.summary } : {}),
+        ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
+        ...(ev.compactStatus !== undefined ? { compactStatus: ev.compactStatus } : {}),
+        ...(ev.truncatedDir !== undefined ? { truncatedDir: ev.truncatedDir } : {}),
+      };
+      if (typeof estimatedAfter !== "number" || estimatedAfter < 0) return [...entries, checkpointEntry];
+      return [
+        ...entries,
+        checkpointEntry,
+        { kind: "context_usage" as const, tokensIn: estimatedAfter, source: "compact-estimate" as const },
+      ];
+    }
+    default:
+      return entries;
+  }
 }

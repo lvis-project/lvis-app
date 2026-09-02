@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isDarwin } from "../api-client.js";
 
 /**
  * Keyboard bindings for visit history.
@@ -18,11 +19,6 @@ export interface ViewHistoryShortcutHandlers {
   canGoForward: boolean;
   goBack: () => void;
   goForward: () => void;
-}
-
-function isDarwin(): boolean {
-  return (window as unknown as { lvisPlatform?: { isDarwin: boolean } }).lvisPlatform?.isDarwin
-    ?? false;
 }
 
 /** True when the keystroke belongs to whatever the user is typing into. */

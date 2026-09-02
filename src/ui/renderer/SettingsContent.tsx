@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
-import { useContainerNarrow } from "./hooks/use-container-narrow.js";
+import { useContainerNarrow, SETTINGS_NARROW_ENTER_WIDTH, SETTINGS_NARROW_EXIT_WIDTH } from "./hooks/use-container-narrow.js";
 import { SavedToastFloating, SavedToastProvider } from "./context/SavedToastContext.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
@@ -304,14 +304,14 @@ export function SettingsContent({
   // ── Responsive shell ────────────────────────────────────────────────────
   // Panel-width (not viewport) responsive switch: the inline Settings panel can
   // be narrow on a wide display (split view / small window), so we measure the
-  // panel root itself. Below ~640px (≈ Tailwind `sm`) the w-48 sidebar + content
-  // master-detail is too cramped, so we collapse to a mobile 2-depth stack.
-  // `useContainerNarrow`'s 60px dead-band (enter 640 / exit 700) keeps a drag
-  // near the boundary from flip-flopping, and it reports wide (isNarrow=false)
+  // panel root itself. Below `SETTINGS_NARROW_ENTER_WIDTH` the w-48 sidebar +
+  // content master-detail is too cramped, so we collapse to a mobile 2-depth
+  // stack. `useContainerNarrow`'s dead-band keeps a drag near the boundary from
+  // flip-flopping, and it reports wide (isNarrow=false)
   // under jsdom where ResizeObserver is absent — unit tests keep the
   // master-detail layout unchanged.
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const { isNarrow } = useContainerNarrow(rootRef, { enter: 640, exit: 700 });
+  const { isNarrow } = useContainerNarrow(rootRef, { enter: SETTINGS_NARROW_ENTER_WIDTH, exit: SETTINGS_NARROW_EXIT_WIDTH });
 
   // Narrow-only 2-depth navigation. Depth 1 = the grouped category list;
   // depth 2 = one selected pane + a back bar. Default "list": a freshly opened

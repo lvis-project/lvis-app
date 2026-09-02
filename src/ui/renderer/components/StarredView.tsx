@@ -10,9 +10,10 @@ import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
 import { localDateKey, localDayStart, utcDateKey } from "../../../shared/local-date.js";
-import { formatCost } from "../../../lib/cost-format.js";
+import { formatCost, formatTokensExact } from "../../../lib/cost-format.js";
 import { formatHhMm, formatMediumDateTime, formatMonthYear } from "../../../shared/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
+import { shortSessionId } from "../../../shared/session-lookup.js";
 
 export interface StarredItem {
   id: string;
@@ -127,10 +128,6 @@ function monthRange(date: Date): { monthKey: string; dateFrom: string; dateTo: s
     dateFrom: `${monthKey}-01`,
     dateTo: `${monthKey}-${String(lastDay).padStart(2, "0")}`,
   };
-}
-
-function formatTokenCount(value: number | undefined): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.max(0, value ?? 0));
 }
 
 function usageForDate(summary: unknown, dateKey: string): UsageTotals | null {
@@ -406,12 +403,12 @@ export function StarredView({
         date: selectedKey,
         sessions: conversationsForDay.length,
         starred: starredForDay.length,
-        tokens: formatTokenCount(dailyUsage?.totalTokens),
+        tokens: formatTokensExact(dailyUsage?.totalTokens),
       })
     : t("starredView.dailySummaryEmpty", { date: selectedKey });
   const summaryPayload = useMemo(() => ({
     date: selectedKey,
-    locale: typeof navigator === "undefined" ? "ko-KR" : navigator.language,
+    locale,
     sessions: conversationsForDay.slice(0, 12).map((conversation) => ({
       title: conversation.title,
       projectName: conversation.projectName,
@@ -421,7 +418,7 @@ export function StarredView({
       text: item.text,
     })),
     usage: dailyUsage,
-  }), [conversationsForDay, dailyUsage, selectedKey, starredForDay]);
+  }), [conversationsForDay, dailyUsage, locale, selectedKey, starredForDay]);
 
   useEffect(() => {
     let cancelled = false;
@@ -525,9 +522,9 @@ export function StarredView({
           </section>
           <section className="rounded-md border bg-background p-3">
             <h3 className="text-sm font-semibold text-foreground">{t("starredView.tokensTitle")}</h3>
-            <p className="mt-3 text-2xl font-semibold text-foreground">{formatTokenCount(dailyUsage?.totalTokens)}</p>
+            <p className="mt-3 text-2xl font-semibold text-foreground">{formatTokensExact(dailyUsage?.totalTokens)}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {formatTokenCount(dailyUsage?.inputTokens)} / {formatTokenCount(dailyUsage?.outputTokens)} · {formatCost(dailyUsage?.cost ?? 0)}
+              {formatTokensExact(dailyUsage?.inputTokens)} / {formatTokensExact(dailyUsage?.outputTokens)} · {formatCost(dailyUsage?.cost ?? 0)}
             </p>
           </section>
         </div>
@@ -601,8 +598,8 @@ export function StarredView({
                     key={cell.key}
                     type="button"
                     className={`h-2.5 w-2.5 rounded-[2px] transition-transform hover:scale-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:scale-100 ${TOKEN_HEAT_CLASS[cell.level ?? 0]} ${cell.dateKey === selectedKey ? "ring-1 ring-foreground" : ""}`}
-                    title={t("starredView.heatmapDay", { date: cell.dateKey, tokens: formatTokenCount(cell.tokens) })}
-                    aria-label={t("starredView.heatmapDay", { date: cell.dateKey, tokens: formatTokenCount(cell.tokens) })}
+                    title={t("starredView.heatmapDay", { date: cell.dateKey, tokens: formatTokensExact(cell.tokens) })}
+                    aria-label={t("starredView.heatmapDay", { date: cell.dateKey, tokens: formatTokensExact(cell.tokens) })}
                     disabled={!activityDateKeys.has(cell.dateKey)}
                     onClick={() => {
                       const date = dateFromKey(cell.dateKey!);
@@ -656,12 +653,12 @@ export function StarredView({
                     <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                       {conversation.projectName ? <span className="truncate">{conversation.projectName}</span> : null}
                       {conversation.totalTokens !== undefined ? (
-                        <span className="shrink-0">{formatTokenCount(conversation.totalTokens)} {t("starredView.tokensTitle")}</span>
+                        <span className="shrink-0">{formatTokensExact(conversation.totalTokens)} {t("starredView.tokensTitle")}</span>
                       ) : conversation.modifiedAt ? (
                         <span className="shrink-0">{formatHhMm(conversation.modifiedAt)}</span>
                       ) : null}
                       <span className="ml-auto shrink-0 font-mono opacity-60" title={conversation.sessionId}>
-                        #{conversation.sessionId.slice(0, 8)}
+                        #{shortSessionId(conversation.sessionId)}
                       </span>
                     </span>
                   </button>
@@ -688,7 +685,7 @@ export function StarredView({
                     <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
                       <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
                       <span>{formatMediumDateTime(s.starredAt)}</span>
-                      <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
+                      <span className="font-mono opacity-60">#{shortSessionId(s.sessionId)}</span>
                       <Button variant="ghost" size="icon-xs" className="ml-auto hover:bg-muted" title={t("starredView.unstar")} onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
                         <XIcon className="h-3 w-3" />
                       </Button>

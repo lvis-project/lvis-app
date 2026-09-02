@@ -24,8 +24,8 @@
  * the panel claims its session, so its cards never reach the tile beside it
  * or the window's dock.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Plus } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { TranscriptRenderer } from "./TranscriptRenderer.js";
@@ -34,6 +34,7 @@ import { ComposerApiKeyChip, resolveComposerRuntimeGates } from "./ChatComposerD
 import { AttachButton, ShortcutsButton, TurnControlButton } from "./InputActionBar.js";
 import { MessageQueuePanel } from "./MessageQueuePanel.js";
 import { useSideChat } from "../hooks/use-side-chat.js";
+import { useChatScroll } from "../hooks/use-chat-scroll.js";
 import { useMessageQueue } from "../hooks/use-message-queue.js";
 import { useAttachmentPicker } from "../hooks/use-attachment-picker.js";
 import { computeComposerPlaceholder } from "../utils/composer-placeholder.js";
@@ -45,6 +46,9 @@ import { useOptionalChatContext } from "../context/ChatContext.js";
 import { useApprovalSurface } from "../hooks/use-approval.js";
 import { ApprovalDock } from "./permissions/ApprovalDock.js";
 import { sessionOwnedBy } from "./chat-group-session-registry.js";
+
+/** The side transcript has no search band; the scroll hook still wants a stable list. */
+const NO_SEARCH_MATCHES: number[] = [];
 
 /**
  * The side loop's stream carries no sub-agent frames, so this panel learns of
@@ -127,7 +131,7 @@ function SideChatSession({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const attachmentNCounter = useRef(0);
   const composerRef = useRef<ComposerHandle | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   // Side chat is a second ConversationLoop, not a second credential policy.
   // Read the app-level readiness contract so it cannot bypass a selected
@@ -158,11 +162,18 @@ function SideChatSession({
   const composerSendDisabled = composerInputDisabled || draftHasUnsupportedAttachment;
   const hasDraft = draft.trim().length > 0 || attachments.length > 0;
 
-  // Auto-scroll to the latest message as the transcript grows / streams.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [entries]);
+  // The main transcript's scroll model: follow the stream only while pinned
+  // near the bottom, and offer a jump back once the reader has scrolled away.
+  const { scrollViewportRef, showJumpToBottom, scrollChatToBottom } = useChatScroll({
+    entries,
+    currentSessionId: sessionId ?? "",
+    chatEndRef,
+    viewMode: null,
+    searchOpen: false,
+    searchMatches: NO_SEARCH_MATCHES,
+    searchIdx: 0,
+    hidden: tileHidden,
+  });
 
   const allocateN = useCallback(() => ++attachmentNCounter.current, []);
 
@@ -253,8 +264,9 @@ function SideChatSession({
         </Button>
       </div>
 
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <div
-        ref={scrollRef}
+        ref={scrollViewportRef}
         className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2"
         data-testid="side-chat-transcript"
       >
@@ -271,6 +283,21 @@ function SideChatSession({
             showTokenCostBadge={chatContext?.usageAvailable !== false}
           />
         )}
+        <div ref={chatEndRef} />
+      </div>
+      {showJumpToBottom && (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="lvis-surface-raised absolute bottom-3 right-3 z-20 h-7 rounded-full bg-card/(--opacity-solid) px-2.5 text-[11px] backdrop-blur"
+          onClick={() => scrollChatToBottom("smooth")}
+          data-testid="side-chat-jump-to-bottom"
+        >
+          <ChevronDown className="mr-1 h-3.5 w-3.5" />
+          {t("chatView.jumpToBottom")}
+        </Button>
+      )}
       </div>
 
       {/* `data-composer-surface` marks the whole dock subtree, matching the

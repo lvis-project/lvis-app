@@ -15,6 +15,7 @@ import { highlightText } from "../utils/html-preview.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
+import { shortSessionId } from "../../../shared/session-lookup.js";
 
 type ConversationMatch = {
   entryIndex: number;
@@ -291,7 +292,7 @@ export function UnifiedSearchPanel({
                 <SearchResultButton
                   key={`memory-session:${session.sessionId}:${session.timestamp}`}
                   label={t("unifiedSearchPanel.labelConversationContent", { date: formatMediumDateTime(session.timestamp) })}
-                  meta={session.sessionId.slice(0, 8)}
+                  meta={shortSessionId(session.sessionId)}
                   onClick={() => handleLoadSession(session.sessionId)}
                 >
                   {highlightText(previewText(session.matchedMessage), trimmedQuery, { caseSensitive }) ?? previewText(session.matchedMessage)}

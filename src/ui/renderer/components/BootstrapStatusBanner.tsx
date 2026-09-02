@@ -21,6 +21,35 @@ interface Props {
   onRetry: () => void;
 }
 
+/** The red banner both failure states share: a message, Retry, and dismiss. */
+function DestructiveBanner({ message, onRetry, onDismiss }: { message: string; onRetry: () => void; onDismiss: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-between gap-2 bg-popover border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down">
+      <span>{message}</span>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onRetry}
+          className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/(--opacity-medium) hover:bg-destructive/(--opacity-soft)"
+        >
+          {t("bootstrapStatusBanner.retry")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDismiss}
+          aria-label={t("bootstrapStatusBanner.dismissNotification")}
+          className="text-destructive hover:text-destructive/(--opacity-intense) h-auto p-1"
+        >
+          ✕
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): React.ReactElement | null {
   const { t } = useTranslation();
   if (!status) return null;
@@ -35,28 +64,11 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
 
   if (status.phase === "error") {
     return (
-      <div className="flex items-center justify-between gap-2 bg-popover border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down">
-        <span>{t("bootstrapStatusBanner.bootstrapError", { message: status.message })}</span>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onRetry}
-            className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/(--opacity-medium) hover:bg-destructive/(--opacity-soft)"
-          >
-            {t("bootstrapStatusBanner.retry")}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onDismiss}
-            aria-label={t("bootstrapStatusBanner.dismissNotification")}
-            className="text-destructive hover:text-destructive/(--opacity-intense) h-auto p-1"
-          >
-            ✕
-          </Button>
-        </div>
-      </div>
+      <DestructiveBanner
+        message={t("bootstrapStatusBanner.bootstrapError", { message: status.message })}
+        onRetry={onRetry}
+        onDismiss={onDismiss}
+      />
     );
   }
 
@@ -87,30 +99,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
       status.failed.length === 1
         ? t("bootstrapStatusBanner.singlePluginFailed", { id: status.failed[0].id, error: truncate(status.failed[0].error) })
         : t("bootstrapStatusBanner.multiplePluginsFailed", { count: status.failed.length });
-    return (
-      <div className="flex items-center justify-between gap-2 bg-popover border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down">
-        <span>{summary}</span>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onRetry}
-            className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/(--opacity-medium) hover:bg-destructive/(--opacity-soft)"
-          >
-            {t("bootstrapStatusBanner.retry")}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onDismiss}
-            aria-label={t("bootstrapStatusBanner.dismissNotification")}
-            className="text-destructive hover:text-destructive/(--opacity-intense) h-auto p-1"
-          >
-            ✕
-          </Button>
-        </div>
-      </div>
-    );
+    return <DestructiveBanner message={summary} onRetry={onRetry} onDismiss={onDismiss} />;
   }
 
   // complete + nothing failed + not skipped → silent.

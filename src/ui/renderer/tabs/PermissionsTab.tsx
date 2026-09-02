@@ -55,6 +55,7 @@ import { canonicalStringify } from "../../../shared/canonical-json.js";
 import type { ExactDenyDraft } from "../exact-permission-decision.js";
 import { TEST_IDS, execModeTestId, testIdSelector } from "../../../shared/test-ids.js";
 import { formatDateTime } from "../../../shared/format-time.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   mode: "disabled",
@@ -284,7 +285,7 @@ export function PermissionsTab({
         setWindowsStatus(null);
       }
     } catch (e) {
-      const message = (e as Error).message ?? t("permissionsTab.errorLoadFailed");
+      const message = errorMessage(e) || t("permissionsTab.errorLoadFailed");
       // Same rule for the failure surface. A refresh that fails still has the
       // last-known state on screen, so it reports through the banner instead of
       // replacing what the user is reading with an error page.
@@ -361,7 +362,7 @@ export function PermissionsTab({
         document.querySelector<HTMLElement>(testIdSelector(TEST_IDS.settingsPageTitle))?.focus();
       });
     } catch (err) {
-      showBanner("error", t("permissionsTab.errorRevokeFailed", { message: (err as Error).message }));
+      showBanner("error", t("permissionsTab.errorRevokeFailed", { message: errorMessage(err) }));
     } finally {
       setExactDenyBusy(false);
     }
@@ -412,7 +413,7 @@ export function PermissionsTab({
           return;
         }
       } catch (err) {
-        showBanner("error", t("permissionsTab.errorRevokeFailed", { message: (err as Error).message }));
+        showBanner("error", t("permissionsTab.errorRevokeFailed", { message: errorMessage(err) }));
         return;
       }
       try {
@@ -421,7 +422,7 @@ export function PermissionsTab({
       } catch (err) {
         showBanner(
           "warn",
-          t("permissionsTab.errorRevokeRefreshFailed", { toolName, message: (err as Error).message }),
+          t("permissionsTab.errorRevokeRefreshFailed", { toolName, message: errorMessage(err) }),
         );
       }
     } finally {
@@ -476,7 +477,7 @@ export function PermissionsTab({
         }
       }
     } catch (e) {
-      showBanner("error", t("permissionsTab.errorModeChangeError", { message: (e as Error).message }));
+      showBanner("error", t("permissionsTab.errorModeChangeError", { message: errorMessage(e) }));
     } finally {
       setModeBusy(false);
     }
@@ -497,7 +498,7 @@ export function PermissionsTab({
     } catch (error) {
       showBanner(
         "error",
-        t("permissionsTab.errorModeChangeError", { message: (error as Error).message }),
+        t("permissionsTab.errorModeChangeError", { message: errorMessage(error) }),
       );
     } finally {
       setModeBusy(false);
@@ -521,7 +522,7 @@ export function PermissionsTab({
       setAdjudicationEnabled(!next);
       showBanner(
         "error",
-        t("permissionsTab.adjudicationToggleError", { message: (e as Error).message }),
+        t("permissionsTab.adjudicationToggleError", { message: errorMessage(e) }),
       );
     } finally {
       setAdjudicationBusy(false);
@@ -560,7 +561,7 @@ export function PermissionsTab({
       setAdjudicationRevision((revision) => revision + 1);
       showBanner(
         "error",
-        t("permissionsTab.adjudicationToggleError", { message: (error as Error).message }),
+        t("permissionsTab.adjudicationToggleError", { message: errorMessage(error) }),
       );
     } finally {
       setAdjudicationBusy(false);
@@ -617,7 +618,7 @@ export function PermissionsTab({
       }
     } catch (e) {
       setSandboxEnabled(!next);
-      showBanner("error", t("permissionsTab.osSandboxToggleError", { message: (e as Error).message }));
+      showBanner("error", t("permissionsTab.osSandboxToggleError", { message: errorMessage(e) }));
     } finally {
       setSandboxBusy(false);
     }
@@ -659,7 +660,7 @@ export function PermissionsTab({
       const status = await window.lvis.permission.sandboxWindowsStatus();
       setWindowsStatus(status);
     } catch (e) {
-      showBanner("error", t("permissionsTab.osSandboxWindowsInstallError", { message: (e as Error).message }));
+      showBanner("error", t("permissionsTab.osSandboxWindowsInstallError", { message: errorMessage(e) }));
     } finally {
       setWindowsInstallBusy(false);
     }
@@ -683,7 +684,7 @@ export function PermissionsTab({
         showBanner("error", res.message ?? t("permissionsTab.errorRuleAddFailed", { error: res.error }));
       }
     } catch (e) {
-      showBanner("error", t("permissionsTab.errorRuleAddError", { message: (e as Error).message }));
+      showBanner("error", t("permissionsTab.errorRuleAddError", { message: errorMessage(e) }));
     } finally {
       setRulesBusy(false);
     }
@@ -699,7 +700,7 @@ export function PermissionsTab({
         showBanner("error", res.message ?? t("permissionsTab.errorRuleRemoveFailed", { error: res.error }));
       }
     } catch (e) {
-      showBanner("error", t("permissionsTab.errorRuleRemoveError", { message: (e as Error).message }));
+      showBanner("error", t("permissionsTab.errorRuleRemoveError", { message: errorMessage(e) }));
     } finally {
       setRulesBusy(false);
     }
@@ -745,7 +746,7 @@ export function PermissionsTab({
       }
     } catch (e) {
       setPendingDirectoryWarning(null);
-      showBanner("error", t("permissionsTab.errorDirectoryAddError", { message: (e as Error).message }));
+      showBanner("error", t("permissionsTab.errorDirectoryAddError", { message: errorMessage(e) }));
     } finally {
       setDirsBusy(false);
     }
@@ -762,7 +763,7 @@ export function PermissionsTab({
         showBanner("error", res.error);
       }
     } catch (e) {
-      showBanner("error", t("permissionsTab.errorDirectoryRemoveError", { message: (e as Error).message }));
+      showBanner("error", t("permissionsTab.errorDirectoryRemoveError", { message: errorMessage(e) }));
     } finally {
       setDirsBusy(false);
       restoreScroll();

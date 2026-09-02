@@ -13,7 +13,7 @@ import {
 } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { SubscriptionUsageTelemetry } from "../../../shared/subscription-runtime.js";
-import { formatCost, formatTokens } from "../../../lib/cost-format.js";
+import { formatCost, formatTokens, formatTokensExact } from "../../../lib/cost-format.js";
 import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface TokenCostBadgePricing {
@@ -135,7 +135,7 @@ function TokenCostBadgeImpl({
           </div>
           <div className="flex justify-between gap-3">
             <span>{sourceDetailLabels.join(" · ")}</span>
-            <span>{totalTokens.toLocaleString()}</span>
+            <span>{formatTokensExact(totalTokens)}</span>
           </div>
           <div className="mt-1 border-t border-border/(--opacity-medium) pt-1 font-semibold text-muted-foreground">
             {t("tokenCostBadge.subscriptionPricingUnavailableLabel")}
@@ -224,33 +224,33 @@ function TokenCostBadgeImpl({
         <div className="space-y-0.5">
           <div className="flex justify-between gap-3">
             <span>{t("tokenCostBadge.freshInputLabel")}</span>
-            <span>{freshInputTokens.toLocaleString()}</span>
+            <span>{formatTokensExact(freshInputTokens)}</span>
           </div>
           {cacheReadTokens > 0 && (
             <div className="flex justify-between gap-3 text-success">
               <span>{t("tokenCostBadge.cacheReadLabel")}</span>
-              <span>{cacheReadTokens.toLocaleString()}</span>
+              <span>{formatTokensExact(cacheReadTokens)}</span>
             </div>
           )}
           {cacheWriteTokens > 0 && (
             <div className="flex justify-between gap-3 text-warning">
               <span>{t("tokenCostBadge.cacheWriteLabel")}</span>
-              <span>{cacheWriteTokens.toLocaleString()}</span>
+              <span>{formatTokensExact(cacheWriteTokens)}</span>
             </div>
           )}
           <div className="flex justify-between gap-3">
             <span>{t("tokenCostBadge.outputLabel")}</span>
-            <span>{tokensOut.toLocaleString()}</span>
+            <span>{formatTokensExact(tokensOut)}</span>
           </div>
         </div>
         <div className="mt-1 border-t border-border/(--opacity-medium) pt-1 space-y-0.5">
           <div className="flex justify-between gap-3 font-semibold">
             <span>{t("tokenCostBadge.freshPlusOutputLabel")}</span>
-            <span>{headlineTokens.toLocaleString()}</span>
+            <span>{formatTokensExact(headlineTokens)}</span>
           </div>
           <div className="flex justify-between gap-3 opacity-70">
             <span>{t("tokenCostBadge.projectedNextInputLabel")}</span>
-            <span>{tokensIn.toLocaleString()}</span>
+            <span>{formatTokensExact(tokensIn)}</span>
           </div>
           {cost !== null && (
             <div className="flex justify-between gap-3 font-semibold text-success pt-0.5 border-t border-border/(--opacity-medium)">

@@ -3,28 +3,27 @@ import { t } from "../../../i18n/runtime.js";
 import {
   appendImportedTriggerEntry,
   appendUserEntry,
+  applyReasoningDelta,
+  applyTranscriptFrame,
   applyUserMessageFrame,
+  clearTurnAssistantInterrupted,
   dropOptimisticUserEntry,
-  applyToolEnd,
-  applyToolStart,
+  dropPendingLlmStatusAssistant,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
-  setAssistantError,
-  upsertPermissionReview,
-  upsertStreamingAssistant,
-  upsertStreamingReasoning,
-  normalizeSubscriptionUsageList,
-  type ChatEntry,
+  isTranscriptFrame,
   markTurnAssistantInterrupted,
-  clearTurnAssistantInterrupted,
+  setAssistantError,
+  upsertStreamingAssistant,
+  type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
-import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { isMissingStagedEnvelopeErrorMessage } from "../../../shared/staged-origins.js";
 import type { LvisApi } from "../types.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { resetSuggestedReplies } from "./use-suggested-replies.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 function isMissingStagedEnvelopeIpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -280,43 +279,8 @@ export function useChatState(api: LvisApi) {
           return;
         }
         thoughtRef.current += ev.text;
-        setEntries((p) => {
-          const base = p;
-          return upsertStreamingReasoning(dropPendingLlmStatusAssistant(base), thoughtRef.current);
-        });
-      } else if (
-        ev.type === "permission_review" &&
-        ev.reviewStatus &&
-        ev.name &&
-        ev.groupId &&
-        ev.toolUseId !== undefined
-      ) {
-        const {
-          reviewStatus,
-          name,
-          toolCategory,
-          source,
-          groupId,
-          toolUseId,
-          displayOrder = 0,
-          verdictLevel,
-          reason,
-          approvalPurpose,
-        } = ev;
-        setEntries((p) =>
-          upsertPermissionReview(dropPendingLlmStatusAssistant(p), {
-            status: reviewStatus,
-            toolName: name,
-            groupId,
-            toolUseId,
-            displayOrder,
-            ...(toolCategory ? { toolCategory } : {}),
-            ...(source ? { source } : {}),
-            ...(verdictLevel ? { verdictLevel } : {}),
-            ...(reason ? { reason } : {}),
-            ...(approvalPurpose ? { approvalPurpose } : {}),
-          }),
-        );
+        const thought = thoughtRef.current;
+        setEntries((p) => applyReasoningDelta(p, thought));
       } else if (ev.type === "assistant_round") {
         if (debugStreamEnabled) {
           debugLog("stream", "assistant_round:enter", {
@@ -384,44 +348,6 @@ export function useChatState(api: LvisApi) {
         finalAssistantRoundClosedRef.current = phase === "final";
         streamRef.current = "";
         thoughtRef.current = "";
-      } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, displayOrder = 0, name, input, source, toolCategory, pluginId, mcpServerId } = ev;
-        setEntries((p) => {
-          const base = dropPendingLlmStatusAssistant(p);
-          return applyToolStart(
-            base,
-            {
-              groupId,
-              toolUseId,
-              displayOrder,
-              name,
-              input,
-              ...(source ? { source } : {}),
-              ...(toolCategory ? { category: toolCategory } : {}),
-              ...(pluginId ? { pluginId } : {}),
-              ...(mcpServerId ? { mcpServerId } : {}),
-            },
-          );
-        });
-      } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, result, isError, cancelled, uiPayload, durationMs, source, toolCategory, pluginId, mcpServerId, executionPlan } = ev;
-        setEntries((p) => applyToolEnd(
-          p,
-          {
-            groupId,
-            toolUseId,
-            result,
-            isError,
-            ...(cancelled ? { cancelled: true } : {}),
-            uiPayload,
-            durationMs,
-            ...(source ? { source } : {}),
-            ...(toolCategory ? { category: toolCategory } : {}),
-            ...(pluginId ? { pluginId } : {}),
-            ...(mcpServerId ? { mcpServerId } : {}),
-            ...(executionPlan !== undefined ? { executionPlan } : {}),
-          },
-        ));
       } else if (ev.type === "error") {
         // LLM compact may have started but thrown — clear the indicator
         // so the StatusBar item doesn't stick when compact_notice never arrives.
@@ -450,34 +376,6 @@ export function useChatState(api: LvisApi) {
           ...p,
           { kind: "system", text: t("useChatState.piiRedactedText", { count, kindSuffix: kindLabel ? ` (${kindLabel})` : "" }) },
         ]);
-      } else if (ev.type === "turn_summary") {
-        // Turn aggregate footer (§ chat transcript per-turn footer) — append a
-        // single `kind: "turn_summary"` entry. Lives in the entries stream so
-        // it survives session reload + historical rendering rather than being
-        // re-derived from per-tool / per-round events. Renderer (ChatView)
-        // consumes this entry to render <TurnSummaryFooter> next to the final
-        // assistant card. tokensIn / tokensOut are routed from the LLM
-        // provider's usage report (Vercel AI SDK forwards prompt_tokens +
-        // completion_tokens through fullStreamToStreamEvent in
-        // engine/llm/vercel/adapter.ts; see the engine-side
-        // `onTurnSummary` wiring in conversation-loop.ts runTurn).
-        const summary = parseTurnSummaryEvent(ev);
-        if (!summary) {
-          console.warn("Malformed turn_summary stream event ignored", ev);
-          return;
-        }
-        setEntries((p) => [
-          ...p,
-          {
-            kind: "turn_summary",
-            ...summary,
-            ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
-            ...(ev.cacheWriteTokens !== undefined ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
-            ...(summary.vendorProvider !== undefined ? { vendorProvider: summary.vendorProvider } : {}),
-            ...(summary.vendorModel !== undefined ? { vendorModel: summary.vendorModel } : {}),
-            ...(ev.breakdown ? { breakdown: ev.breakdown } : {}),
-          },
-        ]);
       } else if (ev.type === "compact_started") {
         // Pre-turn auto-compact started — show a transient "자동 압축 중..." hint.
         // Cleared when `compact_notice` (completion) arrives.
@@ -489,39 +387,13 @@ export function useChatState(api: LvisApi) {
         // Issue #917 — force-recover budget consumed; compact cannot reduce context.
         setIsRecoveryExhausted(true);
       } else if (ev.type === "compact_notice") {
-        // Compact completed — clear the in-progress indicator.
+        // Compact completed — clear the in-progress indicator. The checkpoint
+        // divider itself is the shared transcript reducer's.
         setIsCompacting(false);
         setCompactTriggerSource(null);
-        // Emit a structured `kind: "checkpoint"` entry so ChatView can render
-        // a consistent checkpoint divider instead of string-matching prose.
-        const removed = ev.removedMessages ?? 0;
-        const freed = ev.freedTokens ?? 0;
-        const estimatedAfter = ev.estimatedAfter;
-        setEntries((p) => {
-          const hasReliableAfter = typeof estimatedAfter === "number" && estimatedAfter >= 0;
-          const checkpointEntry = {
-            kind: "checkpoint" as const,
-            removedMessages: removed,
-            freedTokens: freed,
-            ...(ev.trigger ? { trigger: ev.trigger } : {}),
-            ...(ev.summary ? { summary: ev.summary } : {}),
-            ...(ev.compactNum !== undefined ? { compactNum: ev.compactNum } : {}),
-            ...(ev.compactStatus !== undefined ? { compactStatus: ev.compactStatus } : {}),
-            ...(ev.truncatedDir !== undefined ? { truncatedDir: ev.truncatedDir } : {}),
-          };
-          if (!hasReliableAfter) {
-            return [...p, checkpointEntry];
-          }
-          return [
-            ...p,
-            checkpointEntry,
-            {
-              kind: "context_usage" as const,
-              tokensIn: estimatedAfter,
-              source: "compact-estimate" as const,
-            },
-          ];
-        });
+        setEntries((p) => applyTranscriptFrame(p, ev));
+      } else if (isTranscriptFrame(ev)) {
+        setEntries((p) => applyTranscriptFrame(p, ev));
       } else if (ev.type === "done") {
         // Defensive clear — if compact started but compact_notice never
         // arrived (engine error path swallowed the throw), this prevents
@@ -759,7 +631,7 @@ export function useChatState(api: LvisApi) {
         }
       } catch (err) {
         failed = true;
-        const error = (err as Error).message;
+        const error = errorMessage(err);
         const stagedEnvelopeFailure = isMissingStagedEnvelopeIpcError(err);
         setEntries((p) =>
           setAssistantError(
@@ -811,7 +683,7 @@ export function useChatState(api: LvisApi) {
         );
       }
     } catch (err) {
-      const error = (err as Error).message;
+      const error = errorMessage(err);
       const stagedEnvelopeFailure = isMissingStagedEnvelopeIpcError(err);
       setEntries((p) =>
         setAssistantError(
@@ -894,7 +766,7 @@ export function useChatState(api: LvisApi) {
         setErrorWithThought(t("useChatState.continueGenerationFailedError", { error: res?.error ?? t("useChatState.unknownError") }));
       }
     } catch (err) {
-      setErrorWithThought(t("useChatState.errorPrefix", { error: (err as Error).message }));
+      setErrorWithThought(t("useChatState.errorPrefix", { error: errorMessage(err) }));
     } finally {
       finishStreamingRequest(requestId);
     }
@@ -956,7 +828,7 @@ export function useChatState(api: LvisApi) {
           : res.summary;
         setEntries((p) => [...p, { kind: "system", text: banner }]);
       } catch (err) {
-        setEntries((p) => [...p, { kind: "system", text: t("useChatState.compactError", { error: (err as Error).message }) }]);
+        setEntries((p) => [...p, { kind: "system", text: t("useChatState.compactError", { error: errorMessage(err) }) }]);
       } finally {
         setIsCompacting(false);
       }
@@ -1010,98 +882,6 @@ function visibleAssistantText(text: string): string {
   return text.trim().length > 0 ? text : "";
 }
 
-function parseTurnSummaryEvent(ev: Parameters<Parameters<LvisApi["onChatStream"]>[0]>[0]): Pick<
-  Extract<ChatEntry, { kind: "turn_summary" }>,
-  | "turnDurationMs"
-  | "toolCount"
-  | "cumulativeToolMs"
-  | "tokensIn"
-  | "freshInputTokens"
-  | "tokensOut"
-  | "vendorProvider"
-  | "vendorModel"
-  | "usageByModel"
-  | "subscriptionUsage"
-> | null {
-  if (ev.type !== "turn_summary") return null;
-  const {
-    turnDurationMs,
-    toolCount,
-    cumulativeToolMs,
-    tokensIn,
-    freshInputTokens,
-    tokensOut,
-    vendorProvider,
-    vendorModel,
-  } = ev;
-  const subscriptionUsage = normalizeSubscriptionUsageList(ev.subscriptionUsage);
-  if (
-    !isFiniteNonNegative(turnDurationMs) ||
-    !isFiniteNonNegative(toolCount) ||
-    !isFiniteNonNegative(cumulativeToolMs) ||
-    !isFiniteNonNegative(tokensIn) ||
-    !isFiniteNonNegative(freshInputTokens) ||
-    !isFiniteNonNegative(tokensOut)
-  ) {
-    return null;
-  }
-  return {
-    turnDurationMs,
-    toolCount,
-    cumulativeToolMs,
-    tokensIn,
-    freshInputTokens,
-    tokensOut,
-    ...(isLLMVendor(vendorProvider) ? { vendorProvider } : {}),
-    ...(typeof vendorModel === "string" && vendorModel.length > 0 ? { vendorModel } : {}),
-    ...(parseUsageByModel(ev.usageByModel) !== undefined
-      ? { usageByModel: parseUsageByModel(ev.usageByModel) }
-      : {}),
-    ...(subscriptionUsage !== undefined ? { subscriptionUsage } : {}),
-  };
-}
-
-function isFiniteNonNegative(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function parseUsageByModel(value: unknown): Extract<ChatEntry, { kind: "turn_summary" }>["usageByModel"] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const parsed = value.flatMap((segment) => {
-    if (!segment || typeof segment !== "object") return [];
-    const s = segment as {
-      vendorProvider?: unknown;
-      vendorModel?: unknown;
-      tokenUsage?: {
-        inputTokens?: unknown;
-        outputTokens?: unknown;
-        cacheReadTokens?: unknown;
-        cacheWriteTokens?: unknown;
-      };
-    };
-    if (!isLLMVendor(s.vendorProvider) || typeof s.vendorModel !== "string" || s.vendorModel.length === 0) return [];
-    const usage = s.tokenUsage;
-    if (
-      !usage ||
-      !isFiniteNonNegative(usage.inputTokens) ||
-      !isFiniteNonNegative(usage.outputTokens)
-    ) {
-      return [];
-    }
-    return [{
-      vendorProvider: s.vendorProvider,
-      vendorModel: s.vendorModel,
-      tokenUsage: {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        ...(isFiniteNonNegative(usage.cacheReadTokens) ? { cacheReadTokens: usage.cacheReadTokens } : {}),
-        ...(isFiniteNonNegative(usage.cacheWriteTokens) ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
-      },
-    }];
-  });
-  return parsed.length > 0 ? parsed : undefined;
-}
-
 function formatLlmStatusMessage(ev: {
   phase?: "attempt" | "retry" | "fallback";
   label?: string;
@@ -1126,26 +906,4 @@ function formatLlmStatusMessage(ev: {
     return t("useChatState.llmStatusAttemptRetrying", { attempt, max });
   }
   return "";
-}
-
-function dropPendingLlmStatusAssistant(entries: ChatEntry[]): ChatEntry[] {
-  let idx = -1;
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = entries[i];
-    if (
-      entry.kind === "assistant" &&
-      entry.streaming === true &&
-      isLlmStatusAssistantText(entry.text)
-    ) {
-      idx = i;
-      break;
-    }
-  }
-  if (idx < 0) return entries;
-  return [...entries.slice(0, idx), ...entries.slice(idx + 1)];
-}
-
-function isLlmStatusAssistantText(text: string): boolean {
-  const base = t("useChatState.llmStatusAttemptFirst");
-  return text === base || text.startsWith(base + " ");
 }

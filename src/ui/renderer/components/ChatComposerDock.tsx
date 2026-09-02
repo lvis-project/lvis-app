@@ -22,6 +22,7 @@ import type { ViewModeState } from "./ViewModeBanner.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import { ComposerProjectSelector } from "./ComposerProjectSelector.js";
+import { usePrefersReducedMotion } from "../hooks/use-prefers-reduced-motion.js";
 import type { ProjectErrorReporter } from "../hooks/use-add-project-folder.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
@@ -271,19 +272,19 @@ export function ChatComposerDock({
   // read as one coordinated motion. Reduced-motion users skip the linger
   // entirely (no transition to wait out).
   const [showProjectSelectorSlot, setShowProjectSelectorSlot] = useState(centered);
+  const prefersReducedMotion = usePrefersReducedMotion();
   useEffect(() => {
     if (centered) {
       setShowProjectSelectorSlot(true);
       return;
     }
-    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     if (prefersReducedMotion) {
       setShowProjectSelectorSlot(false);
       return;
     }
     const timer = window.setTimeout(() => setShowProjectSelectorSlot(false), 300);
     return () => window.clearTimeout(timer);
-  }, [centered]);
+  }, [centered, prefersReducedMotion]);
 
   // One lift, unconditionally. The `"compact"` variant existed only to leave
   // room for the no-API-key transcript card; that card is gone (its affordance

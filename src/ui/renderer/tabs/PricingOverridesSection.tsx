@@ -17,7 +17,7 @@
  * composer badge prices from the shared table directly and is untouched by
  * either path.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
@@ -32,6 +32,7 @@ import {
   type PricingOverride,
 } from "../../../shared/pricing-overrides.js";
 import type { AppSettings } from "../types.js";
+import { useSettingsSnapshot } from "../hooks/use-settings-snapshot.js";
 
 /**
  * A row mid-edit. Rates are strings because "" and "1." are states a number
@@ -109,12 +110,7 @@ export function PricingOverridesSection() {
     setLoaded(true);
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    void api.getSettings().then((s) => { if (alive) applySnapshot(s); });
-    const unsub = api.onSettingsUpdated((s) => applySnapshot(s));
-    return () => { alive = false; unsub(); };
-  }, [api, applySnapshot]);
+  useSettingsSnapshot(api, applySnapshot);
 
   const editRow = useCallback((index: number, patch: Partial<DraftRow>) => {
     setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));

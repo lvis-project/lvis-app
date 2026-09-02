@@ -73,6 +73,7 @@ import { getApi } from "../api-client.js";
 // Optional: this component also mounts outside the chat subtree.
 import { useOptionalChatContext } from "../context/ChatContext.js";
 import { hostTimeZone } from "../../../shared/format-time.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 /** Extract the `?t=<token>` proxy-session token from a `lvis-mcp-app://` URL. */
 function tokenFromProxyUrl(proxyUrl: string): string | null {
@@ -377,7 +378,7 @@ export function McpAppView({
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
       });
 
     return () => { cancelled = true; };

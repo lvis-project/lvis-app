@@ -11,6 +11,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
 import type { SettingsTab } from "../../../shared/settings-tabs.js";
 import { localDateKey, shiftLocalDateKey } from "../../../shared/local-date.js";
+import { shortSessionId } from "../../../shared/session-lookup.js";
 
 type Preset = "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -307,7 +308,7 @@ export function UsageDashboard({
               <tbody>
                 {summary.topConversations.map((c) => (
                   <tr key={c.sessionId} className="border-t">
-                    <td className="py-1 max-w-[120px] truncate font-mono" title={c.firstInput ?? c.sessionId}>{c.sessionId.slice(0, 12)}</td>
+                    <td className="py-1 max-w-[120px] truncate font-mono" title={c.firstInput ?? c.sessionId}>{shortSessionId(c.sessionId)}</td>
                     <td>{c.turns}</td>
                     <td>{formatTokens(c.totalTokens)}</td>
                     <td className="text-muted-foreground">{formatCacheBreakdown(c)}</td>

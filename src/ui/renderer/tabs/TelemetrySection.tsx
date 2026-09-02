@@ -22,6 +22,7 @@ import { EnvForcedNotice, useEnvForcedSettings } from "../components/EnvForcedNo
 import { useTranslation } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
 import type { AppSettings } from "../types.js";
+import { useSettingsSnapshot } from "../hooks/use-settings-snapshot.js";
 
 /** Every write here is one field; the store merges the rest. */
 type TelemetryPatch = Partial<NonNullable<AppSettings["telemetry"]>>;
@@ -48,12 +49,7 @@ export function TelemetrySection() {
     setLoaded(true);
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    void api.getSettings().then((s) => { if (alive) applySnapshot(s); });
-    const unsub = api.onSettingsUpdated((s) => applySnapshot(s));
-    return () => { alive = false; unsub(); };
-  }, [api, applySnapshot]);
+  useSettingsSnapshot(api, applySnapshot);
 
   useEffect(() => {
     let alive = true;

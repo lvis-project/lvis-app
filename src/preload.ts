@@ -7,6 +7,7 @@ import { contextBridge } from "electron";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildPublicSurface } from "./preload/public-surface.js";
+import type { LvisApi } from "./ui/renderer/types.js";
 import { resolveDroppedPaths } from "./preload/webutils-bridge.js";
 import {
   applyInitialThemePrime,
@@ -46,12 +47,16 @@ const lvisInitialAppMode = readInitialAppModeArg();
 // `window.lvisApi` object is their union (byte-identical name + shape). The
 // plugin webview asset URLs are added here because they depend on this module's
 // `__dirname`.
+// `satisfies` is the drift gate: the renderer declares LvisApi and this is
+// the one place the whole surface is assembled, so a member the renderer
+// expects and no builder provides fails to compile here (each builder checks
+// its own members against the same type).
 const api = {
   ...buildPublicSurface(),
   ...buildInternalApiSurface(),
   pluginPreloadUrl,
   pluginShellUrl,
-};
+} satisfies LvisApi;
 
 // Expose the theme prime payload so ThemeProvider (renderer) can read it
 // synchronously on mount and skip its async settings.json hydrate. `null`

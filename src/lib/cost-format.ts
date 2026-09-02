@@ -22,6 +22,20 @@ export function formatTokens(n: number): string {
 }
 
 /**
+ * Format a token count in full, with the runtime locale's digit grouping
+ * (`1,234,567`) — the tooltip and dashboard form of {@link formatTokens}.
+ *
+ * Same clamp as the compact form: a missing, negative or non-finite count
+ * renders `"0"`. Two surfaces already clamped their own `Intl.NumberFormat`
+ * copies while thirteen others called `.toLocaleString()` on the raw number,
+ * so the same aggregate could read `-50` in one badge and `0` in the next.
+ */
+export function formatTokensExact(n: number | null | undefined): string {
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return "0";
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n);
+}
+
+/**
  * Format a USD amount for display (`$0`, `$0.00050`, `$0.0050`, `$0.050`,
  * `$1.50`).
  *

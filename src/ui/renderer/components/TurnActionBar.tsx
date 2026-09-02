@@ -1,5 +1,5 @@
 import { Copy, Check, RefreshCw, GitBranch, Pin, ThumbsUp, ThumbsDown } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -8,6 +8,7 @@ import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } 
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { formatHhMm } from "../../../shared/format-time.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { useCopyFlash } from "../hooks/use-copy-flash.js";
 
 
 
@@ -54,17 +55,8 @@ export function TurnActionBar({
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
-  const [copied, setCopied] = useState(false);
-  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleCopy = () => {
-    const text = copyText ?? "";
-    if (!text) return;
-    void navigator.clipboard.writeText(text);
-    setCopied(true);
-    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
-    copyResetTimer.current = setTimeout(() => setCopied(false), 1500);
-  };
+  const { copied, copy } = useCopyFlash();
+  const handleCopy = () => copy(copyText ?? "");
 
   // The shared formatter, so this label reads the same clock as every other
   // time in the transcript.

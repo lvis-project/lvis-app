@@ -70,54 +70,21 @@ export async function loadSlashPickerRuntime(): Promise<SlashPickerRuntime> {
   };
 }
 
+const EMPTY_RUNTIME: SlashPickerRuntime = { mcpTools: [], mcpPrompts: [], skills: [] };
+
 export function useSlashPickerRuntime(enabled: boolean): SlashPickerRuntime {
-  const [mcpTools, setMcpTools] = useState<McpToolEntry[]>([]);
-  const [mcpPrompts, setMcpPrompts] = useState<McpPromptEntry[]>([]);
-  const [skills, setSkills] = useState<SkillEntry[]>([]);
+  const [runtime, setRuntime] = useState<SlashPickerRuntime>(EMPTY_RUNTIME);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-
-    void (async () => {
-      const servers = (await window.lvis?.mcp?.servers?.()) ?? [];
-      if (cancelled) return;
-      const tools: McpToolEntry[] = [];
-      const prompts: McpPromptEntry[] = [];
-      for (const s of servers) {
-        if (s.status !== "connected") continue;
-        for (const name of s.registeredTools) {
-          tools.push({ name, serverId: s.id });
-        }
-        for (const prompt of s.prompts ?? []) {
-          prompts.push({
-            name: prompt.name,
-            serverId: s.id,
-            ...(prompt.title ? { title: prompt.title } : {}),
-            ...(prompt.description ? { description: prompt.description } : {}),
-            arguments: (prompt.arguments ?? []).map((argument) => ({
-              name: argument.name,
-              ...(argument.description ? { description: argument.description } : {}),
-              required: argument.required === true,
-            })),
-          });
-        }
-      }
-      setMcpTools(tools);
-      setMcpPrompts(prompts);
-    })();
-
-    void (async () => {
-      const result = await window.lvisApi?.listSkills?.();
-      if (cancelled) return;
-      const list = result?.skills ?? [];
-      setSkills(list.map((s) => ({ name: s.name, description: s.description })));
-    })();
-
+    void loadSlashPickerRuntime().then((next) => {
+      if (!cancelled) setRuntime(next);
+    });
     return () => {
       cancelled = true;
     };
   }, [enabled]);
 
-  return { mcpTools, mcpPrompts, skills };
+  return runtime;
 }

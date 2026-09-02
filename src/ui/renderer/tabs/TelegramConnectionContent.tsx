@@ -18,6 +18,7 @@ import { formatIpcError } from "../format-ipc-error.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
 import { AwayAuthorityContent } from "./AwayAuthorityContent.js";
 import type { LvisApi } from "../types.js";
+import { useCopyFlash } from "../hooks/use-copy-flash.js";
 
 export interface TelegramConnectionContentProps {
   api: LvisApi;
@@ -91,7 +92,7 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
   const [botToken, setBotToken] = useState("");
   const [duration, setDuration] = useState<TelegramApprovalDurationPreset>("8h");
   const [issuedCode, setIssuedCode] = useState<TelegramCreatedPairingCode | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy: copyToClipboard, reset: resetCopied } = useCopyFlash();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -152,7 +153,7 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
   const createPairingCode = useCallback(async () => {
     setBusy(true);
     setFeedback(null);
-    setCopied(false);
+    resetCopied();
     try {
       const result = await api.telegramConnection.createPairingCode();
       if (!result.ok) {
@@ -171,12 +172,8 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
   }, [api, refresh, t]);
 
   const copyCode = useCallback(() => {
-    if (!issuedCode || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(issuedCode.code).then(
-      () => setCopied(true),
-      () => setCopied(false),
-    );
-  }, [issuedCode]);
+    if (issuedCode) copyToClipboard(issuedCode.code);
+  }, [copyToClipboard, issuedCode]);
 
   const state = snapshot?.state ?? null;
   const readOnly = state === "unsupported";
