@@ -86,7 +86,7 @@ describe("App smoke (Phase 1 infra)", () => {
     // Default appMode is "work" — Settings renders inline in the main area
     // through the same setActiveView + main-content-region path as the other views.
     await waitFor(() =>
-      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+      expect(container.querySelector("[data-settings-layout]")).toBeTruthy(),
     );
     expect(container.querySelector('[data-testid="settings-close"]')).toBeNull();
     expect(container.querySelector('[data-testid="settings-mobile-close"]')).toBeNull();
@@ -228,7 +228,7 @@ describe("App smoke (Phase 1 infra)", () => {
       fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
     });
     await waitFor(() =>
-      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+      expect(container.querySelector("[data-settings-layout]")).toBeTruthy(),
     );
     // Hidden with its conversation, not unmounted: a tile subscribes to its
     // group's stream when it mounts, so tearing the surface down for Settings
@@ -247,7 +247,7 @@ describe("App smoke (Phase 1 infra)", () => {
       fireEvent.click(container.querySelector('[data-testid="sidebar-new-chat"]')!);
     });
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy();
+      expect(container.querySelector("[data-settings-layout]")).toBeFalsy();
       expect(
         container.querySelector('[data-testid="chat-surface"]')?.getAttribute("data-visible"),
       ).toBe("true");
@@ -284,7 +284,7 @@ describe("Settings inline (all modes)", () => {
 
     // Inline render via setActiveView + the main content region.
     await waitFor(() =>
-      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+      expect(container.querySelector("[data-settings-layout]")).toBeTruthy(),
     );
     // Sidebar item shows ACTIVE state (aria-current=page) while inline.
     expect(
@@ -297,14 +297,14 @@ describe("Settings inline (all modes)", () => {
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
     });
-    expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy();
+    expect(container.querySelector("[data-settings-layout]")).toBeTruthy();
 
     // The app-level navbar returns to the prior/home view.
     await act(async () => {
       fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.viewPathBack))!);
     });
     await waitFor(() =>
-      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy(),
+      expect(container.querySelector("[data-settings-layout]")).toBeFalsy(),
     );
   });
 
@@ -321,7 +321,7 @@ describe("Settings inline (all modes)", () => {
 
     // Settings is an always-inline panel in every app mode.
     await waitFor(() =>
-      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+      expect(container.querySelector("[data-settings-layout]")).toBeTruthy(),
     );
   });
 });

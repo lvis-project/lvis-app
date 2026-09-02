@@ -16,7 +16,7 @@
  *   - the marketplace, which opens an external URL and is not an in-app
  *     place at all.
  */
-import { Brain, CalendarDays, KanbanSquare, Repeat2, type LucideIcon } from "lucide-react";
+import { Brain, CalendarDays, KanbanSquare, KeyRound, Repeat2, type LucideIcon } from "lucide-react";
 import {
   SETTINGS_TAB_LABEL_KEYS,
   normalizeSettingsTab,
@@ -88,7 +88,7 @@ export function viewLocationBreadcrumb(
   if (location.view === "settings") {
     const tab = location.settingsTab ?? "llm";
     return [
-      { key: "settings", label: t("mainToolbar.settings"), target: { view: "settings", settingsTab: "llm" } },
+      { key: "settings", label: t(BUILTIN_LABEL_KEYS.settings), target: { view: "settings", settingsTab: "llm" } },
       { key: `settings:${tab}`, label: t(SETTINGS_TAB_LABEL_KEYS[tab]) },
     ];
   }
@@ -124,18 +124,20 @@ export function viewLocationBreadcrumb(
 }
 
 /**
- * A built-in view that is a PLACE of its own: neither the conversation surface
- * nor Settings, which are their own shapes. These are the views that become a
+ * A built-in view that is a PLACE of its own — everything but the conversation
+ * surface, which is the pane's other kind of content and is named by the
+ * session it holds rather than by a view. These are the views that become a
  * pane body with the frame's header carrying their name.
  */
-export type FeatureViewKey = Exclude<BuiltinViewKey, "home" | "settings">;
+export type PaneViewKey = Exclude<BuiltinViewKey, "home">;
 
 /**
  * Built-in view → the label its own sidebar entry already uses. Reused rather
- * than restated so a renamed destination cannot be one thing in the rail and
- * another in the path.
+ * than restated so a renamed destination cannot be one thing in the rail, a
+ * second in the path, and a third in the pane header that carries it.
  */
-export const BUILTIN_LABEL_KEYS: Record<FeatureViewKey, string> = {
+export const BUILTIN_LABEL_KEYS: Record<PaneViewKey, string> = {
+  settings: "mainToolbar.settings",
   "work-board": "mainToolbar.workBoard",
   routines: "mainToolbar.routines",
   insights: "mainToolbar.insights",
@@ -153,7 +155,8 @@ export const BUILTIN_LABEL_KEYS: Record<FeatureViewKey, string> = {
  * (removed in the 2026-07 shell refinement, the view stays routable) and is
  * listed here because the pane header still has to draw it.
  */
-export const BUILTIN_VIEW_ICONS: Record<FeatureViewKey, LucideIcon> = {
+export const BUILTIN_VIEW_ICONS: Record<PaneViewKey, LucideIcon> = {
+  settings: KeyRound,
   "work-board": KanbanSquare,
   routines: Repeat2,
   insights: CalendarDays,

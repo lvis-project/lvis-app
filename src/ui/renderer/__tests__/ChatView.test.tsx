@@ -183,7 +183,7 @@ describe("ChatView", () => {
         fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
       });
       await waitFor(() =>
-        expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+        expect(container.querySelector("[data-settings-layout]")).toBeTruthy(),
       );
 
       await act(async () => {

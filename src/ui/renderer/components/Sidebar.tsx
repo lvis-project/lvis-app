@@ -5,7 +5,6 @@ import {
   Blocks,
   ChevronRight,
   Folder,
-  KeyRound,
   LayoutGrid,
   MessageSquareText,
   MoreHorizontal,
@@ -26,7 +25,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { toPluginDoctorViewKey, toPluginSettingsViewKey } from "../utils/plugin-doctor-view.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
-import { BUILTIN_VIEW_ICONS } from "../utils/view-location.js";
+import { BUILTIN_LABEL_KEYS, BUILTIN_VIEW_ICONS } from "../utils/view-location.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
 import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
@@ -54,11 +53,12 @@ import {
 } from "../../../shared/side-panel.js";
 import { formatRelativeTime } from "../../../shared/format-time.js";
 
-// The Features rows draw the same glyph the pane header draws for the view
-// they open — one map, so a row and the header it produces cannot disagree.
+// A nav row draws the same glyph the pane header draws for the view it opens —
+// one map, so a row and the header it produces cannot disagree.
 const WorkBoardIcon = BUILTIN_VIEW_ICONS["work-board"];
 const RoutinesIcon = BUILTIN_VIEW_ICONS.routines;
 const InsightsIcon = BUILTIN_VIEW_ICONS.insights;
+const SettingsIcon = BUILTIN_VIEW_ICONS.settings;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -2246,8 +2246,8 @@ export function Sidebar({
             Plugins, where installing is done. */}
         <NavItem
           viewKey="settings"
-          label={t("mainToolbar.settings")}
-          icon={<KeyRound className={settingsNeedsApiKey || runtimeUnavailable ? "h-4 w-4 text-destructive" : "h-4 w-4"} />}
+          label={t(BUILTIN_LABEL_KEYS.settings)}
+          icon={<SettingsIcon className={settingsNeedsApiKey || runtimeUnavailable ? "h-4 w-4 text-destructive" : "h-4 w-4"} />}
           // Active when settings render inline (work mode).
           isActive={activeView === "settings"}
           onClick={onOpenSettings}
