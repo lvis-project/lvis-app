@@ -36,11 +36,10 @@ import { collectChatPreviewModel } from "./preview/preview-targets.js";
 import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
 import { SIDE_PANEL_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js";
 import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
-import { ActionPanel } from "./components/ActionPanel.js";
 import { createPortal } from "react-dom";
 import { FloatingRightLane } from "./components/FloatingRightLane.js";
-import { useChatGroupHeaderSlot, useChatGroupPanelSlot } from "./components/ChatGroupFrame.js";
-import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
+import { useChatGroupPanelSlot } from "./components/ChatGroupFrame.js";
+import { computeToolActivity } from "./utils/tool-activity.js";
 import { sidePanelLayout, useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { SIDE_PANEL_MIN_RESERVE } from "../../shared/side-panel.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
@@ -143,9 +142,6 @@ export interface ChatViewProps {
   statusBar?: StatusBarProps;
   /** App-owned toast producer for attachment capability warnings. */
   onAttachmentWarning?: (message: string) => void;
-  /** Controlled Tool Activity (ActionPanel) open state — work mode only. */
-  actionPanelOpen?: boolean;
-  onActionPanelOpenChange?: (open: boolean) => void;
   /** Controlled right-side work panel state, toggled from the title bar. */
   sidePanelOpen?: boolean;
   onSidePanelOpenChange: (open: boolean) => void;
@@ -165,7 +161,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   const approvals = useApprovalSurface();
   const approvalHead = pendingApprovals[0] ?? null;
@@ -351,15 +347,16 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     [commitSidePanelWidth, setSidePanelWidth],
   );
 
-  // Tool Activity (ActionPanel) — co-located here (§6.10.7) so its open-actions
-  // reach the workspace store / preview model / side-panel toggle that also
-  // live at ChatView level. Left-click routes items in-app; right-click offers
-  // "open in system app" (web only — tool-derived local paths have no
-  // authorized OS-open channel, so that menu item is hidden for files).
-  const actionPanelActivity = useMemo(() => computeActionPanelActivity(entries), [entries]);
-  const chatGroupHeaderSlot = useChatGroupHeaderSlot();
+  // Tool activity — derived here (only this view sees the transcript) so its
+  // open-actions reach the workspace store / preview model / side-panel toggle
+  // that also live at ChatView level. It lives in the work panel: the empty
+  // launcher shows the compact report, and the file / browser / activity tabs
+  // list it in full. Left-click routes items in-app; right-click offers "open
+  // in system app" (web only — tool-derived local paths have no authorized
+  // OS-open channel, so that menu item is hidden for files).
+  const toolActivity = useMemo(() => computeToolActivity(entries), [entries]);
 
-  // Route an ActionPanel item into the workspace rail. Single-click (`ephemeral`)
+  // Route a tool-activity item into the workspace rail. Single-click (`ephemeral`)
   // opens it in the one reusable preview slot; double-click (`pinned`) opens and
   // keeps it as a durable tab — the VS Code preview-tab model the workspace-tab
   // store documents (single = ephemeral, double = pinned).
@@ -687,23 +684,6 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         data-testid="chat-main-column"
         data-approval-scope
       >
-      {/* Tool activity is derived HERE (only this view sees the transcript) but
-          belongs to the group header, so the control is portaled up into the
-          header's slot. No slot means no header to contribute to — the view is
-          being rendered outside a group frame — and nothing is contributed. */}
-      {appMode !== "chat" && chatGroupHeaderSlot
-        ? createPortal(
-            <ActionPanel
-              open={actionPanelOpen}
-              onOpenChange={(open) => onActionPanelOpenChange?.(open)}
-              activity={actionPanelActivity}
-              onOpenItem={routeActivityItem}
-              onOpenItemPinned={routeActivityItemPinned}
-              onOpenItemInSystemApp={openActivityItemInSystemApp}
-            />,
-            chatGroupHeaderSlot,
-          )
-        : null}
       <FloatingRightLane>
         {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
         <OverlayCardRegion
@@ -949,7 +929,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
             onWidthCommit={handleSidePanelWidthCommit}
             resizeElementRef={dockedPanelMotionRef}
             onClose={() => onSidePanelOpenChange(false)}
-            activity={actionPanelActivity}
+            activity={toolActivity}
             onOpenActivityItem={routeActivityItem}
             onOpenActivityItemPinned={routeActivityItemPinned}
             onOpenActivityItemInSystemApp={openActivityItemInSystemApp}

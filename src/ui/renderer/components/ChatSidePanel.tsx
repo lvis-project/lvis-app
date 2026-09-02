@@ -23,7 +23,7 @@ import {
 } from "../../../components/ui/dropdown-menu.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_RESERVE } from "../../../shared/side-panel.js";
-import { ToolActivityBody, toolActivityTotal, type ActionPanelActivityState } from "./ActionPanel.js";
+import { ToolActivityBody, ToolActivityWorkspace, toolActivityTotal, type ToolActivityState } from "./ToolActivity.js";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
@@ -347,6 +347,8 @@ function tabLabelKey(kind: WorkspaceTabKind): string {
       return "chatPreviewRail.tab.preview";
     case "subagent":
       return "chatPreviewRail.tab.subagent";
+    case "activity":
+      return "chatPreviewRail.tab.activity";
     case "side-chat":
       return "chatPreviewRail.tab.sideChat";
   }
@@ -364,6 +366,8 @@ function tabTestId(kind: WorkspaceTabKind): string {
       return "chat-side-panel-tab-terminal";
     case "subagent":
       return "chat-side-panel-tab-subagent";
+    case "activity":
+      return "chat-side-panel-tab-activity";
     case "side-chat":
       return "chat-side-panel-tab-side-chat";
   }
@@ -508,18 +512,21 @@ function LauncherItems({
  */
 function WorkspaceLauncher({
   onOpen,
+  onOpenActivityTab,
   activity,
   onOpenActivityItem,
   onOpenActivityItemPinned,
   onOpenActivityItemInSystemApp,
 }: {
   onOpen: (kind: WorkspaceTabKind) => void;
+  /** The activity tab, reused if one is already open — the compact report's way to the full lists. */
+  onOpenActivityTab: () => void;
 } & Pick<ChatSidePanelProps, "activity" | "onOpenActivityItem" | "onOpenActivityItemPinned" | "onOpenActivityItemInSystemApp">) {
   const { t } = useTranslation();
   // The empty panel is where the conversation's tool activity reads best: no
   // tab is competing for the space, and the items there open the very tabs
   // the picker below offers.
-  const showActivity = activity !== undefined && toolActivityTotal(activity) > 0;
+  const showActivity = toolActivityTotal(activity) > 0;
   return (
     <div
       className={cn(
@@ -531,13 +538,14 @@ function WorkspaceLauncher({
       {showActivity ? (
         <div
           className="flex max-h-[50%] min-h-0 w-full shrink-0 flex-col overflow-hidden"
-          data-testid="chat-side-panel-launcher-activity"
+          data-testid="chat-side-panel-launcher-tool-activity"
         >
           <ToolActivityBody
             activity={activity}
             onOpenItem={onOpenActivityItem}
             onOpenItemPinned={onOpenActivityItemPinned}
             onOpenItemInSystemApp={onOpenActivityItemInSystemApp}
+            onOpenActivityTab={onOpenActivityTab}
           />
         </div>
       ) : null}
@@ -655,9 +663,10 @@ export interface ChatSidePanelProps {
   onClose: () => void;
   /**
    * What this conversation did — the empty launcher shows it above the tab
-   * picker, so an open panel with nothing in it still says something.
+   * picker, so an open panel with nothing in it still says something, and the
+   * activity tab lists all of it.
    */
-  activity?: ActionPanelActivityState;
+  activity: ToolActivityState;
   onOpenActivityItem?: (target: string, web: boolean) => void;
   onOpenActivityItemPinned?: (target: string, web: boolean) => void;
   onOpenActivityItemInSystemApp?: (target: string, web: boolean) => void;
@@ -759,6 +768,7 @@ export function ChatSidePanel({
     browserUrlByTab,
     setActiveTabId,
     addTab,
+    ensureContainerTab,
     promoteToPinned,
     closeTab,
     setBrowserTabUrl,
@@ -968,6 +978,7 @@ export function ChatSidePanel({
           {activeTab == null ? (
             <WorkspaceLauncher
               onOpen={addTab}
+              onOpenActivityTab={() => ensureContainerTab("activity")}
               activity={activity}
               onOpenActivityItem={onOpenActivityItem}
               onOpenActivityItemPinned={onOpenActivityItemPinned}
@@ -1002,6 +1013,8 @@ export function ChatSidePanel({
               {...(sessionId ? { parentSessionId: sessionId } : {})}
               subAgentSpawns={subAgentSpawns}
             />
+          ) : activeTab.kind === "activity" ? (
+            <ToolActivityWorkspace activity={activity} />
           ) : activeTab.kind === "side-chat" ? (
             // Side chat — a second, independently-streaming chat session driven
             // by a dedicated ConversationLoop in main. The view subscribes to the

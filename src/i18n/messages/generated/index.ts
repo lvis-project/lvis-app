@@ -8,7 +8,6 @@
  *
  * Fragments: 189
  */
-import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
 import { en as en_appearanceTab } from "./appearanceTab.js";
 import { en as en_approvalAttribution } from "./approvalAttribution.js";
@@ -175,6 +174,7 @@ import { en as en_telegramConnection } from "./telegramConnection.js";
 import { en as en_tokenCostBadge } from "./tokenCostBadge.js";
 import { en as en_tokenProgressRing } from "./tokenProgressRing.js";
 import { en as en_tokyoNight } from "./tokyoNight.js";
+import { en as en_toolActivity } from "./toolActivity.js";
 import { en as en_toolApprovalDialog } from "./toolApprovalDialog.js";
 import { en as en_toolDisplay } from "./toolDisplay.js";
 import { en as en_toolGroupCard } from "./toolGroupCard.js";
@@ -199,7 +199,6 @@ import { en as en_workBoard } from "./workBoard.js";
 import { en as en_workGroup } from "./workGroup.js";
 
 export const generatedEn: Record<string, string> = {
-  ...en_actionPanel,
   ...en_app,
   ...en_appearanceTab,
   ...en_approvalAttribution,
@@ -366,6 +365,7 @@ export const generatedEn: Record<string, string> = {
   ...en_tokenCostBadge,
   ...en_tokenProgressRing,
   ...en_tokyoNight,
+  ...en_toolActivity,
   ...en_toolApprovalDialog,
   ...en_toolDisplay,
   ...en_toolGroupCard,

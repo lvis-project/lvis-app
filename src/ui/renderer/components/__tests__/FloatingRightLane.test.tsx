@@ -3,7 +3,7 @@
  * FloatingRightLane — the invariant that stops the top-right overlays from
  * landing on each other.
  *
- * The bug this replaced: the action-panel rail and the overlay card each
+ * The bug this replaced: the tool-activity rail and the overlay card each
  * carried its own `absolute right-4 top-2`, at z-50 and z-20. Same anchor,
  * different layers, so the rail's button column covered the overlay card's
  * close and queue controls — and since that button is `pointer-events-auto`, a
@@ -84,12 +84,12 @@ describe("FloatingRightLane", () => {
     expect(className, "overlay-card-region must not set its own layer").not.toMatch(/\bz-\d/);
   });
 
-  it("no longer carries the action panel — it hangs off the group header now", () => {
+  it("carries no tool-activity surface — that lives in the work panel now", () => {
     renderLane();
 
     const lane = screen.getByTestId("floating-right-lane");
-    expect(lane.querySelector("[data-testid='action-panel-open']")).toBeNull();
-    expect(lane.querySelector("[data-testid='action-panel']")).toBeNull();
+    expect(lane.querySelector("[data-testid='chat-side-panel-launcher-tool-activity']")).toBeNull();
+    expect(lane.querySelector("[data-testid='tool-activity-open-tab']")).toBeNull();
   });
 
   it("keeps the overlay card's own dismiss control reachable", () => {

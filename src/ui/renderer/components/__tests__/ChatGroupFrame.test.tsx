@@ -88,6 +88,14 @@ describe("ChatGroupFrame", () => {
     expect(onTogglePanel).toHaveBeenCalledTimes(1);
   });
 
+  it("points the toggle along the panel's axis: it opens beside the transcript, so the icon is the right-panel pair, not the bottom one", () => {
+    const { unmount } = render(frame({ panelOpen: false }));
+    expect(screen.getByTestId(TEST_IDS.chatGroupPanelToggle).querySelector("svg.lucide-panel-right-open")).toBeTruthy();
+    unmount();
+    render(frame({ panelOpen: true }));
+    expect(screen.getByTestId(TEST_IDS.chatGroupPanelToggle).querySelector("svg.lucide-panel-right-close")).toBeTruthy();
+  });
+
   it("drops a two-way split choice — beside or under — instead of guessing from the tile's shape", () => {
     const onSplit = vi.fn();
     const splitFits = vi.fn((axis: "row" | "column") => axis === "row");
@@ -160,23 +168,6 @@ describe("ChatGroupFrame", () => {
     render(frame());
     expect(screen.queryByTestId("chat-group-sidebar")).toBeNull();
     expect(screen.queryByTestId("chat-group-sidebar-toggle")).toBeNull();
-  });
-
-  it("publishes a header slot ahead of the fixed actions, for contributed controls", () => {
-    render(frame({
-      actions: buildChatGroupActions({
-        t,
-        pinned: false,
-        onTogglePin: vi.fn(),
-        onExport: vi.fn(),
-        onImport: vi.fn(),
-      }),
-    }));
-    const slot = screen.getByTestId("chat-group-header-slot");
-    const pin = screen.getByTestId("chat-group-action-conversation.pin");
-    // Contributed first, pin second: the fixed set keeps its order whatever the
-    // transcript decides to contribute.
-    expect(slot.compareDocumentPosition(pin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("offers show-alone only when told there is something to hide, and names the way back", () => {

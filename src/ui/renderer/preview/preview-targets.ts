@@ -4,22 +4,24 @@ import type { Attachment } from "../types/attachments.js";
 import { extractFileEditDiff, type FileEditDiffData } from "../utils/file-diff.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import { getToolDisplayName } from "../utils/tool-display.js";
-// The web-artifact vocabulary is shared with the action panel on purpose: the
+// The web-artifact vocabulary is shared with the tool activity lists on purpose: the
 // Browser tab and the Tool Activity list are two views of ONE set of fetched
 // pages, so both sides must classify web tools and extract URLs with the same
 // code. A second local collector here is what made the Browser tab read "no web
-// artifacts" while the activity popup listed dozens of sources.
+// artifacts" while the activity list showed dozens of sources.
 import {
-  ACTION_PANEL_ACTIVITY_LIMIT,
+  collectFileChanges,
   collectUrls,
   isBrowserTool,
-} from "../utils/action-panel-activity.js";
+  resolveTranscriptUrls,
+} from "../utils/tool-activity.js";
 import {
-  FILE_WRITE_TOOL_NAMES,
   READ_TOOL_PATTERN,
   TOOL_PATH_KEYS,
   extractPatchPaths,
+  classifyFileChange,
   isGlobPattern,
+  type FileChangeOperation,
 } from "../utils/tool-input-paths.js";
 import { displaySafeLabel } from "../../../shared/display-safe-text.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../../../shared/mcp-resource-bounds.js";
@@ -157,7 +159,8 @@ export interface WorkspaceFileItem {
   label: string;
   detail: string;
   sourceLabel: string;
-  operation: "attachment" | "read" | "write" | "tool";
+  /** How the session touched the file; a change says what kind. */
+  operation: "attachment" | "read" | "tool" | FileChangeOperation;
   previewTargetId?: string;
   canOpenExternal: boolean;
   status?: ToolItem["status"];
@@ -220,7 +223,7 @@ function collectPathStrings(value: unknown): string[] {
     if (typeof item !== "string") return;
     // An `apply_patch` body names the files it writes only inside the patch
     // text; the call's own arguments do not list them. Without this branch the
-    // action panel emits those paths and this side does not, so the row's
+    // activity list emits those paths and this side does not, so the row's
     // lookup against `targets` misses and the open falls to the dead-end
     // file-browser branch.
     if (key != null && key.toLowerCase() === "patch") {
@@ -238,66 +241,6 @@ function collectPathStrings(value: unknown): string[] {
     if (isLikelyPath(item)) paths.add(item);
   });
   return [...paths];
-}
-
-/**
- * A URL named in a call's ARGUMENTS outranks the same URL merely mentioned in a
- * result. Mirrors {@link FILE_OPERATION_RANK}: the same artifact seen through a
- * stronger relationship keeps the stronger attribution, so a page a
- * `web_fetch` actually retrieved is credited to that fetch and not to the
- * `web_search` that happened to list it first.
- */
-type TranscriptUrlOrigin = Exclude<UrlTargetOrigin, "address">;
-
-const URL_ORIGIN_RANK: Record<TranscriptUrlOrigin, number> = {
-  result: 0,
-  argument: 1,
-};
-
-interface UrlAttribution {
-  /** The call the target is credited to — the only one that emits it. */
-  toolUseId: string;
-  origin: TranscriptUrlOrigin;
-}
-
-/**
- * Which call owns each fetched page, and which pages make the list at all.
- *
- * Runs before the target walk because both answers need the whole transcript: a
- * later call can outrank an earlier one for the same URL, and the cap keeps the
- * MOST RECENT {@link ACTION_PANEL_ACTIVITY_LIMIT} pages — the same bound, and
- * the same end of the list, the action panel keeps. Without it one link-heavy
- * result (a search page quoting a hundred links) becomes a hundred rows in a
- * tab that is meant to show what this conversation actually visited.
- */
-function resolveUrlAttributions(entries: ChatEntry[]): Map<string, UrlAttribution> {
-  const attributions = new Map<string, UrlAttribution>();
-  /** Position of the LAST call that produced each URL — what "most recent" means. */
-  const lastProducedAt = new Map<string, number>();
-  let producedAt = 0;
-
-  for (const entry of entries) {
-    if (entry.kind !== "tool_group") continue;
-    for (const tool of entry.tools) {
-      if (!isBrowserTool(tool)) continue;
-      producedAt += 1;
-      const argumentUrls = new Set(collectUrls(tool.input));
-      for (const url of new Set([...argumentUrls, ...collectUrls(tool.result)])) {
-        const origin: TranscriptUrlOrigin = argumentUrls.has(url) ? "argument" : "result";
-        lastProducedAt.set(url, producedAt);
-        const existing = attributions.get(url);
-        if (existing && URL_ORIGIN_RANK[origin] <= URL_ORIGIN_RANK[existing.origin]) continue;
-        attributions.set(url, { toolUseId: tool.toolUseId, origin });
-      }
-    }
-  }
-
-  if (attributions.size <= ACTION_PANEL_ACTIVITY_LIMIT) return attributions;
-  const dropped = [...lastProducedAt]
-    .sort((left, right) => right[1] - left[1])
-    .slice(ACTION_PANEL_ACTIVITY_LIMIT);
-  for (const [url] of dropped) attributions.delete(url);
-  return attributions;
 }
 
 /**
@@ -393,9 +336,19 @@ function toolSourceLabel(tool: ToolItem): string {
 }
 
 function toolOperation(tool: ToolItem): WorkspaceFileItem["operation"] {
-  if (FILE_WRITE_TOOL_NAMES.has(tool.name) || tool.category === "write") return "write";
+  const change = classifyFileChange(tool);
+  if (change) return change;
   if (tool.category === "read" || READ_TOOL_PATTERN.test(tool.name)) return "read";
   return "tool";
+}
+
+const CHANGE_OPERATIONS: ReadonlySet<WorkspaceFileItem["operation"]> = new Set<WorkspaceFileItem["operation"]>([
+  "write", "create", "modify", "delete", "move",
+]);
+
+/** Did the session change this file (as opposed to read or attach it)? */
+export function isFileChangeOperation(operation: WorkspaceFileItem["operation"]): operation is FileChangeOperation {
+  return CHANGE_OPERATIONS.has(operation);
 }
 
 function addUnique<T extends { id: string }>(items: T[], item: T, seen: Set<string>): void {
@@ -409,7 +362,27 @@ const FILE_OPERATION_RANK: Record<WorkspaceFileItem["operation"], number> = {
   read: 1,
   attachment: 2,
   write: 3,
+  modify: 3,
+  create: 3,
+  move: 3,
+  delete: 3,
 };
+
+/**
+ * Two changes to one file: the LATER one says what the file is now (edited
+ * then deleted → deleted), except that a file this session created stays
+ * "created" through its later edits — that is still what the session did to
+ * it. Any change outranks a read or an attachment.
+ */
+function mergedOperation(
+  existing: WorkspaceFileItem["operation"],
+  incoming: WorkspaceFileItem["operation"],
+): WorkspaceFileItem["operation"] {
+  if (CHANGE_OPERATIONS.has(existing) && CHANGE_OPERATIONS.has(incoming)) {
+    return existing === "create" && (incoming === "modify" || incoming === "write") ? existing : incoming;
+  }
+  return FILE_OPERATION_RANK[incoming] >= FILE_OPERATION_RANK[existing] ? incoming : existing;
+}
 
 function addOrMergeFile(items: WorkspaceFileItem[], item: WorkspaceFileItem, seen: Set<string>): void {
   const existingIndex = items.findIndex((existing) => existing.id === item.id);
@@ -419,17 +392,24 @@ function addOrMergeFile(items: WorkspaceFileItem[], item: WorkspaceFileItem, see
     return;
   }
   const existing = items[existingIndex];
-  const stronger = FILE_OPERATION_RANK[item.operation] >= FILE_OPERATION_RANK[existing.operation]
-    ? item
-    : existing;
-  items[existingIndex] = {
+  const operation = mergedOperation(existing.operation, item.operation);
+  const stronger = operation === item.operation ? item : existing;
+  const merged: WorkspaceFileItem = {
     ...existing,
     ...item,
     sourceLabel: stronger.sourceLabel,
-    operation: stronger.operation,
+    operation,
     previewTargetId: item.previewTargetId ?? existing.previewTargetId,
     canOpenExternal: existing.canOpenExternal || item.canOpenExternal,
   };
+  // A change is what the list is ordered by: a file changed again moves to
+  // the end, so "most recent first" reads the list backwards and is right.
+  if (CHANGE_OPERATIONS.has(item.operation)) {
+    items.splice(existingIndex, 1);
+    items.push(merged);
+  } else {
+    items[existingIndex] = merged;
+  }
 }
 
 export function collectChatPreviewModel({
@@ -447,7 +427,7 @@ export function collectChatPreviewModel({
   // search that returns a link and the fetch that follows it are the same
   // document. Decided up front — the winning call is the only one that emits
   // it below, and pages past the shared cap are absent from the map entirely.
-  const urlAttributions = resolveUrlAttributions(entries);
+  const urlAttributions = new Map(resolveTranscriptUrls(entries).map((page) => [page.url, page]));
   let order = 0;
 
   for (const attachment of attachments) {
@@ -580,14 +560,20 @@ export function collectChatPreviewModel({
           label: basename(diff.path),
           detail: compactDetail(diff.path),
           sourceLabel: displayName,
-          operation: "write",
+          operation,
           previewTargetId: targetId,
           canOpenExternal: false,
           status: tool.status,
         }, fileIds);
       }
 
-      for (const path of collectPathStrings(tool.input)) {
+      // A file change names its paths through the shared classifier so the file
+      // tab and the activity lists agree on which paths changed and how (a move
+      // lists both ends; a patch body says create / update / delete per file).
+      const pathOperations: Array<[string, WorkspaceFileItem["operation"]]> = CHANGE_OPERATIONS.has(operation)
+        ? collectFileChanges(tool).map((change) => [change.path, change.operation])
+        : collectPathStrings(tool.input).map((path) => [path, operation]);
+      for (const [path, pathOperation] of pathOperations) {
         // Link the file-tree entry to the preview target it opens: a diff target
         // when this tool edited the path, else the plain `file:` target created
         // just below. Without this link a written/read file lists in the session
@@ -600,7 +586,7 @@ export function collectChatPreviewModel({
           label: basename(path),
           detail: compactDetail(path),
           sourceLabel: displayName,
-          operation,
+          operation: pathOperation,
           previewTargetId,
           canOpenExternal: false,
           status: tool.status,
@@ -625,7 +611,7 @@ export function collectChatPreviewModel({
       // A web tool's RESULT is where most fetched pages actually live — a
       // `web_search` names its hits nowhere else — so the result is read on the
       // same footing as the arguments. Restricted to web tools for the same
-      // reason the action panel restricts it: a URL quoted inside a source file
+      // reason the activity list restricts it: a URL quoted inside a source file
       // a read tool returned is text, not a page this turn fetched. Accepted
       // consequence: a non-web tool carrying a url-shaped argument no longer
       // contributes a target. Nothing opened those addresses, and a row that

@@ -1,6 +1,7 @@
 import { createElement, useEffect, useMemo, useState } from "react";
 import type { WorkspaceTabKind } from "../preview/workspace-tabs.js";
 import {
+  Activity,
   Bot,
   Check,
   Code2,
@@ -78,6 +79,8 @@ export function tabIcon(kind: WorkspaceTabKind): LucideIcon {
       return Table;
     case "subagent":
       return Bot;
+    case "activity":
+      return Activity;
     case "side-chat":
       return MessageSquare;
   }

@@ -95,10 +95,17 @@ underneath — and, floating, it covers the header row too, its own strip taking
 over. The mode comes from the container hook's hysteresis verdict so a gutter
 dragged across the threshold does not flip it.
 
-When the card has no tab open, its launcher shows the conversation's tool
-activity — the six counters and the items by category, the same body the
-header's tool-activity popover shows — so an empty panel still reports on the
-conversation, and its items open the very tabs the picker offers.
+The conversation's tool activity lives in the card, not in the header. When
+the card has no tab open, its launcher shows the compact report — the six
+counters and the newest few items by category — so an empty panel still
+reports on the conversation, and its items open the very tabs the picker
+offers. The full lists are spread over the tabs each one belongs to: the
+files the session created, modified, deleted or moved are the file tab's
+changed-files segment, each row wearing its change; the sites it visited are
+the browser tab's list over its viewer; the sub-agents it opened are the
+sub-agent tab; and every plugin and tool it called is the activity tab, which
+the compact report links to. Each list reads latest first and scrolls inside
+the card rather than stopping at a fixed count.
 
 Which way a tile is halved is the user's call: the header's split control
 drops two buttons — beside the chat, under it — rather than guessing from the

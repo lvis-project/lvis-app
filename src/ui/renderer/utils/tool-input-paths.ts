@@ -3,9 +3,9 @@
  *
  * Two renderer derivations read a `ToolEntryItem`'s input and emit path
  * strings — the chat preview target list (`preview/preview-targets.ts`) and the
- * action panel's file-change/read rows (`utils/action-panel-activity.ts`).
+ * tool activity's file-change/read rows (`utils/tool-activity.ts`).
  * They are NOT independent summaries: `ChatView.routeActivity` resolves an
- * action-panel row back against the preview model by exact string equality
+ * tool-activity row back against the preview model by exact string equality
  * (`previewModel.targets.find(c => "path" in c && c.path === target)`), so any
  * string one side emits and the other does not is by construction a lookup miss
  * that falls to the file-browser dead-end branch.
@@ -30,12 +30,43 @@ export const TOOL_PATH_KEYS: ReadonlySet<string> = new Set([
   "targets",
 ]);
 
-/** Tool names whose invocation is a file WRITE regardless of declared category. */
-export const FILE_WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "edit_file",
-  "apply_patch",
-  "write_file",
+/**
+ * What a file-changing call did to the file. `create` / `delete` / `move` are
+ * claimed only where the tool contract makes them certain; `modify` where the
+ * tool refuses a path that is not an existing regular file; `write` where the
+ * call may have created or overwritten and nothing in its arguments or result
+ * says which (the builtin `write_file` reports bytes, not prior existence).
+ */
+export type FileChangeOperation = "create" | "modify" | "delete" | "move" | "write";
+
+/**
+ * Tool names whose invocation is a file change regardless of declared
+ * category, and the change each one is contractually known to make.
+ */
+const FILE_CHANGE_TOOL_OPERATIONS: ReadonlyMap<string, FileChangeOperation> = new Map([
+  // Both refuse anything but an existing regular file — an edit is a modify.
+  ["edit_file", "modify"],
+  ["apply_patch", "modify"],
+  // "Create or overwrite": prior existence is not in the call's output.
+  ["write_file", "write"],
+  ["move_file", "move"],
+  ["delete_file", "delete"],
 ]);
+
+/** Tool names whose invocation is a file WRITE regardless of declared category. */
+export const FILE_WRITE_TOOL_NAMES: ReadonlySet<string> = new Set(FILE_CHANGE_TOOL_OPERATIONS.keys());
+
+/**
+ * The change a file-changing call made, from its name alone. A tool declared
+ * `category: "write"` under a name this module does not know is a `write`:
+ * the category says the file changed and nothing says how. `null` means the
+ * call is not a file change at all.
+ */
+export function classifyFileChange(tool: { name: string; category?: string }): FileChangeOperation | null {
+  const known = FILE_CHANGE_TOOL_OPERATIONS.get(tool.name);
+  if (known) return known;
+  return tool.category === "write" ? "write" : null;
+}
 
 /** Tool-name shape that reads/searches files. */
 export const READ_TOOL_PATTERN = /(^|[._:-])(read|open|cat|grep|rg|search|find|list|glob)([._:-]|$)/i;
@@ -63,12 +94,27 @@ export function isGlobPattern(value: string): boolean {
  * this the files an `apply_patch` actually wrote are invisible.
  */
 export function extractPatchPaths(patch: string): string[] {
-  const paths: string[] = [];
-  const pattern = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
+  return extractPatchFileChanges(patch).map((change) => change.path);
+}
+
+const PATCH_HEADER_OPERATIONS: Readonly<Record<string, FileChangeOperation>> = {
+  Add: "create",
+  Update: "modify",
+  Delete: "delete",
+};
+
+/**
+ * The same headers with what each one did: a patch body is the one place a
+ * file change states create / update / delete in so many words.
+ */
+export function extractPatchFileChanges(patch: string): Array<{ path: string; operation: FileChangeOperation }> {
+  const changes: Array<{ path: string; operation: FileChangeOperation }> = [];
+  const pattern = /^\*\*\* (Add|Update|Delete) File: (.+)$/gm;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(patch)) !== null) {
-    const value = match[1]?.trim();
-    if (value) paths.push(value);
+    const path = match[2]?.trim();
+    const operation = PATCH_HEADER_OPERATIONS[match[1] ?? ""];
+    if (path && operation) changes.push({ path, operation });
   }
-  return paths;
+  return changes;
 }

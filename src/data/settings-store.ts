@@ -647,14 +647,14 @@ export interface SystemSettings {
   /**
    * Persisted TOP-pane percent of the workspace-rail vertical (list↕viewer)
    * split, one field per tab kind whose body is a list-over-viewer layout
-   * (file-browser / preview / subagent). Clamped to the
+   * (file-browser / preview / subagent / browser). Clamped to the
    * [SIDE_PANEL_SPLIT_MIN_PERCENT, SIDE_PANEL_SPLIT_MAX_PERCENT] pane range at
-   * drag time in the renderer. Browser is excluded — its list moved into a
-   * floating search Popover, so it has no vertical splitter. Default 45.
+   * drag time in the renderer. Default 45.
    */
   sidePanelSplitFilePercent?: number;
   sidePanelSplitPreviewPercent?: number;
   sidePanelSplitSubagentPercent?: number;
+  sidePanelSplitBrowserPercent?: number;
   /**
    * Persisted active sidebar tab ("chats" = the plain ungrouped conversation
    * list, "projects" = named-project groups). Durable UI preference, same

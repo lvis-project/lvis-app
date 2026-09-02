@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ChatEntry, ToolEntryItem } from "../../../lib/chat-stream-state.js";
 import {
-  computeActionPanelActivity,
+  computeToolActivity,
   isFileChangeTool,
   isReadTool,
   isTerminalTool,
@@ -11,11 +11,13 @@ import {
   looksLikeFilePath,
   collectUrls,
   collectPathStrings,
+  collectFileChanges,
+  resolveTranscriptUrls,
   formatToolSource,
   formatUrlOrigin,
-} from "../utils/action-panel-activity.js";
+} from "../utils/tool-activity.js";
 // Moved to the shared authority both file-target derivations now read from.
-import { extractPatchPaths } from "../utils/tool-input-paths.js";
+import { classifyFileChange, extractPatchFileChanges, extractPatchPaths } from "../utils/tool-input-paths.js";
 
 function tool(partial: Partial<ToolEntryItem> & { name: string }): ToolEntryItem {
   return {
@@ -30,7 +32,7 @@ function toolGroup(tools: ToolEntryItem[]): ChatEntry {
   return { kind: "tool_group", groupId: "g1", groupIds: ["g1"], status: "done", tools };
 }
 
-describe("action-panel-activity — tool classifiers", () => {
+describe("tool-activity — tool classifiers", () => {
   it("isFileChangeTool matches known names and write category", () => {
     expect(isFileChangeTool(tool({ name: "write_file" }))).toBe(true);
     expect(isFileChangeTool(tool({ name: "apply_patch" }))).toBe(true);
@@ -66,7 +68,60 @@ describe("action-panel-activity — tool classifiers", () => {
   });
 });
 
-describe("action-panel-activity — string predicates + collectors", () => {
+describe("tool-activity — file change classifier", () => {
+  it("names the change from the tool contract: edits modify, delete deletes, move moves, write stays write", () => {
+    expect(classifyFileChange({ name: "edit_file" })).toBe("modify");
+    expect(classifyFileChange({ name: "apply_patch" })).toBe("modify");
+    expect(classifyFileChange({ name: "delete_file" })).toBe("delete");
+    expect(classifyFileChange({ name: "move_file" })).toBe("move");
+    // "Create or overwrite" — prior existence is not in the output, so no create claim.
+    expect(classifyFileChange({ name: "write_file" })).toBe("write");
+    expect(classifyFileChange({ name: "custom", category: "write" })).toBe("write");
+    expect(classifyFileChange({ name: "read_file", category: "read" })).toBeNull();
+  });
+
+  it("reads create / modify / delete per file from a patch body's headers", () => {
+    const patch = "*** Add File: src/new.ts\n+x\n*** Update File: src/old.ts\n*** Delete File: src/gone.ts\n";
+    expect(extractPatchFileChanges(patch)).toEqual([
+      { path: "src/new.ts", operation: "create" },
+      { path: "src/old.ts", operation: "modify" },
+      { path: "src/gone.ts", operation: "delete" },
+    ]);
+    expect(collectFileChanges(tool({ name: "apply_patch", input: { patch } }))).toEqual([
+      { path: "src/new.ts", operation: "create" },
+      { path: "src/old.ts", operation: "modify" },
+      { path: "src/gone.ts", operation: "delete" },
+    ]);
+  });
+
+  it("lists both ends of a move, each pointing at the other", () => {
+    expect(collectFileChanges(tool({ name: "move_file", input: { sourcePath: "/ws/a.md", destinationPath: "/ws/b.md" } }))).toEqual([
+      { path: "/ws/a.md", operation: "move", counterpart: "/ws/b.md" },
+      { path: "/ws/b.md", operation: "move", counterpart: "/ws/a.md" },
+    ]);
+    expect(collectFileChanges(tool({ name: "delete_file", input: { path: "/ws/a.md" } }))).toEqual([
+      { path: "/ws/a.md", operation: "delete" },
+    ]);
+    expect(collectFileChanges(tool({ name: "read_file", input: { path: "/ws/a.md" } }))).toEqual([]);
+  });
+
+  it("stamps the change on each changed-file row, newest first", () => {
+    const activity = computeToolActivity([toolGroup([
+      tool({ name: "write_file", toolUseId: "w1", input: { path: "/ws/a.md" } }),
+      tool({ name: "delete_file", toolUseId: "d1", input: { path: "/ws/b.md" } }),
+    ])]);
+    expect(activity.changedFiles.map((row) => [row.label, row.operation])).toEqual([
+      ["/ws/b.md", "delete"],
+      ["/ws/a.md", "write"],
+    ]);
+    expect(activity.toolCalls.map((call) => [call.name, call.argument])).toEqual([
+      ["delete_file", "/ws/b.md"],
+      ["write_file", "/ws/a.md"],
+    ]);
+  });
+});
+
+describe("tool-activity — string predicates + collectors", () => {
   it("looksLikeUrl", () => {
     expect(looksLikeUrl("https://example.com")).toBe(true);
     expect(looksLikeUrl("  http://a.b  ")).toBe(true);
@@ -114,12 +169,12 @@ describe("action-panel-activity — string predicates + collectors", () => {
   });
 });
 
-describe("computeActionPanelActivity", () => {
+describe("computeToolActivity", () => {
   it("returns an empty summary for no tool groups", () => {
-    const activity = computeActionPanelActivity([{ kind: "user", text: "hi" }] as ChatEntry[]);
+    const activity = computeToolActivity([{ kind: "user", text: "hi" }] as ChatEntry[]);
     expect(activity.toolCallCount).toBe(0);
     expect(activity.readFiles).toEqual([]);
-    expect(activity.writtenFiles).toEqual([]);
+    expect(activity.changedFiles).toEqual([]);
   });
 
   it("aggregates counts and dedupes across tool groups", () => {
@@ -132,21 +187,21 @@ describe("computeActionPanelActivity", () => {
         tool({ name: "web_fetch", toolUseId: "u1", input: { url: "https://x.com/page" } }),
       ]),
     ];
-    const activity = computeActionPanelActivity(entries);
+    const activity = computeToolActivity(entries);
     expect(activity.toolCallCount).toBe(5);
-    expect(activity.writtenFileCount).toBe(1);
+    expect(activity.changedFileCount).toBe(1);
     expect(activity.readFileCount).toBe(1);
     expect(activity.pluginCallCount).toBe(1);
     expect(activity.mcpCallCount).toBe(1);
     expect(activity.fetchedPageCount).toBe(1);
-    expect(activity.writtenFiles[0]?.label).toBe("/a.ts");
+    expect(activity.changedFiles[0]?.label).toBe("/a.ts");
     expect(activity.readFiles[0]?.label).toBe("/b.ts");
     expect(activity.fetchedPages[0]?.label).toBe("https://x.com");
     expect(activity.fetchedPages[0]?.target).toBe("https://x.com/page");
-    // Read/written rows carry their path as `target` so ActionPanel can route
+    // Read/written rows carry their path as `target` so the activity rows can route
     // them to an in-app preview (§6.10.5). No opener is triggered — the target
     // is only a routing key.
-    expect(activity.writtenFiles[0]?.target).toBe("/a.ts");
+    expect(activity.changedFiles[0]?.target).toBe("/a.ts");
     expect(activity.readFiles[0]?.target).toBe("/b.ts");
   });
 
@@ -169,9 +224,15 @@ describe("computeActionPanelActivity", () => {
         }),
       ]),
     ];
-    const activity = computeActionPanelActivity(entries);
+    const activity = computeToolActivity(entries);
     // Three URL mentions, two distinct pages.
     expect(activity.fetchedPageCount).toBe(2);
+    // The fetched page is credited to the fetch that asked for it, not the
+    // search that listed it, and leads as the most recent call's page.
+    expect(resolveTranscriptUrls(entries).map((page) => [page.url, page.toolUseId, page.origin])).toEqual([
+      ["https://a.example/one", "u2", "argument"],
+      ["https://b.example/two", "s1", "result"],
+    ]);
     expect(activity.fetchedPages.map((page) => page.detail).sort()).toEqual([
       "https://a.example/one",
       "https://b.example/two",

@@ -7,7 +7,7 @@
  * checks (those are the CodeQL "incomplete URL substring sanitization" sink).
  * This is the only place the renderer decides whether a URL is safe to navigate
  * to. Every renderer boundary calls THIS validator (defense-in-depth, one SOT):
- *   - the ActionPanel routing callback (routeActivityItem / routeActivityItemPinned),
+ *   - the tool-activity routing callback (routeActivityItem / routeActivityItemPinned),
  *   - the workspace-tab store (openInEphemeral / openPinned reject invalid urls),
  *   - the in-app browser viewer (UrlDocumentViewer, incl. its credential check).
  *

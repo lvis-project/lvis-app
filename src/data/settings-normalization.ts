@@ -1082,6 +1082,7 @@ export const SIDE_PANEL_SPLIT_KEYS = [
   "sidePanelSplitFilePercent",
   "sidePanelSplitPreviewPercent",
   "sidePanelSplitSubagentPercent",
+  "sidePanelSplitBrowserPercent",
 ] as const satisfies readonly (keyof SystemSettings)[];
 
 export function normalizeSystem(input: unknown): SystemSettings {

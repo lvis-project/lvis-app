@@ -4,6 +4,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget } from "../preview/preview-targets.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
+import { useNativeContextMenu, type NativeContextMenuHandlers } from "../hooks/use-native-context-menu.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import {
   DetailHeader,
@@ -43,13 +44,17 @@ export function TargetRows({
   selectedId,
   rowTestId,
   onSelect,
+  onOpenUrlInSystemApp,
 }: {
   targets: ChatPreviewTarget[];
   selectedId?: string;
   rowTestId: string;
   onSelect: (id: string) => void;
+  /** Right-click on a web row: open the page in the system browser, or copy its address. */
+  onOpenUrlInSystemApp?: (url: string) => void;
 }) {
   const { t } = useTranslation();
+  const openNativeContextMenu = useNativeContextMenu();
   // Where a web address came from, said on the row that offers to open it. A
   // `result` address is third-party text — some page named it — and following
   // it is not the same act as opening a page the turn asked for by name. An
@@ -69,6 +74,12 @@ export function TargetRows({
             selectedId === target.id ? "bg-accent text-accent-foreground" : ""
           }`}
           onClick={() => onSelect(target.id)}
+          onContextMenu={target.kind === "url" && onOpenUrlInSystemApp
+            ? (event) => openNativeContextMenu(event, "action-item", {
+                "action.open-system": () => onOpenUrlInSystemApp(target.url),
+                "action.copy-url": () => void navigator.clipboard?.writeText(target.url),
+              } as NativeContextMenuHandlers)
+            : undefined}
         >
           <span className="shrink-0 text-muted-foreground">{targetIcon(target.kind)}</span>
           <span className="min-w-0 flex-1">
