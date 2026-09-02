@@ -511,6 +511,7 @@ describe("preload contextBridge world shape lock", () => {
           "subscriptionVerifyRuntime": "function",
           "tailnetObserver": [
             "apply",
+            "configureServe",
             "snapshot",
           ],
           "tailnetSharing": [

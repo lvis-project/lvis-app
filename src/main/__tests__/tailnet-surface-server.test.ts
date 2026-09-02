@@ -2,15 +2,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
 import type { TailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runtime.js";
 import {
+  configureTailscaleServe,
   DEFAULT_TAILNET_OBSERVER_PORT,
+  getTailnetObserverRuntimeState,
   getTailnetPairedSharingRuntime,
   loadTailnetObserverConfig,
   maybeStartTailnetObserverServer,
   parseTailnetObserverConfigFile,
+  probeTailscaleEnvironment,
   resetTailnetObserverServerForTests,
   resolveTailnetObserverConfig,
+  restartTailnetObserverServer,
   stopTailnetObserverServer,
+  tailnetWebOriginFor,
+  tailscaleServeCommandText,
   type TailnetObserverConfigFile,
+  type TailscaleCommandResult,
+  type TailscaleCommandRunner,
 } from "../tailnet-surface-server.js";
 
 const CAPABILITY = "lvis.example.com/cap/conversation-observer";
@@ -420,5 +428,229 @@ describe("Tailnet observer configuration surface", () => {
     expect(f.startServer).toHaveBeenCalledWith(
       expect.objectContaining({ host: "127.0.0.1", expectedAppCapability: CAPABILITY }),
     );
+  });
+});
+
+/** A `tailscale status --json` payload for a node that is up and signed in. */
+function readyStatus(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    BackendState: "Running",
+    Self: { UserID: 7, DNSName: "desk.example-tailnet.ts.net." },
+    User: { "7": { LoginName: "owner@example.com" } },
+    CurrentTailnet: { Name: "example-tailnet.ts.net" },
+    ...overrides,
+  });
+}
+
+function runner(
+  answers: Record<string, TailscaleCommandResult>,
+): TailscaleCommandRunner {
+  return async (_cliPath, args) =>
+    answers[args.join(" ")] ?? { kind: "ran", code: 1, stdout: "", stderr: "no such command" };
+}
+
+describe("Tailscale environment probe", () => {
+  it("reads the tailnet, the node name, and the login instead of asking for them", async () => {
+    const environment = await probeTailscaleEnvironment({
+      platform: "linux",
+      runCommand: runner({
+        "status --json": { kind: "ran", code: 0, stdout: readyStatus(), stderr: "" },
+        "serve status --json": {
+          kind: "ran",
+          code: 0,
+          stdout: JSON.stringify({
+            Web: { "desk.example-tailnet.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:46173" } } } },
+          }),
+          stderr: "",
+        },
+      }),
+    });
+
+    expect(environment.state).toBe("ready");
+    expect(environment.login).toBe("owner@example.com");
+    expect(environment.dnsName).toBe("desk.example-tailnet.ts.net");
+    expect(environment.tailnetName).toBe("example-tailnet.ts.net");
+    expect(environment.serveConfigured).toBe(true);
+    expect(environment.serveTargetPort).toBe(46_173);
+  });
+
+  it("names a logged-out node instead of reporting an empty tailnet", async () => {
+    const environment = await probeTailscaleEnvironment({
+      platform: "linux",
+      runCommand: runner({
+        "status --json": {
+          kind: "ran",
+          code: 0,
+          stdout: JSON.stringify({ BackendState: "NeedsLogin" }),
+          stderr: "",
+        },
+      }),
+    });
+
+    expect(environment.state).toBe("logged-out");
+    expect(environment.login).toBeNull();
+    expect(environment.dnsName).toBeNull();
+  });
+
+  it("names a stopped backend separately from a signed-out one", async () => {
+    const environment = await probeTailscaleEnvironment({
+      platform: "linux",
+      runCommand: runner({
+        "status --json": {
+          kind: "ran",
+          code: 0,
+          stdout: JSON.stringify({ BackendState: "Stopped" }),
+          stderr: "",
+        },
+      }),
+    });
+
+    expect(environment.state).toBe("stopped");
+    expect(environment.detail).toBe("Stopped");
+  });
+
+  it("reports a node with no MagicDNS name as ready without inventing one", async () => {
+    const environment = await probeTailscaleEnvironment({
+      platform: "linux",
+      runCommand: runner({
+        "status --json": {
+          kind: "ran",
+          code: 0,
+          stdout: readyStatus({ Self: { UserID: 7, DNSName: "" }, CurrentTailnet: null }),
+          stderr: "",
+        },
+        "serve status --json": { kind: "ran", code: 0, stdout: "{}", stderr: "" },
+      }),
+    });
+
+    expect(environment.state).toBe("ready");
+    expect(environment.dnsName).toBeNull();
+    expect(environment.tailnetName).toBeNull();
+    expect(tailnetWebOriginFor(environment.dnsName)).toBeNull();
+  });
+
+  it("reports an absent Tailscale as its own state, not as a stopped node", async () => {
+    const environment = await probeTailscaleEnvironment({
+      platform: "linux",
+      runCommand: async () => ({ kind: "not-found" as const }),
+    });
+
+    expect(environment.state).toBe("cli-not-found");
+    expect(environment.cliPath).toBeNull();
+  });
+
+  it("carries what the CLI printed when it could not answer", async () => {
+    const environment = await probeTailscaleEnvironment({
+      platform: "linux",
+      runCommand: runner({
+        "status --json": {
+          kind: "ran",
+          code: 1,
+          stdout: "",
+          stderr: "failed to connect to local backend",
+        },
+      }),
+    });
+
+    expect(environment.state).toBe("cli-failed");
+    expect(environment.detail).toBe("failed to connect to local backend");
+  });
+
+  it("derives the web origin from the MagicDNS name", () => {
+    expect(tailnetWebOriginFor("desk.example-tailnet.ts.net"))
+      .toBe("https://desk.example-tailnet.ts.net");
+    expect(tailnetWebOriginFor("desk.example.internal")).toBeNull();
+  });
+});
+
+describe("Tailscale Serve configuration", () => {
+  it("shows the command it will run, built from the argv it runs", () => {
+    expect(tailscaleServeCommandText("tailscale", 46_173))
+      .toBe("tailscale serve --bg --https=443 http://127.0.0.1:46173");
+  });
+
+  it("runs the command for the owner and reports success", async () => {
+    const runCommand = vi.fn(async () => ({ kind: "ran" as const, code: 0, stdout: "", stderr: "" }));
+
+    await expect(configureTailscaleServe({ cliPath: "tailscale", port: 46_173, runCommand }))
+      .resolves.toEqual({ ok: true });
+    expect(runCommand).toHaveBeenCalledWith(
+      "tailscale",
+      ["serve", "--bg", "--https=443", "http://127.0.0.1:46173"],
+    );
+  });
+
+  it("hands back what Tailscale printed when the command fails", async () => {
+    const outcome = await configureTailscaleServe({
+      cliPath: "tailscale",
+      port: 46_173,
+      runCommand: async () => ({
+        kind: "ran" as const,
+        code: 1,
+        stdout: "",
+        stderr: "HTTPS is not enabled on this tailnet",
+      }),
+    });
+
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "command-failed",
+      output: "HTTPS is not enabled on this tailnet",
+    });
+  });
+});
+
+describe("Tailnet observer restart", () => {
+  it("brings the listener up on a newly saved configuration without a relaunch", async () => {
+    const f = options({});
+    let saved: TailnetObserverConfigFile | null = null;
+
+    await expect(maybeStartTailnetObserverServer({
+      ...f.input,
+      dependencies: { startServer: f.startServer as never, readConfigFile: async () => saved },
+    })).resolves.toBeNull();
+    expect(f.startServer).not.toHaveBeenCalled();
+
+    saved = { enabled: true, expectedAppCapability: CAPABILITY, port: 46_500 };
+    const started = await restartTailnetObserverServer();
+
+    expect(started?.port).toBe(46_500);
+    expect(getTailnetObserverRuntimeState().listeningPort).toBe(46_500);
+  });
+
+  it("closes the running listener when the saved configuration turns it off", async () => {
+    const f = options({});
+    let saved: TailnetObserverConfigFile | null = {
+      enabled: true,
+      expectedAppCapability: CAPABILITY,
+    };
+
+    await maybeStartTailnetObserverServer({
+      ...f.input,
+      dependencies: { startServer: f.startServer as never, readConfigFile: async () => saved },
+    });
+    expect(getTailnetObserverRuntimeState().listeningPort).toBe(DEFAULT_TAILNET_OBSERVER_PORT);
+
+    saved = null;
+    await expect(restartTailnetObserverServer()).resolves.toBeNull();
+    expect(getTailnetObserverRuntimeState().listeningPort).toBeNull();
+  });
+
+  it("records why a restart failed instead of leaving a half-applied listener", async () => {
+    const f = options({});
+    let saved: TailnetObserverConfigFile | null = null;
+
+    await maybeStartTailnetObserverServer({
+      ...f.input,
+      dependencies: { startServer: f.startServer as never, readConfigFile: async () => saved },
+    });
+
+    saved = { enabled: true };
+    await expect(restartTailnetObserverServer()).rejects.toThrow(
+      "tailnet-observer-capability-missing-or-invalid",
+    );
+    expect(getTailnetObserverRuntimeState().lastStartError)
+      .toBe("tailnet-observer-capability-missing-or-invalid");
+    expect(getTailnetObserverRuntimeState().listeningPort).toBeNull();
   });
 });

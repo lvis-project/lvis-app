@@ -10,10 +10,12 @@ import { CHANNELS } from "../contract/app-contract.js";
 import {
   parseTailnetObserverMutationResult,
   parseTailnetObserverSnapshotResult,
+  parseTailnetServeResult,
   type TailnetObserverConfigApi,
   type TailnetObserverConfigView,
   type TailnetObserverMutationResult,
   type TailnetObserverSnapshotResult,
+  type TailnetServeResult,
 } from "../shared/tailnet-observer-config.js";
 import { ipcUserKeyboardIntent } from "./gesture-intent.js";
 
@@ -23,6 +25,10 @@ function unavailableSnapshot(): TailnetObserverSnapshotResult {
 
 function unavailableMutation(): TailnetObserverMutationResult {
   return Object.freeze({ ok: false, error: "tailnet-observer-unavailable" });
+}
+
+function unavailableServe(): TailnetServeResult {
+  return Object.freeze({ ok: false, error: "tailnet-observer-unavailable", output: null });
 }
 
 /** Build the private `window.lvisApi.tailnetObserver` namespace. */
@@ -48,6 +54,18 @@ export function buildTailnetObserverApiSurface(): TailnetObserverConfigApi {
         ) ?? unavailableMutation();
       } catch {
         return unavailableMutation();
+      }
+    },
+
+    async configureServe(): Promise<TailnetServeResult> {
+      try {
+        return parseTailnetServeResult(
+          await ipcRenderer.invoke(CHANNELS.tailnetObserver.configureServe, {
+            intent: ipcUserKeyboardIntent(),
+          }),
+        ) ?? unavailableServe();
+      } catch {
+        return unavailableServe();
       }
     },
   });

@@ -80,4 +80,22 @@ export function registerTailnetObserverHandlers(deps: IpcDeps): void {
       return rejection(err);
     }
   });
+
+  // The port and the binary come from the host's own runtime state and probe,
+  // never from the payload: this route runs a command, and a caller-supplied
+  // target is the difference between "put my listener behind Serve" and
+  // "publish whatever port I name".
+  ipcMain.handle(CHANNELS.tailnetObserver.configureServe, async (event, payload: unknown) => {
+    if (!validateHostRendererSender(event)) {
+      auditUnauthorized(deps.auditLogger, CHANNELS.tailnetObserver.configureServe, event);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!service) return DISABLED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
+    try {
+      return await service.configureServe();
+    } catch (err) {
+      return { ...rejection(err), output: null };
+    }
+  });
 }

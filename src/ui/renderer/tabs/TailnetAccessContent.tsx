@@ -40,11 +40,29 @@ function durationLabel(
   return value;
 }
 
+/**
+ * Every failure code gets its own sentence.
+ *
+ * Three sentences used to cover the whole vocabulary, so "no conversation is
+ * focused" and "the store could not be written" read identically and neither
+ * told anyone what to do next.
+ */
 function errorText(error: TailnetSharingErrorCode, t: (key: string) => string): string {
-  if (error === "user-keyboard-required") return t("tailnetAccessTab.userGestureRequired");
-  if (error === "tailnet-sharing-disabled" || error === "tailnet-sharing-unavailable") {
-    return t("tailnetAccessTab.disabled");
+  switch (error) {
+    case "user-keyboard-required":
+      return t("tailnetAccessTab.userGestureRequired");
+    case "tailnet-sharing-disabled":
+    case "tailnet-sharing-unavailable":
+      return t("tailnetAccessTab.disabled");
+    case "unauthorized":
+    case "unauthorized-frame":
+      return t("tailnetAccessTab.errorUnauthorized");
+    case "tailnet-sharing-input-invalid":
+      return t("tailnetAccessTab.errorInputInvalid");
+    case "tailnet-sharing-operation-rejected":
+      return t("tailnetAccessTab.errorOperationRejected");
   }
+
   return t("tailnetAccessTab.operationFailed");
 }
 
