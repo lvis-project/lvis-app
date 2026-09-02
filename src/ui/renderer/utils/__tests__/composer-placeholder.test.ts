@@ -3,20 +3,17 @@ import { computeComposerPlaceholder } from "../composer-placeholder.js";
 import type { SuggestedRepliesSnapshot } from "../../hooks/use-suggested-replies.js";
 
 const EMPTY: SuggestedRepliesSnapshot = {
-  best: null,
-  alternates: [],
+  text: null,
   isDismissed: false,
 };
 
 const ACTIVE: SuggestedRepliesSnapshot = {
-  best: "캘린더 직접 열게",
-  alternates: ["나중에 할게"],
+  text: "캘린더 직접 열게",
   isDismissed: false,
 };
 
 const DISMISSED: SuggestedRepliesSnapshot = {
-  best: "캘린더 직접 열게",
-  alternates: ["나중에 할게"],
+  text: "캘린더 직접 열게",
   isDismissed: true,
 };
 
@@ -41,7 +38,7 @@ describe("computeComposerPlaceholder", () => {
     ).toBe("메시지 큐에 추가됩니다 (즉시 인터럽트는 ⌘⏎)");
   });
 
-  it("suggested-replies 가 활성 (best != null, !dismissed) 이면 placeholder 가 빈 문자열", () => {
+  it("suggested-replies 가 활성 (text != null, !dismissed) 이면 placeholder 가 빈 문자열", () => {
     expect(
       computeComposerPlaceholder({
         hasApiKey: true,

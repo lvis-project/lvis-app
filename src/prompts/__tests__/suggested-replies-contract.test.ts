@@ -44,10 +44,12 @@ describe("system prompt — suggested replies contract", () => {
     expect(prompt).toMatch(/생략한다/);
   });
 
-  it("keeps the #980 count and command-prefix policy explicit", () => {
+  it("asks for exactly one candidate and keeps the #980 command-prefix policy explicit", () => {
+    // The composer renders a single ghost suggestion; asking for more would
+    // spend output tokens on candidates the parser discards.
     const prompt = buildMinimalPrompt();
-    expect(prompt).toContain("기본 3개");
-    expect(prompt).toContain("최대 5개");
+    expect(prompt).toContain("정확히 1개");
+    expect(prompt).not.toContain("최대 5개");
     expect(prompt).toContain("완결 답변");
     expect(prompt).toContain("/clear 포함");
     expect(prompt).toContain("단일 토큰 command 도 금지");
@@ -55,6 +57,6 @@ describe("system prompt — suggested replies contract", () => {
       prompt.indexOf(SUGGESTED_REPLIES_OPEN),
       prompt.indexOf(SUGGESTED_REPLIES_CLOSE),
     );
-    expect(example.match(/^- \{text\}$/gm)).toHaveLength(3);
+    expect(example.match(/^- \{text\}$/gm)).toHaveLength(1);
   });
 });

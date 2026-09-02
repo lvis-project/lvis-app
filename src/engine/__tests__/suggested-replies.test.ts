@@ -5,52 +5,52 @@
 import { describe, it, expect } from "vitest";
 import {
   createStreamingFilter,
-  parseSuggestedReplies,
+  parseSuggestedReply,
   stripSuggestedReplies,
 } from "../suggested-replies.js";
 
-describe("parseSuggestedReplies", () => {
-  it("returns [] when no block is present", () => {
-    expect(parseSuggestedReplies("plain text response")).toEqual([]);
+describe("parseSuggestedReply", () => {
+  it("returns null when no block is present", () => {
+    expect(parseSuggestedReply("plain text response")).toBeNull();
   });
 
-  it("extracts a 3-item block", () => {
+  it("extracts the single candidate", () => {
     const raw = [
       "응답 본문.",
       "",
       "<suggested_replies>",
       "- 다음 단계로 진행",
-      "- 다른 옵션 보기",
-      "- 취소",
       "</suggested_replies>",
     ].join("\n");
-    expect(parseSuggestedReplies(raw)).toEqual([
-      "다음 단계로 진행",
-      "다른 옵션 보기",
-      "취소",
-    ]);
+    expect(parseSuggestedReply(raw)).toBe("다음 단계로 진행");
   });
 
-  it("ignores blank lines inside the block", () => {
-    const raw = "<suggested_replies>\n- a\n\n- b\n</suggested_replies>";
-    expect(parseSuggestedReplies(raw)).toEqual(["a", "b"]);
-  });
-
-  it("caps results at 5 items (matches SUGGESTED_REPLIES_INSTRUCTION upper bound)", () => {
+  it("keeps only the first candidate when the model still lists alternatives", () => {
     const raw =
-      "<suggested_replies>\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n</suggested_replies>";
-    expect(parseSuggestedReplies(raw)).toEqual(["1", "2", "3", "4", "5"]);
+      "<suggested_replies>\n- 다음 단계로 진행\n- 다른 옵션 보기\n- 취소\n</suggested_replies>";
+    expect(parseSuggestedReply(raw)).toBe("다음 단계로 진행");
   });
 
-  it("drops candidates over 80 characters (parser safety cap above 40~60자 recommended length)", () => {
+  it("skips blank lines inside the block", () => {
+    const raw = "<suggested_replies>\n\n- a\n</suggested_replies>";
+    expect(parseSuggestedReply(raw)).toBe("a");
+  });
+
+  it("skips a candidate over 80 characters (parser safety cap above 40~60자 recommended length)", () => {
     const tooLong = "x".repeat(90);
-    const raw = `<suggested_replies>\n- short\n- ${tooLong}\n- ok\n</suggested_replies>`;
-    expect(parseSuggestedReplies(raw)).toEqual(["short", "ok"]);
+    const raw = `<suggested_replies>\n- ${tooLong}\n- ok\n</suggested_replies>`;
+    expect(parseSuggestedReply(raw)).toBe("ok");
+  });
+
+  it("returns null when every candidate is over 80 characters", () => {
+    const tooLong = "x".repeat(90);
+    expect(parseSuggestedReply(`<suggested_replies>\n- ${tooLong}\n</suggested_replies>`)).toBeNull();
   });
 
   it("tolerates bullet variants (•, *, dash, spaces)", () => {
-    const raw = "<suggested_replies>\n* a\n• b\n  -   c\n</suggested_replies>";
-    expect(parseSuggestedReplies(raw)).toEqual(["a", "b", "c"]);
+    expect(parseSuggestedReply("<suggested_replies>\n* a\n</suggested_replies>")).toBe("a");
+    expect(parseSuggestedReply("<suggested_replies>\n• b\n</suggested_replies>")).toBe("b");
+    expect(parseSuggestedReply("<suggested_replies>\n  -   c\n</suggested_replies>")).toBe("c");
   });
 });
 
@@ -107,17 +107,17 @@ describe("createStreamingFilter", () => {
   it("passes plain text through unchanged", () => {
     const f = createStreamingFilter();
     expect(feedAll(f, ["hello ", "world"])).toBe("hello world");
-    expect(f.finish()).toEqual({ trailing: "", suggestedReplies: [] });
+    expect(f.finish()).toEqual({ trailing: "", suggestedReply: null });
   });
 
-  it("withholds the tag and emits parsed list at finish()", () => {
+  it("withholds the tag and emits the parsed reply at finish()", () => {
     const f = createStreamingFilter();
     const visible = feedAll(f, [
       "본문",
-      "\n\n<suggested_replies>\n- 예\n- 아니오\n</suggested_replies>",
+      "\n\n<suggested_replies>\n- 예\n</suggested_replies>",
     ]);
     expect(visible).toBe("본문");
-    expect(f.finish()).toEqual({ trailing: "", suggestedReplies: ["예", "아니오"] });
+    expect(f.finish()).toEqual({ trailing: "", suggestedReply: "예" });
   });
 
   it("handles the open tag split across chunk boundaries", () => {
@@ -126,7 +126,7 @@ describe("createStreamingFilter", () => {
     // the visible stream while we wait for the rest.
     expect(f.feed("body text <sugg")).toBe("body text ");
     expect(f.feed("ested_replies>\n- ok\n</suggested_replies>")).toBe("");
-    expect(f.finish().suggestedReplies).toEqual(["ok"]);
+    expect(f.finish().suggestedReply).toBe("ok");
   });
 
   it("treats a partial-tag suffix that turns out to be plain text as visible", () => {
@@ -134,21 +134,21 @@ describe("createStreamingFilter", () => {
     // "<sugg" looks like a prefix, but the next chunk diverges — emit it.
     expect(f.feed("see <sugg")).toBe("see ");
     expect(f.feed("ar in coffee")).toBe("<suggar in coffee");
-    expect(f.finish()).toEqual({ trailing: "", suggestedReplies: [] });
+    expect(f.finish()).toEqual({ trailing: "", suggestedReply: null });
   });
 
   it("returns trailing pending on stream end without a block", () => {
     const f = createStreamingFilter();
     // Stream ends with a partial-tag suffix — still emitted as plain text.
     expect(f.feed("done <sug")).toBe("done ");
-    expect(f.finish()).toEqual({ trailing: "<sug", suggestedReplies: [] });
+    expect(f.finish()).toEqual({ trailing: "<sug", suggestedReply: null });
   });
 
   it("drops the partial block silently when the stream aborts mid-block", () => {
     const f = createStreamingFilter();
     expect(f.feed("hi\n<suggested_replies>\n- a")).toBe("hi");
-    // Stream aborts here — block never closed. Parser returns [] and trailing
-    // is empty so the renderer sees nothing leftover.
-    expect(f.finish()).toEqual({ trailing: "", suggestedReplies: [] });
+    // Stream aborts here — block never closed. Parser returns null and
+    // trailing is empty so the renderer sees nothing leftover.
+    expect(f.finish()).toEqual({ trailing: "", suggestedReply: null });
   });
 });

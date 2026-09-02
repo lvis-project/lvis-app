@@ -499,12 +499,12 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
     expect(screen.queryByTestId("composer-send-button")).toBeNull();
   });
 
-  // --- Suggested Replies (PR-B) ---
+  // --- Suggested Reply (ghost text) ---
 
   it("renders ghost text when value empty + best != null", () => {
     render(
       <Harness
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
     const ghost = screen.getByTestId("suggested-replies-ghost");
@@ -516,7 +516,7 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
   it("suppresses the fallback placeholder while ghost text is visible", () => {
     render(
       <Harness
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
     const textarea = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
@@ -527,7 +527,7 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
     render(
       <Harness
         initialText="x"
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
     expect(screen.queryByTestId("suggested-replies-ghost")).toBeNull();
@@ -536,7 +536,7 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
   it("hides ghost text when no best", () => {
     render(
       <Harness
-        suggestedReplies={{ best: null, alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: null, isDismissed: false }}
       />,
     );
     expect(screen.queryByTestId("suggested-replies-ghost")).toBeNull();
@@ -545,56 +545,28 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
   it("hides ghost text when dismissed", () => {
     render(
       <Harness
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: true }}
+        suggestedReplies={{ text: "네", isDismissed: true }}
       />,
     );
     expect(screen.queryByTestId("suggested-replies-ghost")).toBeNull();
   });
 
-  it("renders chip row when alternates present", () => {
+  it("renders the ghost alone — no alternate chip row", () => {
     render(
       <Harness
-        suggestedReplies={{ best: "네", alternates: ["아니오", "나중에"], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
-    const row = screen.getByTestId("suggested-replies-chip-row");
-    expect(row).toBeTruthy();
-    const chips = screen.getAllByTestId("suggested-replies-chip");
-    expect(chips).toHaveLength(2);
-    expect(chips.map((c) => c.textContent)).toEqual(["아니오", "나중에"]);
-  });
-
-  it("adds top inset to the chip row inside the composer surface", () => {
-    render(
-      <Harness
-        suggestedReplies={{ best: "네", alternates: ["아니오"], isDismissed: false }}
-      />,
-    );
-    expect(screen.getByTestId("suggested-replies-chip-row")).toHaveClass("mt-3");
-  });
-
-  it("hides chip row when alternates empty", () => {
-    render(
-      <Harness
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
-      />,
-    );
+    expect(screen.getByTestId("suggested-replies-ghost")).toBeTruthy();
     expect(screen.queryByTestId("suggested-replies-chip-row")).toBeNull();
-  });
-
-  it("hides chip row when dismissed", () => {
-    render(
-      <Harness
-        suggestedReplies={{ best: "네", alternates: ["아니오"], isDismissed: true }}
-      />,
-    );
-    expect(screen.queryByTestId("suggested-replies-chip-row")).toBeNull();
+    expect(screen.queryByTestId("suggested-replies-chip")).toBeNull();
+    expect(screen.queryByRole("toolbar")).toBeNull();
   });
 
   it("Tab fills textarea with best (empty + not dismissed)", async () => {
     render(
       <Harness
-        suggestedReplies={{ best: "네 확인했습니다", alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: "네 확인했습니다", isDismissed: false }}
       />,
     );
     const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
@@ -610,7 +582,7 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
     render(
       <Harness
         initialText="이미 입력 중"
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
     const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
@@ -620,10 +592,10 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
     expect(ta.value).toBe("이미 입력 중");
   });
 
-  it("Tab does NOT fill when best is null", () => {
+  it("Tab does NOT fill when there is no suggestion", () => {
     render(
       <Harness
-        suggestedReplies={{ best: null, alternates: ["a"], isDismissed: false }}
+        suggestedReplies={{ text: null, isDismissed: false }}
       />,
     );
     const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
@@ -632,38 +604,11 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
     expect(ev.defaultPrevented).toBe(false);
   });
 
-  it("chip click fills textarea + clears chip row", async () => {
-    render(
-      <Harness
-        suggestedReplies={{ best: "네", alternates: ["아니오", "나중에"], isDismissed: false }}
-      />,
-    );
-    const chips = screen.getAllByTestId("suggested-replies-chip");
-    await act(async () => {
-      fireEvent.click(chips[0]!);
-    });
-    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
-    expect(ta.value).toBe("아니오");
-  });
-
-  it("hides chip row once user types 1+ chars (MAJOR-1 round-1)", () => {
-    // Spec §3 line 42: "사용자가 1자 이상 입력 → ghost + chip row 즉시 hide".
-    // Ghost was already hidden in a separate test; this asserts chip row hides
-    // for the same condition so the two surfaces stay in lockstep.
-    render(
-      <Harness
-        initialText="abc"
-        suggestedReplies={{ best: "네", alternates: ["아니오", "나중에"], isDismissed: false }}
-      />,
-    );
-    expect(screen.queryByTestId("suggested-replies-chip-row")).toBeNull();
-  });
-
   it("hides ghost during IME composition + reappears after end (MAJOR-2 round-1)", async () => {
     // Spec §8: ImePreedit (한글 조합) 중 → ghost hide, composition 끝나면 reappear.
     render(
       <Harness
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
     expect(screen.getByTestId("suggested-replies-ghost")).toBeTruthy();
@@ -681,8 +626,7 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
   it("Escape dismisses suggestion (ghost disappears)", async () => {
     function HarnessWithDismiss() {
       const [reps, setReps] = useState<SuggestedRepliesSnapshot>({
-        best: "네",
-        alternates: ["아니오"],
+        text: "네",
         isDismissed: false,
       });
       const [text, setText] = useState("");
@@ -725,76 +669,31 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
       fireEvent.keyDown(ta, { key: "Escape" });
     });
     expect(screen.queryByTestId("suggested-replies-ghost")).toBeNull();
-    expect(screen.queryByTestId("suggested-replies-chip-row")).toBeNull();
   });
 
-  // --- PR-D additions ---
+  // --- animation + telemetry ---
 
-  it("ArrowDown moves focus into the chip row (first chip)", async () => {
+  it("ArrowUp/Down never intercept caret movement — there is nothing to cycle through", () => {
     render(
       <Harness
-        suggestedReplies={{ best: "네", alternates: ["아니오", "나중에"], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
     const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
-    await act(async () => {
-      fireEvent.keyDown(ta, { key: "ArrowDown" });
-    });
-    const chips = screen.getAllByTestId("suggested-replies-chip");
-    expect(chips[0]!.getAttribute("data-focused")).toBe("true");
-  });
-
-  it("ArrowDown advances chip focus index until clamped at end", async () => {
-    render(
-      <Harness
-        suggestedReplies={{ best: "네", alternates: ["a", "b", "c"], isDismissed: false }}
-      />,
-    );
-    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
-    await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
-    await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
-    await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
-    // 3 ArrowDowns on a 3-chip row → idx clamped at 2 (last chip).
-    const chips = screen.getAllByTestId("suggested-replies-chip");
-    expect(chips[2]!.getAttribute("data-focused")).toBe("true");
-  });
-
-  it("ArrowUp from first chip returns focus to textarea", async () => {
-    render(
-      <Harness
-        suggestedReplies={{ best: "네", alternates: ["아니오", "나중에"], isDismissed: false }}
-      />,
-    );
-    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
-    await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
-    // Re-target keydown via the new focused chip — Composer's handler is on
-    // the textarea but the focus has moved; trigger another ArrowUp through
-    // the textarea's onKeyDown directly to simulate the user still pressing
-    // arrow keys (jsdom doesn't bubble keydown across the focused chip).
-    await act(async () => { fireEvent.keyDown(ta, { key: "ArrowUp" }); });
-    const chips = screen.getAllByTestId("suggested-replies-chip");
-    expect(chips[0]!.getAttribute("data-focused")).toBeNull();
-  });
-
-  it("ArrowUp/Down with text in textarea does NOT intercept caret movement", () => {
-    render(
-      <Harness
-        initialText="abc"
-        suggestedReplies={{ best: "네", alternates: ["a", "b"], isDismissed: false }}
-      />,
-    );
-    const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
-    const ev = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
-    ta.dispatchEvent(ev);
-    // text.length > 0 → chip row hidden → no interception → preventDefault
-    // is not called (caret movement remains native).
-    expect(ev.defaultPrevented).toBe(false);
+    expect(screen.getByTestId("suggested-replies-ghost")).toBeTruthy();
+    for (const key of ["ArrowDown", "ArrowUp"]) {
+      const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      ta.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(false);
+    }
+    // The single suggestion is still on offer after the arrows.
+    expect(screen.getByTestId("suggested-replies-ghost")).toBeTruthy();
   });
 
   it("ghost text element carries fade-in transition class (PR-D animation)", () => {
     render(
       <Harness
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
     const ghost = screen.getByTestId("suggested-replies-ghost");
@@ -805,74 +704,41 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
     expect(ghost.className).toContain("animate-in");
   });
 
-  it("chip row carries fade-in transition class (PR-D animation)", () => {
-    render(
-      <Harness
-        suggestedReplies={{ best: "네", alternates: ["아니오"], isDismissed: false }}
-      />,
-    );
-    const row = screen.getByTestId("suggested-replies-chip-row");
-    expect(row.className).toContain("transition-[opacity,transform]");
-    expect(row.className).toContain("animate-in");
-  });
-
-  it("chip click records accepted-chip telemetry event", async () => {
+  it("Tab fill records accepted telemetry event", async () => {
     const { resetSuggestedRepliesCountersForTesting, getSuggestedRepliesCounters } =
       await import("../../../../telemetry/suggested-replies-counter.js");
-    const { pushSuggestedReplies, __resetSuggestedRepliesStoreForTests } =
+    const { pushSuggestedReply, __resetSuggestedRepliesStoreForTests } =
       await import("../../hooks/use-suggested-replies.js");
     __resetSuggestedRepliesStoreForTests();
     resetSuggestedRepliesCountersForTesting();
-    // Composer calls module-level `acceptSuggestedReply` which is a no-op
-    // when the store is empty. Seed the store so the accept path actually
-    // increments the counter.
-    await act(async () => { pushSuggestedReplies(["네", "아니오"]); });
-    resetSuggestedRepliesCountersForTesting(); // discard the "shown" event
-    render(
-      <Harness
-        suggestedReplies={{ best: "네", alternates: ["아니오"], isDismissed: false }}
-      />,
-    );
-    const chip = screen.getByTestId("suggested-replies-chip");
-    await act(async () => { fireEvent.click(chip); });
-    expect(getSuggestedRepliesCounters()["accepted-chip"]).toBe(1);
-  });
-
-  it("Tab fill records accepted-best telemetry event", async () => {
-    const { resetSuggestedRepliesCountersForTesting, getSuggestedRepliesCounters } =
-      await import("../../../../telemetry/suggested-replies-counter.js");
-    const { pushSuggestedReplies, __resetSuggestedRepliesStoreForTests } =
-      await import("../../hooks/use-suggested-replies.js");
-    __resetSuggestedRepliesStoreForTests();
-    resetSuggestedRepliesCountersForTesting();
-    await act(async () => { pushSuggestedReplies(["네"]); });
+    await act(async () => { pushSuggestedReply("네"); });
     resetSuggestedRepliesCountersForTesting();
     render(
       <Harness
-        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+        suggestedReplies={{ text: "네", isDismissed: false }}
       />,
     );
     const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     await act(async () => { fireEvent.keyDown(ta, { key: "Tab" }); });
-    expect(getSuggestedRepliesCounters()["accepted-best"]).toBe(1);
+    expect(getSuggestedRepliesCounters().accepted).toBe(1);
   });
 
   it("Enter (send) releases the dismiss latch (PR-D dismiss memory)", async () => {
-    const { pushSuggestedReplies, dismissSuggestedReplies, __resetSuggestedRepliesStoreForTests } =
+    const { pushSuggestedReply, dismissSuggestedReplies, __resetSuggestedRepliesStoreForTests } =
       await import("../../hooks/use-suggested-replies.js");
     __resetSuggestedRepliesStoreForTests();
     const onSendCb = vi.fn();
     render(<Harness onSendCb={onSendCb} />);
     const ta = screen.getByTestId(TEST_IDS.composerTextarea) as HTMLTextAreaElement;
     // Set up: push + dismiss → latch is set.
-    await act(async () => { pushSuggestedReplies(["첫"]); });
+    await act(async () => { pushSuggestedReply("첫"); });
     await act(async () => { dismissSuggestedReplies(); });
     // Type then send.
     fireEvent.change(ta, { target: { value: "hi" } });
     await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
     expect(onSendCb).toHaveBeenCalledTimes(1);
     // After clear, a fresh push should NOT be dismissed.
-    await act(async () => { pushSuggestedReplies(["둘"]); });
+    await act(async () => { pushSuggestedReply("둘"); });
     // We assert via the public surface: rendering a new Harness with the new
     // snapshot should display the ghost. (Direct hook inspection would need
     // an extra harness; the latch-clear is already covered by the

@@ -135,10 +135,9 @@ export interface ComposerProps {
   /** Overrides the generic warning when a supported image exceeds its runtime budget. */
   onImageAttachmentLimitExceeded?: () => void;
   /**
-   * Suggested-replies snapshot from `useSuggestedReplies()`. Composer renders
-   * (a) `best` as ghost text inside the textarea when value is empty + not
-   * dismissed, and (b) `alternates` as a chip row above the textarea. Tab
-   * fills the best suggestion; Escape dismisses the current snapshot.
+   * Suggested-reply snapshot from `useSuggestedReplies()`. Composer renders
+   * `text` as ghost text inside the textarea when value is empty + not
+   * dismissed. Tab fills the suggestion; Escape dismisses the current snapshot.
    *
    * Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.2.
    */
@@ -232,11 +231,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
    * has to be carried across the two events.
    */
   const plainPasteRequestedRef = useRef(false);
-  // PR-D ↑/↓ chip cycle: index of the currently-focused alternate chip, or
-  // `null` when focus is in the textarea. Composer owns this state so the
-  // textarea's keydown handler can advance it (ChipRow is otherwise a leaf
-  // and would have no way to know about the textarea's key events).
-  const [chipFocusIdx, setChipFocusIdx] = useState<number | null>(null);
   // Caret mirror — the inline "/" menu needs the cursor index, but the value is
   // controlled so selectionStart lives only on the DOM node. Synced on every
   // event that can move the caret (change / keyup / click / select).
@@ -585,9 +579,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "v";
 
       // Inline "/" autocomplete owns navigation while open. This MUST run
-      // before the suggested-reply Tab/Arrow branches and the Enter→onSend
-      // branch, so Enter accepts the highlighted item instead of sending and
-      // arrows drive the menu instead of the chip cycle.
+      // before the suggested-reply Tab branch and the Enter→onSend branch, so
+      // Enter accepts the highlighted item instead of sending.
       if (inlineOpen) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -651,18 +644,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         }
       }
 
-      // Suggested Replies (spec §6.2):
-      //   Tab (no modifier) + value empty + best != null + not dismissed
-      //     → fill textarea with `best`, dismiss current snapshot.
-      //   Escape + any active suggestion → dismiss only (LLM-abort path is
+      // Suggested Reply (spec §6.2):
+      //   Tab (no modifier) + value empty + text != null + not dismissed
+      //     → fill textarea with the suggestion, consume the snapshot.
+      //   Escape + active suggestion → dismiss only (LLM-abort path is
       //     ChatView's ESC handler which runs at document level + is gated
       //     by `streaming`; dismissing here does not interfere because ESC
       //     in idle state has no other Composer-side semantics).
-      const best = suggestedReplies?.best ?? null;
-      const alternates = suggestedReplies?.alternates ?? [];
+      const suggestion = suggestedReplies?.text ?? null;
       const dismissed = suggestedReplies?.isDismissed ?? false;
-      const hasGhost = best !== null && !dismissed && text.length === 0;
-      const hasAnySuggestion = (best !== null || alternates.length > 0) && !dismissed;
+      const hasSuggestion = suggestion !== null && !dismissed;
+      const hasGhost = hasSuggestion && text.length === 0;
 
       if (
         e.key === "Tab" &&
@@ -671,16 +663,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         !e.ctrlKey &&
         !e.metaKey &&
         hasGhost &&
-        best !== null
+        suggestion !== null
       ) {
         e.preventDefault();
         if (disabled) return;
-        onTextChange(best);
-        acceptSuggestedReply(best, "best");
-        setChipFocusIdx(null);
+        onTextChange(suggestion);
+        acceptSuggestedReply();
         requestAnimationFrame(() => {
           if (taRef.current) {
-            const pos = best.length;
+            const pos = suggestion.length;
             taRef.current.setSelectionRange(pos, pos);
             taRef.current.focus();
           }
@@ -688,60 +679,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         return;
       }
 
-      // PR-D ↑/↓ chip cycle: ArrowDown moves focus into the row (or to the
-      // next chip); ArrowUp moves it back. We only intercept when chips are
-      // actually visible — otherwise the keys keep their native textarea
-      // caret-movement semantics. `preventDefault` is gated on a real
-      // navigation actually firing so single-line composers don't lose the
-      // caret-jump shortcut when nothing is rendered anyway.
-      if (
-        e.key === "ArrowDown" &&
-        !e.shiftKey &&
-        !e.altKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        alternates.length > 0 &&
-        !dismissed &&
-        text.length === 0
-      ) {
-        e.preventDefault();
-        setChipFocusIdx((i) => {
-          if (i === null) return 0;
-          return Math.min(i + 1, alternates.length - 1);
-        });
-        return;
-      }
-
-      if (
-        e.key === "ArrowUp" &&
-        !e.shiftKey &&
-        !e.altKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        alternates.length > 0 &&
-        !dismissed &&
-        text.length === 0 &&
-        chipFocusIdx !== null
-      ) {
-        e.preventDefault();
-        setChipFocusIdx((i) => {
-          if (i === null || i === 0) {
-            // Cycle back to textarea — Composer's ChipRow useEffect won't
-            // re-focus when idx is null, but we still need to pull DOM focus
-            // away from the chip so the textarea is editable.
-            requestAnimationFrame(() => taRef.current?.focus());
-            return null;
-          }
-          return i - 1;
-        });
-        return;
-      }
-
-      if (e.key === "Escape" && hasAnySuggestion) {
+      if (e.key === "Escape" && hasSuggestion) {
         // Don't preventDefault — let the document-level ESC handler (ChatView)
         // still run when streaming. Dismissing the snapshot is additive.
         dismissSuggestedReplies();
-        setChipFocusIdx(null);
         // Fall through so other ESC consumers still see the event.
       }
 
@@ -784,7 +725,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
         e.preventDefault();
         if (disabled || sendDisabled) return;
-        // PR-D dismiss memory: a new user message means we're transitioning
+        // Dismiss memory: a new user message means we are transitioning
         // to the next turn — release the dismiss latch so the next suggestion
         // push renders fresh regardless of any prior Escape during this turn.
         clearDismissedReplies();
@@ -799,7 +740,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       text,
       onTextChange,
       suggestedReplies,
-      chipFocusIdx,
       inlineOpen,
       inlineMove,
       inlineAccept,
@@ -819,58 +759,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   );
 
   const isFull = chipStripCount >= ATTACH_MAX_COUNT;
-  const ghostBest = suggestedReplies?.best ?? null;
+  const ghostText = suggestedReplies?.text ?? null;
   // Spec §3 line 42 + §8: ghost hidden when (a) user has typed any char, (b)
-  // IME composition active (preedit), (c) no `best`, or (d) dismissed.
+  // IME composition active (preedit), (c) no suggestion, or (d) dismissed.
   const ghostVisible =
     text.length === 0 &&
     !isComposing &&
-    ghostBest !== null &&
+    ghostText !== null &&
     !(suggestedReplies?.isDismissed ?? false);
-
-  // Chip row hides as soon as the textarea has any text, mirroring the ghost.
-  const chipAlternates =
-    text.length === 0 && suggestedReplies && !suggestedReplies.isDismissed
-      ? suggestedReplies.alternates
-      : [];
-  const suggestionSurfaceVisible = ghostVisible || chipAlternates.length > 0;
-  const fallbackPlaceholder = suggestionSurfaceVisible ? "" : t("composer.defaultPlaceholder");
-
-  const acceptChip = useCallback(
-    (chipText: string) => {
-      if (disabled) return;
-      onTextChange(chipText);
-      acceptSuggestedReply(chipText, "chip");
-      setChipFocusIdx(null);
-      requestAnimationFrame(() => {
-        if (taRef.current) {
-          const pos = chipText.length;
-          taRef.current.setSelectionRange(pos, pos);
-          taRef.current.focus();
-        }
-      });
-    },
-    [disabled, onTextChange],
-  );
-
-  // PR-D: when the chip row disappears (alternates empty, dismissed, or
-  // user typed something), drop the focused index so the next render of the
-  // row starts fresh from `null`. Without this, a stale index could survive
-  // across snapshots and try to focus a non-existent chip.
-  useEffect(() => {
-    if (chipAlternates.length === 0 && chipFocusIdx !== null) {
-      setChipFocusIdx(null);
-    }
-  }, [chipAlternates.length, chipFocusIdx]);
+  const fallbackPlaceholder = ghostVisible ? "" : t("composer.defaultPlaceholder");
 
   return (
     <div data-testid={TEST_IDS.composer} className="min-w-0">
-      <SuggestedRepliesChipRow
-        alternates={chipAlternates}
-        focusedIdx={chipFocusIdx}
-        onAccept={acceptChip}
-        onFocusChange={setChipFocusIdx}
-      />
       <div
         data-testid={TEST_IDS.composerInputBar}
         className="relative flex min-w-0 w-full items-stretch gap-0 overflow-hidden"
@@ -942,7 +842,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           }
           rows={1}
         />
-        <SuggestedRepliesGhost text={ghostBest} visible={ghostVisible} />
+        <SuggestedRepliesGhost text={ghostText} visible={ghostVisible} />
       </div>
       {isFull ? (
         <div
@@ -1001,7 +901,7 @@ export function ComposerFrame({ children }: { children: React.ReactNode }): Reac
 }
 
 // Ghost-text overlay rendered on top of the Composer textarea when (a) the
-// textarea body is empty, (b) a `best` suggested reply is available, and
+// textarea body is empty, (b) a suggested reply is available, and
 // (c) the user has not dismissed the current snapshot.
 //
 // The parent (Composer) owns positioning context: this component renders an
@@ -1011,7 +911,7 @@ export function ComposerFrame({ children }: { children: React.ReactNode }): Reac
 //
 // Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.1.
 //
-// PR-D animation: `motion-safe:animate-in fade-in` eases the ghost in when
+// Animation: `motion-safe:animate-in fade-in` eases the ghost in when
 // a new turn's suggestion arrives. The `transition-opacity` keeps the fade
 // smooth when CSS class state flips (e.g. typing → empty). `prefers-
 // reduced-motion` opt-outs are honored by Tailwind's `motion-safe:` variant.
@@ -1034,98 +934,6 @@ function SuggestedRepliesGhost({ text, visible }: SuggestedRepliesGhostProps): R
       <span className="ml-auto whitespace-nowrap pl-2 text-micro opacity-70">
         {t("suggestedRepliesGhost.tabToFill")}
       </span>
-    </div>
-  );
-}
-
-// iOS QuickType-style chip row rendered immediately above the Composer when
-// 2+ suggested replies are available. The `best` reply is shown as ghost
-// text inside the textarea; this row carries the remaining alternates so
-// the user can pick one with a click (PR-B) or cycle with ↑/↓ (PR-D).
-//
-// Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.1.
-//
-// PR-D additions:
-//   • `focusedIdx` + `onFocusChange` — Composer drives focus via ArrowUp /
-//     ArrowDown so the user can cycle without leaving the textarea. Each
-//     chip is a real <button>, so the focused chip also accepts native
-//     Enter / Space via its own onClick (no extra wiring needed).
-//   • Fade-slide animation — `transition-*` classes on row + chips so a new
-//     turn's chips ease in instead of popping. `key={text}` on chips means
-//     React mounts a fresh node per suggestion, which lets the
-//     `motion-safe:animate-in` class re-fire on every push.
-
-interface SuggestedRepliesChipRowProps {
-  alternates: string[];
-  /** Index of the currently keyboard-focused chip. `null` = no chip focused
-   *  (focus lives in the textarea). Composer owns this state so ArrowUp /
-   *  ArrowDown can also rotate focus back out of the row. */
-  focusedIdx: number | null;
-  onAccept: (text: string) => void;
-  onFocusChange: (idx: number | null) => void;
-}
-
-function SuggestedRepliesChipRow({
-  alternates,
-  focusedIdx,
-  onAccept,
-  onFocusChange,
-}: SuggestedRepliesChipRowProps): ReactElement | null {
-  const { t } = useTranslation();
-  // Imperatively move DOM focus when `focusedIdx` changes. Composer drives
-  // the index from keyboard events; the chip refs receive `.focus()` here so
-  // assistive tech + focus rings stay in sync with the keyboard cursor.
-  const chipRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  useEffect(() => {
-    if (focusedIdx === null) return;
-    const el = chipRefs.current[focusedIdx];
-    if (el) el.focus();
-  }, [focusedIdx]);
-
-  if (alternates.length === 0) return null;
-  return (
-    <div
-      data-testid="suggested-replies-chip-row"
-      role="toolbar"
-      aria-label={t("suggestedRepliesChipRow.toolbarAriaLabel")}
-      className="mx-3 mt-3 mb-1 flex gap-2 overflow-x-auto transition-[opacity,transform] duration-(--motion-fast) ease-(--motion-ease-out) motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-reduce:transition-none"
-    >
-      {alternates.map((text, idx) => {
-        const isFocused = focusedIdx === idx;
-        return (
-          <button
-            key={`${idx}-${text}`}
-            ref={(el) => {
-              chipRefs.current[idx] = el;
-            }}
-            type="button"
-            data-testid="suggested-replies-chip"
-            data-focused={isFocused ? "true" : undefined}
-            tabIndex={isFocused ? 0 : -1}
-            // Focus ring + background highlight when the keyboard cursor lands
-            // on this chip. Hover-on-pointer + focus-on-keyboard are visually
-            // distinct (hover = bg-accent, focus = ring + bg-accent) so users
-            // can tell where input is going.
-            className={
-              "shrink-0 rounded-full bg-input-bar-subtle px-3 py-1 text-caption text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) focus:outline-none focus-visible:ring-2 focus-visible:ring-input-bar-focus motion-reduce:transition-none" +
-              (isFocused ? " bg-input-bar-action/(--opacity-subtle) ring-2 ring-input-bar-focus" : "")
-            }
-            onClick={() => onAccept(text)}
-            onFocus={() => onFocusChange(idx)}
-            onBlur={(e) => {
-              // Only clear focus if focus moved *outside* the row. Tabbing
-              // between chips inside the row would otherwise drop the index
-              // mid-transition.
-              const next = e.relatedTarget as HTMLElement | null;
-              if (!next || !next.closest("[data-testid='suggested-replies-chip-row']")) {
-                onFocusChange(null);
-              }
-            }}
-          >
-            {text}
-          </button>
-        );
-      })}
     </div>
   );
 }

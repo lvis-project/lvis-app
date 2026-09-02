@@ -5,15 +5,13 @@
 
 export type SuggestedRepliesEvent =
   | "shown"
-  | "accepted-best"
-  | "accepted-chip"
+  | "accepted"
   | "dismissed"
   | "ignored";
 
 const counters: Record<SuggestedRepliesEvent, number> = {
   shown: 0,
-  "accepted-best": 0,
-  "accepted-chip": 0,
+  accepted: 0,
   dismissed: 0,
   ignored: 0,
 };

@@ -208,7 +208,7 @@ describe("ChatView", () => {
     await act(async () => {
       emitChatStream({
         type: "suggested_replies",
-        replies: ["다음 작업 진행", "나중에 할게요"],
+        reply: "다음 작업 진행",
       });
     });
 
@@ -319,10 +319,10 @@ describe("ChatView", () => {
       expect(container.querySelector('[data-testid="composer-project-selector-slot"]')).not.toBeNull();
     });
 
-    // Turn end. Suggestions legitimately drop the centered layout — the ghost
-    // text and chip row need the docked composer.
+    // Turn end. A suggestion legitimately drops the centered layout — the
+    // ghost text needs the docked composer.
     await act(async () => {
-      emitChatStream({ type: "suggested_replies", replies: ["다음 작업 진행", "나중에 할게요"] });
+      emitChatStream({ type: "suggested_replies", reply: "다음 작업 진행" });
     });
     await waitFor(() => {
       expect(dock()).toHaveAttribute("data-composer-placement", "bottom");
