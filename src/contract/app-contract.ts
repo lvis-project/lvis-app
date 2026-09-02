@@ -224,6 +224,10 @@ export const CHANNELS = {
   tailnetObserver: {
     snapshot: "lvis:tailnet-observer:snapshot",
     apply: "lvis:tailnet-observer:apply",
+    // Runs `tailscale serve` on the owner's behalf, after the surface has shown
+    // the exact command. Executing a binary for someone is a capability of its
+    // own, so it is gated like `apply` and never inferred from a snapshot read.
+    configureServe: "lvis:tailnet-observer:configure-serve",
   },
   // Local-owner-only Telegram private-DM connection administration. These are
   // INTERNAL for the same reasons as tailnetSharing, and additionally because
@@ -738,6 +742,9 @@ export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
   // Enabling the observer, moving its port, or widening its scope is an owner
   // decision made at this keyboard, exactly like a share.
   [CHANNELS.tailnetObserver.apply]: "required",
+  // Running a binary for the owner is its own decision, made at this keyboard
+  // against a command the surface has already shown in full.
+  [CHANNELS.tailnetObserver.configureServe]: "required",
   // Local-owner Telegram connection: same rule. Saving a bot token, starting
   // the outbound connection, minting a pairing code, and sharing the open
   // conversation are each an owner decision made at this keyboard.

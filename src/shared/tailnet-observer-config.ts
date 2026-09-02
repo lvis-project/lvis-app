@@ -44,6 +44,49 @@ export interface TailnetObserverConfigView {
   readonly webOrigin: string;
 }
 
+/**
+ * What this desktop's Tailscale install actually says about itself.
+ *
+ * Every one of these values used to be something the person had to read out of
+ * a terminal or an admin console and retype into this app, which is precisely
+ * where the setup went wrong without telling anyone. Each state is named: there
+ * is no "assume it is fine" reading, and no invented tailnet or MagicDNS name.
+ */
+const TAILSCALE_ENVIRONMENT_STATES = [
+  /** The node is up, signed in, and answering. */
+  "ready",
+  /** Tailscale is installed but this node has no login. */
+  "logged-out",
+  /** Tailscale is installed and logged in, but the backend is not running. */
+  "stopped",
+  /** No Tailscale CLI on this desktop. */
+  "cli-not-found",
+  /** The CLI ran and did not answer with a status this app can read. */
+  "cli-failed",
+] as const;
+
+type TailscaleEnvironmentState = (typeof TAILSCALE_ENVIRONMENT_STATES)[number];
+
+export interface TailscaleEnvironmentView {
+  readonly state: TailscaleEnvironmentState;
+  /** The Tailscale account this node is signed in as, when it is signed in. */
+  readonly login: string | null;
+  /** This node's MagicDNS name without the trailing dot, or null when it has none. */
+  readonly dnsName: string | null;
+  readonly tailnetName: string | null;
+  /** Whether `tailscale serve` already fronts something on this node. */
+  readonly serveConfigured: boolean;
+  /** The loopback port Serve forwards to, when it forwards to one. */
+  readonly serveTargetPort: number | null;
+  /**
+   * What the CLI printed when it could not answer.
+   *
+   * Carried verbatim on purpose: "Tailscale said no" with the sentence removed
+   * is the failure this surface exists to end.
+   */
+  readonly detail: string | null;
+}
+
 export interface TailnetObserverSnapshot {
   /** What the host-owned file holds, defaults filled in. */
   readonly saved: TailnetObserverConfigView;
@@ -56,17 +99,25 @@ export interface TailnetObserverSnapshot {
   readonly listeningPort: number | null;
   /** Kebab-case code of the last failed start, or null. */
   readonly lastStartError: string | null;
-  /**
-   * Whether the running process reflects the saved configuration.
-   *
-   * The observer is started once per boot and its shutdown path is a latch, so
-   * a change applies at the next launch. Saying so is the whole point of this
-   * field: a toggle that silently does nothing until relaunch is the failure
-   * this surface exists to end.
-   */
-  readonly restartRequired: boolean;
   /** Whether paired-sharing setup failed at boot, leaving owner controls off. */
   readonly pairedSharingBootstrapFailed: boolean;
+  /** What this desktop's Tailscale install says about itself. */
+  readonly environment: TailscaleEnvironmentView;
+  /** The web origin derived from this node's MagicDNS name; never typed in. */
+  readonly derivedWebOrigin: string | null;
+  /**
+   * The exact `tailscale serve` command this app would run, or null when there
+   * is nothing to put behind Serve yet. Shown before it runs, never after.
+   */
+  readonly serveCommand: string | null;
+  /**
+   * Named reason the saved configuration could not be read, or null.
+   *
+   * A damaged file used to make the whole surface fail, leaving a Refresh
+   * button and no way to save over it. The reason is reported instead, and the
+   * form stays reachable so the owner can write a good configuration on top.
+   */
+  readonly configFileError: string | null;
 }
 
 type TailnetObserverErrorCode =
@@ -85,10 +136,27 @@ export type TailnetObserverMutationResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly error: TailnetObserverErrorCode };
 
+/**
+ * The outcome of running `tailscale serve` on the owner's behalf.
+ *
+ * Success hands back the reachable URL so nobody has to assemble it. Failure
+ * carries what the command printed, because "could not be completed" is what
+ * made the terminal unavoidable in the first place.
+ */
+export type TailnetServeResult =
+  | { readonly ok: true; readonly url: string }
+  | {
+      readonly ok: false;
+      readonly error: TailnetObserverErrorCode;
+      readonly output: string | null;
+    };
+
 /** The private `window.lvisApi.tailnetObserver` namespace. */
 export interface TailnetObserverConfigApi {
   snapshot(): Promise<TailnetObserverSnapshotResult>;
   apply(config: TailnetObserverConfigView): Promise<TailnetObserverMutationResult>;
+  /** Put the running listener behind Tailscale Serve, after the owner approved the command. */
+  configureServe(): Promise<TailnetServeResult>;
 }
 
 export const DEFAULT_TAILNET_OBSERVER_VIEW_PORT = 46_173;
@@ -146,6 +214,43 @@ function parseProvenance(
   return Object.freeze(provenance);
 }
 
+function isOptionalPort(value: unknown): value is number | null {
+  return value === null
+    || (typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= 65_535);
+}
+
+function isOptionalText(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function parseTailscaleEnvironmentView(
+  value: unknown,
+): TailscaleEnvironmentView | null {
+  if (!isRecord(value)) return null;
+  const { state, login, dnsName, tailnetName, serveConfigured, serveTargetPort, detail } = value;
+  if (
+    typeof state !== "string"
+    || !(TAILSCALE_ENVIRONMENT_STATES as readonly string[]).includes(state)
+    || !isOptionalText(login)
+    || !isOptionalText(dnsName)
+    || !isOptionalText(tailnetName)
+    || typeof serveConfigured !== "boolean"
+    || !isOptionalPort(serveTargetPort)
+    || !isOptionalText(detail)
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    state: state as TailscaleEnvironmentState,
+    login,
+    dnsName,
+    tailnetName,
+    serveConfigured,
+    serveTargetPort,
+    detail,
+  });
+}
+
 export function parseTailnetObserverSnapshot(
   value: unknown,
 ): TailnetObserverSnapshot | null {
@@ -153,15 +258,26 @@ export function parseTailnetObserverSnapshot(
   const saved = parseTailnetObserverConfigView(value.saved);
   const effective = parseTailnetObserverConfigView(value.effective);
   const provenance = parseProvenance(value.provenance);
-  const { listeningPort, lastStartError, restartRequired, pairedSharingBootstrapFailed } = value;
+  const environment = parseTailscaleEnvironmentView(value.environment);
+  const {
+    listeningPort,
+    lastStartError,
+    pairedSharingBootstrapFailed,
+    derivedWebOrigin,
+    serveCommand,
+    configFileError,
+  } = value;
   if (
     saved === null
     || effective === null
     || provenance === null
+    || environment === null
     || !(listeningPort === null || (typeof listeningPort === "number" && Number.isSafeInteger(listeningPort)))
-    || !(lastStartError === null || typeof lastStartError === "string")
-    || typeof restartRequired !== "boolean"
+    || !isOptionalText(lastStartError)
     || typeof pairedSharingBootstrapFailed !== "boolean"
+    || !isOptionalText(derivedWebOrigin)
+    || !isOptionalText(serveCommand)
+    || !isOptionalText(configFileError)
   ) {
     return null;
   }
@@ -171,8 +287,11 @@ export function parseTailnetObserverSnapshot(
     provenance,
     listeningPort,
     lastStartError,
-    restartRequired,
     pairedSharingBootstrapFailed,
+    environment,
+    derivedWebOrigin,
+    serveCommand,
+    configFileError,
   });
 }
 
@@ -197,6 +316,23 @@ export function parseTailnetObserverMutationResult(
   if (value.ok === true) return Object.freeze({ ok: true as const });
   if (value.ok === false && typeof value.error === "string") {
     return Object.freeze({ ok: false as const, error: value.error });
+  }
+  return null;
+}
+
+export function parseTailnetServeResult(value: unknown): TailnetServeResult | null {
+  if (!isRecord(value)) return null;
+  if (value.ok === true) {
+    return typeof value.url === "string" && value.url.length > 0
+      ? Object.freeze({ ok: true as const, url: value.url })
+      : null;
+  }
+  // A gate that rejected before the command was reached — an unauthorized
+  // frame, a missing keyboard intent — has no command output to carry. That is
+  // a valid failure with `output: null`, not an unparseable one.
+  const output = value.output === undefined ? null : value.output;
+  if (value.ok === false && typeof value.error === "string" && isOptionalText(output)) {
+    return Object.freeze({ ok: false as const, error: value.error, output });
   }
   return null;
 }

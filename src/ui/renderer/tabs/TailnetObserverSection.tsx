@@ -18,23 +18,38 @@ import { Input } from "../../../components/ui/input.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { SettingsSection, type SettingsSectionFeedback } from "../components/PageShell.js";
 import {
+  DEFAULT_TAILNET_OBSERVER_VIEW_PORT,
   TAILNET_OBSERVER_CONFIG_KEYS,
   type TailnetObserverConfigKeyView,
   type TailnetObserverConfigView,
   type TailnetObserverSnapshot,
 } from "../../../shared/tailnet-observer-config.js";
+import { useCopyFlash } from "../hooks/use-copy-flash.js";
 import type { LvisApi } from "../types.js";
 
 export interface TailnetObserverSectionProps {
   api: Pick<LvisApi, "tailnetObserver">;
 }
 
+/** What a save writes when the owner asks to start over from a damaged file. */
+const RESET_CONFIG: TailnetObserverConfigView = Object.freeze({
+  enabled: false,
+  expectedAppCapability: "",
+  port: DEFAULT_TAILNET_OBSERVER_VIEW_PORT,
+  controllerEnabled: false,
+  pairedSharingEnabled: false,
+  webEnabled: false,
+  webOrigin: "",
+});
+
 /**
  * Kebab-case codes from the host, rendered as localized text.
  *
  * Unknown codes fall back to the generic failure rather than being echoed:
  * every known code is a classification of the user's own proposal, and an
- * unrecognized one is not something to put on screen verbatim.
+ * unrecognized one is not something to put on screen verbatim. Every code the
+ * host can produce has a sentence here — a start failure landing on "could not
+ * be saved" was itself one of the dead ends.
  */
 function errorText(code: string, t: (key: string) => string): string {
   switch (code) {
@@ -48,15 +63,62 @@ function errorText(code: string, t: (key: string) => string): string {
       return t("tailnetObserver.errorWebNeedsPairing");
     case "tailnet-web-origin-missing-or-invalid":
       return t("tailnetObserver.errorWebOrigin");
+    case "tailnet-web-origin-underivable":
+      return t("tailnetObserver.errorWebOriginUnderivable");
     case "tailnet-observer-config-file-invalid":
     case "tailnet-observer-config-file-unreadable":
       return t("tailnetObserver.errorConfigFile");
+    case "tailnet-controller-command-port-unavailable":
+      return t("tailnetObserver.errorControllerPort");
+    case "tailnet-paired-sharing-runtime-unavailable":
+      return t("tailnetObserver.errorPairedSharingRuntime");
+    case "tailnet-observer-not-composed":
+    case "tailnet-observer-stopped":
+      return t("tailnetObserver.errorListenerUnreachable");
+    case "tailnet-serve-not-listening":
+      return t("tailnetObserver.errorServeNotListening");
+    case "tailnet-serve-tailscale-cli-not-found":
+      return t("tailnetObserver.environmentCliNotFound");
+    case "tailnet-serve-tailscale-logged-out":
+      return t("tailnetObserver.environmentLoggedOut");
+    case "tailnet-serve-tailscale-stopped":
+      return t("tailnetObserver.environmentStopped");
+    case "tailnet-serve-tailscale-cli-failed":
+      return t("tailnetObserver.environmentCliFailed");
+    case "tailnet-serve-magic-dns-missing":
+      return t("tailnetObserver.errorMagicDnsMissing");
+    case "tailnet-serve-cli-not-found":
+      return t("tailnetObserver.environmentCliNotFound");
+    case "tailnet-serve-command-failed":
+      return t("tailnetObserver.errorServeCommandFailed");
     case "user-keyboard-required":
       return t("tailnetObserver.errorKeyboardIntent");
     case "tailnet-observer-unavailable":
       return t("tailnetObserver.errorUnavailable");
     default:
       return t("tailnetObserver.errorGeneric");
+  }
+}
+
+/** The one sentence this desktop's Tailscale state deserves. */
+function environmentText(
+  environment: TailnetObserverSnapshot["environment"],
+  t: (key: string, vars?: Record<string, string>) => string,
+): string {
+  switch (environment.state) {
+    case "ready":
+      return t("tailnetObserver.environmentReady", {
+        login: environment.login ?? t("tailnetObserver.environmentUnknownLogin"),
+        node: environment.dnsName ?? t("tailnetObserver.environmentNoMagicDns"),
+      });
+    case "logged-out":
+      return t("tailnetObserver.environmentLoggedOut");
+    case "stopped":
+      return t("tailnetObserver.environmentStopped");
+    case "cli-not-found":
+      return t("tailnetObserver.environmentCliNotFound");
+    case "cli-failed":
+      return t("tailnetObserver.environmentCliFailed");
   }
 }
 
@@ -77,6 +139,9 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<SettingsSectionFeedback>(null);
+  const [serveUrl, setServeUrl] = useState<string | null>(null);
+  const [serveOutput, setServeOutput] = useState<string | null>(null);
+  const { copied, copy: copyToClipboard } = useCopyFlash();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -107,19 +172,41 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
     void refresh();
   }, [refresh]);
 
-  const apply = useCallback(async () => {
+  const save = useCallback(async (config: TailnetObserverConfigView) => {
     const bridge = api.tailnetObserver as typeof api.tailnetObserver | undefined;
-    if (draft === null || busy || bridge === undefined) return;
+    if (busy || bridge === undefined) return;
     setBusy(true);
-    const result = await bridge.apply(draft);
+    const result = await bridge.apply(config);
     if (result.ok) {
-      setFeedback({ tone: "success", text: t("tailnetObserver.saved") });
+      // After the refresh, not before: a successful snapshot clears feedback,
+      // so setting it first left a save that applied with nothing said about it.
       await refresh();
+      setFeedback({ tone: "success", text: t("tailnetObserver.saved") });
     } else {
       setFeedback({ tone: "error", text: errorText(result.error, t) });
     }
     setBusy(false);
-  }, [api, busy, draft, refresh, t]);
+  }, [api, busy, refresh, t]);
+
+  const configureServe = useCallback(async () => {
+    const bridge = api.tailnetObserver as typeof api.tailnetObserver | undefined;
+    if (busy || bridge === undefined) return;
+    setBusy(true);
+    setServeUrl(null);
+    setServeOutput(null);
+    const result = await bridge.configureServe();
+    if (result.ok) {
+      setServeUrl(result.url);
+      await refresh();
+      setFeedback({ tone: "success", text: t("tailnetObserver.serveConfigured") });
+    } else {
+      // Tailscale's own sentence, not a paraphrase of it: the certificate case
+      // needs a tailnet administrator, and only Tailscale says so.
+      setServeOutput(result.output);
+      setFeedback({ tone: "error", text: errorText(result.error, t) });
+    }
+    setBusy(false);
+  }, [api, busy, refresh, t]);
 
   const patch = useCallback((change: Partial<TailnetObserverConfigView>) => {
     setDraft((current) => (current === null ? current : { ...current, ...change }));
@@ -140,7 +227,12 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
       <SettingsSection
         title={t("tailnetObserver.sectionTitle")}
         actions={
-          <Button size="sm" variant="outline" onClick={() => void refresh()}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void refresh()}
+            data-testid="tailnet-observer-refresh"
+          >
             {t("tailnetObserver.refresh")}
           </Button>
         }
@@ -155,25 +247,78 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
   const envOverridden = TAILNET_OBSERVER_CONFIG_KEYS.filter(
     (key) => snapshot.provenance[key] === "env-override",
   );
+  const environment = snapshot.environment;
+  const webOriginUnavailable = snapshot.derivedWebOrigin === null;
 
   return (
     <SettingsSection
       title={t("tailnetObserver.sectionTitle")}
       description={t("tailnetObserver.sectionDescription")}
       actions={
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => void refresh()}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => void refresh()}
+          data-testid="tailnet-observer-refresh"
+        >
           {t("tailnetObserver.refresh")}
         </Button>
       }
     >
+      {/* What Tailscale says, read by this app rather than asked for. Every
+          value below that used to be a text field comes from here. */}
       <p
         className="rounded-md border border-border bg-card/(--opacity-half) px-3 py-2 text-xs text-muted-foreground"
+        data-testid="tailnet-observer-environment"
+      >
+        {environmentText(environment, t)}
+        {/* A personal tailnet is named after its owner's login, so appending it
+            unconditionally prints the same address twice. */}
+        {environment.tailnetName === null || environment.tailnetName === environment.login
+          ? ""
+          : ` · ${environment.tailnetName}`}
+      </p>
+
+      {environment.detail !== null ? (
+        <pre
+          className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card/(--opacity-half) px-3 py-2 text-[11px] text-muted-foreground"
+          data-testid="tailnet-observer-environment-detail"
+        >
+          {environment.detail}
+        </pre>
+      ) : null}
+
+      <p
+        className="mt-2 rounded-md border border-border bg-card/(--opacity-half) px-3 py-2 text-xs text-muted-foreground"
         data-testid="tailnet-observer-status"
       >
         {snapshot.listeningPort === null
           ? t("tailnetObserver.statusNotListening")
           : `${t("tailnetObserver.statusListening")} 127.0.0.1:${snapshot.listeningPort}`}
       </p>
+
+      {snapshot.configFileError !== null ? (
+        <div
+          className="mt-2 rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2"
+          data-testid="tailnet-observer-config-file-error"
+        >
+          <p className="text-xs text-destructive">{errorText(snapshot.configFileError, t)}</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t("tailnetObserver.configFileRecovery")}
+          </p>
+          <Button
+            className="mt-2"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void save(RESET_CONFIG)}
+            data-testid="tailnet-observer-reset"
+          >
+            {t("tailnetObserver.reset")}
+          </Button>
+        </div>
+      ) : null}
 
       {snapshot.lastStartError !== null ? (
         <p className="mt-2 text-xs text-destructive" data-testid="tailnet-observer-start-error">
@@ -268,42 +413,82 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
           <Switch
             checked={draft.webEnabled}
             onCheckedChange={(next: boolean) => patch({ webEnabled: next })}
-            disabled={busy}
+            disabled={busy || webOriginUnavailable}
             aria-label={t("tailnetObserver.webLabel")}
             data-testid="tailnet-observer-web"
           />
         </div>
 
-        {draft.webEnabled ? (
-          <label className="grid gap-1 text-xs font-medium">
-            <span>{t("tailnetObserver.webOriginLabel")}</span>
-            <Input
-              value={draft.webOrigin}
-              disabled={busy}
-              spellCheck={false}
-              placeholder="https://host.tailnet.ts.net"
-              onChange={(event) => patch({ webOrigin: event.target.value })}
-              data-testid="tailnet-observer-web-origin"
-            />
-          </label>
-        ) : null}
+        {/* Derived, never typed. An origin that disagrees with the name
+            Tailscale serves fails as a bare 403 in the remote browser. */}
+        <p className="text-xs text-muted-foreground" data-testid="tailnet-observer-web-origin">
+          {webOriginUnavailable
+            ? t("tailnetObserver.webOriginUnavailable")
+            : `${t("tailnetObserver.webOriginLabel")}: ${snapshot.derivedWebOrigin}`}
+        </p>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <Button
           size="sm"
           disabled={busy}
-          onClick={() => void apply()}
+          onClick={() => void save(draft)}
           data-testid="tailnet-observer-apply"
         >
           {t("tailnetObserver.apply")}
         </Button>
-        {snapshot.restartRequired ? (
-          <span className="text-xs text-muted-foreground" data-testid="tailnet-observer-restart-required">
-            {t("tailnetObserver.restartRequired")}
-          </span>
-        ) : null}
       </div>
+
+      {/* Tailscale Serve is what puts the loopback listener on the tailnet and
+          is where the identity headers come from. The command is shown in full
+          before anything runs; approving it is the only way it runs. */}
+      {snapshot.serveCommand !== null ? (
+        <div className="mt-4 border-t border-border pt-3" data-testid="tailnet-observer-serve">
+          <p className="text-sm font-medium">{t("tailnetObserver.serveTitle")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {environment.serveTargetPort === snapshot.listeningPort
+              ? t("tailnetObserver.serveAlreadyConfigured")
+              : t("tailnetObserver.serveDescription")}
+          </p>
+          <code
+            className="mt-2 block max-w-full overflow-x-auto rounded bg-background px-2 py-1 font-mono text-xs"
+            data-testid="tailnet-observer-serve-command"
+          >
+            {snapshot.serveCommand}
+          </code>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => void configureServe()}
+              data-testid="tailnet-observer-serve-run"
+            >
+              {t("tailnetObserver.serveRun")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => copyToClipboard(snapshot.serveCommand ?? "")}
+              data-testid="tailnet-observer-serve-copy"
+            >
+              {copied ? t("tailnetObserver.copied") : t("tailnetObserver.copy")}
+            </Button>
+          </div>
+          {serveUrl !== null ? (
+            <p className="mt-2 text-xs" data-testid="tailnet-observer-serve-url">
+              {t("tailnetObserver.serveReachableAt", { url: serveUrl })}
+            </p>
+          ) : null}
+          {serveOutput !== null ? (
+            <pre
+              className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-[11px] text-destructive"
+              data-testid="tailnet-observer-serve-output"
+            >
+              {serveOutput}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
 
       {feedback !== null ? (
         <p

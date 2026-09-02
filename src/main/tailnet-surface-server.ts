@@ -1,13 +1,19 @@
 /**
  * Main-process lifecycle for the dedicated Tailnet observer listener.
  *
- * This listener is deliberately enabled only by an explicit boot environment
- * configuration. It does not configure Tailscale Serve, mutate tailnet policy,
- * or retain a Tailscale admin credential: those are deployment-admin actions
- * whose lifecycle must be coupled to the host application outside this process.
+ * The listener is off until the local owner turns it on, and it never mutates
+ * tailnet policy or retains a Tailscale admin credential. It does read this
+ * desktop's own Tailscale state, and — only when the owner approves the exact
+ * command first — puts its own loopback port behind `tailscale serve`, because
+ * asking a person to retype a name the CLI already knows is where the setup
+ * silently went wrong.
  */
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { platform as hostPlatform } from "node:process";
+import { promisify } from "node:util";
 import {
   createTailnetControllerReceiptStore,
   type TailnetControllerReceiptStore,
@@ -18,6 +24,8 @@ import {
   type TailnetSurfaceServer,
 } from "../api/tailnet-surface-server.js";
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
+import { isRecord } from "../shared/is-record.js";
+import type { TailscaleEnvironmentView } from "../shared/tailnet-observer-config.js";
 import type { ConversationCommandPort } from "./conversation-command-port.js";
 import {
   openFeatureNamespace,
@@ -381,6 +389,17 @@ let stopped = false;
 
 let activeConfig: TailnetObserverConfig | null = null;
 let lastStartError: string | null = null;
+/**
+ * What this process was composed with.
+ *
+ * Kept so a configuration saved from the Settings tab can be applied to the
+ * running process. Without it the listener was a boot-once latch and every
+ * change — including turning the feature on for the first time — waited for
+ * the next launch, which is the step people did not know they had to take.
+ */
+let compositionOptions: StartTailnetObserverServerOptions | null = null;
+/** Serializes restarts against each other; boot's own latch handles the first. */
+let lifecycleChain: Promise<unknown> = Promise.resolve();
 
 /** The main-owned P2 runtime is intentionally never exposed to a remote surface. */
 export function getTailnetPairedSharingRuntime(): TailnetPairedSharingRuntime | null {
@@ -492,6 +511,7 @@ export async function maybeStartTailnetObserverServer(
   options: StartTailnetObserverServerOptions,
 ): Promise<TailnetObserverServer | null> {
   if (stopped) return null;
+  compositionOptions = options;
   if (stopPromise) {
     await stopPromise;
     return null;
@@ -523,6 +543,51 @@ export async function maybeStartTailnetObserverServer(
       activeStartAttempt = null;
     }
   }
+}
+
+/**
+ * Bring the listener back up on the configuration that is saved right now.
+ *
+ * Stop, advance the lifecycle generation so a start still in flight cannot
+ * install itself afterwards, then resolve and start again with the options this
+ * process was composed with. The generation bump is what makes this safe to
+ * call while a boot start is still resolving.
+ */
+async function restartOnce(): Promise<TailnetObserverServer | null> {
+  if (stopped) throw new Error("tailnet-observer-stopped");
+  const options = compositionOptions;
+  if (options === null) throw new Error("tailnet-observer-not-composed");
+  if (startPromise) await startPromise.catch(() => undefined);
+  if (stopPromise) await stopPromise.catch(() => undefined);
+  if (stopped) throw new Error("tailnet-observer-stopped");
+
+  lifecycleGeneration += 1;
+  const generation = lifecycleGeneration;
+  activeConfig = null;
+  activePairedSharingRuntime = null;
+  const current = takeActiveServer();
+  if (current) await current.close();
+
+  try {
+    const started = await startForBoot(options, generation);
+    lastStartError = null;
+    return started;
+  } catch (err) {
+    lastStartError = err instanceof Error ? err.message : "tailnet-observer-start-failed";
+    throw err;
+  }
+}
+
+/**
+ * Apply a saved configuration to the running process.
+ *
+ * Callers are the owner-facing configuration service; a restart is the whole
+ * reason "takes effect the next time the app starts" is gone.
+ */
+export function restartTailnetObserverServer(): Promise<TailnetObserverServer | null> {
+  const next = lifecycleChain.then(restartOnce, restartOnce);
+  lifecycleChain = next.then(() => undefined, () => undefined);
+  return next;
 }
 
 async function stopForShutdown(): Promise<void> {
@@ -570,6 +635,304 @@ export function resetTailnetObserverServerForTests(): void {
   activeConfig = null;
   lastStartError = null;
   activePairedSharingRuntime = null;
+  compositionOptions = null;
+  lifecycleChain = Promise.resolve();
+}
+
+// ─── Tailscale environment ──────────────────────────────────────────────────
+
+/**
+ * The macOS app keeps its CLI inside the bundle and does not put it on PATH,
+ * so a PATH-only lookup reports "not installed" on the platform where it is
+ * most often installed.
+ */
+const MACOS_TAILSCALE_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+const TAILSCALE_CLI_TIMEOUT_MS = 5_000;
+const TAILSCALE_CLI_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+/** How much CLI output is carried to the surface that shows it verbatim. */
+const TAILSCALE_DETAIL_MAX_CHARS = 2_000;
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * How a Tailscale CLI invocation is run.
+ *
+ * Injected by the tests so their matrix is a question about what the CLI says,
+ * not about whether the machine running them happens to have Tailscale
+ * installed, logged in, and serving.
+ */
+export type TailscaleCommandResult =
+  | { readonly kind: "ran"; readonly code: number; readonly stdout: string; readonly stderr: string }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "failed"; readonly detail: string };
+
+export type TailscaleCommandRunner = (
+  cliPath: string,
+  args: readonly string[],
+) => Promise<TailscaleCommandResult>;
+
+/** The probe's own view plus the binary it spoke to, which never leaves main. */
+export interface TailscaleEnvironment extends TailscaleEnvironmentView {
+  readonly cliPath: string | null;
+}
+
+function tailscaleCliPath(platformName: NodeJS.Platform): string {
+  return platformName === "darwin" && existsSync(MACOS_TAILSCALE_CLI)
+    ? MACOS_TAILSCALE_CLI
+    : "tailscale";
+}
+
+async function runTailscaleCommand(
+  cliPath: string,
+  args: readonly string[],
+): Promise<TailscaleCommandResult> {
+  try {
+    const { stdout, stderr } = await execFileAsync(cliPath, [...args], {
+      encoding: "utf8",
+      timeout: TAILSCALE_CLI_TIMEOUT_MS,
+      maxBuffer: TAILSCALE_CLI_MAX_OUTPUT_BYTES,
+      windowsHide: true,
+    });
+    return { kind: "ran", code: 0, stdout, stderr };
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException & {
+      code?: number | string;
+      stdout?: string;
+      stderr?: string;
+    };
+    if (error.code === "ENOENT") return { kind: "not-found" };
+    if (typeof error.code === "number") {
+      return {
+        kind: "ran",
+        code: error.code,
+        stdout: error.stdout ?? "",
+        stderr: error.stderr ?? "",
+      };
+    }
+    return { kind: "failed", detail: error.message };
+  }
+}
+
+/** Trim CLI output to what a person can read, without rewording it. */
+function cliDetail(...candidates: readonly string[]): string | null {
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (trimmed.length > 0) return trimmed.slice(0, TAILSCALE_DETAIL_MAX_CHARS);
+  }
+  return null;
+}
+
+function environmentOf(
+  partial: Partial<TailscaleEnvironment> & Pick<TailscaleEnvironment, "state">,
+): TailscaleEnvironment {
+  return Object.freeze({
+    state: partial.state,
+    cliPath: partial.cliPath ?? null,
+    login: partial.login ?? null,
+    dnsName: partial.dnsName ?? null,
+    tailnetName: partial.tailnetName ?? null,
+    serveConfigured: partial.serveConfigured === true,
+    serveTargetPort: partial.serveTargetPort ?? null,
+    detail: partial.detail ?? null,
+  });
+}
+
+function selfDnsName(status: Record<string, unknown>): string | null {
+  const self = status.Self;
+  if (!isRecord(self) || typeof self.DNSName !== "string") return null;
+  const name = self.DNSName.replace(/\.$/, "");
+  return name.length === 0 ? null : name;
+}
+
+function selfLogin(status: Record<string, unknown>): string | null {
+  const self = status.Self;
+  const users = status.User;
+  if (!isRecord(self) || !isRecord(users)) return null;
+  const userId = self.UserID;
+  if (typeof userId !== "number" && typeof userId !== "string") return null;
+  const user = users[String(userId)];
+  if (!isRecord(user) || typeof user.LoginName !== "string" || user.LoginName.length === 0) {
+    return null;
+  }
+  return user.LoginName;
+}
+
+function currentTailnetName(status: Record<string, unknown>): string | null {
+  const tailnet = status.CurrentTailnet;
+  if (!isRecord(tailnet) || typeof tailnet.Name !== "string" || tailnet.Name.length === 0) {
+    return null;
+  }
+  return tailnet.Name;
+}
+
+function loopbackProxyPort(proxy: string): number | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(proxy);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") return null;
+  const port = Number(parsed.port);
+  return Number.isSafeInteger(port) && port > 0 && port <= 65_535 ? port : null;
+}
+
+/** What `tailscale serve status --json` says about the web handlers in place. */
+function readServeStatus(raw: unknown): { configured: boolean; targetPort: number | null } {
+  if (!isRecord(raw) || !isRecord(raw.Web)) return { configured: false, targetPort: null };
+  let configured = false;
+  for (const hostPort of Object.values(raw.Web)) {
+    if (!isRecord(hostPort) || !isRecord(hostPort.Handlers)) continue;
+    for (const handler of Object.values(hostPort.Handlers)) {
+      if (!isRecord(handler)) continue;
+      configured = true;
+      if (typeof handler.Proxy !== "string") continue;
+      const port = loopbackProxyPort(handler.Proxy);
+      if (port !== null) return { configured: true, targetPort: port };
+    }
+  }
+  return { configured, targetPort: null };
+}
+
+/**
+ * Read this desktop's own Tailscale state.
+ *
+ * Every outcome is a named state. There is no reading that invents a tailnet
+ * name, a MagicDNS name, or a port when the CLI did not supply one — those are
+ * exactly the values the old flow asked a person to retype, and a guess here
+ * would fail later at the remote end with a bare 401.
+ */
+export async function probeTailscaleEnvironment(options: {
+  readonly runCommand?: TailscaleCommandRunner;
+  readonly platform?: NodeJS.Platform;
+} = {}): Promise<TailscaleEnvironment> {
+  const run = options.runCommand ?? runTailscaleCommand;
+  const cliPath = tailscaleCliPath(options.platform ?? hostPlatform);
+
+  const status = await run(cliPath, ["status", "--json"]);
+  if (status.kind === "not-found") return environmentOf({ state: "cli-not-found" });
+  if (status.kind === "failed") {
+    return environmentOf({ state: "cli-failed", cliPath, detail: cliDetail(status.detail) });
+  }
+  if (status.code !== 0) {
+    return environmentOf({
+      state: "cli-failed",
+      cliPath,
+      detail: cliDetail(status.stderr, status.stdout),
+    });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(status.stdout);
+  } catch {
+    return environmentOf({ state: "cli-failed", cliPath, detail: cliDetail(status.stdout) });
+  }
+  if (!isRecord(parsed)) {
+    return environmentOf({ state: "cli-failed", cliPath, detail: cliDetail(status.stdout) });
+  }
+
+  const backendState = typeof parsed.BackendState === "string" ? parsed.BackendState : "";
+  if (backendState === "NeedsLogin" || backendState === "NoState") {
+    return environmentOf({ state: "logged-out", cliPath });
+  }
+  if (backendState !== "Running") {
+    return environmentOf({ state: "stopped", cliPath, detail: cliDetail(backendState) });
+  }
+
+  const serve = await run(cliPath, ["serve", "status", "--json"]);
+  let serveStatus = { configured: false, targetPort: null as number | null };
+  if (serve.kind === "ran" && serve.code === 0) {
+    try {
+      serveStatus = readServeStatus(JSON.parse(serve.stdout));
+    } catch {
+      // Serve reports "nothing configured" as output this app cannot parse on
+      // some versions. That is not a reason to call the node unusable, and it
+      // stays visible: `serveConfigured` remains false until Serve says so.
+      serveStatus = { configured: false, targetPort: null };
+    }
+  }
+
+  return environmentOf({
+    state: "ready",
+    cliPath,
+    login: selfLogin(parsed),
+    dnsName: selfDnsName(parsed),
+    tailnetName: currentTailnetName(parsed),
+    serveConfigured: serveStatus.configured,
+    serveTargetPort: serveStatus.targetPort,
+  });
+}
+
+/**
+ * The origin a MagicDNS name implies.
+ *
+ * Derived, never typed: an origin that does not match the name Tailscale serves
+ * fails as `403 same-origin-required` at the remote browser, with nothing on
+ * the desktop saying why.
+ */
+export function tailnetWebOriginFor(dnsName: string | null): string | null {
+  if (dnsName === null) return null;
+  const origin = "https://" + dnsName;
+  return isTailnetWebOrigin(origin) ? origin : null;
+}
+
+/** The argv `tailscale serve` is run with — the single source of the shown command. */
+function tailscaleServeArgs(port: number): readonly string[] {
+  return ["serve", "--bg", "--https=443", "http://127.0.0.1:" + port];
+}
+
+function shellWord(value: string): string {
+  return /[\s"'\\]/.test(value) ? JSON.stringify(value) : value;
+}
+
+/**
+ * The command, as text, for the confirmation step that shows it before it runs.
+ *
+ * Built from the same argv the run uses, so the sentence on screen cannot drift
+ * from what actually executes.
+ */
+export function tailscaleServeCommandText(cliPath: string, port: number): string {
+  return [cliPath, ...tailscaleServeArgs(port)].map(shellWord).join(" ");
+}
+
+export type TailscaleServeOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: "cli-not-found" | "command-failed"; readonly output: string | null };
+
+/**
+ * Put a loopback port behind Tailscale Serve.
+ *
+ * Running a binary for the owner is a real capability, so the caller is
+ * responsible for having shown this exact command and taken an approval first.
+ * A failure returns what Tailscale printed rather than a classification of it:
+ * the HTTPS-certificate case in particular needs Tailscale's own sentence.
+ */
+export async function configureTailscaleServe(options: {
+  readonly cliPath: string;
+  readonly port: number;
+  readonly runCommand?: TailscaleCommandRunner;
+}): Promise<TailscaleServeOutcome> {
+  const run = options.runCommand ?? runTailscaleCommand;
+  const result = await run(options.cliPath, tailscaleServeArgs(options.port));
+  if (result.kind === "not-found") {
+    return Object.freeze({ ok: false as const, reason: "cli-not-found" as const, output: null });
+  }
+  if (result.kind === "failed") {
+    return Object.freeze({
+      ok: false as const,
+      reason: "command-failed" as const,
+      output: cliDetail(result.detail),
+    });
+  }
+  if (result.code !== 0) {
+    return Object.freeze({
+      ok: false as const,
+      reason: "command-failed" as const,
+      output: cliDetail(result.stderr, result.stdout),
+    });
+  }
+  return Object.freeze({ ok: true as const });
 }
 
 function parseFixedPort(value: string): number {

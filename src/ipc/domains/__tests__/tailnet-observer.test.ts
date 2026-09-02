@@ -39,20 +39,36 @@ function snapshotFixture() {
     },
     listeningPort: 46_173,
     lastStartError: null,
-    restartRequired: false,
     pairedSharingBootstrapFailed: false,
+    environment: {
+      state: "ready" as const,
+      login: "owner@example.com",
+      dnsName: "desk.example-tailnet.ts.net",
+      tailnetName: "example-tailnet.ts.net",
+      serveConfigured: false,
+      serveTargetPort: null,
+      detail: null,
+    },
+    derivedWebOrigin: "https://desk.example-tailnet.ts.net",
+    serveCommand: "tailscale serve --bg --https=443 http://127.0.0.1:46173",
+    configFileError: null,
   };
 }
 
 async function setup(overrides: {
   snapshot?: () => Promise<unknown>;
   apply?: (config: unknown) => Promise<void>;
+  configureServe?: () => Promise<unknown>;
 } = {}) {
   handlers.clear();
   vi.clearAllMocks();
   const service = {
     snapshot: vi.fn(overrides.snapshot ?? (async () => snapshotFixture())),
     apply: vi.fn(overrides.apply ?? (async () => undefined)),
+    configureServe: vi.fn(
+      overrides.configureServe
+        ?? (async () => ({ ok: true as const, url: "https://desk.example-tailnet.ts.net/" })),
+    ),
   };
   const { registerTailnetObserverHandlers } = await import("../tailnet-observer.js");
   registerTailnetObserverHandlers({
@@ -158,5 +174,72 @@ describe("Tailnet observer configuration IPC boundary", () => {
 
     await expect(invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.snapshot))
       .resolves.toEqual({ ok: true, snapshot: snapshotFixture() });
+  });
+
+  describe("running Tailscale Serve", () => {
+    it("gates the command on a live keyboard intent and a host frame", async () => {
+      const service = await setup();
+
+      const handler = handlers.get(CHANNELS.tailnetObserver.configureServe)!;
+      await expect(Promise.resolve(handler(
+        { senderFrame: { url: "file:///app/plugin-ui-shell.html" } } as never,
+        { intent },
+      ))).resolves.toEqual({ ok: false, error: "unauthorized-frame" });
+
+      await expect(invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.configureServe, {}))
+        .resolves.toEqual({ ok: false, error: "user-keyboard-required" });
+
+      // Nothing is executed by a caller that could not prove it was the owner.
+      expect(service.configureServe).not.toHaveBeenCalled();
+    });
+
+    it("takes no port from the payload — the host decides what it serves", async () => {
+      const service = await setup();
+
+      await invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.configureServe, {
+        intent,
+        port: 22,
+      });
+
+      expect(service.configureServe).toHaveBeenCalledWith();
+    });
+
+    it("returns the reachable URL the host assembled", async () => {
+      await setup();
+
+      await expect(
+        invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.configureServe, { intent }),
+      ).resolves.toEqual({ ok: true, url: "https://desk.example-tailnet.ts.net/" });
+    });
+
+    it("carries the command output through the boundary", async () => {
+      await setup({
+        configureServe: async () => ({
+          ok: false as const,
+          error: "tailnet-serve-command-failed",
+          output: "HTTPS is not enabled on this tailnet",
+        }),
+      });
+
+      await expect(
+        invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.configureServe, { intent }),
+      ).resolves.toEqual({
+        ok: false,
+        error: "tailnet-serve-command-failed",
+        output: "HTTPS is not enabled on this tailnet",
+      });
+    });
+
+    it("never lets a thrown message out as an error code", async () => {
+      await setup({
+        configureServe: async () => {
+          throw new Error("spawn /Applications/Example.app/Contents/MacOS/Example ENOENT");
+        },
+      });
+
+      await expect(
+        invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.configureServe, { intent }),
+      ).resolves.toEqual({ ok: false, error: "tailnet-observer-write-failed", output: null });
+    });
   });
 });

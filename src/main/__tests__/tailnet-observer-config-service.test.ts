@@ -1,12 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTailnetObserverConfigService } from "../tailnet-observer-config-service.js";
-import type { TailnetObserverConfigFile } from "../tailnet-surface-server.js";
+import type {
+  TailnetObserverConfigFile,
+  TailscaleEnvironment,
+  TailscaleServeOutcome,
+} from "../tailnet-surface-server.js";
 import type { TailnetObserverConfigView } from "../../shared/tailnet-observer-config.js";
 
 const CAPABILITY = "lvis.example.com/cap/conversation-observer";
+const DNS_NAME = "desk.example-tailnet.ts.net";
+const WEB_ORIGIN = "https://" + DNS_NAME;
+
+/** A signed-in node with a MagicDNS name — the case everything else varies from. */
+function readyEnvironment(overrides: Partial<TailscaleEnvironment> = {}): TailscaleEnvironment {
+  return {
+    state: "ready",
+    cliPath: "tailscale",
+    login: "owner@example.com",
+    dnsName: DNS_NAME,
+    tailnetName: "example-tailnet.ts.net",
+    serveConfigured: false,
+    serveTargetPort: null,
+    detail: null,
+    ...overrides,
+  };
+}
 
 function service(options: {
   file?: TailnetObserverConfigFile | null;
+  readConfigFile?: () => Promise<TailnetObserverConfigFile | null>;
   env?: NodeJS.ProcessEnv;
   listeningPort?: number | null;
   activeConfig?: {
@@ -19,10 +41,13 @@ function service(options: {
   lastStartError?: string | null;
   pairedSharingBootstrapFailed?: boolean;
   writeConfigFile?: (file: TailnetObserverConfigFile) => Promise<void>;
+  environment?: TailscaleEnvironment;
+  restartListener?: () => Promise<unknown>;
+  runServe?: (input: { cliPath: string; port: number }) => Promise<TailscaleServeOutcome>;
 } = {}) {
   return createTailnetObserverConfigService({
     pairedSharingBootstrapFailed: () => options.pairedSharingBootstrapFailed === true,
-    readConfigFile: async () => options.file ?? null,
+    readConfigFile: options.readConfigFile ?? (async () => options.file ?? null),
     writeConfigFile: options.writeConfigFile ?? (async () => undefined),
     env: options.env ?? {},
     runtimeState: () => ({
@@ -30,6 +55,12 @@ function service(options: {
       activeConfig: options.activeConfig ?? null,
       lastStartError: options.lastStartError ?? null,
     }),
+    // The probe and the listener lifecycle are injected so this matrix stays a
+    // question about the configuration surface, not about whether the machine
+    // running it happens to have Tailscale installed and a listener bound.
+    probeEnvironment: async () => options.environment ?? readyEnvironment(),
+    restartListener: options.restartListener ?? (async () => undefined),
+    ...(options.runServe === undefined ? {} : { runServe: options.runServe as never }),
   });
 }
 
@@ -50,7 +81,7 @@ describe("Tailnet observer configuration service", () => {
     expect(snapshot.saved).toEqual(OFF_VIEW);
     expect(snapshot.effective.enabled).toBe(false);
     expect(snapshot.listeningPort).toBeNull();
-    expect(snapshot.restartRequired).toBe(false);
+    expect(snapshot.configFileError).toBeNull();
   });
 
   it("separates what is saved from what the environment makes effective", async () => {
@@ -62,31 +93,6 @@ describe("Tailnet observer configuration service", () => {
     expect(snapshot.saved.port).toBe(46_500);
     expect(snapshot.effective.port).toBe(47_000);
     expect(snapshot.provenance.port).toBe("env-override");
-  });
-
-  it("says a restart is required until the listener matches the resolved config", async () => {
-    const file: TailnetObserverConfigFile = {
-      enabled: true,
-      expectedAppCapability: CAPABILITY,
-    };
-    const active = {
-      port: 46_173,
-      expectedAppCapability: CAPABILITY,
-      controllerEnabled: false,
-      pairedSharingEnabled: false,
-    };
-
-    expect((await service({ file, listeningPort: 46_173, activeConfig: active }).snapshot())
-      .restartRequired).toBe(false);
-    // Saved a different capability than the one the running listener enforces.
-    expect((await service({
-      file: { ...file, expectedAppCapability: "other/cap/observer" },
-      listeningPort: 46_173,
-      activeConfig: active,
-    }).snapshot()).restartRequired).toBe(true);
-    // Turned it off while a listener is still up.
-    expect((await service({ listeningPort: 46_173, activeConfig: active }).snapshot())
-      .restartRequired).toBe(true);
   });
 
   it("surfaces the boot failure a log line used to be the only record of", async () => {
@@ -115,6 +121,192 @@ describe("Tailnet observer configuration service", () => {
       enabled: true,
       expectedAppCapability: CAPABILITY,
       pairedSharingEnabled: true,
+    });
+  });
+
+  describe("web origin derivation", () => {
+    it("puts the probed MagicDNS name in the snapshot instead of asking for it", async () => {
+      const snapshot = await service().snapshot();
+
+      expect(snapshot.environment.dnsName).toBe(DNS_NAME);
+      expect(snapshot.derivedWebOrigin).toBe(WEB_ORIGIN);
+    });
+
+    it("persists the derived origin and ignores whatever the proposal carried", async () => {
+      const writeConfigFile = vi.fn(async () => undefined);
+      await service({ writeConfigFile }).apply({
+        enabled: true,
+        expectedAppCapability: CAPABILITY,
+        port: 46_173,
+        controllerEnabled: false,
+        pairedSharingEnabled: true,
+        webEnabled: true,
+        webOrigin: "https://someone-typed-this.ts.net",
+      });
+
+      expect(writeConfigFile).toHaveBeenCalledWith(expect.objectContaining({
+        webEnabled: true,
+        webOrigin: WEB_ORIGIN,
+      }));
+    });
+
+    it("refuses the web surface when there is no name to derive an origin from", async () => {
+      const writeConfigFile = vi.fn(async () => undefined);
+      const surface = service({
+        writeConfigFile,
+        environment: readyEnvironment({ dnsName: null }),
+      });
+
+      expect((await surface.snapshot()).derivedWebOrigin).toBeNull();
+      await expect(surface.apply({
+        enabled: true,
+        expectedAppCapability: CAPABILITY,
+        port: 46_173,
+        controllerEnabled: false,
+        pairedSharingEnabled: true,
+        webEnabled: true,
+        webOrigin: "",
+      })).rejects.toThrow("tailnet-web-origin-underivable");
+      expect(writeConfigFile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a damaged configuration file", () => {
+    const damaged = async (): Promise<TailnetObserverConfigFile | null> => {
+      throw new Error("tailnet-observer-config-file-invalid");
+    };
+
+    it("names the damage and still produces a saveable snapshot", async () => {
+      const snapshot = await service({ readConfigFile: damaged }).snapshot();
+
+      // The whole point: a draft exists, so Save is reachable. This used to
+      // throw, leaving the section with a Refresh button and no way forward.
+      expect(snapshot.configFileError).toBe("tailnet-observer-config-file-invalid");
+      expect(snapshot.saved).toEqual(OFF_VIEW);
+      expect(snapshot.effective.enabled).toBe(false);
+    });
+
+    it("reports an unreadable file distinctly from an unparseable one", async () => {
+      const snapshot = await service({
+        readConfigFile: async () => {
+          throw new Error("tailnet-observer-config-file-unreadable");
+        },
+      }).snapshot();
+
+      expect(snapshot.configFileError).toBe("tailnet-observer-config-file-unreadable");
+    });
+
+    it("does not echo a failure that is not one of its own codes", async () => {
+      const snapshot = await service({
+        readConfigFile: async () => {
+          throw new Error("EACCES: permission denied, open '/home/example/tailnet/observer.json'");
+        },
+      }).snapshot();
+
+      expect(snapshot.configFileError).toBe("tailnet-observer-config-file-unreadable");
+    });
+
+    it("lets a save write over the damaged bytes", async () => {
+      const writeConfigFile = vi.fn(async () => undefined);
+      await service({ readConfigFile: damaged, writeConfigFile }).apply(OFF_VIEW);
+
+      expect(writeConfigFile).toHaveBeenCalledWith({});
+    });
+  });
+
+  describe("applying without a relaunch", () => {
+    it("restarts the listener after the file is written", async () => {
+      const order: string[] = [];
+      await service({
+        writeConfigFile: async () => { order.push("write"); },
+        restartListener: async () => { order.push("restart"); },
+      }).apply(OFF_VIEW);
+
+      expect(order).toEqual(["write", "restart"]);
+    });
+
+    it("surfaces a restart failure rather than reporting a save that did nothing", async () => {
+      await expect(service({
+        restartListener: async () => {
+          throw new Error("tailnet-observer-capability-missing-or-invalid");
+        },
+      }).apply(OFF_VIEW)).rejects.toThrow("tailnet-observer-capability-missing-or-invalid");
+    });
+  });
+
+  describe("configuring Tailscale Serve", () => {
+    it("offers the exact command for the port the listener actually bound", async () => {
+      const snapshot = await service({ listeningPort: 46_500 }).snapshot();
+
+      expect(snapshot.serveCommand)
+        .toBe("tailscale serve --bg --https=443 http://127.0.0.1:46500");
+    });
+
+    it("offers no command while nothing is listening", async () => {
+      expect((await service().snapshot()).serveCommand).toBeNull();
+    });
+
+    it("runs it for the listening port and hands back the reachable URL", async () => {
+      const runServe = vi.fn(async () => ({ ok: true as const }));
+      const result = await service({ listeningPort: 46_500, runServe }).configureServe();
+
+      expect(runServe).toHaveBeenCalledWith({ cliPath: "tailscale", port: 46_500 });
+      expect(result).toEqual({ ok: true, url: WEB_ORIGIN + "/" });
+    });
+
+    it("refuses before running anything when no listener is up", async () => {
+      const runServe = vi.fn(async () => ({ ok: true as const }));
+      const result = await service({ runServe }).configureServe();
+
+      expect(result).toEqual({ ok: false, error: "tailnet-serve-not-listening", output: null });
+      expect(runServe).not.toHaveBeenCalled();
+    });
+
+    it("refuses when Tailscale is not signed in, and says which state it is in", async () => {
+      const runServe = vi.fn(async () => ({ ok: true as const }));
+      const result = await service({
+        listeningPort: 46_173,
+        environment: readyEnvironment({ state: "logged-out" }),
+        runServe,
+      }).configureServe();
+
+      expect(result).toEqual({
+        ok: false,
+        error: "tailnet-serve-tailscale-logged-out",
+        output: null,
+      });
+      expect(runServe).not.toHaveBeenCalled();
+    });
+
+    it("refuses when there is no MagicDNS name to serve", async () => {
+      const result = await service({
+        listeningPort: 46_173,
+        environment: readyEnvironment({ dnsName: null }),
+        runServe: async () => ({ ok: true as const }),
+      }).configureServe();
+
+      expect(result).toEqual({
+        ok: false,
+        error: "tailnet-serve-magic-dns-missing",
+        output: null,
+      });
+    });
+
+    it("carries what Tailscale printed when the command fails", async () => {
+      const result = await service({
+        listeningPort: 46_173,
+        runServe: async () => ({
+          ok: false as const,
+          reason: "command-failed" as const,
+          output: "HTTPS is not enabled on this tailnet",
+        }),
+      }).configureServe();
+
+      expect(result).toEqual({
+        ok: false,
+        error: "tailnet-serve-command-failed",
+        output: "HTTPS is not enabled on this tailnet",
+      });
     });
   });
 });
