@@ -10,7 +10,7 @@
  *     Range 500 — 100,000 tokens. Live IPC push to engine.
  */
 import { useCallback, useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { Tags, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Slider } from "../../../components/ui/slider.js";
 import type { LvisApi } from "../types.js";
@@ -28,9 +28,13 @@ interface DevToolsPanelProps {
   api: LvisApi;
   open: boolean;
   onClose: () => void;
+  /** Whether the component-name overlay is currently drawn. */
+  labelsOn: boolean;
+  /** Toggle the component-name overlay. */
+  onToggleLabels: () => void;
 }
 
-export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
+export function DevToolsPanel({ api, open, onClose, labelsOn, onToggleLabels }: DevToolsPanelProps) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<PreflightStatus | null>(null);
   const [sliderValue, setSliderValue] = useState<number>(5_000);
@@ -122,6 +126,35 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
       <p className="mt-1 text-[10px] text-muted-foreground">
         {t("devToolsPanel.shortcutHint")}
       </p>
+
+      {/* Component labels — names each region on screen with its own
+          `data-testid`, so a person pointing at part of the window and the
+          agent naming a component can be shown to mean the same thing. It
+          lives here rather than in the top bar: it is used while diagnosing,
+          which is when this panel is already open, and the band has no room
+          for a control that is off almost all of the time. */}
+      <div className="mt-3 flex items-center justify-between gap-2 rounded-md border p-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs font-medium">
+            <Tags className="h-3 w-3 shrink-0" />
+            <span className="truncate">{t("devToolsPanel.componentLabelsLabel")}</span>
+          </div>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">
+            {t("devToolsPanel.componentLabelsHint")}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant={labelsOn ? "default" : "outline"}
+          size="sm"
+          className="h-7 shrink-0 px-3 text-xs"
+          onClick={onToggleLabels}
+          aria-pressed={labelsOn}
+          data-testid="dev-labels-toggle"
+        >
+          {labelsOn ? t("devToolsPanel.componentLabelsOn") : t("devToolsPanel.componentLabelsOff")}
+        </Button>
+      </div>
 
       <div className="mt-4 space-y-2">
         <div className="flex items-center justify-between gap-2">
