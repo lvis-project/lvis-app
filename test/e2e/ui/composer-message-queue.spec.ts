@@ -94,16 +94,16 @@ test.describe('renderer debug stream env', () => {
   });
 });
 
-test('InputActionBar: command → persona → attach leading controls and reasoning status are visible', async ({ mainWindow }) => {
+test('InputActionBar: command → attach leading controls and reasoning status are visible', async ({ mainWindow }) => {
   // attach button 존재
   const attachBtn = mainWindow.locator(MAIN + '[data-testid="iab-attach-button"]');
   await expect(attachBtn).toBeVisible();
+  // The persona is the command menu's first submenu, not a button of its own.
   const leadingIds = await mainWindow.locator('[data-testid="iab-leading"] [data-testid]').evaluateAll(
     (nodes) => nodes.map((node) => node.getAttribute('data-testid')),
   );
   expect(leadingIds).toEqual([
     'slash-picker-trigger',
-    'iab-assistant-context-button',
     'iab-attach-button',
   ]);
   await expect(mainWindow.locator('[data-testid="iab-status-reasoning"]')).toBeVisible();

@@ -459,7 +459,6 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:tour:get-state",
         "lvis:tour:mark-complete",
         "lvis:tour:start",
-        "lvis:ui:assistant-context-menu",
         "lvis:ui:dynamic-menu",
         "lvis:ui:native-context-menu",
         "lvis:usage:daily-summary",

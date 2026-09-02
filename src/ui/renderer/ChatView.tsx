@@ -185,7 +185,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
     tpmLimit, tpmPct,
-    rolePresets, activePreset, activePresetId, setActivePresetId,
+    rolePresets, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     enableThinkingChat, reasoningAvailable, toggleThinking, usageAvailable, subscriptionRuntimePolicy, subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider, subscriptionUnavailableProvider, subscriptionPendingProvider,
     costEstimate, costBadgeClass, activeVendor,
@@ -845,7 +845,6 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         subscriptionUnavailableProvider={runtimeUnavailableProvider}
         subscriptionPendingProvider={runtimePendingProvider}
         rolePresets={rolePresets}
-        activePreset={activePreset}
         activePresetId={activePresetId}
         onSelectPreset={setActivePresetId}
         onBottomSend={handleBottomSend}

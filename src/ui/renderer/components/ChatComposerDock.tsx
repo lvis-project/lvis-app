@@ -76,7 +76,6 @@ export interface ChatComposerDockProps {
   subscriptionUnavailableProvider?: string;
   subscriptionPendingProvider?: string;
   rolePresets: RolePreset[];
-  activePreset: RolePreset | null;
   activePresetId: string;
   onSelectPreset: (id: string) => void;
   onBottomSend: () => void;
@@ -242,7 +241,6 @@ export function ChatComposerDock({
   subscriptionUnavailableProvider,
   subscriptionPendingProvider,
   rolePresets,
-  activePreset,
   activePresetId,
   onSelectPreset,
   onBottomSend,
@@ -479,7 +477,6 @@ export function ChatComposerDock({
           }
           onAttach={onAttach}
           rolePresets={rolePresets}
-          activePreset={activePreset}
           activePresetId={activePresetId}
           onSelectPreset={onSelectPreset}
           isBusy={streaming}

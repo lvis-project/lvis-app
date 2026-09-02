@@ -35,7 +35,6 @@ export const zh: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginMessage": "请选择包含 plugin.json 的构建文件夹",
   "mainDialog.unauthorizedFrame": "未经授权的框架。",
   "mainDialog.pluginDisableNotPermitted": "此插件由您的组织管理，无法停用。",
-  "mainDialog.noPersonasAvailable": "没有可用的 persona",
   "mainDialog.exportConversationTitle": "导出会话",
   "mainDialog.deleteConversationMessage": "删除此对话？",
   "mainDialog.deleteConversationDetail": "记录及其检查点将从磁盘中删除。此操作无法撤销。",

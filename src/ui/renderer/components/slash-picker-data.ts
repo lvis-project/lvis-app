@@ -6,6 +6,7 @@ import { Terminal, Zap, Puzzle, Server, Sparkles, MessageSquareText, type Lucide
 import { t } from "../../../i18n/runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
+import type { RolePreset } from "../../../data/role-presets.js";
 import type { NativeMenuRow } from "../hooks/use-native-context-menu.js";
 
 /** A single live MCP-server tool, namespaced by its server. */
@@ -163,12 +164,22 @@ export function filterSkills(skills: SkillEntry[], query: string): SkillEntry[] 
  *
  * A category with nothing in it is left out rather than shown empty: an
  * always-present row that never opens teaches the user it is broken.
+ *
+ * The persona comes first. It is the one row here that is a STATE rather than
+ * an insertion — which voice the next message is answered in — so its rows are
+ * radio items with the current one checked, and it sits above the lists so the
+ * thing that colours every message is not found below the fold of them. It
+ * used to be its own button beside this one; one menu for "what shapes the
+ * next message" beats two buttons that each hold a third of it.
  */
 export function buildComposerMenuSections(input: {
+  personas: RolePreset[];
+  activePersonaId: string;
   plugins: PluginEntry[];
   mcpTools: McpToolEntry[];
   mcpPrompts: McpPromptEntry[];
   skills: SkillEntry[];
+  onSelectPersona: (id: string) => void;
   onInsert: (cmd: string) => void;
   onSelectPlugin: (viewKey: string) => void;
   onRunMcpPrompt: (prompt: McpPromptEntry) => void;
@@ -179,6 +190,18 @@ export function buildComposerMenuSections(input: {
     categories.push({ id: `category:${category}`, label: catLabel(category), submenu: rows });
   };
 
+  if (input.personas.length > 0) {
+    categories.push({
+      id: "category:persona",
+      label: t("slashPicker.catPersona"),
+      submenu: input.personas.map((persona) => ({
+        id: `persona:${persona.id}`,
+        label: persona.name,
+        checked: persona.id === input.activePersonaId,
+        onSelect: () => input.onSelectPersona(persona.id),
+      })),
+    });
+  }
   push("command", SLASH_COMMANDS.map((command) => ({
     id: `command:${command.cmd}`,
     label: `${command.cmd} — ${t(command.labelKey)}`,

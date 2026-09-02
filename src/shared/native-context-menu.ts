@@ -122,6 +122,12 @@ export interface NativeMenuItem {
   sublabel?: string;
   accelerator?: string;
   enabled?: boolean;
+  /**
+   * Leaf rows only. Present, the row is drawn as a radio item — one of a set
+   * where exactly one is current, the way a persona is — and its state is
+   * this value. Absent, the row is a plain command.
+   */
+  checked?: boolean;
   submenu?: NativeMenuItem[];
 }
 

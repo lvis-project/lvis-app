@@ -35,7 +35,6 @@ export const ja: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginMessage": "plugin.json を含むビルドフォルダーを選択してください",
   "mainDialog.unauthorizedFrame": "許可されていないフレームです。",
   "mainDialog.pluginDisableNotPermitted": "このプラグインは組織によって管理されているため、無効にできません。",
-  "mainDialog.noPersonasAvailable": "利用可能な persona はありません",
   "mainDialog.exportConversationTitle": "会話をエクスポート",
   "mainDialog.deleteConversationMessage": "この会話を削除しますか？",
   "mainDialog.deleteConversationDetail": "トランスクリプトとチェックポイントがディスクから削除されます。元に戻せません。",

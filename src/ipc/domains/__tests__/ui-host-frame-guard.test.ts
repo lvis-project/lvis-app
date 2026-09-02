@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invokeRegisteredHandlerWithEvent } from "../../../__tests__/test-helpers.js";
 
-const ASSISTANT_CHANNEL = "lvis:ui:assistant-context-menu";
+const DYNAMIC_CHANNEL = "lvis:ui:dynamic-menu";
 const NATIVE_CHANNEL = "lvis:ui:native-context-menu";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -37,12 +37,11 @@ function uiEvent(frameUrl: string) {
   };
 }
 
-const assistantPayload = {
+const dynamicPayload = {
   requestId: "req-1",
   x: 10,
   y: 20,
-  personas: [{ id: "persona-1", name: "Default" }],
-  activePersonaId: "persona-1",
+  sections: [{ items: [{ id: "persona:default", label: "Default", checked: true }] }],
 };
 
 const nativePayload = {
@@ -73,7 +72,7 @@ describe("UI context-menu channels — host renderer frames only", () => {
 
   it("refuses a plugin UI shell frame on both channels", () => {
     const shell = "file:///dist/src/plugin-ui-shell.html";
-    expect(invoke(ASSISTANT_CHANNEL, shell, assistantPayload)).toEqual({
+    expect(invoke(DYNAMIC_CHANNEL, shell, dynamicPayload)).toEqual({
       ok: false,
       error: "unauthorized-frame",
     });
@@ -86,19 +85,19 @@ describe("UI context-menu channels — host renderer frames only", () => {
 
   it("serves the host renderer even when its URL mentions the shell filename", () => {
     const hostLookalike = "file:///dist/src/index.html?next=plugin-ui-shell.html";
-    expect(invoke(ASSISTANT_CHANNEL, hostLookalike, assistantPayload)).toEqual({ ok: true });
+    expect(invoke(DYNAMIC_CHANNEL, hostLookalike, dynamicPayload)).toEqual({ ok: true });
     expect(invoke(NATIVE_CHANNEL, hostLookalike, nativePayload)).toEqual({ ok: true });
     expect(popup).toHaveBeenCalledTimes(2);
   });
 
   it("serves the ordinary host renderer", () => {
     const host = "file:///dist/src/index.html";
-    expect(invoke(ASSISTANT_CHANNEL, host, assistantPayload)).toEqual({ ok: true });
+    expect(invoke(DYNAMIC_CHANNEL, host, dynamicPayload)).toEqual({ ok: true });
     expect(popup).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a remote origin frame", () => {
-    expect(invoke(ASSISTANT_CHANNEL, "https://evil.example.com/", assistantPayload)).toEqual({
+    expect(invoke(DYNAMIC_CHANNEL, "https://evil.example.com/", dynamicPayload)).toEqual({
       ok: false,
       error: "unauthorized-frame",
     });

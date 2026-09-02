@@ -15,6 +15,8 @@ export interface NativeMenuRow {
   sublabel?: string;
   accelerator?: string;
   enabled?: boolean;
+  /** Leaf rows only — drawn as a radio item carrying this state. */
+  checked?: boolean;
   submenu?: NativeMenuRow[];
   /** Leaf rows only — a row with a submenu opens it instead. */
   onSelect?: () => void | Promise<void>;
@@ -151,6 +153,7 @@ export function useNativeMenu() {
           ...(row.sublabel === undefined ? {} : { sublabel: row.sublabel }),
           ...(row.accelerator === undefined ? {} : { accelerator: row.accelerator }),
           ...(row.enabled === undefined ? {} : { enabled: row.enabled }),
+          ...(row.checked === undefined ? {} : { checked: row.checked }),
           ...(row.submenu === undefined ? {} : { submenu: strip(row.submenu) }),
         };
       });

@@ -21,10 +21,6 @@ import {
   type InitialAppMode,
 } from "../shared/initial-app-mode.js";
 import type {
-  AssistantContextMenuAction,
-  AssistantContextMenuPayload,
-} from "../shared/assistant-context-menu.js";
-import type {
   NativeContextMenuAction,
   DynamicNativeMenuAction,
   DynamicNativeMenuPayload,
@@ -200,13 +196,6 @@ export function buildLvisNamespaceExtras() {
     cards: () => ipcRenderer.invoke(CHANNELS.plugins.cards),
   },
   ui: {
-    showAssistantContextMenu: (payload: AssistantContextMenuPayload) =>
-      ipcRenderer.invoke(UI.assistantContextMenu, payload),
-    onAssistantContextAction: (cb: (action: AssistantContextMenuAction) => void) => {
-      const listener = (_event: unknown, action: AssistantContextMenuAction) => cb(action);
-      ipcRenderer.on(UI.assistantContextAction, listener);
-      return () => ipcRenderer.removeListener(UI.assistantContextAction, listener);
-    },
     showNativeContextMenu: (payload: NativeContextMenuPayload) =>
       ipcRenderer.invoke(UI.nativeContextMenu, payload),
     onNativeContextMenuAction: (cb: (action: NativeContextMenuAction) => void) => {

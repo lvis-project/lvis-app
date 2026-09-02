@@ -25,7 +25,7 @@ afterEach(() => {
  */
 function installMenuBridge() {
   let actionHandler: ((action: DynamicNativeMenuAction) => void) | null = null;
-  const showDynamicMenu = vi.fn(async () => ({ ok: true as const }));
+  const showDynamicMenu = vi.fn(async (_payload: DynamicNativeMenuPayload) => ({ ok: true as const }));
   Object.defineProperty(window, "lvis", {
     configurable: true,
     value: {
@@ -54,8 +54,16 @@ function installMenuBridge() {
 const flatten = (items: NativeMenuItem[]): NativeMenuItem[] =>
   items.flatMap((item) => [item, ...flatten(item.submenu ?? [])]);
 
+const personas = [
+  { id: "default", name: "기본", systemPromptAdd: "", isDefault: true },
+  { id: "coding", name: "코딩", systemPromptAdd: "Code carefully." },
+];
+
 function renderPicker(overrides: Partial<Parameters<typeof SlashPicker>[0]> = {}) {
   const props: Parameters<typeof SlashPicker>[0] = {
+    personas,
+    activePersonaId: "default",
+    onSelectPersona: vi.fn(),
     plugins: [],
     onSelectPlugin: vi.fn(),
     onInsert: vi.fn(),
@@ -93,6 +101,13 @@ describe("SlashPicker", () => {
     expect(categoryIds).toContain("category:plugin");
     expect(categoryIds).not.toContain("category:mcp");
     expect(categoryIds).not.toContain("category:skills");
+    // The persona leads: it is the one row that is a state, not an insertion,
+    // and the current one is the checked radio row.
+    expect(categoryIds[0]).toBe("category:persona");
+    expect(categories.items[0]!.submenu!.map((row) => [row.id, row.checked])).toEqual([
+      ["persona:default", true],
+      ["persona:coding", false],
+    ]);
     // Nothing anywhere in the menu acts on click without opening a submenu.
     expect(flatten(categories.items).some((item) => item.id.startsWith("shortcut:")))
       .toBe(false);
@@ -102,10 +117,12 @@ describe("SlashPicker", () => {
     const bridge = installMenuBridge();
     const onInsert = vi.fn();
     const onSelectPlugin = vi.fn();
+    const onSelectPersona = vi.fn();
     const { getByTestId } = renderPicker({
       plugins: [{ viewKey: "meeting", label: "미팅" } as never],
       onInsert,
       onSelectPlugin,
+      onSelectPersona,
     });
 
     fireEvent.click(getByTestId(TEST_IDS.slashPickerTrigger));
@@ -129,6 +146,20 @@ describe("SlashPicker", () => {
     expect(onInsert).not.toHaveBeenCalled();
 
     expect(rows.some((row) => row.id === "plugin:meeting")).toBe(true);
+    expect(onSelectPersona).not.toHaveBeenCalled();
+  });
+
+  it("a persona row reports the persona id, the way the old picker did", async () => {
+    const bridge = installMenuBridge();
+    const onSelectPersona = vi.fn();
+    const { getByTestId } = renderPicker({ onSelectPersona });
+
+    fireEvent.click(getByTestId(TEST_IDS.slashPickerTrigger));
+    await waitFor(() => expect(bridge.showDynamicMenu).toHaveBeenCalledOnce());
+    const payload = bridge.showDynamicMenu.mock.calls[0]![0];
+
+    act(() => { bridge.fire({ requestId: payload.requestId, id: "persona:coding" }); });
+    expect(onSelectPersona).toHaveBeenCalledExactlyOnceWith("coding");
   });
 
   it("opens the same menu when the shortcut raises it", async () => {
@@ -140,6 +171,9 @@ describe("SlashPicker", () => {
     rerender(
       <TooltipProvider>
         <SlashPicker
+          personas={personas}
+          activePersonaId="default"
+          onSelectPersona={vi.fn()}
           plugins={[]}
           onSelectPlugin={vi.fn()}
           onInsert={vi.fn()}
@@ -160,6 +194,9 @@ describe("SlashPicker", () => {
     rerender(
       <TooltipProvider>
         <SlashPicker
+          personas={personas}
+          activePersonaId="default"
+          onSelectPersona={vi.fn()}
           plugins={[]}
           onSelectPlugin={vi.fn()}
           onInsert={vi.fn()}

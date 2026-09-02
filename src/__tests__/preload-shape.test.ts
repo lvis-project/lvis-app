@@ -188,10 +188,8 @@ describe("preload contextBridge world shape lock", () => {
             "readFile",
           ],
           "ui": [
-            "onAssistantContextAction",
             "onDynamicMenuAction",
             "onNativeContextMenuAction",
-            "showAssistantContextMenu",
             "showDynamicMenu",
             "showNativeContextMenu",
           ],

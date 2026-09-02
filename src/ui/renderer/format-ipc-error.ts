@@ -190,7 +190,6 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
   // ── Assistant context / role / memory / routine ──
   "invalid-assistant-context": "formatIpcError.invalidAssistantContext",
-  "invalid-assistant-context-menu": "formatIpcError.invalidAssistantContextMenu",
   "invalid-assistant-agent": "formatIpcError.invalidAssistantAgent",
   "invalid-assistant-skill": "formatIpcError.invalidAssistantSkill",
   "invalid-assistant-skills": "formatIpcError.invalidAssistantSkills",
