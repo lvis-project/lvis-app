@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { DayPicker } from "react-day-picker";
-import { de, enUS, es, fr, ja, ko, zhCN } from "date-fns/locale";
+import { enUS, ko } from "date-fns/locale";
 
 import { cn } from "../../lib/utils.js";
 import { useTranslation } from "../../i18n/react.js";
@@ -12,11 +12,6 @@ export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 const DATE_FNS_LOCALES = {
   en: enUS,
   ko,
-  ja,
-  zh: zhCN,
-  es,
-  fr,
-  de,
 } as const;
 
 /**

@@ -1020,20 +1020,19 @@ describe("Minor-1: broadcastSettingsSnapshot helper — all mutation handlers ca
       shortcuts: { toggleWindow: null, enabled: false },
       system: { launchAtStartup: false, launchMinimized: false },
     };
-    let resolveJa!: (messages: Record<string, string>) => void;
-    let signalJaRequested!: () => void;
-    const jaLoading = new Promise<Record<string, string>>((resolve) => {
-      resolveJa = resolve;
+    let resolveKo!: (messages: Record<string, string>) => void;
+    let signalKoRequested!: () => void;
+    const koLoading = new Promise<Record<string, string>>((resolve) => {
+      resolveKo = resolve;
     });
-    const jaRequested = new Promise<void>((resolve) => {
-      signalJaRequested = resolve;
+    const koRequested = new Promise<void>((resolve) => {
+      signalKoRequested = resolve;
     });
     const { __setLocaleLoaderForTest } = await import("../../../i18n/messages/index.js");
-    const restoreJa = __setLocaleLoaderForTest("ja", () => {
-      signalJaRequested();
-      return jaLoading;
+    const restoreKo = __setLocaleLoaderForTest("ko", () => {
+      signalKoRequested();
+      return koLoading;
     });
-    const restoreFr = __setLocaleLoaderForTest("fr", async () => ({}));
     const { getLocale, setLocale } = await import("../../../i18n/index.js");
     setLocale("en");
     const baseDeps = makeDeps([win]);
@@ -1066,31 +1065,32 @@ describe("Minor-1: broadcastSettingsSnapshot helper — all mutation handlers ca
       const { registerSettingsHandlers } = await import("../settings.js");
       registerSettingsHandlers(deps as never);
 
-      const older = invoke("lvis:settings:update", { appearance: { language: "ja" } });
-      await jaRequested;
-      await expect(invoke("lvis:settings:update", { appearance: { language: "fr" } }))
-        .resolves.toMatchObject({ appearance: { language: "fr" } });
-      expect(getLocale()).toBe("fr");
-      resolveJa({});
-      await expect(older).resolves.toMatchObject({ appearance: { language: "ja" } });
+      // The older update targets the lazy Korean catalog and stalls on its
+      // loader; the newer one targets the eager English catalog and lands first.
+      const older = invoke("lvis:settings:update", { appearance: { language: "ko" } });
+      await koRequested;
+      await expect(invoke("lvis:settings:update", { appearance: { language: "en" } }))
+        .resolves.toMatchObject({ appearance: { language: "en" } });
+      expect(getLocale()).toBe("en");
+      resolveKo({});
+      await expect(older).resolves.toMatchObject({ appearance: { language: "ko" } });
 
-      expect(getLocale()).toBe("fr");
+      expect(getLocale()).toBe("en");
       const snapshots = win.webContents.send.mock.calls
         .filter(([channel]) => channel === SETTINGS.updated)
         .map(([, snapshot]) => snapshot as { appearance?: { language?: string } });
       expect(snapshots).toEqual([
-        expect.objectContaining({ appearance: { language: "fr" } }),
+        expect.objectContaining({ appearance: { language: "en" } }),
       ]);
     } finally {
-      restoreJa();
-      restoreFr();
+      restoreKo();
       setLocale("en");
     }
   });
   it("loads and applies a lazy main-process locale before broadcasting settings:update", async () => {
     const win = makeWindow();
     const snapshot = {
-      appearance: { language: "ja" },
+      appearance: { language: "ko" },
       llm: { provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } },
       marketplace: { cloudAllowPrivateNetwork: false },
     };
@@ -1114,17 +1114,17 @@ describe("Minor-1: broadcastSettingsSnapshot helper — all mutation handlers ca
     const { registerSettingsHandlers } = await import("../settings.js");
     registerSettingsHandlers(deps as never);
 
-    await invoke("lvis:settings:update", { appearance: { language: "ja" } });
+    await invoke("lvis:settings:update", { appearance: { language: "ko" } });
 
-    expect(getLocale()).toBe("ja");
-    expect(translate("ja", "settings.appearance.language.title")).toBe("言語");
+    expect(getLocale()).toBe("ko");
+    expect(translate("ko", "settings.appearance.language.title")).toBe("언어");
     expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
   });
 
   it("keeps the current main-process locale and still broadcasts when lazy locale loading fails", async () => {
     const win = makeWindow();
     const snapshot = {
-      appearance: { language: "ja" },
+      appearance: { language: "ko" },
       llm: { provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } },
       marketplace: { cloudAllowPrivateNetwork: false },
     };
@@ -1144,16 +1144,16 @@ describe("Minor-1: broadcastSettingsSnapshot helper — all mutation handlers ca
     };
     const { setLocale, getLocale } = await import("../../../i18n/index.js");
     const { __setLocaleLoaderForTest } = await import("../../../i18n/messages/index.js");
-    const restore = __setLocaleLoaderForTest("ja", () => Promise.reject(new Error("missing chunk")));
-    setLocale("ko");
+    const restore = __setLocaleLoaderForTest("ko", () => Promise.reject(new Error("missing chunk")));
+    setLocale("en");
 
     try {
       const { registerSettingsHandlers } = await import("../settings.js");
       registerSettingsHandlers(deps as never);
 
-      await invoke("lvis:settings:update", { appearance: { language: "ja" } });
+      await invoke("lvis:settings:update", { appearance: { language: "ko" } });
 
-      expect(getLocale()).toBe("ko");
+      expect(getLocale()).toBe("en");
       expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
     } finally {
       restore();

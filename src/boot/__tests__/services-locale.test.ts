@@ -17,28 +17,28 @@ afterEach(() => {
 describe("applyBootLocale", () => {
   it("loads a persisted lazy locale before applying the main-process runtime locale", async () => {
     const settingsService = {
-      get: () => ({ language: "zh" }),
+      get: () => ({ language: "ko" }),
     };
 
     setLocale(DEFAULT_LOCALE);
     __resetLazyLocaleMessagesForTest();
-    expect(isLocaleMessagesLoaded("zh")).toBe(false);
+    expect(isLocaleMessagesLoaded("ko")).toBe(false);
 
     await applyBootLocale(settingsService);
 
-    expect(isLocaleMessagesLoaded("zh")).toBe(true);
-    expect(getLocale()).toBe("zh");
-    expect(translate("zh", "settings.appearance.language.title")).toBe("语言");
+    expect(isLocaleMessagesLoaded("ko")).toBe(true);
+    expect(getLocale()).toBe("ko");
+    expect(translate("ko", "settings.appearance.language.title")).toBe("언어");
   });
 
   it("falls back to English instead of failing boot when a lazy locale cannot load", async () => {
     const settingsService = {
-      get: () => ({ language: "zh" }),
+      get: () => ({ language: "ko" }),
     };
-    const restore = __setLocaleLoaderForTest("zh", () => Promise.reject(new Error("missing chunk")));
+    const restore = __setLocaleLoaderForTest("ko", () => Promise.reject(new Error("missing chunk")));
 
     try {
-      setLocale("ko");
+      setLocale("en");
 
       await expect(applyBootLocale(settingsService)).resolves.toBeUndefined();
 

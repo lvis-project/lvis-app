@@ -1,8 +1,8 @@
 /**
  * Every key a caller asks for must exist in the catalog.
  *
- * The catalog check next door validates locale PARITY — that all seven locales
- * carry the same key set. It says nothing about whether a key a caller passes
+ * The catalog check next door validates locale PARITY — that every supported
+ * locale carries the same key set. It says nothing about whether a key a caller passes
  * to `t()` is in that set, so a typo or an invented key passes every gate and
  * ships: `t()` falls back to echoing the key, and the UI renders the literal
  * string "sidebar.newChat" where a label belongs. That is a user-visible defect

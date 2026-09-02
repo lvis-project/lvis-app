@@ -28,7 +28,7 @@ function LocaleProbe() {
     <div>
       <span data-testid="active-locale">{locale}</span>
       <span data-testid="language-title">{t("settings.appearance.language.title")}</span>
-      <button type="button" onClick={() => setLocale("zh")}>zh</button>
+      <button type="button" onClick={() => setLocale("ko")}>ko</button>
     </div>
   );
 }
@@ -40,7 +40,7 @@ afterEach(() => {
 
 describe("I18nSettingsProvider lazy locale loading", () => {
   it("hydrates a persisted lazy locale before switching the rendered catalog", async () => {
-    installApi("ja");
+    installApi("ko");
 
     render(
       <I18nSettingsProvider>
@@ -49,8 +49,8 @@ describe("I18nSettingsProvider lazy locale loading", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("active-locale")).toHaveTextContent("ja");
-      expect(screen.getByTestId("language-title")).toHaveTextContent("言語");
+      expect(screen.getByTestId("active-locale")).toHaveTextContent("ko");
+      expect(screen.getByTestId("language-title")).toHaveTextContent("언어");
     });
   });
 
@@ -65,14 +65,14 @@ describe("I18nSettingsProvider lazy locale loading", () => {
 
     expect(screen.getByTestId("language-title")).toHaveTextContent("Language");
 
-    fireEvent.click(screen.getByText("zh"));
+    fireEvent.click(screen.getByText("ko"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("active-locale")).toHaveTextContent("zh");
-      expect(screen.getByTestId("language-title")).toHaveTextContent("语言");
+      expect(screen.getByTestId("active-locale")).toHaveTextContent("ko");
+      expect(screen.getByTestId("language-title")).toHaveTextContent("언어");
     });
     expect(api.updateSettings).toHaveBeenCalledWith({
-      appearance: { schemaVersion: 2, language: "zh" },
+      appearance: { schemaVersion: 2, language: "ko" },
     });
   });
 
@@ -87,17 +87,17 @@ describe("I18nSettingsProvider lazy locale loading", () => {
 
     expect(screen.getByTestId("language-title")).toHaveTextContent("Language");
 
-    settingsUpdatedHandlers[0]?.({ appearance: { language: "ja" } });
+    settingsUpdatedHandlers[0]?.({ appearance: { language: "ko" } });
 
     await waitFor(() => {
-      expect(screen.getByTestId("active-locale")).toHaveTextContent("ja");
-      expect(screen.getByTestId("language-title")).toHaveTextContent("言語");
+      expect(screen.getByTestId("active-locale")).toHaveTextContent("ko");
+      expect(screen.getByTestId("language-title")).toHaveTextContent("언어");
     });
   });
 
   it("keeps the current rendered locale when a selected lazy catalog fails to load", async () => {
     const { api } = installApi("en");
-    const restore = __setLocaleLoaderForTest("zh", () => Promise.reject(new Error("missing chunk")));
+    const restore = __setLocaleLoaderForTest("ko", () => Promise.reject(new Error("missing chunk")));
 
     try {
       render(
@@ -108,11 +108,11 @@ describe("I18nSettingsProvider lazy locale loading", () => {
 
       expect(screen.getByTestId("language-title")).toHaveTextContent("Language");
 
-      fireEvent.click(screen.getByText("zh"));
+      fireEvent.click(screen.getByText("ko"));
 
       await waitFor(() => {
         expect(api.updateSettings).toHaveBeenCalledWith({
-          appearance: { schemaVersion: 2, language: "zh" },
+          appearance: { schemaVersion: 2, language: "ko" },
         });
       });
       expect(screen.getByTestId("active-locale")).toHaveTextContent("en");

@@ -13,17 +13,10 @@
 export const en = {
   // ── Common / shared ───────────────────────────────────────────────
   "common.cancel": "Cancel",
-  "common.allow": "Allow",
-  "common.confirm": "Confirm",
-  "common.ok": "OK",
   "common.save": "Save",
   "common.close": "Close",
   "common.delete": "Delete",
-  "common.remove": "Remove",
   "common.retry": "Retry",
-  "common.loading": "Loading…",
-  "common.error": "Error",
-  "common.thinking": "Thinking…",
 
   // ── Settings → Appearance → Language ──────────────────────────────
   "settings.appearance.language.title": "Language",

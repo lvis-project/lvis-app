@@ -198,7 +198,7 @@ describe("SettingsService marketplace defaults", () => {
           { providerId: "bad router", label: "Bad", baseUrl: "http://localhost:8000/v1", defaultModel: "x" },
         ],
         installedThemeBundleIds: ["high-contrast", "moonstone", "nope"] as never,
-        installedLanguagePacks: ["ja", "en", "nope"] as never,
+        installedLanguagePacks: ["ko", "en", "nope"] as never,
       },
     });
 
@@ -213,7 +213,7 @@ describe("SettingsService marketplace defaults", () => {
         requiresApiKey: false,
       }],
       installedThemeBundleIds: ["high-contrast"],
-      installedLanguagePacks: ["ja"],
+      installedLanguagePacks: ["ko"],
     });
   });
 

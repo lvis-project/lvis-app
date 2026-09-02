@@ -8,17 +8,10 @@ import type { SeedMessageKey } from "./en.js";
 export const ko: Record<SeedMessageKey, string> = {
   // ── Common / shared ───────────────────────────────────────────────
   "common.cancel": "취소",
-  "common.allow": "허용",
-  "common.confirm": "확인",
-  "common.ok": "확인",
   "common.save": "저장",
   "common.close": "닫기",
   "common.delete": "삭제",
-  "common.remove": "제거",
   "common.retry": "다시 시도",
-  "common.loading": "불러오는 중…",
-  "common.error": "오류",
-  "common.thinking": "생각 중...",
 
   // ── Settings → Appearance → Language ──────────────────────────────
   "settings.appearance.language.title": "언어",
