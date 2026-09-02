@@ -1,7 +1,8 @@
 import "../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { collapsedBandLeadClearance } from "../../../shared/shell-geometry.js";
-import { clickSidebarNavRow, openSidebarGroup, sidebarNavRowActive } from "../../../../test/renderer/helpers.js";
+import { clickSidebarNavRow, mountedTileIds, openSidebarGroup, sidebarNavRowActive, splitIntoNTiles } from "../../../../test/renderer/helpers.js";
+import { MAX_PANES } from "../../../contract/app-contract.js";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 
@@ -118,6 +119,64 @@ describe("App inline navigation", () => {
     });
     expect(await sidebarNavRowActive("features", "sidebar-routines")).toBe(true);
     expect(await sidebarNavRowActive("features", "toolbar-work-board")).toBe(false);
+  });
+
+  it("opens a row in a NEW pane when the click carries the modifier", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    await waitFor(() => expect(mountedTileIds(container)).toHaveLength(1));
+
+    await clickSidebarNavRow("features", "sidebar-routines", { metaKey: true });
+
+    // A second pane, and the view in it: the pane the gesture made is the one
+    // focus is on, so the ordinary selection landed there.
+    await waitFor(() => expect(mountedTileIds(container)).toHaveLength(2));
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="view-path-current-routines"]')).not.toBeNull();
+    });
+    const [, second] = mountedTileIds(container);
+    expect(
+      container.querySelector(`[data-testid="chat-group-cell:${second}"] [data-testid="chat-group"]`)
+        ?.getAttribute("data-focused"),
+    ).toBe("true");
+
+    // A plain click on the same row replaces the focused pane's content and
+    // adds nothing — the two gestures differ, and not by accident.
+    await clickSidebarNavRow("features", "toolbar-work-board");
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="view-path-current-work-board"]')).not.toBeNull();
+    });
+    expect(mountedTileIds(container)).toHaveLength(2);
+  });
+
+  it("says so, and opens nothing, when the canvas has no room for another pane", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    await splitIntoNTiles(container, MAX_PANES);
+    expect(mountedTileIds(container)).toHaveLength(MAX_PANES);
+
+    await clickSidebarNavRow("features", "sidebar-routines", { metaKey: true });
+
+    // The refusal is SAID. A menu row that quietly does nothing is the one
+    // outcome a user cannot tell apart from a broken app.
+    await waitFor(() => {
+      const toasts = container.querySelectorAll('[data-testid="status-toast-message"]');
+      expect([...toasts].some((el) => el.textContent?.includes("자리가 없습니다"))).toBe(true);
+    });
+    expect(mountedTileIds(container)).toHaveLength(MAX_PANES);
+    // And nothing moved: the refusal is not a quiet navigation either.
+    expect(container.querySelector('[data-testid="view-path-current-routines"]')).toBeNull();
+  });
+
+  it("offers no new-pane gesture in chat mode, which draws one pane and hides the rest", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    await switchToChatMode(container);
+
+    await clickSidebarNavRow("features", "sidebar-routines", { metaKey: true });
+
+    // The modifier is inert here, so the row does what a plain click does.
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="view-path-current-routines"]')).not.toBeNull();
+    });
+    expect(mountedTileIds(container)).toHaveLength(1);
   });
 
   it("starts the band's path past the sidebar's bare cluster strip once the rail is collapsed", async () => {

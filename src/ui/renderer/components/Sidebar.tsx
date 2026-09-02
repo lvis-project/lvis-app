@@ -68,6 +68,18 @@ export interface SidebarProps {
    *  also accepts the `plugin-doctor:<id>` pseudo-key that is intercepted
    *  before it can become a location. Hence `string`, not `ViewKey`. */
   onSelect: (viewKey: string) => void;
+  /**
+   * Open the row's view in a NEW pane instead of the focused one.
+   *
+   * Absent where a new pane has no meaning — chat mode draws one pane and
+   * nothing of the others, so a second one there would be a place the user
+   * cannot see. The rows read this as "is there such a gesture at all": the
+   * menu row and the modifier chord both disappear with it, the same way the
+   * split control disappears from a pane header. Whether the CANVAS has room is
+   * a different question, asked at the moment the gesture is made, and its
+   * answer arrives as a message rather than as a missing menu row.
+   */
+  onSelectInNewPane?: (viewKey: string) => void;
   /** Plugin views from usePluginMarketplace — same list passed to the main content region. */
   pluginViews: PluginUiExtension[];
   /** Installed plugins that failed to load and therefore need Settings → Plugin Doctor. */
@@ -217,7 +229,12 @@ interface NavItemProps {
   label: string;
   icon: React.ReactNode;
   isActive: boolean;
-  onClick: () => void;
+  /** The event is passed because HOW the row was clicked decides where the view
+   *  opens — a plain click replaces the focused pane, meta/ctrl opens a new one. */
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  /** Right-click. The row's own menu, so the modifier chord above is not the
+   *  only way to discover the second destination. */
+  onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
   collapsed: boolean;
   /** Hover tone for the inactive state. Defaults to the primary `accent` surface. */
   tone?: NavTone;
@@ -243,6 +260,7 @@ function NavItem({
   icon,
   isActive,
   onClick,
+  onContextMenu,
   collapsed,
   tone = "accent",
   "data-testid": testId,
@@ -260,6 +278,7 @@ function NavItem({
     <button
       type="button"
       onClick={onClick}
+      onContextMenu={onContextMenu}
       role={role}
       aria-current={isActive ? "page" : undefined}
       aria-label={title}
@@ -287,6 +306,7 @@ function NavItem({
     <button
       type="button"
       onClick={onClick}
+      onContextMenu={onContextMenu}
       role={role}
       aria-current={isActive ? "page" : undefined}
       aria-label={title}
@@ -466,14 +486,30 @@ export function sidebarViewTestId(viewKey: string): string {
   return `sidebar-${viewKey.replace(/:/g, "-")}`;
 }
 
+/**
+ * How a row that names a VIEW is opened — the click and the right-click, built
+ * together so no row can offer one destination and not the other.
+ *
+ * Every such row is handed the same pair by the factory the Sidebar builds,
+ * which is where the two destinations are decided; a row spreads them onto its
+ * control and holds no opinion of its own.
+ */
+interface ViewRowHandlers {
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
+}
+
+/** Builds {@link ViewRowHandlers} for a view key. */
+type ViewRowHandlerFactory = (viewKey: string) => ViewRowHandlers;
+
 function FailedPluginNavItem({
   plugin,
-  onSelect,
+  rowHandlers,
   collapsed,
   role,
 }: {
   plugin: PluginCardSummary;
-  onSelect: (key: string) => void;
+  rowHandlers: ViewRowHandlerFactory;
   collapsed: boolean;
   role?: "menuitem";
 }) {
@@ -510,7 +546,7 @@ function FailedPluginNavItem({
           label={label}
           icon={<Wrench className="h-4 w-4 text-destructive" />}
           isActive={false}
-          onClick={() => onSelect(viewKey)}
+          {...rowHandlers(viewKey)}
           collapsed={collapsed}
 
           role={role}
@@ -527,7 +563,7 @@ function FailedPluginNavItem({
         label={label}
         icon={icon}
         isActive={false}
-        onClick={() => onSelect(viewKey)}
+        {...rowHandlers(viewKey)}
         collapsed={collapsed}
 
         role={role}
@@ -558,12 +594,12 @@ function FailedPluginNavItem({
  */
 function InactivePluginNavItem({
   plugin,
-  onSelect,
+  rowHandlers,
   collapsed,
   role,
 }: {
   plugin: PluginCardSummary;
-  onSelect: (key: string) => void;
+  rowHandlers: ViewRowHandlerFactory;
   collapsed: boolean;
   role?: "menuitem";
 }) {
@@ -592,7 +628,7 @@ function InactivePluginNavItem({
           label={label}
           icon={<PowerOff className="h-4 w-4 text-muted-foreground" />}
           isActive={false}
-          onClick={() => onSelect(viewKey)}
+          {...rowHandlers(viewKey)}
           collapsed={collapsed}
 
           role={role}
@@ -616,7 +652,7 @@ function InactivePluginNavItem({
           </span>
         }
         isActive={false}
-        onClick={() => onSelect(viewKey)}
+        {...rowHandlers(viewKey)}
         collapsed={collapsed}
 
         role={role}
@@ -636,14 +672,14 @@ function PluginNavItem({
   view,
   isActive,
   isUnauthed,
-  onSelect,
+  rowHandlers,
   collapsed,
   role,
 }: {
   view: PluginUiExtension;
   isActive: boolean;
   isUnauthed: boolean;
-  onSelect: (key: string) => void;
+  rowHandlers: ViewRowHandlerFactory;
   collapsed: boolean;
   role?: "menuitem";
 }) {
@@ -670,7 +706,7 @@ function PluginNavItem({
           label={label}
           icon={<span className="h-4 w-4" />}
           isActive={isActive}
-          onClick={() => onSelect(viewKey)}
+          {...rowHandlers(viewKey)}
           collapsed={collapsed}
 
           role={role}
@@ -684,7 +720,7 @@ function PluginNavItem({
         label={label}
         icon={<IconComponent className="h-4 w-4" />}
         isActive={isActive}
-        onClick={() => onSelect(viewKey)}
+        {...rowHandlers(viewKey)}
         collapsed={collapsed}
 
         role={role}
@@ -1746,6 +1782,7 @@ function ClusterStrip({
 export function Sidebar({
   activeView,
   onSelect,
+  onSelectInNewPane,
   pluginViews,
   failedPluginCards = [],
   inactivePluginCards = [],
@@ -1793,6 +1830,60 @@ export function Sidebar({
   // pointer — `isResizing` (true only between a drag's first move and its commit)
   // is the single gate that suppresses the transition for the drag path alone.
   const [isResizing, setIsResizing] = useState(false);
+  const openRowMenu = useNativeContextMenu();
+  /**
+   * The two destinations a row that names a view offers, as one pair.
+   *
+   * A plain click puts the view in the FOCUSED pane, over the conversation that
+   * pane holds. Meta (Ctrl off macOS) puts it in a new pane instead — the
+   * platform chord for "open that somewhere else" — and the row's own context
+   * menu names both, which is the whole reason the menu exists: a chord nobody
+   * has been told about is not a gesture, it is a secret.
+   *
+   * `open` is for the one row whose plain click is not a bare `onSelect`
+   * (Settings, which also names a page); `after` is the flyout's dismissal,
+   * which both destinations owe equally. `newPane: false` is for a row whose
+   * key is a SHORTCUT rather than a location — the Doctor and switched-off
+   * plugin rows, which lead to a settings page and are not views of their own,
+   * so there is nothing of theirs to put in a pane.
+   */
+  const viewRowHandlers = useCallback((
+    viewKey: string,
+    { open, after, newPane = true }: {
+      open?: () => void;
+      after?: () => void;
+      newPane?: boolean;
+    } = {},
+  ): ViewRowHandlers => {
+    const openHere = () => {
+      if (open) open();
+      else onSelect(viewKey);
+      after?.();
+    };
+    // Absent in chat mode, where there is no second pane to open into. The
+    // chord and the menu row go with it, together.
+    const openBeside = newPane && onSelectInNewPane
+      ? () => {
+        onSelectInNewPane(viewKey);
+        after?.();
+      }
+      : undefined;
+    return {
+      onClick: (event) => {
+        if (openBeside && (event.metaKey || event.ctrlKey)) {
+          openBeside();
+          return;
+        }
+        openHere();
+      },
+      onContextMenu: (event) => {
+        openRowMenu(event, "view-row", {
+          "view.open": openHere,
+          ...(openBeside ? { "view.open-in-new-pane": openBeside } : {}),
+        });
+      },
+    };
+  }, [onSelect, onSelectInNewPane, openRowMenu]);
   const handleWidthChange = useCallback(
     (px: number) => {
       setIsResizing(true);
@@ -2087,10 +2178,7 @@ export function Sidebar({
                   label={t("mainToolbar.workBoard")}
                   icon={<WorkBoardIcon className="h-4 w-4" />}
                   isActive={activeView === "work-board"}
-                  onClick={() => {
-                    onSelect("work-board");
-                    close();
-                  }}
+                  {...viewRowHandlers("work-board", { after: close })}
                   collapsed={false}
                   role="menuitem"
                   data-testid="toolbar-work-board"
@@ -2100,10 +2188,7 @@ export function Sidebar({
                   label={t("mainToolbar.routines")}
                   icon={<RoutinesIcon className="h-4 w-4" />}
                   isActive={activeView === "routines"}
-                  onClick={() => {
-                    onSelect("routines");
-                    close();
-                  }}
+                  {...viewRowHandlers("routines", { after: close })}
                   collapsed={false}
                   role="menuitem"
                   data-testid="sidebar-routines"
@@ -2118,10 +2203,7 @@ export function Sidebar({
                   label={t("mainToolbar.insights")}
                   icon={<InsightsIcon className="h-4 w-4" />}
                   isActive={activeView === "insights" || activeView === "starred"}
-                  onClick={() => {
-                    onSelect("insights");
-                    close();
-                  }}
+                  {...viewRowHandlers("insights", { after: close })}
                   collapsed={false}
                   role="menuitem"
                   data-testid="sidebar-starred"
@@ -2154,10 +2236,12 @@ export function Sidebar({
                     collapsed={compact}
                   >
                     {(close) => {
-                      const pick = (key: string) => {
-                        onSelect(key);
-                        close();
-                      };
+                      const pick: ViewRowHandlerFactory = (viewKey) =>
+                        viewRowHandlers(viewKey, { after: close });
+                      // A Doctor or switched-off row names a settings PAGE, not
+                      // a view, so it offers only the one destination.
+                      const pickShortcut: ViewRowHandlerFactory = (viewKey) =>
+                        viewRowHandlers(viewKey, { after: close, newPane: false });
                       return (
                         <>
                           {pluginViews.map((view) => {
@@ -2171,7 +2255,7 @@ export function Sidebar({
                                 view={view}
                                 isActive={activeView === viewKey}
                                 isUnauthed={Boolean(isUnauthed)}
-                                onSelect={pick}
+                                rowHandlers={pick}
                                 collapsed={false}
                                 role="menuitem"
                               />
@@ -2181,7 +2265,7 @@ export function Sidebar({
                             <FailedPluginNavItem
                               key={`doctor:${plugin.id}`}
                               plugin={plugin}
-                              onSelect={pick}
+                              rowHandlers={pickShortcut}
                               collapsed={false}
                               role="menuitem"
                             />
@@ -2190,7 +2274,7 @@ export function Sidebar({
                             <InactivePluginNavItem
                               key={`inactive:${plugin.id}`}
                               plugin={plugin}
-                              onSelect={pick}
+                              rowHandlers={pickShortcut}
                               collapsed={false}
                               role="menuitem"
                             />
@@ -2250,7 +2334,7 @@ export function Sidebar({
           icon={<SettingsIcon className={settingsNeedsApiKey || runtimeUnavailable ? "h-4 w-4 text-destructive" : "h-4 w-4"} />}
           // Active when settings render inline (work mode).
           isActive={activeView === "settings"}
-          onClick={onOpenSettings}
+          {...viewRowHandlers("settings", { open: onOpenSettings })}
           collapsed={compact}
           tone="settings"
           data-testid="sidebar-settings"

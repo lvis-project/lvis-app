@@ -34,7 +34,7 @@ import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroup
 import { minimumCanvasHeight } from "./components/chat-group-tree.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
-import type { InlineViewKey, PluginViewKey } from "../../shared/view-key.js";
+import { parseInlineViewKey, type InlineViewKey, type PluginViewKey } from "../../shared/view-key.js";
 import { CONTENT_TITLE_INSET, SHELL_GUTTER, collapsedBandLeadClearance } from "../../shared/shell-geometry.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
@@ -618,6 +618,8 @@ export function App() {
     () => pluginViews.map((view) => toViewKey(view)),
     [pluginViews],
   );
+  // Set for the duration of ONE new-pane gesture — see `openViewInNewPane`.
+  const newPaneTargetRef = useRef<string | null>(null);
   // The location lives in the focused pane's content, so navigating is putting
   // a view IN that pane. `useActiveView` still owns the restore and the
   // persistence; what it no longer owns is the value. With one focused pane
@@ -625,7 +627,17 @@ export function App() {
   // same string, which is why the router below is untouched.
   const activeViewPane = useMemo(() => ({
     view: chatGroups.contentById[chatGroups.focusedId]?.view ?? "home",
-    navigate: (next: InlineViewKey) => chatGroups.setPaneContent(chatGroups.focusedId, { view: next }),
+    navigate: (next: InlineViewKey) => chatGroups.setPaneContent(
+      // A navigation the new-pane gesture asked for goes into the pane that
+      // gesture just made, which `focusedId` cannot yet name: the pane is
+      // created and filled inside one event, and React has not re-rendered in
+      // between. The claim lives for exactly that event (see
+      // `openViewInNewPane`), so nothing later can be captured by it — and it
+      // has to be honoured, or the two moves would land as two locations and
+      // the visit history would record a stop at a pane's blank conversation.
+      newPaneTargetRef.current ?? chatGroups.focusedId,
+      { view: next },
+    ),
   }), [chatGroups.contentById, chatGroups.focusedId, chatGroups.setPaneContent]);
   const { activeView, setActiveView, restoresApplied: activeViewRestoresApplied } =
     useActiveView(api, loadedPluginViewKeys, activeViewPane);
@@ -1056,6 +1068,57 @@ export function App() {
     handleViewSelect(key);
   }, [handleViewSelect, onOpenSettings, pluginCards, statusPushToast, t]);
 
+  /**
+   * Open a sidebar row's view in a NEW pane, beside the focused one.
+   *
+   * The pane and the view land in ONE commit: the claim above points the
+   * navigation at the pane this call just made, so the window's location goes
+   * straight from where it was to the view. Opening the pane and then
+   * navigating as two commits would put the new pane's blank conversation
+   * between them, and the visit history — which records the location it
+   * observes — would keep that as a step the user never took.
+   *
+   * The selection itself is the ordinary one, so the plugin auth gate, the
+   * Doctor interception and the no-duplicates rule are all still in front of
+   * the destination. Nothing about where a view may go is decided twice here.
+   *
+   * Three outcomes, all of them stated:
+   *   • already open in another pane → no new pane, and the ordinary selection
+   *     focuses the pane that has it (`paneShowing` is that rule's one home);
+   *   • no room on the canvas → a message, and nothing opens;
+   *   • otherwise → a pane, focused, holding the view.
+   */
+  const openViewInNewPane = useCallback((key: string) => {
+    // The same runtime boundary the focused-pane path has: a string that is not
+    // a place the window can BE must not cost a pane. The rows whose key is a
+    // shortcut rather than a location do not offer this gesture at all.
+    const parsed = parseInlineViewKey(key);
+    if (!parsed) {
+      console.warn(`[nav] ignoring unknown view key '${key}'`);
+      return;
+    }
+    if (chatGroups.paneShowing({ view: parsed.key }) === undefined) {
+      const opened = chatGroups.openPane(
+        chatGroups.focusedId,
+        measuredCanvasSize(chatGroupCanvasRef.current),
+      );
+      if (opened === null) {
+        statusPushToast({ severity: "warning", message: t("app.newPaneNoRoom"), ttlMs: 6000 });
+        return;
+      }
+      newPaneTargetRef.current = opened;
+    }
+    try {
+      handleViewSelectWithDoctor(key);
+    } finally {
+      // The claim is one event long. A plugin whose sign-in defers the open
+      // lands later, by which time focus IS the new pane and the ordinary
+      // path names it — so a claim that outlived this call could only ever
+      // capture a navigation the gesture did not ask for.
+      newPaneTargetRef.current = null;
+    }
+  }, [chatGroups, handleViewSelectWithDoctor, statusPushToast, t]);
+
   // Loading a conversation from Memory, Insights, or Routines is content
   // navigation, not a history replay. The top toolbar exclusively owns visit
   // history; result activation always reveals the loaded chat.
@@ -1379,6 +1442,11 @@ export function App() {
               <Sidebar
                 activeView={activeView}
                 onSelect={handleViewSelectWithDoctor}
+                /* Chat mode draws one pane and nothing of the others, so there
+                   is no second pane to open into and the gesture is not
+                   offered — the same rule that takes the split control out of
+                   a pane header there. */
+                onSelectInNewPane={appMode === "chat" ? undefined : openViewInNewPane}
                 pluginViews={pluginViews}
                 failedPluginCards={failedPluginCards}
                 inactivePluginCards={inactivePluginCards}

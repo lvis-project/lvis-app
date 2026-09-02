@@ -33,6 +33,8 @@ export const NATIVE_CONTEXT_MENU_COMMANDS = [
   "message.returnHere",
   "command.activate",
   "command.copy",
+  "view.open",
+  "view.open-in-new-pane",
 ] as const;
 
 export type NativeContextMenuCommand = (typeof NATIVE_CONTEXT_MENU_COMMANDS)[number];
@@ -43,7 +45,8 @@ export type NativeContextMenuKind =
   | "project"
   | "conversation"
   | "message"
-  | "command-item";
+  | "command-item"
+  | "view-row";
 
 export interface NativeContextMenuPayload {
   requestId: string;
@@ -99,6 +102,12 @@ export const NATIVE_CONTEXT_MENU_COMMANDS_BY_KIND = {
   ],
   message: ["message.copy", "message.edit", "message.fork", "message.returnHere"],
   "command-item": ["command.activate", "command.copy"],
+  // A sidebar row that names a VIEW — a feature, a plugin panel, Settings.
+  // Where the other kinds act ON their target, both of these open it; what
+  // they differ about is WHERE. The menu is what makes the second one
+  // discoverable: the modifier chord that also performs it is invisible until
+  // someone has read it here.
+  "view-row": ["view.open", "view.open-in-new-pane"],
 } as const satisfies Record<NativeContextMenuKind, readonly NativeContextMenuCommand[]>;
 
 

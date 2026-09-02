@@ -138,16 +138,24 @@ group. VS Code's sidebar guidance is explicit that a toolbar should stay small �
 not add too many actions to reduce clutter and confusion"* — so the header takes the few actions
 that act on the conversation and nothing else.
 
-### Path depth belongs to the content, not to the window
+### The path names what is open, on a leading edge
 
 Breadcrumbs in VS Code sit at the **top of the editor content, on the leading edge** — under the
 chrome, above the text — because the path describes what is open, not where the window is. Their
 tokens (`breadcrumb.foreground`, `breadcrumb.activeSelectionForeground`) are content tokens, not
-title-bar tokens. A path floated to the trailing edge of the window band reads as window
-furniture and loses that association.
+title-bar tokens. What we take is the association and the edge; what we do not take is the
+storey. Ours runs on the **leading edge of the window band**, starting exactly where the
+sidebar card ends, because the band is the one strip that spans every pane and the path has to
+name one location while several panes are open. A path floated to the *trailing* edge would
+read as window furniture and lose the association — that is the placement the rule forbids, and
+it is not this one.
 
-History navigation is the opposite case: back/forward act on the *window's* location, so they
-stay in the chrome.
+What it names is the **focused pane's location**, since that is where the window is (see
+`docs/design/tiled-chat-groups.md`). Moving focus between panes therefore moves the path, with
+nothing navigated.
+
+History navigation is the same subject seen from the other side: back and forward act on the
+window's location, which is to say on the focused pane's content, so they stay in the chrome.
 
 ### Splitting is a first-class layout, not a window trick
 
@@ -201,8 +209,10 @@ not be drawn with the same value.
   - Chat group: the framed work container (see Workbench model). Owns its header — title on
     the leading edge, conversation-scoped actions and its work-panel toggle on the trailing
     edge — and owns its own work panel. Groups tile; each is complete on its own.
-  - Main canvas: route-owned work surface with minimal host framing through `PageShell`.
-    Carries the location path on its LEADING edge, under the window band.
+  - Main canvas: the tiled panes. A pane holds a conversation and draws whatever location it
+    is on over it — its own conversation, a feature panel, Settings, or a plugin view — inside
+    the same frame either way. The window's location is the FOCUSED pane's, and the window
+    band carries it as the path on its leading edge.
   - ActionPanel: floating operational activity surface.
   - Command picker: search and 1st/2nd-depth command navigation.
   - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
