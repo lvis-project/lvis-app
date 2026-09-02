@@ -42,7 +42,10 @@ const lockControl = vi.hoisted(() => {
   return control;
 });
 
-vi.mock("../../lib/with-file-lock.js", () => ({
+// Only withFileLock is scripted; the module's other exports (the serial queue the
+// memory manager builds its JSONL writers on) stay real.
+vi.mock("../../lib/with-file-lock.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/with-file-lock.js")>()),
   withFileLock: vi.fn(async <T>(targetPath: string, callback: () => Promise<T>): Promise<T> => {
     const callNumber = ++lockControl.calls;
     lockControl.targets.push(targetPath);
