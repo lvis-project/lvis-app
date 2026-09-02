@@ -48,7 +48,11 @@ function Harness(props: Parameters<typeof Sidebar>[0]) {
 function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const onLoadSession = vi.fn();
   const onNewChatForProject = vi.fn();
-  let nativeContextActionHandler: ((action: NativeContextMenuAction) => void) | null = null;
+  // EVERY listener, not the last one: the preload's own registration is
+  // `ipcRenderer.on`, and the sidebar now has two subscribers of its own — the
+  // session/project rows and the view rows. Keeping one would deliver the
+  // action to whichever mounted last and silently drop the other's menus.
+  const nativeContextActionHandlers = new Set<(action: NativeContextMenuAction) => void>();
   const showNativeContextMenu = vi.fn(async (_payload: NativeContextMenuPayload) => ({
     ok: true as const,
   }));
@@ -143,9 +147,9 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     ui: {
       showNativeContextMenu,
       onNativeContextMenuAction: (handler: (action: NativeContextMenuAction) => void) => {
-        nativeContextActionHandler = handler;
+        nativeContextActionHandlers.add(handler);
         return () => {
-          if (nativeContextActionHandler === handler) nativeContextActionHandler = null;
+          nativeContextActionHandlers.delete(handler);
         };
       },
     },
@@ -174,7 +178,11 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     emitNativeContextCommand: (command: NativeContextMenuAction["command"]) => {
       const payload = showNativeContextMenu.mock.calls.at(-1)?.[0];
       if (!payload) throw new Error("native context menu was not requested");
-      nativeContextActionHandler?.({ requestId: payload.requestId, command });
+      // The request id is what routes it: only the hook that opened this menu
+      // holds a pending entry for that id, so the others ignore it.
+      for (const handler of nativeContextActionHandlers) {
+        handler({ requestId: payload.requestId, command });
+      }
     },
     restore: () => {
       if (previous === undefined) {
@@ -1405,6 +1413,78 @@ describe("Sidebar conversation reveal on scroll", () => {
       fireEvent.click(getByTestId(moreId));
       expect(countRenderedRows(otherRows, queryByTestId)).toBe(6);
       expect(getByTestId(moreId)).toHaveAttribute("aria-expanded", "false");
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("Sidebar view rows", () => {
+  /** Open the Features flyout and hand back a row from it (it is portaled). */
+  async function featuresRow(getByTestId: (id: string) => HTMLElement, rowTestId: string) {
+    fireEvent.click(getByTestId("sidebar-group-features"));
+    return await waitFor(() => {
+      const row = document.querySelector<HTMLButtonElement>(`[data-testid="${rowTestId}"]`);
+      expect(row).not.toBeNull();
+      return row!;
+    });
+  }
+
+  it("names both destinations in the row's own menu", async () => {
+    const onSelect = vi.fn();
+    const onSelectInNewPane = vi.fn();
+    const { getByTestId, showNativeContextMenu, emitNativeContextCommand, restore } =
+      renderSidebar({ onSelect, onSelectInNewPane });
+    try {
+      const row = await featuresRow(getByTestId, "sidebar-routines");
+      fireEvent.contextMenu(row);
+
+      // Both commands are offered, so the second destination is discoverable
+      // without anyone having been told about a modifier chord.
+      const payload = showNativeContextMenu.mock.calls.at(-1)?.[0];
+      expect(payload?.kind).toBe("view-row");
+      expect(payload?.commands).toEqual(["view.open", "view.open-in-new-pane"]);
+
+      act(() => emitNativeContextCommand("view.open-in-new-pane"));
+      expect(onSelectInNewPane).toHaveBeenCalledWith("routines");
+      expect(onSelect).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("offers only the one destination where there is no second pane to open into", async () => {
+    // Chat mode withholds the callback entirely, and the row has to follow:
+    // a menu row that cannot go anywhere is worse than no menu row.
+    const onSelect = vi.fn();
+    const { getByTestId, showNativeContextMenu, emitNativeContextCommand, restore } =
+      renderSidebar({ onSelect });
+    try {
+      const row = await featuresRow(getByTestId, "sidebar-routines");
+      fireEvent.contextMenu(row);
+      expect(showNativeContextMenu.mock.calls.at(-1)?.[0]?.commands).toEqual(["view.open"]);
+
+      act(() => emitNativeContextCommand("view.open"));
+      expect(onSelect).toHaveBeenCalledWith("routines");
+    } finally {
+      restore();
+    }
+  });
+
+  it("routes a modifier-click to the new pane and a plain click to the focused one", async () => {
+    const onSelect = vi.fn();
+    const onSelectInNewPane = vi.fn();
+    const { getByTestId, restore } = renderSidebar({ onSelect, onSelectInNewPane });
+    try {
+      const row = await featuresRow(getByTestId, "sidebar-routines");
+      fireEvent.click(row, { metaKey: true });
+      expect(onSelectInNewPane).toHaveBeenCalledWith("routines");
+      expect(onSelect).not.toHaveBeenCalled();
+
+      const again = await featuresRow(getByTestId, "sidebar-routines");
+      fireEvent.click(again);
+      expect(onSelect).toHaveBeenCalledWith("routines");
+      expect(onSelectInNewPane).toHaveBeenCalledTimes(1);
     } finally {
       restore();
     }

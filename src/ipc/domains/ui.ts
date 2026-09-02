@@ -74,6 +74,11 @@ const NATIVE_LAYOUT: Record<
     ["command.activate"],
     ["command.copy"],
   ],
+  // Same destination, two places to put it — one section, because neither is
+  // an alternative to the other in the way a pin is to an unpin.
+  "view-row": [
+    ["view.open", "view.open-in-new-pane"],
+  ],
 };
 
 const NATIVE_LABEL: Record<NativeContextMenuCommand, () => string> = {
@@ -120,6 +125,8 @@ const NATIVE_LABEL: Record<NativeContextMenuCommand, () => string> = {
   "message.returnHere": () => t("chatView.returnHereButtonTitle"),
   "command.activate": () => t("chatPreviewRail.ctxOpen"),
   "command.copy": () => t("turnActionBar.copyButton"),
+  "view.open": () => t("chatPreviewRail.ctxOpen"),
+  "view.open-in-new-pane": () => t("sidebar.openInNewPane"),
 };
 
 function cleanRequestId(value: unknown): string | null {

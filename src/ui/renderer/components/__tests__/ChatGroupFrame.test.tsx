@@ -456,6 +456,62 @@ describe("useChatGroups pane content", () => {
     expect([...result.current.conversationIds].includes("group-5")).toBe(true);
   });
 
+  it("opens a pane beside the focused one and gives back its id", () => {
+    // The sidebar's "open in a new pane" makes the SAME pane the header's split
+    // makes — a conversation pane, focused — and hands the id back so the
+    // caller can put a view in it.
+    const { result } = renderHook(() => useChatGroups("work"));
+    let opened: string | null = "not-called";
+    act(() => { opened = result.current.openPane("main", undefined); });
+
+    expect(opened).toBe("group-2");
+    expect(leafIds(result.current.tree)).toEqual(["main", "group-2"]);
+    expect(result.current.focusedId).toBe("group-2");
+    expect(result.current.conversationIds.has("group-2")).toBe(true);
+    expect(result.current.contentById["group-2"]).toEqual({ view: "home" });
+  });
+
+  it("refuses a new pane once the canvas is full, without opening one", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.split("group-2", "row"));
+    act(() => result.current.split("group-3", "row"));
+    expect(leafIds(result.current.tree)).toHaveLength(MAX_PANES);
+
+    let opened: string | null = "not-called";
+    act(() => { opened = result.current.openPane("main", undefined); });
+    expect(opened).toBeNull();
+    // A refusal that still added a pane would be worse than no refusal at all.
+    expect(leafIds(result.current.tree)).toHaveLength(MAX_PANES);
+  });
+
+  it("refuses a new pane the width cannot carry — the split's own floor", () => {
+    // No second rule for this gesture: `splitFits` is asked exactly as the
+    // header's split control asks it, so a canvas too narrow to halve refuses
+    // both the same way.
+    const { result } = renderHook(() => useChatGroups("work"));
+    const tooNarrow = { width: (CHAT_GROUP_MIN_WIDTH + CHAT_GROUP_CELL_INSET) * 2 - 1, height: 900 };
+
+    expect(result.current.splitFits("main", "row", tooNarrow)).toBe(false);
+    let opened: string | null = "not-called";
+    act(() => { opened = result.current.openPane("main", tooNarrow); });
+    expect(opened).toBeNull();
+    expect(leafIds(result.current.tree)).toEqual(["main"]);
+
+    // One pixel wider and both halves clear the floor, so both say yes.
+    const wideEnough = { width: (CHAT_GROUP_MIN_WIDTH + CHAT_GROUP_CELL_INSET) * 2, height: 900 };
+    act(() => { opened = result.current.openPane("main", wideEnough); });
+    expect(opened).toBe("group-2");
+  });
+
+  it("refuses a new pane in chat mode, which draws one and hides the rest", () => {
+    const { result } = renderHook(() => useChatGroups("chat"));
+    let opened: string | null = "not-called";
+    act(() => { opened = result.current.openPane("main", undefined); });
+    expect(opened).toBeNull();
+    expect(leafIds(result.current.tree)).toEqual(["main"]);
+  });
+
   it("names the conversation pane focus is on, and never one that is gone", () => {
     const { result } = renderHook(() => useChatGroups("work"));
     expect(result.current.focusedConversationId).toBe("main");

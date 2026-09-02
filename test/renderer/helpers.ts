@@ -320,13 +320,22 @@ export async function closeSidebarGroup(group: SidebarNavGroup): Promise<void> {
   await waitFor(() => expect(sidebarGroupMenu(group)).toBeNull());
 }
 
-/** Picks a row the way the user does: open the flyout, click, and let it close. */
-export async function clickSidebarNavRow(group: SidebarNavGroup, rowTestId: string): Promise<void> {
+/**
+ * Picks a row the way the user does: open the flyout, click, and let it close.
+ *
+ * `modifiers` is how the SECOND destination is reached — a meta/ctrl click is
+ * "open in a new pane", the same event the row's context menu performs.
+ */
+export async function clickSidebarNavRow(
+  group: SidebarNavGroup,
+  rowTestId: string,
+  modifiers: { metaKey?: boolean; ctrlKey?: boolean } = {},
+): Promise<void> {
   const menu = await openSidebarGroup(group);
   const row = menu.querySelector<HTMLButtonElement>(`[data-testid="${rowTestId}"]`);
   expect(row, `missing [data-testid="${rowTestId}"] in the ${group} flyout`).not.toBeNull();
   await act(async () => {
-    fireEvent.click(row!);
+    fireEvent.click(row!, modifiers);
   });
   await waitFor(() => expect(sidebarGroupMenu(group)).toBeNull());
 }

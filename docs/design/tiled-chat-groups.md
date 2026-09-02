@@ -42,6 +42,77 @@ Per **window** — shared, and deliberately not multiplied:
 - the session list, search, starred, export/import — these describe the
   window's conversations, not any one tile's
 
+## Pane content: a conversation, and whatever is drawn over it
+
+A tile is a **pane**, and a pane holds two things that are not the same thing.
+
+Underneath is its **conversation** — the loop, the transcript, the composer
+draft, the scroll position. That is what makes the pane a pane: every pane is
+created by a gesture that means "put a conversation here" (a split, an edge
+drop, the sidebar's new-pane gesture), and `conversationIds` is the set that
+records it.
+
+On top is its **location** — a `ViewLocation`, the same union the window's
+location has always used, held per pane in `contentById`. `{view:"home"}` means
+"draw this pane's own conversation"; every other value is a feature panel,
+Settings or a plugin view drawn over it. The conversation is not taken away
+while a view covers it: the tile stays mounted and goes `hidden`, exactly as it
+does when another tile has the box.
+
+The location lives beside the tree, not inside it, for the same reason
+`panelOpenIds` does: the tree is geometry, and a leaf that carried content would
+make every split, close and resize rewrite something it has no opinion about.
+
+### The window is the focused pane
+
+`activeView` is not a second piece of state. It is
+`contentById[focusedId].view` — so the top band's path, the sidebar's current
+row and the persisted `system.activeView` key all name the FOCUSED pane's
+location, and moving focus between panes moves the window without any pane's
+content changing. The path follows a focus change for that reason, not as a
+special case.
+
+### Three rules
+
+1. **Choosing a view replaces the focused pane's content.** The conversation
+   stays underneath, so closing the view puts the pane back on it.
+2. **A non-home location may be open in ONE pane at a time.** Choosing one that
+   another pane already shows focuses THAT pane instead of drawing a second
+   copy — `paneShowing` is where the rule is evaluated, and it is asked by both
+   readers of it. Two Settings panes would fight over the single persisted
+   `system.settingsTab`; two views of one plugin are two `<webview>` guests in
+   one partition, sharing storage while disagreeing about the plugin's state.
+   Home is exempt: a pane's home is its OWN conversation, not a shared place.
+3. **Back and forward move the focused pane**, and where the recorded location
+   is already open in another pane they move FOCUS to that pane — rule 2 again,
+   not a second rule for history.
+
+### Opening in a new pane
+
+The sidebar's rows offer a second destination: a new pane beside the focused
+one, reached by a meta/ctrl click and named in the row's own context menu. The
+menu is what makes it a gesture rather than a secret.
+
+It makes the same pane the header's split makes, and asks the split's own two
+questions — both ceilings (`MAX_PANES` leaves, `MAX_CHAT_GROUPS` loops) and
+`splitFits`, which refuses a halving that would put either side under the tile
+floor. A refusal is SAID, because nothing in a menu row shows the limit the way
+a missing split control does. In chat mode, which draws one pane and hides the
+rest, the gesture is not offered at all — the same withdrawal `canSplit` makes
+in the pane header.
+
+The pane and the view it is opened with land in ONE commit. Two commits would
+put the new pane's blank conversation between them, and visit history — which
+records the location it observes — would keep that as a step the user never
+took.
+
+### Not persisted
+
+The tree is not persisted, and neither is the content map (`useState`, and a
+reload starts the pane counter over). What IS persisted is the focused pane's
+location, under the keys it has always used — so a restart opens one pane where
+the user left off, exactly as it did before panes had locations of their own.
+
 ## Channel split
 
 `lvis:chat:*` divides cleanly along that line.

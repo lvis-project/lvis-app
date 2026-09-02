@@ -21,6 +21,21 @@ import { sameViewLocation, type ViewLocation } from "../utils/view-location.js";
  * one of it per half of the location, and it is the only mover the location
  * alone cannot identify. Nothing is asked of the navigation producers, so the
  * property above still holds for every one of them.
+ *
+ * WHAT A STEP MOVES, now that a location belongs to a PANE rather than to the
+ * window: back and forward put the recorded location in the FOCUSED pane, and
+ * where that location is already open in another pane they move FOCUS to that
+ * pane instead of opening a second copy. That is one rule, not two — the
+ * window's location IS the focused pane's content, so "put the window back
+ * where it was" is satisfied by either, and the pane model already refuses the
+ * duplicate for every other producer (`setPaneContent`). Nothing about panes
+ * appears in this file, which is the point: the hook records and replays
+ * locations, and where a location lives is the pane model's answer.
+ *
+ * Moving focus BETWEEN panes is therefore travel, and is recorded like any
+ * other visit: it changes where the window is without changing what any pane
+ * holds. A back step after one lands on the pane focus came from — which is
+ * what a user who clicked into the wrong pane means by "back".
  */
 
 /** Beyond this, the oldest entries are dropped. Entries are two short strings,

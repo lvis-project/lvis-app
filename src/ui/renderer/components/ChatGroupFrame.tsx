@@ -992,6 +992,29 @@ export function useChatGroups(appMode?: "chat" | "work") {
   }, []);
 
   /**
+   * Which pane, if any, is showing `location` right now.
+   *
+   * The one place the "a location is open in at most one pane" rule is
+   * evaluated. Both readers of that rule ask HERE — the pane content setter,
+   * which redirects to the pane that has it, and the sidebar's new-pane
+   * gesture, which has nothing to open when the answer is a pane. Two copies of
+   * this search would be two rules the moment one of them learned something the
+   * other did not.
+   *
+   * Over the LIVE panes, not over the content map's keys: a pane that is gone
+   * is not somewhere the user can be sent.
+   *
+   * Home is never an answer. Every pane's home is ITS OWN conversation rather
+   * than a shared place, so two panes on home are not two copies of anything.
+   */
+  const paneShowing = useCallback((location: ViewLocation): string | undefined => {
+    if (location.view === "home") return undefined;
+    return leafIds(tree).find(
+      (paneId) => sameViewLocation(contentById[paneId] ?? PANE_HOME, location),
+    );
+  }, [tree, contentById]);
+
+  /**
    * Show `location` in pane `id`.
    *
    * A non-home location may be open in ONE pane at a time. Choosing one that
@@ -1006,19 +1029,13 @@ export function useChatGroups(appMode?: "chat" | "work") {
    * place, so "already open elsewhere" does not apply.
    */
   const setPaneContent = useCallback((id: string, location: ViewLocation) => {
-    if (location.view !== "home") {
-      // Over the LIVE panes, not over the map's keys: a pane that is gone is
-      // not somewhere the user can be sent.
-      const openElsewhere = leafIds(tree).find(
-        (paneId) => paneId !== id && sameViewLocation(contentById[paneId] ?? PANE_HOME, location),
-      );
-      if (openElsewhere !== undefined) {
-        focus(openElsewhere);
-        return;
-      }
+    const openElsewhere = paneShowing(location);
+    if (openElsewhere !== undefined && openElsewhere !== id) {
+      focus(openElsewhere);
+      return;
     }
     setContentById((current) => ({ ...current, [id]: location }));
-  }, [tree, contentById, focus]);
+  }, [paneShowing, focus]);
 
   /**
    * The pane whose CONVERSATION the window's conversation-scoped surfaces mean.
@@ -1099,6 +1116,31 @@ export function useChatGroups(appMode?: "chat" | "work") {
     && countLeaves(tree) < MAX_PANES
     && conversationIds.size < MAX_CHAT_GROUPS;
 
+  /**
+   * Open a pane beside `besideGroupId` and hand back its id, or null when the
+   * canvas will not carry another one.
+   *
+   * This is the header split's gesture under a second name: the sidebar's
+   * "open in a new pane" wants the same pane the split control makes, so it
+   * asks the same two questions — do both ceilings have room ({@link canSplit}),
+   * and does halving this pane leave both halves above the tile floors
+   * ({@link splitFits}). There is no third rule here; a refusal is one of those
+   * two, and the caller has to say so, because nothing in a menu row showed the
+   * limit the way a missing split control does.
+   *
+   * The pane it makes holds a conversation, exactly as a split's does. What the
+   * caller then SHOWS in it is a separate act: the new pane takes focus, so the
+   * ordinary navigation — which puts a view in the focused pane — lands there.
+   */
+  const openPane = useCallback((
+    besideGroupId: string,
+    canvasSize: { width: number; height: number } | undefined,
+  ): string | null => {
+    if (!canSplit) return null;
+    if (!splitFits(besideGroupId, "row", canvasSize)) return null;
+    return dropOnEdge(besideGroupId, SPLIT_EDGE.row);
+  }, [canSplit, splitFits, dropOnEdge]);
+
   // Boundaries between tiles. Chat mode shows one leaf, so there are none.
   const gutters = useMemo(
     () => layoutGutters(visibleTree),
@@ -1132,12 +1174,14 @@ export function useChatGroups(appMode?: "chat" | "work") {
     focus,
     contentById,
     setPaneContent,
+    paneShowing,
     conversationIds,
     focusedConversationId,
     setPanelOpen,
     canSplit,
     split,
     splitFits,
+    openPane,
     dropOnEdge,
     adopt,
     resize,

@@ -2,7 +2,14 @@ import "../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
-import { clickSidebarNavRow, deferred, settingsWithActiveView } from "../../../../test/renderer/helpers.js";
+import {
+  clickSidebarNavRow,
+  deferred,
+  focusTile,
+  mountedTileIds,
+  settingsWithActiveView,
+  splitIntoTwoTiles,
+} from "../../../../test/renderer/helpers.js";
 import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
 import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
 
@@ -19,6 +26,14 @@ import { TEST_IDS, testIdSelector } from "../../../shared/test-ids.js";
  * nothing, so every assertion here goes through the real producers and reads
  * the rendered path.
  */
+/** Which pane the window is ON — the one the frame marks focused. */
+const focusedPaneId = (container: HTMLElement) =>
+  container
+    .querySelector('[data-testid="chat-group"][data-focused="true"]')
+    ?.closest('[data-testid^="chat-group-cell:"]')
+    ?.getAttribute("data-testid")
+    ?.slice("chat-group-cell:".length) ?? null;
+
 /** The rendered path text, which is what the user actually reads. */
 const path = (container: HTMLElement) =>
   container.querySelector('[data-testid="view-path-breadcrumb"]')?.textContent?.trim() ?? "";
@@ -143,6 +158,73 @@ describe("App view history", () => {
     await click(container, "view-path-segment-settings");
     await waitFor(() => expect(path(container)).toContain("모델"));
     expect(screen.getByRole("tab", { name: /모델/ }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("moves FOCUS when a step lands on a location another pane already shows", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    await ready(container);
+
+    // One pane on Routines, then a second pane on the work board.
+    await clickSidebarNavRow("features", "sidebar-routines");
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+    await clickSidebarNavRow("features", "toolbar-work-board", { metaKey: true });
+    await waitFor(() => expect(mountedTileIds(container)).toHaveLength(2));
+    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+    const [first, second] = mountedTileIds(container);
+    expect(focusedPaneId(container)).toBe(second);
+
+    // Back: Routines is open in the FIRST pane, so the step focuses that pane
+    // instead of drawing a second copy of it. No pane is added, and the second
+    // pane keeps the work board.
+    await click(container, "view-path-back");
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+    expect(mountedTileIds(container)).toHaveLength(2);
+    expect(focusedPaneId(container)).toBe(first);
+
+    // Forward is the same rule in the other direction.
+    await click(container, "view-path-forward");
+    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+    expect(mountedTileIds(container)).toHaveLength(2);
+    expect(focusedPaneId(container)).toBe(second);
+  });
+
+  it("does not record the new pane's own conversation as a stop on the way", async () => {
+    // The gesture makes a pane and puts a view in it. If those landed as two
+    // location changes, the pane's blank conversation would sit in the history
+    // between them and one back would go nowhere the user had been.
+    const { container } = await renderApp({ hasApiKey: true });
+    await ready(container);
+
+    await clickSidebarNavRow("features", "sidebar-routines");
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+    await clickSidebarNavRow("features", "toolbar-work-board", { metaKey: true });
+    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+
+    await click(container, "view-path-back");
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+  });
+
+  it("follows a change of FOCUS, with no navigation at all", async () => {
+    // The path says where the window is, and the window is the focused pane.
+    // Clicking into a pane that holds a different location moves the window
+    // there — nothing navigated, and the path still has to agree.
+    const { container } = await renderApp({ hasApiKey: true });
+    await ready(container);
+
+    const tiles = await splitIntoTwoTiles(container);
+    const [firstTile, secondTile] = tiles;
+    await focusTile(firstTile!);
+    await clickSidebarNavRow("features", "sidebar-routines");
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+
+    // The other pane is still on its own conversation.
+    await focusTile(secondTile!);
+    await waitFor(() => expect(path(container)).toContain("대화"));
+    expect(focusedPaneId(container)).toBe(secondTile!.chatGroupId);
+
+    await focusTile(firstTile!);
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+    expect(focusedPaneId(container)).toBe(firstTile!.chatGroupId);
   });
 
   it("keeps visit history exclusively in the toolbar", async () => {
