@@ -40,6 +40,7 @@ export type RenderAppReturn = {
   emitChatStream: (ev: unknown) => void;
   emitAgentSpawnEvent: ReturnType<typeof makeMockLvisApi>["emitAgentSpawnEvent"];
   emitSkillLoaded: ReturnType<typeof makeMockLvisApi>["emitSkillLoaded"];
+  emitSessionTodoChanged: ReturnType<typeof makeMockLvisApi>["emitSessionTodoChanged"];
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFired: (r: unknown) => void;
@@ -63,6 +64,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitChatStream,
     emitAgentSpawnEvent,
     emitSkillLoaded,
+    emitSessionTodoChanged,
     emitOverlayShow,
     emitOverlayDismiss,
     emitRoutineFired,
@@ -93,6 +95,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitChatStream,
     emitAgentSpawnEvent,
     emitSkillLoaded,
+    emitSessionTodoChanged,
     emitOverlayShow,
     emitOverlayDismiss,
     emitRoutineFired,

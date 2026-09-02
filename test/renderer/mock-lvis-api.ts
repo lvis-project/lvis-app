@@ -165,6 +165,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitAgentSpawnEvent: (event: AgentSpawnEvent) => void;
   /** `lvis:skill-load:event` — window-wide, stamped with the turn's session. */
   emitSkillLoaded: (event: { name: string; description: string; sessionId: string }) => void;
+  /** `onSessionTodoChanged` push — the assistant's checklist for one session. */
+  emitSessionTodoChanged: (payload: { sessionId: string; items: unknown[] }) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFired: (r: unknown) => void;
@@ -763,6 +765,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
     emitAgentSpawnEvent: (event) => agentSpawnEventHandlers.forEach((h) => h(event)),
     emitSkillLoaded: (event) => skillLoadedHandlers.forEach((h) => h(event)),
+    emitSessionTodoChanged: (payload) => sessionTodoHandlers.forEach((h) => h(payload)),
     emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
     emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
     emitRoutineFired: (r) => routineFiredHandlers.forEach((h) => h(r)),

@@ -8,7 +8,7 @@ import { MessageQueuePanel } from "./MessageQueuePanel.js";
 import { DeferredApprovalChip } from "./DeferredApprovalChip.js";
 import { StatusBar, type StatusBarProps } from "./StatusBar.js";
 import { Composer, ComposerFrame, type ComposerHandle } from "./Composer.js";
-import { InputActionBar } from "./InputActionBar.js";
+import { ComposerStatusRow, InputActionBar } from "./InputActionBar.js";
 import { QuestionOverlay } from "./QuestionOverlay.js";
 import { computeComposerPlaceholder } from "../utils/composer-placeholder.js";
 import { ATTACH_MAX_COUNT, type Attachment } from "../types/attachments.js";
@@ -27,7 +27,7 @@ import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
 
 import { subscriptionImageAttachmentLimitViolation, type SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
-type InputStatusRow = React.ComponentProps<typeof InputActionBar>["statusRow"];
+type InputStatusRow = React.ComponentProps<typeof ComposerStatusRow>["statusRow"];
 
 export interface ChatComposerDockProps {
   dockColumnClass: string;
@@ -345,8 +345,7 @@ export function ChatComposerDock({
       // renders the very same test ids.
       data-composer-surface="main"
     >
-      <div className={dockColumnClass} data-testid="session-todo-dock">
-        <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+      <div className={dockColumnClass} data-testid="composer-queue-dock">
         <ApprovalWaitingBand pendingApprovals={pendingApprovals} />
         <MessageQueuePanel
           store={messageQueueStore}
@@ -360,10 +359,11 @@ export function ChatComposerDock({
             contract describes); self-hides unless the draft expresses an
             approve/reject intent AND exactly one queue entry is pending. */}
         <DeferredApprovalChip draftText={question} />
-        {/* ONE unified input box: textarea + the single InputActionBar
-            (action row + status sub-row). The window StatusBar is
-            notifications-only; the model / permission / active / context%
-            cells live in the bar's status sub-row.
+        {/* ONE input box: textarea + the single InputActionBar (action row).
+            The session line — model / permission / active / ring — is drawn
+            UNDER the box by ComposerStatusRow, not inside it: what is inside
+            the box is about the message being written. The window StatusBar
+            is notifications-only.
             `lvis-surface-raised` paints the edge as an inset hairline so
             the dock's overflow handling cannot clip the composer edge. */}
         <div className="relative mx-3 mb-2 pt-9">
@@ -463,7 +463,6 @@ export function ChatComposerDock({
           onRunMcpPrompt={onRunMcpPrompt}
           slashPickerOpen={slashPickerOpen}
           onSlashPickerOpenChange={onSlashPickerOpenChange}
-          ringSlot={ringSlot}
           attachDisabled={
             attachments.length >= ATTACH_MAX_COUNT ||
             !attachmentInputsReady ||
@@ -493,15 +492,23 @@ export function ChatComposerDock({
             // ESC handler 와 동일: 큐를 inject + abort (멈춤 X, 입력으로 inject).
             onCancel();
           }}
-          enableThinkingChat={enableThinkingChat}
-          reasoningAvailable={reasoningAvailable}
-          onToggleThinking={onToggleThinking}
-          statusRow={inputStatusRow}
-          onOpenModelSettings={onOpenModelSettings}
-          onOpenPermissions={onOpenPermissions}
-          onOpenApprovalQueue={onOpenApprovalQueue}
         />
           </ComposerFrame>
+          <ComposerStatusRow
+            statusRow={inputStatusRow}
+            ringSlot={ringSlot}
+            // The session's todo list is a chip on this row, next to the
+            // ring: it describes the work this conversation is doing, which
+            // is what the row is for. Up in the queue dock it floated over an
+            // empty toast reserve whenever there was nothing to notify.
+            todoSlot={<SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />}
+            onOpenModelSettings={onOpenModelSettings}
+            onOpenPermissions={onOpenPermissions}
+            onOpenApprovalQueue={onOpenApprovalQueue}
+            enableThinkingChat={enableThinkingChat}
+            reasoningAvailable={reasoningAvailable}
+            onToggleThinking={onToggleThinking}
+          />
         </div>
       </div>
       <QuestionOverlay

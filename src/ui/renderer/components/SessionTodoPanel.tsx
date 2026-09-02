@@ -3,14 +3,10 @@
 
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  ListChecks,
-  X,
-} from "lucide-react";
+import { ListChecks, X } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import {
   isSessionTodoStatus,
@@ -81,10 +77,10 @@ export function SessionTodoPanel({
 }) {
   const { t } = useTranslation();
   const [items, setItems] = useState<SessionTodoItem[]>([]);
-  // Start collapsed: a freshly-set plan opens in the closed state so it does
-  // not push the input cluster down. The collapsed header still streams the
-  // in-progress item title, so the user sees the active step at a glance and
-  // expands only when they want the full list.
+  // The list lives in a popover that starts closed: a freshly-set plan must
+  // not take space from the conversation. The chip still names the active
+  // step, so the user sees what is happening at a glance and opens the list
+  // only when they want the whole plan.
   const [open, setOpen] = useState(false);
   const itemsRef = useRef<SessionTodoItem[]>([]);
   const latestSessionIdRef = useRef<string | undefined>(sessionId);
@@ -188,37 +184,32 @@ export function SessionTodoPanel({
   };
 
   return (
-    <div
-      // The input cluster below us already draws its own `border-t bg-card`
-      // — we don't double up. Side borders + dashed amber tint signal "this
-      // is the assistant's running plan" without a redundant horizontal rule.
-      // Full-bleed across <main> is deliberate and pinned by
-      // session-todo-in-chat.spec.ts: dock strips are BANDS, the composer is
-      // the inset card. Do not inset this.
-      className="border-x border-dashed border-warning/(--opacity-medium) bg-warning/(--opacity-faint) text-xs transition-colors"
-      data-testid="session-todo-panel"
-      data-session-id={sessionId ?? ""}
-    >
-      <div className="flex items-center hover:bg-warning/(--opacity-subtle)">
-        <Button
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        {/* A chip in the composer's status row, next to the context ring: the
+            plan describes the SESSION's work, which is what that row is for.
+            It used to be a full-width band above the composer, which floated
+            over an empty toast reserve whenever there was nothing to notify. */}
+        <button
           type="button"
-          variant="ghost"
-          className="h-auto flex-1 min-w-0 justify-start gap-2 rounded-none px-3 py-1.5 text-xs font-normal hover:bg-transparent"
-          onClick={() => setOpen((o) => !o)}
+          className={`inline-flex min-w-0 shrink-0 items-center gap-1 rounded-full border border-warning/(--opacity-medium) bg-warning/(--opacity-faint) px-1.5 tabular-nums text-warning transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-warning/(--opacity-subtle) focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${
+            open ? "bg-warning/(--opacity-subtle)" : ""
+          }`}
+          data-testid="session-todo-panel"
+          data-session-id={sessionId ?? ""}
+          aria-expanded={open}
+          title={t("sessionTodoPanel.panelTitle")}
         >
-          {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-          <ListChecks className="h-3 w-3" />
-          <span className="font-medium">{t("sessionTodoPanel.panelTitle")}</span>
-          <Badge variant="outline" className="px-1 py-0 text-[10px]">
+          <ListChecks className="h-3 w-3 shrink-0" />
+          <span className="shrink-0">
             {completedCount}/{visible.length}
-          </Badge>
-          {/* Collapsed-state focal point: the focus item (in-progress, else the
-              first non-completed) streams next to the count so the user can see
-              what's happening at a glance without expanding. Pulse only when the
-              focus item is actually in-progress. */}
-          {!open && collapsedFocus && (
+          </span>
+          {/* The focus item (in-progress, else the first not-completed) rides
+              on the chip so the active step is readable without opening the
+              list. Pulse only when it is actually in progress. */}
+          {collapsedFocus && (
             <span
-              className={`ml-2 min-w-0 flex-1 truncate text-left text-warning ${
+              className={`max-w-[14rem] min-w-0 truncate text-left ${
                 collapsedFocus.status === "in_progress" ? activePulse : ""
               }`}
               data-testid="session-todo-collapsed-active"
@@ -227,28 +218,31 @@ export function SessionTodoPanel({
               {collapsedFocus.content}
             </span>
           )}
-        </Button>
-        {allComplete && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="mr-1 h-6 w-6 shrink-0 rounded-none hover:bg-transparent"
-            data-testid="session-todo-dismiss"
-            title={t("sessionTodoPanel.dismissTitle")}
-            onClick={(e) => {
-              // Don't toggle the panel open/closed when dismissing.
-              e.stopPropagation();
-              void handleDismiss();
-            }}
-          >
-            <X className="h-3 w-3" />
-          </Button>
-        )}
-      </div>
-      {open && (
-        // Cap the expanded list so a long plan doesn't push the input
-        // cluster off-screen — internal scroll preserves the chat layout.
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-80 p-0 text-xs" data-testid="session-todo-list">
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          <ListChecks className="h-3 w-3" />
+          <span className="font-medium">{t("sessionTodoPanel.panelTitle")}</span>
+          <Badge variant="outline" className="px-1 py-0 text-[10px]">
+            {completedCount}/{visible.length}
+          </Badge>
+          {allComplete && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="ml-auto h-6 w-6 shrink-0"
+              data-testid="session-todo-dismiss"
+              title={t("sessionTodoPanel.dismissTitle")}
+              onClick={() => { void handleDismiss(); }}
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+        {/* Cap the list so a long plan stays inside the popover — internal
+            scroll instead of a popover taller than the window. */}
         <ul className="max-h-[35vh] space-y-1 overflow-y-auto border-t px-3 py-1.5">
           {items.map((it) => {
             const meta = STATUS_BADGE[it.status];
@@ -287,7 +281,7 @@ export function SessionTodoPanel({
             );
           })}
         </ul>
-      )}
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }

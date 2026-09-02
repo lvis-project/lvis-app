@@ -165,7 +165,8 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
     expect(ta.className).toContain(surface === "main" ? "max-h-[144px]" : "max-h-[112px]");
     expect(ta.className).toContain("text-body-sm");
     expect(ta.className).toContain("placeholder:text-input-bar-placeholder");
-    expect(ta.getAttribute("rows")).toBeNull();
+    // One line at rest on both surfaces — the shared field, not a per-surface copy.
+    expect(ta.getAttribute("rows")).toBe("1");
     expect(ta.getAttribute("data-tour-anchor")).toBe(surface === "main" ? "composer-input" : null);
   });
 

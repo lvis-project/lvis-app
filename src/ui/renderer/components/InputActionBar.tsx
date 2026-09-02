@@ -1,25 +1,30 @@
 /**
- * InputActionBar — the single unified action bar inside the composer input box.
+ * InputActionBar — the single action row inside the composer input box, and
+ * ComposerStatusRow — the status line drawn UNDER the box.
  *
- * There is ONE action bar in the composer — shortcuts, thinking, cancel and
- * send live here rather than in a second turn-control row below it. Layout:
+ * There is ONE action bar in the composer — shortcuts, cancel and send live
+ * here rather than in a second turn-control row below it. Layout:
  *
- *   ACTION ROW (single line):
+ *   ACTION ROW (single line, inside the box):
  *     LEADING:  [⌘ slash/command picker] → [persona] → [attach]
- *     TRAILING: [? shortcuts] → [thinking] → [send / stop — one button]
+ *     TRAILING: [? shortcuts] → [send / stop — one button]
  *
  * The turn control is a SINGLE icon button, not a send button next to a
  * separate cancel button: it carries "stop" only while a run is in flight AND
  * the composer is empty, and reverts to "send" the moment anything is typed.
  *
- *   STATUS SUB-ROW (bottom, compact single line):
- *     [● active] · [model] · [permission — per-mode TEXT color] · [ring]
+ *   STATUS ROW (compact single line, below the box):
+ *     [ring] … [pending approvals] · [permission] · [model] · [reasoning] · [● active]
  *
- * The window StatusBar is notifications-only after this change; the persistent
- * model / permission / active cells moved here. The TokenProgressRing widget
- * lives at the END of this sub-row (after permission); the % / cost detail is
- * surfaced on the ring's hover/click — there is no separate context-percent
- * text cell.
+ * The status row is outside the input box on purpose. Everything inside the
+ * box is about the message being written; the model, the permission mode and
+ * whether a turn is running describe the SESSION, and a reader looks for that
+ * at the foot of the box, not among the controls that send it. The window
+ * StatusBar is notifications-only; the persistent cells live here.
+ *
+ * Both are exported from one module because the dock composes them as a pair
+ * and the side chat takes only the row's buttons — the split is in where they
+ * are drawn, not in what they know.
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
@@ -55,10 +60,6 @@ export interface InputActionBarProps {
   onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   slashPickerOpen: boolean;
   onSlashPickerOpenChange: (open: boolean) => void;
-  // Status sub-row — token progress ring (composed by the caller: ring + cost
-  // detail). Rendered at the END of the status sub-row, after the permission
-  // cell. The ring surfaces %/cost on hover/click.
-  ringSlot: ReactNode;
   // Leading — attachment picker (single unified button, no count badge —
   // count lives on the in-composer chip).
   onAttach: () => void | Promise<void>;
@@ -90,21 +91,6 @@ export interface InputActionBarProps {
   onSend: () => void;
 
   onCancel: () => void;
-  /** Thinking (extended reasoning) toggle + depth, before Send. */
-  enableThinkingChat: boolean;
-  /** Whether the selected runtime accepts this app-controlled reasoning setting. */
-  reasoningAvailable?: boolean;
-  onToggleThinking: (next: boolean) => void | Promise<void>;
-
-  // Status sub-row.
-  /** Resolved model / permission / active fields (from useInputStatusRow). */
-  statusRow: InputStatusRow;
-  /** Opens Settings → LLM — the model card's way to the full catalogue. */
-  onOpenModelSettings: () => void;
-  /** Opens Settings → Permissions when the permission cell is clicked. */
-  onOpenPermissions?: () => void;
-  /** Opens the deferred approval queue dialog. Separate from permission settings. */
-  onOpenApprovalQueue?: () => void;
 }
 
 function attachButtonLabel(
@@ -151,7 +137,6 @@ export function InputActionBar({
   onRunMcpPrompt,
   slashPickerOpen,
   onSlashPickerOpenChange,
-  ringSlot,
   onAttach,
   attachDisabled,
   attachDisabledReason = "limit",
@@ -165,13 +150,6 @@ export function InputActionBar({
   hasDraft,
   onSend,
   onCancel,
-  enableThinkingChat,
-  reasoningAvailable = true,
-  onToggleThinking,
-  statusRow,
-  onOpenModelSettings,
-  onOpenPermissions,
-  onOpenApprovalQueue,
 }: InputActionBarProps) {
   const { t } = useTranslation();
   const assistantMenuRequestIdRef = useRef<string | null>(null);
@@ -216,76 +194,61 @@ export function InputActionBar({
       // `first-boot-essentials` pins to this action-bar root, see
       // `default-tour-scenarios.ts`.
       data-tour-anchor="input-action-bar"
-      className="flex min-w-0 flex-col gap-1"
+      className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 py-2"
     >
-      {/* ── ACTION ROW ──────────────────────────────────────────────── */}
-      <div className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pt-2">
-        {/* Leading cluster — [command/slash] → [persona] → [attach].
-            The token ring moved to the status sub-row (after permission). */}
-        <div className="flex shrink-0 flex-nowrap items-center gap-0.5" data-testid="iab-leading">
-          <SlashPicker
-            plugins={plugins}
-            onSelectPlugin={onSelectPlugin}
-            onInsert={onInsertSlashCommand}
-            onRunMcpPrompt={onRunMcpPrompt}
-            open={slashPickerOpen}
-            onOpenChange={onSlashPickerOpenChange}
-          />
+      {/* Leading cluster — [command/slash] → [persona] → [attach].
+          The token ring lives in the status row under the box. */}
+      <div className="flex shrink-0 flex-nowrap items-center gap-0.5" data-testid="iab-leading">
+        <SlashPicker
+          plugins={plugins}
+          onSelectPlugin={onSelectPlugin}
+          onInsert={onInsertSlashCommand}
+          onRunMcpPrompt={onRunMcpPrompt}
+          open={slashPickerOpen}
+          onOpenChange={onSlashPickerOpenChange}
+        />
 
-          {/* Native persona context menu. Electron draws this outside the
-              renderer DOM, so submenus are not clipped by the chat pane. */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="relative h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
-            title={assistantTitle}
-            aria-label={assistantTitle}
-            data-testid="iab-assistant-context-button"
-            onClick={openAssistantContextMenu}
-            onContextMenu={openAssistantContextMenu}
-          >
-            <User className="h-3.5 w-3.5" />
-            {hasAssistantContext && (
-              <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-action-view" />
-            )}
-          </Button>
-
-          <AttachButton
-            onAttach={onAttach}
-            disabled={attachDisabled}
-            disabledReason={attachDisabledReason}
-            disabledSubscriptionProvider={attachDisabledSubscriptionProvider}
-          />
-        </div>
-
-        {/* Trailing cluster — turn controls (? · thinking · send/stop). */}
-        <div
-          className="ml-auto flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5 overflow-hidden pr-2"
-          data-testid="iab-trailing"
+        {/* Native persona context menu. Electron draws this outside the
+            renderer DOM, so submenus are not clipped by the chat pane. */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="relative h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
+          title={assistantTitle}
+          aria-label={assistantTitle}
+          data-testid="iab-assistant-context-button"
+          onClick={openAssistantContextMenu}
+          onContextMenu={openAssistantContextMenu}
         >
-          <ShortcutsButton />
-          {/* Reasoning control moved to the status sub-row (between model and dot). */}
-          <TurnControlButton
-            isBusy={isBusy}
-            hasDraft={hasDraft}
-            isSendDisabled={isSendDisabled}
-            onSend={onSend}
-            onCancel={onCancel}
-          />
-        </div>
+          <User className="h-3.5 w-3.5" />
+          {hasAssistantContext && (
+            <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-action-view" />
+          )}
+        </Button>
+
+        <AttachButton
+          onAttach={onAttach}
+          disabled={attachDisabled}
+          disabledReason={attachDisabledReason}
+          disabledSubscriptionProvider={attachDisabledSubscriptionProvider}
+        />
       </div>
 
-      {/* ── STATUS SUB-ROW ──────────────────────────────────────────── */}
-      <StatusSubRow
-        statusRow={statusRow}
-        ringSlot={ringSlot}
-        onOpenModelSettings={onOpenModelSettings}
-        onOpenPermissions={onOpenPermissions}
-        onOpenApprovalQueue={onOpenApprovalQueue}
-        enableThinkingChat={enableThinkingChat}
-        reasoningAvailable={reasoningAvailable}
-        onToggleThinking={onToggleThinking}
-      />
+      {/* Trailing cluster — turn controls (? · thinking · send/stop). */}
+      <div
+        className="ml-auto flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5 overflow-hidden pr-2"
+        data-testid="iab-trailing"
+      >
+        <ShortcutsButton />
+        {/* Reasoning control lives in the status row (between model and dot). */}
+        <TurnControlButton
+          isBusy={isBusy}
+          hasDraft={hasDraft}
+          isSendDisabled={isSendDisabled}
+          onSend={onSend}
+          onCancel={onCancel}
+        />
+      </div>
     </div>
   );
 }
@@ -409,25 +372,38 @@ export function AttachButton({
  * cost detail is surfaced on the ring's hover/click — there is no separate
  * context-percent text cell.
  */
-function StatusSubRow({
+export interface ComposerStatusRowProps {
+  /** Resolved model / permission / active fields (from useInputStatusRow). */
+  statusRow: InputStatusRow;
+  /** Token progress ring, composed by the caller (ring + cost detail). Leftmost. */
+  ringSlot: ReactNode;
+  /** The session's todo chip, drawn right after the ring; absent when the plan is empty. */
+  todoSlot?: ReactNode;
+  /** Opens Settings → LLM — the model card's way to the full catalogue. */
+  onOpenModelSettings: () => void;
+  /** Opens Settings → Permissions when the permission cell is clicked. */
+  onOpenPermissions?: () => void;
+  /** Opens the deferred approval queue dialog. Separate from permission settings. */
+  onOpenApprovalQueue?: () => void;
+  /** Thinking (extended reasoning) toggle + depth. */
+  enableThinkingChat: boolean;
+  /** Whether the selected runtime accepts this app-controlled reasoning setting. */
+  reasoningAvailable?: boolean;
+  onToggleThinking: (next: boolean) => void | Promise<void>;
+}
+
+/** The session line under the input box — see the module header for why it is outside. */
+export function ComposerStatusRow({
   statusRow,
   ringSlot,
+  todoSlot,
   onOpenModelSettings,
   onOpenPermissions,
   onOpenApprovalQueue,
   enableThinkingChat,
-  reasoningAvailable,
+  reasoningAvailable = true,
   onToggleThinking,
-}: {
-  statusRow: InputStatusRow;
-  ringSlot: ReactNode;
-  onOpenModelSettings: () => void;
-  onOpenPermissions?: () => void;
-  onOpenApprovalQueue?: () => void;
-  enableThinkingChat: boolean;
-  reasoningAvailable: boolean;
-  onToggleThinking: (next: boolean) => void | Promise<void>;
-}) {
+}: ComposerStatusRowProps) {
   const { t } = useTranslation();
   const { active, vendorModel, permissionMode, pendingApprovals } = statusRow;
   // Mode label ONLY — the pending-approval count is now its own separate
@@ -444,7 +420,7 @@ function StatusSubRow({
   return (
     <div
       data-testid="iab-status-row"
-      className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pb-1.5 text-caption text-input-bar-placeholder"
+      className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pt-1 text-caption text-muted-foreground"
     >
       {/* Status sub-row order (user): ring on the LEFT; then a right-aligned
           cluster — [대기 승인 N] · permission(mode only) · model ·
@@ -454,6 +430,7 @@ function StatusSubRow({
       <span className="shrink-0" data-testid="iab-status-ring">
         {ringSlot}
       </span>
+      {todoSlot}
 
       <div className="ml-auto flex min-w-0 flex-nowrap items-center gap-1.5">
         {/* Pending approvals — its OWN button, BEFORE the permission cell. */}

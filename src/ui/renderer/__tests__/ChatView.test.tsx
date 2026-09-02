@@ -220,10 +220,55 @@ describe("ChatView", () => {
     });
   });
 
-  it("keeps the session todo dock edge-to-edge above the composer", async () => {
+  it("draws the session todo chip in the composer status row, not in the queue dock", async () => {
+    const { container, emitSessionTodoChanged } = await renderApp({
+      hasApiKey: true,
+      history: {
+        sessionId: "sess-todo-dock",
+        messages: [
+          { index: 0, role: "user", content: "할 일 만들어 줘" },
+          { index: 1, role: "assistant", content: "만들었습니다" },
+        ],
+      },
+      mainActiveState: {
+        mainActiveSessionId: "sess-todo-dock",
+        mainActiveMode: "resume",
+        updatedAt: "2026-05-16T00:00:00.000Z",
+      },
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="composer-frame"]')).not.toBeNull();
+    });
+    act(() => {
+      emitSessionTodoChanged({
+        sessionId: "sess-todo-dock",
+        items: [
+          { id: "t1", content: "첫 번째", status: "in_progress" },
+          { id: "t2", content: "두 번째", status: "pending" },
+        ],
+      });
+    });
+    await waitFor(() => {
+      const chip = container.querySelector('[data-testid="session-todo-panel"]');
+      const frame = container.querySelector('[data-testid="composer-frame"]');
+      const queueDock = container.querySelector('[data-testid="composer-queue-dock"]');
+      const statusRow = container.querySelector('[data-testid="iab-status-row"]');
+      const ring = container.querySelector('[data-testid="iab-status-ring"]');
+      expect(chip).not.toBeNull();
+      // The plan describes the SESSION's work, so it is a chip on the session
+      // line under the box, right after the context ring — not a band up in
+      // the queue dock over an empty toast reserve, and not inside the box.
+      expect(queueDock?.contains(chip)).toBe(false);
+      expect(frame?.contains(chip)).toBe(false);
+      expect(statusRow?.contains(chip)).toBe(true);
+      expect(ring?.nextElementSibling).toBe(chip);
+    });
+  });
+
+  it("keeps the composer queue dock edge-to-edge above the composer", async () => {
     const { container } = await renderApp({ hasApiKey: true });
     await waitFor(() => {
-      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      const dock = container.querySelector('[data-testid="composer-queue-dock"]');
       expect(dock).not.toBeNull();
       expect(dock).toHaveClass("w-full");
       expect(dock?.className).not.toContain("px-");
@@ -235,7 +280,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
-      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      const dock = container.querySelector('[data-testid="composer-queue-dock"]');
       expect(dock).not.toBeNull();
       expect(dock).toHaveClass("mx-auto");
       expect(dock).toHaveClass("max-w-(--reading-column-max)");
@@ -369,7 +414,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="app-mode-chat"]')?.getAttribute("aria-pressed")).toBe("true");
-      const dock = container.querySelector('[data-testid="session-todo-dock"]');
+      const dock = container.querySelector('[data-testid="composer-queue-dock"]');
       expect(dock).not.toBeNull();
       expect(dock).toHaveClass("w-full");
       expect(dock).toHaveClass("max-w-full");
