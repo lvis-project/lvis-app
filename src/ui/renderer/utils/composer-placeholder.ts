@@ -5,10 +5,7 @@ import type { SuggestedRepliesSnapshot } from "../hooks/use-suggested-replies.js
 
 
 export function hasActiveSuggestedReplies(suggestedReplies: SuggestedRepliesSnapshot): boolean {
-  return (
-    !suggestedReplies.isDismissed &&
-    (suggestedReplies.best !== null || suggestedReplies.alternates.length > 0)
-  );
+  return !suggestedReplies.isDismissed && suggestedReplies.text !== null;
 }
 
 export function computeComposerPlaceholder(opts: {

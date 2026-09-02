@@ -1332,7 +1332,7 @@ B${i}
       },
       {
         channel: "lvis:chat:stream",
-        payload: expect.objectContaining({ type: "suggested_replies", replies: [], streamId: 1 }),
+        payload: expect.objectContaining({ type: "suggested_replies", reply: null, streamId: 1 }),
       },
       {
         channel: "lvis:chat:stream",

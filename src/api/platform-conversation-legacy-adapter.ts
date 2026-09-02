@@ -151,7 +151,7 @@ function projectPlatformConversationEventToLegacyChatFrame(
     case "guidance.dropped":
       return streamFrame(streamChannel, withStreamId({ type: "guidance_dropped", text: event.text }));
     case "suggestions.updated":
-      return streamFrame(streamChannel, withStreamId({ type: "suggested_replies", replies: event.replies }));
+      return streamFrame(streamChannel, withStreamId({ type: "suggested_replies", reply: event.reply }));
     case "turn.completed":
       return streamFrame(streamChannel, withStreamId({
         type: "done",

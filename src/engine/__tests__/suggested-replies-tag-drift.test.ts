@@ -5,7 +5,7 @@
  * bracket and the name. Matching was literal, so the opening tag was never
  * found: the streaming filter passed the block straight through, and the user
  * saw the markup, the bullet list and the trailing `</suggested_replies>`
- * rendered as message text instead of getting reply chips.
+ * rendered as message text instead of getting the ghost suggestion.
  *
  * The failure mode matters more than the typo. Tag spelling is model output —
  * i.e. it drifts — so exact-match parsing turns a cosmetic deviation into a
@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createStreamingFilter,
-  parseSuggestedReplies,
+  parseSuggestedReply,
   stripSuggestedReplies,
 } from "../suggested-replies.js";
 
@@ -38,22 +38,16 @@ const DRIFTED_CLOSE = [
 ] as const;
 
 function block(open: string, close: string): string {
-  return `${open}\n- first reply\n- second reply\n${close}`;
+  return `${open}\n- first reply\n${close}`;
 }
 
 describe("suggested-replies tag drift", () => {
   it.each(DRIFTED_OPEN)("parses a block opened with %j", (open) => {
-    expect(parseSuggestedReplies(block(open, "</suggested_replies>"))).toEqual([
-      "first reply",
-      "second reply",
-    ]);
+    expect(parseSuggestedReply(block(open, "</suggested_replies>"))).toBe("first reply");
   });
 
   it.each(DRIFTED_CLOSE)("parses a block closed with %j", (close) => {
-    expect(parseSuggestedReplies(block("<suggested_replies>", close))).toEqual([
-      "first reply",
-      "second reply",
-    ]);
+    expect(parseSuggestedReply(block("<suggested_replies>", close))).toBe("first reply");
   });
 
   it.each(DRIFTED_OPEN)("strips a drifted block from persisted text (%j)", (open) => {
@@ -75,7 +69,7 @@ describe("suggested-replies tag drift", () => {
     // behaviour, identical with the literal tag, and not what this is testing.
     expect(visible).toContain("answer text");
     expect(visible).not.toMatch(/suggested_replies|first reply/);
-    expect(filter.finish().suggestedReplies).toEqual(["first reply", "second reply"]);
+    expect(filter.finish().suggestedReply).toBe("first reply");
   });
 
   it("holds back a drifted tag split across chunks", () => {
@@ -89,7 +83,7 @@ describe("suggested-replies tag drift", () => {
     visible += filter.feed("ested_replies>\n- only reply\n</suggested_replies>");
     expect(visible).toContain("answer text");
     expect(visible).not.toMatch(/suggested_replies|only reply/);
-    expect(filter.finish().suggestedReplies).toEqual(["only reply"]);
+    expect(filter.finish().suggestedReply).toBe("only reply");
   });
 
   it("does not hold back ordinary text that merely starts with a bracket", () => {

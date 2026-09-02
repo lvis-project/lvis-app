@@ -123,7 +123,7 @@ export async function runStreamedTurn(
   const originSource = envelope?.source ?? null;
   // Per-turn streaming filter for the <suggested_replies> block. Withholds
   // chunks that could be (or are) part of the trailing tag, surfaces the
-  // parsed list when the turn ends. See
+  // parsed suggestion when the turn ends. See
   // `docs/architecture/proposals/suggested-replies-ghost-text.md`.
   const suggestedRepliesFilter = createStreamingFilter();
   send({ kind: "turn.started" });
@@ -314,9 +314,9 @@ export async function runStreamedTurn(
       userMessageId,
     },
   );
-  const { trailing, suggestedReplies } = suggestedRepliesFilter.finish();
+  const { trailing, suggestedReply } = suggestedRepliesFilter.finish();
   if (trailing) send({ kind: "assistant.text.delta", text: trailing });
-  send({ kind: "suggestions.updated", replies: suggestedReplies });
+  send({ kind: "suggestions.updated", reply: suggestedReply });
   send({ kind: "turn.completed", ...(result.route === "command" ? { route: "command" } : {}) });
   return result;
 }

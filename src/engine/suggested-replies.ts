@@ -52,15 +52,21 @@ function partialOpenTagLength(text: string): number {
   return 0;
 }
 
-/** Extract suggested replies from a complete assistant message. */
-export function parseSuggestedReplies(raw: string): string[] {
+/**
+ * Extract the suggested reply from a complete assistant message.
+ *
+ * The prompt asks for exactly one candidate; the first well-formed line wins
+ * so a model that still lists alternatives degrades to its top pick instead of
+ * to nothing.
+ */
+export function parseSuggestedReply(raw: string): string | null {
   const match = raw.match(BLOCK_REGEX);
-  if (!match) return [];
-  return match[1]
+  if (!match) return null;
+  const first = match[1]
     .split("\n")
     .map((line) => line.replace(/^[\s\-•*]+/, "").trim())
-    .filter((line) => line.length > 0 && line.length <= 80)
-    .slice(0, 5);
+    .find((line) => line.length > 0 && line.length <= 80);
+  return first ?? null;
 }
 
 /**
@@ -90,8 +96,8 @@ export interface StreamingFilter {
 export interface StreamingFilterResult {
   /** Tail that was held back but turned out not to be a tag prefix. */
   trailing: string;
-  /** Parsed suggestions, empty if no closed block was seen. */
-  suggestedReplies: string[];
+  /** Parsed suggestion, null if no closed block was seen. */
+  suggestedReply: string | null;
 }
 
 /**
@@ -133,9 +139,9 @@ export function createStreamingFilter(): StreamingFilter {
     },
     finish(): StreamingFilterResult {
       if (inBlock) {
-        return { trailing: "", suggestedReplies: parseSuggestedReplies(blockBuffer) };
+        return { trailing: "", suggestedReply: parseSuggestedReply(blockBuffer) };
       }
-      return { trailing: pending, suggestedReplies: [] };
+      return { trailing: pending, suggestedReply: null };
     },
   };
 }

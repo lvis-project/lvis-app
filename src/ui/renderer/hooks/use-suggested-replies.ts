@@ -6,16 +6,16 @@
 //
 // Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.1.
 //
-// PR-D additions:
+// Guards and bookkeeping:
 //   • Slash-command prefix filter (`/`, `!`, `$`) — security guard so a
 //     malicious / hallucinated suggestion cannot ride straight into a host
 //     command (proposal §10 follow-up).
 //   • Turn-scoped dismiss memory — once the user dismisses, subsequent pushes
 //     within the same turn keep `isDismissed: true`. A *new user message*
 //     calls `clearDismissedReplies()` to reset the latch so the next turn's
-//     suggestions render fresh.
-//   • Telemetry — `shown / accepted-best / accepted-chip / dismissed /
-//     ignored` counters routed through `telemetry/suggested-replies-counter`.
+//     suggestion renders fresh.
+//   • Telemetry — `shown / accepted / dismissed / ignored` counters routed
+//     through `telemetry/suggested-replies-counter`.
 import { useEffect, useSyncExternalStore } from "react";
 import { getApi } from "../api-client.js";
 import {
@@ -23,41 +23,40 @@ import {
 } from "../../../telemetry/suggested-replies-counter.js";
 
 export interface SuggestedRepliesSnapshot {
-  best: string | null;
-  alternates: string[];
+  /** The one suggested next input, rendered as ghost text. */
+  text: string | null;
   isDismissed: boolean;
 }
 
 const EMPTY_SNAPSHOT: SuggestedRepliesSnapshot = {
-  best: null,
-  alternates: [],
+  text: null,
   isDismissed: false,
 };
 
-// Suggestions matching this pattern are filtered out before they reach the
-// store. Spec §10 / #980 intent = drop LLM-generated executable command
-// payloads even when they are single-token host commands (`/clear`, `/help`,
-// `!ls`) because chip accept fills the composer and the next Enter can execute
-// it unintentionally. `$` is limited to env-assignment shape so natural
+// A suggestion matching this pattern is dropped before it reaches the store.
+// Spec §10 / #980 intent = drop LLM-generated executable command payloads
+// even when they are single-token host commands (`/clear`, `/help`, `!ls`)
+// because Tab-accept fills the composer and the next Enter can execute it
+// unintentionally. `$` is limited to env-assignment shape so natural
 // currency/prose suggestions are not silently removed.
 const COMMAND_PREFIX_PATTERN = /^(?:\/\S*|!\S*|\$[A-Za-z_][A-Za-z0-9_]*=)/;
 
 // Module-level store — single source of truth for all subscribers. Reset to
-// `EMPTY_SNAPSHOT` on every new replies push so React's `Object.is` snapshot
-// check correctly skips renders when nothing changed (object identity stable
-// across pushes that yield 0 replies).
+// `EMPTY_SNAPSHOT` on every empty push so React's `Object.is` snapshot check
+// correctly skips renders when nothing changed (object identity stable
+// across pushes that yield no reply).
 let snapshot: SuggestedRepliesSnapshot = EMPTY_SNAPSHOT;
 const subscribers = new Set<() => void>();
 
-// PR-D dismiss-memory: when the user hits Escape, we latch a flag so any
+// Dismiss-memory: when the user hits Escape, we latch a flag so any
 // subsequent push *within the same turn* (rare but possible — e.g. a plugin
 // re-emit) keeps the snapshot dismissed. `clearDismissedReplies()` is called
 // by the Composer when the user sends a new message, releasing the latch so
-// the next turn's suggestions render fresh.
+// the next turn's suggestion renders fresh.
 let dismissLatch = false;
 
-// PR-D ignored telemetry: when a new non-empty push arrives while the prior
-// snapshot was *active and unaccepted* (best != null, not dismissed), we
+// Ignored telemetry: when a new non-empty push arrives while the prior
+// snapshot was *active and unaccepted* (text != null, not dismissed), we
 // record an `ignored` event before overwriting. Tracking the active flag as
 // a separate scalar keeps the bookkeeping outside `snapshot` so it doesn't
 // pollute the public snapshot identity.
@@ -78,24 +77,27 @@ function getSnapshot(): SuggestedRepliesSnapshot {
   return snapshot;
 }
 
-export function pushSuggestedReplies(replies: string[]): void {
-  // Slash-command filter runs *before* the empty-check so a list whose only
-  // entries are command-prefixed correctly collapses to "no suggestions".
-  const filtered = replies.filter((r) => {
-    if (typeof r !== "string") return false;
-    const trimmed = r.trim();
-    return trimmed.length > 0 && !COMMAND_PREFIX_PATTERN.test(trimmed);
-  });
+function sanitizeReply(reply: unknown): string | null {
+  if (typeof reply !== "string") return null;
+  const trimmed = reply.trim();
+  if (trimmed.length === 0 || COMMAND_PREFIX_PATTERN.test(trimmed)) return null;
+  return reply;
+}
+
+export function pushSuggestedReply(reply: string | null): void {
+  // Command filter runs *before* the empty-check so a command-prefixed reply
+  // correctly collapses to "no suggestion".
+  const text = sanitizeReply(reply);
 
   // Telemetry: if the previous snapshot was still active + unaccepted when a
   // new push arrives, the user effectively ignored it. Record before we
   // overwrite (and only on a *fresh* non-empty arrival — an empty push
   // means "clear" which isn't a user-driven ignore).
-  if (priorActiveUnused && filtered.length > 0) {
+  if (priorActiveUnused && text !== null) {
     recordSuggestedRepliesEvent("ignored");
   }
 
-  if (filtered.length === 0) {
+  if (text === null) {
     priorActiveUnused = false;
     if (snapshot === EMPTY_SNAPSHOT) return;
     snapshot = EMPTY_SNAPSHOT;
@@ -107,8 +109,7 @@ export function pushSuggestedReplies(replies: string[]): void {
   // the user's prior Escape decision is honored across the (rare) intra-turn
   // re-push. `clearDismissedReplies()` releases the latch.
   snapshot = {
-    best: filtered[0]!,
-    alternates: filtered.slice(1),
+    text,
     isDismissed: dismissLatch,
   };
   // Only count as "shown" when the snapshot is actually visible (not latched
@@ -124,7 +125,7 @@ export function pushSuggestedReplies(replies: string[]): void {
 
 export function dismissSuggestedReplies(): void {
   if (snapshot.isDismissed) return;
-  if (snapshot.best === null && snapshot.alternates.length === 0) return;
+  if (snapshot.text === null) return;
   snapshot = { ...snapshot, isDismissed: true };
   dismissLatch = true;
   priorActiveUnused = false;
@@ -147,13 +148,9 @@ export function clearDismissedReplies(): void {
   priorActiveUnused = false;
 }
 
-export function acceptSuggestedReply(
-  _text: string,
-  source: "best" | "chip" = "best",
-): void {
-
+export function acceptSuggestedReply(): void {
   if (snapshot === EMPTY_SNAPSHOT) return;
-  recordSuggestedRepliesEvent(source === "best" ? "accepted-best" : "accepted-chip");
+  recordSuggestedRepliesEvent("accepted");
   snapshot = EMPTY_SNAPSHOT;
   // Accept also releases the dismiss latch — the snapshot was consumed, so
   // the next push should render fresh regardless of any prior Escape.
@@ -163,15 +160,15 @@ export function acceptSuggestedReply(
 }
 
 /**
- * Drop the current suggestions because the conversation that produced them is
+ * Drop the current suggestion because the conversation that produced it is
  * no longer the one on screen (new chat, session switch, transcript rewind).
  *
- * Suggestions belong to one assistant turn of one conversation, but this store
- * is a renderer singleton that deliberately outlives view remounts so a
- * Composer remount mid-turn does not lose them (see `ensureIpcWired`). Nothing
- * else bounds their lifetime, so without this reset the previous
+ * A suggestion belongs to one assistant turn of one conversation, but this
+ * store is a renderer singleton that deliberately outlives view remounts so a
+ * Composer remount mid-turn does not lose it (see `ensureIpcWired`). Nothing
+ * else bounds its lifetime, so without this reset the previous
  * conversation's snapshot survives into the next one — where an empty
- * transcript still reads as "suggestions active" and suppresses the
+ * transcript still reads as "suggestion active" and suppresses the
  * empty-state centered composer (and with it the project selector, which is
  * only mounted in that layout).
  *
@@ -194,7 +191,6 @@ export function __resetSuggestedRepliesStoreForTests(): void {
   snapshot = EMPTY_SNAPSHOT;
   dismissLatch = false;
   priorActiveUnused = false;
-
 }
 
 let ipcWired = false;
@@ -204,7 +200,7 @@ let ipcUnsub: (() => void) | null = null;
  * Wire renderer IPC listener exactly once per process. Idempotent — multiple
  * `useSuggestedReplies` consumers share the same subscription, and the
  * subscription is never torn down because the store outlives any individual
- * view (Composer remount during chat session change must not lose replies).
+ * view (Composer remount during chat session change must not lose the reply).
  */
 function ensureIpcWired(): void {
   if (ipcWired) return;
@@ -212,13 +208,8 @@ function ensureIpcWired(): void {
     const api = getApi();
     ipcUnsub = api.onChatStream((ev) => {
       if (ev.type !== "suggested_replies") return;
-      const replies = (ev as { replies?: unknown }).replies;
-      if (!Array.isArray(replies)) {
-        pushSuggestedReplies([]);
-        return;
-      }
-      const cleaned = replies.filter((r): r is string => typeof r === "string");
-      pushSuggestedReplies(cleaned);
+      const reply = (ev as { reply?: unknown }).reply;
+      pushSuggestedReply(typeof reply === "string" ? reply : null);
     });
     // Only mark wired after successful subscription — if getApi() / onChatStream
     // throws, leave `ipcWired = false` so the next consumer can retry once the
@@ -248,7 +239,7 @@ export function useSuggestedReplies(): SuggestedRepliesSnapshot {
 
 // HMR cleanup (dev only). Without this, Vite hot-replacing this module leaves
 // the previous IPC subscription dangling — both old + new closures fire on
-// every `suggested_replies` event, doubling `pushSuggestedReplies` calls and
+// every `suggested_replies` event, doubling `pushSuggestedReply` calls and
 // freezing the store at whichever closure ran last. Disposing on dispose
 // ensures the next module instance re-arms cleanly.
 //

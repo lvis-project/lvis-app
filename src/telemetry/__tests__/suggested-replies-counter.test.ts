@@ -17,8 +17,7 @@ describe("suggested-replies-counter", () => {
   it("starts every counter at 0", () => {
     expect(getSuggestedRepliesCounters()).toEqual({
       shown: 0,
-      "accepted-best": 0,
-      "accepted-chip": 0,
+      accepted: 0,
       dismissed: 0,
       ignored: 0,
     });
@@ -30,8 +29,7 @@ describe("suggested-replies-counter", () => {
     recordSuggestedRepliesEvent("dismissed");
     expect(getSuggestedRepliesCounters()).toEqual({
       shown: 2,
-      "accepted-best": 0,
-      "accepted-chip": 0,
+      accepted: 0,
       dismissed: 1,
       ignored: 0,
     });
@@ -45,13 +43,12 @@ describe("suggested-replies-counter", () => {
   });
 
   it("resetForTesting clears all counters", () => {
-    recordSuggestedRepliesEvent("accepted-best");
-    recordSuggestedRepliesEvent("accepted-chip");
+    recordSuggestedRepliesEvent("accepted");
+    recordSuggestedRepliesEvent("accepted");
     resetSuggestedRepliesCountersForTesting();
     expect(getSuggestedRepliesCounters()).toEqual({
       shown: 0,
-      "accepted-best": 0,
-      "accepted-chip": 0,
+      accepted: 0,
       dismissed: 0,
       ignored: 0,
     });

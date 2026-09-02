@@ -205,7 +205,7 @@ export type PlatformConversationEvent =
     readonly ownerDetail: { readonly messageId: string };
   }
   | { readonly kind: "guidance.dropped"; readonly text: string }
-  | { readonly kind: "suggestions.updated"; readonly replies: readonly string[] }
+  | { readonly kind: "suggestions.updated"; readonly reply: string | null }
   | { readonly kind: "turn.completed"; readonly route?: "command" }
   | {
     readonly kind: "privacy.redacted";
