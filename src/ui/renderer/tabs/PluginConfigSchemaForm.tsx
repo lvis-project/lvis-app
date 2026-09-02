@@ -78,6 +78,22 @@ function isSameConfigValue(a: unknown, b: unknown): boolean {
  * one key at a time so the value never sits in the cleartext settings
  * payload.
  */
+/** The per-field Save for cleartext inputs: disabled until dirty, busy while the host writes. */
+function SaveFieldButton({ fieldId, dirty, saving, onSave }: { fieldId: string; dirty: boolean; saving: boolean; onSave: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      size="sm"
+      className="h-7 text-xs px-2 shrink-0"
+      onClick={onSave}
+      disabled={!dirty || saving}
+      data-testid={`${fieldId}:save`}
+    >
+      {saving ? t("pluginConfigSchemaForm.saving") : t("pluginConfigSchemaForm.save")}
+    </Button>
+  );
+}
+
 export function PluginConfigSchemaForm({
   pluginId,
   schema,
@@ -329,15 +345,12 @@ export function PluginConfigSchemaForm({
                   }}
                   onKeyDown={(e) => { if (e.key === "Enter" && isCleartextDirty(key)) void saveField(key); }}
                 />
-                <Button
-                  size="sm"
-                  className="h-7 text-xs px-2 shrink-0"
-                  onClick={() => void saveField(key)}
-                  disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
-                  data-testid={`${fieldId}:save`}
-                >
-                  {fieldSaving[key] ? t("pluginConfigSchemaForm.saving") : t("pluginConfigSchemaForm.save")}
-                </Button>
+                <SaveFieldButton
+                  fieldId={fieldId}
+                  dirty={isCleartextDirty(key)}
+                  saving={Boolean(fieldSaving[key])}
+                  onSave={() => void saveField(key)}
+                />
               </div>
             ) : prop.type === "number" || prop.type === "integer" ? (
               <div className="flex items-center gap-2">
@@ -361,15 +374,12 @@ export function PluginConfigSchemaForm({
                   min={prop.minimum}
                   max={prop.maximum}
                 />
-                <Button
-                  size="sm"
-                  className="h-7 text-xs px-2 shrink-0"
-                  onClick={() => void saveField(key)}
-                  disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
-                  data-testid={`${fieldId}:save`}
-                >
-                  {fieldSaving[key] ? t("pluginConfigSchemaForm.saving") : t("pluginConfigSchemaForm.save")}
-                </Button>
+                <SaveFieldButton
+                  fieldId={fieldId}
+                  dirty={isCleartextDirty(key)}
+                  saving={Boolean(fieldSaving[key])}
+                  onSave={() => void saveField(key)}
+                />
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -381,15 +391,12 @@ export function PluginConfigSchemaForm({
                   onKeyDown={(e) => { if (e.key === "Enter" && isCleartextDirty(key)) void saveField(key); }}
                   maxLength={prop.maxLength}
                 />
-                <Button
-                  size="sm"
-                  className="h-7 text-xs px-2 shrink-0"
-                  onClick={() => void saveField(key)}
-                  disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
-                  data-testid={`${fieldId}:save`}
-                >
-                  {fieldSaving[key] ? t("pluginConfigSchemaForm.saving") : t("pluginConfigSchemaForm.save")}
-                </Button>
+                <SaveFieldButton
+                  fieldId={fieldId}
+                  dirty={isCleartextDirty(key)}
+                  saving={Boolean(fieldSaving[key])}
+                  onSave={() => void saveField(key)}
+                />
               </div>
             )}
             {error && <p className="text-[11px] text-destructive">{error}</p>}

@@ -919,6 +919,18 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
 
   const canSave = !!item && dirty && title.trim().length > 0 && !busy;
 
+  // A mutation either lands (close, let the board reload) or explains itself
+  // in the dialog; the host's refusal reads the same for every operation.
+  const settleMutation = (ok: boolean, result: object) => {
+    if (ok) {
+      onChanged();
+      onClose();
+      return;
+    }
+    const reason = "reason" in result ? result.reason : "error" in result ? result.error : undefined;
+    setActionError(typeof reason === "string" ? reason : t("workBoard.errorSaveFailed"));
+  };
+
   const handleSave = async () => {
     if (!item || !canSave) return;
     const patch: WorkItemUpdateInput = {};
@@ -937,13 +949,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
     setActionError("");
     try {
       const result = await api.updateWorkBoardItem(item.id, patch);
-      if ("status" in result && result.status === "updated") {
-        onChanged();
-        onClose();
-      } else {
-        const reason = "reason" in result ? result.reason : "error" in result ? result.error : undefined;
-        setActionError(reason ?? t("workBoard.errorSaveFailed"));
-      }
+      settleMutation("status" in result && result.status === "updated", result);
     } catch (err) {
       setActionError(errorMessage(err) || t("workBoard.errorSaveFailed"));
     } finally {
@@ -965,13 +971,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
       const ok =
         "status" in result &&
         (result.status === "completed" || result.status === "reopened" || result.status === "deleted");
-      if (ok) {
-        onChanged();
-        onClose();
-      } else {
-        const reason = "reason" in result ? result.reason : "error" in result ? result.error : undefined;
-        setActionError(reason ?? t("workBoard.errorSaveFailed"));
-      }
+      settleMutation(ok, result);
     } catch (err) {
       setActionError(errorMessage(err) || t("workBoard.errorSaveFailed"));
     } finally {
