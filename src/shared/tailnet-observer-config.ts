@@ -11,13 +11,28 @@
  */
 
 import { isRecord } from "./is-record.js";
+import { hasControlChars } from "./display-safe-text.js";
 
 /** Where a key's effective value came from. */
 type TailnetObserverConfigSourceView = "file" | "env-override" | "unset";
 
+/**
+ * How the listener decides a Tailnet request may reach it at all.
+ *
+ * `tailnet-identity` accepts any human identity Tailscale Serve vouches for and
+ * leaves observe-versus-control entirely to LVIS's own share permission; the
+ * pairing code is what turns such an identity into a share. `app-capability`
+ * additionally requires a grant written into the tailnet policy file, which
+ * only a tailnet administrator can do. Neither is a default — a configuration
+ * that names no authorization is refused rather than resolved.
+ */
+export type TailnetAuthorization =
+  | { readonly kind: "tailnet-identity" }
+  | { readonly kind: "app-capability"; readonly capability: string };
+
 export const TAILNET_OBSERVER_CONFIG_KEYS = [
   "enabled",
-  "expectedAppCapability",
+  "authorization",
   "port",
   "controllerEnabled",
   "pairedSharingEnabled",
@@ -36,7 +51,7 @@ export type TailnetObserverConfigKeyView = (typeof TAILNET_OBSERVER_CONFIG_KEYS)
  */
 export interface TailnetObserverConfigView {
   readonly enabled: boolean;
-  readonly expectedAppCapability: string;
+  readonly authorization: TailnetAuthorization;
   readonly port: number;
   readonly controllerEnabled: boolean;
   readonly pairedSharingEnabled: boolean;
@@ -161,6 +176,40 @@ export interface TailnetObserverConfigApi {
 
 export const DEFAULT_TAILNET_OBSERVER_VIEW_PORT = 46_173;
 
+/**
+ * Whether a string is usable as an app-capability grant name.
+ *
+ * A capability key is a token spliced into grant strings, so a SPACE in one
+ * would split it in two; prototype-pollution names are refused because the key
+ * indexes the parsed capability header object.
+ */
+export function isTailnetAppCapabilityKey(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 512
+    && value !== "__proto__"
+    && value !== "constructor"
+    && value !== "prototype"
+    && !hasControlChars(value)
+    && !value.includes(" ");
+}
+
+/** Validate an authorization choice crossing a trust boundary in either direction. */
+export function parseTailnetAuthorization(value: unknown): TailnetAuthorization | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === "tailnet-identity") {
+    return Object.keys(value).length === 1
+      ? Object.freeze({ kind: "tailnet-identity" as const })
+      : null;
+  }
+  if (value.kind === "app-capability" && typeof value.capability === "string") {
+    return Object.keys(value).length === 2
+      ? Object.freeze({ kind: "app-capability" as const, capability: value.capability })
+      : null;
+  }
+  return null;
+}
+
 /** Validate a config view crossing a trust boundary in either direction. */
 export function parseTailnetObserverConfigView(
   value: unknown,
@@ -168,19 +217,19 @@ export function parseTailnetObserverConfigView(
   if (!isRecord(value)) return null;
   const {
     enabled,
-    expectedAppCapability,
     port,
     controllerEnabled,
     pairedSharingEnabled,
     webEnabled,
     webOrigin,
   } = value;
+  const authorization = parseTailnetAuthorization(value.authorization);
   if (
     typeof enabled !== "boolean"
     || typeof controllerEnabled !== "boolean"
     || typeof pairedSharingEnabled !== "boolean"
     || typeof webEnabled !== "boolean"
-    || typeof expectedAppCapability !== "string"
+    || authorization === null
     || typeof webOrigin !== "string"
     || typeof port !== "number"
     || !Number.isSafeInteger(port)
@@ -189,7 +238,7 @@ export function parseTailnetObserverConfigView(
   }
   return Object.freeze({
     enabled,
-    expectedAppCapability,
+    authorization,
     port,
     controllerEnabled,
     pairedSharingEnabled,

@@ -130,14 +130,14 @@ const GUARDRAIL: readonly string[] = [
  *
  * The tailnet group is listed by name rather than through
  * {@link ENV_BACKED_SETTINGS} because its control writes a host-owned file
- * instead of the settings store — the capability it carries must stay
- * unsettable by a renderer. Same surface obligation, different backing.
+ * instead of the settings store — the authorization boundary it carries must
+ * stay unsettable by a renderer. Same surface obligation, different backing.
  */
 const SETTINGS_BACKED: readonly string[] = [
   ...ENV_BACKED_SETTINGS.map((entry) => entry.envVar),
   "LVIS_TAILNET_CONTROLLER",
   "LVIS_TAILNET_OBSERVER",
-  "LVIS_TAILNET_OBSERVER_CAP",
+  "LVIS_TAILNET_OBSERVER_AUTHORIZATION",
   "LVIS_TAILNET_OBSERVER_PORT",
   "LVIS_TAILNET_PAIRED_SHARING",
   "LVIS_TAILNET_WEB",

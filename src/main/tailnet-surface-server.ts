@@ -23,6 +23,11 @@ import {
   isTailnetWebOrigin,
   type TailnetSurfaceServer,
 } from "../api/tailnet-surface-server.js";
+import {
+  isTailnetAppCapabilityKey,
+  parseTailnetAuthorization,
+  type TailnetAuthorization,
+} from "../shared/tailnet-observer-config.js";
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import { isRecord } from "../shared/is-record.js";
 import type { TailscaleEnvironmentView } from "../shared/tailnet-observer-config.js";
@@ -40,7 +45,7 @@ export const DEFAULT_TAILNET_OBSERVER_PORT = 46_173;
 
 export interface TailnetObserverConfig {
   readonly port: number;
-  readonly expectedAppCapability: string;
+  readonly authorization: TailnetAuthorization;
   readonly controllerEnabled: boolean;
   readonly pairedSharingEnabled: boolean;
   readonly webOrigin?: string;
@@ -53,7 +58,7 @@ export interface TailnetObserverServer {
 /** Every key the observer configuration is made of, in both of its sources. */
 type TailnetObserverConfigKey =
   | "enabled"
-  | "expectedAppCapability"
+  | "authorization"
   | "port"
   | "controllerEnabled"
   | "pairedSharingEnabled"
@@ -83,13 +88,13 @@ export interface TailnetObserverResolution {
  * The host-owned observer configuration, `~/.lvis/tailnet/observer.json`.
  *
  * Deliberately NOT part of the settings store. That pipeline is renderer-
- * writable by design, and the capability key is precisely the value a webpage
- * must never be able to set — the property the env-only resolver was
+ * writable by design, and the authorization boundary is precisely the value a
+ * webpage must never be able to set — the property the env-only resolver was
  * protecting, kept intact by moving to a host-owned file instead of settings.
  */
 export interface TailnetObserverConfigFile {
   readonly enabled?: boolean;
-  readonly expectedAppCapability?: string;
+  readonly authorization?: TailnetAuthorization;
   readonly port?: number;
   readonly controllerEnabled?: boolean;
   readonly pairedSharingEnabled?: boolean;
@@ -102,7 +107,7 @@ const TAILNET_OBSERVER_CONFIG_FILE = "observer.json";
 
 const CONFIG_KEYS: readonly TailnetObserverConfigKey[] = [
   "enabled",
-  "expectedAppCapability",
+  "authorization",
   "port",
   "controllerEnabled",
   "pairedSharingEnabled",
@@ -112,7 +117,7 @@ const CONFIG_KEYS: readonly TailnetObserverConfigKey[] = [
 
 const ENV_KEY: Readonly<Record<TailnetObserverConfigKey, string>> = {
   enabled: "LVIS_TAILNET_OBSERVER",
-  expectedAppCapability: "LVIS_TAILNET_OBSERVER_CAP",
+  authorization: "LVIS_TAILNET_OBSERVER_AUTHORIZATION",
   port: "LVIS_TAILNET_OBSERVER_PORT",
   controllerEnabled: "LVIS_TAILNET_CONTROLLER",
   pairedSharingEnabled: "LVIS_TAILNET_PAIRED_SHARING",
@@ -183,8 +188,8 @@ function fileLayer(file: TailnetObserverConfigFile): RawLayer {
   for (const key of BOOLEAN_FILE_KEYS) {
     if (file[key] === true) layer[key] = "1";
   }
-  if (file.expectedAppCapability !== undefined) {
-    layer.expectedAppCapability = file.expectedAppCapability;
+  if (file.authorization !== undefined) {
+    layer.authorization = authorizationLayerValue(file.authorization);
   }
   if (file.port !== undefined) layer.port = String(file.port);
   if (file.webOrigin !== undefined) layer.webOrigin = file.webOrigin;
@@ -214,11 +219,16 @@ export function parseTailnetObserverConfigFile(raw: unknown): TailnetObserverCon
     if (typeof value !== "boolean") throw new Error("tailnet-observer-config-file-invalid");
     file[key] = value;
   }
-  for (const key of ["expectedAppCapability", "webOrigin"] as const) {
-    const value = source[key];
-    if (value === undefined) continue;
-    if (typeof value !== "string") throw new Error("tailnet-observer-config-file-invalid");
-    file[key] = value;
+  if (source.webOrigin !== undefined) {
+    if (typeof source.webOrigin !== "string") {
+      throw new Error("tailnet-observer-config-file-invalid");
+    }
+    file.webOrigin = source.webOrigin;
+  }
+  if (source.authorization !== undefined) {
+    const authorization = parseTailnetAuthorization(source.authorization);
+    if (authorization === null) throw new Error("tailnet-observer-config-file-invalid");
+    file.authorization = authorization;
   }
   if (source.port !== undefined) {
     if (typeof source.port !== "number") throw new Error("tailnet-observer-config-file-invalid");
@@ -245,9 +255,10 @@ function provenanceOf(file: RawLayer, env: RawLayer): TailnetObserverConfigProve
  * pretend otherwise; what it must not do is win *silently*, which is what the
  * returned provenance is for.
  *
- * OFF is side-effect free. ON requires an explicit owned app-capability key;
- * the renderer never supplies this value, so a webpage cannot widen Tailnet
- * policy by editing ordinary settings.
+ * OFF is side-effect free. ON requires an explicitly named authorization
+ * boundary — a tailnet identity or an owned app-capability key — with no
+ * implicit default, and the file it comes from is host-owned, so a webpage
+ * cannot widen Tailnet policy by editing ordinary settings.
  */
 function resolveFromLayers(file: RawLayer, env: RawLayer): TailnetObserverResolution {
   const merged: RawLayer = { ...file, ...env };
@@ -255,10 +266,7 @@ function resolveFromLayers(file: RawLayer, env: RawLayer): TailnetObserverResolu
   const fileConfigured = Object.keys(file).length > 0;
   if (merged.enabled !== "1") return { config: null, provenance, fileConfigured };
 
-  const expectedAppCapability = merged.expectedAppCapability;
-  if (!isCapabilityKey(expectedAppCapability)) {
-    throw new Error("tailnet-observer-capability-missing-or-invalid");
-  }
+  const authorization = parseAuthorizationLayerValue(merged.authorization);
 
   const rawPort = merged.port;
   const port = rawPort === undefined
@@ -298,7 +306,7 @@ function resolveFromLayers(file: RawLayer, env: RawLayer): TailnetObserverResolu
   return {
     config: Object.freeze({
       port,
-      expectedAppCapability,
+      authorization,
       controllerEnabled: rawController === "1",
       pairedSharingEnabled: rawPairedSharing === "1",
       ...(webOrigin === undefined ? {} : { webOrigin }),
@@ -469,7 +477,7 @@ async function startForBoot(
   const server = await resolved.startServer({
     host: "127.0.0.1",
     port: config.port,
-    expectedAppCapability: config.expectedAppCapability,
+    authorization: config.authorization,
     projectionStore: options.conversationSurfaceRuntime.sharedProjection,
     getCurrentConversationId: options.getCurrentConversationId,
     isConversationBusy: options.isConversationBusy,
@@ -946,12 +954,26 @@ function parseFixedPort(value: string): number {
   return port;
 }
 
-function isCapabilityKey(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 512
-    && value !== "__proto__"
-    && value !== "constructor"
-    && value !== "prototype"
-    && !/[\u0000-\u0020\u007f]/.test(value);
+/**
+ * The raw-layer spelling of an authorization choice.
+ *
+ * The file and the environment are merged in one vocabulary of strings, so the
+ * union has to survive a round trip through that vocabulary rather than get a
+ * second, file-only representation the environment could not express.
+ */
+function authorizationLayerValue(authorization: TailnetAuthorization): string {
+  return authorization.kind === "tailnet-identity"
+    ? "tailnet-identity"
+    : "app-capability:" + authorization.capability;
+}
+
+function parseAuthorizationLayerValue(raw: string | undefined): TailnetAuthorization {
+  if (raw === "tailnet-identity") return Object.freeze({ kind: "tailnet-identity" as const });
+  const capability = raw?.startsWith("app-capability:") === true
+    ? raw.slice("app-capability:".length)
+    : undefined;
+  if (!isTailnetAppCapabilityKey(capability)) {
+    throw new Error("tailnet-observer-authorization-missing-or-invalid");
+  }
+  return Object.freeze({ kind: "app-capability" as const, capability });
 }

@@ -5,7 +5,10 @@ import type {
   TailscaleEnvironment,
   TailscaleServeOutcome,
 } from "../tailnet-surface-server.js";
-import type { TailnetObserverConfigView } from "../../shared/tailnet-observer-config.js";
+import type {
+  TailnetAuthorization,
+  TailnetObserverConfigView,
+} from "../../shared/tailnet-observer-config.js";
 
 const CAPABILITY = "lvis.example.com/cap/conversation-observer";
 const DNS_NAME = "desk.example-tailnet.ts.net";
@@ -25,6 +28,8 @@ function readyEnvironment(overrides: Partial<TailscaleEnvironment> = {}): Tailsc
     ...overrides,
   };
 }
+const APP_CAPABILITY = Object.freeze({ kind: "app-capability" as const, capability: CAPABILITY });
+const TAILNET_IDENTITY = Object.freeze({ kind: "tailnet-identity" as const });
 
 function service(options: {
   file?: TailnetObserverConfigFile | null;
@@ -33,7 +38,7 @@ function service(options: {
   listeningPort?: number | null;
   activeConfig?: {
     port: number;
-    expectedAppCapability: string;
+    authorization: TailnetAuthorization;
     controllerEnabled: boolean;
     pairedSharingEnabled: boolean;
     webOrigin?: string;
@@ -66,7 +71,7 @@ function service(options: {
 
 const OFF_VIEW: TailnetObserverConfigView = Object.freeze({
   enabled: false,
-  expectedAppCapability: "",
+  authorization: TAILNET_IDENTITY,
   port: 46_173,
   controllerEnabled: false,
   pairedSharingEnabled: false,
@@ -86,7 +91,7 @@ describe("Tailnet observer configuration service", () => {
 
   it("separates what is saved from what the environment makes effective", async () => {
     const snapshot = await service({
-      file: { enabled: true, expectedAppCapability: CAPABILITY, port: 46_500 },
+      file: { enabled: true, authorization: APP_CAPABILITY, port: 46_500 },
       env: { LVIS_TAILNET_OBSERVER_PORT: "47000" },
     }).snapshot();
 
@@ -109,7 +114,7 @@ describe("Tailnet observer configuration service", () => {
     const writeConfigFile = vi.fn(async () => undefined);
     await service({ writeConfigFile }).apply({
       enabled: true,
-      expectedAppCapability: CAPABILITY,
+      authorization: APP_CAPABILITY,
       port: 46_173,
       controllerEnabled: false,
       pairedSharingEnabled: true,
@@ -119,7 +124,7 @@ describe("Tailnet observer configuration service", () => {
 
     expect(writeConfigFile).toHaveBeenCalledWith({
       enabled: true,
-      expectedAppCapability: CAPABILITY,
+      authorization: APP_CAPABILITY,
       pairedSharingEnabled: true,
     });
   });
@@ -136,7 +141,7 @@ describe("Tailnet observer configuration service", () => {
       const writeConfigFile = vi.fn(async () => undefined);
       await service({ writeConfigFile }).apply({
         enabled: true,
-        expectedAppCapability: CAPABILITY,
+        authorization: APP_CAPABILITY,
         port: 46_173,
         controllerEnabled: false,
         pairedSharingEnabled: true,
@@ -160,7 +165,7 @@ describe("Tailnet observer configuration service", () => {
       expect((await surface.snapshot()).derivedWebOrigin).toBeNull();
       await expect(surface.apply({
         enabled: true,
-        expectedAppCapability: CAPABILITY,
+        authorization: APP_CAPABILITY,
         port: 46_173,
         controllerEnabled: false,
         pairedSharingEnabled: true,
@@ -210,7 +215,10 @@ describe("Tailnet observer configuration service", () => {
       const writeConfigFile = vi.fn(async () => undefined);
       await service({ readConfigFile: damaged, writeConfigFile }).apply(OFF_VIEW);
 
-      expect(writeConfigFile).toHaveBeenCalledWith({});
+      // Not `{}` any more: the boundary has no implicit default, so a file
+      // that named none would be invalid the moment the listener is enabled.
+      // Starting over therefore writes the default boundary out explicitly.
+      expect(writeConfigFile).toHaveBeenCalledWith({ authorization: TAILNET_IDENTITY });
     });
   });
 
@@ -228,9 +236,9 @@ describe("Tailnet observer configuration service", () => {
     it("surfaces a restart failure rather than reporting a save that did nothing", async () => {
       await expect(service({
         restartListener: async () => {
-          throw new Error("tailnet-observer-capability-missing-or-invalid");
+          throw new Error("tailnet-observer-authorization-missing-or-invalid");
         },
-      }).apply(OFF_VIEW)).rejects.toThrow("tailnet-observer-capability-missing-or-invalid");
+      }).apply(OFF_VIEW)).rejects.toThrow("tailnet-observer-authorization-missing-or-invalid");
     });
   });
 

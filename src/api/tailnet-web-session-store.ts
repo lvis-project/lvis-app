@@ -34,11 +34,28 @@ export interface TailnetWebIssuedSession extends TailnetWebSessionAuthorization 
   readonly csrfToken: string;
 }
 
+/**
+ * A browser that has cleared the same-origin boundary but holds no share yet.
+ *
+ * The pairing page needs a CSRF secret before there is anything to authorize,
+ * so this record deliberately carries no actor and no share binding: it can
+ * only be presented to the pairing-claim route, never resolved into a session.
+ */
+interface TailnetWebPairingEntry {
+  readonly cookieToken: string;
+  readonly csrfToken: string;
+  readonly expiresAt: number;
+}
+
 export interface TailnetWebSessionStore {
   issue(input: Readonly<{
     actorId: TailnetShareActorId;
     pairedShare: TailnetPairingShareBinding;
   }>): TailnetWebIssuedSession | null;
+  /** Mint the share-less cookie/CSRF pair the pairing-code page is served with. */
+  issuePairingEntry(): TailnetWebPairingEntry | null;
+  /** Whether a cookie/CSRF pair is a current pairing entry — never a session. */
+  resolvePairingEntryMutation(cookieToken: string, csrfToken: string): boolean;
   /**
    * Add an independent page CSRF secret to a current browser session. This
    * keeps separately opened same-origin tabs usable without rotating their
@@ -64,7 +81,10 @@ export interface CreateTailnetWebSessionStoreOptions {
   readonly maxCsrfTokensPerSession?: number;
 }
 
-interface StoredSession extends TailnetWebSessionAuthorization {
+interface StoredSession {
+  /** Null while the browser may only redeem a pairing code. */
+  readonly authorization: TailnetWebSessionAuthorization | null;
+  readonly expiresAt: number;
   readonly cookieDigest: string;
   readonly csrfDigests: Set<string>;
 }
@@ -129,7 +149,7 @@ export function createTailnetWebSessionStore(
     const at = checkedNow();
     prune(at);
     const record = records.get(digest("cookie", cookieToken));
-    return record === undefined ? null : authorize(record);
+    return record?.authorization ?? null;
   };
 
   return Object.freeze({
@@ -144,19 +164,53 @@ export function createTailnetWebSessionStore(
       if (!Number.isSafeInteger(expiresAt)) {
         throw new Error("tailnet-web-session-store-clock-invalid");
       }
-      const record: StoredSession = Object.freeze({
+      const authorization: TailnetWebSessionAuthorization = Object.freeze({
         actorId: input.actorId,
         pairedShare: Object.freeze({ ...input.pairedShare }),
+        expiresAt,
+      });
+      const record: StoredSession = Object.freeze({
+        authorization,
         expiresAt,
         cookieDigest: digest("cookie", cookieToken),
         csrfDigests: new Set([digest("csrf", csrfToken)]),
       });
       records.set(record.cookieDigest, record);
       return Object.freeze({
-        ...authorize(record),
+        ...authorization,
         cookieToken,
         csrfToken,
       });
+    },
+
+    issuePairingEntry(): TailnetWebPairingEntry | null {
+      const at = checkedNow();
+      prune(at);
+      if (records.size >= maxSessions) return null;
+      const cookieToken = mint(randomBytes);
+      const csrfToken = mint(randomBytes);
+      const expiresAt = at + ttlMs;
+      if (!Number.isSafeInteger(expiresAt)) {
+        throw new Error("tailnet-web-session-store-clock-invalid");
+      }
+      const record: StoredSession = Object.freeze({
+        authorization: null,
+        expiresAt,
+        cookieDigest: digest("cookie", cookieToken),
+        csrfDigests: new Set([digest("csrf", csrfToken)]),
+      });
+      records.set(record.cookieDigest, record);
+      return Object.freeze({ cookieToken, csrfToken, expiresAt });
+    },
+
+    resolvePairingEntryMutation(cookieToken: string, csrfToken: string): boolean {
+      if (!TOKEN.test(cookieToken) || !TOKEN.test(csrfToken)) return false;
+      const at = checkedNow();
+      prune(at);
+      const record = records.get(digest("cookie", cookieToken));
+      return record !== undefined
+        && record.authorization === null
+        && hasMatchingCsrfDigest(record.csrfDigests, digest("csrf", csrfToken));
     },
     issuePageCsrf(
       cookieToken: string,
@@ -170,8 +224,9 @@ export function createTailnetWebSessionStore(
       const record = records.get(digest("cookie", cookieToken));
       if (
         record === undefined
-        || record.actorId !== input.actorId
-        || !sameBinding(record.pairedShare, input.pairedShare)
+        || record.authorization === null
+        || record.authorization.actorId !== input.actorId
+        || !sameBinding(record.authorization.pairedShare, input.pairedShare)
         || record.csrfDigests.size >= maxCsrfTokensPerSession
       ) {
         return null;
@@ -179,7 +234,7 @@ export function createTailnetWebSessionStore(
       const csrfToken = mint(randomBytes);
       record.csrfDigests.add(digest("csrf", csrfToken));
       return Object.freeze({
-        ...authorize(record),
+        ...record.authorization,
         cookieToken,
         csrfToken,
       });
@@ -214,14 +269,6 @@ export function createTailnetWebSessionStore(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-  });
-}
-
-function authorize(record: StoredSession): TailnetWebSessionAuthorization {
-  return Object.freeze({
-    actorId: record.actorId,
-    pairedShare: Object.freeze({ ...record.pairedShare }),
-    expiresAt: record.expiresAt,
   });
 }
 

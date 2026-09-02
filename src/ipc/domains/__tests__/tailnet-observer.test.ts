@@ -16,7 +16,7 @@ vi.mock("electron", () => ({
 
 const CONFIG = Object.freeze({
   enabled: true,
-  expectedAppCapability: CAPABILITY,
+  authorization: { kind: "app-capability" as const, capability: CAPABILITY },
   port: 46_173,
   controllerEnabled: false,
   pairedSharingEnabled: true,
@@ -30,7 +30,7 @@ function snapshotFixture() {
     effective: CONFIG,
     provenance: {
       enabled: "file" as const,
-      expectedAppCapability: "file" as const,
+      authorization: "file" as const,
       port: "unset" as const,
       controllerEnabled: "unset" as const,
       pairedSharingEnabled: "file" as const,
