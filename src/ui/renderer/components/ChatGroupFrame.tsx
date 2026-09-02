@@ -735,7 +735,7 @@ export interface ChatGroupState {
  * today. Shared rather than rebuilt so identity comparisons stay cheap; nothing
  * mutates a location in place.
  */
-const PANE_HOME: ViewLocation = { view: "home" };
+export const PANE_HOME: ViewLocation = { view: "home" };
 
 /**
  * The open chat groups, tiled.

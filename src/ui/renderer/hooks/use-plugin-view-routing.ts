@@ -40,12 +40,26 @@ export interface UsePluginViewRoutingDeps {
   statusPushToast: PushToast;
 }
 
+/** What a pane holding `viewKey` needs in order to draw a plugin surface.
+ *  Named only here: callers reach it through `pluginPaneFor`'s return type. */
+interface PluginPane {
+  view: PluginView | undefined;
+  /** The named plugin's runtime is still starting — see `isPluginPreparing`. */
+  preparing: boolean;
+  authError: string | null;
+}
+
 export interface UsePluginViewRoutingResult {
   handleViewSelect: (key: string) => void;
-  activePluginView: PluginView | undefined;
-  /** The open plugin view's runtime is still starting — see the memo below. */
-  activePluginPreparing: boolean;
-  activePluginAuthError: string | null;
+  /**
+   * Resolve a plugin surface for ONE view key.
+   *
+   * Panes each hold their own view, so "which plugin is open" is a question
+   * about a pane, not about the window: two panes can show two plugins at
+   * once. The auth errors and load statuses this reads are keyed by plugin
+   * id, which is already per-plugin — only the derivation was window-wide.
+   */
+  pluginPaneFor: (viewKey: string) => PluginPane;
 }
 
 /**
@@ -101,20 +115,25 @@ export function usePluginViewRouting({
 
   const [pluginAuthErrors, setPluginAuthErrors] = useState<Map<string, string>>(new Map());
 
-  const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
-  const activePluginAuthError = activePluginView ? pluginAuthErrors.get(activePluginView.pluginId) ?? null : null;
   /**
-   * The open view names a plugin whose runtime has not finished starting, so
-   * its view is not registered yet. The panel is a destination the user asked
-   * for, not a missing one: the host shows its loading state, and the view
-   * takes over the moment `pluginViews` gains it.
+   * `preparing` covers the view key that names a plugin whose runtime has not
+   * finished starting, so its view is not registered yet. The panel is a
+   * destination the user asked for, not a missing one: the host shows its
+   * loading state, and the view takes over the moment `pluginViews` gains it.
    */
-  const activePluginPreparing = useMemo(() => {
-    if (activePluginView) return false;
-    const parsed = parseInlineViewKey(activeView);
-    if (parsed?.kind !== "plugin") return false;
-    return isPluginPreparing(pluginCards, parsed.pluginId);
-  }, [activePluginView, activeView, pluginCards]);
+  const pluginPaneFor = useCallback((viewKey: string): PluginPane => {
+    const view = pluginViews.find((i) => toViewKey(i) === viewKey);
+    if (view) {
+      return { view, preparing: false, authError: pluginAuthErrors.get(view.pluginId) ?? null };
+    }
+    const parsed = parseInlineViewKey(viewKey);
+    const preparing = parsed?.kind === "plugin" && isPluginPreparing(pluginCards, parsed.pluginId);
+    return { view: undefined, preparing, authError: null };
+  }, [pluginViews, pluginCards, pluginAuthErrors]);
+
+  // The focused pane's own resolution, which the fallback effect below acts on:
+  // it is `activeView` that it would send back home.
+  const activePane = useMemo(() => pluginPaneFor(activeView), [pluginPaneFor, activeView]);
 
   const clearPluginAuthError = useCallback((pluginId: string) => {
     setPluginAuthErrors((prev) => {
@@ -289,10 +308,10 @@ export function usePluginViewRouting({
   // preparing plugin.
   useEffect(() => {
     if (!activeView.startsWith("plugin:")) return;
-    if (activePluginView) return;
-    if (activePluginPreparing) return;
+    if (activePane.view) return;
+    if (activePane.preparing) return;
     setActiveView("home");
-  }, [activeView, activePluginView, activePluginPreparing, setActiveView]);
+  }, [activeView, activePane, setActiveView]);
 
-  return { handleViewSelect, activePluginView, activePluginPreparing, activePluginAuthError };
+  return { handleViewSelect, pluginPaneFor };
 }

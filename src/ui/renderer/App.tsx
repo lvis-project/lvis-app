@@ -30,7 +30,7 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroupGutter, PaneFrame, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
+import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroupGutter, PANE_HOME, PaneFrame, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
 import { minimumCanvasHeight } from "./components/chat-group-tree.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
@@ -878,9 +878,7 @@ export function App() {
   // use-plugin-view-routing.ts.
   const {
     handleViewSelect,
-    activePluginView,
-    activePluginPreparing,
-    activePluginAuthError,
+    pluginPaneFor,
   } = usePluginViewRouting({
     api, t, activeView, setActiveView,
     pluginViews, pluginCards, pluginAuthStatuses, refreshPluginAuthStatus,
@@ -1118,13 +1116,6 @@ export function App() {
       newPaneTargetRef.current = null;
     }
   }, [chatGroups, handleViewSelectWithDoctor, statusPushToast, t]);
-
-  // Loading a conversation from Memory, Insights, or Routines is content
-  // navigation, not a history replay. The top toolbar exclusively owns visit
-  // history; result activation always reveals the loaded chat.
-  const handleActivateHome = useCallback(() => {
-    setActiveView("home");
-  }, [setActiveView]);
 
   // Side panel (ChatSidePanel) is a home-view affordance: navigating away from
   // home closes it so it never lingers behind another view. Toggling from a
@@ -1381,6 +1372,243 @@ export function App() {
   ]);
 
   // ─── Render ───────────────────────────────────
+  /**
+   * What ONE pane draws while it is not showing its conversation.
+   *
+   * The view is the pane's own — `contentById[paneId]` — not the window's, so
+   * two panes can hold two different views at once and each closes back to its
+   * own conversation. `null` means this pane is on home and the conversation
+   * behind it is what shows.
+   *
+   * One branch per view keeps the router readable; a built-in view — Settings
+   * included — and a plugin surface all go into the same frame a conversation
+   * gets.
+   */
+  const renderPaneRoute = (view: InlineViewKey, paneId: string): ReactNode => {
+    // Closing a routed pane does not close the pane: it puts THIS one back on
+    // home, so the conversation the view was covering comes back (design §3).
+    // Loading a conversation from Memory, Insights or Routines ends the same
+    // way — content navigation, not a history replay, so the top toolbar keeps
+    // exclusive ownership of visit history and the result reveals its chat.
+    const closePane = () => chatGroups.setPaneContent(paneId, PANE_HOME);
+    const pluginPane = pluginPaneFor(view);
+    /*
+     * What every pane is as a TILE, whatever it is showing.
+     *
+     * The same bindings the conversation frame gets, from the same source: a
+     * pane holding the work board is focusable, splittable and maximizable
+     * exactly as the conversation it replaced was, or the canvas would quietly
+     * lose those controls the moment a view opened in a tile. `onClose` is the
+     * one that differs — it hands the pane back to its conversation rather
+     * than removing the pane — so it stays with each branch.
+     */
+    const asTile = {
+      focused: chatGroups.focusedId === paneId,
+      onFocus: () => chatGroups.focus(paneId),
+      ...(chatGroups.canSplit ? {
+        canSplit: true,
+        onSplit: (axis: ChatGroupSplitAxis) => chatGroups.split(paneId, axis),
+        splitFits: (axis: ChatGroupSplitAxis) => chatGroups.splitFits(
+          paneId, axis, measuredCanvasSize(chatGroupCanvasRef.current),
+        ),
+      } : {}),
+      ...(chatGroups.canMaximize ? {
+        maximized: chatGroups.maximizedId === paneId,
+        onToggleMaximize: () => chatGroups.toggleMaximize(paneId),
+      } : {}),
+    };
+    /*
+     * The routed body, inside the pane's own cell.
+     *
+     * The cell already carries the tile inset and the box the
+     * split tree gave it, so the shell adds no margin of its
+     * own — a routed pane's outline lands exactly where the
+     * conversation it replaced drew one.
+     *
+     * `data-view` says which view this shell is holding.
+     * `main-pane-shell` alone cannot: a second pane's shell is
+     * one too, and both are in the DOM at the same time.
+     */
+    const paneShell = (view: InlineViewKey, frame: ReactNode) => (
+      <div
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+        data-testid="main-pane-shell"
+        data-view={view}
+      >
+        {frame}
+      </div>
+    );
+
+    /*
+     * A built-in view, drawn as a pane.
+     *
+     * The frame carries what used to be a heading INSIDE the
+     * view: its name, its glyph, and — through
+     * `usePaneActions` — the global controls that sat beside
+     * that heading. Closing it does not close the pane: it
+     * puts the pane back on `home`, so the conversation the
+     * view was covering comes back (design §3).
+     *
+     * `bodyInset` is where the view's page margin lives, and
+     * it lives in exactly one place per view: `page` for a
+     * view whose body is one column of content, `none` for a
+     * view that lays out its own regions to the hairline —
+     * Settings, whose nav column's full-height divider has to
+     * reach the frame's edge to read as two regions of one
+     * pane rather than a card floating inside it.
+     */
+    const viewPane = (
+      view: PaneViewKey,
+      body: ReactNode,
+      bodyInset: "none" | "page" = "page",
+    ) => {
+      const PaneIcon = BUILTIN_VIEW_ICONS[view];
+      return paneShell(view, (
+        <PaneFrame
+          title={t(BUILTIN_LABEL_KEYS[view])}
+          icon={<PaneIcon className="h-4 w-4" />}
+          bodyInset={bodyInset}
+          onClose={closePane}
+          {...asTile}
+        >
+          {body}
+        </PaneFrame>
+      ));
+    };
+
+    if (view === "memory") {
+      return viewPane("memory", (
+        <MemorySearchPanel
+          api={api}
+          project={activeProject ?? defaultWorkspaceProject}
+          onOpenSession={async (sessionId) => {
+            const loaded = await handleLoadSessionAndRefresh(sessionId);
+            if (loaded !== false) closePane();
+            return loaded;
+          }}
+        />
+      ));
+    }
+
+    if (view === "insights" || view === "starred") {
+      return viewPane(view, (
+        <StarredView
+          api={api}
+          starred={starred}
+          sessions={sessions}
+          workspaceProjects={workspaceProjects}
+          currentSessionId={currentSessionId}
+          refreshStarred={refreshStarred}
+          onJumpToSession={handleLoadSessionAndRefresh}
+          onActivateHome={closePane}
+        />
+      ));
+    }
+
+    if (view === "routines") {
+      return viewPane("routines", (
+        <RoutinePanel
+          api={api}
+          onOpenSession={(sessionId) => {
+            void (async () => {
+              const loaded = await handleLoadSessionAndRefresh(sessionId);
+              if (loaded !== false) closePane();
+            })();
+          }}
+        />
+      ));
+    }
+
+    if (view === "settings") {
+      // Settings renders inline in EVERY appMode; there is no
+      // detached settings window on this path. It lays out its
+      // own two regions, so the frame insets it by nothing.
+      return viewPane("settings", (
+        <SettingsInlineView
+          api={api}
+          /* The away-authority binding names a CONVERSATION, and
+             the focused pane is the one showing Settings — so it
+             is the conversation pane focus came from, not the
+             focused pane itself, that this means. */
+          chatGroupId={paneId}
+          initialTab={settingsTab}
+          onSaved={handleInlineSettingsSaved}
+          onTabChange={setSettingsTab}
+          exactDenyDraft={exactDenyDraft ?? null}
+          onExactDenySaved={handleExactDenySaved ?? (() => undefined)}
+          onDiscardExactDeny={() => setExactDenyDraft(null)}
+        />
+      ), "none");
+    }
+
+    if (view === "work-board") {
+      return viewPane("work-board", (
+        <WorkBoardPanel api={api} project={activeProject ?? defaultWorkspaceProject} />
+      ));
+    }
+
+    // The conversations are rendered OUTSIDE this router — see
+    // `chatSurface` above. They must stay mounted across view
+    // navigation: each tile's stream subscription starts when it
+    // mounts, so unmounting them to show Settings would drop the
+    // frames of a turn that is still running.
+    if (view === "home") return null;
+
+    // Everything above narrowed away an inline BUILT-IN key, so what is
+    // left is a plugin view — proven, not assumed. The annotation is the
+    // proof: add a built-in to `BUILTIN_VIEWS` with `inline: true` and
+    // forget a branch here, and this line stops compiling. That is what
+    // replaced the old bare fallback, which rendered ANY unrecognized
+    // string as a plugin view and so reported a misspelled destination
+    // as a missing plugin.
+    const pluginKey: PluginViewKey = view;
+    void pluginKey;
+    /*
+     * The plugin surface is a pane BODY, framed exactly like
+     * a built-in view: the header carries the extension's
+     * label and the glyph its sidebar row draws — both from
+     * the manifest, so the host holds no plugin-specific code
+     * (architecture.md §9) — and the extension's description,
+     * which used to be a second line of page chrome, is the
+     * title's tooltip.
+     *
+     * It is UNMOUNTED whenever it is not what the pane holds,
+     * not kept behind `display:none`. The conversation is the
+     * one surface that must survive being covered — its
+     * stream subscription, its composer draft and its scroll
+     * position all live in it — and a guest kept alive
+     * off-screen is a whole renderer process holding a
+     * partition open for a view nobody is looking at. The
+     * price is that coming back reloads the guest.
+     */
+    const PluginPaneIcon = pluginIconFor({
+      icon: pluginPane.view?.icon,
+      iconText: pluginPane.view?.iconText,
+    });
+    return paneShell(view, (
+      <PaneFrame
+        title={pluginPane.view
+          ? getPluginViewLabel(pluginPane.view)
+          : t("be_pluginUiHost.pluginUiTitle")}
+        description={pluginPane.view?.extension.description
+          ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
+        icon={(
+          <Suspense fallback={<span className="h-4 w-4" />}>
+            <PluginPaneIcon className="h-4 w-4" />
+          </Suspense>
+        )}
+        onClose={closePane}
+        {...asTile}
+      >
+        <PluginUiHostView
+          view={pluginPane.view ?? null}
+          preparing={pluginPane.preparing}
+          authError={pluginPane.authError ?? null}
+        />
+      </PaneFrame>
+    ));
+  };
+
   return (
     /* The composition root's provider stack, outer → inner:
        ErrorBoundary → ThemeProvider → TooltipProvider → OverlayContextProvider. */
@@ -1691,17 +1919,30 @@ export function App() {
                         setActiveView("home");
                       }}
                     >
-                      {/* The conversations, always mounted.
-                          A tile subscribes to its group's stream when it mounts, so
-                          swapping it out to render Settings would drop the frames of
-                          a turn still in flight — and take the composer draft and
-                          scroll position with it. `contents` keeps the wrapper out of
-                          the layout entirely, so the flex chain reads exactly as it
+                      {/* The panes. Every one of them, whatever it is showing:
+                          a routed view is drawn INSIDE the pane that holds it,
+                          so it takes that pane's box on the canvas and leaves
+                          its neighbours alone.
+
+                          The conversations under them stay mounted. A tile
+                          subscribes to its group's stream when it mounts, so
+                          swapping it out to render Settings would drop the
+                          frames of a turn still in flight — and take the
+                          composer draft and scroll position with it.
+
+                          `data-visible` answers "is a conversation on screen",
+                          which is what the window-level approval band asks
+                          before it draws a card no pane could: with one pane it
+                          is the old `activeView === "home"`, and with several it
+                          is true while any of them still draws its
+                          conversation. `contents` keeps the wrapper out of the
+                          layout entirely, so the flex chain reads exactly as it
                           does when this is the only child. */}
                       <div
                         data-testid="chat-surface"
-                        data-visible={activeView === "home" ? "true" : "false"}
-                        className={activeView === "home" ? "contents" : "hidden"}
+                        data-visible={chatGroups.groups.some((group) => !group.hidden
+                          && (chatGroups.contentById[group.id]?.view ?? "home") === "home") ? "true" : "false"}
+                        className="contents"
                       >
                         <PageShell
                               padded={false}
@@ -1747,9 +1988,26 @@ export function App() {
                                   data-testid={`chat-group-cell:${group.id}`}
                                   data-hidden={group.hidden ? "true" : undefined}
                                 >
+                                  {/* What this pane is showing. A routed view replaces
+                                      the conversation IN THE CELL, so it inherits the
+                                      tile's box, its inset and its place in the split
+                                      tree — and the panes beside it keep drawing
+                                      whatever they hold. */}
+                                  {renderPaneRoute(
+                                    (chatGroups.contentById[group.id]?.view ?? "home") as InlineViewKey,
+                                    group.id,
+                                  )}
                                   {/* The tile owns its conversation: every hook inside is
                                       keyed on its group-bound api, so two tiles stream at
-                                      once without either seeing the other's transcript. */}
+                                      once without either seeing the other's transcript.
+
+                                      Hidden rather than unmounted while a view covers it —
+                                      the turn it may be streaming, its composer draft and
+                                      its scroll position all live in here. `contents` while
+                                      it draws, so the wrapper adds no box of its own. */}
+                                  <div className={(chatGroups.contentById[group.id]?.view ?? "home") === "home"
+                                    ? "contents"
+                                    : "hidden"}>
                                   <ChatGroupSession
                                     chatGroupId={group.id}
                                     api={api}
@@ -1758,13 +2016,14 @@ export function App() {
                                     panelOpen={group.panelOpen}
                                     focused={chatGroups.focusedId === group.id}
                                     // "Hidden" means this tile is not drawn on screen NOW, whatever
-                                    // the reason. The tree answers one reason (another tile has the
-                                    // box); the route answers the other (the whole chat surface is
-                                    // display:none while Settings or a plugin view is open). A tile
-                                    // that only knew the tree kept its approval claim and drew its
-                                    // question cards into a surface nobody could see, and the
-                                    // window-level bands — built for exactly this — drew nothing.
-                                    // `conversationVisible` below reads the same fact.
+                                    // the reason. The tree answers one reason (another pane has the
+                                    // box); the route answers the other (this pane is showing
+                                    // Settings or a plugin view, so its conversation is behind
+                                    // display:none). A tile that only knew the tree kept its
+                                    // approval claim and drew its question cards into a surface
+                                    // nobody could see, and the window-level bands — built for
+                                    // exactly this — drew nothing. `conversationVisible` below
+                                    // reads the same fact, and so does the wrapper above.
                                     //
                                     // The route is asked of THIS pane's own content, not of
                                     // the window: a pane showing Settings hides its
@@ -1804,6 +2063,7 @@ export function App() {
                                       </ChatGroupFrame>
                                     )}
                                   </ChatGroupSession>
+                                  </div>
                                 </div>
                                 ))}
                                 {/* The boundaries sit in the 8px the cells' half-gutters
@@ -1823,201 +2083,6 @@ export function App() {
                               </>
                             </PageShell>
                       </div>
-                      {/* Renders the active main-pane content. One branch per view
-                          keeps the router readable; a built-in view — Settings
-                          included — and a plugin surface all go into the same
-                          frame a conversation gets (`paneShell`). */}
-                      {(() => {
-                        /*
-                         * Where a routed pane sits.
-                         *
-                         * The tile row's own insets around one frame, so a routed
-                         * pane's outline lands where a conversation tile's does.
-                         * Moving it onto the tiled canvas itself is a later
-                         * change.
-                         *
-                         * `data-view` says which view this shell is holding.
-                         * `main-pane-shell` alone cannot: the conversation
-                         * surface is one too, and it is in the DOM at the same
-                         * time.
-                         */
-                        const paneShell = (view: InlineViewKey, frame: ReactNode) => (
-                          <div
-                            className="flex min-h-0 min-w-0 flex-1 flex-col pb-(--chrome-gap) pl-(--chrome-gap-tight) pr-(--chrome-gap) pt-0"
-                            data-testid="main-pane-shell"
-                            data-view={view}
-                          >
-                            {frame}
-                          </div>
-                        );
-
-                        /*
-                         * A built-in view, drawn as a pane.
-                         *
-                         * The frame carries what used to be a heading INSIDE the
-                         * view: its name, its glyph, and — through
-                         * `usePaneActions` — the global controls that sat beside
-                         * that heading. Closing it does not close the pane: it
-                         * puts the pane back on `home`, so the conversation the
-                         * view was covering comes back (design §3).
-                         *
-                         * `bodyInset` is where the view's page margin lives, and
-                         * it lives in exactly one place per view: `page` for a
-                         * view whose body is one column of content, `none` for a
-                         * view that lays out its own regions to the hairline —
-                         * Settings, whose nav column's full-height divider has to
-                         * reach the frame's edge to read as two regions of one
-                         * pane rather than a card floating inside it.
-                         */
-                        const viewPane = (
-                          view: PaneViewKey,
-                          body: ReactNode,
-                          bodyInset: "none" | "page" = "page",
-                        ) => {
-                          const PaneIcon = BUILTIN_VIEW_ICONS[view];
-                          return paneShell(view, (
-                            <PaneFrame
-                              title={t(BUILTIN_LABEL_KEYS[view])}
-                              icon={<PaneIcon className="h-4 w-4" />}
-                              bodyInset={bodyInset}
-                              onClose={handleActivateHome}
-                            >
-                              {body}
-                            </PaneFrame>
-                          ));
-                        };
-
-                        if (activeView === "memory") {
-                          return viewPane("memory", (
-                            <MemorySearchPanel
-                              api={api}
-                              project={activeProject ?? defaultWorkspaceProject}
-                              onOpenSession={async (sessionId) => {
-                                const loaded = await handleLoadSessionAndRefresh(sessionId);
-                                if (loaded !== false) handleActivateHome();
-                                return loaded;
-                              }}
-                            />
-                          ));
-                        }
-
-                        if (activeView === "insights" || activeView === "starred") {
-                          return viewPane(activeView, (
-                            <StarredView
-                              api={api}
-                              starred={starred}
-                              sessions={sessions}
-                              workspaceProjects={workspaceProjects}
-                              currentSessionId={currentSessionId}
-                              refreshStarred={refreshStarred}
-                              onJumpToSession={handleLoadSessionAndRefresh}
-                              onActivateHome={handleActivateHome}
-                            />
-                          ));
-                        }
-
-                        if (activeView === "routines") {
-                          return viewPane("routines", (
-                            <RoutinePanel
-                              api={api}
-                              onOpenSession={(sessionId) => {
-                                void (async () => {
-                                  const loaded = await handleLoadSessionAndRefresh(sessionId);
-                                  if (loaded !== false) handleActivateHome();
-                                })();
-                              }}
-                            />
-                          ));
-                        }
-
-                        if (activeView === "settings") {
-                          // Settings renders inline in EVERY appMode; there is no
-                          // detached settings window on this path. It lays out its
-                          // own two regions, so the frame insets it by nothing.
-                          return viewPane("settings", (
-                            <SettingsInlineView
-                              api={api}
-                              /* The away-authority binding names a CONVERSATION, and
-                                 the focused pane is the one showing Settings — so it
-                                 is the conversation pane focus came from, not the
-                                 focused pane itself, that this means. */
-                              chatGroupId={chatGroups.focusedConversationId}
-                              initialTab={settingsTab}
-                              onSaved={handleInlineSettingsSaved}
-                              onTabChange={setSettingsTab}
-                              exactDenyDraft={exactDenyDraft ?? null}
-                              onExactDenySaved={handleExactDenySaved ?? (() => undefined)}
-                              onDiscardExactDeny={() => setExactDenyDraft(null)}
-                            />
-                          ), "none");
-                        }
-
-                        if (activeView === "work-board") {
-                          return viewPane("work-board", (
-                            <WorkBoardPanel api={api} project={activeProject ?? defaultWorkspaceProject} />
-                          ));
-                        }
-
-                        // The conversations are rendered OUTSIDE this router — see
-                        // `chatSurface` above. They must stay mounted across view
-                        // navigation: each tile's stream subscription starts when it
-                        // mounts, so unmounting them to show Settings would drop the
-                        // frames of a turn that is still running.
-                        if (activeView === "home") return null;
-
-                        // Everything above narrowed away an inline BUILT-IN key, so what is
-                        // left is a plugin view — proven, not assumed. The annotation is the
-                        // proof: add a built-in to `BUILTIN_VIEWS` with `inline: true` and
-                        // forget a branch here, and this line stops compiling. That is what
-                        // replaced the old bare fallback, which rendered ANY unrecognized
-                        // string as a plugin view and so reported a misspelled destination
-                        // as a missing plugin.
-                        const pluginKey: PluginViewKey = activeView;
-                        void pluginKey;
-                        /*
-                         * The plugin surface is a pane BODY, framed exactly like
-                         * a built-in view: the header carries the extension's
-                         * label and the glyph its sidebar row draws — both from
-                         * the manifest, so the host holds no plugin-specific code
-                         * (architecture.md §9) — and the extension's description,
-                         * which used to be a second line of page chrome, is the
-                         * title's tooltip.
-                         *
-                         * It is UNMOUNTED whenever it is not what the pane holds,
-                         * not kept behind `display:none`. The conversation is the
-                         * one surface that must survive being covered — its
-                         * stream subscription, its composer draft and its scroll
-                         * position all live in it — and a guest kept alive
-                         * off-screen is a whole renderer process holding a
-                         * partition open for a view nobody is looking at. The
-                         * price is that coming back reloads the guest.
-                         */
-                        const PluginPaneIcon = pluginIconFor({
-                          icon: activePluginView?.icon,
-                          iconText: activePluginView?.iconText,
-                        });
-                        return paneShell(activeView, (
-                          <PaneFrame
-                            title={activePluginView
-                              ? getPluginViewLabel(activePluginView)
-                              : t("be_pluginUiHost.pluginUiTitle")}
-                            description={activePluginView?.extension.description
-                              ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
-                            icon={(
-                              <Suspense fallback={<span className="h-4 w-4" />}>
-                                <PluginPaneIcon className="h-4 w-4" />
-                              </Suspense>
-                            )}
-                            onClose={handleActivateHome}
-                          >
-                            <PluginUiHostView
-                              view={activePluginView ?? null}
-                              preparing={activePluginPreparing}
-                              authError={activePluginAuthError ?? null}
-                            />
-                          </PaneFrame>
-                        ));
-                      })()}
                     </ErrorBoundary>
                   </div>
                   {/* The window's own band: everything the window itself has to
