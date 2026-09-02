@@ -237,6 +237,58 @@ export type WorkBoardReportResult =
   | { status: "empty"; kind: WorkBoardReportKind; period: string; reason: string }
   | { status: "error"; kind: WorkBoardReportKind; reason: string };
 
+// ── Briefing payloads ───────────────────────────────────────────────────────
+//
+// A briefing is the report surface run in the opposite direction. A report
+// summarizes what is ALREADY on the board; a briefing goes and LOOKS at the
+// user's work, and files what it finds back onto the board.
+//
+// What it files are proposals, not work items. A surveyed action item is a
+// machine's claim about what needs doing, and a proposal is already the shape
+// the board has for exactly that: reviewable, dismissable, expiring on its own,
+// and one click from becoming a real item. Writing straight into the planned
+// column would put unreviewed model output into the work the user has
+// committed to.
+
+/** Which window a briefing surveys. */
+export type WorkBoardBriefingKind = "daily" | "weekly";
+
+/**
+ * The `pluginId` every briefing-filed proposal carries.
+ *
+ * Reserved for the host: a plugin id is a directory name under the plugins
+ * root, and a dotted `lvis.` name is not one — so no installed plugin can post
+ * a card that claims to have come from the user's own briefing.
+ */
+export const BRIEFING_PROPOSAL_SOURCE_ID = "lvis.briefing";
+
+/** Display name stored on briefing-filed proposals. */
+export const BRIEFING_PROPOSAL_SOURCE_LABEL = "Briefing";
+
+/** Proposal kind each briefing window files under. */
+export const BRIEFING_PROPOSAL_KINDS: Record<WorkBoardBriefingKind, string> = {
+  daily: "daily-briefing",
+  weekly: "weekly-briefing",
+};
+
+/**
+ * Outcome of one briefing run. `filed` and `refreshed` carry proposal ids
+ * rather than counts so the IPC layer can name each changed card in the
+ * `proposalChanged` fan-out; the renderer reads `filed.length` for its result
+ * line. `refreshed` is what duplicate suppression produced — an action item
+ * whose key was already on the board updated its existing card in place
+ * instead of adding a second one.
+ */
+export type WorkBoardBriefingResult =
+  | {
+      status: "ok";
+      kind: WorkBoardBriefingKind;
+      filed: string[];
+      refreshed: string[];
+    }
+  | { status: "empty"; kind: WorkBoardBriefingKind; reason: string }
+  | { status: "error"; kind: WorkBoardBriefingKind; reason: string };
+
 // ── Bus events ──────────────────────────────────────────────────────────────
 
 /**

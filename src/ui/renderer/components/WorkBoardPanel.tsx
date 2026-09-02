@@ -27,6 +27,8 @@ import type { LvisApi } from "../types.js";
 import type {
   RunProgressEventPayload,
   RunTranscriptEvent,
+  WorkBoardBriefingKind,
+  WorkBoardBriefingResult,
   WorkBoardReportResult,
   WorkItemCreateInput,
   WorkItemPriority,
@@ -35,7 +37,7 @@ import type {
   WorkItemUpdateInput,
   WorkProposal,
 } from "../../../shared/work-board-types.js";
-import { MAX_ITEMS } from "../../../shared/work-board-types.js";
+import { BRIEFING_PROPOSAL_SOURCE_ID, MAX_ITEMS } from "../../../shared/work-board-types.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 import { errorMessage } from "../../../shared/error-message.js";
@@ -1179,7 +1181,13 @@ function ProposalCard({
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <Badge variant="outline" data-testid="work-board-proposal-source">
-          {t("workBoard.proposalSourceLabel", { plugin: proposal.pluginLabel })}
+          {/* A plugin's display name comes off its manifest and is not
+              translated; the host's own briefing has no manifest, so its
+              source reads in the user's language instead of interpolating an
+              English noun into a localized sentence. */}
+          {proposal.pluginId === BRIEFING_PROPOSAL_SOURCE_ID
+            ? t("workBoard.proposalSourceBriefing")
+            : t("workBoard.proposalSourceLabel", { plugin: proposal.pluginLabel })}
         </Badge>
         <span className="text-[11px] text-muted-foreground">{formatDue(proposal.dueAt)}</span>
       </div>
@@ -1317,19 +1325,33 @@ function ProposalsSection({
   );
 }
 
-// ─── Reports section (daily / weekly generation) ───────────────────────────────
+// ─── Reports & briefings section ───────────────────────────────────────────────
 //
-// Generates a personal work report on demand: the daily / weekly buttons call
-// the `generate-report` IPC channel, which drives the host-native reporter
-// (board state + activity log + learned memory → LLM → markdown). The returned
-// markdown renders in a scrollable monospace block (mirroring the run-output
-// panel). `empty` (no activity) and `error` (LLM failure / no reporter) both
-// surface as a single discriminated result so the user always gets feedback.
+// Two directions over the same two windows, in one card because the user picks
+// between them:
+//
+//   report   — summarize what is ALREADY on the board. Calls `generate-report`,
+//              which drives the host-native reporter (board state + activity log
+//              + learned memory → LLM → markdown) and renders the markdown here.
+//   briefing — go and LOOK at the user's work, then file what needs doing back
+//              onto the board. Calls `run-briefing`, which drives a read-only
+//              sub-agent survey; its findings land in the recommended-work band
+//              above as cards the user accepts or dismisses, so this row reports
+//              only how many were filed rather than rendering them twice.
+//
+// Both rows carry their own one-line description, because "daily report" and
+// "daily briefing" sitting next to each other are otherwise indistinguishable.
+// `empty` and `error` surface as discriminated results in both directions, so a
+// press always produces feedback.
 
 function ReportsSection({ api, project }: { api: LvisApi; project?: ProjectIdentity }) {
   const [generating, setGenerating] = useState<"daily" | "weekly" | null>(null);
   const [result, setResult] = useState<
     WorkBoardReportResult | { ok: false; error: string } | null
+  >(null);
+  const [briefing, setBriefing] = useState<WorkBoardBriefingKind | null>(null);
+  const [briefingResult, setBriefingResult] = useState<
+    WorkBoardBriefingResult | { ok: false; error: string } | null
   >(null);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
@@ -1346,6 +1368,21 @@ function ReportsSection({ api, project }: { api: LvisApi; project?: ProjectIdent
         if (mountedRef.current) setResult(r);
       } finally {
         if (mountedRef.current) setGenerating(null);
+      }
+    },
+    [api, project],
+  );
+
+  const survey = useCallback(
+    async (kind: WorkBoardBriefingKind) => {
+      if (typeof api.runWorkBoardBriefing !== "function") return;
+      setBriefing(kind);
+      setBriefingResult(null);
+      try {
+        const r = await api.runWorkBoardBriefing(kind, project?.projectRoot);
+        if (mountedRef.current) setBriefingResult(r);
+      } finally {
+        if (mountedRef.current) setBriefing(null);
       }
     },
     [api, project],
@@ -1381,8 +1418,78 @@ function ReportsSection({ api, project }: { api: LvisApi; project?: ProjectIdent
         </Button>
       </div>
       {result && <ReportResultBlock result={result} onClose={() => setResult(null)} />}
+
+      <div className="mt-4 border-t pt-4">
+        <p className="text-[11px] text-muted-foreground">{t("workBoard.briefingHint")}</p>
+        <div className="mt-3 flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={briefing !== null}
+            onClick={() => void survey("daily")}
+            data-testid="work-board-briefing-daily"
+          >
+            {briefing === "daily" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+            {t("workBoard.briefingDaily")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={briefing !== null}
+            onClick={() => void survey("weekly")}
+            data-testid="work-board-briefing-weekly"
+          >
+            {briefing === "weekly" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+            {t("workBoard.briefingWeekly")}
+          </Button>
+        </div>
+        {briefing !== null && (
+          <p className="mt-2 text-[11px] text-muted-foreground" data-testid="work-board-briefing-running">
+            {t("workBoard.briefingRunning")}
+          </p>
+        )}
+        {briefing === null && briefingResult && <BriefingResultLine result={briefingResult} />}
+      </div>
       </div>
     </section>
+  );
+}
+
+// The briefing's own result line. The cards themselves render in the
+// recommended-work band, so this says only how many arrived — or, when the
+// survey found nothing new, that there is nothing to look at.
+function BriefingResultLine({
+  result,
+}: {
+  result: WorkBoardBriefingResult | { ok: false; error: string };
+}) {
+  if ("ok" in result) {
+    return (
+      <p className="mt-2 text-[11px] text-destructive" data-testid="work-board-briefing-error">
+        {t("workBoard.briefingFailed")}: {result.error}
+      </p>
+    );
+  }
+  if (result.status === "error") {
+    return (
+      <p className="mt-2 text-[11px] text-destructive" data-testid="work-board-briefing-error">
+        {t("workBoard.briefingFailed")}: {result.reason}
+      </p>
+    );
+  }
+  // An `ok` run that refreshed existing cards and added none is, to the user,
+  // the same answer as a survey that found nothing: no new work arrived.
+  if (result.status === "empty" || result.filed.length === 0) {
+    return (
+      <p className="mt-2 text-[11px] text-muted-foreground" data-testid="work-board-briefing-empty">
+        {t("workBoard.briefingNothing")}
+      </p>
+    );
+  }
+  return (
+    <p className="mt-2 text-[11px] text-muted-foreground" data-testid="work-board-briefing-filed">
+      {t("workBoard.briefingFiled", { count: result.filed.length })}
+    </p>
   );
 }
 

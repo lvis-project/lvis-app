@@ -682,6 +682,11 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       period: input.period ?? "",
       reason: "mock",
     })),
+    runWorkBoardBriefing: vi.fn(async (kind: string) => ({
+      status: "empty",
+      kind,
+      reason: "mock",
+    })),
     onWorkBoardItemChanged: vi.fn((handler: (p: unknown) => void) => {
       workBoardItemChangedHandlers.add(handler);
       return () => workBoardItemChangedHandlers.delete(handler);
