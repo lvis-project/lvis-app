@@ -52,6 +52,22 @@ describe("shell-path-policy", () => {
     });
   });
 
+  it("treats `~\\` as a literal filename on POSIX — the file the file tools open", () => {
+    // `expandLeadingTilde` (shared/home-tilde.ts) expands `~\` only where `\`
+    // is a separator. This policy used to expand it on every platform, so on
+    // POSIX it judged `$HOME/notes.txt` (outside the sandbox) while the tool
+    // opened `<cwd>/~\notes.txt` — one ordinary file inside it.
+    const original = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux" });
+    try {
+      withRoot((root) => {
+        expect(validateShellCommandPathPolicy("cat '~\\notes.txt'", root, root, [])).toBeNull();
+      });
+    } finally {
+      Object.defineProperty(process, "platform", { value: original });
+    }
+  });
+
   it("validates shell working directory through the same sandbox path gate", () => {
     withRoot((root) => {
       expect(validateShellWorkingDirectory(root, root, [])).toBeNull();

@@ -10,6 +10,7 @@ import {
   isSensitivePath,
 } from "../permissions/sensitive-paths.js";
 import { errorMessage } from "../shared/error-message.js";
+import { expandLeadingTilde } from "../shared/home-tilde.js";
 
 export type ShellPathPolicyViolationKind =
   | "dynamic-path"
@@ -644,19 +645,14 @@ function resolveCandidatePath(value: string, cwd: string): string {
   if (expandedVars.includes("$") || expandedVars.includes("%")) {
     throw new Error(`Sandbox: unresolved shell variable in path operand ${value}`);
   }
-  if (
-    expandedVars.startsWith("~") &&
-    expandedVars !== "~" &&
-    !expandedVars.startsWith("~/") &&
-    !expandedVars.startsWith("~\\")
-  ) {
+  // `~user` is the one tilde form nobody expands; `~\x` on POSIX is not that —
+  // it is a literal filename `expandLeadingTilde` leaves alone, exactly as the
+  // file tools and the permission layer do, so this policy judges the same
+  // file they open.
+  if (/^~[^/\\]/.test(expandedVars)) {
     throw new Error(`Sandbox: unsupported user-home expansion in path operand ${value}`);
   }
-  const expanded = expandedVars === "~"
-    ? homedir()
-    : expandedVars.startsWith("~/") || expandedVars.startsWith("~\\")
-      ? pathResolve(homedir(), expandedVars.slice(2))
-      : expandedVars;
+  const expanded = expandLeadingTilde(expandedVars);
   const resolved = isAbsolute(expanded) || /^[A-Za-z]:[\\/]/.test(expanded)
     ? pathResolve(expanded)
     : pathResolve(cwd, expanded);
