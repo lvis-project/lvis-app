@@ -24,6 +24,7 @@ import type { PluginManifest } from "../../types.js";
 import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
+import { TOOL_NAME_PATTERN, isValidToolName } from "../../../tools/types.js";
 
 const CRLF_GUARD_PATTERN = "[\\r\\n]";
 
@@ -82,7 +83,20 @@ const validFirstTask = {
 };
 
 describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
+  it("enforces the same tools[].name grammar the schema pins", () => {
+    const toolDefinition = (manifestSchema as { definitions: Record<string, { properties: Record<string, { pattern?: string }> }> })
+      .definitions.tool;
+    expect(toolDefinition.properties.name.pattern).toBe(TOOL_NAME_PATTERN.source);
+    expect(isValidToolName("sample_tool")).toBe(true);
+    expect(isValidToolName("_private")).toBe(true);
+    expect(isValidToolName("sample.tool")).toBe(false);
+    expect(isValidToolName("sample-tool")).toBe(false);
+    expect(isValidToolName("1st")).toBe(false);
+    expect(isValidToolName(undefined)).toBe(false);
+  });
+
   it("compiles the host schema into a working validator", async () => {
+
     const validator = await buildManifestValidator();
     expect(typeof validator).toBe("function");
   });

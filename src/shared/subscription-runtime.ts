@@ -31,7 +31,22 @@ export const SUBSCRIPTION_TOOL_BRIDGE_CONTRACT = Object.freeze({
   maxJsonKeys: 1_024,
   maxJsonArrayItems: 1_024,
   maxJsonStringLength: 64 * 1024,
+  maxToolNameLength: 128,
 } as const);
+
+/**
+ * The name a host tool travels under on the subscription tool bridge: minted
+ * by the bridge (a host name that already fits passes through, anything else
+ * becomes `lvis_<sha>`), then checked again by the MCP shim on every
+ * `tools/list` entry and `tools/call`. One grammar for the two ends of the
+ * wire — a leading letter, then letters, digits, `_` or `-`, at most
+ * `maxToolNameLength` characters.
+ */
+const SUBSCRIPTION_BRIDGE_TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+
+export function isSubscriptionBridgeToolName(name: unknown): name is string {
+  return typeof name === "string" && SUBSCRIPTION_BRIDGE_TOOL_NAME_PATTERN.test(name);
+}
 
 /**
  * Provenance of a subscription-runtime token segment.

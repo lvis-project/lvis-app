@@ -16,12 +16,12 @@ import { join } from "node:path";
 import type { ToolSchema } from "../engine/llm/types.js";
 import { mainDir } from "./main-paths.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
-import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../shared/subscription-runtime.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT, isSubscriptionBridgeToolName } from "../shared/subscription-runtime.js";
 import { isPlainRecord } from "../shared/is-record.js";
 
 const MAX_TOOL_COUNT = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount;
 const MAX_SOURCE_TOOL_NAME_LENGTH = 256;
-const MAX_REMOTE_TOOL_NAME_LENGTH = 128;
+const MAX_REMOTE_TOOL_NAME_LENGTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolNameLength;
 const MAX_DESCRIPTION_CHARACTERS = 1_024;
 const MAX_DESCRIPTION_BYTES = 64 * 1024;
 const MAX_SCHEMA_BYTES = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxSchemaBytes;
@@ -37,7 +37,6 @@ const BRIDGE_URL_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.urlEnv;
 const BRIDGE_TOKEN_ENV = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.tokenEnv;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const DESCRIPTION_CONTROL_CHARACTERS = /[\u0000\u007f]/;
-const SAFE_REMOTE_TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonRecord | JsonValue[];
@@ -145,7 +144,7 @@ interface BridgedToolSchema {
 }
 
 function remoteToolName(originalName: string, occupied: ReadonlyMap<string, BridgedToolSchema>): string {
-  const base = SAFE_REMOTE_TOOL_NAME.test(originalName)
+  const base = isSubscriptionBridgeToolName(originalName)
     ? originalName
     : `lvis_${sha256Hex(originalName).slice(0, 48)}`;
   if (!occupied.has(base)) return base;
@@ -267,7 +266,7 @@ export class SubscriptionToolBridge {
 
   async invoke(name: unknown, input: unknown): Promise<string> {
     if (this.stopped || this.accepted) throw new Error("subscription-host-tool-unavailable");
-    const schema = typeof name === "string" && SAFE_REMOTE_TOOL_NAME.test(name)
+    const schema = isSubscriptionBridgeToolName(name)
       ? this.schemasByRemoteName.get(name)
       : undefined;
     if (!schema || !isPlainRecord(input) || !isSafeJsonValue(input)) {

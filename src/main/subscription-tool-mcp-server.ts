@@ -31,7 +31,7 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT } from "../shared/subscription-runtime.js";
+import { SUBSCRIPTION_TOOL_BRIDGE_CONTRACT, isSubscriptionBridgeToolName } from "../shared/subscription-runtime.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { hasExactKeys } from "../shared/is-record.js";
 import { isPlainRecord } from "../shared/is-record.js";
@@ -44,7 +44,7 @@ const TOOL_CALL_PATH = "/v1/tools/call";
 const MAX_BRIDGE_RESPONSE_BYTES = 512 * 1024;
 const MAX_TOOL_CALL_REQUEST_BYTES = 128 * 1024;
 const MAX_TOOL_COUNT = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolCount;
-const MAX_TOOL_NAME_LENGTH = 128;
+const MAX_TOOL_NAME_LENGTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxToolNameLength;
 const MAX_TOOL_DESCRIPTION_LENGTH = 16 * 1024;
 const MAX_SCHEMA_DIALECT_LENGTH = 1_024;
 const MAX_SCHEMA_BYTES = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxSchemaBytes;
@@ -55,7 +55,6 @@ const MAX_JSON_STRING_LENGTH = SUBSCRIPTION_TOOL_BRIDGE_CONTRACT.maxJsonStringLe
 const MAX_RESULT_TEXT_LENGTH = 16 * 1024;
 const MAX_TOKEN_LENGTH = 512;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
-const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/u;
 const TOKEN = /^[A-Za-z0-9_-]+$/u;
 
 interface JsonRecord {
@@ -201,7 +200,7 @@ function sanitizeTool(value: unknown): SubscriptionMcpTool | null {
   const rawInputSchema = ownValue(value, "inputSchema");
   if (
     !isSafeString(name, MAX_TOOL_NAME_LENGTH)
-    || !TOOL_NAME.test(name)
+    || !isSubscriptionBridgeToolName(name)
     || !isBoundedText(description, MAX_TOOL_DESCRIPTION_LENGTH, true)
     || !isPlainRecord(rawInputSchema)
   ) {
@@ -411,7 +410,7 @@ export class SubscriptionToolBridgeClient {
   }
 
   async callTool(name: unknown, args: unknown): Promise<BridgeCallResult> {
-    if (!isSafeString(name, MAX_TOOL_NAME_LENGTH) || !TOOL_NAME.test(name)) {
+    if (!isSafeString(name, MAX_TOOL_NAME_LENGTH) || !isSubscriptionBridgeToolName(name)) {
       return INVALID_TOOL_REQUEST;
     }
     const argumentsRecord = sanitizeToolArguments(args);
