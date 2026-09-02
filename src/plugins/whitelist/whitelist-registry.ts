@@ -27,11 +27,9 @@
  *   - "stale-past-grace"    — past 7d grace, deny `whitelist-stale-exceeded`
  *   - "no-cache"            — never had a successful load, deny `whitelist-unreachable`
  */
-import { createLogger } from "../../lib/logger.js";
-import { verifyEnvelope } from "../envelope-verifier.js";
 import { WHITELIST_PUBLIC_KEYS, WHITELIST_PRIMARY_KEY_ID } from "../marketplace-keys.js";
 import type { PublicKeyInput } from "../envelope-verifier.js";
-import type { SignatureEnvelope, ResolvedSignedSnapshot } from "../types.js";
+import type { ResolvedSignedSnapshot } from "../types.js";
 import {
   incrementHostSecretCounter,
   sanitizeKeyPrefix,
@@ -40,19 +38,13 @@ import {
   parseWhitelistDocument,
   type WhitelistDocument,
 } from "./whitelist-schema.js";
-import {
-  checkIssuedAt,
-  SignedDocumentCache,
-  type SignedDocCacheSnapshot,
-} from "../signed-doc-cache.js";
+import { loadSignedDocumentSnapshot, SignedDocumentCache } from "../signed-doc-cache.js";
 import {
   fetchSignedDocument,
   type FetchSignedDocumentOptions,
   type SignedDocSource,
   type SignedDocumentFetchOutcome,
 } from "../signed-doc-fetcher.js";
-
-const log = createLogger("whitelist-registry");
 
 // ---------------------------------------------------------------------
 // Transport + disk cache
@@ -83,8 +75,6 @@ export class WhitelistCache extends SignedDocumentCache {
  * consumer here; import `SignedDocCacheMeta` from `../signed-doc-cache.js`
  * directly if one is ever needed.
  */
-type WhitelistCacheSnapshot = SignedDocCacheSnapshot;
-
 /**
  * Primary URL is GitHub Pages; the fallback is a GitHub Release asset,
  * used on 5xx / network errors against the primary. An ETag is sent on
@@ -219,133 +209,28 @@ class WhitelistRegistry {
     const audit = opts.audit ?? (() => {});
     const telemetry = opts.telemetry ?? (() => {});
 
-    const cache = new WhitelistCache(opts.userDataDir);
-    const cached = await cache.load().catch((err) => {
-      log.warn(`cache load failed: ${(err as Error).message}`);
-      return null;
+    const { snapshot, unreachable } = await loadSignedDocumentSnapshot<WhitelistDocument>({
+      cache: new WhitelistCache(opts.userDataDir),
+      online: opts.online,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      now: this.now,
+      parse: parseWhitelistDocument,
+      publicKeys: this.publicKeys,
+      primaryKeyId: WHITELIST_PRIMARY_KEY_ID,
+      fetch: fetchWhitelist,
+      // Fail-closed: with no document `isAllowed` reports
+      // `whitelist-unreachable` for every secret.
+      failMode: "closed",
+      telemetryPrefix: "whitelist",
+      telemetry,
+      audit,
     });
-    let highestSeenIssuedAt: string | undefined = cached?.meta.highestSeenIssuedAt;
-
-    if (cached) {
-      const verified = this.verifyCachedSnapshot(cached);
-      // The cached body goes through the same `issuedAt` rules as a fetched
-      // one. The on-disk mark gating only the remote document would leave the
-      // shorter path — read a body off disk, check parse and signature, serve
-      // it — as the one that never meets the mark those very bytes are stored
-      // beside.
-      const issuedAtRejection = verified
-        ? checkIssuedAt(verified.issuedAt, highestSeenIssuedAt, this.now())
-        : null;
-      if (verified && !issuedAtRejection) {
-        this.snapshot = { doc: verified, source: "cache" };
-        if (!highestSeenIssuedAt || Date.parse(verified.issuedAt) > Date.parse(highestSeenIssuedAt)) {
-          highestSeenIssuedAt = verified.issuedAt;
-        }
-        telemetry("whitelist_cache_hit");
-      } else {
-        // Corrupt, unverifiable, or refused on `issuedAt` — treated as absent
-        // either way, and discarded rather than left on disk. Keeping it means
-        // re-reading and re-refusing the same bytes on every boot, and means
-        // its `highestSeenIssuedAt` outlives the only document that ever
-        // justified it. The mark stays in memory for the rest of this `init()`,
-        // so the remote fetch below is still gated by it.
-        telemetry("whitelist_cache_miss_offline", { reason: issuedAtRejection ?? "corrupt" });
-        if (issuedAtRejection) {
-          audit(
-            `whitelist_cache_rejected reason=${issuedAtRejection}`
-              + ` received=${verified?.issuedAt ?? "unknown"}`
-              + ` highest=${highestSeenIssuedAt ?? "none"}`,
-          );
-        }
-        await cache.clear().catch((err) => {
-          log.warn(`cache clear failed: ${(err as Error).message}`);
-        });
-      }
-    }
-
-    if (!opts.online) {
-      // Offline — cache (if any) is all we have. Record the "no-cache + offline"
-      // state so `isAllowed` reports `whitelist-unreachable` unambiguously.
-      if (!this.snapshot) {
-        this.noCacheOffline = true;
-        telemetry("whitelist_cache_miss_offline", { reason: "no-cache" });
-        audit(`whitelist_unreachable reason=no-cache-and-offline`);
-      }
-      return;
-    }
-
-    // Online — try a fetch. Conditional GET via `If-None-Match` when we have
-    // an ETag so the CDN can short-circuit.
-    try {
-      const meta = await cache.loadMeta();
-      const outcome = await fetchWhitelist({
-        ifNoneMatch: meta.etag,
-        ...(opts.signal ? { signal: opts.signal } : {}),
-      });
-      if ("notModified" in outcome) {
-        telemetry("whitelist_fetch_ok", { source: outcome.source, conditional: "304" });
-        // Cache unchanged — keep current snapshot, touch lastFetchAt.
-        await cache.storeMeta({
-          ...meta,
-          lastFetchAt: this.now(),
-        }).catch(() => {});
-        return;
-      }
-      const envelope = JSON.parse(outcome.signature) as SignatureEnvelope;
-      const doc = parseWhitelistDocument(outcome.body);
-      const verify = verifyEnvelope(
-        Buffer.from(outcome.body, "utf-8"),
-        envelope,
-        this.publicKeys,
-      );
-      if (!verify.ok) {
-        telemetry("whitelist_fetch_failed", { reason: "signature_invalid" });
-        audit(`whitelist_fetch_failed reason=signature_invalid detail=${verify.reason ?? "unknown"}`);
-        return;
-      }
-      // Rollback guard plus the plausibility bound that protects the mark
-      // itself: a document dated implausibly far ahead is discarded WITHOUT
-      // advancing `highestSeenIssuedAt`, because the mark is written to disk
-      // and would otherwise sit above every genuine document that follows,
-      // across restarts.
-      const issuedAtRejection = checkIssuedAt(doc.issuedAt, highestSeenIssuedAt, this.now());
-      if (issuedAtRejection) {
-        telemetry("whitelist_fetch_failed", { reason: issuedAtRejection });
-        audit(
-          `whitelist_fetch_failed reason=${issuedAtRejection} received=${doc.issuedAt}`
-            + ` highest=${highestSeenIssuedAt ?? "none"}`
-            + ` deviceClock=${new Date(this.now()).toISOString()}`,
-        );
-        return;
-      }
-      // Accept + persist.
-      const newMeta = {
-        etag: outcome.etag,
-        highestSeenIssuedAt: doc.issuedAt,
-        lastFetchAt: this.now(),
-      };
-      await cache.store({
-        body: outcome.body,
-        signature: outcome.signature,
-        meta: newMeta,
-      }).catch((err) => {
-        log.warn(`cache store failed: ${(err as Error).message}`);
-      });
-      this.snapshot = { doc, source: "remote" };
-      telemetry("whitelist_fetch_ok", { source: outcome.source });
-      audit(`whitelist_loaded source=${outcome.source} issuedAt=${doc.issuedAt}`);
-    } catch (err) {
-      telemetry("whitelist_fetch_failed", { reason: "network" });
-      audit(`whitelist_fetch_failed reason=network detail=${(err as Error).message}`);
-      // Keep whatever snapshot the cache produced (may be null).
-      if (!this.snapshot) {
-        this.noCacheOffline = true;
-        telemetry("whitelist_cache_miss_offline", { reason: "no-cache" });
-      }
-    }
+    this.snapshot = snapshot;
+    this.noCacheOffline = unreachable;
   }
 
   /**
+   * Synchronous Tier-3 decision.  /**
    * Synchronous Tier-3 decision. Returns `allow` / `deny{reason}`.
    *
    * Manifest sha mismatch is only checked when both sides supply a value —
@@ -430,37 +315,6 @@ class WhitelistRegistry {
   // helpers
   // ---------------------------------------------------------------------
 
-  private verifyCachedSnapshot(cached: WhitelistCacheSnapshot): WhitelistDocument | null {
-    try {
-      const doc = parseWhitelistDocument(cached.body);
-      const envelope = JSON.parse(cached.signature) as SignatureEnvelope;
-      const verify = verifyEnvelope(
-        Buffer.from(cached.body, "utf-8"),
-        envelope,
-        this.publicKeys,
-      );
-      if (!verify.ok) {
-        log.warn(`cached whitelist signature invalid: ${verify.reason}`);
-        return null;
-      }
-      // Rotation visibility, not a second gate. `verifyEnvelope` above only
-      // accepts key ids present in `WHITELIST_PUBLIC_KEYS`, so a signer that
-      // reaches this line is already a trusted Tier-3 anchor and a signer from
-      // another trust domain never gets here at all. What is left to say is
-      // that the document was signed by a trusted anchor other than the
-      // current primary — a rotation in progress, or one that stalled — so the
-      // branch logs and accepts. Retiring an anchor is done by removing it
-      // from `WHITELIST_PUBLIC_KEYS`, which turns this into a signature
-      // failure above rather than a warning here.
-      if (verify.key_id && verify.key_id !== WHITELIST_PRIMARY_KEY_ID) {
-        log.warn(`cached whitelist signed by non-primary trusted key_id=${verify.key_id}`);
-      }
-      return doc;
-    } catch (err) {
-      log.warn(`cached whitelist parse/verify failed: ${(err as Error).message}`);
-      return null;
-    }
-  }
 
 }
 
