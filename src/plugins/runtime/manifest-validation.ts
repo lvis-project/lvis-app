@@ -8,8 +8,6 @@
  */
 
 import { readFile } from "node:fs/promises";
-import * as AjvModule from "ajv";
-import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 // Host-owned manifest-shape SOT (ph2). The schema is imported as a
 // bundler-visible JSON module so it inlines into the packaged main bundle —
@@ -40,6 +38,9 @@ import {
   isAllowedHostSecretKey } from "../../shared/marketplace-package-assets.js";
 import { resolvePluginContributionDeclarations } from "../plugin-contributions.js";
 import { errorMessage } from "../../shared/error-message.js";
+import { resolveAddFormats, resolveAjv } from "../config-schema.js";
+import { TOOL_NAME_PATTERN, isValidToolName } from "../../tools/types.js";
+
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
@@ -75,26 +76,6 @@ export function formatUnknownErrorMessage(err: unknown): string {
   return String(err);
 }
 
-interface AjvCtor {
-  new (opts?: unknown): {
-    compile: (schema: unknown) => ValidateFunction;
-  };
-}
-
-/**
- * Resolve the AJV constructor / `addFormats` across CJS/ESM interop. AJV ships
- * its concrete class as either `module.default` (ESM) or `module.exports`
- * (CJS); the same interop dance the host already uses in `config-schema.ts`.
- */
-function resolveAjv(): AjvCtor {
-  const mod = AjvModule as unknown as { default?: unknown };
-  return (mod.default ?? AjvModule) as AjvCtor;
-}
-
-function resolveAddFormats(): (a: unknown) => void {
-  const mod = AddFormatsModule as unknown as { default?: unknown };
-  return (mod.default ?? AddFormatsModule) as (a: unknown) => void;
-}
 
 export function normalizeInstallPolicy(
   source: Partial<Pick<PluginManifest, "installPolicy">> | null | undefined,
@@ -505,22 +486,22 @@ export async function parsePluginJson(
   // Validate them before any runtime or subsystem can observe the manifest.
   resolvePluginContributionDeclarations(manifest);
 
-  // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor
-  // requirement — kept as defence-in-depth against an accidentally stale compiled
-  // Host validator, same rationale as the hostSecrets/version re-checks). One pass
-  // also builds the by-name index reused by auth cross-field checks and REJECTS duplicates:
-  // the old three-map shape got name-uniqueness for free (object keys), but two
-  // `tools[]` objects may now share a `name`, which would throw at runtime in the
-  // loader methodMap and make auth lookups ambiguous (u2 §1.4.1).
-  const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  // Tool names exposed to LLMs must satisfy TOOL_NAME_PATTERN (the schema's
+  // `tools[].name` rule — kept as defence-in-depth against an accidentally stale
+  // compiled Host validator, same rationale as the hostSecrets/version re-checks).
+  // One pass also builds the by-name index reused by auth cross-field checks and
+  // REJECTS duplicates: the old three-map shape got name-uniqueness for free
+  // (object keys), but two `tools[]` objects may now share a `name`, which would
+  // throw at runtime in the loader methodMap and make auth lookups ambiguous
+  // (u2 §1.4.1).
   const byName = new Map<string, Tool>();
   for (let i = 0; i < manifest.tools.length; i += 1) {
     const tool = manifest.tools[i];
     const name = tool?.name;
-    if (typeof name !== "string" || !TOOL_NAME_PATTERN.test(name)) {
+    if (!isValidToolName(name)) {
       throw new Error(
         `Invalid tool name '${String(name)}' in plugin '${pid}' at 'tools[${i}].name' (${path}): ` +
-          `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
+          `tool names must match ${TOOL_NAME_PATTERN.source} (start with letter/underscore, then letters/digits/underscores). ` +
           `Example: "tools": [{ "name": "sample_tool", ... }] (not "sample.tool")`,
       );
     }

@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
@@ -262,4 +262,23 @@ export function setProcessPlatform(value: NodeJS.Platform): void {
 /** Parse a tool's JSON text output as a keyed record. */
 export function parseJsonRecord(output: string): Record<string, unknown> {
   return JSON.parse(output) as Record<string, unknown>;
+}
+
+/**
+ * The file's identity and its bytes, read through ONE open handle.
+ *
+ * The atomic-write tests assert that a rewrite REPLACED the file: a new inode
+ * carrying the new bytes. Statting the path and then reading the path asks the
+ * directory twice, so the two answers can describe different files — the race
+ * those very tests exist to prove the writer avoids. Opening once and asking
+ * the descriptor makes the inode and the bytes the same file by construction.
+ */
+export function inspectFile(path: string): { ino: number; mode: number; text: string } {
+  const fd = openSync(path, "r");
+  try {
+    const stat = fstatSync(fd);
+    return { ino: stat.ino, mode: stat.mode & 0o777, text: readFileSync(fd, "utf-8") };
+  } finally {
+    closeSync(fd);
+  }
 }

@@ -162,34 +162,7 @@ export interface MessageMeta {
    * conversation loop. Persisted alongside the message so TokenCostBadge +
    * TurnActionBar show real numbers (not zeros) on historical sessions.
    */
-  turnSummary?: {
-    turnDurationMs: number;
-    toolCount: number;
-    cumulativeToolMs: number;
-    /**
-     * Engine-projected next request input. This is the single context-fill SOT
-     * used by TokenProgressRing and the turn footer.
-     */
-    tokensIn: number;
-    /** Sum of per-round (input − cacheRead − cacheWrite). Always set by the
-     * live conversation-loop emit, so required for any persisted turnSummary. */
-    freshInputTokens: number;
-    tokensOut: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-    /** Provider/model that actually served this turn, after fallback resolution. */
-    vendorProvider?: LLMVendor;
-    vendorModel?: string;
-    /**
-     * Per provider request usage segments. Kept unmerged so surcharge-sensitive
-     * pricing (for example OpenAI long-context request tiers) is computed at
-     * the same granularity the provider bills.
-     */
-    usageByModel?: TokenUsageByModel[];
-    /** Non-billable subscription telemetry; never enters API-key pricing. */
-    subscriptionUsage?: SubscriptionUsageTelemetry[];
-    breakdown?: Record<string, { count: number; ms: number }>;
-  };
+  turnSummary?: TurnSummary;
   /**
    * Checkpoint metrics — present ONLY on the compactBoundary user message
    * created by structured-compact. Lets historyToEntries reconstruct the
@@ -389,6 +362,58 @@ export interface TokenUsageByModel {
   vendorModel: string;
   tokenUsage: TokenUsage;
 }
+
+/**
+ * Turn-aggregate stats. Emitted live through `TurnCallbacks.onTurnSummary`
+ * and persisted byte-for-byte as `MessageMeta.turnSummary` on the turn-final
+ * assistant message, so the renderer can rebuild the `kind: "turn_summary"`
+ * ChatEntry on session reload without re-running the conversation loop.
+ */
+export interface TurnSummary {
+  turnDurationMs: number;
+  toolCount: number;
+  cumulativeToolMs: number;
+  /**
+   * `tokensIn` = engine-projected next request input. This is the
+   * provider-calibrated input size the next request would carry after the
+   * final assistant output/tool results have been appended, including the
+   * system prompt and exposed tool schemas. TokenProgressRing and the turn
+   * footer both use this same context-fill SOT.
+   */
+  tokensIn: number;
+  /**
+   * `freshInputTokens` = turn-aggregate fresh input (sum across rounds of
+   * `inputTokens − cacheReadTokens − cacheWriteTokens`). This is the
+   * billing-weight number the TokenCostBadge needs — fresh tokens are
+   * billed at full input price, while cached reads are billed at 10%.
+   * Splitting `tokensIn` (context-fill SOT) from `freshInputTokens`
+   * (turn-aggregate fresh, for billing) keeps the ring/footer context number
+   * separate from cost arithmetic. Always set by the live emit, so required
+   * for any persisted turnSummary.
+   */
+  freshInputTokens: number;
+  tokensOut: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  /**
+   * Provider/model that actually served this turn after fallback resolution.
+   * Persisted with turn_summary so historical cost badges never re-price old
+   * turns with the user's current settings.
+   */
+  vendorProvider?: LLMVendor;
+  vendorModel?: string;
+  /**
+   * Per provider request usage segments. Kept unmerged so surcharge-sensitive
+   * pricing (for example OpenAI long-context request tiers) is computed at
+   * the same granularity the provider bills.
+   */
+  usageByModel?: TokenUsageByModel[];
+  /** Non-billable subscription telemetry; never enters API-key pricing. */
+  subscriptionUsage?: SubscriptionUsageTelemetry[];
+  /** `{ count, ms }` per tool name; omitted when no tools ran. */
+  breakdown?: Record<string, { count: number; ms: number }>;
+}
+
 
 // ─── Provider 인터페이스 ────────────────────────────
 

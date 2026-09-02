@@ -25,24 +25,11 @@
 import type { Readable, Writable } from "node:stream";
 import { frameMessage, StdioFrameDecoder } from "../stdio-framing.js";
 import { RPC_INTERNAL_ERROR } from "../protocol-constants.js";
-
-interface JsonRpcRequestLike {
-  jsonrpc: "2.0";
-  id: number | string;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-interface JsonRpcResponseLike {
-  jsonrpc: "2.0";
-  id: number | string;
-  result?: unknown;
-  error?: { code: number; message: string; data?: unknown };
-}
+import type { JsonRpcId, JsonRpcRequest, JsonRpcResponse } from "../mcp-client.js";
 
 /** What the loop dispatches each request to (a {@link PluginMcpServer} satisfies this). */
 export interface StdioRequestHandler {
-  handle(request: JsonRpcRequestLike): Promise<JsonRpcResponseLike>;
+  handle(request: JsonRpcRequest<JsonRpcId>): Promise<JsonRpcResponse<JsonRpcId>>;
 }
 
 export class StdioServerLoop {
@@ -69,13 +56,13 @@ export class StdioServerLoop {
       // Only requests (method + id) get a reply; notifications (method, no id)
       // are fire-and-forget and a bare response is ignored.
       if (typeof message.method === "string" && message.id !== undefined) {
-        void this.dispatch(message as unknown as JsonRpcRequestLike);
+        void this.dispatch(message as unknown as JsonRpcRequest<JsonRpcId>);
       }
     }
   }
 
-  private async dispatch(request: JsonRpcRequestLike): Promise<void> {
-    let response: JsonRpcResponseLike;
+  private async dispatch(request: JsonRpcRequest<JsonRpcId>): Promise<void> {
+    let response: JsonRpcResponse<JsonRpcId>;
     try {
       response = await this.handler.handle(request);
     } catch (err) {

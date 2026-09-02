@@ -19,6 +19,7 @@
  */
 import type { WorkBoardStorage } from "./storage.js";
 import type { RunTranscriptEvent } from "../shared/work-board-types.js";
+import { parseJsonlLines } from "../audit/jsonl-reader.js";
 
 export type { RunTranscriptEvent };
 
@@ -74,11 +75,9 @@ export async function readRunTranscript(
   if (!(await storage.exists(path))) return [];
   const text = await storage.readText(path);
   const events: RunTranscriptEvent[] = [];
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+  for (const line of parseJsonlLines(text)) {
     try {
-      events.push(JSON.parse(trimmed) as RunTranscriptEvent);
+      events.push(JSON.parse(line) as RunTranscriptEvent);
     } catch {
       // skip a torn final line
     }

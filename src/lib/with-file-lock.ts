@@ -49,13 +49,37 @@ export async function withInProcessFileQueue<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const key = resolve(filePath);
-  const previous = inProcessFileQueues.get(key) ?? Promise.resolve();
-  const next = previous.then(() => fn());
-  inProcessFileQueues.set(key, next.then(() => undefined, () => undefined));
-  return next;
+  let queue = inProcessFileQueues.get(key);
+  if (!queue) {
+    queue = createSerialQueue();
+    inProcessFileQueues.set(key, queue);
+  }
+  return queue(fn);
 }
 
-const inProcessFileQueues = new Map<string, Promise<void>>();
+const inProcessFileQueues = new Map<string, SerialQueue>();
+
+/** Runs `work` after every previously queued `work` has settled. */
+export type SerialQueue = <T>(work: () => Promise<T>) => Promise<T>;
+
+/**
+ * One in-process FIFO. The promise chain that every "mutex" in the tree was
+ * re-typing by hand: a caller's `work` starts only after the previous caller's
+ * `work` has settled, in submission order, and a rejection is handed back to
+ * the caller that produced it without wedging the queue for the next one.
+ *
+ * Same scope caveat as {@link withInProcessFileQueue}: this orders callers
+ * inside ONE module instance of ONE process and nothing else.
+ */
+export function createSerialQueue(): SerialQueue {
+  let tail: Promise<void> = Promise.resolve();
+  return <T>(work: () => Promise<T>): Promise<T> => {
+    const next = tail.then(() => work());
+    tail = next.then(() => undefined, () => undefined);
+    return next;
+  };
+}
+
 
 export interface FileLockOptions {
   /**

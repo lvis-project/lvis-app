@@ -36,6 +36,7 @@ import {
   isPermissionAuditEntry,
   type PermissionAuditEntry,
 } from "../audit/audit-schema.js";
+import { parseJsonlLines } from "../audit/jsonl-reader.js";
 
 const TAIL_CHUNK_BYTES = 64 * 1024;
 
@@ -158,8 +159,7 @@ export function verifyAllAuditFiles(
 
   for (const file of files) {
     const filePath = join(auditDir, file);
-    const raw = readFileSync(filePath, "utf-8");
-    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+    const lines = parseJsonlLines(readFileSync(filePath, "utf-8"));
     const result = verifyChain(secret, lines);
     let sealMatch: boolean | null = null;
     const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})\.permission-audit\.jsonl$/);

@@ -10,7 +10,8 @@ import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import lockfile from "proper-lockfile";
-import { FileLockReleaseError, withFileLock, withInProcessFileQueue } from "../with-file-lock.js";
+import { FileLockReleaseError, createSerialQueue, withFileLock, withInProcessFileQueue } from "../with-file-lock.js";
+
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let tmpDir: string;
@@ -166,5 +167,30 @@ describe("withInProcessFileQueue", () => {
     expect(existsSync(`${testFile}.lock`)).toBe(false);
     await withFileLock(testFile, async () => undefined);
     expect(existsSync(`${testFile}.lock`)).toBe(false);
+  });
+});
+
+describe("createSerialQueue", () => {
+  it("runs work in submission order, one at a time", async () => {
+    const queue = createSerialQueue();
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const first = queue(() => new Promise<string>((resolve) => {
+      releaseFirst = () => { order.push("first:done"); resolve("first"); };
+    }));
+    const second = queue(async () => { order.push("second:start"); return "second"; });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(order).toEqual([]);
+    releaseFirst();
+    expect(await Promise.all([first, second])).toEqual(["first", "second"]);
+    expect(order).toEqual(["first:done", "second:start"]);
+  });
+
+  it("hands a rejection to its own caller without wedging the queue", async () => {
+    const queue = createSerialQueue();
+    const failed = queue(async () => { throw new Error("boom"); });
+    const next = queue(async () => "after");
+    await expect(failed).rejects.toThrow("boom");
+    expect(await next).toBe("after");
   });
 });

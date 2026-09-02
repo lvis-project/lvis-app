@@ -39,7 +39,14 @@ const STAGED_IMAGE_FILE_NAME = new RegExp(`^lvis-subscription-image-${UUID_SOURC
 const STAGED_IMAGE_ORPHAN_SWEEP_STARTED_AT_MS = Date.now();
 const liveStagedImagePaths = new Set<string>();
 
-const DYNAMIC_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+/**
+ * Codex app-server's grammar for a dynamic tool / namespace identifier, applied
+ * in both directions (definitions the host publishes, call payloads Codex sends
+ * back). It is the remote protocol's rule, not the host's: every name the host
+ * registers (`TOOL_NAME_PATTERN`) also satisfies it, and the hyphen it admits is
+ * for identifiers Codex itself may mint.
+ */
+const CODEX_DYNAMIC_TOOL_IDENTIFIER_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const RESERVED_DYNAMIC_TOOL_NAMESPACES = new Set([
   "functions",
   "multi_tool_use",
@@ -514,7 +521,7 @@ function boundedDynamicToolName(value: unknown, maxLength: number): string | nul
     typeof value !== "string"
     || value.length === 0
     || value.length > maxLength
-    || !DYNAMIC_TOOL_NAME_PATTERN.test(value)
+    || !CODEX_DYNAMIC_TOOL_IDENTIFIER_PATTERN.test(value)
   ) {
     return null;
   }

@@ -45,6 +45,8 @@ import type {
   TelegramOwnerConnectionSnapshot,
 } from "./telegram-connection-store.js";
 import { mintTelegramPairingCode, telegramPairingCodeDigest } from "./telegram-pairing-code.js";
+import { createSerialQueue } from "../lib/with-file-lock.js";
+
 
 /**
  * Sole storage key for the owner bot token; activation reads the same one.
@@ -284,24 +286,6 @@ function deriveState(
   }
 }
 
-/** Serialize multi-step lifecycle work so two connects cannot interleave. */
-function createMutex(): <T>(work: () => Promise<T>) => Promise<T> {
-  let tail: Promise<void> = Promise.resolve();
-  return async <T>(work: () => Promise<T>): Promise<T> => {
-    const previous = tail;
-    let release!: () => void;
-    tail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    try {
-      return await work();
-    } finally {
-      release();
-    }
-  };
-}
-
 export function createTelegramConnectionService(
   options: CreateTelegramConnectionServiceOptions,
 ): TelegramConnectionService {
@@ -321,7 +305,9 @@ export function createTelegramConnectionService(
   const makeClient = options.createBotApiClient
     ?? ((botToken: string) => createTelegramBotApiClient({ botToken }));
   const listeners = new Set<() => void>();
-  const runExclusive = createMutex();
+  /** Serialize multi-step lifecycle work so two connects cannot interleave. */
+  const runExclusive = createSerialQueue();
+
   /** Resolved from getMe and never persisted; a restart re-verifies it. */
   let botUsername: string | null = null;
 

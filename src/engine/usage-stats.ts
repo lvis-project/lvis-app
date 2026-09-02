@@ -7,6 +7,8 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { iterateJsonlLines, withAuditSnapshotLock } from "../audit/jsonl-reader.js";
+import type { AuditTokenUsage, AuditUsageByModelSegment } from "../audit/audit-logger.js";
+
 import { localDateKey, localMonthStartKey, localMondayWeekStartKey, shiftLocalDateKey } from "../shared/local-date.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import {
@@ -23,22 +25,8 @@ export interface AuditTurnEntry {
   timestamp: string;
   sessionId: string;
   type: string;
-  tokenUsage?: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-  };
-  usageByModel?: Array<{
-    vendorProvider: string;
-    vendorModel: string;
-    tokenUsage: {
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadTokens?: number;
-      cacheWriteTokens?: number;
-    };
-  }>;
+  tokenUsage?: AuditTokenUsage;
+  usageByModel?: AuditUsageByModelSegment[];
   /** Untrusted persisted subscription telemetry; normalize before use. */
   subscriptionUsage?: unknown;
   route?: string;

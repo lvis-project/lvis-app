@@ -15,9 +15,18 @@ import { isRecord } from "../shared/is-record.js";
 
 const MAX_REMOTE_DIAGNOSTIC_TEXT_LENGTH = 8_192;
 const MAX_RATE_LIMIT_VALUE = 1_000_000_000_000;
-const SAFE_TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/u;
+/**
+ * Charset a tool name quoted in REMOTE error text may be echoed with. This is
+ * an external boundary, not the host's tool-name rule: the runtime names
+ * whatever function its own side rejected (which may be a provider-namespaced
+ * `ns.tool`, hence the dot), and the match is only ever echoed into a bounded
+ * `messagePreview` — never resolved against the registry.
+ */
+const REMOTE_ERROR_TOOL_NAME_ECHO_CHARSET = "[A-Za-z0-9_.-]{1,128}";
+const REMOTE_ERROR_TOOL_NAME_ECHO = new RegExp(`^${REMOTE_ERROR_TOOL_NAME_ECHO_CHARSET}$`, "u");
 const SCHEMA_SIGNAL = /invalid[_ -]function[_ -]parameters|invalid schema for (?:function|tool)/iu;
-const NAMED_FUNCTION = /(?:function|tool)\s+['"`]?([A-Za-z0-9_.-]{1,128})['"`]?/iu;
+const NAMED_FUNCTION = new RegExp(`(?:function|tool)\\s+['"\`]?(${REMOTE_ERROR_TOOL_NAME_ECHO_CHARSET})['"\`]?`, "iu");
+const INVALID_SCHEMA_PREVIEW = new RegExp(`^Invalid schema for function '${REMOTE_ERROR_TOOL_NAME_ECHO_CHARSET}'\\.$`, "u");
 const CONTEXT_SIGNAL = /context[_ -]?(?:length|window)|maximum context length|prompt is too long|too many tokens/iu;
 const TPM_SIGNAL = /tokens?[_ -]?(?:per[_ -]?minute|per min)|\btpm\b/iu;
 const RATE_LIMIT_SIGNAL = /rate[_ -]?limit|too many requests|\b429\b/iu;
@@ -94,7 +103,7 @@ function diagnosticStatus(records: readonly Record<string, unknown>[]): number |
 function namedSchemaTool(texts: readonly string[]): string | undefined {
   for (const text of texts) {
     const name = text.match(NAMED_FUNCTION)?.[1];
-    if (name && SAFE_TOOL_NAME.test(name)) return name;
+    if (name && REMOTE_ERROR_TOOL_NAME_ECHO.test(name)) return name;
   }
   return undefined;
 }
@@ -197,7 +206,7 @@ export function projectedSubscriptionTransportDiagnosticsFromError(
   if (
     candidate.providerCode === "invalid_function_parameters"
     && candidate.classification === "unknown"
-    && /^Invalid schema for function '[A-Za-z0-9_.-]{1,128}'\.$/u.test(messagePreview)
+    && INVALID_SCHEMA_PREVIEW.test(messagePreview)
   ) {
     return {
       origin: "provider",

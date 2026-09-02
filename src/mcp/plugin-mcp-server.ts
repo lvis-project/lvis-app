@@ -36,6 +36,7 @@ import {
   RPC_UNSUPPORTED_PROTOCOL_VERSION,
 } from "./protocol-constants.js";
 import { PLUGIN_RESULT_CACHE } from "./plugin-server-projection.js";
+import type { JsonRpcId, JsonRpcRequest, JsonRpcResponse } from "./mcp-client.js";
 
 /** One content block of a tool result (a 2026-07-28 `CallToolResult` content). */
 export interface PluginToolContent {
@@ -58,20 +59,6 @@ export type PluginToolDelegate = (
   args: Record<string, unknown>,
 ) => Promise<PluginToolOutcome>;
 
-interface JsonRpcRequestLike {
-  jsonrpc: "2.0";
-  id: number | string;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-interface JsonRpcResponseLike {
-  jsonrpc: "2.0";
-  id: number | string;
-  result?: unknown;
-  error?: { code: number; message: string; data?: unknown };
-}
-
 export class PluginMcpServer {
   constructor(
     private readonly manifest: PluginManifest,
@@ -92,7 +79,7 @@ export class PluginMcpServer {
    * problems use JSON-RPC error codes. Every RESULT is stamped with the
    * reserved `serverInfo` `_meta` identity (spec SHOULD) — errors are not.
    */
-  async handle(request: JsonRpcRequestLike): Promise<JsonRpcResponseLike> {
+  async handle(request: JsonRpcRequest<JsonRpcId>): Promise<JsonRpcResponse<JsonRpcId>> {
     const response = await this.dispatch(request);
     if (
       response.result !== undefined &&
@@ -112,7 +99,7 @@ export class PluginMcpServer {
     return response;
   }
 
-  private async dispatch(request: JsonRpcRequestLike): Promise<JsonRpcResponseLike> {
+  private async dispatch(request: JsonRpcRequest<JsonRpcId>): Promise<JsonRpcResponse<JsonRpcId>> {
     const id = request.id;
 
     const versionError = this.checkProtocolVersion(request.params);

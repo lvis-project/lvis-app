@@ -10,6 +10,7 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
+import { parseJsonlLines } from "../audit/jsonl-reader.js";
 
 export interface FeedbackEntry {
   /** uuid */
@@ -68,9 +69,8 @@ export class FeedbackStore {
   /** Read all entries, optionally filtered by sessionId. */
   list(sessionId?: string): FeedbackEntry[] {
     if (!existsSync(this.filePath)) return [];
-    const lines = readFileSync(this.filePath, "utf-8").trim().split("\n").filter(Boolean);
     const entries: FeedbackEntry[] = [];
-    for (const line of lines) {
+    for (const line of parseJsonlLines(readFileSync(this.filePath, "utf-8"))) {
       try {
         const e = JSON.parse(line) as FeedbackEntry;
         if (!sessionId || e.sessionId === sessionId) entries.push(e);

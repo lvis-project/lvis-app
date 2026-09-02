@@ -79,9 +79,16 @@ const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
 
-export interface JsonRpcRequest {
+/**
+ * JSON-RPC 2.0 request id. This client mints numbers, so `number` is the
+ * default; a server (`plugin-mcp-server`, `stdio-server-loop`) must echo
+ * whatever its peer sent and instantiates these with the full wire union.
+ */
+export type JsonRpcId = number | string;
+
+export interface JsonRpcRequest<Id extends JsonRpcId = number> {
   jsonrpc: "2.0";
-  id: number;
+  id: Id;
   method: string;
   params?: Record<string, unknown>;
 }
@@ -92,10 +99,11 @@ export interface JsonRpcNotification {
   params?: Record<string, unknown>;
 }
 
-export interface JsonRpcResponse {
+export interface JsonRpcResponse<Id extends JsonRpcId = number> {
   jsonrpc: "2.0";
-  id: number;
+  id: Id;
   result?: unknown;
+
   error?: { code: number; message: string; data?: unknown };
   /**
    * Present on an id-less SERVER notification delivered on the same inbound

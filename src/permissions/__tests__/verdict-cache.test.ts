@@ -10,7 +10,8 @@
  *   - Persistence to file across instances
  */
 import { afterEach, describe, it, expect, beforeEach } from "vitest";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { inspectFile } from "../../__tests__/test-helpers.js";
 import { dirname, join } from "node:path";
 import {
   MAX_VERDICT_CACHE_ENTRIES,
@@ -266,7 +267,19 @@ describe("VerdictCache lookup states", () => {
     expect(r.reason).toBe("miss-expired");
   });
 
+  it("expired-entry rewrite replaces the file through temp+rename", async () => {
+    writeFileSync(path, expiredCacheLine() + "\n", "utf-8");
+    const before = statSync(path);
+    cache = resources.makeVerdictCache(path);
+    expect(cache.lookup(LOOKUP, CTX).reason).toBe("miss-expired");
+    await cache.flush();
+    const after = inspectFile(path);
+    expect(after.ino).not.toBe(before.ino);
+    expect(after.text).toBe("");
+  });
+
   it("flush waits for the expired-entry rewrite", async () => {
+
     writeFileSync(path, expiredCacheLine() + "\n", "utf-8");
     cache = resources.makeVerdictCache(path);
 

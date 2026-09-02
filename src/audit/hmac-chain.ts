@@ -47,6 +47,7 @@ import { platform } from "node:process";
 import { lvisHome } from "../shared/lvis-home.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
 import { SHA256_HEX } from "../lib/hex-digest-equal.js";
+import { parseJsonlLines } from "./jsonl-reader.js";
 
 export const GENESIS_MARKER = "genesis";
 const AUDIT_HMAC_SECRET_NAME = "audit-hmac.key";
@@ -557,8 +558,7 @@ export function sealDayFromFile(
   isoDate: string,
 ): string | null {
   if (!existsSync(filePath)) return null;
-  const raw = readFileSync(filePath, "utf-8");
-  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+  const lines = parseJsonlLines(readFileSync(filePath, "utf-8"));
   if (lines.length === 0) return null;
   const seal = computeDailySeal(secret, lines[lines.length - 1]);
   store.write(sealKeyName(isoDate), seal);
@@ -589,8 +589,7 @@ export function verifyDailySeal(
   if (!existsSync(filePath)) return { ok: false, reason: "no-file" };
   const stored = store.read(sealKeyName(isoDate), SECRET_AUTHORITY_MAX_BYTES);
   if (!stored) return { ok: false, reason: "no-seal" };
-  const raw = readFileSync(filePath, "utf-8");
-  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+  const lines = parseJsonlLines(readFileSync(filePath, "utf-8"));
   const chain = verifyChain(secret, lines);
   if (!chain.ok) {
     return {

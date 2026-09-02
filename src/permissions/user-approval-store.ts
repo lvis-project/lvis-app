@@ -48,9 +48,11 @@ import type {
 } from "../shared/permissions-events.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
+import { createSerialQueue } from "../lib/with-file-lock.js";
+
 
 const log = createLogger("user-approval-store");
-let persistentWriteQueue: Promise<void> = Promise.resolve();
+let persistentWrites = createSerialQueue();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -200,13 +202,11 @@ async function atomicWrite(data: ApprovalsFile): Promise<void> {
 async function mutatePersistentApprovals(
   mutator: (file: ApprovalsFile) => Promise<void> | void,
 ): Promise<void> {
-  const run = persistentWriteQueue.catch(() => {}).then(async () => {
+  return persistentWrites(async () => {
     const file = await readApprovalsFile();
     await mutator(file);
     await atomicWrite(file);
   });
-  persistentWriteQueue = run.then(() => undefined, () => undefined);
-  return run;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -625,7 +625,7 @@ export async function migrateCanonicalization(): Promise<void> {
 /**
  * @internal Test only — clears the session cache between test cases.
  *
- * Resetting `persistentWriteQueue` does not cancel an in-flight write — nothing can — it
+ * Resetting `persistentWrites` does not cancel an in-flight write — nothing can — it
  * only stops the NEXT write from chaining behind it, which is the isolation this reset is
  * for.
  *
@@ -643,5 +643,5 @@ export async function migrateCanonicalization(): Promise<void> {
 export function __resetSessionStoreForTest(): void {
   if (sessionStore.size > 0) approvalGeneration += 1;
   sessionStore.clear();
-  persistentWriteQueue = Promise.resolve();
+  persistentWrites = createSerialQueue();
 }

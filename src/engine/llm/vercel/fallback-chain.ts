@@ -25,6 +25,8 @@ import type { ProviderConfig } from "../types.js";
 import type { SubscriptionChatRuntimeSelection } from "../../../shared/subscription-runtime.js";
 import { createProvider as defaultCreateProvider } from "../provider-factory.js";
 import { createLogger } from "../../../lib/logger.js";
+import { sleep } from "../../../shared/abortable-deadline.js";
+
 const log = createLogger("fallback-chain");
 
 export interface FallbackChainEntry {
@@ -198,17 +200,9 @@ function waitForAttemptWindow(
   const remainingMs = Math.max(0, MIN_RETRY_WINDOW_MS - (Date.now() - startedAt));
   if (abortSignal?.aborted) return Promise.reject(makeAbortError());
   if (remainingMs <= 0) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const onAbort = () => {
-      if (timeout) clearTimeout(timeout);
-      reject(makeAbortError());
-    };
-    timeout = setTimeout(() => {
-      abortSignal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, remainingMs);
-    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  // The chain's callers match on the AbortError name, not the signal's reason.
+  return sleep(remainingMs, abortSignal).catch(() => {
+    throw makeAbortError();
   });
 }
 

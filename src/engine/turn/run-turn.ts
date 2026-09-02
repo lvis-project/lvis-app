@@ -11,9 +11,9 @@ import { randomUUID } from "node:crypto";
 // on. It IS the ConversationLoop instance: the class owns all turn state and
 // the extracted free functions read/write it through this alias.
 import type { ConversationLoop as LoopContext } from "../conversation-loop.js";
-import type { TurnCallbacks, TurnResult, TurnStopReason } from "./types.js";
-import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
-import type { ActiveRolePrompt } from "../../data/role-presets.js";
+import type { RunTurnOptions, TurnCallbacks, TurnResult, TurnStopReason } from "./types.js";
+
+import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { MessageMeta } from "../llm/types.js";
 import { queryLoop } from "./query-loop.js";
 import { initialToolTrustOrigin, summarizePermissionUserIntent,
@@ -31,7 +31,6 @@ import {
 import { sessionContext } from "../session-context.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
-import type { A2AAgentCausalContext } from "../a2a-agent-message-envelope.js";
 import { createRequestAnchor } from "../../tools/pipeline/rationale-control.js";
 import { providerMatchesActiveChatRuntime } from "./provider.js";
 import { aggregateSubscriptionUsage } from "./subscription-usage-telemetry.js";
@@ -77,64 +76,7 @@ export async function runTurn(
     input: string,
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
-    options?: {
-    /**
-     * Multimodal user content parts — appended after the text input as
-     * additional content blocks (vision images, files). When omitted the
-     * user message is a plain string (current behavior).
-     */
-    attachments?: import("../llm/types.js").UserContentPart[];
-      originSource?: string | null;
-    /**
-     * C3(a): hard cap on assistant rounds for this turn. When set,
-     * queryLoop terminates cleanly between rounds once the cap is hit
-     * regardless of tool_use chains the LLM still wants to run. Used by
-     * SubAgentRunner to enforce the host-assigned `maxRounds` budget at
-     * the loop boundary instead of using user-cancel semantics.
-     */
-    maxRounds?: number;
-    /**
-     * C3(c): override session id used by the executor's
-     * ToolExecutionContext.metadata.sessionId. SubAgentRunner threads
-     * the child session id here so audit entries from the sub-agent's
-     * tool calls are attributed to the child, not the parent.
-     */
-    sessionIdOverride?: string;
-    /**
-     * C3(b): spawn depth carried through to the executor's metadata.
-     * Sub-agents see depth >= 1 and reject any nested agent_spawn call
-     * before it reaches the LLM-visible registry.
-     */
-    spawnDepth?: number;
-      /** Internal provenance label prepended to ApprovalGate reasons. */
-      approvalReasonPrefix?: string;
-      /** Host-owned remote-controller authority, independent of changing tool taint. */
-      remoteControllerAuthority?: RemoteControllerAuthority;
-      /** DLP-masked durable child messages joined to this turn after the prompt gate. */
-      initialGuidance?: string;
-      /**
-       * Marks the child messages this turn carries as a sub-agent report. Stamped
-       * onto whichever message holds them — the `agent-message` turn input on a
-       * wake turn, the guidance message when they ride a user turn — so a reload
-       * replays the report box instead of a bubble attributed to the user.
-       */
-      subAgentReport?: { title?: string };
-      /** Host-owned causal hop inherited from durable A2A guidance. */
-      a2aCausalContext?: A2AAgentCausalContext;
-      inputOrigin: ChatInputOrigin;
-      /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
-      requestAnchorRawIntent?: string;
-      rolePrompt?: ActiveRolePrompt;
-      /**
-       * User-visible text for the transcript row, when the durable content carries more
-       * than the user wrote. Forwarded by the replay paths, which fold a turn's text
-       * parts into the body: without it, a replayed resource turn shows the server's
-       * fenced body inside the user's own bubble.
-       */
-      displayText?: string;
-      /** Identity to stamp on this turn's user row (see ConversationLoop.runTurn). */
-      userMessageId?: string;
-    },
+    options?: RunTurnOptions,
   ): Promise<TurnResult> {
     const effectiveSessionId = options?.sessionIdOverride ?? self.sessionId;
     if (!options?.inputOrigin) {

@@ -10,11 +10,15 @@
 import type {
   GenericMessage,
   LLMProvider,
-  LLMVendor,
   TokenUsage,
+
   TokenUsageByModel,
   ToolSchema,
+  TurnSummary,
+  UserContentPart,
 } from "../llm/types.js";
+import type { ActiveRolePrompt } from "../../data/role-presets.js";
+import type { A2AAgentCausalContext } from "../a2a-agent-message-envelope.js";
 import type {
   SubscriptionChatRuntimeSelection,
   SubscriptionUsageTelemetry,
@@ -23,7 +27,7 @@ import type { RequestInputProjection } from "../request-input-projection.js";
 import type { CompressionStatus } from "../../shared/compact-status.js";
 import type { FallbackStatus } from "../llm/vercel/fallback-chain.js";
 import type { ToolCallMeta } from "../../tools/executor.js";
-import type { ChatInputOrigin } from "../../shared/chat-origin.js";
+import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
 import type { ToolSource } from "../../tools/types.js";
 import type { SettingsService } from "../../data/settings-store.js";
@@ -180,50 +184,80 @@ export interface TurnCallbacks {
    * `breakdown` carries `{ count, ms }` per tool name; omitted when no
    * tools ran (the footer hides the expand affordance in that case).
    */
-  onTurnSummary?: (summary: {
-    turnDurationMs: number;
-    toolCount: number;
-    cumulativeToolMs: number;
-    /**
-     * `tokensIn` = engine-projected next request input. This is the
-     * provider-calibrated input size the next request would carry after the
-     * final assistant output/tool results have been appended, including the
-     * system prompt and exposed tool schemas. TokenProgressRing and the turn
-     * footer both use this same context-fill SOT.
-     */
-    tokensIn: number;
-    /**
-     * `freshInputTokens` = turn-aggregate fresh input (sum across rounds of
-     * `inputTokens − cacheReadTokens − cacheWriteTokens`). This is the
-     * billing-weight number the TokenCostBadge needs — fresh tokens are
-     * billed at full input price, while cached reads are billed at 10%.
-     * Splitting `tokensIn` (context-fill SOT) from `freshInputTokens`
-     * (turn-aggregate fresh, for billing) keeps the ring/footer context number
-     * separate from cost arithmetic.
-     */
-    freshInputTokens: number;
-    tokensOut: number;
+  onTurnSummary?: (summary: TurnSummary) => void;
+}
 
-
-
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-    /**
-     * Provider/model that actually served this turn after fallback resolution.
-     * Persisted with turn_summary so historical cost badges never re-price old
-     * turns with the user's current settings.
-     */
-    vendorProvider?: LLMVendor;
-    vendorModel?: string;
-    usageByModel?: TokenUsageByModel[];
-    /** Non-billable subscription telemetry, kept outside API pricing fields. */
-    subscriptionUsage?: SubscriptionUsageTelemetry[];
-    breakdown?: Record<string, { count: number; ms: number }>;
-  }) => void;
+/**
+ * Per-turn options accepted by `ConversationLoop.runTurn` and threaded verbatim
+ * into `engine/turn/run-turn.ts`. One declaration so the public method and the
+ * unit that implements it cannot drift apart.
+ */
+export interface RunTurnOptions {
+  /**
+   * Multimodal user content parts — appended after the text input as
+   * additional content blocks (vision images, files). When omitted the
+   * user message is a plain string (current behavior).
+   */
+  attachments?: UserContentPart[];
+  originSource?: string | null;
+  /**
+   * C3(a): hard cap on assistant rounds for this turn. When set,
+   * queryLoop terminates cleanly between rounds once the cap is hit
+   * regardless of tool_use chains the LLM still wants to run. Used by
+   * SubAgentRunner to enforce the host-assigned `maxRounds` budget at
+   * the loop boundary instead of using user-cancel semantics.
+   */
+  maxRounds?: number;
+  /**
+   * C3(c): override session id used by the executor's
+   * ToolExecutionContext.metadata.sessionId. SubAgentRunner threads
+   * the child session id here so audit entries from the sub-agent's
+   * tool calls are attributed to the child, not the parent.
+   */
+  sessionIdOverride?: string;
+  /**
+   * C3(b): spawn depth carried through to the executor's metadata.
+   * Sub-agents see depth >= 1 and reject any nested agent_spawn call
+   * before it reaches the LLM-visible registry.
+   */
+  spawnDepth?: number;
+  /** Internal provenance label prepended to ApprovalGate reasons. */
+  approvalReasonPrefix?: string;
+  /** Host-owned remote-controller authority, never parsed from chat input. */
+  remoteControllerAuthority?: RemoteControllerAuthority;
+  /** DLP-masked durable child messages joined to this turn after the prompt gate. */
+  initialGuidance?: string;
+  /**
+   * Marks the child messages this turn carries as a sub-agent report. Stamped
+   * onto whichever message holds them — the `agent-message` turn input on a
+   * wake turn, the guidance message when they ride a user turn — so a reload
+   * replays the report box instead of a bubble attributed to the user.
+   */
+  subAgentReport?: { title?: string };
+  /** Host-owned causal hop inherited from durable A2A guidance. */
+  a2aCausalContext?: A2AAgentCausalContext;
+  inputOrigin: ChatInputOrigin;
+  /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
+  requestAnchorRawIntent?: string;
+  rolePrompt?: ActiveRolePrompt;
+  /**
+   * User-visible text for the transcript row, when the durable content carries more
+   * than the user wrote. Forwarded by the replay paths, which fold a turn's text
+   * parts into the body: without it, a replayed resource turn shows the server's
+   * fenced body inside the user's own bubble.
+   */
+  displayText?: string;
+  /**
+   * Identity to stamp on the user row this turn appends. Supplied by the
+   * caller that already announced the row on the timeline, so the row the
+   * surface is showing and the row stored here are the same row.
+   */
+  userMessageId?: string;
 }
 
 /**
  * Why the turn ended. Centralized so the queryLoop return type, TurnResult,
+
  * and the willEmit/notification gates all reference one source — adding a new
  * reason later means changing one union (and then auditing the gates).
  */

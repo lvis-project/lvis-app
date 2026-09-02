@@ -22,7 +22,7 @@ import type { PluginConfigSchema, PluginConfigSchemaProperty } from "./types.js"
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("plugin-config-schema");
 
-interface AjvCtor {
+export interface AjvCtor {
   new (opts?: unknown): {
     compile: (schema: unknown) => ValidateFunction;
     addFormat: (name: string, def: unknown) => void;
@@ -32,15 +32,17 @@ interface AjvCtor {
 /**
  * Resolve the AJV constructor across CJS/ESM interop. AJV ships its
  * concrete class as either `module.default` (ESM) or `module.exports`
- * (CJS); the same dance is already used by `runtime.ts` for manifest
- * validation.
+ * (CJS). The one interop seam for every AJV consumer in the host
+ * (plugin config schemas here, manifest validation in
+ * `runtime/manifest-validation.ts`).
  */
-function resolveAjv(): AjvCtor {
+export function resolveAjv(): AjvCtor {
   const mod = AjvModule as unknown as { default?: unknown };
   return (mod.default ?? AjvModule) as AjvCtor;
 }
 
-function resolveAddFormats(): (a: unknown) => void {
+export function resolveAddFormats(): (a: unknown) => void {
+
   const mod = AddFormatsModule as unknown as { default?: unknown };
   return (mod.default ?? AddFormatsModule) as (a: unknown) => void;
 }

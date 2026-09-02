@@ -60,6 +60,25 @@ export type ToolTrustOrigin = ChatInputOrigin;
  * medium trust. MCP tools come from third-party servers and are the
  * lowest trust tier.
  */
+/**
+ * Grammar of a tool name the host registers and exposes to a model: a letter
+ * or underscore, then letters, digits and underscores. It is the rule
+ * `schemas/plugin-manifest.schema.json` pins for `tools[].name` (the schema
+ * is the mirror plugin authors see; this constant is the one the host
+ * enforces), and it sits inside what every supported vendor accepts — none
+ * of them take a dot, which is why `sample.tool` is refused at ingest rather
+ * than rewritten. Plugin names enter through the manifest and are registered
+ * verbatim; MCP names are prefixed by governance (`mcp_<prefix>_`) and never
+ * rewritten either. Wire grammars owned by a remote runtime (Codex dynamic
+ * tools, the subscription tool bridge) are declared next to that runtime's
+ * contract, not here.
+ */
+export const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+export function isValidToolName(name: unknown): name is string {
+  return typeof name === "string" && TOOL_NAME_PATTERN.test(name);
+}
+
 export function trustFromSource(source: ToolSource): TrustLevel {
   switch (source) {
     case "builtin":
