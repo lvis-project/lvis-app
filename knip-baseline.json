@@ -594,11 +594,6 @@
     },
     {
       "type": "exports",
-      "file": "src/permissions/permission-audit-runner.ts",
-      "name": "getDefaultAuditDir"
-    },
-    {
-      "type": "exports",
       "file": "src/permissions/permission-settings-store.ts",
       "name": "REVIEWER_PROVIDERS"
     },

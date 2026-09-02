@@ -191,14 +191,6 @@ export function verifyAllAuditFiles(
 }
 
 /**
- * Path-builder used by the IPC handler so tests can drop in a
- * controlled audit dir.
- */
-export function getDefaultAuditDir(home: string): string {
-  return join(home, ".lvis", "audit");
-}
-
-/**
  * Return total bytes occupied by `.permission-audit.jsonl` files — used by the
  * renderer's panel header ("12 files / 1.2 MB").
  */

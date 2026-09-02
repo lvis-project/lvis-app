@@ -22,10 +22,6 @@ const ALLOWED_FILE = pathResolve(SRC_ROOT, "shared/lvis-home.ts");
 // Patterns that flag violations:
 // 1. Direct `(join|resolve|...)(homedir(), ".lvis", ...)` form
 // 2. Template-literal `\`${homedir()}/.lvis...\`` form
-// Plugin-side helpers that take a `home` parameter (e.g.
-// `getDefaultAuditDir(home)` in permission-audit-runner) are intentionally
-// NOT scanned here — they delegate the responsibility to the caller.
-// Their callers must already use lvisHome().
 const VIOLATION_PATTERNS: RegExp[] = [
   // join(homedir(), ".lvis", ...) / resolve / pathResolve / path.join / path.resolve
   /(?:join|resolve|pathResolve|path\.join|path\.resolve)\(\s*(?:os\.)?homedir\(\)\s*,\s*"\.lvis"/,
