@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Switch } from "../../../components/ui/switch.js";
@@ -17,6 +17,7 @@ import { TOOL_TIMEOUT_POLICY } from "../../../shared/tool-timeout-policy.js";
 import { normalizeAccelerator } from "../../../shared/shortcuts.js";
 import { eventToAccelerator } from "../utils/accelerator-capture.js";
 import type { AppSettings } from "../types.js";
+import { useSettingsSnapshot } from "../hooks/use-settings-snapshot.js";
 
 /**
  * The cleanup windows the control offers, in milliseconds.
@@ -104,17 +105,7 @@ export function StartupTab() {
     setLoaded(true);
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    void api.getSettings().then((s) => {
-      if (alive) applySnapshot(s);
-    });
-    const unsub = api.onSettingsUpdated((s) => applySnapshot(s));
-    return () => {
-      alive = false;
-      unsub();
-    };
-  }, [api, applySnapshot]);
+  useSettingsSnapshot(api, applySnapshot);
 
   const persistShortcuts = useCallback(
     (next: { toggleWindow?: string | null; enabled?: boolean }) => {
