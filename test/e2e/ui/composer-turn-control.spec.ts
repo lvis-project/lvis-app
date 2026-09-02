@@ -113,7 +113,7 @@ test('message queue panel stays a full-bleed band and paints visible actions', a
     // can align with it — which is why the equivalent assertion in
     // session-todo-in-chat.spec.ts is red on main too.
     const dockBox = document
-      .querySelector('[data-testid="session-todo-dock"]')
+      .querySelector('[data-testid="composer-queue-dock"]')
       ?.getBoundingClientRect();
     const injectEl = el.querySelector('[data-testid="message-queue-row-send-now-button"]')!;
     // The panel's own tint is 5% alpha, so the effective backdrop is the

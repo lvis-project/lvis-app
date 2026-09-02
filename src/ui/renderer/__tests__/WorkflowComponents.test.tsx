@@ -5,7 +5,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent, act, waitFor, within } from "@testing-library/react";
+import { render, fireEvent, act, waitFor, within, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { AskUserQuestionCard } from "../components/AskUserQuestionCard.js";
 import { QuestionOverlay } from "../components/QuestionOverlay.js";
@@ -385,12 +385,13 @@ describe("RoutinePanel", () => {
 });
 
 describe("SessionTodoPanel", () => {
-  // The panel now starts collapsed (default closed). Open it via the header
-  // toggle to assert the expanded list. Requires the panel to be rendered
-  // already (items loaded), so callers await the header text first.
+  // The chip is the trigger; the list opens in a popover (portalled to body,
+  // so assertions on the list go through `document.body` / screen queries).
+  // Requires the chip to be rendered already (items loaded), so callers await
+  // the chip text first.
   async function openPanel(container: HTMLElement) {
-    const header = container.querySelector('[data-testid="session-todo-panel"] button');
-    if (!header) throw new Error("session-todo panel header not rendered");
+    const header = container.querySelector('[data-testid="session-todo-panel"]');
+    if (!header) throw new Error("session-todo chip not rendered");
     await act(async () => {
       header.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -414,18 +415,19 @@ describe("SessionTodoPanel", () => {
           { id: "t2", content: "step 2", status: "completed" },
         ]),
     });
-    const { findByText, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
-    await findByText("세션 TO-DO");
+    const { container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
+    await screen.findByTestId("session-todo-panel");
     await openPanel(container);
-    expect(await findByText("step 1")).toBeInTheDocument();
-    expect(await findByText("step 2")).toBeInTheDocument();
-    const panel = container.querySelector('[data-testid="session-todo-panel"]');
+    const list = await screen.findByTestId("session-todo-list");
+    // The chip repeats the focus item's title, so rows are read from the list.
+    expect(list.textContent).toContain("step 1");
+    expect(list.textContent).toContain("step 2");
     // Per-row status pills survive the header-badge removal: each row keeps a
     // 대기/진행/완료 chip.
-    expect(panel?.textContent).toContain("대기");
-    expect(panel?.textContent).toContain("완료");
+    expect(list.textContent).toContain("대기");
+    expect(list.textContent).toContain("완료");
     // The removed transient header badges must no longer render.
-    expect(panel?.textContent).not.toContain("수정");
+    expect(list.textContent).not.toContain("수정");
     expect(container.querySelector('[data-testid="session-todo-continuation"]')).toBeNull();
     expect(container.querySelector('[data-testid="session-todo-fresh"]')).toBeNull();
     expect(container.querySelector('[data-testid="session-todo-added"]')).toBeNull();
@@ -441,8 +443,8 @@ describe("SessionTodoPanel", () => {
           { id: "t3", content: "next thing", status: "pending" },
         ]),
     });
-    const { findByTestId, queryAllByTestId, findByText, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
-    await findByText("세션 TO-DO");
+    const { findByTestId, queryAllByTestId, container } = render(<SessionTodoPanel api={api} sessionId="session-todo" />);
+    await screen.findByTestId("session-todo-panel");
     await openPanel(container);
     const active = await findByTestId("session-todo-active-row");
     expect(active.className).toContain("animate-pulse");
@@ -512,10 +514,12 @@ describe("SessionTodoPanel", () => {
         return () => undefined;
       }) as never,
     });
-    const { findByText, queryByTestId, findByTestId } = render(
+    const { queryByTestId, findByTestId, container } = render(
       <SessionTodoPanel api={api} sessionId="session-dismiss" />,
     );
-    await findByText("세션 TO-DO");
+    await screen.findByTestId("session-todo-panel");
+    await openPanel(container);
+    await screen.findByTestId("session-todo-list");
     // Not yet all-complete: the dismiss X must be absent.
     expect(queryByTestId("session-todo-dismiss")).toBeNull();
 
@@ -557,7 +561,7 @@ describe("SessionTodoPanel", () => {
         return () => undefined;
       }) as never,
     });
-    const { findByText, queryByText, container } = render(
+    const { queryByText, container } = render(
       <SessionTodoPanel api={api} sessionId="session-race" />,
     );
 
@@ -565,7 +569,7 @@ describe("SessionTodoPanel", () => {
     await act(async () => {
       pushPayload!({ sessionId: "session-race", items: firstItems });
     });
-    await findByText("세션 TO-DO");
+    await screen.findByTestId("session-todo-panel");
 
     await act(async () => {
       resolveList([{ id: "old", content: "stale list snapshot", status: "pending" }]);
@@ -707,7 +711,7 @@ describe("SessionTodoPanel", () => {
     const { findByText, queryByTestId } = render(
       <SessionTodoPanel api={api} sessionId="session-clear" />,
     );
-    await findByText("세션 TO-DO");
+    await screen.findByTestId("session-todo-panel");
 
     await act(async () => {
       pushPayload!({ sessionId: "session-clear", items: [] });
@@ -740,12 +744,12 @@ describe("SessionTodoPanel", () => {
         return () => undefined;
       }) as never,
     });
-    const { findByText, queryByText, container } = render(
+    const { queryByText, queryAllByText, container } = render(
       <SessionTodoPanel api={api} sessionId="session-A" />,
     );
-    await findByText("세션 TO-DO");
+    await screen.findByTestId("session-todo-panel");
     await openPanel(container);
-    await findByText("session-A item");
+    await screen.findAllByText("session-A item");
     // A foreign session emits — must NOT clobber the visible list.
     await act(async () => {
       pushPayload!({
@@ -754,7 +758,8 @@ describe("SessionTodoPanel", () => {
       });
     });
     expect(queryByText("stale ghost")).toBeNull();
-    expect(queryByText("session-A item")).toBeInTheDocument();
+    // The chip and the list row both carry the title, so more than one match is right.
+    expect(queryAllByText("session-A item").length).toBeGreaterThan(0);
   });
 
   it("clears items immediately when the chat session id changes", async () => {
@@ -764,13 +769,13 @@ describe("SessionTodoPanel", () => {
     });
     const fetchSpy = vi.fn(() => fetchPromise);
     const api = fakeApi({ listSessionTodos: fetchSpy as never });
-    const { rerender, findByText, queryByText, container } = render(
+    const { rerender, queryByText, container } = render(
       <SessionTodoPanel api={api} sessionId="session-A" />,
     );
     resolveList([{ id: "t1", content: "first", status: "pending" }]);
-    await findByText("세션 TO-DO");
+    await screen.findByTestId("session-todo-panel");
     await openPanel(container);
-    await findByText("first");
+    await screen.findAllByText("first");
     // Swap session id — synchronously the panel should clear its visible
     // items so a stale row never lingers between sessions. The pending
     // listSessionTodos for the new id will repopulate when it resolves.
@@ -787,13 +792,14 @@ describe("SessionTodoPanel", () => {
       listSessionTodos: () =>
         Promise.resolve([{ id: "t1", content: "smooth pill", status: "pending" }]),
     });
-    const { findByText, container } = render(
+    const { container } = render(
       <SessionTodoPanel api={api} sessionId="s" />,
     );
-    await findByText("세션 TO-DO");
+    await screen.findByTestId("session-todo-panel");
     await openPanel(container);
-    await findByText("smooth pill");
-    const pill = container.querySelector('li[data-status="pending"] span:nth-child(2)');
+    await screen.findAllByText("smooth pill");
+    // The list is a portalled popover, so it is not under `container`.
+    const pill = document.body.querySelector('li[data-status="pending"] span:nth-child(2)');
     expect(pill).not.toBeNull();
     expect(pill!.className).toContain("transition-colors");
   });

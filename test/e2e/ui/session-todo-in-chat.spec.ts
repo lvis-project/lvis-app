@@ -66,38 +66,41 @@ test('session-todo-panel appears inside ChatView after session-todo:changed even
 
   await expect(panel).toBeVisible();
 
-  // Collapsed by default: the active item is visible in the header.
+  // Closed by default: the active item rides on the chip.
   const collapsedActive = mainWindow.locator('[data-testid="session-todo-collapsed-active"]');
   await expect(collapsedActive).toBeVisible();
 
-  // Expanding the panel should reveal the active row.
-  await panel.locator('button').click();
+  // Opening the chip's popover should reveal the active row.
+  await panel.click();
   const activeRow = mainWindow.locator('[data-testid="session-todo-active-row"]');
   await expect(activeRow).toBeVisible();
 
+  // The chip sits on the composer's status row, right after the context
+  // ring — under the input box, not above it and not in the queue dock.
   const geometry = await mainWindow.evaluate(() => {
-    const main = document.querySelector<HTMLElement>('main');
-    const dock = document.querySelector<HTMLElement>('[data-testid="session-todo-dock"]');
-    const panel = document.querySelector<HTMLElement>('[data-testid="session-todo-panel"]');
-    if (!main || !dock || !panel) return null;
-    const m = main.getBoundingClientRect();
-    const d = dock.getBoundingClientRect();
-    const p = panel.getBoundingClientRect();
+    const row = document.querySelector<HTMLElement>('[data-testid="iab-status-row"]');
+    const ring = document.querySelector<HTMLElement>('[data-testid="iab-status-ring"]');
+    const frame = document.querySelector<HTMLElement>('[data-testid="composer-frame"]');
+    const chip = document.querySelector<HTMLElement>('[data-testid="session-todo-panel"]');
+    if (!row || !ring || !frame || !chip) return null;
+    const r = ring.getBoundingClientRect();
+    const f = frame.getBoundingClientRect();
+    const c = chip.getBoundingClientRect();
     return {
-      mainLeft: m.left,
-      mainRight: m.right,
-      dockLeft: d.left,
-      dockRight: d.right,
-      panelLeft: p.left,
-      panelRight: p.right,
+      inRow: row.contains(chip),
+      afterRing: ring.nextElementSibling === chip,
+      chipLeft: c.left,
+      ringRight: r.right,
+      chipTop: c.top,
+      frameBottom: f.bottom,
     };
   });
 
-  expect(geometry, 'session todo dock geometry must be measurable').not.toBeNull();
-  expect(Math.abs(geometry!.dockLeft - geometry!.mainLeft)).toBeLessThanOrEqual(1);
-  expect(Math.abs(geometry!.dockRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
-  expect(Math.abs(geometry!.panelLeft - geometry!.mainLeft)).toBeLessThanOrEqual(1);
-  expect(Math.abs(geometry!.panelRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
+  expect(geometry, 'session todo chip geometry must be measurable').not.toBeNull();
+  expect(geometry!.inRow).toBe(true);
+  expect(geometry!.afterRing).toBe(true);
+  expect(geometry!.chipLeft).toBeGreaterThanOrEqual(geometry!.ringRight);
+  expect(geometry!.chipTop).toBeGreaterThanOrEqual(geometry!.frameBottom - 1);
 });
 
 test('session-todo-panel drops transient header badges and dismisses at completion', async ({ app, mainWindow }) => {
@@ -133,6 +136,8 @@ test('session-todo-panel drops transient header badges and dismisses at completi
     { id: 'fresh-2', content: 'added step', status: 'completed' },
   ]);
   await expect(mainWindow.locator('[data-testid="session-todo-completed"]')).toHaveCount(0);
+  // The X lives in the chip's popover: open it first.
+  await panel.click();
   const dismiss = mainWindow.locator('[data-testid="session-todo-dismiss"]');
   await expect(dismiss).toBeVisible();
 

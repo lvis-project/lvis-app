@@ -63,10 +63,8 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       plugins: [],
       onSelectPlugin: vi.fn(),
       onInsertSlashCommand: vi.fn(),
-      commandActions: [],
       slashPickerOpen: false,
       onSlashPickerOpenChange: vi.fn(),
-      ringSlot: null,
       onAttach: vi.fn(),
       attachDisabled: false,
       rolePresets: [mockPreset],
@@ -77,9 +75,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       isSendDisabled: false,
       onSend: vi.fn(),
       onCancel: vi.fn(),
-      enableThinkingChat: false,
-      onToggleThinking: vi.fn(),
-      statusRow: { active: false, vendorModel: "", permissionMode: "unknown", pendingApprovals: 0 },
     };
     const { getByTestId } = render(
       <TooltipProvider>
@@ -121,10 +116,8 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       plugins: [],
       onSelectPlugin: vi.fn(),
       onInsertSlashCommand: vi.fn(),
-      commandActions: [],
       slashPickerOpen: false,
       onSlashPickerOpenChange: vi.fn(),
-      ringSlot: null,
       onAttach: vi.fn(),
       attachDisabled: false,
       rolePresets: [mockPreset],
@@ -135,9 +128,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       isSendDisabled: false,
       onSend: vi.fn(),
       onCancel: vi.fn(),
-      enableThinkingChat: false,
-      onToggleThinking: vi.fn(),
-      statusRow: { active: false, vendorModel: "", permissionMode: "unknown", pendingApprovals: 0 },
     };
     // The "chat-history" (search) + "settings-entry" (export) tour anchors moved
     // from MainToolbar into the floating sidebar's cluster strip (#1319), so the

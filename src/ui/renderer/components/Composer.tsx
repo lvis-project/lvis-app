@@ -72,11 +72,14 @@ export interface ComposerHandle {
 export type ComposerSurface = "main" | "side";
 
 /**
- * Growth cap per surface. Both start at one line (`min-h-[40px]`: 24px line +
- * 8px vertical padding on each side) and grow to a bound. The main column has
- * room for five lines; the side rail is a narrow card whose transcript is the
- * thing being read, so the field stops at four (16 + 4 × 24 = 112px) — the one
- * value the issue that unified the two surfaces called out as worth differing.
+ * Growth cap per surface. Both start at one line and grow to a bound. The
+ * textarea is `rows={1}`: without it a textarea defaults to two rows, and the
+ * empty field showed the placeholder pinned to the top of a two-line box. The
+ * measured line is 17.5px with 7px of vertical padding, so one row is 31.5px
+ * and `min-h-[40px]` is the actual floor at rest. The main column has room for
+ * five lines; the side rail is a narrow card whose transcript is the thing
+ * being read, so the field stops at four — the one value the issue that
+ * unified the two surfaces called out as worth differing.
  */
 const TEXTAREA_MAX_HEIGHT_CLASS: Record<ComposerSurface, string> = {
   main: "max-h-[144px]",
@@ -937,6 +940,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             "min-w-0 flex-1 resize-none min-h-[40px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none px-4 py-2 text-body-sm text-input-bar-foreground caret-input-bar-action placeholder:text-body-sm placeholder:text-input-bar-placeholder " +
             TEXTAREA_MAX_HEIGHT_CLASS[surface]
           }
+          rows={1}
         />
         <SuggestedRepliesGhost text={ghostBest} visible={ghostVisible} />
       </div>

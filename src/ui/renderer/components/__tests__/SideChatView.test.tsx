@@ -151,7 +151,8 @@ describe("SideChatView — the main composer's input system", () => {
     expect(textarea.className).toContain("max-h-[112px]");
     expect(textarea.className).toContain("text-body-sm");
     expect(textarea.className).toContain("text-input-bar-foreground");
-    expect(textarea.getAttribute("rows")).toBeNull();
+    // One line at rest on both surfaces — the shared field, not a per-surface copy.
+    expect(textarea.getAttribute("rows")).toBe("1");
     expect(textarea.hasAttribute("data-tour-anchor")).toBe(false);
     expect(view.getByTestId("composer-frame")).toBeTruthy();
     expect(view.getByTestId("iab-attach-button")).toBeTruthy();

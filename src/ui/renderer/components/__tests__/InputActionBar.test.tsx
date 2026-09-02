@@ -3,7 +3,7 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
-import { InputActionBar } from "../InputActionBar.js";
+import { ComposerStatusRow, InputActionBar } from "../InputActionBar.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../../shared/assistant-context-menu.js";
 import type { InputStatusRow } from "../../hooks/use-input-status-row.js";
@@ -55,15 +55,18 @@ function installNativeMenuMock() {
   };
 }
 
-function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}) {
-  const props: Parameters<typeof InputActionBar>[0] = {
+type BarProps = Parameters<typeof InputActionBar>[0];
+type RowProps = Parameters<typeof ComposerStatusRow>[0];
+
+// The dock draws the action row inside the box and the status row under it;
+// the tests render the same pair so every assertion keeps addressing one tree.
+function renderBar(overrides: Partial<BarProps & RowProps> = {}) {
+  const barProps: BarProps = {
     plugins: [],
     onSelectPlugin: vi.fn(),
     onInsertSlashCommand: vi.fn(),
-    commandActions: [],
     slashPickerOpen: false,
     onSlashPickerOpenChange: vi.fn(),
-    ringSlot: <span data-testid="ring-slot" />,
     onAttach: vi.fn(),
     attachDisabled: false,
     rolePresets: [mockPreset],
@@ -75,15 +78,26 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     hasDraft: false,
     onSend: vi.fn(),
     onCancel: vi.fn(),
+  };
+  const rowProps: RowProps = {
+    ringSlot: <span data-testid="ring-slot" />,
     enableThinkingChat: false,
     onToggleThinking: vi.fn(),
     statusRow: defaultStatusRow,
     onOpenModelSettings: vi.fn(),
-    ...overrides,
   };
+  const rowKeys = new Set<string>([
+    "statusRow", "ringSlot", "onOpenModelSettings", "onOpenPermissions", "onOpenApprovalQueue",
+    "enableThinkingChat", "reasoningAvailable", "onToggleThinking",
+  ]);
+  for (const [key, value] of Object.entries(overrides)) {
+    if (rowKeys.has(key)) (rowProps as unknown as Record<string, unknown>)[key] = value;
+    else (barProps as unknown as Record<string, unknown>)[key] = value;
+  }
   return render(
     <TooltipProvider>
-      <InputActionBar {...props} />
+      <InputActionBar {...barProps} />
+      <ComposerStatusRow {...rowProps} />
     </TooltipProvider>,
   );
 }
