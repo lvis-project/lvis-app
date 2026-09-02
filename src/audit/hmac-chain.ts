@@ -31,21 +31,19 @@ import {
   constants,
   existsSync,
   fstatSync,
-  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   readSync,
   renameSync,
-  unlinkSync,
   writeFileSync,
   chmodSync,
 } from "node:fs";
 import { join } from "node:path";
 import { platform } from "node:process";
 import { lvisHome } from "../shared/lvis-home.js";
-import { isMissingPathError } from "../lib/atomic-file.js";
+import { isMissingPathError, PRIVATE_FILE_MODE, writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { SHA256_HEX } from "../lib/hex-digest-equal.js";
 import { parseJsonlLines } from "./jsonl-reader.js";
 
@@ -62,38 +60,15 @@ function hardenSecretDirectory(dir: string): void {
   if (platform !== "win32") chmodSync(dir, 0o700);
 }
 
-function fsyncDirectory(dir: string): void {
-  if (platform === "win32") return;
-  const fd = openSync(dir, "r");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-/** Atomic temp -> fsync -> rename -> directory-fsync secret replacement. */
+/**
+ * Secret replacement goes through the one atomic writer: exclusive random
+ * staging, fsync, rename (retried on the Windows transient-lock codes),
+ * directory fsync. The `wx` staging inode carries the 0o600 it was created
+ * with across the rename, so no chmod follows.
+ */
 function atomicWriteSecretFile(dir: string, path: string, value: string): void {
   hardenSecretDirectory(dir);
-  const tempPath = `${path}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
-  let fd: number | undefined;
-  try {
-    fd = openSync(tempPath, "wx", 0o600);
-    writeFileSync(fd, value, { encoding: "utf-8" });
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    if (platform !== "win32") chmodSync(tempPath, 0o600);
-    renameSync(tempPath, path);
-    if (platform !== "win32") chmodSync(path, 0o600);
-    fsyncDirectory(dir);
-  } catch (cause) {
-    if (fd !== undefined) {
-      try { closeSync(fd); } catch { /* preserve primary failure */ }
-    }
-    try { unlinkSync(tempPath); } catch { /* absent or already renamed */ }
-    throw cause;
-  }
+  writeUtf8FileAtomicSync(path, value, PRIVATE_FILE_MODE);
 }
 
 function assertSecretReadLimit(maxBytes: number): void {
@@ -117,11 +92,21 @@ function sameSecretFileIdentity(
   return left.dev === right.dev && left.ino === right.ino;
 }
 
-function readSecretFileUtf8Bounded(
+/**
+ * Read a whole regular file through a descriptor opened with `O_NOFOLLOW`
+ * and prove the bytes came from ONE unchanged file: the path must not be a
+ * symlink, the descriptor and the path must name the same inode before and
+ * after the read, and size/mtime/ctime must not move in between. Returns
+ * `null` only when the path is absent. `label` names the file in errors.
+ *
+ * This is the single copy of that check; the secret store and the rationale
+ * invocation journal both read authority files through it.
+ */
+export function readStableRegularFileUtf8(
   filePath: string,
-  maxStoredBytes: number,
+  maxBytes: number,
+  label: string,
 ): string | null {
-  assertStoredSecretReadLimit(maxStoredBytes);
   const flags = constants.O_RDONLY |
     (platform === "win32" ? 0 : constants.O_NOFOLLOW);
   let fd: number | undefined;
@@ -136,18 +121,18 @@ function readSecretFileUtf8Bounded(
     const pathAtOpen = lstatSync(filePath, { bigint: true });
     if (!before.isFile() || pathAtOpen.isSymbolicLink() ||
         !pathAtOpen.isFile() || !sameSecretFileIdentity(pathAtOpen, before)) {
-      throw new Error("secret authority path is not a stable regular file");
+      throw new Error(`${label} path is not a stable regular file`);
     }
     const size = Number(before.size);
-    if (!Number.isSafeInteger(size) || size < 0 || size > maxStoredBytes) {
-      throw new Error("secret authority exceeds read byte limit");
+    if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes) {
+      throw new Error(`${label} exceeds read byte limit`);
     }
     const buffer = Buffer.alloc(size);
     let completed = 0;
     while (completed < size) {
       const read = readSync(fd, buffer, completed, size - completed, completed);
       if (read === 0) {
-        throw new Error("secret authority was truncated during read");
+        throw new Error(`${label} was truncated during read`);
       }
       completed += read;
     }
@@ -158,16 +143,25 @@ function readSecretFileUtf8Bounded(
         !sameSecretFileIdentity(after, pathAfter) ||
         before.size !== after.size || before.mtimeNs !== after.mtimeNs ||
         before.ctimeNs !== after.ctimeNs) {
-      throw new Error("secret authority changed during read");
+      throw new Error(`${label} changed during read`);
     }
     const text = buffer.toString("utf8");
     if (!Buffer.from(text, "utf8").equals(buffer)) {
-      throw new Error("secret authority is not valid UTF-8");
+      throw new Error(`${label} is not valid UTF-8`);
     }
-    return text.replace(/\n$/, "");
+    return text;
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+
+function readSecretFileUtf8Bounded(
+  filePath: string,
+  maxStoredBytes: number,
+): string | null {
+  assertStoredSecretReadLimit(maxStoredBytes);
+  const text = readStableRegularFileUtf8(filePath, maxStoredBytes, "secret authority");
+  return text === null ? null : text.replace(/\n$/, "");
 }
 
 function assertSecretValueWithinLimit(value: string, maxBytes: number): void {
