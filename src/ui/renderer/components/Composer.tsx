@@ -76,7 +76,10 @@ export type ComposerSurface = "main" | "side";
  * textarea is `rows={1}`: without it a textarea defaults to two rows, and the
  * empty field showed the placeholder pinned to the top of a two-line box. The
  * measured line is 17.5px with 7px of vertical padding, so one row is 31.5px
- * and `min-h-[40px]` is the actual floor at rest. The main column has room for
+ * and that natural row is the floor at rest: `min-h-0` cancels the Textarea
+ * primitive's `min-h-[80px]` (cn/twMerge keeps the later class), and nothing
+ * pads the empty field up to the 40px action row beside it. The main column
+ * has room for
  * five lines; the side rail is a narrow card whose transcript is the thing
  * being read, so the field stops at four — the one value the issue that
  * unified the two surfaces called out as worth differing.
@@ -837,7 +840,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           }}
           placeholder={placeholder ?? fallbackPlaceholder}
           className={
-            "min-w-0 flex-1 resize-none min-h-[40px] overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none px-4 py-2 text-body-sm text-input-bar-foreground caret-input-bar-action placeholder:text-body-sm placeholder:text-input-bar-placeholder " +
+            "min-w-0 min-h-0 flex-1 resize-none overflow-y-auto border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none px-4 py-2 text-body-sm text-input-bar-foreground caret-input-bar-action placeholder:text-body-sm placeholder:text-input-bar-placeholder " +
             TEXTAREA_MAX_HEIGHT_CLASS[surface]
           }
           rows={1}
