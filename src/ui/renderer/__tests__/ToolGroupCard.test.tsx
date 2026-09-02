@@ -10,6 +10,8 @@ import type { ReactNode } from "react";
 import { ToolGroupCard } from "../components/ToolGroupCard.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { t } from "../../../i18n/runtime.js";
+import { TooltipProvider } from "../../../components/ui/tooltip.js";
+import { getToolDisplayName } from "../utils/tool-display.js";
 
 vi.mock("../../../components/ui/scroll-area.js", () => ({
   ScrollArea: ({ children, className }: { children: ReactNode; className?: string }) => (
@@ -774,4 +776,98 @@ describe("ToolGroupCard — failure badges", () => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("ToolGroupCard — tool row header cells", () => {
+  type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
+  function makeReview(toolUseId: string, extra: Partial<PermissionReviewEntry> = {}): PermissionReviewEntry {
+    return {
+      kind: "permission_review",
+      status: "auto_approved",
+      toolName: "read_file",
+      source: "builtin",
+      groupId: "grp-1",
+      toolUseId,
+      displayOrder: 0,
+      verdictLevel: "low",
+      ...extra,
+    };
+  }
+  /** name → builtin → review chip → status → duration; the name button carries the source badge. */
+  const HEADER_CELL_ORDER = ["tool-source", "permission-review-status-card", "tool-status", "tool-duration"];
+  function headerCellOrder(header: Element): Array<string | null> {
+    return Array.from(header.querySelectorAll("[data-testid]")).map((el) => el.getAttribute("data-testid"));
+  }
+
+  it("single tool: name → builtin → review chip → status → duration on one wrapping row", () => {
+    const base = makeGroup().tools[0]!;
+    const group = makeGroup({ tools: [{ ...base, source: "builtin", durationMs: 2300 }] });
+    const { getByTestId } = render(
+      <ToolGroupCard group={group} permissionReviews={new Map([["tu-1", makeReview("tu-1")]])} />,
+    );
+    const header = getByTestId("tool-row-header");
+    expect(header.className).toContain("flex-wrap");
+    expect(headerCellOrder(header)).toEqual(HEADER_CELL_ORDER);
+
+    const nameButton = header.querySelector("button") as HTMLButtonElement;
+    expect(nameButton.textContent).toContain(getToolDisplayName("read_file"));
+    expect(nameButton.contains(getByTestId("tool-source"))).toBe(true);
+    const chip = getByTestId("permission-review-status-card");
+    // The chip is a header cell, not a second line under the button.
+    expect(chip.parentElement).toBe(header);
+    expect(nameButton.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(getByTestId("tool-status").textContent).toBe(t("toolGroupCard.done"));
+    expect(getByTestId("tool-duration").textContent).toContain("2.3s");
+  });
+
+  it("single tool: the name button still toggles the row (click bubbles to the row surface)", () => {
+    const { getByTestId, container } = render(
+      <ToolGroupCard group={makeGroup()} permissionReviews={new Map([["tu-1", makeReview("tu-1")]])} />,
+    );
+    const nameButton = getByTestId("tool-row-header").querySelector("button") as HTMLButtonElement;
+    expect(nameButton.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(nameButton);
+    expect(nameButton.getAttribute("aria-expanded")).toBe("true");
+    expect(container.textContent).toContain("/tmp/test.txt");
+  });
+
+  it("grouped tools: every per-tool row uses the same cell order", () => {
+    const tools = makeMultiGroup().tools.map((tool) => ({ ...tool, source: "builtin" as const, durationMs: 100 }));
+    const reviews = new Map(tools.map((tool) => [tool.toolUseId, makeReview(tool.toolUseId)]));
+    const { container, getAllByTestId } = render(
+      <ToolGroupCard group={makeMultiGroup({ tools })} permissionReviews={reviews} />,
+    );
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+    const headers = getAllByTestId("tool-row-header");
+    expect(headers).toHaveLength(2);
+    for (const header of headers) {
+      expect(header.className).toContain("flex-wrap");
+      expect(headerCellOrder(header)).toEqual(HEADER_CELL_ORDER);
+    }
+  });
+
+  it("review chip carries the reviewer rationale as a keyboard-reachable tooltip", async () => {
+    const reason = "workspace-local read, no egress";
+    const { getByTestId, getByRole } = render(
+      <TooltipProvider>
+        <ToolGroupCard group={makeGroup()} permissionReviews={new Map([["tu-1", makeReview("tu-1", { reason })]])} />
+      </TooltipProvider>,
+    );
+    const chip = getByTestId("permission-review-status-card");
+    expect(chip.getAttribute("tabindex")).toBe("0");
+    fireEvent.focus(chip);
+    await waitFor(() => expect(getByRole("tooltip").textContent).toBe(reason));
+  });
+
+  it("without a recorded rationale the chip is a plain cell — no tooltip, nothing to focus", () => {
+    // No TooltipProvider on purpose: a Tooltip mounted here would throw.
+    const { getByTestId, queryByRole } = render(
+      <ToolGroupCard group={makeGroup()} permissionReviews={new Map([["tu-1", makeReview("tu-1")]])} />,
+    );
+    const chip = getByTestId("permission-review-status-card");
+    expect(chip.hasAttribute("tabindex")).toBe(false);
+    expect(chip.hasAttribute("data-state")).toBe(false);
+    fireEvent.focus(chip);
+    expect(queryByRole("tooltip")).toBeNull();
+  });
 });

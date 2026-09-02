@@ -22,8 +22,10 @@ type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
 export type PermissionReviewsByToolUseId = ReadonlyMap<string, PermissionReviewEntry>;
 
 /**
- * The verdict belongs to the tool call, so it renders on the tool row instead
- * of as a sibling card that could be read as unrelated to the call below it.
+ * The verdict belongs to the tool call. Rows with a header cell the chip can
+ * sit in render `PermissionReviewStatusCard` inline; the result-only surfaces
+ * (compacted result, write_file sidecar) have no such row, so the chip is
+ * placed directly under them instead of as an unrelated sibling card.
  */
 function AttachedPermissionReview({
   review,
@@ -147,6 +149,7 @@ function ToolStatusBadge({
     <Badge
       variant={isError ? "secondary" : "default"}
       className={`shrink-0 px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""} ${isCancelled ? "text-muted-foreground" : ""}`}
+      data-testid="tool-status"
     >
       {isError
         ? t("toolGroupCard.failed")
@@ -248,25 +251,37 @@ function SingleToolInline({
   const fileDiff: FileEditDiffData | null = extractFileEditDiff(tool);
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
-      <button
-        type="button"
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/(--opacity-muted)"
+      {/* The header is a wrapping flex surface rather than one <button>: the
+          review chip is a focusable tooltip trigger, and interactive content
+          cannot nest inside a button. The name group stays the real button
+          (keyboard toggle, aria-expanded); its click bubbles up to the row,
+          which is the pointer target. Cells wrap in DOM order when the row is
+          too narrow — the chip is the widest cell, so it drops first. */}
+      <div
+        className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 hover:bg-muted/(--opacity-muted)"
         onClick={() => setOpen((o) => !o)}
+        data-testid="tool-row-header"
       >
-        <Wrench className="h-3 w-3 flex-shrink-0" />
-        <span className="min-w-0 truncate font-medium">{getToolDisplayName(tool.name)}</span>
-        <ToolSourceBadge tool={tool} />
-        {isRunning
-          ? <RunningDurationBadge startedAt={tool.startedAt} />
-          : <ToolDurationBadge durationMs={tool.durationMs} />}
+        <button
+          type="button"
+          className="flex min-w-0 max-w-full items-center gap-2 text-left"
+          aria-expanded={open}
+        >
+          <Wrench className="h-3 w-3 flex-shrink-0" />
+          <span className="min-w-0 truncate font-medium">{getToolDisplayName(tool.name)}</span>
+          <ToolSourceBadge tool={tool} />
+        </button>
+        {review && <PermissionReviewStatusCard entry={review} variant="attached" />}
         {isRunning ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
         ) : (
           <ToolStatusBadge status={tool.status} />
         )}
+        {isRunning
+          ? <RunningDurationBadge startedAt={tool.startedAt} />
+          : <ToolDurationBadge durationMs={tool.durationMs} />}
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
-      </button>
-      <AttachedPermissionReview review={review} className="px-3 pb-1.5" />
+      </div>
       {open && (
         <div className="min-w-0 space-y-1 border-t px-3 py-1.5 font-mono text-[10px] lvis-anim-fade-in">
           {tool.input && (
@@ -424,28 +439,34 @@ export function ToolGroupCard({
         <div className="min-w-0 space-y-1 border-t px-3 py-1.5 lvis-anim-fade-in">
           {tools.map((tool) => {
             const isExpanded = expandedTools.has(tool.toolUseId);
+            const review = permissionReviews?.get(tool.toolUseId);
             return (
               <div key={tool.toolUseId} className="min-w-0 rounded border border-dashed/50">
-                <button
-                  className="flex w-full min-w-0 items-center gap-2 px-2 py-1 hover:bg-muted/(--opacity-light)"
+                {/* Same row contract as the single-tool header above. */}
+                <div
+                  className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1 hover:bg-muted/(--opacity-light)"
                   onClick={() => toggleTool(tool.toolUseId)}
+                  data-testid="tool-row-header"
                 >
-                  {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}
-                  <span className="min-w-0 truncate">{getToolDisplayName(tool.name)}</span>
-                  <ToolSourceBadge tool={tool} />
-                  {tool.status === "running"
-                    ? <RunningDurationBadge startedAt={tool.startedAt} />
-                    : <ToolDurationBadge durationMs={tool.durationMs} />}
+                  <button
+                    type="button"
+                    className="flex min-w-0 max-w-full items-center gap-2 text-left"
+                    aria-expanded={isExpanded}
+                  >
+                    {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}
+                    <span className="min-w-0 truncate">{getToolDisplayName(tool.name)}</span>
+                    <ToolSourceBadge tool={tool} />
+                  </button>
+                  {review && <PermissionReviewStatusCard entry={review} variant="attached" />}
                   {tool.status === "running" ? (
                     <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
                   ) : (
                     <ToolStatusBadge status={tool.status} />
                   )}
-                </button>
-                <AttachedPermissionReview
-                  review={permissionReviews?.get(tool.toolUseId)}
-                  className="px-2 pb-1"
-                />
+                  {tool.status === "running"
+                    ? <RunningDurationBadge startedAt={tool.startedAt} />
+                    : <ToolDurationBadge durationMs={tool.durationMs} />}
+                </div>
                 {isExpanded && (
                   <div className="min-w-0 space-y-1 border-t px-2 py-1 font-mono text-[10px] lvis-anim-fade-in">
                     {tool.input && (
