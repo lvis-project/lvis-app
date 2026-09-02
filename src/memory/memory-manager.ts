@@ -32,6 +32,7 @@ import { escapeRegExp } from "../shared/escape-reg-exp.js";
 import { dlpSafeCandidate } from "../shared/dlp-safe-id.js";
 import { UUID_PATTERN } from "../shared/uuid.js";
 import { SHA256_HEX, sha256Hex } from "../lib/hex-digest-equal.js";
+import { parseJsonlLines } from "../audit/jsonl-reader.js";
 const log = createLogger("memory");
 
 export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
@@ -2096,9 +2097,8 @@ export class MemoryManager {
     const snapshotPath = join(this.checkpointsDir, sessionId, `${compactNum}.jsonl`);
     const raw = readUtf8FileIfPresent(snapshotPath);
     if (raw === null) return null;
-    const lines = raw.trim().split("\n");
     const messages: unknown[] = [];
-    for (const line of lines.filter(Boolean)) {
+    for (const line of parseJsonlLines(raw)) {
       try {
         messages.push(JSON.parse(line));
       } catch {
@@ -2114,9 +2114,8 @@ export class MemoryManager {
     const path = join(this.sessionsDir, `${sessionId}.jsonl`);
     const raw = readUtf8FileIfPresent(path);
     if (raw === null) return null;
-    const lines = raw.trim().split("\n");
     const messages: unknown[] = [];
-    for (const line of lines.filter(Boolean)) {
+    for (const line of parseJsonlLines(raw)) {
       try {
         messages.push(JSON.parse(line));
       } catch {

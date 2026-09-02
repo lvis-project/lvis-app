@@ -2,10 +2,9 @@
 
 
 
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve as pathResolve } from "node:path";
+import { resolve as pathResolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { withFileLock } from "../../lib/with-file-lock.js";
+import { JsonlRecordFile } from "../../audit/jsonl-reader.js";
 import { createLogger } from "../../lib/logger.js";
 import type { RiskVerdict } from "./risk-classifier.js";
 import type { PermissionEvaluationContext } from "../evaluation-context.js";
@@ -72,7 +71,7 @@ function defaultPath(): string {
 }
 
 export class DeferredQueue {
-  private readonly filePath: string;
+  private readonly file: JsonlRecordFile<DeferredEntry>;
   private readonly onPendingChange?: (summary: { pending: number }) => void;
   private entries: DeferredEntry[] | null = null;
 
@@ -80,34 +79,20 @@ export class DeferredQueue {
     filePath?: string,
     onPendingChange?: (summary: { pending: number }) => void,
   ) {
-    this.filePath = filePath ?? defaultPath();
+    this.file = new JsonlRecordFile<DeferredEntry>(filePath ?? defaultPath(), {
+      accept: (parsed): parsed is DeferredEntry => {
+        const entry = parsed as Partial<DeferredEntry> | null;
+        return Boolean(entry && entry.id && entry.toolName && entry.status);
+      },
+      onMalformedLine: (line) => log.warn(`skipping malformed deferred-queue line: ${line.trim().slice(0, 80)}`),
+      onReadFailure: (err) => log.warn(`failed to read deferred-queue: %s`, (err as Error).message),
+    });
     this.onPendingChange = onPendingChange;
   }
 
   private ensureLoaded(): void {
     if (this.entries !== null) return;
-    if (!existsSync(this.filePath)) {
-      this.entries = [];
-      return;
-    }
-    try {
-      const raw = readFileSync(this.filePath, "utf-8");
-      const out: DeferredEntry[] = [];
-      for (const line of raw.split("\n")) {
-        const t = line.trim();
-        if (!t) continue;
-        try {
-          const parsed = JSON.parse(t) as DeferredEntry;
-          if (parsed.id && parsed.toolName && parsed.status) out.push(parsed);
-        } catch {
-          log.warn(`skipping malformed deferred-queue line: ${t.slice(0, 80)}`);
-        }
-      }
-      this.entries = out;
-    } catch (err) {
-      log.warn(`failed to read deferred-queue: %s`, (err as Error).message);
-      this.entries = [];
-    }
+    this.entries = this.file.loadSync();
   }
 
   /**
@@ -136,7 +121,7 @@ export class DeferredQueue {
       status: "pending",
     };
     this.entries!.push(entry);
-    await this.appendLine(entry);
+    await this.file.append(entry);
     this.emitPendingChange();
     return id;
   }
@@ -188,7 +173,7 @@ export class DeferredQueue {
       ...(decision === "approved" && scope ? { resolvedScope: scope } : {}),
     };
     this.entries![idx] = next;
-    await this.rewriteFromMemory();
+    await this.file.rewrite(this.entries!);
     this.emitPendingChange();
     return next;
   }
@@ -196,38 +181,6 @@ export class DeferredQueue {
   /** Test helper. */
   resetForTests(): void {
     this.entries = null;
-  }
-
-  private async appendLine(entry: DeferredEntry): Promise<void> {
-    await withFileLock(this.filePath, async () => {
-      mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
-      const line = JSON.stringify(entry) + "\n";
-      // O(1) append — previous implementation read+rewrote the entire
-      // file (O(n) per append). The full-rewrite path remains in
-      // rewriteFromMemory() for resolve operations that mutate
-      // existing entries.
-      appendFileSync(this.filePath, line, { encoding: "utf-8", mode: 0o600 });
-      try {
-        chmodSync(this.filePath, 0o600);
-      } catch {
-        // Non-fatal — chmod failure must not block queue writes.
-      }
-    });
-  }
-
-  private async rewriteFromMemory(): Promise<void> {
-    await withFileLock(this.filePath, async () => {
-      mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
-      const body =
-        this.entries!.map((e) => JSON.stringify(e)).join("\n") +
-        (this.entries!.length > 0 ? "\n" : "");
-      writeFileSync(this.filePath, body, { encoding: "utf-8", mode: 0o600 });
-      try {
-        chmodSync(this.filePath, 0o600);
-      } catch {
-        // Non-fatal — chmod failure must not block queue writes.
-      }
-    });
   }
 
   private emitPendingChange(): void {

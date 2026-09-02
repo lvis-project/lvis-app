@@ -33,11 +33,10 @@
  * NOT a circuit breaker: provider quota exhaustion routes through
  * `fallbackOnError` (rule | deny), NOT through cache.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve as pathResolve } from "node:path";
+import { resolve as pathResolve } from "node:path";
 import type { RiskVerdict } from "./risk-classifier.js";
 import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../../tools/types.js";
-import { withFileLock } from "../../lib/with-file-lock.js";
+import { JsonlRecordFile } from "../../audit/jsonl-reader.js";
 import { createLogger } from "../../lib/logger.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import { sha256Hex } from "../../lib/hex-digest-equal.js";
@@ -193,14 +192,30 @@ export interface VerdictCacheLookupResult {
 }
 
 export class VerdictCache {
-  private readonly filePath: string;
+  private readonly file: JsonlRecordFile<VerdictCacheEntry>;
   /** In-memory mirror of the file. Loaded lazily on first read. */
   private entries: VerdictCacheEntry[] | null = null;
   /** Best-effort rewrites scheduled by synchronous lookup pruning. */
   private readonly pendingRewrites = new Set<Promise<void>>();
 
   constructor(filePath?: string) {
-    this.filePath = filePath ?? defaultPath();
+    this.file = new JsonlRecordFile<VerdictCacheEntry>(filePath ?? defaultPath(), {
+      accept: (parsed): parsed is VerdictCacheEntry => {
+        const entry = parsed as Partial<VerdictCacheEntry> | null;
+        return Boolean(
+          entry &&
+          typeof entry.key === "string" &&
+          typeof entry.invalidationKey === "string" &&
+          entry.verdict &&
+          typeof entry.expiresAt === "number",
+        );
+      },
+      // A malformed line is dropped, not fatal: the cache file is
+      // non-authoritative scratch storage, and the next write produces a
+      // clean record.
+      onMalformedLine: (line) => log.warn(`skipping malformed cache line: ${line.trim().slice(0, 80)}`),
+      onReadFailure: (err) => log.warn(`failed to read cache: %s`, (err as Error).message),
+    });
   }
 
   /**
@@ -210,39 +225,7 @@ export class VerdictCache {
    */
   private ensureLoaded(): void {
     if (this.entries !== null) return;
-    if (!existsSync(this.filePath)) {
-      this.entries = [];
-      return;
-    }
-    try {
-      const raw = readFileSync(this.filePath, "utf-8");
-      const out: VerdictCacheEntry[] = [];
-      for (const line of raw.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed) as VerdictCacheEntry;
-          if (
-            typeof parsed.key === "string" &&
-            typeof parsed.invalidationKey === "string" &&
-            parsed.verdict &&
-            typeof parsed.expiresAt === "number"
-          ) {
-            out.push(parsed);
-          }
-        } catch {
-          // Skip malformed lines — log and continue. Atomic cutover
-          // (CLAUDE.md No-Fallback) does NOT apply here: the cache
-          // file is non-authoritative scratch storage; a corrupt line
-          // is dropped and the next write produces a clean record.
-          log.warn(`skipping malformed cache line: ${trimmed.slice(0, 80)}`);
-        }
-      }
-      this.entries = out;
-    } catch (err) {
-      log.warn(`failed to read cache: %s`, (err as Error).message);
-      this.entries = [];
-    }
+    this.entries = this.file.loadSync();
   }
 
   /**
@@ -304,9 +287,9 @@ export class VerdictCache {
     this.entries!.push(entry);
     const pruned = this.pruneExpiredAndCap(Date.now());
     if (pruned) {
-      await this.rewriteFromMemory();
+      await this.file.rewrite(this.entries!);
     } else {
-      await this.appendLine(entry);
+      await this.file.append(entry);
     }
   }
 
@@ -323,7 +306,7 @@ export class VerdictCache {
     this.entries = this.entries!.filter((e) => e.invalidationKey === ivk);
     const dropped = before - this.entries!.length;
     if (dropped > 0) {
-      await this.rewriteFromMemory();
+      await this.file.rewrite(this.entries!);
     }
     return dropped;
   }
@@ -357,7 +340,7 @@ export class VerdictCache {
 
   private scheduleRewrite(): void {
     let pending: Promise<void>;
-    pending = this.rewriteFromMemory()
+    pending = this.file.rewrite(this.entries!)
       .catch((err) => {
         log.warn(`failed to rewrite pruned cache: %s`, (err as Error).message);
       })
@@ -365,21 +348,5 @@ export class VerdictCache {
         this.pendingRewrites.delete(pending);
       });
     this.pendingRewrites.add(pending);
-  }
-
-  private async appendLine(entry: VerdictCacheEntry): Promise<void> {
-    await withFileLock(this.filePath, async () => {
-      mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
-      const line = JSON.stringify(entry) + "\n";
-      appendFileSync(this.filePath, line, { encoding: "utf-8", mode: 0o600 });
-    });
-  }
-
-  private async rewriteFromMemory(): Promise<void> {
-    await withFileLock(this.filePath, async () => {
-      mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
-      const body = this.entries!.map((e) => JSON.stringify(e)).join("\n") + (this.entries!.length > 0 ? "\n" : "");
-      writeFileSync(this.filePath, body, { encoding: "utf-8", mode: 0o600 });
-    });
   }
 }

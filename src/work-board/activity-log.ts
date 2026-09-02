@@ -8,6 +8,7 @@
  * fallback paths.
  */
 import type { WorkBoardStorage } from "./storage.js";
+import { parseJsonlLines } from "../audit/jsonl-reader.js";
 
 /** Relative path (under the feature dir) of the activity log. */
 export const ACTIVITY_FILE = "activity.jsonl";
@@ -84,12 +85,10 @@ export async function readActivity(
   const text = await storage.readText(ACTIVITY_FILE);
   const sinceMs = sinceIso !== undefined ? Date.parse(sinceIso) : undefined;
   const events: ActivityEvent[] = [];
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+  for (const line of parseJsonlLines(text)) {
     let parsed: ActivityEvent;
     try {
-      parsed = JSON.parse(trimmed) as ActivityEvent;
+      parsed = JSON.parse(line) as ActivityEvent;
     } catch {
       continue;
     }
