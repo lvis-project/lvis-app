@@ -12,8 +12,8 @@ import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js"
 import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
 import { ChatGroupFrame } from "../ChatGroupFrame.js";
-import { emptyActionPanelActivity } from "../../../../../test/renderer/helpers.js";
-import type { ActionPanelActivityState } from "../ActionPanel.js";
+import { emptyToolActivity } from "../../../../../test/renderer/helpers.js";
+import type { ToolActivityState } from "../ToolActivity.js";
 import { useWorkspaceTabs } from "../../preview/workspace-tabs.js";
 import type { SubAgentSpawn } from "../../subagents/types.js";
 import type {
@@ -86,7 +86,7 @@ function openLauncherMenu() {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
   fireEvent.click(trigger);
 }
-function addTabViaMenu(kind: "preview" | "file-browser" | "browser" | "terminal" | "subagent") {
+function addTabViaMenu(kind: "preview" | "file-browser" | "browser" | "terminal" | "subagent" | "activity") {
   openLauncherMenu();
   fireEvent.click(screen.getByTestId(`chat-side-panel-launcher-menu-${kind}`));
 }
@@ -106,7 +106,7 @@ function HarnessPanel({
   panelMounted = true,
   subAgentSpawns = [],
   onClose = vi.fn(),
-  activity,
+  activity = emptyToolActivity(),
   onOpenActivityItem,
 }: {
   api: LvisApi;
@@ -117,7 +117,7 @@ function HarnessPanel({
   panelMounted?: boolean;
   subAgentSpawns?: SubAgentSpawn[];
   onClose?: () => void;
-  activity?: ActionPanelActivityState;
+  activity?: ToolActivityState;
   onOpenActivityItem?: (target: string, web: boolean) => void;
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId);
@@ -209,13 +209,14 @@ describe("ChatSidePanel", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.getByTestId("chat-side-panel-add-tab")).toBeTruthy();
 
-    // Six launcher items (side-chat is now a launcher item — its engine ships
-    // in this PR).
+    // Seven launcher items: the five surfaces, side chat, and the activity
+    // tab that lists the conversation's plugin and tool calls in full.
     expect(screen.getByTestId(chatSidePanelLauncherTestId("preview"))).toBeTruthy();
     expect(screen.getByTestId(chatSidePanelLauncherTestId("terminal"))).toBeTruthy();
     expect(screen.getByTestId(chatSidePanelLauncherTestId("browser"))).toBeTruthy();
     expect(screen.getByTestId(chatSidePanelLauncherTestId("file-browser"))).toBeTruthy();
     expect(screen.getByTestId(chatSidePanelLauncherTestId("subagent"))).toBeTruthy();
+    expect(screen.getByTestId(chatSidePanelLauncherTestId("activity"))).toBeTruthy();
     expect(screen.getByTestId(chatSidePanelLauncherTestId("side-chat"))).toBeTruthy();
 
     // Shortcut hints are displayed for the bound items.
@@ -458,9 +459,13 @@ describe("ChatSidePanel", () => {
     addTabViaMenu("browser");
     expect(screen.getByTestId("chat-side-panel-browser-viewer")).toBeTruthy();
 
-    // The web-artifact search + list live behind the floating 🔍 Popover now.
-    // Before opening it, the always-on strip is gone (no rows in the DOM).
-    expect(screen.queryAllByTestId("chat-side-panel-browser-row")).toHaveLength(0);
+    // The visited-site list sits over the viewer, latest first — the page
+    // named by a result (url-1, created after the html doc) leads.
+    const visited = screen.getByTestId("chat-side-panel-browser-visited");
+    expect(within(visited).getAllByTestId("chat-side-panel-browser-row").map((row) => row.textContent)).toEqual([
+      expect.stringContaining("example.com/docs"),
+      expect.stringContaining("Artifact dashboard"),
+    ]);
 
     const addressInput = screen.getByTestId("chat-side-panel-browser-address") as HTMLInputElement;
     fireEvent.change(addressInput, { target: { value: "google.com" } });
@@ -469,14 +474,13 @@ describe("ChatSidePanel", () => {
     expect(manualWebview).not.toBeNull();
     expect(manualWebview?.getAttribute("src")).toBe("https://google.com/");
 
-    // Open the search Popover and pick the second artifact (example.com/docs).
-    fireEvent.click(screen.getByTestId("chat-side-panel-browser-search-trigger"));
+    // Pick the first visited site (example.com/docs) from the list.
     const rows = screen.getAllByTestId("chat-side-panel-browser-row");
     expect(rows.length).toBeGreaterThanOrEqual(2);
     // The web row discloses where its address came from: this one was named by
     // a page, not asked for by the turn.
-    expect(rows[1]!.textContent).toContain("결과에서");
-    fireEvent.click(rows[1]!);
+    expect(rows[0]!.textContent).toContain("결과에서");
+    fireEvent.click(rows[0]!);
     const webview = container.querySelector('[data-testid="chat-side-panel-browser-webview"]');
     expect(webview?.getAttribute("src")).toBe("https://example.com/docs");
     expect(webview?.getAttribute("partition")).toBe(LVIS_SIDE_BROWSER_PARTITION);
@@ -1681,7 +1685,7 @@ describe("ChatSidePanel inside a chat group", () => {
   it("shows the conversation's tool activity on the empty launcher, and nothing when there is none", () => {
     const onOpenActivityItem = vi.fn();
     const activity = {
-      ...emptyActionPanelActivity(),
+      ...emptyToolActivity(),
       toolCallCount: 3,
       fetchedPageCount: 1,
       fetchedPages: [{ id: "url:1", label: "example.com", detail: "https://example.com/a", target: "https://example.com/a", status: "done" as const }],
@@ -1698,14 +1702,71 @@ describe("ChatSidePanel inside a chat group", () => {
       />,
     );
     const launcher = screen.getByTestId("chat-side-panel-launcher");
-    expect(within(launcher).getByTestId(chatSidePanelLauncherTestId("activity"))).toBeTruthy();
-    fireEvent.click(within(launcher).getByTestId("action-panel-activity-url:1"));
+    expect(within(launcher).getByTestId("chat-side-panel-launcher-tool-activity")).toBeTruthy();
+    fireEvent.click(within(launcher).getByTestId("tool-activity-item-url:1"));
     expect(onOpenActivityItem).toHaveBeenCalledWith("https://example.com/a", true);
     unmount();
 
     renderPanel(
-      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} activity={emptyActionPanelActivity()} />,
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} activity={emptyToolActivity()} />,
     );
-    expect(screen.queryByTestId(chatSidePanelLauncherTestId("activity"))).toBeNull();
+    expect(screen.queryByTestId("chat-side-panel-launcher-tool-activity")).toBeNull();
+  });
+
+  it("the launcher's compact report opens the activity tab, which lists every plugin and tool call", () => {
+    const activity = {
+      ...emptyToolActivity(),
+      toolCallCount: 2,
+      pluginCallCount: 1,
+      pluginCalls: [{ id: "plugin:p1", label: "meeting_open", detail: "meeting", status: "done" as const }],
+      toolCalls: [
+        { id: "call:t2", name: "read_file", status: "running" as const, source: "builtin", startedAt: Date.UTC(2026, 0, 1, 9, 30, 15), argument: "/ws/report.md" },
+        { id: "call:p1", name: "meeting_open", status: "done" as const, source: "plugin", pluginId: "meeting", durationMs: 1400 },
+      ],
+    };
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} activity={activity} />,
+    );
+    fireEvent.click(screen.getByTestId("tool-activity-open-tab"));
+    expect(screen.getByTestId("chat-side-panel-tab-activity")).toBeTruthy();
+    const workspace = screen.getByTestId("chat-side-panel-activity-workspace");
+    expect(within(workspace).getByTestId("chat-side-panel-activity-plugins")).toHaveTextContent("meeting_open");
+    const toolRows = within(workspace).getAllByTestId("chat-side-panel-activity-tool-row");
+    expect(toolRows).toHaveLength(2);
+    // A live call shows its clock; a persisted one (no clock) shows its duration and source.
+    expect(toolRows[0]).toHaveTextContent("read_file");
+    expect(toolRows[0]).toHaveTextContent("/ws/report.md");
+    expect(toolRows[0]).toHaveTextContent("실행 중");
+    expect(toolRows[1]).toHaveTextContent("plugin:meeting");
+    expect(toolRows[1]).toHaveTextContent("1.4s");
+  });
+
+  it("file tab: the changed-files segment lists created / modified / deleted / moved files, latest first, with the change on each row", () => {
+    const files: WorkspaceFileItem[] = [
+      { id: "tool:/ws/read.md", path: "/ws/read.md", label: "read.md", detail: "/ws/read.md", sourceLabel: "read_file", operation: "read", canOpenExternal: false },
+      { id: "tool:/ws/old.md", path: "/ws/old.md", label: "old.md", detail: "/ws/old.md", sourceLabel: "delete_file", operation: "delete", canOpenExternal: false },
+      { id: "tool:/ws/edit.md", path: "/ws/edit.md", label: "edit.md", detail: "/ws/edit.md", sourceLabel: "edit_file", operation: "modify", canOpenExternal: false },
+      { id: "tool:/ws/moved.md", path: "/ws/moved.md", label: "moved.md", detail: "/ws/moved.md", sourceLabel: "move_file", operation: "move", canOpenExternal: false },
+      { id: "tool:/ws/new.md", path: "/ws/new.md", label: "new.md", detail: "/ws/new.md", sourceLabel: "apply_patch", operation: "create", canOpenExternal: false },
+    ];
+    renderPanel(
+      <HarnessPanel api={api()} sessionId="s" targets={[]} files={files} initialSelectedId={null} />,
+    );
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("file-browser")));
+    const changedSeg = screen.getByTestId("chat-side-panel-file-source-changed") as HTMLButtonElement;
+    expect(changedSeg.disabled).toBe(false);
+    // The read file is not a change, so it is not counted.
+    expect(screen.getByTestId("chat-side-panel-file-source-changed-count").textContent).toBe("4");
+    fireEvent.click(changedSeg);
+    const rows = screen.getAllByTestId("chat-side-panel-file-change-row");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("new.md"),
+      expect.stringContaining("moved.md"),
+      expect.stringContaining("edit.md"),
+      expect.stringContaining("old.md"),
+    ]);
+    expect(screen.getAllByTestId("chat-side-panel-file-change-operation").map((badge) => badge.textContent))
+      .toEqual(["생성", "이동", "수정", "삭제"]);
+    expect(screen.getByTestId("chat-side-panel-file-changes")).not.toHaveTextContent("read.md");
   });
 });

@@ -7,7 +7,7 @@ import { TooltipProvider } from "../../src/components/ui/tooltip.js";
 import type { MessageQueueStore } from "../../src/ui/renderer/state/message-queue-store.js";
 import { SETTINGS_TABS } from "../../src/shared/settings-tabs.js";
 import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
-import type { ActionPanelActivityState } from "../../src/ui/renderer/components/ActionPanel.js";
+import type { ToolActivityState } from "../../src/ui/renderer/components/ToolActivity.js";
 import { ApprovalSurfaceClaims, type ApprovalSurfaceContextValue } from "../../src/ui/renderer/hooks/use-approval.js";
 import { vi } from "vitest";
 export { relativeLuminance } from "../contrast-helpers.js";
@@ -252,26 +252,27 @@ export function settingsWithActiveView(activeView: string, settingsTab?: string)
 }
 
 /**
- * An ActionPanel activity state with nothing in it.
+ * A tool activity state with nothing in it.
  *
  * Shared because two tests need the same empty starting point for different
  * reasons — one exercises item routing after filling a list in, the other
  * asserts the collapsed rail's placement in the floating lane. Two copies would
- * let a change to `ActionPanelActivityState` be fixed in one and rot in the
+ * let a change to `ToolActivityState` be fixed in one and rot in the
  * other.
  */
-export function emptyActionPanelActivity(): ActionPanelActivityState {
+export function emptyToolActivity(): ToolActivityState {
   return {
     readFileCount: 0,
-    writtenFileCount: 0,
+    changedFileCount: 0,
     mcpCallCount: 0,
     pluginCallCount: 0,
     toolCallCount: 0,
     fetchedPageCount: 0,
     readFiles: [],
-    writtenFiles: [],
+    changedFiles: [],
     pluginCalls: [],
     mcpCalls: [],
+    toolCalls: [],
     fetchedPages: [],
   };
 }

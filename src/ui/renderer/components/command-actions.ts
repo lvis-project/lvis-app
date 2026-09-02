@@ -1,4 +1,4 @@
-import { Bot, Folder, Globe, MessageSquare, Table, Terminal, type LucideIcon } from "lucide-react";
+import { Activity, Bot, Folder, Globe, MessageSquare, Table, Terminal, type LucideIcon } from "lucide-react";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { t } from "../../../i18n/runtime.js";
 import type { WorkspaceTabKind } from "../preview/workspace-tabs.js";
@@ -79,6 +79,13 @@ export const WORKSPACE_TAB_LAUNCHER: readonly WorkspaceLauncherItem[] = [
     shortcutHint: "⌘⇧A",
     shortcut: { key: "a", meta: true, ctrl: false, shift: true, alt: false },
     icon: Bot,
+  },
+  {
+    kind: "activity",
+    labelKey: "chatPreviewRail.launcher.activity",
+    shortcutHint: "",
+    shortcut: null,
+    icon: Activity,
   },
   {
     kind: "side-chat",

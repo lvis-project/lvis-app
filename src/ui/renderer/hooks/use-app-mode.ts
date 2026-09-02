@@ -17,8 +17,6 @@ export interface UseAppModeResult {
   setAppMode: (next: AppMode) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: Dispatch<SetStateAction<boolean>>;
-  actionPanelOpen: boolean;
-  setActionPanelOpen: Dispatch<SetStateAction<boolean>>;
   sidePanelOpen: boolean;
   setSidePanelOpen: Dispatch<SetStateAction<boolean>>;
 }
@@ -32,7 +30,7 @@ export interface UseAppModeResult {
  *     frame 0. `setAppMode` persists to host settings, guarded against no-op
  *     writes (#1312 render-loop guard).
  *   - `sidebarCollapsed` (owned by the shell; per-transition default coupled to
- *     appMode, NOT a lock) + `actionPanelOpen` (work-mode Tool Activity panel).
+ *     appMode, NOT a lock).
  *   - the appMode-transition effects: rail-width coupling and OS-window
  *     resizeForMode (mount-skip via ref).
  *
@@ -55,9 +53,6 @@ export function useAppMode(api: Api): UseAppModeResult {
   // default, NOT a lock.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readInitialAppMode() === "chat");
 
-  // fresh launch the full expanded card should not auto-show — the user opens it
-  // on demand. (Only rendered in work mode; see the appMode gate at its mount.)
-  const [actionPanelOpen, setActionPanelOpen] = useState(false);
   // The right-docked work panel (ChatSidePanel), toggled from the title bar.
   // Chat-mode only affordance: opening it widens the OS window (resizeForSidePanel)
   // and closing it restores the normal chat bounds.
@@ -109,21 +104,11 @@ export function useAppMode(api: Api): UseAppModeResult {
     if (appMode !== "chat") return;
     void api.window?.resizeForSidePanel?.(sidePanelOpen);
   }, [appMode, api, sidePanelOpen]);
-  // The work-mode Tool Activity panel never persists into chat mode: collapse it
-  // on the transition so switching to chat starts from the focused surface.
-  useEffect(() => {
-    if (appMode === "chat") {
-      setActionPanelOpen(false);
-    }
-  }, [appMode]);
-
   return {
     appMode,
     setAppMode,
     sidebarCollapsed,
     setSidebarCollapsed,
-    actionPanelOpen,
-    setActionPanelOpen,
     sidePanelOpen,
     setSidePanelOpen,
   };

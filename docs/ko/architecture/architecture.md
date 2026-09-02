@@ -1219,7 +1219,7 @@ lvis-app/src/
 │   │                            #  McpTab, PluginConfigTab, MarketplaceTab
 │   │                            #  (RoutinePanel → components/ as built-in view)
 │   ├── utils/                   # cost-format, html-preview, history, compose,
-│   │                            #  action-panel-activity, plugin-auth-error,
+│   │                            #  tool-activity, plugin-auth-error,
 │   │                            #  read-initial-app-mode, chat-entry-revision,
 │   │                            #  korea-date-key, classify-turn-entries
 │   └── types.ts, constants.ts, api-client.ts
@@ -2577,7 +2577,7 @@ composer/status 영역에 붙여 사용자가 질문과 선택지를 즉시 확�
 
 ### 6.10.2 콘텐츠-주도 탭 모델 (content-driven tabs)
 
-- **No-default:** 워크스페이스는 빈 상태로 시작한다. 고정된 4개 기본 탭은 없다. 탭은 사용자 액션(런처) 또는 콘텐츠 라우팅(ActionPanel / 인덱서 결과)이 만든다.
+- **No-default:** 워크스페이스는 빈 상태로 시작한다. 고정된 4개 기본 탭은 없다. 탭은 사용자 액션(런처) 또는 콘텐츠 라우팅(도구 활동 / 인덱서 결과)이 만든다.
   - _현재 → 목표:_ 현재는 `file-browser` / `preview` / `browser` / `terminal` 4개 탭이 `closeable:false` 로 마운트-하드코딩(PR-2 에서 빈 배열로 전환). PR-1 은 이 기본 탭 세트를 **그대로 유지**하되 소유 위치만 옮긴다(§6.10.7).
 - **All-closeable:** 모든 탭은 닫을 수 있다. never-empty 가드는 제거된다(빈 워크스페이스는 empty-state 런처가 채운다).
 - **Per-item:** 탭은 kind-그룹(현재 방식)이 아니라 개별 항목(파일/브라우저 URL/미리보기) 단위로 열린다. `WorkspaceTab` 이 자신이 표시하는 preview-target 을 직접 가리킨다.
@@ -2589,16 +2589,20 @@ composer/status 영역에 붙여 사용자가 질문과 선택지를 즉시 확�
 
 - **사이드채팅은 런처서 제외**(후속 과제로 defer). 런처 SOT 는 `src/ui/renderer/components/command-actions.ts` 의 `buildQuickActions` / `QuickAction{id,label,run}` 를 확장하며, `WorkspaceTabKind` 와 수렴시킨다(PR-3). `CommandPaletteDialog.tsx` 는 아직 부재.
 
-### 6.10.4 카운트 제거 — ActionPanel 단일 활동 소스
+### 6.10.4 카운트 제거 — 도구 활동 단일 소스
 
-탭에서 항목 카운트 배지를 제거한다. **활동 신호는 ActionPanel(도구 활동 패널)이 단일 소스**다. 워크스페이스 레일은 콘텐츠를 여는 곳이지 활동을 집계하는 곳이 아니다.
+탭에서 항목 카운트 배지를 제거한다. **활동 신호는 도구 활동(`computeToolActivity`, `src/ui/renderer/utils/tool-activity.ts`)이 단일 소스**이며, 그 결과는 머리글이 아니라 작업 패널 안에서만 보인다. 헤더의 도구 활동 버튼(팝오버)은 제거됐다.
 
-- _현재 → 목표:_ 현재는 탭 라벨 옆에 kind 별 카운트를 렌더(`counts` map + 배지). PR-2 에서 제거. PR-1 은 카운트를 **그대로 유지**.
+- **빈 런처:** 탭이 하나도 없을 때 `ToolActivityBody`(`src/ui/renderer/components/ToolActivity.tsx`)가 여섯 카운터와 카테고리별 최신 5개를 보여 주고, "전체 활동 보기"로 activity 탭을 연다.
+- **탭별 전체 목록(최신순, 개수 제한 없음, 패널 안에서 스크롤):**
+  - 파일 탭 → "변경된 파일" 세그먼트: 생성/수정/삭제/이동/씀 배지. 분류는 `classifyFileChange`(`tool-input-paths.ts`)가 도구 계약으로 정한다 — `edit_file`/`apply_patch`=수정, `delete_file`=삭제, `move_file`=이동(양 끝 모두 나열), `write_file`=씀(생성 여부는 결과에 없으므로 주장하지 않음), 패치 본문 헤더 `Add/Update/Delete File`=생성/수정/삭제.
+  - 브라우저 탭 → "방문한 사이트" 목록(뷰어 위 분할). 인자로 요청한 페이지는 전부, 결과에 언급만 된 링크는 최신 `TOOL_ACTIVITY_MENTIONED_URL_LIMIT`개까지.
+  - 서브에이전트 탭 → 세션의 스폰 전부(완료·복원 포함).
+  - activity 탭(`WorkspaceTabKind` `"activity"`) → 호출한 플러그인 + 호출한 도구(`toolCalls[]`: 이름·출처·상태·시작 시각(라이브 전용)·소요 시간·첫 경로/URL 인자).
 
-### 6.10.5 ActionPanel 인앱 라우팅 + 우클릭 시스템앱
+### 6.10.5 도구 활동 인앱 라우팅 + 우클릭 시스템앱
 
-- **인앱 라우팅(기본):** ActionPanel 항목 open 은 시스템 브라우저가 아니라 워크스페이스 레일 안으로 라우팅한다 — 웹 URL → browser 탭, 지원 파일 → preview 탭.
-  - _현재 → 목표:_ 현재 `App.tsx` 의 `openActionPanelUrl` → `api.openExternalUrl` (시스템 브라우저)로 직결(`ActionPanel.tsx` 의 `onOpenExternalUrl`). PR-4 에서 인앱 open action 으로 재배선하며 `onOpenExternalUrl` → `onOpenItem` 으로 일반화.
+- **인앱 라우팅(기본):** 활동 항목 open 은 시스템 브라우저가 아니라 워크스페이스 레일 안으로 라우팅한다 — 웹 URL → browser 탭, 지원 파일 → preview 탭 (`ChatView.routeActivity`).
 - **우클릭 → '시스템앱으로 열기':** 시스템 앱 열기는 우클릭 컨텍스트 메뉴에서만 명시적으로 제공한다.
 - **보안 계약(불변):** 로컬 경로 auto-open 금지(commit `c04f3b0f` — action panel local path opener 제거). URL 은 검증 후에만 라우팅한다(CodeQL 해소). 이 두 계약은 PR-4 이후에도 유지된다.
 
@@ -2614,7 +2618,7 @@ composer/status 영역에 붙여 사용자가 질문과 선택지를 즉시 확�
 워크스페이스 탭 state 는 `ChatSidePanel` 로컬 `useState` 가 아니라 **패널보다 상위에서 사는 스토어**가 소유한다.
 
 - **스토어:** `src/ui/renderer/preview/workspace-tabs.ts` 의 `useWorkspaceTabs()` — `tabs` / `activeTabId` / `browserUrlByTab` 를 소유하고 `addTab` / `closeTab` / `setActiveTabId` / `setBrowserTabUrl` 를 노출한다. `WorkspaceTabKind` / `WorkspaceTab` 타입도 이 모듈에 둔다(런처 SOT 인 `command-actions.ts` 와의 수렴은 PR-3).
-- **마운트 위치:** `ChatView` 레벨. `ChatSidePanel` 은 레일 닫힘 / home 이탈 / 세션 전환 시 **조건부 언마운트**(`{previewRailVisible ? <ChatSidePanel/> : null}`)되지만 `ChatView` 는 그 전이 동안 마운트를 유지하므로, 스토어를 여기 두면 **탭 state 가 세션 전환/패널 토글을 넘어 유지**된다. 이는 `sidePanelOpen` 이 `use-app-mode.ts` 에서 상위 소유되어 threaded-down 되는 패턴과 동일하다. 이 위치는 향후 ActionPanel 의 open action(§6.10.5)이 스토어에 닿을 수 있는 지점이기도 하다.
+- **마운트 위치:** `ChatView` 레벨. `ChatSidePanel` 은 레일 닫힘 / home 이탈 / 세션 전환 시 **조건부 언마운트**(`{previewRailVisible ? <ChatSidePanel/> : null}`)되지만 `ChatView` 는 그 전이 동안 마운트를 유지하므로, 스토어를 여기 두면 **탭 state 가 세션 전환/패널 토글을 넘어 유지**된다. 이는 `sidePanelOpen` 이 `use-app-mode.ts` 에서 상위 소유되어 threaded-down 되는 패턴과 동일하다. 이 위치는 도구 활동의 open action(§6.10.5)이 스토어에 닿는 지점이기도 하다.
 - **PR-1 불변식(pure refactor):** 이 lift 는 **행동을 바꾸지 않는다**. 기본 4탭 · 카운트 · never-empty 가드 · 닫기 규칙이 전부 동일하며, state 가 사는 *위치*만 바뀐다. 후속 PR 이 모델(§6.10.2~6.10.6)을 실제로 변경한다.
 
 ### 6.10.8 반응형 / 인덱서 통합 (부가)
@@ -2630,7 +2634,7 @@ composer/status 영역에 붙여 사용자가 질문과 선택지를 즉시 확�
 | **PR-1** | 탭 state(tabs/activeTabId/browserUrlByTab)를 로컬 `useState` → `useWorkspaceTabs` 스토어로 승격 (§6.10.7). 순수 리팩터, 행동 불변. 세션 전환 시 탭 유지 검증. | 기반 |
 | **PR-2** | 기본 탭 제거(빈 배열) + 전부 closeable + never-empty 가드 삭제 + 카운트 제거. (PR-3 와 순서 결합: empty-state 없으면 빈 화면.) | 후속 |
 | **PR-3** | empty-state 런처 피커(§6.10.3). `command-actions.ts` SOT 확장, `WorkspaceTabKind` 수렴. | 후속 |
-| **PR-4** | ActionPanel 인앱 라우팅 + 우클릭 '시스템앱으로 열기'(§6.10.5). URL 검증, 로컬경로 auto-open 금지. | 후속 |
+| **PR-4** | 도구 활동 인앱 라우팅 + 우클릭 '시스템앱으로 열기'(§6.10.5). URL 검증, 로컬경로 auto-open 금지. | 후속 |
 | **PR-5** | ephemeral ↔ pinned(§6.10.2). `WorkspaceTab.mode`, `openInEphemeral()` + `promoteToPinned()`. | 후속 |
 | **PR-6+** | 점진적 파일 뷰어(§6.10.6). renderer 레지스트리, mermaid 로컬 번들. | 후속 |
 | **부가-A/B** | 좁은 화면 drawer fallback · 인덱서 결과 → 원문 preview(§6.10.8). | 후속 |
@@ -2642,8 +2646,8 @@ composer/status 영역에 붙여 사용자가 질문과 선택지를 즉시 확�
 - `src/ui/renderer/ChatView.tsx` — 스토어 마운트 지점(`useWorkspaceTabs()`), 조건부 `ChatSidePanel` 렌더.
 - `src/ui/renderer/preview/preview-targets.ts` — preview-target 데이터 모델(`ChatPreviewTarget` / `WorkspaceFileItem` / `collectChatPreviewModel`).
 - `src/ui/renderer/components/command-actions.ts` — 런처 SOT(`buildQuickActions` / `QuickAction`), PR-3 수렴 대상.
-- `src/ui/renderer/App.tsx` — `openActionPanelUrl`(PR-4 재배선 대상), `sidePanelOpen` threading.
-- `src/ui/renderer/components/ActionPanel.tsx` — `onOpenExternalUrl`(PR-4 에서 `onOpenItem` 일반화).
+- `src/ui/renderer/App.tsx` — `sidePanelOpen` threading.
+- `src/ui/renderer/components/ToolActivity.tsx` — `ToolActivityBody`(런처 요약) / `ToolActivityWorkspace`(activity 탭), `onOpenItem` 라우팅 계약.
 - `src/main/side-browser-webview.ts` + `src/shared/side-browser.ts` — 인앱 webview(`LVIS_SIDE_BROWSER_PARTITION`).
 - §6.6.5 — HtmlPreview 격리 셸(`lvis-render-html` 파티션), md/mermaid 렌더 경계.
 

@@ -7,7 +7,7 @@ import { normalizeBrowserNavigationUrl } from "./url-safety.js";
  * the ChatSidePanel redesign (issue #1415): while the state lived inside
  * ChatSidePanel, it was destroyed every time the panel unmounted (closing the
  * rail, leaving the home view, or switching sessions) and no external surface
- * (e.g. ActionPanel's open-action) could reach it.
+ * (e.g. the tool-activity open-action) could reach it.
  *
  * The store OWNS the tab list, the active tab, and the per-browser-tab manual
  * URL. It is mounted one level up (ChatView) — a component that stays mounted
@@ -19,7 +19,7 @@ import { normalizeBrowserNavigationUrl } from "./url-safety.js";
  *   - LAUNCHER CONTAINER tabs (`addTab`) — a fresh terminal/browser/review/file
  *     surface the user explicitly opened. `content === null`, always `pinned`.
  *   - CONTENT tabs (`openInEphemeral` / `openPinned`) — a tab that points at a
- *     specific item (a preview-target or a web URL). ActionPanel left-click and
+ *     specific item (a preview-target or a web URL). Tool-activity left-click and
  *     indexer results route here.
  *
  * Ephemeral ↔ pinned (§6.10.2, VS Code preview-tab model): a single left-click
@@ -30,7 +30,7 @@ import { normalizeBrowserNavigationUrl } from "./url-safety.js";
  * adding a second).
  *
  * Every tab is closeable; closing the last one empties the list and the
- * launcher takes over. Activity counts live solely in the ActionPanel (§6.10.4).
+ * launcher takes over. Activity counts live solely in the tool activity (§6.10.4).
  */
 
 export type WorkspaceTabKind =
@@ -39,6 +39,9 @@ export type WorkspaceTabKind =
   | "browser"
   | "terminal"
   | "subagent"
+  // The conversation's tool activity — every plugin and tool call, in full.
+  // A container tab like `terminal`: it lists, it does not point at one item.
+  | "activity"
   // Reserved for the side-chat companion PR (a second, independently-streaming
   // chat session in the rail). The tab kind is declared here now so the
   // exhaustive tab switches (icon/label/testid/body) and the ordinal map stay
@@ -150,6 +153,7 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
     browser: 1,
     terminal: 1,
     subagent: 1,
+    activity: 1,
     "side-chat": 1,
   });
 

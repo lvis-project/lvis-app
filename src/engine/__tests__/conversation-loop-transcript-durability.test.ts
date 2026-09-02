@@ -34,7 +34,7 @@ import { MemoryManager } from "../../memory/memory-manager.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import { historyToEntries } from "../../ui/renderer/utils/history.js";
-import { computeActionPanelActivity } from "../../ui/renderer/utils/action-panel-activity.js";
+import { computeToolActivity } from "../../ui/renderer/utils/tool-activity.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const SESSION_ID = "durability-session";
@@ -358,7 +358,7 @@ describe("transcript durability", () => {
         }),
       ]);
 
-      const activity = computeActionPanelActivity(historyToEntries(serialized));
+      const activity = computeToolActivity(historyToEntries(serialized));
       expect(activity.pluginCallCount).toBe(1);
       expect(activity.mcpCallCount).toBe(1);
     });

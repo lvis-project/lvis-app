@@ -112,7 +112,7 @@ export function OverlayCardRegion({
         data-testid="overlay-card-region"
         data-overlay-surface={chatGroupId ?? "window"}
         // In a tile, position comes from `FloatingRightLane`, which is also what
-        // keeps the action-panel rail from landing on top of this card's
+        // kept the old tool-activity rail from landing on top of this card's
         // controls. In the window band the card is in flow — see
         // `regionClassName`.
         className={regionClassName}
@@ -166,7 +166,7 @@ export function OverlayCardRegion({
         data-testid="overlay-card-region"
         data-overlay-surface={chatGroupId ?? "window"}
         // In a tile, position comes from `FloatingRightLane`, which is also what
-        // keeps the action-panel rail from landing on top of this card's
+        // kept the old tool-activity rail from landing on top of this card's
         // controls. In the window band the card is in flow — see
         // `regionClassName`.
         className={regionClassName}

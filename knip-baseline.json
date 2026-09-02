@@ -1044,11 +1044,6 @@
     },
     {
       "type": "exports",
-      "file": "src/ui/renderer/utils/action-panel-activity.ts",
-      "name": "addUniqueActivity"
-    },
-    {
-      "type": "exports",
       "file": "src/ui/renderer/utils/html-preview.ts",
       "name": "clampPreviewHeight"
     },

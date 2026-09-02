@@ -84,9 +84,9 @@ const NATIVE_LAYOUT: Record<
 };
 
 const NATIVE_LABEL: Record<NativeContextMenuCommand, () => string> = {
-  "action.open-system": () => t("actionPanel.openInSystemApp"),
-  "action.copy-url": () => t("actionPanel.copyUrl"),
-  "action.copy-path": () => t("actionPanel.copyPath"),
+  "action.open-system": () => t("toolActivity.openInSystemApp"),
+  "action.copy-url": () => t("toolActivity.copyUrl"),
+  "action.copy-path": () => t("toolActivity.copyPath"),
   "workspace.open": () => t("chatPreviewRail.ctxOpen"),
   "workspace.reveal": () =>
     t(process.platform === "darwin"

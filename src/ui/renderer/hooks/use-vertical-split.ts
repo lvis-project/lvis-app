@@ -7,13 +7,13 @@ import {
 
 /**
  * The `SystemSettings` fields that persist a workspace-rail vertical split. One
- * per tab kind whose body is a list-over-viewer layout; browser is excluded
- * (its list moved to a floating search Popover, so it has no vertical split).
+ * per tab kind whose body is a list-over-viewer layout.
  */
 export type VerticalSplitStorageKey =
   | "sidePanelSplitFilePercent"
   | "sidePanelSplitPreviewPercent"
-  | "sidePanelSplitSubagentPercent";
+  | "sidePanelSplitSubagentPercent"
+  | "sidePanelSplitBrowserPercent";
 
 export interface UseVerticalSplitResult {
   /** Current TOP-pane percent (drag-live), clamped to the pane range. */

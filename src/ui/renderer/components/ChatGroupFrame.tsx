@@ -3,7 +3,7 @@ import {
   type ReactNode, type RefObject,
 } from "react";
 import {
-  Columns2, Download, Maximize2, Minimize2, PanelBottomClose, PanelBottomOpen,
+  Columns2, Download, Maximize2, Minimize2, PanelRightClose, PanelRightOpen,
   Pin, Rows2, Upload, X,
 } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
@@ -167,22 +167,7 @@ const HEADER_BUTTON_CLASS =
   "h-(--chrome-icon-button) w-(--chrome-icon-button) aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground";
 
 /**
- * The header's contributed-control slot.
- *
- * Tool activity is computed from the transcript, which only the chat view
- * inside this frame can see — but the control that opens it belongs to the
- * header, one level ABOVE that view. Rather than lifting the whole activity
- * derivation into the app shell just to hand it back down, the frame publishes
- * the slot element and the view portals its control into it.
- */
-const ChatGroupHeaderSlotContext = createContext<HTMLElement | null>(null);
-
-export function useChatGroupHeaderSlot(): HTMLElement | null {
-  return useContext(ChatGroupHeaderSlotContext);
-}
-
-/**
- * The work panel is the same kind of guest. It stands as tall as the tile —
+ * The work panel is the frame's guest. It stands as tall as the tile —
  * beside the header, not under it — so the view portals it into a slot that
  * is the tile's own child. `tile` is the frame itself, the box the panel's
  * docked/overlay verdict is measured against: measuring the view would
@@ -223,7 +208,6 @@ export function ChatGroupFrame({
   children,
 }: ChatGroupFrameProps) {
   const { t } = useTranslation();
-  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
   const [panelSlot, setPanelSlot] = useState<HTMLElement | null>(null);
   const [tile, setTile] = useState<HTMLElement | null>(null);
   const panelSlots = useMemo<ChatGroupPanelSlot>(() => ({ panel: panelSlot, tile }), [panelSlot, tile]);
@@ -308,10 +292,6 @@ export function ChatGroupFrame({
         <h2 className="min-w-0 flex-1 truncate text-caption font-medium text-foreground">
           {title}
         </h2>
-        {/* Contributed controls (tool activity) land here — LEADING of the
-            conversation actions, so the pin stays the first thing in the fixed
-            set no matter what the transcript contributes. */}
-        <div ref={setHeaderSlot} className="flex shrink-0 items-center" data-testid="chat-group-header-slot" />
         {actions.map((action) =>
           action.items ? (
             <DropdownMenu key={action.id}>
@@ -445,7 +425,7 @@ export function ChatGroupFrame({
               aria-pressed={panelOpen}
               data-testid={TEST_IDS.chatGroupPanelToggle}
             >
-              {panelOpen ? <PanelBottomClose className="h-4 w-4" /> : <PanelBottomOpen className="h-4 w-4" />}
+              {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{panelLabel}</TooltipContent>
@@ -492,11 +472,9 @@ export function ChatGroupFrame({
       {/* The conversation list is the WINDOW's sidebar and only that. A second
           copy of it inside the frame said the same thing twice and cost the
           transcript the width to say it. */}
-      <ChatGroupHeaderSlotContext.Provider value={headerSlot}>
-        <ChatGroupPanelSlotContext.Provider value={panelSlots}>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-        </ChatGroupPanelSlotContext.Provider>
-      </ChatGroupHeaderSlotContext.Provider>
+      <ChatGroupPanelSlotContext.Provider value={panelSlots}>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+      </ChatGroupPanelSlotContext.Provider>
       </div>
       {/* The work panel lands here: `contents` makes what the view portals
           in the tile's own flex item (a column beside the conversation) or,

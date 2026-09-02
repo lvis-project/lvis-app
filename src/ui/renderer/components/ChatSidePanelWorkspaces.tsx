@@ -7,10 +7,10 @@ import {
   ExternalLink,
   File,
   FileText,
+  FilePenLine,
   Folder,
   FolderPlus,
   Globe,
-  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -18,10 +18,9 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { LvisApi } from "../types.js";
-import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
+import { isFileChangeOperation, type ChatPreviewTarget, type WorkspaceFileItem } from "../preview/preview-targets.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
@@ -810,6 +809,60 @@ function ProjectRootsBrowser({
   );
 }
 
+/** The badge a changed file wears: the change, not the tool. */
+function fileChangeBadgeClass(operation: WorkspaceFileItem["operation"]): string {
+  if (operation === "create") return "bg-success/(--opacity-faint) text-success";
+  if (operation === "delete") return "bg-destructive/(--opacity-faint) text-destructive";
+  return "bg-primary/(--opacity-faint) text-primary";
+}
+
+/**
+ * The file tab's changed-files list: a flat list, latest change first, each
+ * row saying what happened to the file. A tree answers "where is it"; this
+ * answers "what did the session do".
+ */
+function ChangedFileRows({
+  files,
+  selectedFileId,
+  onSelectFile,
+}: {
+  files: WorkspaceFileItem[];
+  selectedFileId?: string;
+  onSelectFile: (file: WorkspaceFileItem) => void;
+}) {
+  const { t } = useTranslation();
+  if (files.length === 0) return <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>;
+  return (
+    <div className="space-y-1" data-testid="chat-side-panel-file-changes">
+      {files.map((file) => (
+        <button
+          key={file.id}
+          type="button"
+          data-testid="chat-side-panel-file-change-row"
+          title={`${file.detail} · ${file.sourceLabel}`}
+          className={cn(
+            "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/(--opacity-muted)",
+            file.id === selectedFileId ? "bg-accent text-accent-foreground" : "",
+          )}
+          onClick={() => onSelectFile(file)}
+        >
+          <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">{file.label}</span>
+            <span className="block truncate text-[10.5px] text-muted-foreground">{file.detail}</span>
+          </span>
+          <span
+            data-testid="chat-side-panel-file-change-operation"
+            className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px]", fileChangeBadgeClass(file.operation))}
+          >
+            {t(`chatPreviewRail.fileOperation.${file.operation}`)}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function FileBrowserWorkspace({
   api,
   sessionId,
@@ -836,17 +889,28 @@ export function FileBrowserWorkspace({
   // session list is not squeezed into a sliver. This is a SOURCE
   // switch on the horizontal axis — orthogonal to the top/bottom split axis
   // above, so the two never fight.
-  const [fileSource, setFileSource] = useState<"directory" | "session">("directory");
+  const [fileSource, setFileSource] = useState<"directory" | "session" | "changed">("directory");
   const sessionFileCount = files.length;
   const hasSessionFiles = sessionFileCount > 0;
-  // The session segment is disabled with zero files; snap back to directory so a
-  // previously-selected-but-now-empty session source can't strand an empty pane.
-  const effectiveSource = fileSource === "session" && hasSessionFiles ? "session" : "directory";
   const tree = useMemo(() => filterFileTree(buildFileTree(files), query), [files, query]);
   const filteredFiles = useMemo(
     () => files.filter((file) => matchesQuery(query, file.label, file.detail, file.path, file.sourceLabel)),
     [files, query],
   );
+  // The files this session created, modified, deleted or moved — the model
+  // lists them oldest first and re-appends a file on each change, so reading
+  // it backwards puts the latest change on top.
+  const changedFiles = useMemo(
+    () => filteredFiles.filter((file) => isFileChangeOperation(file.operation)).reverse(),
+    [filteredFiles],
+  );
+  const changedFileCount = useMemo(() => files.filter((file) => isFileChangeOperation(file.operation)).length, [files]);
+  // A segment is disabled with zero files; snap back to directory so a
+  // previously-selected-but-now-empty source can't strand an empty pane.
+  const effectiveSource =
+    fileSource === "session" && hasSessionFiles ? "session"
+      : fileSource === "changed" && changedFileCount > 0 ? "changed"
+        : "directory";
   const selectedFile = useMemo(
     () => filteredFiles.find((file) => file.previewTargetId === selectedId) ?? filteredFiles[0] ?? null,
     [filteredFiles, selectedId],
@@ -882,7 +946,7 @@ export function FileBrowserWorkspace({
         showing it there is a dead affordance. Render it only for the Session
         segment so there is no no-op search control.
       */}
-      {effectiveSource === "session" ? (
+      {effectiveSource !== "directory" ? (
         <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
       ) : null}
       <VerticalSplitLayout
@@ -941,6 +1005,25 @@ export function FileBrowserWorkspace({
                   {sessionFileCount}
                 </Badge>
               </button>
+              <button
+                type="button"
+                aria-pressed={effectiveSource === "changed"}
+                disabled={changedFileCount === 0}
+                data-testid="chat-side-panel-file-source-changed"
+                className={cn(
+                  "flex h-6 flex-1 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-(--opacity-half)",
+                  effectiveSource === "changed"
+                    ? "bg-primary/(--opacity-subtle) text-primary"
+                    : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground",
+                )}
+                onClick={() => setFileSource("changed")}
+              >
+                <FilePenLine className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("chatPreviewRail.fileSourceChanged")}
+                <Badge variant="outline" className="px-1 py-0 text-[10px]" data-testid="chat-side-panel-file-source-changed-count">
+                  {changedFileCount}
+                </Badge>
+              </button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-2">
               {effectiveSource === "directory" ? (
@@ -948,6 +1031,15 @@ export function FileBrowserWorkspace({
                   selectedPath={fsPath}
                   onOpenFile={(path) => {
                     setFsPath(path);
+                  }}
+                />
+              ) : effectiveSource === "changed" ? (
+                <ChangedFileRows
+                  files={changedFiles}
+                  selectedFileId={fsPath ? undefined : selectedFile?.id}
+                  onSelectFile={(file) => {
+                    setFsPath(null);
+                    if (file.previewTargetId) onSelect(file.previewTargetId);
                   }}
                 />
               ) : hasFiles && tree.length > 0 ? (
@@ -1063,10 +1155,16 @@ export function BrowserWorkspace({
   const [query, setQuery] = useState("");
   const [addressDraft, setAddressDraft] = useState("");
   const [addressError, setAddressError] = useState<string | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
+  const { topPercent, setTopPercent, commitTopPercent } = useVerticalSplit(api, "sidePanelSplitBrowserPercent");
   const filteredTargets = useMemo(
     () => targets.filter((target) => matchesQuery(query, target.title, target.subtitle, target.sourceLabel, target.kind === "url" ? target.url : undefined)),
     [targets, query],
+  );
+  // The visited list reads latest first: the page the conversation went to most
+  // recently is the one the viewer most likely wants back.
+  const visitedTargets = useMemo(
+    () => [...filteredTargets].sort((left, right) => right.createdOrder - left.createdOrder),
+    [filteredTargets],
   );
   const selectedTarget = useMemo(
     () => filteredTargets.find((target) => target.id === selectedId) ?? filteredTargets[0] ?? null,
@@ -1119,8 +1217,7 @@ export function BrowserWorkspace({
       {/*
         Single address bar (#11): the browser tab owns ONE address row here and
         the viewer's own header is suppressed (UrlDocumentViewer showHeader=false)
-        so there is no duplicate URL band nesting. The web-artifact list + search
-        moved out of the always-on stacked strip into the floating 🔍 Popover.
+        so there is no duplicate URL band nesting.
       */}
       <form
         className="flex shrink-0 items-center gap-2 border-b px-3 py-2"
@@ -1140,51 +1237,6 @@ export function BrowserWorkspace({
           placeholder={t("chatPreviewRail.browserAddressPlaceholder")}
           className="h-8 min-w-0 flex-1 text-xs"
         />
-        <Popover open={searchOpen} onOpenChange={setSearchOpen}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  // Radix sets data-state=open on the trigger while the search
-                  // Popover is open; reflect that with an active tint so the
-                  // toggled state is visible.
-                  className="h-8 w-8 shrink-0 data-[state=open]:bg-primary/(--opacity-subtle) data-[state=open]:text-primary"
-                  aria-label={t("chatPreviewRail.browserSearch")}
-                  data-testid="chat-side-panel-browser-search-trigger"
-                >
-                  <Search className="h-3.5 w-3.5" />
-                </Button>
-              </PopoverTrigger>
-            </TooltipTrigger>
-            <TooltipContent>{t("chatPreviewRail.browserSearch")}</TooltipContent>
-          </Tooltip>
-          <PopoverContent
-            align="end"
-            className="w-72 p-0"
-            data-testid="chat-side-panel-browser-search-popover"
-          >
-            <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
-            <div className="max-h-64 overflow-auto p-2">
-              {filteredTargets.length > 0 ? (
-                <TargetRows
-                  targets={filteredTargets}
-                  selectedId={manualTarget ? undefined : selectedTarget?.id}
-                  rowTestId="chat-side-panel-browser-row"
-                  onSelect={(id) => {
-                    onManualUrlChange(tabId, null);
-                    onSelect(id);
-                    setSearchOpen(false);
-                  }}
-                />
-              ) : (
-                <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
-              )}
-            </div>
-          </PopoverContent>
-        </Popover>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -1206,15 +1258,58 @@ export function BrowserWorkspace({
           {addressError}
         </div>
       ) : null}
-      <div className="min-h-0 w-full min-w-0 flex-1 overflow-hidden">
-        {displayedTarget?.kind === "html" ? (
-          <BrowserDocumentViewer target={displayedTarget} />
-        ) : displayedTarget?.kind === "url" ? (
-          <UrlDocumentViewer api={api} target={displayedTarget} showHeader={false} />
-        ) : (
-          <div className="p-4 text-xs text-muted-foreground">{t("chatPreviewRail.noBrowserTargets")}</div>
-        )}
-      </div>
+      {/*
+        The pages this conversation went to, over the page it is looking at —
+        the same list-over-viewer split the file and sub-agent tabs use. A row
+        opens its page in the viewer below; right-click offers the system
+        browser, as the activity rows do.
+      */}
+      <VerticalSplitLayout
+        topPercent={topPercent}
+        onDragChange={setTopPercent}
+        onCommit={commitTopPercent}
+        ariaLabel={t("chatPreviewRail.resizeBrowserPanels")}
+        testId="chat-side-panel-browser-split-layout"
+        separatorTestId="chat-side-panel-browser-splitter"
+        top={
+          <div className="flex min-h-0 flex-col" data-testid="chat-side-panel-browser-visited">
+            <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+            <div className="min-h-0 flex-1 overflow-auto p-2">
+              <h3 className="mb-1 px-2 text-[11px] font-semibold uppercase text-muted-foreground">
+                {t("chatPreviewRail.browserVisited")}
+              </h3>
+              {visitedTargets.length > 0 ? (
+                <TargetRows
+                  targets={visitedTargets}
+                  selectedId={manualTarget ? undefined : selectedTarget?.id}
+                  rowTestId="chat-side-panel-browser-row"
+                  onSelect={(id) => {
+                    onManualUrlChange(tabId, null);
+                    onSelect(id);
+                  }}
+                  onOpenUrlInSystemApp={(url) => {
+                    const safe = normalizeBrowserNavigationUrl(url);
+                    if (safe) void api.openExternalUrl(safe);
+                  }}
+                />
+              ) : (
+                <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
+              )}
+            </div>
+          </div>
+        }
+        bottom={
+          <div className="h-full min-h-0 w-full min-w-0 overflow-hidden">
+            {displayedTarget?.kind === "html" ? (
+              <BrowserDocumentViewer target={displayedTarget} />
+            ) : displayedTarget?.kind === "url" ? (
+              <UrlDocumentViewer api={api} target={displayedTarget} showHeader={false} />
+            ) : (
+              <div className="p-4 text-xs text-muted-foreground">{t("chatPreviewRail.noBrowserTargets")}</div>
+            )}
+          </div>
+        }
+      />
     </div>
   );
 }

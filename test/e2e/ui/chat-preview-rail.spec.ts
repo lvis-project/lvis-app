@@ -245,10 +245,10 @@ test.describe("chat preview rail", () => {
       await expect(openButton).toBeVisible({ timeout: 20_000 });
       await expect(ctx.page.getByTestId("chat-preview-open")).toHaveCount(0);
       await expect(ctx.page.getByTestId("chat-preview-rail")).toHaveCount(0);
-      const closedActionRailBox = await ctx.page.getByTestId("action-panel-rail").boundingBox();
+      // No tool-activity control in the header: the activity lives in the panel.
+      await expect(ctx.page.getByTestId("chat-group-header")).not.toContainText("도구 활동");
       const modeToggleBox = await ctx.page.getByTestId("app-mode-toggle").boundingBox();
       const sidePanelButtonBox = await openButton.boundingBox();
-      expect(closedActionRailBox).not.toBeNull();
       expect(modeToggleBox).not.toBeNull();
       expect(sidePanelButtonBox).not.toBeNull();
       expect(sidePanelButtonBox!.x).toBeGreaterThanOrEqual(modeToggleBox!.x + modeToggleBox!.width);
@@ -290,14 +290,10 @@ test.describe("chat preview rail", () => {
       await expect(ctx.page.getByRole("tab")).toHaveCount(tabCountBefore + 1);
       await expect(ctx.page.getByTestId("chat-side-panel-tab-browser")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-tab-actions")).toBeVisible();
-      // The web-artifact list + search now live behind the floating 🔍 Popover,
-      // not an always-on strip. Open it to confirm the artifacts are listed.
-      await ctx.page.getByTestId("chat-side-panel-browser-search-trigger").click();
-      const searchPopover = ctx.page.getByTestId("chat-side-panel-browser-search-popover");
-      await expect(searchPopover).toContainText("Artifact dashboard");
-      await expect(searchPopover).toContainText(sideBrowserHost);
-      // Close the Popover; the browser tab shows the html viewer directly.
-      await ctx.page.keyboard.press("Escape");
+      // The visited-site list sits over the viewer, latest first.
+      const visited = ctx.page.getByTestId("chat-side-panel-browser-visited");
+      await expect(visited).toContainText("Artifact dashboard");
+      await expect(visited).toContainText(sideBrowserHost);
       await expect(ctx.page.getByTestId("chat-side-panel-browser-viewer")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-browser-frame")).toBeVisible();
       await expect(ctx.page.frameLocator('[data-testid="chat-side-panel-browser-frame"]').getByText("Preview OK")).toBeVisible();
@@ -316,9 +312,8 @@ test.describe("chat preview rail", () => {
 
       // The narrow-screen drawer fallback is covered by workspace-rail-redesign.spec.ts;
       // this spec stays at a docked viewport to exercise the side-by-side geometry.
-      // Pick a listed artifact from the search Popover (rows moved off the strip).
-      await ctx.page.getByTestId("chat-side-panel-browser-search-trigger").click();
-      await ctx.page.getByTestId("chat-side-panel-browser-row").nth(1).click();
+      // Pick the fetched host from the visited list.
+      await ctx.page.getByTestId("chat-side-panel-browser-row").filter({ hasText: sideBrowserHost }).first().click();
       const browserWebview = ctx.page.getByTestId("chat-side-panel-browser-webview");
       await expect(browserWebview).toBeVisible();
       await expect(browserWebview).toHaveAttribute("src", sideBrowser.url);
@@ -387,43 +382,31 @@ test.describe("chat preview rail", () => {
       expect(Math.abs(rootBox!.height - railBox!.height - 16)).toBeLessThanOrEqual(2);
       await expect(panel).not.toHaveCSS("position", "absolute");
 
-      const actionRailBox = await ctx.page.getByTestId("action-panel-rail").boundingBox();
-      const actionOpenBox = await ctx.page.getByTestId("action-panel-open").boundingBox();
-      expect(actionRailBox).not.toBeNull();
-      expect(actionOpenBox).not.toBeNull();
-      expect(actionRailBox!.x + actionRailBox!.width).toBeLessThanOrEqual(railBox!.x - 2);
-      const topElementOwner = await ctx.page.evaluate(({ x, y }) => {
-        const element = document.elementFromPoint(x, y);
-        return {
-          previewRail: Boolean(element?.closest('[data-testid="chat-side-panel"]')),
-          actionRail: Boolean(element?.closest('[data-testid="action-panel-rail"]')),
-        };
-      }, {
-        x: actionOpenBox!.x + actionOpenBox!.width / 2,
-        y: actionOpenBox!.y + actionOpenBox!.height / 2,
-      });
-      expect(topElementOwner.previewRail).toBe(false);
-      expect(topElementOwner.actionRail).toBe(true);
-
-      await ctx.page.getByTestId("action-panel-open").click();
-      const actionPanel = ctx.page.getByTestId("action-panel");
-      await expect(actionPanel).toBeVisible();
-      await expect(actionPanel).toContainText("meeting_lookup");
-      await expect(actionPanel).toContainText("meeting");
-      await expect(actionPanel).toContainText(READ_PATH);
-      await expect(actionPanel).toContainText(WRITE_PATH);
-      await expect(actionPanel).toContainText(sideBrowserOrigin);
-      await expect(actionPanel).toContainText("https://search.example.test");
-      const openActionPanelBox = await actionPanel.boundingBox();
-      expect(openActionPanelBox).not.toBeNull();
-      expect(openActionPanelBox!.x + openActionPanelBox!.width).toBeLessThanOrEqual(railBox!.x - 2);
-      const actionPanelProbe = await readCdpProbe(ctx.page);
-      await test.info().attach("action-panel-cdp.png", {
+      // The activity tab lists every plugin and tool call of the session; the
+      // web and file lists live on the browser and file tabs.
+      await addTabTrigger.dispatchEvent("pointerdown");
+      await ctx.page.getByTestId(chatSidePanelLauncherTestId("menu-activity")).click();
+      const activityWorkspace = ctx.page.getByTestId("chat-side-panel-activity-workspace");
+      await expect(activityWorkspace).toBeVisible();
+      await expect(activityWorkspace.getByTestId("chat-side-panel-activity-plugins")).toContainText("meeting_lookup");
+      await expect(activityWorkspace.getByTestId("chat-side-panel-activity-plugins")).toContainText("meeting");
+      await expect(activityWorkspace.getByTestId("chat-side-panel-activity-tools")).toContainText("web_fetch");
+      await expect(activityWorkspace.getByTestId("chat-side-panel-activity-tools")).toContainText(sideBrowserOrigin);
+      await expect(activityWorkspace.getByTestId("chat-side-panel-activity-tools")).toContainText(READ_PATH);
+      await expect(activityWorkspace.getByTestId("chat-side-panel-activity-tools")).toContainText(WRITE_PATH);
+      const activityProbe = await readCdpProbe(ctx.page);
+      await test.info().attach("activity-tab-cdp.png", {
         contentType: "image/png",
-        body: Buffer.from(actionPanelProbe.screenshot.data, "base64"),
+        body: Buffer.from(activityProbe.screenshot.data, "base64"),
       });
-      await ctx.page.getByTestId("action-panel-close").click();
-      await expect(ctx.page.getByTestId("action-panel-rail")).toBeVisible();
+
+      // The file tab's changed-files segment says what happened to each file.
+      await ctx.page.getByTestId("chat-side-panel-tab-file-browser").click();
+      await ctx.page.getByTestId("chat-side-panel-file-source-changed").click();
+      const changedRows = rail.getByTestId("chat-side-panel-file-change-row");
+      await expect(changedRows).toHaveCount(1);
+      await expect(changedRows.first()).toContainText("report.md");
+      await expect(rail.getByTestId("chat-side-panel-file-change-operation")).toHaveText("씀");
 
       // Switch back to the earlier file-browser tab (still open) to filter files.
       // The tab body remounts, so its source resets to Directory — switch to the

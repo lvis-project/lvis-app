@@ -1,12 +1,12 @@
 /**
  * THE JOIN INVARIANT between the two renderer file-target derivations.
  *
- * `ChatView.routeActivity` resolves an ActionPanel row back against the chat
+ * `ChatView.routeActivity` resolves an tool-activity row back against the chat
  * preview model by EXACT STRING EQUALITY:
  *
  *   previewModel.targets.find(c => "path" in c && c.path === target)
  *
- * where `target` is `computeActionPanelActivity(entries)`'s string and
+ * where `target` is `computeToolActivity(entries)`'s string and
  * `previewModel` is `collectChatPreviewModel({entries, attachments})`. The two
  * derivations are therefore not independent summaries — a string one side emits
  * and the other does not is by construction a lookup miss, and the click falls
@@ -21,19 +21,19 @@ import { describe, expect, it } from "vitest";
 import type { ChatEntry } from "../../../../lib/chat-stream-state.js";
 import { collectChatPreviewModel } from "../preview-targets.js";
 import {
-  ACTION_PANEL_ACTIVITY_LIMIT,
-  computeActionPanelActivity,
-} from "../../utils/action-panel-activity.js";
+  TOOL_ACTIVITY_MENTIONED_URL_LIMIT,
+  computeToolActivity,
+} from "../../utils/tool-activity.js";
 
 /** The exact lookup ChatView.routeActivity performs for a non-web row. */
 function resolvesInPreview(model: ReturnType<typeof collectChatPreviewModel>, target: string): boolean {
   return model.targets.some((candidate) => "path" in candidate && candidate.path === target);
 }
 
-/** Every file target the ActionPanel would render as a clickable row. */
-function actionPanelFileTargets(entries: ChatEntry[]): string[] {
-  const activity = computeActionPanelActivity(entries);
-  return [...activity.readFiles, ...activity.writtenFiles]
+/** Every file target the activity lists would render as a clickable row. */
+function activityFileTargets(entries: ChatEntry[]): string[] {
+  const activity = computeToolActivity(entries);
+  return [...activity.readFiles, ...activity.changedFiles]
     .map((item) => item.target)
     .filter((target): target is string => typeof target === "string");
 }
@@ -51,7 +51,7 @@ function toolGroup(tools: Array<Record<string, unknown>>): ChatEntry {
 /** Assert the invariant, and that the case is non-vacuous (it produced rows). */
 function expectJoinHolds(entries: ChatEntry[], expectedTargets: string[]) {
   const model = collectChatPreviewModel({ entries, attachments: [] });
-  const targets = actionPanelFileTargets(entries);
+  const targets = activityFileTargets(entries);
   expect([...new Set(targets)].sort()).toEqual([...expectedTargets].sort());
   for (const target of targets) {
     expect({ target, resolves: resolvesInPreview(model, target) })
@@ -111,7 +111,7 @@ describe("action panel <-> preview file-target join", () => {
       result: "{}",
     }])];
 
-    expect(actionPanelFileTargets(entries)).toEqual([]);
+    expect(activityFileTargets(entries)).toEqual([]);
     expect(resolvesInPreview(collectChatPreviewModel({ entries, attachments: [] }), "src/**/*.ts"))
       .toBe(false);
   });
@@ -152,9 +152,9 @@ describe("action panel <-> preview file-target join", () => {
   });
 });
 
-/** Every fetched page the ActionPanel would render as a clickable row. */
-function actionPanelWebTargets(entries: ChatEntry[]): string[] {
-  return computeActionPanelActivity(entries)
+/** Every fetched page the activity lists would render as a clickable row. */
+function activityWebTargets(entries: ChatEntry[]): string[] {
+  return computeToolActivity(entries)
     .fetchedPages.map((item) => item.target)
     .filter((target): target is string => typeof target === "string");
 }
@@ -219,7 +219,7 @@ describe("action panel <-> preview web-target join", () => {
     ])];
 
     const expected = ["https://a.example/one", "https://b.example/two"];
-    expect([...new Set(actionPanelWebTargets(entries))].sort()).toEqual(expected);
+    expect([...new Set(activityWebTargets(entries))].sort()).toEqual(expected);
     expect(browserTabUrls(entries).sort()).toEqual(expected);
 
     // The page is credited to the call that FETCHED it, not to the search that
@@ -241,7 +241,7 @@ describe("action panel <-> preview web-target join", () => {
     );
   });
 
-  it("bounds the tab by the same row cap the activity list uses, keeping the newest pages", () => {
+  it("bounds mentioned pages by the same cap the activity list uses, keeping the newest, and never the pages the turn asked for", () => {
     // One link-heavy result: without a bound this is one Browser row per link.
     const listed = Array.from({ length: 12 }, (_, index) => `https://listed.example/${index}`);
     const entries = [toolGroup([
@@ -262,12 +262,13 @@ describe("action panel <-> preview web-target join", () => {
     ])];
 
     const tabUrls = browserTabUrls(entries);
-    expect(tabUrls).toHaveLength(ACTION_PANEL_ACTIVITY_LIMIT);
-    // Both sides keep the same end of the list: the most recent call's page is
-    // in, and both stop at the shared limit.
+    // The cap bounds the MENTIONED links only; the page the fetch asked for is
+    // listed on top of them. Both sides keep the same end of the list: the most
+    // recent mentions are in, and both stop at the shared limit.
+    expect(tabUrls).toHaveLength(TOOL_ACTIVITY_MENTIONED_URL_LIMIT + 1);
     expect(tabUrls).toContain("https://newest.example/page");
-    expect([...new Set(actionPanelWebTargets(entries))]).toHaveLength(ACTION_PANEL_ACTIVITY_LIMIT);
-    expect(actionPanelWebTargets(entries)).toContain("https://newest.example/page");
+    expect([...new Set(activityWebTargets(entries))]).toHaveLength(TOOL_ACTIVITY_MENTIONED_URL_LIMIT + 1);
+    expect(activityWebTargets(entries)).toContain("https://newest.example/page");
   });
 
   it("neither side promotes a URL quoted inside a file a read tool returned", () => {
@@ -283,7 +284,7 @@ describe("action panel <-> preview web-target join", () => {
       },
     ])];
 
-    expect(actionPanelWebTargets(entries)).toEqual([]);
+    expect(activityWebTargets(entries)).toEqual([]);
     expect(browserTabUrls(entries)).toEqual([]);
   });
 });

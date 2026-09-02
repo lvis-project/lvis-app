@@ -6,9 +6,7 @@
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
-import { TooltipProvider } from "../../src/components/ui/tooltip.js";
-import { ActionPanel } from "../../src/ui/renderer/components/ActionPanel.js";
+import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import { MOCK_DEFAULT_SESSION_ID } from "./mock-lvis-api.js";
 import { TEST_IDS, testIdSelector } from "../../src/shared/test-ids.js";
@@ -104,41 +102,58 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(Array.isArray(list)).toBe(true);
   });
 
-  it("hangs tool activity off the chat group's header, closed until asked for", async () => {
-    const { container, api } = await renderApp();
+  it("reports tool activity in the work panel — compact on the launcher, in full on the activity tab — and never in the header", async () => {
+    const { container, api, emitChatStream } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    // The control is IN the group header (not floating over the transcript, and
-    // not in the window band), and the panel itself is closed on a fresh launch.
-    const trigger = container.querySelector('[data-testid="action-panel-open"]');
-    expect(trigger).toBeTruthy();
-    expect(container.querySelector('[data-testid="chat-group-header-slot"]')?.contains(trigger!)).toBe(true);
-    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
-    // It opens DOWNWARD as a popover, so its content is portaled — absent from
-    // the page entirely while closed.
-    expect(document.querySelector('[data-testid="action-panel"]')).toBeFalsy();
-    expect(document.body.textContent).not.toContain("아직 읽은 파일이 없습니다.");
-
     await act(async () => {
-      fireEvent.click(trigger!);
+      emitChatStream({
+        type: "tool_start",
+        name: "read_file",
+        groupId: "g1",
+        toolUseId: "t1",
+        toolCategory: "read",
+        input: { path: "C:\\tmp\\readme.md" },
+      });
+      emitChatStream({
+        type: "tool_end",
+        name: "read_file",
+        groupId: "g1",
+        toolUseId: "t1",
+        toolCategory: "read",
+        result: "ok",
+      });
     });
 
-    const actionPanel = await waitFor(() => {
-      const panel = document.querySelector('[data-testid="action-panel"]');
-      expect(panel).toBeTruthy();
-      return panel!;
-    });
-    expect(actionPanel.textContent).toContain("도구 활동");
-    expect(actionPanel.textContent).toContain("카테고리별 최신 5개");
-    // Scoped to the action panel itself — the sidebar's own Chats/Projects
-    // tablist is unrelated and (correctly) present elsewhere on the page.
-    expect(actionPanel.querySelector('[role="tablist"]')).toBeFalsy();
+    // The header carries the conversation's line and the tile controls only —
+    // no activity control hangs off it.
+    const header = container.querySelector('[data-testid="chat-group-header"]');
+    expect(header).toBeTruthy();
+    expect(header?.textContent).not.toContain("도구 활동");
+    expect(container.querySelector('[data-testid="tool-activity-open-tab"]')).toBeFalsy();
 
-    // Escape dismisses it, the way every other popover on this surface does.
+    // Open the work panel: its empty launcher carries the compact report.
     await act(async () => {
-      fireEvent.keyDown(actionPanel, { key: "Escape", code: "Escape" });
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.chatGroupPanelToggle))!);
     });
-    await waitFor(() => expect(document.querySelector('[data-testid="action-panel"]')).toBeFalsy());
+    const launcherActivity = await waitFor(() => {
+      const found = container.querySelector('[data-testid="chat-side-panel-launcher-tool-activity"]');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect(launcherActivity.textContent).toContain("읽은 파일");
+    expect(launcherActivity.textContent).toContain("변경된 파일");
+    expect(launcherActivity.textContent).toContain("호출한 도구");
+    expect(launcherActivity.querySelector('[data-testid^="tool-activity-item-read:t1:"]')?.textContent).toContain("readme.md");
+
+    // Its way to the full lists is the activity tab.
+    await act(async () => {
+      fireEvent.click(launcherActivity.querySelector('[data-testid="tool-activity-open-tab"]')!);
+    });
+    expect(container.querySelector('[data-testid="chat-side-panel-tab-activity"]')).toBeTruthy();
+    const workspace = container.querySelector('[data-testid="chat-side-panel-activity-workspace"]');
+    expect(workspace?.textContent).toContain("read_file");
+    expect(workspace?.querySelectorAll('[data-testid="chat-side-panel-activity-tool-row"]')).toHaveLength(1);
   });
 
   it("hides tool activity in chat mode and opens the side panel from the title bar", async () => {
@@ -166,14 +181,10 @@ describe("App smoke (Phase 1 infra)", () => {
         result: "ok",
       });
     });
-    expect(container.querySelector('[data-testid="action-panel-open"]')).toBeTruthy();
-
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="app-mode-chat"]')!);
     });
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenCalledWith(false));
-    expect(container.querySelector('[data-testid="action-panel-open"]')).toBeFalsy();
-    expect(document.querySelector('[data-testid="action-panel"]')).toBeFalsy();
     expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeFalsy();
 
     await act(async () => {
@@ -255,96 +266,6 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.textContent).not.toContain("워크 보드");
   });
 
-  it("keeps expanded action panel counters visible while hiding empty detail rows", async () => {
-    const { container, api } = await renderApp();
-    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-
-    // Closed until asked for; open it to inspect the counters.
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
-    });
-
-    const panel = await waitFor(() => {
-      const found = document.querySelector('[data-testid="action-panel"]');
-      expect(found).toBeTruthy();
-      return found!;
-    });
-    expect(panel.textContent).toContain("읽은 파일");
-    expect(panel.textContent).toContain("쓴 파일");
-    expect(panel.textContent).toContain("MCP 호출");
-    expect(panel.textContent).toContain("플러그인 호출");
-    expect(panel.textContent).toContain("도구 호출");
-    expect(panel.textContent).toContain("웹 출처");
-    expect(panel.textContent).not.toContain("아직 읽은 파일이 없습니다.");
-    expect(panel.querySelector('[data-testid^="action-panel-activity-"]')).toBeFalsy();
-  });
-
-  it("surfaces populated action panel activity and routes rows in-app", () => {
-    const readFiles = Array.from({ length: 6 }, (_, index) => ({
-      id: `read-${index}`,
-      label: `latest-read-${index}`,
-      target: `C:\\tmp\\latest-read-${index}.md`,
-    }));
-    const openItem = vi.fn();
-    const openInSystemApp = vi.fn();
-    // Rendered open. The content is a popover, so it lands in a portal on the
-    // document rather than inside the render container.
-    render(
-      <TooltipProvider>
-        <ActionPanel
-          open
-          onOpenChange={vi.fn()}
-          onOpenItem={openItem}
-          onOpenItemInSystemApp={openInSystemApp}
-          activity={{
-            readFileCount: readFiles.length,
-            writtenFileCount: 1,
-            mcpCallCount: 1,
-            pluginCallCount: 1,
-            toolCallCount: 4,
-            fetchedPageCount: 1,
-            readFiles,
-            writtenFiles: [{
-              id: "write-1",
-              label: "C:\\tmp\\written.md",
-              target: "C:\\tmp\\written.md",
-            }],
-            pluginCalls: [{ id: "plugin-1", label: "plugin_tool", detail: "plugin-a" }],
-            mcpCalls: [{ id: "mcp-1", label: "mcp_tool", detail: "server-a" }],
-            fetchedPages: [{
-              id: "web-1",
-              label: "https://example.com",
-              detail: "https://example.com/full/path?q=1",
-              target: "https://example.com/full/path?q=1",
-            }],
-          }}
-        />
-      </TooltipProvider>,
-    );
-
-    expect(document.body.textContent).toContain("읽은 파일");
-    expect(document.body.textContent).toContain("쓴 파일");
-    expect(document.body.textContent).toContain("MCP 호출");
-    expect(document.body.textContent).toContain("플러그인 호출");
-    expect(document.body.textContent).toContain("도구 호출");
-    expect(document.body.textContent).toContain("웹 출처");
-    expect(document.body.textContent).toContain("latest-read-0");
-    expect(document.body.textContent).toContain("latest-read-4");
-    expect(document.body.textContent).not.toContain("latest-read-5");
-    expect(document.body.textContent).toContain("https://example.com");
-    expect(document.body.textContent).not.toContain("/full/path");
-
-    // Read-file rows now carry a target → they are clickable buttons that route
-    // the file in-app (web=false); no local path ever reaches a system opener.
-    const readRow = document.querySelector('[data-testid="action-panel-activity-read-0"]')!;
-    expect(readRow.tagName).toBe("BUTTON");
-    fireEvent.click(readRow);
-    expect(openItem).toHaveBeenLastCalledWith("C:\\tmp\\latest-read-0.md", false);
-    expect(openInSystemApp).not.toHaveBeenCalled();
-    // Web rows route in-app with web=true.
-    fireEvent.click(document.querySelector('[data-testid="action-panel-activity-web-1"]')!);
-    expect(openItem).toHaveBeenLastCalledWith("https://example.com/full/path?q=1", true);
-  });
 });
 
 describe("Settings inline (all modes)", () => {

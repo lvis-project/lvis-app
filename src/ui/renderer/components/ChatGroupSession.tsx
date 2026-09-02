@@ -250,7 +250,6 @@ export function ChatGroupSession({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const attachmentNCounter = useRef(0);
-  const [actionPanelOpen, setActionPanelOpen] = useState(false);
 
   // Forward-ref cycle bridge — the TILE owns this ref: use-send-message writes
   // it each render and this tile's MCP-prompt path reads it. Keeping it per
@@ -754,8 +753,6 @@ export function ChatGroupSession({
         onRoutineAcknowledge={env.onRoutineAcknowledge}
         statusBar={env.statusBar}
         onAttachmentWarning={handleAttachmentWarning}
-        actionPanelOpen={actionPanelOpen}
-        onActionPanelOpenChange={setActionPanelOpen}
         sidePanelOpen={panelOpen}
         onSidePanelOpenChange={onSidePanelOpenChange}
         blogLayout={env.appMode === "work"}
