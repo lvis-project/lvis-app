@@ -19,7 +19,13 @@ import "./setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { atHome, renderApp } from "./render-app.js";
-import { activeSettingsTab, clickSettingsTab, settingsWithActiveView } from "./helpers.js";
+import {
+  activeSettingsTab,
+  clickSettingsTab,
+  clickSidebarNavRow,
+  settingsWithActiveView,
+  splitIntoTwoTiles,
+} from "./helpers.js";
 import { t } from "../../src/i18n/runtime.js";
 import { BUILTIN_LABEL_KEYS, type PaneViewKey } from "../../src/ui/renderer/utils/view-location.js";
 
@@ -355,6 +361,33 @@ describe("settings is a pane body", () => {
       );
       expect(container.querySelector('[data-testid="view-path-current-settings:permissions"]')).not.toBeNull();
     });
+  });
+
+  it("draws the view in the pane that holds it and leaves its neighbour alone", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    // Focus follows a split, so the view opens in the SECOND tile.
+    const [left, right] = await splitIntoTwoTiles(container);
+    const cell = (chatGroupId: string) =>
+      container.querySelector<HTMLElement>(`[data-testid="chat-group-cell:${chatGroupId}"]`)!;
+
+    await clickSidebarNavRow("features", "toolbar-work-board");
+
+    // The board took ONE pane's box — the one that was focused.
+    await waitFor(() => {
+      expect(cell(right!.chatGroupId)
+        .querySelector('[data-testid="main-pane-shell"][data-view="work-board"]')).not.toBeNull();
+    });
+    // Its neighbour is untouched: still a conversation, still drawn. Before the
+    // route moved onto the canvas the whole surface went `display:none` here,
+    // so the second pane went dark for a view it was not showing.
+    expect(cell(left!.chatGroupId)
+      .querySelector('[data-testid="main-pane-shell"][data-view]')).toBeNull();
+    expect(cell(left!.chatGroupId).querySelector('[data-testid="chat-group"]')).not.toBeNull();
+
+    // Two frames in that one cell: the board's, and the conversation it covers.
+    // The covered one is hidden rather than unmounted — its turn may still be
+    // streaming, and its composer draft and scroll position live in it.
+    expect(cell(right!.chatGroupId).querySelectorAll('[data-testid="chat-group"]')).toHaveLength(2);
   });
 
   it("hands the pane back to the conversation when closed", async () => {
