@@ -20,6 +20,7 @@ import { SettingsSection, type SettingsSectionFeedback } from "../components/Pag
 import { TailnetObserverSection } from "./TailnetObserverSection.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
 import type { LvisApi } from "../types.js";
+import { useCopyFlash } from "../hooks/use-copy-flash.js";
 
 export interface TailnetAccessContentProps {
   api: LvisApi;
@@ -63,7 +64,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   const [shareDuration, setShareDuration] = useState<TailnetShareDurationPreset>("8h");
   const [sharePermission, setSharePermission] = useState<TailnetSharePermission>("observe");
   const [issuedInvitation, setIssuedInvitation] = useState<TailnetSharingCreatedInvitation | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy: copyToClipboard, reset: resetCopied } = useCopyFlash();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -122,7 +123,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   const createInvitation = useCallback(async () => {
     setBusy("invitation");
     setFeedback(null);
-    setCopied(false);
+    resetCopied();
     try {
       const result = await api.tailnetSharing.createInvitation(invitationDuration);
       if (!result.ok) {
@@ -142,12 +143,8 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   }, [api, invitationDuration, refresh, t]);
 
   const copyInvitation = useCallback(() => {
-    if (!issuedInvitation || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(issuedInvitation.code).then(
-      () => setCopied(true),
-      () => setCopied(false),
-    );
-  }, [issuedInvitation]);
+    if (issuedInvitation) copyToClipboard(issuedInvitation.code);
+  }, [copyToClipboard, issuedInvitation]);
 
   const createShare = useCallback((pairingId: string) => {
     if (sharePermission === "control" && !globalThis.confirm(t("tailnetAccessTab.controlConfirm"))) return;
