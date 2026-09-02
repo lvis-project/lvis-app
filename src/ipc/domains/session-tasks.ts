@@ -13,11 +13,14 @@ import { ipcMain } from "electron";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
+import { isValidSessionId } from "../../memory/memory-manager.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
 /**
  * The conversation a session-tasks call names, or `null` when it names none.
+ * An id that is not well-formed names no session either: the list lives in
+ * that session's metadata sidecar, which only a valid id can address.
  *
  * A refusal rather than a throw: `ipcMain.handle` would turn a throw into a
  * rejected promise in the renderer, and the panel's read is fire-and-forget —
@@ -25,7 +28,7 @@ const log = createLogger("lvis");
  * the channel's own empty answer.
  */
 function namedSession(sessionId: unknown): string | null {
-  return typeof sessionId === "string" && sessionId.trim() ? sessionId : null;
+  return isValidSessionId(sessionId) ? sessionId : null;
 }
 
 export function registerSessionTasksHandlers(deps: IpcDeps): void {
@@ -44,7 +47,7 @@ export function registerSessionTasksHandlers(deps: IpcDeps): void {
     if (!sessionTasksStore) return [];
     return sessionTasksStore.list(sid);
   });
-  ipcMain.handle(CHANNELS.sessionTasks.clear, (e, sessionId: unknown) => {
+  ipcMain.handle(CHANNELS.sessionTasks.clear, async (e, sessionId: unknown) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.sessionTasks.clear, e);
       return UNAUTHORIZED_FRAME;
@@ -55,7 +58,7 @@ export function registerSessionTasksHandlers(deps: IpcDeps): void {
       return { ok: false, error: "session-id-required" };
     }
     if (!sessionTasksStore) return { ok: false, error: "no-session-tasks-store" };
-    sessionTasksStore.clear(sid);
+    await sessionTasksStore.clear(sid);
     return { ok: true };
   });
   if (sessionTasksStore) {

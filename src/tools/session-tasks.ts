@@ -1,54 +1,65 @@
 /**
- * `session_tasks` LLM tool — assistant's current-turn checklist.
- * Distinct from user `task_*` (persistent): in-memory only, scoped to the
- * active ChatSession id, and cleared at the next explicit user/user-queued
- * turn boundary only after every item is completed.
+ * `session_tasks` LLM tool — the assistant's checklist for the current
+ * session. Distinct from user `task_*`: scoped to the active ChatSession id,
+ * persisted in that session's metadata sidecar, and addressed by 1-based
+ * task number so the model and the user talk about the same "task 1".
+ *
+ * Every action answers with the full numbered list, so the model never has
+ * to remember positions across calls.
  */
 import { createDynamicTool, type Tool } from "./base.js";
 import {
-  SessionTasksEmptyPlanError,
+  SessionTaskIndexError,
   type SessionTasksStore,
 } from "../main/session-tasks-store.js";
-import {
-  isSessionTaskUpdateStatus,
-  SESSION_TASK_UPDATE_STATUSES,
-  type SessionTaskItem,
-  type SessionTaskUpdate,
-} from "../shared/session-tasks.js";
+import type { SessionTaskItem } from "../shared/session-tasks.js";
 import { t } from "../i18n/index.js";
 
-/**
- * An update changes the plan when it adds/moves an item, deletes one, or
- * shifts an existing item's status or content. A call whose every update
- * leaves the current state untouched by re-marking an existing item (e.g.
- * already-in_progress -> in_progress) is invalid: it burns a full-context
- * round without moving the checklist. We reject that case so the model treats
- * the call as a failed update instead of a successful tool result worth
- * repeating. A delete of an already-absent item remains an idempotent no-op.
- */
-function updateChangesPlan(
-  u: SessionTaskUpdate,
-  current: Map<string, SessionTaskItem>,
-): boolean {
-  // Reorder intent — we do not compute the resulting order here, so never
-  // suppress it.
-  if (u.beforeId || u.afterId) return true;
-  const cur = u.id ? current.get(u.id) : undefined;
-  if (!cur) {
-    // No existing item under this id: a delete targets nothing (no-op),
-    // anything else creates/adds an item (a real change).
-    return u.status !== "deleted";
-  }
-  if (u.status !== cur.status) return true;
-  if (u.content !== undefined && u.content !== cur.content) return true;
-  return false;
+const ACTIONS = ["create", "add", "edit", "delete", "complete"] as const;
+type SessionTasksAction = (typeof ACTIONS)[number];
+
+const EDIT_STATUSES = ["pending", "in_progress"] as const;
+
+function isAction(value: unknown): value is SessionTasksAction {
+  return typeof value === "string" && (ACTIONS as readonly string[]).includes(value);
 }
 
-function isMissingDeleteNoOp(
-  u: SessionTaskUpdate,
-  current: Map<string, SessionTaskItem>,
-): boolean {
-  return !!u.id && u.status === "deleted" && !current.has(u.id) && !u.beforeId && !u.afterId;
+/**
+ * `steps` is a comma-separated string by contract; a JSON array of strings is
+ * accepted too because some providers serialize list-shaped arguments that
+ * way. Blank entries are dropped, so a trailing comma is harmless.
+ */
+function parseSteps(raw: unknown): string[] {
+  const parts = Array.isArray(raw)
+    ? raw.filter((s): s is string => typeof s === "string")
+    : typeof raw === "string"
+      ? raw.split(",")
+      : [];
+  return parts.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+function optionalInteger(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return typeof n === "number" && Number.isInteger(n) ? n : Number.NaN;
+}
+
+function numbered(items: SessionTaskItem[]): Array<{ index: number; text: string; status: string }> {
+  return items.map((item, i) => ({ index: i + 1, text: item.content, status: item.status }));
+}
+
+function failure(error: string) {
+  return { output: JSON.stringify({ error }), isError: true };
+}
+
+/**
+ * A call that leaves the list as it is burns a full-context round for
+ * nothing. Returning success was not enough in live sessions — the model kept
+ * repeating the same call and hit TPM — so it is a failed update, which
+ * engages the generic "do not retry the same failed tool input" prompt rule.
+ */
+function noChange(detail: string) {
+  return failure(`${detail}: nothing changed. Do not retry session_tasks with the same input; continue with work tools and update a task only when it actually advances.`);
 }
 
 export function createSessionTasksTool(store: SessionTasksStore): Tool {
@@ -56,111 +67,110 @@ export function createSessionTasksTool(store: SessionTasksStore): Tool {
     name: "session_tasks",
     description: t("be_sessionTasks.toolDescription"),
     source: "builtin",
-    // category="read" — the assistant's own current-turn checklist lives
-    // entirely in an in-memory store this conversation owns; there is no
-    // external mutation, no on-disk persistence, no cross-session impact.
-    // Treating each tick as a write would open the approval dock for every
-    // status change, which is a UX regression with zero security gain.
-    // The tool does not declare isReadOnly() because the §S4 short-circuit
-    // is only consulted when category=read AND ApprovalGate is engaged;
-    // category=read alone is sufficient to keep PermissionManager from
-    // raising an "ask" decision for the default policy.
+    // category="read" — the list is this conversation's own bookkeeping,
+    // written into its own session sidecar; there is no external mutation
+    // and no cross-session impact. Treating each tick as a write would open
+    // the approval dock for every status change, which is a UX regression
+    // with zero security gain. The tool does not declare isReadOnly() for
+    // the §S4 short-circuit alone: category=read is what keeps
+    // PermissionManager from raising an "ask" decision under the default policy.
     category: "read",
     isReadOnly: () => true,
     jsonSchema: {
       type: "object",
-      required: ["items"],
+      required: ["action"],
       properties: {
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["status"],
-            properties: {
-              id: { type: "string", description: t("be_sessionTasks.schemaIdDesc") },
-              content: { type: "string", description: t("be_sessionTasks.schemaContentDesc") },
-              status: { type: "string", enum: SESSION_TASK_UPDATE_STATUSES },
-              beforeId: { type: "string", description: t("be_sessionTasks.schemaBeforeIdDesc") },
-              afterId: { type: "string", description: t("be_sessionTasks.schemaAfterIdDesc") },
-            },
-          },
+        action: {
+          type: "string",
+          enum: ACTIONS,
+          description: t("be_sessionTasks.actionDesc"),
+        },
+        steps: { type: "string", description: t("be_sessionTasks.stepsDesc") },
+        after: { type: "integer", minimum: 0, description: t("be_sessionTasks.afterDesc") },
+        index: { type: "integer", minimum: 1, description: t("be_sessionTasks.indexDesc") },
+        text: { type: "string", description: t("be_sessionTasks.textDesc") },
+        status: {
+          type: "string",
+          enum: EDIT_STATUSES,
+          description: t("be_sessionTasks.statusDesc"),
         },
       },
     },
     execute: async (rawInput, ctx) => {
       if (typeof ctx.metadata?.sessionId !== "string" || ctx.metadata.sessionId.length === 0) {
-        return {
-          output: JSON.stringify({ error: "missing sessionId metadata" }),
-          isError: true,
-        };
+        return failure("missing sessionId metadata");
       }
       const sessionId = ctx.metadata.sessionId;
       const a = (rawInput ?? {}) as Record<string, unknown>;
-      const itemsRaw = Array.isArray(a.items) ? (a.items as unknown[]) : [];
-      const updates: SessionTaskUpdate[] = [];
-      for (const it of itemsRaw) {
-        if (!it || typeof it !== "object") continue;
-        const obj = it as Record<string, unknown>;
-        const content = typeof obj.content === "string" ? obj.content : undefined;
-        const id = typeof obj.id === "string" ? obj.id : undefined;
-        const beforeId = typeof obj.beforeId === "string" ? obj.beforeId : undefined;
-        const afterId = typeof obj.afterId === "string" ? obj.afterId : undefined;
-        const status = obj.status;
-        // new items require content; updates by id allow content omission
-        if (!id && !content?.trim()) continue;
-        if (!isSessionTaskUpdateStatus(status)) continue;
-        updates.push({ id, content, status, beforeId, afterId });
+      if (!isAction(a.action)) {
+        return failure(`action must be one of ${ACTIONS.join(", ")}`);
       }
-      if (updates.length === 0) {
-        return {
-          output: JSON.stringify({ error: "no valid items provided" }),
-          isError: true,
-        };
-      }
-      // No-op guard — if no update would change the current plan (the
-      // already-in_progress re-mark loop), reject it as an invalid update.
-      // Returning success with changed:false was not enough in live sessions:
-      // the model kept repeating the same no-op and hit TPM. A failed result
-      // makes the contract violation explicit and engages the generic
-      // "do not retry the same failed tool input" prompt rule.
-      const current = new Map(store.list(sessionId).map((i) => [i.id, i]));
-      if (!updates.some((u) => updateChangesPlan(u, current))) {
-        if (updates.every((u) => isMissingDeleteNoOp(u, current))) {
+      const index = optionalInteger(a.index);
+      const after = optionalInteger(a.after);
+      if (Number.isNaN(index)) return failure("index must be an integer task number (1-based)");
+      if (Number.isNaN(after)) return failure("after must be an integer task number (0 = front)");
+      try {
+        let items: SessionTaskItem[];
+        switch (a.action) {
+          case "create": {
+            const steps = parseSteps(a.steps);
+            if (steps.length === 0) return failure("create needs steps: a comma-separated list of tasks");
+            items = await store.create(sessionId, steps);
+            break;
+          }
+          case "add": {
+            const steps = parseSteps(a.steps);
+            if (steps.length === 0) return failure("add needs steps: a comma-separated list of tasks");
+            items = await store.add(sessionId, steps, after);
+            break;
+          }
+          case "edit": {
+            if (index === undefined) return failure("edit needs index: the task number to change");
+            const text = typeof a.text === "string" && a.text.trim() ? a.text.trim() : undefined;
+            const status = (EDIT_STATUSES as readonly string[]).includes(a.status as string)
+              ? (a.status as (typeof EDIT_STATUSES)[number])
+              : undefined;
+            if (a.status !== undefined && status === undefined) {
+              return failure(`status must be one of ${EDIT_STATUSES.join(", ")}; use action=complete to finish a task`);
+            }
+            if (text === undefined && status === undefined) {
+              return failure("edit needs text and/or status");
+            }
+            const current = store.list(sessionId)[index - 1];
+            if (
+              current &&
+              (text === undefined || text === current.content) &&
+              (status === undefined || status === current.status)
+            ) {
+              return noChange(`task ${index} is already "${current.content}" (${current.status})`);
+            }
+            items = await store.edit(sessionId, index, { text, status });
+            break;
+          }
+          case "delete": {
+            if (index === undefined) return failure("delete needs index: the task number to remove");
+            items = await store.delete(sessionId, index);
+            break;
+          }
+          case "complete": {
+            if (index === undefined) return failure("complete needs index: the task number that is done");
+            if (store.list(sessionId)[index - 1]?.status === "completed") {
+              return noChange(`task ${index} is already completed`);
+            }
+            items = await store.complete(sessionId, index);
+            break;
+          }
+        }
+        return { output: JSON.stringify({ tasks: numbered(items) }), isError: false };
+      } catch (err) {
+        if (err instanceof SessionTaskIndexError) {
           return {
-            output: JSON.stringify({
-              items: store.list(sessionId),
-              changed: false,
-            }),
-            isError: false,
+            output: JSON.stringify({ error: err.message, tasks: numbered(store.list(sessionId)) }),
+            isError: true,
           };
         }
-        return {
-          output: JSON.stringify({
-            items: store.list(sessionId),
-            changed: false,
-            error: "No item changed state. Do not retry session_tasks with the same status; continue with work tools and only update the TO-DO when an item actually advances.",
-          }),
-          isError: true,
-        };
+        throw err;
       }
-      let merged;
-      try {
-        merged = store.write(sessionId, updates);
-      } catch (err) {
-        if (!(err instanceof SessionTasksEmptyPlanError)) {
-          throw err;
-        }
-        return {
-          output: JSON.stringify({
-            error: "session_tasks cannot delete every item; mark remaining items completed instead",
-          }),
-          isError: true,
-        };
-      }
-      return {
-        output: JSON.stringify({ items: merged }),
-        isError: false,
-      };
     },
   });
 }

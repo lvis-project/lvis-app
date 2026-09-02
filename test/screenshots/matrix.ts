@@ -1065,17 +1065,16 @@ export const scenarios: Record<string, ScenarioEntry> = {
         parts: [
           {
             kind: 'tool',
-            id: 'capture-tasks',
+            id: 'capture-tasks-create',
             name: 'session_tasks',
             input: {
-              items: [
-                { id: 't1', content: '읽을 자료 목록 정리', status: 'completed' },
-                { id: 't2', content: '장별 핵심 질문 뽑기', status: 'completed' },
-                { id: 't3', content: '요약 초안 작성', status: 'in_progress' },
-                { id: 't4', content: '다음 주 읽을 순서 정하기', status: 'pending' },
-              ],
+              action: 'create',
+              steps: '읽을 자료 목록 정리, 장별 핵심 질문 뽑기, 요약 초안 작성, 다음 주 읽을 순서 정하기',
             },
           },
+          { kind: 'tool', id: 'capture-tasks-done-1', name: 'session_tasks', input: { action: 'complete', index: 1 } },
+          { kind: 'tool', id: 'capture-tasks-done-2', name: 'session_tasks', input: { action: 'complete', index: 2 } },
+          { kind: 'tool', id: 'capture-tasks-active-3', name: 'session_tasks', input: { action: 'edit', index: 3, status: 'in_progress' } },
         ],
       },
       {

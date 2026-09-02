@@ -1,7 +1,9 @@
-
-
-
-
+/**
+ * SessionTasksPanel — the assistant's session task list (`session_tasks`
+ * tool) as a chip in the composer status row, with the numbered list in a
+ * popover. Numbers are 1-based and match what the model sees, so "task 2"
+ * on screen is the "task 2" the assistant talks about.
+ */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ListChecks, X } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
@@ -9,7 +11,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import {
-  isSessionTaskStatus,
+  isSessionTaskItem,
   type SessionTaskItem,
   type SessionTaskStatus,
 } from "../../../shared/session-tasks.js";
@@ -35,15 +37,7 @@ const STATUS_BADGE: Record<SessionTaskStatus, { labelKey: string; cls: string; d
 };
 
 function isSessionTaskItemArray(value: unknown): value is SessionTaskItem[] {
-  if (!Array.isArray(value)) return false;
-  return value.every((item) => {
-    if (!isRecord(item)) return false;
-    return (
-      typeof item.id === "string" &&
-      typeof item.content === "string" &&
-      isSessionTaskStatus(item.status)
-    );
-  });
+  return Array.isArray(value) && value.every(isSessionTaskItem);
 }
 
 /**
@@ -147,8 +141,9 @@ export function SessionTasksPanel({
   // When the chat session id flips (new chat, load session, fork) we want
   // the panel to drop stale state immediately — otherwise the user sees
   // the prior session's items until the next push lands. Resetting via
-  // refresh covers both "swap to a session that has tasks" (fetch repopulates)
-  // and "swap to a session that has none" (fetch returns []).
+  // refresh covers both "swap to a session that has tasks" (fetch repopulates,
+  // including a list read back from the session's metadata sidecar) and "swap
+  // to a session that has none" (fetch returns []).
   useEffect(() => {
     hasLivePushRef.current = false;
     itemsRef.current = [];
@@ -160,7 +155,9 @@ export function SessionTasksPanel({
   const visible = items;
   const completedCount = items.filter((i) => i.status === "completed").length;
   const inProgress = items.find((i) => i.status === "in_progress");
-  // A completed plan is the trigger for the manual dismiss affordance.
+  // A completed plan is the trigger for the manual dismiss affordance. Finished
+  // tasks stay listed (and persisted) until the user dismisses them or the
+  // assistant replaces the plan.
   const allComplete = visible.length > 0 && completedCount === visible.length;
   // Collapsed-header focus: prefer the in-progress item; if none yet (e.g. a
   // freshly-set plan still all-pending before step 1 is marked in_progress),
@@ -215,7 +212,7 @@ export function SessionTasksPanel({
               data-testid="session-tasks-collapsed-active"
               title={collapsedFocus.content}
             >
-              {collapsedFocus.content}
+              {items.indexOf(collapsedFocus) + 1}. {collapsedFocus.content}
             </span>
           )}
         </button>
@@ -244,7 +241,7 @@ export function SessionTasksPanel({
         {/* Cap the list so a long plan stays inside the popover — internal
             scroll instead of a popover taller than the window. */}
         <ul className="max-h-[35vh] space-y-1 overflow-y-auto border-t px-3 py-1.5">
-          {items.map((it) => {
+          {items.map((it, i) => {
             const meta = STATUS_BADGE[it.status];
             const active = it.status === "in_progress";
             return (
@@ -253,9 +250,15 @@ export function SessionTasksPanel({
                 className={`flex items-start gap-2 transition-opacity duration-200 ${
                   active ? activePulse : ""
                 }`}
-                data-testid={active ? "session-tasks-active-row" : undefined}
+                data-testid={active ? "session-tasks-active-row" : "session-tasks-row"}
                 data-status={it.status}
+                data-index={i + 1}
               >
+                {/* The 1-based number is the task's identity for the user and
+                    the model alike — it is what "task 2" refers to. */}
+                <span className="mt-px w-4 shrink-0 text-right tabular-nums text-muted-foreground">
+                  {i + 1}.
+                </span>
                 {/* Leading status dot — color alone communicates state
                     even when the user has dimmed text or scaled the chip
                     label below readability. */}

@@ -26,9 +26,9 @@ async function setup() {
   vi.clearAllMocks();
   const store = {
     list: vi.fn((sessionId: string) => [
-      { id: "1", title: `task for ${sessionId}`, status: "pending" },
+      { id: "1", content: `task for ${sessionId}`, status: "pending" },
     ]),
-    clear: vi.fn(),
+    clear: vi.fn(async () => {}),
     onChange: vi.fn(),
   };
   const getSessionId = vi.fn(() => PRIMARY_SESSION);
@@ -52,7 +52,7 @@ describe("session-tasks IPC", () => {
 
     await expect(
       invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.list, "tile-2-session"),
-    ).resolves.toEqual([{ id: "1", title: "task for tile-2-session", status: "pending" }]);
+    ).resolves.toEqual([{ id: "1", content: "task for tile-2-session", status: "pending" }]);
     expect(store.list).toHaveBeenCalledWith("tile-2-session");
   });
 
@@ -71,6 +71,7 @@ describe("session-tasks IPC", () => {
   it.each([
     ["nothing at all", undefined],
     ["whitespace", "   "],
+    ["a malformed id", "../not-a-session"],
   ])("refuses a list that names no session (%s) instead of resolving one", async (_name, argument) => {
     const { store, getSessionId } = await setup();
 
@@ -83,6 +84,7 @@ describe("session-tasks IPC", () => {
   it.each([
     ["nothing at all", undefined],
     ["whitespace", "   "],
+    ["a malformed id", "../not-a-session"],
   ])("refuses a clear that names no session (%s) instead of resolving one", async (_name, argument) => {
     const { store, getSessionId } = await setup();
 

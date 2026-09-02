@@ -433,13 +433,6 @@ export interface ConversationLoopDeps {
    */
   skillOverlay?: { clear(sessionId: string): void };
   /**
-   * Session-scoped assistant TO-DO lifecycle — execute side. At the start of a
-   * new turn the loop unconditionally drops any plan the post-turn hook marked
-   * as completed (`markForClearIfCompleted`), so a finished plan clears at the
-   * turn boundary regardless of input origin. Unfinished plans stay visible.
-   */
-  sessionTasksStore?: { clearIfPending(sessionId: string): boolean };
-  /**
    * Issue #260: optional system notification service. When supplied, the
    * loop fires a `turn-end` notification when runTurn resolves successfully
    * (not aborted, not interrupted). Routine / sub-agent / trigger loops

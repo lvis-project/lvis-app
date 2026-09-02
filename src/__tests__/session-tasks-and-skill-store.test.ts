@@ -7,9 +7,10 @@ import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  SessionTasksEmptyPlanError,
+  SessionTaskIndexError,
   SessionTasksStore,
 } from "../main/session-tasks-store.js";
+import type { SessionTaskItem } from "../shared/session-tasks.js";
 import { SkillStore, parseFrontmatter } from "../main/skill-store.js";
 import { cleanupTmpDir } from "../__tests__/support/tmp-dir-teardown.js";
 
@@ -20,181 +21,115 @@ const REPO_ROOT = resolvePath(
 const BUILTIN_SKILLS_DIR = resolvePath(REPO_ROOT, "resources/skills");
 
 describe("SessionTasksStore", () => {
-  it("auto-generates ids and merges by id", () => {
-    const store = new SessionTasksStore();
-    const r1 = store.write("s", [
-      { content: "a", status: "pending" },
-      { content: "b", status: "pending" },
-    ]);
-    expect(r1).toHaveLength(2);
-    const idA = r1[0].id;
-    const r2 = store.write("s", [
-      { id: idA, content: "a", status: "completed" },
-      { content: "c", status: "pending" },
-    ]);
-    expect(r2).toHaveLength(3);
-    expect(r2[0].status).toBe("completed");
-    expect(r2[2].content).toBe("c");
+  function memoryPersistence(seed: Record<string, SessionTaskItem[]> = {}) {
+    const disk = new Map(Object.entries(seed));
+    const saves: Array<{ sid: string; items: SessionTaskItem[] }> = [];
+    return {
+      disk,
+      saves,
+      persistence: {
+        load: (sid: string) => disk.get(sid) ?? [],
+        save: async (sid: string, items: SessionTaskItem[]) => {
+          saves.push({ sid, items });
+          disk.set(sid, items);
+        },
+      },
+    };
+  }
+
+  it("create replaces the list with pending steps and persists it", async () => {
+    const { persistence, disk } = memoryPersistence();
+    const store = new SessionTasksStore(persistence);
+    const first = await store.create("s", ["a", "b"]);
+    expect(first.map((i) => [i.content, i.status])).toEqual([["a", "pending"], ["b", "pending"]]);
+    const second = await store.create("s", ["only"]);
+    expect(second.map((i) => i.content)).toEqual(["only"]);
+    expect(disk.get("s")?.map((i) => i.content)).toEqual(["only"]);
   });
 
-  it("inserts, moves, deletes, then marks and clears a fully completed plan", () => {
-    const store = new SessionTasksStore();
+  it("add inserts at the front (0), after N, and appends when after is omitted", async () => {
+    const store = new SessionTasksStore(memoryPersistence().persistence);
+    await store.create("s", ["b", "d"]);
+    expect((await store.add("s", ["a"], 0)).map((i) => i.content)).toEqual(["a", "b", "d"]);
+    expect((await store.add("s", ["c"], 2)).map((i) => i.content)).toEqual(["a", "b", "c", "d"]);
+    expect((await store.add("s", ["e", "f"])).map((i) => i.content)).toEqual(["a", "b", "c", "d", "e", "f"]);
+    expect(() => store.add("s", ["x"], 7)).toThrow(SessionTaskIndexError);
+    expect(() => store.add("s", ["x"], -1)).toThrow(SessionTaskIndexError);
+  });
+
+  it("edit changes text and status by 1-based number", async () => {
+    const store = new SessionTasksStore(memoryPersistence().persistence);
+    await store.create("s", ["a", "b"]);
+    const edited = await store.edit("s", 2, { text: "B", status: "in_progress" });
+    expect(edited[1]).toMatchObject({ content: "B", status: "in_progress" });
+    expect(edited[0]).toMatchObject({ content: "a", status: "pending" });
+    const textOnly = await store.edit("s", 1, { text: "A" });
+    expect(textOnly[0]).toMatchObject({ content: "A", status: "pending" });
+  });
+
+  it("complete keeps the item in the list; delete removes it", async () => {
+    const { persistence, disk } = memoryPersistence();
+    const store = new SessionTasksStore(persistence);
+    await store.create("s", ["a", "b", "c"]);
+    const done = await store.complete("s", 1);
+    expect(done.map((i) => i.status)).toEqual(["completed", "pending", "pending"]);
+    expect(disk.get("s")?.[0].status).toBe("completed");
+    const removed = await store.delete("s", 2);
+    expect(removed.map((i) => i.content)).toEqual(["a", "c"]);
+  });
+
+  it("rejects an out-of-range number without touching the list", async () => {
+    const { persistence, saves } = memoryPersistence();
+    const store = new SessionTasksStore(persistence);
+    await store.create("s", ["a"]);
+    for (const bad of [0, 2, -1, 1.5]) {
+      expect(() => store.edit("s", bad, { text: "x" })).toThrow(SessionTaskIndexError);
+      expect(() => store.delete("s", bad)).toThrow(SessionTaskIndexError);
+      expect(() => store.complete("s", bad)).toThrow(SessionTaskIndexError);
+    }
+    expect(() => store.complete("empty", 1)).toThrow("the list is empty");
+    expect(store.list("s").map((i) => i.content)).toEqual(["a"]);
+    expect(saves).toHaveLength(1);
+  });
+
+  it("reads a session's list back from persistence the first time it is asked", async () => {
+    const seeded: SessionTaskItem[] = [
+      { id: "x1", content: "done", status: "completed" },
+      { id: "x2", content: "next", status: "pending" },
+    ];
+    const store = new SessionTasksStore(memoryPersistence({ resumed: seeded }).persistence);
+    expect(store.list("resumed")).toEqual(seeded);
+    // Mutations continue from the loaded list, not from an empty one.
+    expect((await store.complete("resumed", 2)).map((i) => i.status)).toEqual(["completed", "completed"]);
+  });
+
+  it("emits the full list after every mutation and an empty list on clear", async () => {
+    const { persistence, disk } = memoryPersistence();
+    const store = new SessionTasksStore(persistence);
     const events: Array<{ sid: string; len: number }> = [];
     store.onChange((sid, items) => events.push({ sid, len: items.length }));
-    const initial = store.write("s", [
-      { content: "a", status: "pending" },
-      { content: "c", status: "pending" },
+    await store.create("s3", ["a", "b"]);
+    await store.edit("s3", 1, { status: "in_progress" });
+    await store.clear("s3");
+    expect(events).toEqual([
+      { sid: "s3", len: 2 },
+      { sid: "s3", len: 2 },
+      { sid: "s3", len: 0 },
     ]);
-    const [a, c] = initial;
-
-    const inserted = store.write("s", [
-      { content: "b", status: "pending", beforeId: c.id },
-    ]);
-    expect(inserted.map((i) => i.content)).toEqual(["a", "b", "c"]);
-
-    const b = inserted[1];
-    const moved = store.write("s", [
-      { id: b.id, status: "pending", afterId: c.id },
-    ]);
-    expect(moved.map((i) => i.content)).toEqual(["a", "c", "b"]);
-
-    const deleted = store.write("s", [
-      { id: c.id, status: "deleted" },
-    ]);
-    expect(deleted.map((i) => i.content)).toEqual(["a", "b"]);
-
-    // Nothing pending yet → execute is a no-op for any session.
-    expect(store.clearIfPending("missing-session")).toBe(false);
-    expect(store.clearIfPending("s")).toBe(false);
-
-    store.write("s", [
-      { id: a.id, status: "completed" },
-      { id: b.id, status: "completed" },
-    ]);
-    const eventCountBeforeMark = events.length;
-
-    // Phase 1: mark must NOT emit — the panel stays visible this turn.
-    expect(store.markForClearIfCompleted("s")).toBe(true);
-    expect(events.length).toBe(eventCountBeforeMark);
-    expect(store.list("s").map((i) => i.content)).toEqual(["a", "b"]);
-
-    // Phase 2: execute drops the session + emits empty exactly once.
-    expect(store.clearIfPending("s")).toBe(true);
-    expect(store.list("s")).toEqual([]);
-    expect(events.at(-1)).toEqual({ sid: "s", len: 0 });
-    // Mark is consumed: a second execute is a no-op.
-    expect(store.clearIfPending("s")).toBe(false);
-  });
-
-  it("does not mark unfinished plans for clear", () => {
-    const store = new SessionTasksStore();
-    const events: Array<{ sid: string; len: number }> = [];
-    store.onChange((sid, items) => events.push({ sid, len: items.length }));
-
-    store.write("s", [
-      { content: "still running", status: "in_progress" },
-      { content: "not started", status: "pending" },
-    ]);
-
-    expect(store.markForClearIfCompleted("s")).toBe(false);
-    expect(store.clearIfPending("s")).toBe(false);
-    expect(store.list("s").map((item) => item.content)).toEqual([
-      "still running",
-      "not started",
-    ]);
-    expect(events).toEqual([{ sid: "s", len: 2 }]);
-  });
-
-  it("markForClearIfCompleted defensively unmarks when re-run on a no-longer-completed plan", () => {
-    const store = new SessionTasksStore();
-    const [a] = store.write("s", [{ content: "a", status: "completed" }]);
-    expect(store.markForClearIfCompleted("s")).toBe(true);
-
-    // The plan regresses to in_progress. write() already resets the mark, but
-    // re-running the mark step on a non-completed plan must also clear it via
-    // the defensive `else` branch (it returns false and leaves nothing pending).
-    store.write("s", [{ id: a.id, status: "in_progress" }]);
-    expect(store.markForClearIfCompleted("s")).toBe(false);
-    expect(store.clearIfPending("s")).toBe(false);
-
-    // markForClearIfCompleted on a session with no plan also returns false.
-    expect(store.markForClearIfCompleted("never-seen")).toBe(false);
-  });
-
-  it("write() resets a stale pending-clear mark so a changed plan is re-evaluated", () => {
-    const store = new SessionTasksStore();
-    const events: Array<{ sid: string; len: number }> = [];
-    store.onChange((sid, items) => events.push({ sid, len: items.length }));
-    const [a] = store.write("s", [{ content: "a", status: "completed" }]);
-    expect(store.markForClearIfCompleted("s")).toBe(true);
-
-    // The plan changes after being marked → the mark is invalidated.
-    store.write("s", [
-      { id: a.id, status: "completed" },
-      { content: "b", status: "in_progress" },
-    ]);
-    expect(store.clearIfPending("s")).toBe(false);
-    expect(store.list("s").map((i) => i.content)).toEqual(["a", "b"]);
-    // No spurious empty-list emit happened.
-    expect(events.every((e) => e.len > 0)).toBe(true);
-  });
-
-  it("manual clear() drops a pending-clear mark", () => {
-    const store = new SessionTasksStore();
-    store.write("s", [{ content: "a", status: "completed" }]);
-    expect(store.markForClearIfCompleted("s")).toBe(true);
-
-    // Manual dismiss clears immediately and consumes the mark, so a later
-    // execute cannot re-fire against a repopulated session.
-    store.clear("s");
-    store.write("s", [{ content: "new topic", status: "pending" }]);
-    expect(store.clearIfPending("s")).toBe(false);
-    expect(store.list("s").map((i) => i.content)).toEqual(["new topic"]);
-  });
-
-  it("rejects a delete-only update that would empty the plan", () => {
-    const store = new SessionTasksStore();
-    const events: Array<{ sid: string; len: number }> = [];
-    store.onChange((sid, items) => events.push({ sid, len: items.length }));
-    const [a, b] = store.write("s", [
-      { content: "a", status: "pending" },
-      { content: "b", status: "pending" },
-    ]);
-
-    expect(() =>
-      store.write("s", [
-        { id: a.id, status: "deleted" },
-        { id: b.id, status: "deleted" },
-      ]),
-    ).toThrow(SessionTasksEmptyPlanError);
-
-    expect(store.list("s").map((item) => item.content)).toEqual(["a", "b"]);
-    expect(events).toEqual([{ sid: "s", len: 2 }]);
-  });
-
-  it("emits change events with the merged list", () => {
-    const store = new SessionTasksStore();
-    const events: number[] = [];
-    store.onChange((_sid, items) => events.push(items.length));
-    store.write("s2", [{ content: "x", status: "pending" }]);
-    store.write("s2", [{ content: "y", status: "pending" }]);
-    expect(events).toEqual([1, 2]);
-  });
-
-  it("clear() emits an empty list and drops the session regardless of status", () => {
-    const store = new SessionTasksStore();
-    const events: Array<{ sid: string; len: number }> = [];
-    store.onChange((sid, items) => events.push({ sid, len: items.length }));
-    store.write("s3", [
-      { content: "a", status: "in_progress" },
-      { content: "b", status: "pending" },
-    ]);
-
-    // Manual dismiss path: unlike the mark step, clear() does not gate on
-    // every item being completed.
-    store.clear("s3");
     expect(store.list("s3")).toEqual([]);
-    expect(events.at(-1)).toEqual({ sid: "s3", len: 0 });
+    expect(disk.get("s3")).toEqual([]);
+  });
+
+  it("leaves the held list untouched when persistence fails", async () => {
+    const store = new SessionTasksStore({
+      load: () => [],
+      save: async (_sid, items) => {
+        if (items.length > 1) throw new Error("disk full");
+      },
+    });
+    await store.create("s", ["a"]);
+    await expect(store.add("s", ["b"])).rejects.toThrow("disk full");
+    expect(store.list("s").map((i) => i.content)).toEqual(["a"]);
   });
 });
 

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
+import { isSessionTaskItem, type SessionTaskItem } from "../shared/session-tasks.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
@@ -456,6 +457,12 @@ export interface SessionMetadata {
   subAgentSuspensionReason?: SubAgentSuspensionReason;
   /** DLP-masked, bounded prompt paired with an INPUT_REQUIRED suspension. */
   subAgentSuspensionPrompt?: string;
+  /**
+   * The assistant's session task list (`session_tasks` tool), in list order.
+   * Completed items stay: finishing a step is a state, not a deletion. Absent
+   * when the session has no list.
+   */
+  tasks?: SessionTaskItem[];
 }
 
 function asTerminalA2ATaskState(value: unknown): A2AProjectedTaskState | undefined {
@@ -1108,6 +1115,14 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     raw.subAgentSuspensionPrompt,
     MAX_SUMMARY_PREAMBLE_CHARS,
   );
+  // Session tasks: only well-formed items survive; an empty list is absent.
+  const tasks = Array.isArray(raw.tasks)
+    ? raw.tasks.filter(isSessionTaskItem).map((item) => ({
+        id: item.id,
+        content: item.content,
+        status: item.status,
+      }))
+    : [];
   return {
     sessionKind: normalizeSessionKind(raw.sessionKind),
     routineId,
@@ -1147,6 +1162,7 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     subAgentTaskState,
     subAgentSuspensionReason,
     subAgentSuspensionPrompt,
+    tasks: tasks.length > 0 ? tasks : undefined,
     archivedAt: typeof raw.archivedAt === "string" ? raw.archivedAt : undefined,
     unreadSince: typeof raw.unreadSince === "string" ? raw.unreadSince : undefined,
   };
@@ -2244,6 +2260,23 @@ export class MemoryManager {
       if (fields.unreadSince === null) delete next.unreadSince;
       else next.unreadSince = fields.unreadSince;
     }
+    await this.saveSessionMetadata(sessionId, next);
+  }
+
+  /**
+   * Replace the session's task list (`session_tasks` tool). Read-modify-write
+   * for the same reason as {@link updateSessionRowFields}: the sidecar is
+   * written whole, so the list must ride along with everything else in it.
+   * An empty list removes the field rather than storing `[]`.
+   */
+  async saveSessionTasks(sessionId: string, tasks: SessionTaskItem[]): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`saveSessionTasks: invalid sessionId "${sessionId}"`);
+    }
+    const current = this.loadSessionMetadata(sessionId) ?? {};
+    const next: SessionMetadata = { ...current };
+    if (tasks.length === 0) delete next.tasks;
+    else next.tasks = tasks.map((item) => ({ ...item }));
     await this.saveSessionMetadata(sessionId, next);
   }
 

@@ -1,16 +1,17 @@
-export const SESSION_TASK_ITEM_STATUSES = [
-  "pending",
-  "in_progress",
-  "completed",
-] as const;
+/**
+ * Session tasks — the assistant's per-session checklist (`session_tasks` LLM
+ * tool). Shared between main (store + metadata sidecar) and the renderer
+ * (composer chip + popover).
+ *
+ * Positions are the public identity: the model and the user both address a
+ * task by its 1-based number as listed. `id` exists only so React keys and
+ * the persisted array stay stable across reorders.
+ */
+import { isRecord } from "./is-record.js";
 
-export const SESSION_TASK_UPDATE_STATUSES = [
-  ...SESSION_TASK_ITEM_STATUSES,
-  "deleted",
-] as const;
+const SESSION_TASK_STATUSES = ["pending", "in_progress", "completed"] as const;
 
-export type SessionTaskStatus = (typeof SESSION_TASK_ITEM_STATUSES)[number];
-export type SessionTaskUpdateStatus = (typeof SESSION_TASK_UPDATE_STATUSES)[number];
+export type SessionTaskStatus = (typeof SESSION_TASK_STATUSES)[number];
 
 export interface SessionTaskItem {
   id: string;
@@ -18,20 +19,15 @@ export interface SessionTaskItem {
   status: SessionTaskStatus;
 }
 
-export interface SessionTaskUpdate {
-  id?: string;
-  content?: string;
-  status: SessionTaskUpdateStatus;
-  /** Insert or move this item before another item id. Wins over afterId. */
-  beforeId?: string;
-  /** Insert or move this item after another item id. Appends if target missing. */
-  afterId?: string;
+function isSessionTaskStatus(value: unknown): value is SessionTaskStatus {
+  return typeof value === "string" && SESSION_TASK_STATUSES.includes(value as SessionTaskStatus);
 }
 
-export function isSessionTaskStatus(value: unknown): value is SessionTaskStatus {
-  return typeof value === "string" && SESSION_TASK_ITEM_STATUSES.includes(value as SessionTaskStatus);
-}
-
-export function isSessionTaskUpdateStatus(value: unknown): value is SessionTaskUpdateStatus {
-  return typeof value === "string" && SESSION_TASK_UPDATE_STATUSES.includes(value as SessionTaskUpdateStatus);
+export function isSessionTaskItem(value: unknown): value is SessionTaskItem {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.content === "string" &&
+    isSessionTaskStatus(value.status)
+  );
 }

@@ -29,10 +29,21 @@ import {
 } from "../tools.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
+import type { MemoryManager } from "../../memory/memory-manager.js";
 
 const log = createLogger("lvis");
 
-export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
+/**
+ * @param sessionMetadataStores every MemoryManager that owns conversation
+ *   sidecars (main, side-chat, sub-agent), main first. A session's task list
+ *   is persisted in the sidecar of whichever store already holds that
+ *   session; a session no store has seen yet is a brand-new main conversation
+ *   whose transcript is flushed at the end of its first turn.
+ */
+export async function setupWorkflowStores(
+  ctx: BootContext,
+  sessionMetadataStores: readonly MemoryManager[],
+): Promise<void> {
   const {
     routinesStore,
     getMainWindow,
@@ -45,7 +56,14 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     auditService,
   } = ctx;
 
-  const sessionTasksStore = new SessionTasksStore();
+  const sessionOwner = (sessionId: string): MemoryManager =>
+    sessionMetadataStores.find(
+      (store) => store.hasSessionTranscript(sessionId) || store.hasSessionMetadataFile(sessionId),
+    ) ?? sessionMetadataStores[0];
+  const sessionTasksStore = new SessionTasksStore({
+    load: (sessionId) => sessionOwner(sessionId).loadSessionMetadata(sessionId)?.tasks ?? [],
+    save: (sessionId, items) => sessionOwner(sessionId).saveSessionTasks(sessionId, items),
+  });
   const skillStore = new SkillStore();
   const agentProfileStore = new AgentProfileStore();
   const personaPromptStore = new PersonaPromptStore();

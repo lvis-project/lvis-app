@@ -643,7 +643,7 @@ export async function bootstrap(
   ctx.routinesScheduler = routinesScheduler;
 
   await setupWorkBoard(ctx);
-  await setupWorkflowStores(ctx);
+  await setupWorkflowStores(ctx, workspaceSessionStores);
   await setupMarketplace(ctx);
   // ONE cleanup service set for every boot entry point into
   // plugins/uninstall-lifecycle. It used to be hand-spelled per call site, and

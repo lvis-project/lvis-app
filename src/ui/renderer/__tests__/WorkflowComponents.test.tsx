@@ -434,6 +434,33 @@ describe("SessionTasksPanel", () => {
     expect(container.querySelector('[data-testid="session-tasks-updated"]')).toBeNull();
   });
 
+  it("numbers rows from 1 in list order, keeps completed rows listed and struck through, and counts completed/total on the chip", async () => {
+    const api = fakeApi({
+      listSessionTasks: () =>
+        Promise.resolve([
+          { id: "t1", content: "done thing", status: "completed" },
+          { id: "t2", content: "current thing", status: "in_progress" },
+          { id: "t3", content: "next thing", status: "pending" },
+        ]),
+    });
+    const { container } = render(<SessionTasksPanel api={api} sessionId="session-tasks" />);
+    const chip = await screen.findByTestId("session-tasks-panel");
+    expect(chip.textContent).toContain("1/3");
+    await openPanel(container);
+    const list = await screen.findByTestId("session-tasks-list");
+    const rows = Array.from(list.querySelectorAll("li"));
+    expect(rows.map((row) => row.getAttribute("data-index"))).toEqual(["1", "2", "3"]);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringMatching(/^1\..*done thing$/),
+      expect.stringMatching(/^2\..*current thing$/),
+      expect.stringMatching(/^3\..*next thing$/),
+    ]);
+    // The completed task is still a row — finishing is a state, not a removal.
+    expect(rows[0].getAttribute("data-status")).toBe("completed");
+    expect(rows[0].querySelector(".line-through")).not.toBeNull();
+    expect(rows[1].querySelector(".line-through")).toBeNull();
+  });
+
   it("pulses the in-progress row in the expanded view so it's the focal point", async () => {
     const api = fakeApi({
       listSessionTasks: () =>
@@ -465,10 +492,10 @@ describe("SessionTasksPanel", () => {
     const { findByText, container } = render(<SessionTasksPanel api={api} sessionId="session-tasks" />);
     // Panel starts collapsed by default — the active item should already show
     // next to the count without any toggle.
-    await findByText("current thing");
+    await findByText("2. current thing");
     const collapsed = container.querySelector('[data-testid="session-tasks-collapsed-active"]');
     expect(collapsed).not.toBeNull();
-    expect(collapsed!.textContent).toBe("current thing");
+    expect(collapsed!.textContent).toBe("2. current thing");
     expect(collapsed!.className).toContain("animate-pulse");
   });
 
@@ -483,10 +510,10 @@ describe("SessionTasksPanel", () => {
     const { findByText, container } = render(<SessionTasksPanel api={api} sessionId="session-tasks" />);
     // Starts collapsed; with no in_progress item the header surfaces the first
     // non-completed item instead of going blank.
-    await findByText("first pending");
+    await findByText("1. first pending");
     const collapsed = container.querySelector('[data-testid="session-tasks-collapsed-active"]');
     expect(collapsed).not.toBeNull();
-    expect(collapsed!.textContent).toBe("first pending");
+    expect(collapsed!.textContent).toBe("1. first pending");
     // A pending (not in-progress) focus item must not pulse.
     expect(collapsed!.className).not.toContain("animate-pulse");
   });
@@ -724,7 +751,7 @@ describe("SessionTasksPanel", () => {
         items: [{ id: "new", content: "new topic", status: "pending" }],
       });
     });
-    await findByText("new topic");
+    await findByText("1. new topic");
     expect(queryByTestId("session-tasks-panel")).toBeInTheDocument();
   });
 

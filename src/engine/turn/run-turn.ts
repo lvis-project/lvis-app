@@ -165,10 +165,6 @@ export async function runTurn(
           rawIntent: options.requestAnchorRawIntent,
         })
       : null;
-    // Deterministic completed-plan clear: execute any clear the post-turn hook
-    // marked for this session. Unconditional (no input-origin gate) so
-    // routine/headless turns clear too; unfinished plans were never marked.
-    self.deps.sessionTasksStore?.clearIfPending?.(effectiveSessionId);
     self.deps.skillOverlay?.clear(effectiveSessionId);
 
 

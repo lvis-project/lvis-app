@@ -80,3 +80,44 @@ describe("updateSessionRowFields", () => {
     ).rejects.toThrow(/invalid sessionId/);
   });
 });
+
+describe("saveSessionTasks", () => {
+  it("round-trips the task list through the sidecar, completed items included", async () => {
+    await mm.saveSessionMetadata(SESSION, { sessionKind: "main", projectRoot: "/ws/alpha", title: "plan" });
+    await mm.saveSessionTasks(SESSION, [
+      { id: "a", content: "scan folder", status: "completed" },
+      { id: "b", content: "write report", status: "in_progress" },
+    ]);
+
+    const metadata = mm.loadSessionMetadata(SESSION);
+    expect(metadata?.tasks).toEqual([
+      { id: "a", content: "scan folder", status: "completed" },
+      { id: "b", content: "write report", status: "in_progress" },
+    ]);
+    // Same guarantee as the row fields: the rest of the sidecar survives.
+    expect(metadata?.projectRoot).toBe("/ws/alpha");
+    expect(metadata?.title).toBe("plan");
+  });
+
+  it("survives a later field-level update and is dropped by an empty list", async () => {
+    await mm.saveSessionTasks(SESSION, [{ id: "a", content: "one", status: "pending" }]);
+    await mm.updateSessionRowFields(SESSION, { title: "renamed" });
+    expect(mm.loadSessionMetadata(SESSION)?.tasks).toEqual([{ id: "a", content: "one", status: "pending" }]);
+
+    await mm.saveSessionTasks(SESSION, []);
+    expect(mm.loadSessionMetadata(SESSION)?.tasks).toBeUndefined();
+    expect(mm.loadSessionMetadata(SESSION)?.title).toBe("renamed");
+  });
+
+  it("keeps only well-formed items when reading a sidecar", async () => {
+    await mm.saveSessionMetadata(SESSION, {
+      sessionKind: "main",
+      tasks: [
+        { id: "ok", content: "fine", status: "pending" },
+        { id: "bad", content: "no status" } as never,
+        "not an item" as never,
+      ],
+    });
+    expect(mm.loadSessionMetadata(SESSION)?.tasks).toEqual([{ id: "ok", content: "fine", status: "pending" }]);
+  });
+});
