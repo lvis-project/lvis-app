@@ -1654,7 +1654,15 @@ export function App() {
                                     env={chatGroupEnvironment}
                                     panelOpen={group.panelOpen}
                                     focused={chatGroups.focusedId === group.id}
-                                    hidden={group.hidden}
+                                    // "Hidden" means this tile is not drawn on screen NOW, whatever
+                                    // the reason. The tree answers one reason (another tile has the
+                                    // box); the route answers the other (the whole chat surface is
+                                    // display:none while Settings or a plugin view is open). A tile
+                                    // that only knew the tree kept its approval claim and drew its
+                                    // question cards into a surface nobody could see, and the
+                                    // window-level bands — built for exactly this — drew nothing.
+                                    // `conversationVisible` below reads the same fact.
+                                    hidden={group.hidden || activeView !== "home"}
                                     onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
                                   >
                                     {({ actions, content, currentSessionId: tileSessionId }) => (

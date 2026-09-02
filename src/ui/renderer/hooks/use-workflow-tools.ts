@@ -293,14 +293,23 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
   }, []);
 
   /**
-   * M4: explicit reset hook callable from the App (e.g. when the user
-   * clicks "new chat"). Clears the per-session skill badge list so a
-   * brand-new conversation does not inherit prior session badges.
+   * Reset hook for the moment a tile takes a different conversation (session
+   * load, new chat). It clears what the OLD conversation put on screen —
+   * skill badges, sub-agent rows — because those are content of that
+   * conversation and a new one must not inherit them.
+   *
+   * It does NOT clear `askQuestions`. Both callers are refused while the
+   * tile's own turn runs, so at this point every queued question was ADOPTED
+   * from a headless session (routine, side chat, orphaned sub-agent) whose
+   * gate is still open in main. A question is owned by its session id, not
+   * by whichever conversation this tile happens to show, and it leaves the
+   * queue only through its own channel (answer, dismiss, host timeout).
+   * Clearing it here left the host waiting five minutes on a card no
+   * surface would ever draw again.
    */
   const resetForNewSession = useCallback(() => {
     setLoadedSkills([]);
     setSubAgentSpawns([]);
-    setAskQuestions([]);
   }, []);
 
   return {
