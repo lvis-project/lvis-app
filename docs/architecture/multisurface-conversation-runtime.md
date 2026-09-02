@@ -46,7 +46,9 @@ It is default OFF and starts only when the main-process launch environment conta
 
 ~~~text
 LVIS_TAILNET_OBSERVER=1
-LVIS_TAILNET_OBSERVER_CAP=<owned-domain>/cap/lvis-conversation
+LVIS_TAILNET_OBSERVER_AUTHORIZATION=tailnet-identity
+# ...or the advanced boundary:
+# LVIS_TAILNET_OBSERVER_AUTHORIZATION=app-capability:<owned-domain>/cap/lvis-conversation
 LVIS_TAILNET_OBSERVER_PORT=46173   # optional; fixed nonzero port
 LVIS_TAILNET_CONTROLLER=1          # optional; default OFF
 LVIS_TAILNET_PAIRED_SHARING=1      # required for owner pairing/share and Web
@@ -54,10 +56,14 @@ LVIS_TAILNET_WEB=1                 # optional same-origin browser adapter
 LVIS_TAILNET_WEB_ORIGIN=https://<machine>.<tailnet>.ts.net
 ~~~
 
-The renderer cannot set these values. The capability key must match an owned
-Tailscale grant and Serve's accepted app-capability key. The app never changes
-Tailscale ACLs or configures Serve automatically. Deployment requires
-Tailscale **1.92 or later**, which supports Serve's forwarded app-capability
+The renderer cannot set these values. The authorization boundary is an explicit
+choice with no implicit default: `tailnet-identity` accepts any human identity
+Serve vouches for and leaves observe-versus-control to the LVIS share
+permission, while `app-capability` additionally requires a capability key
+matching an owned Tailscale grant and Serve's accepted app-capability key. The
+app never changes Tailscale ACLs or configures Serve automatically. The
+app-capability boundary requires Tailscale **1.92 or later**, which supports
+Serve's forwarded app-capability
 headers. P1 roles and capability keys are intentionally ASCII-only; an
 unknown/encoded value fails closed rather than being interpreted permissively.
 
@@ -158,9 +164,10 @@ POST /tailnet/v2/pairing/claim
 { "code": "lvis-pair-v1.<one-time-code>" }
 ~~~
 
-It needs the distinct `{ "role": "pairing" }` capability and rejects browser
-Origin or Fetch Metadata context before a capability bucket is consumed;
-claiming it does not expose a conversation.
+It needs the distinct `{ "role": "pairing" }` capability under the
+app-capability boundary and rejects browser Origin or Fetch Metadata context
+before a capability bucket is consumed; claiming it does not expose a
+conversation. A browser redeems through the Web boundary instead, below.
 
 ### Same-origin Tailnet Web
 
@@ -170,16 +177,25 @@ The listener never derives that origin from `Host` or forwarding headers. It
 serves no CORS response and provides only:
 
 ~~~text
+GET  /
 GET  /tailnet/v2/web
 GET  /tailnet/v2/web/snapshot
 GET  /tailnet/v2/web/events?scope=<public-uuid>
 POST /tailnet/v2/web/commands
 POST /tailnet/v2/web/logout
+POST /tailnet/v2/web/pairing/claim
 POST /tailnet/v3/web/attachments
 ~~~
 
-The document requires a Tailscale observer capability plus an active P2 observe
-share. It accepts only a top-level browser document navigation with Fetch
+The tailnet root is the same document: the `*.ts.net` name is the whole address
+a person is handed, so it must not answer with a 404 they cannot interpret.
+
+The document requires an authorized observer identity plus an active P2 observe
+share. Without that share it serves the invitation-code page rather than raw
+JSON, backed by a share-less cookie and CSRF pair that can only be presented to
+`POST /tailnet/v2/web/pairing/claim` — a second path to pairing behind the full
+same-origin Web boundary, not a relaxation of the native route's browser
+refusal. It accepts only a top-level browser document navigation with Fetch
 Metadata (`Sec-Fetch-Site` `none` or `same-origin`, `Sec-Fetch-Mode: navigate`,
 and `Sec-Fetch-Dest: document`), so cross-site and iframe loads cannot consume
 session slots. It issues a bounded, in-memory `__Host-` cookie

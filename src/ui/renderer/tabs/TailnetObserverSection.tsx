@@ -34,7 +34,9 @@ export interface TailnetObserverSectionProps {
 /** What a save writes when the owner asks to start over from a damaged file. */
 const RESET_CONFIG: TailnetObserverConfigView = Object.freeze({
   enabled: false,
-  expectedAppCapability: "",
+  // Starting over lands on the default boundary, not on a half-filled advanced
+  // one: identity mode needs nothing typed to be valid.
+  authorization: { kind: "tailnet-identity" as const },
   port: DEFAULT_TAILNET_OBSERVER_VIEW_PORT,
   controllerEnabled: false,
   pairedSharingEnabled: false,
@@ -53,8 +55,8 @@ const RESET_CONFIG: TailnetObserverConfigView = Object.freeze({
  */
 function errorText(code: string, t: (key: string) => string): string {
   switch (code) {
-    case "tailnet-observer-capability-missing-or-invalid":
-      return t("tailnetObserver.errorCapability");
+    case "tailnet-observer-authorization-missing-or-invalid":
+      return t("tailnetObserver.errorAuthorization");
     case "tailnet-observer-port-invalid":
       return t("tailnetObserver.errorPort");
     case "tailnet-controller-requires-paired-sharing":
@@ -142,6 +144,9 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
   const [serveUrl, setServeUrl] = useState<string | null>(null);
   const [serveOutput, setServeOutput] = useState<string | null>(null);
   const { copied, copy: copyToClipboard } = useCopyFlash();
+  // Toggling back to identity mode must not silently discard a capability the
+  // user already typed; the draft keeps it so flipping the switch is reversible.
+  const [capabilityDraft, setCapabilityDraft] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -160,6 +165,8 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
     if (result.ok) {
       setSnapshot(result.snapshot);
       setDraft(result.snapshot.saved);
+      const saved = result.snapshot.saved.authorization;
+      if (saved.kind === "app-capability") setCapabilityDraft(saved.capability);
       setFeedback(null);
     } else {
       setSnapshot(null);
@@ -350,25 +357,50 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
           />
         </div>
 
-        <label className="grid gap-1 text-xs font-medium">
-          <span>
-            {t("tailnetObserver.capabilityLabel")}
-            {sourceLabel("expectedAppCapability", snapshot, t) !== null
-              ? ` (${sourceLabel("expectedAppCapability", snapshot, t)})`
+        <div className="flex items-center justify-between gap-4">
+          <span className="min-w-0 text-sm font-medium">
+            {t("tailnetObserver.appCapabilityLabel")}
+            {sourceLabel("authorization", snapshot, t) !== null
+              ? ` (${sourceLabel("authorization", snapshot, t)})`
               : ""}
           </span>
-          <Input
-            value={draft.expectedAppCapability}
+          <Switch
+            checked={draft.authorization.kind === "app-capability"}
+            onCheckedChange={(next: boolean) => patch({
+              authorization: next
+                ? { kind: "app-capability", capability: capabilityDraft }
+                : { kind: "tailnet-identity" },
+            })}
             disabled={busy}
-            spellCheck={false}
-            placeholder="example.com/cap/conversation-observer"
-            onChange={(event) => patch({ expectedAppCapability: event.target.value })}
-            data-testid="tailnet-observer-capability"
+            aria-label={t("tailnetObserver.appCapabilityLabel")}
+            data-testid="tailnet-observer-app-capability"
           />
-          <span className="font-normal text-muted-foreground">
-            {t("tailnetObserver.capabilityHint")}
-          </span>
-        </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {draft.authorization.kind === "app-capability"
+            ? t("tailnetObserver.appCapabilityHint")
+            : t("tailnetObserver.tailnetIdentityHint")}
+        </p>
+
+        {draft.authorization.kind === "app-capability" ? (
+          <label className="grid gap-1 text-xs font-medium">
+            <span>{t("tailnetObserver.capabilityLabel")}</span>
+            <Input
+              value={draft.authorization.capability}
+              disabled={busy}
+              spellCheck={false}
+              placeholder="example.com/cap/conversation-observer"
+              onChange={(event) => {
+                setCapabilityDraft(event.target.value);
+                patch({ authorization: { kind: "app-capability", capability: event.target.value } });
+              }}
+              data-testid="tailnet-observer-capability"
+            />
+            <span className="font-normal text-muted-foreground">
+              {t("tailnetObserver.capabilityHint")}
+            </span>
+          </label>
+        ) : null}
 
         <label className="grid gap-1 text-xs font-medium">
           <span>{t("tailnetObserver.portLabel")}</span>

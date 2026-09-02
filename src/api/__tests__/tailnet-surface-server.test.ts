@@ -18,9 +18,11 @@ import { createPlatformConversationTimeline } from "../../engine/conversation-pl
 import { createSharedConversationProjectionStore } from "../../engine/shared-conversation-projection.js";
 import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import type { TailnetPairedShareAuthorizer } from "../../main/tailnet-paired-share-authorizer.js";
+import type { TailnetAuthorization } from "../../shared/tailnet-observer-config.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const CAPABILITY = "lvis.example.com/cap/conversation-observer";
+const APP_CAPABILITY = Object.freeze({ kind: "app-capability" as const, capability: CAPABILITY });
 const CONVERSATION_ID = "owner-session-do-not-expose";
 const OWNER_ONLY_SENTINEL = "OWNER_ONLY_SECRET_DO_NOT_EXPOSE";
 const WEB_ORIGIN = "https://lvis.example.ts.net";
@@ -53,6 +55,7 @@ afterEach(async () => {
 });
 
 interface FixtureOptions {
+  readonly authorization?: TailnetAuthorization;
   readonly conversationId?: () => string;
   readonly replayLimitPerConversation?: number;
   readonly maxConnections?: number;
@@ -80,7 +83,7 @@ async function fixture(options: FixtureOptions = {}) {
   stores.push(store);
   const server = await startTailnetSurfaceServer({
     port: await reservePort(),
-    expectedAppCapability: CAPABILITY,
+    authorization: options.authorization ?? APP_CAPABILITY,
     projectionStore: store,
     getCurrentConversationId: options.conversationId ?? (() => CONVERSATION_ID),
     ...(options.maxWebReadRequestsPerWindow === undefined
@@ -328,31 +331,31 @@ function dataFrames(stream: string): unknown[] {
 
 describe("Tailnet observer authorization", () => {
   it("requires a human identity and the exact observer app capability", () => {
-    expect(isAuthorizedTailnetObserver(observerHeaders() as never, CAPABILITY)).toBe(true);
+    expect(isAuthorizedTailnetObserver(observerHeaders() as never, APP_CAPABILITY)).toBe(true);
     expect(isAuthorizedTailnetObserver({
       "tailscale-app-capabilities": JSON.stringify({ [CAPABILITY]: [{ role: "observer" }] }),
-    }, CAPABILITY)).toBe(false);
-    expect(isAuthorizedTailnetObserver(observerHeaders("controller") as never, CAPABILITY)).toBe(false);
+    }, APP_CAPABILITY)).toBe(false);
+    expect(isAuthorizedTailnetObserver(observerHeaders("controller") as never, APP_CAPABILITY)).toBe(false);
     expect(isAuthorizedTailnetObserver({
       "tailscale-user-login": "   ",
       "tailscale-app-capabilities": JSON.stringify({ [CAPABILITY]: [{ role: "observer" }] }),
-    }, CAPABILITY)).toBe(false);
+    }, APP_CAPABILITY)).toBe(false);
     expect(isAuthorizedTailnetObserver({
       "tailscale-user-login": "owner@example.com",
       "tailscale-app-capabilities": "{invalid",
-    }, CAPABILITY)).toBe(false);
+    }, APP_CAPABILITY)).toBe(false);
   });
 
   it("fails closed for an oversized capability header", () => {
     expect(isAuthorizedTailnetObserver({
       "tailscale-user-login": "owner@example.com",
       "tailscale-app-capabilities": "x".repeat(16 * 1024 + 1),
-    }, CAPABILITY)).toBe(false);
+    }, APP_CAPABILITY)).toBe(false);
   });
 
   it("requires the separately granted controller role for remote commands", () => {
-    expect(isAuthorizedTailnetController(controllerHeaders() as never, CAPABILITY)).toBe(true);
-    expect(isAuthorizedTailnetController(observerHeaders() as never, CAPABILITY)).toBe(false);
+    expect(isAuthorizedTailnetController(controllerHeaders() as never, APP_CAPABILITY)).toBe(true);
+    expect(isAuthorizedTailnetController(observerHeaders() as never, APP_CAPABILITY)).toBe(false);
   });
 });
 
@@ -363,7 +366,7 @@ describe("Tailnet observer HTTP boundary", () => {
     stores.push(store);
     const options = {
       port: await reservePort(),
-      expectedAppCapability: CAPABILITY,
+      authorization: APP_CAPABILITY,
       projectionStore: store,
       getCurrentConversationId: () => CONVERSATION_ID,
       isConversationBusy: () => false,
@@ -377,8 +380,8 @@ describe("Tailnet observer HTTP boundary", () => {
     );
     await expect(startTailnetSurfaceServer({
       ...options,
-      expectedAppCapability: "__proto__",
-    })).rejects.toThrow("valid expected app capability");
+      authorization: { kind: "app-capability", capability: "__proto__" },
+    })).rejects.toThrow("valid authorization boundary");
     await expect(startTailnetSurfaceServer({
       ...options,
       controller: {
@@ -1512,5 +1515,185 @@ describe("Tailnet observer HTTP boundary", () => {
     expect(response.status).toBe(200);
     const stream = await readUntil(response.body!.getReader(), "reauthorize-required", 2_000);
     expect(stream).toContain("event: reauthorize-required");
+  });
+});
+
+const NAVIGATION_HEADERS = Object.freeze({
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Dest": "document",
+});
+
+describe("Tailnet identity authorization", () => {
+  const IDENTITY: TailnetAuthorization = { kind: "tailnet-identity" };
+  const IDENTITY_HEADERS = Object.freeze({ "Tailscale-User-Login": "owner@example.com" });
+
+  it("accepts a Serve identity with no tailnet policy grant at all", () => {
+    expect(isAuthorizedTailnetObserver(IDENTITY_HEADERS as never, IDENTITY)).toBe(true);
+    // No capability header participates, so the role names cannot be what
+    // separates observing from controlling in this mode.
+    expect(isAuthorizedTailnetController(IDENTITY_HEADERS as never, IDENTITY)).toBe(true);
+    expect(isAuthorizedTailnetObserver({}, IDENTITY)).toBe(false);
+    expect(isAuthorizedTailnetObserver({ "tailscale-user-login": "   " }, IDENTITY)).toBe(false);
+  });
+
+  it("leaves observe-versus-control entirely to the LVIS share permission", async () => {
+    const sharing = pairedSharing({ observe: true, control: false });
+    const submit = vi.fn();
+    const commandPort = { execute: vi.fn(), submit } as unknown as ConversationCommandPort;
+    const { server } = await fixture({
+      authorization: IDENTITY,
+      pairedSharing: sharing.authorizer,
+      controllerCommandPort: commandPort,
+    });
+
+    const status = await fetch(url(server, "/tailnet/v1/status"), { headers: IDENTITY_HEADERS });
+    expect(status.status).toBe(200);
+    const scope = (await status.json() as { conversation: { scope: string } }).conversation.scope;
+
+    const command = await fetch(url(server, "/tailnet/v1/commands"), {
+      method: "POST",
+      headers: { ...IDENTITY_HEADERS, "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "identity-control-required-01",
+        type: "conversation.send",
+        input: "must not be admitted",
+        scope,
+      }),
+    });
+    expect(command.status).toBe(403);
+    expect(await command.json()).toMatchObject({ error: "pairing-share-required" });
+    expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("Tailnet Web root and browser pairing", () => {
+  const CODE = "lvis-pair-v1." + "A".repeat(43);
+
+  it("serves the Web document at the tailnet root a person is actually given", async () => {
+    const sharing = pairedSharing({ observe: true, control: false });
+    const { server } = await fixture({
+      pairedSharing: sharing.authorizer,
+      web: { origin: WEB_ORIGIN },
+    });
+
+    const document = await requestTailnetGet(server, "/", {
+      ...observerHeaders(),
+      ...NAVIGATION_HEADERS,
+    });
+    expect(document.status).toBe(200);
+    expect(responseHeader(document.headers["content-type"])).toContain("text/html");
+    expect(document.body).toContain("csrfToken");
+  });
+
+  it("leaves the root unrouted when no Web surface is configured", async () => {
+    const { server } = await fixture();
+
+    const document = await requestTailnetGet(server, "/", {
+      ...observerHeaders(),
+      ...NAVIGATION_HEADERS,
+    });
+    expect(document.status).toBe(404);
+  });
+
+  it("renders a code entry page instead of raw JSON and redeems it same-origin", async () => {
+    const claimInvitation = vi.fn(async () => ({ expiresAt: 4_102_444_800_000 }));
+    const sharing = pairedSharing({ observe: false, control: false });
+    const { server } = await fixture({
+      pairedSharing: sharing.authorizer,
+      pairing: { claimInvitation },
+      web: { origin: WEB_ORIGIN },
+    });
+
+    const page = await requestTailnetGet(server, "/", {
+      ...observerHeaders(),
+      ...NAVIGATION_HEADERS,
+    });
+    expect(page.status).toBe(200);
+    expect(responseHeader(page.headers["content-type"])).toContain("text/html");
+    expect(page.body).toContain("/tailnet/v2/web/pairing/claim");
+    const cookieToken = /__Host-lvis-tailnet-v2=([A-Za-z0-9_-]{43})/
+      .exec(responseHeader(page.headers["set-cookie"]))?.[1];
+    const csrfToken = /"csrfToken":"([A-Za-z0-9_-]{43})"/.exec(page.body)?.[1];
+    expect(cookieToken).toBeTypeOf("string");
+    expect(csrfToken).toBeTypeOf("string");
+
+    // The pairing cookie carries no share, so it is not a Web session.
+    const snapshot = await fetch(url(server, "/tailnet/v2/web/snapshot"), {
+      headers: webSessionHeaders(cookieToken!, csrfToken!),
+    });
+    expect(snapshot.status).toBe(401);
+
+    const crossSite = await fetch(url(server, "/tailnet/v2/web/pairing/claim"), {
+      method: "POST",
+      headers: {
+        ...tailnetRoleHeaders(["pairing"]),
+        "content-type": "application/json",
+        Cookie: "__Host-lvis-tailnet-v2=" + cookieToken,
+        Origin: "https://attacker.example.ts.net",
+        "Sec-Fetch-Site": "cross-site",
+        "X-Lvis-Tailnet-Csrf": csrfToken!,
+      },
+      body: JSON.stringify({ code: CODE }),
+    });
+    expect(crossSite.status).toBe(403);
+    expect(await crossSite.json()).toMatchObject({ error: "same-origin-required" });
+
+    const withoutCsrf = await fetch(url(server, "/tailnet/v2/web/pairing/claim"), {
+      method: "POST",
+      headers: {
+        ...tailnetRoleHeaders(["pairing"]),
+        "content-type": "application/json",
+        Cookie: "__Host-lvis-tailnet-v2=" + cookieToken,
+        Origin: WEB_ORIGIN,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ code: CODE }),
+    });
+    expect(withoutCsrf.status).toBe(403);
+    expect(await withoutCsrf.json()).toMatchObject({ error: "csrf-required" });
+    expect(claimInvitation).not.toHaveBeenCalled();
+
+    const accepted = await fetch(url(server, "/tailnet/v2/web/pairing/claim"), {
+      method: "POST",
+      headers: {
+        ...webSessionHeaders(cookieToken!, csrfToken!, ["pairing"]),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ code: CODE }),
+    });
+    expect(accepted.status).toBe(202);
+    expect(await accepted.json()).toMatchObject({ ok: true, pending: true });
+    expect(claimInvitation).toHaveBeenCalledWith(CODE, PAIRED_ACTOR_ID);
+
+    // The native route is a separate boundary and stays shut to browsers even
+    // now that a browser path to redemption exists.
+    const nativeFromBrowser = await fetch(url(server, "/tailnet/v2/pairing/claim"), {
+      method: "POST",
+      headers: {
+        ...observerHeaders("pairing"),
+        "content-type": "application/json",
+        Origin: WEB_ORIGIN,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ code: CODE }),
+    });
+    expect(nativeFromBrowser.status).toBe(403);
+    expect(await nativeFromBrowser.json()).toMatchObject({ error: "browser-pairing-not-ready" });
+  });
+
+  it("names the unredeemable state rather than drawing a form that cannot work", async () => {
+    const sharing = pairedSharing({ observe: false, control: false });
+    const { server } = await fixture({
+      pairedSharing: sharing.authorizer,
+      web: { origin: WEB_ORIGIN },
+    });
+
+    const page = await requestTailnetGet(server, "/tailnet/v2/web", {
+      ...observerHeaders(),
+      ...NAVIGATION_HEADERS,
+    });
+    expect(page.status).toBe(403);
+    expect(JSON.parse(page.body)).toMatchObject({ error: "pairing-share-required" });
   });
 });

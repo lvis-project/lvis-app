@@ -22,6 +22,9 @@ import {
 } from "../tailnet-surface-server.js";
 
 const CAPABILITY = "lvis.example.com/cap/conversation-observer";
+const CAPABILITY_ENV = "app-capability:" + CAPABILITY;
+const APP_CAPABILITY = Object.freeze({ kind: "app-capability" as const, capability: CAPABILITY });
+const TAILNET_IDENTITY = Object.freeze({ kind: "tailnet-identity" as const });
 const WEB_ORIGIN = "https://lvis.example.ts.net";
 
 function runtime(): ConversationSurfaceRuntime {
@@ -68,21 +71,33 @@ describe("Tailnet observer lifecycle", () => {
     expect(f.startServer).not.toHaveBeenCalled();
   });
 
-  it("requires explicit owned capability and a valid fixed port when enabled", () => {
+  it("requires an explicitly named authorization boundary and a valid fixed port when enabled", () => {
     expect(resolveTailnetObserverConfig({})).toBeNull();
     expect(resolveTailnetObserverConfig({
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
     })).toEqual({
       port: DEFAULT_TAILNET_OBSERVER_PORT,
-      expectedAppCapability: CAPABILITY,
+      authorization: APP_CAPABILITY,
+      controllerEnabled: false,
+      pairedSharingEnabled: false,
+    });
+
+    // Identity mode is a first-class choice, not the absence of one: it has to
+    // be named as explicitly as the capability it replaces.
+    expect(resolveTailnetObserverConfig({
+      LVIS_TAILNET_OBSERVER: "1",
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: "tailnet-identity",
+    })).toEqual({
+      port: DEFAULT_TAILNET_OBSERVER_PORT,
+      authorization: TAILNET_IDENTITY,
       controllerEnabled: false,
       pairedSharingEnabled: false,
     });
 
     expect(resolveTailnetObserverConfig({
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
       LVIS_TAILNET_PAIRED_SHARING: "1",
     })).toMatchObject({
       pairedSharingEnabled: true,
@@ -92,7 +107,7 @@ describe("Tailnet observer lifecycle", () => {
     // paired sharing — the same coupling the web adapter already requires.
     expect(resolveTailnetObserverConfig({
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
       LVIS_TAILNET_CONTROLLER: "1",
       LVIS_TAILNET_PAIRED_SHARING: "1",
     })).toMatchObject({
@@ -101,7 +116,7 @@ describe("Tailnet observer lifecycle", () => {
     });
     expect(resolveTailnetObserverConfig({
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
       LVIS_TAILNET_PAIRED_SHARING: "1",
       LVIS_TAILNET_WEB: "1",
       LVIS_TAILNET_WEB_ORIGIN: WEB_ORIGIN,
@@ -114,54 +129,57 @@ describe("Tailnet observer lifecycle", () => {
 
     for (const env of [
       { LVIS_TAILNET_OBSERVER: "1" },
-      { LVIS_TAILNET_OBSERVER: "1", LVIS_TAILNET_OBSERVER_CAP: "__proto__" },
+      { LVIS_TAILNET_OBSERVER: "1", LVIS_TAILNET_OBSERVER_AUTHORIZATION: "" },
+      { LVIS_TAILNET_OBSERVER: "1", LVIS_TAILNET_OBSERVER_AUTHORIZATION: "app-capability:" },
+      { LVIS_TAILNET_OBSERVER: "1", LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY },
+      { LVIS_TAILNET_OBSERVER: "1", LVIS_TAILNET_OBSERVER_AUTHORIZATION: "app-capability:__proto__" },
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_OBSERVER_PORT: "0",
       },
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_OBSERVER_PORT: "65536",
       },
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_CONTROLLER: "true",
       },
       // Controller enabled (valid "1") but WITHOUT paired sharing — the new
       // coupling gate rejects it rather than leaving the native routes ungated.
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_CONTROLLER: "1",
       },
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_PAIRED_SHARING: "true",
       },
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_WEB: "true",
       },
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_WEB: "1",
       },
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_PAIRED_SHARING: "1",
         LVIS_TAILNET_WEB: "1",
         LVIS_TAILNET_WEB_ORIGIN: "http://lvis.example.ts.net",
       },
       {
         LVIS_TAILNET_OBSERVER: "1",
-        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
         LVIS_TAILNET_PAIRED_SHARING: "1",
         LVIS_TAILNET_WEB: "1",
         LVIS_TAILNET_WEB_ORIGIN: WEB_ORIGIN + "/path",
@@ -183,7 +201,7 @@ describe("Tailnet observer lifecycle", () => {
     } as unknown as TailnetPairedSharingRuntime;
     const f = options({
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
       LVIS_TAILNET_PAIRED_SHARING: "1",
       LVIS_TAILNET_WEB: "1",
       LVIS_TAILNET_WEB_ORIGIN: WEB_ORIGIN,
@@ -213,7 +231,7 @@ describe("Tailnet observer lifecycle", () => {
   it("fails closed when P2 bootstrap could not create the shared runtime", async () => {
     const f = options({
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
       LVIS_TAILNET_PAIRED_SHARING: "1",
     });
 
@@ -236,7 +254,7 @@ describe("Tailnet observer lifecycle", () => {
     }));
     const f = options({
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
       LVIS_TAILNET_OBSERVER_PORT: "46174",
     }, startServer);
 
@@ -246,7 +264,7 @@ describe("Tailnet observer lifecycle", () => {
     expect(startServer).toHaveBeenCalledWith(expect.objectContaining({
       host: "127.0.0.1",
       port: 46174,
-      expectedAppCapability: CAPABILITY,
+      authorization: APP_CAPABILITY,
       projectionStore: f.input.conversationSurfaceRuntime.sharedProjection,
     }));
 
@@ -273,7 +291,7 @@ describe("Tailnet observer lifecycle", () => {
     }));
     const f = options({
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
     }, startServer as never);
 
     const starting = maybeStartTailnetObserverServer(f.input);
@@ -303,14 +321,14 @@ describe("Tailnet observer configuration surface", () => {
       env: {},
       readConfigFile: file({
         enabled: true,
-        expectedAppCapability: CAPABILITY,
+        authorization: APP_CAPABILITY,
         pairedSharingEnabled: true,
       }),
     });
 
     expect(resolution.config).toEqual({
       port: DEFAULT_TAILNET_OBSERVER_PORT,
-      expectedAppCapability: CAPABILITY,
+      authorization: APP_CAPABILITY,
       controllerEnabled: false,
       pairedSharingEnabled: true,
     });
@@ -336,20 +354,20 @@ describe("Tailnet observer configuration surface", () => {
       env: { LVIS_TAILNET_OBSERVER_PORT: "47000" },
       readConfigFile: file({
         enabled: true,
-        expectedAppCapability: CAPABILITY,
+        authorization: APP_CAPABILITY,
         port: 46_500,
       }),
     });
 
     expect(resolution.config?.port).toBe(47_000);
     expect(resolution.provenance.port).toBe("env-override");
-    expect(resolution.provenance.expectedAppCapability).toBe("file");
+    expect(resolution.provenance.authorization).toBe("file");
   });
 
   it("lets the environment turn a file-enabled observer back off", async () => {
     const resolution = await loadTailnetObserverConfig({
       env: { LVIS_TAILNET_OBSERVER: "0" },
-      readConfigFile: file({ enabled: true, expectedAppCapability: CAPABILITY }),
+      readConfigFile: file({ enabled: true, authorization: APP_CAPABILITY }),
     });
 
     expect(resolution.config).toBeNull();
@@ -361,19 +379,28 @@ describe("Tailnet observer configuration surface", () => {
     // key, or a scope combination the env form would have rejected.
     await expect(loadTailnetObserverConfig({
       env: {},
-      readConfigFile: file({ enabled: true, expectedAppCapability: CAPABILITY, port: 65_536 }),
+      readConfigFile: file({ enabled: true, authorization: APP_CAPABILITY, port: 65_536 }),
     })).rejects.toThrow("tailnet-observer-port-invalid");
-
-    await expect(loadTailnetObserverConfig({
-      env: {},
-      readConfigFile: file({ enabled: true, expectedAppCapability: "__proto__" }),
-    })).rejects.toThrow("tailnet-observer-capability-missing-or-invalid");
 
     await expect(loadTailnetObserverConfig({
       env: {},
       readConfigFile: file({
         enabled: true,
-        expectedAppCapability: CAPABILITY,
+        authorization: { kind: "app-capability", capability: "__proto__" },
+      }),
+    })).rejects.toThrow("tailnet-observer-authorization-missing-or-invalid");
+
+    // Neither boundary named is still invalid: there is no implicit default.
+    await expect(loadTailnetObserverConfig({
+      env: {},
+      readConfigFile: file({ enabled: true }),
+    })).rejects.toThrow("tailnet-observer-authorization-missing-or-invalid");
+
+    await expect(loadTailnetObserverConfig({
+      env: {},
+      readConfigFile: file({
+        enabled: true,
+        authorization: APP_CAPABILITY,
         controllerEnabled: true,
       }),
     })).rejects.toThrow("tailnet-controller-requires-paired-sharing");
@@ -382,7 +409,7 @@ describe("Tailnet observer configuration surface", () => {
       env: {},
       readConfigFile: file({
         enabled: true,
-        expectedAppCapability: CAPABILITY,
+        authorization: APP_CAPABILITY,
         pairedSharingEnabled: true,
         webEnabled: true,
       }),
@@ -396,6 +423,9 @@ describe("Tailnet observer configuration surface", () => {
       { enabled: "1" },
       { enabled: true, port: "46173" },
       { enabled: true, unknownKey: true },
+      { enabled: true, authorization: "tailnet-identity" },
+      { enabled: true, authorization: { kind: "app-capability" } },
+      { enabled: true, authorization: { kind: "tailnet-identity", capability: "x" } },
     ]) {
       expect(() => parseTailnetObserverConfigFile(raw))
         .toThrow("tailnet-observer-config-file-invalid");
@@ -405,7 +435,7 @@ describe("Tailnet observer configuration surface", () => {
   it("keeps the env-only resolver on the answers it has always given", async () => {
     const env = {
       LVIS_TAILNET_OBSERVER: "1",
-      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
       LVIS_TAILNET_PAIRED_SHARING: "1",
     };
 
@@ -420,13 +450,13 @@ describe("Tailnet observer configuration surface", () => {
       ...f.input,
       dependencies: {
         startServer: f.startServer as never,
-        readConfigFile: file({ enabled: true, expectedAppCapability: CAPABILITY }),
+        readConfigFile: file({ enabled: true, authorization: APP_CAPABILITY }),
       },
     });
 
     expect(started?.port).toBe(DEFAULT_TAILNET_OBSERVER_PORT);
     expect(f.startServer).toHaveBeenCalledWith(
-      expect.objectContaining({ host: "127.0.0.1", expectedAppCapability: CAPABILITY }),
+      expect.objectContaining({ host: "127.0.0.1", authorization: APP_CAPABILITY }),
     );
   });
 });
@@ -611,7 +641,7 @@ describe("Tailnet observer restart", () => {
     })).resolves.toBeNull();
     expect(f.startServer).not.toHaveBeenCalled();
 
-    saved = { enabled: true, expectedAppCapability: CAPABILITY, port: 46_500 };
+    saved = { enabled: true, authorization: APP_CAPABILITY, port: 46_500 };
     const started = await restartTailnetObserverServer();
 
     expect(started?.port).toBe(46_500);
@@ -622,7 +652,7 @@ describe("Tailnet observer restart", () => {
     const f = options({});
     let saved: TailnetObserverConfigFile | null = {
       enabled: true,
-      expectedAppCapability: CAPABILITY,
+      authorization: APP_CAPABILITY,
     };
 
     await maybeStartTailnetObserverServer({
@@ -647,10 +677,10 @@ describe("Tailnet observer restart", () => {
 
     saved = { enabled: true };
     await expect(restartTailnetObserverServer()).rejects.toThrow(
-      "tailnet-observer-capability-missing-or-invalid",
+      "tailnet-observer-authorization-missing-or-invalid",
     );
     expect(getTailnetObserverRuntimeState().lastStartError)
-      .toBe("tailnet-observer-capability-missing-or-invalid");
+      .toBe("tailnet-observer-authorization-missing-or-invalid");
     expect(getTailnetObserverRuntimeState().listeningPort).toBeNull();
   });
 });

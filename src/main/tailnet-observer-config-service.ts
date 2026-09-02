@@ -3,8 +3,9 @@
  *
  * The renderer proposes; this decides. Every proposal is re-validated through
  * the same resolver the boot path uses and persisted to `~/.lvis/tailnet/`,
- * never to the settings store — the capability key must stay a value a webpage
- * cannot set, which was the property the env-only resolver was protecting.
+ * never to the settings store — the authorization boundary must stay a value a
+ * webpage cannot set, which was the property the env-only resolver was
+ * protecting.
  */
 import {
   configureTailscaleServe,
@@ -55,11 +56,18 @@ export interface TailnetObserverConfigServiceOptions {
   readonly runServe?: typeof configureTailscaleServe;
 }
 
-/** The file's own values with defaults filled in — never the merged result. */
+/**
+ * The file's own values with defaults filled in — never the merged result.
+ *
+ * A file that names no authorization gets the identity boundary here because
+ * that is what the form offers first, not because the resolver would accept
+ * the omission: `provenance.authorization` still reports `unset`, and enabling
+ * the listener from such a file is refused until a choice is actually saved.
+ */
 function savedView(file: TailnetObserverConfigFile | null): TailnetObserverConfigView {
   return Object.freeze({
     enabled: file?.enabled === true,
-    expectedAppCapability: file?.expectedAppCapability ?? "",
+    authorization: file?.authorization ?? { kind: "tailnet-identity" as const },
     port: file?.port ?? DEFAULT_TAILNET_OBSERVER_VIEW_PORT,
     controllerEnabled: file?.controllerEnabled === true,
     pairedSharingEnabled: file?.pairedSharingEnabled === true,
@@ -84,7 +92,7 @@ function effectiveView(
   }
   return Object.freeze({
     enabled: true,
-    expectedAppCapability: config.expectedAppCapability,
+    authorization: config.authorization,
     port: config.port,
     controllerEnabled: config.controllerEnabled,
     pairedSharingEnabled: config.pairedSharingEnabled,
@@ -117,9 +125,9 @@ function proposalToFile(
     : {};
   return {
     ...(config.enabled ? { enabled: true } : {}),
-    ...(config.expectedAppCapability === ""
-      ? {}
-      : { expectedAppCapability: config.expectedAppCapability }),
+    // Authorization is always a chosen value, never a negative: the form has no
+    // "no boundary" position, so persisting it is persisting what was picked.
+    authorization: config.authorization,
     ...(config.port === DEFAULT_TAILNET_OBSERVER_PORT ? {} : { port: config.port }),
     ...(config.controllerEnabled ? { controllerEnabled: true } : {}),
     ...(config.pairedSharingEnabled ? { pairedSharingEnabled: true } : {}),

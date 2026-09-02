@@ -15,7 +15,7 @@ const CAPABILITY = "lvis.example.com/cap/conversation-observer";
 
 const OFF: TailnetObserverConfigView = {
   enabled: false,
-  expectedAppCapability: "",
+  authorization: { kind: "tailnet-identity" },
   port: 46_173,
   controllerEnabled: false,
   pairedSharingEnabled: false,
@@ -41,7 +41,7 @@ function snapshotOf(overrides: Partial<TailnetObserverSnapshot> = {}): TailnetOb
     effective: OFF,
     provenance: {
       enabled: "unset",
-      expectedAppCapability: "unset",
+      authorization: "unset",
       port: "unset",
       controllerEnabled: "unset",
       pairedSharingEnabled: "unset",
@@ -103,9 +103,15 @@ describe("TailnetObserverSection", () => {
     const { api, apply } = makeApi(snapshotOf());
 
     render(<TailnetObserverSection api={api} />);
-    await waitFor(() => expect(screen.getByTestId("tailnet-observer-capability")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("tailnet-observer-app-capability")).toBeTruthy());
+
+    // The capability field exists only once the advanced boundary is chosen:
+    // the beginner path never has to know the tailnet policy file exists.
+    expect(screen.queryByTestId("tailnet-observer-capability")).toBeNull();
 
     fireEvent.click(screen.getByTestId("tailnet-observer-enabled"));
+    fireEvent.click(screen.getByTestId("tailnet-observer-app-capability"));
+    await waitFor(() => expect(screen.getByTestId("tailnet-observer-capability")).toBeTruthy());
     fireEvent.change(screen.getByTestId("tailnet-observer-capability"), {
       target: { value: CAPABILITY },
     });
@@ -114,7 +120,23 @@ describe("TailnetObserverSection", () => {
     await waitFor(() => expect(apply).toHaveBeenCalledWith({
       ...OFF,
       enabled: true,
-      expectedAppCapability: CAPABILITY,
+      authorization: { kind: "app-capability", capability: CAPABILITY },
+    }));
+  });
+
+  it("proposes the identity boundary without asking for a capability", async () => {
+    const { api, apply } = makeApi(snapshotOf());
+
+    render(<TailnetObserverSection api={api} />);
+    await waitFor(() => expect(screen.getByTestId("tailnet-observer-enabled")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("tailnet-observer-enabled"));
+    fireEvent.click(screen.getByTestId("tailnet-observer-apply"));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledWith({
+      ...OFF,
+      enabled: true,
+      authorization: { kind: "tailnet-identity" },
     }));
   });
 
@@ -160,13 +182,13 @@ describe("TailnetObserverSection", () => {
 
   it("surfaces a boot failure the log used to be the only record of", async () => {
     const { api } = makeApi(snapshotOf({
-      lastStartError: "tailnet-observer-capability-missing-or-invalid",
+      lastStartError: "tailnet-observer-authorization-missing-or-invalid",
     }));
 
     render(<TailnetObserverSection api={api} />);
 
     const error = await screen.findByTestId("tailnet-observer-start-error");
-    expect(error.textContent).toContain("capability");
+    expect(error.textContent).toContain("who may reach this listener");
   });
 
   it("gives a start failure its own sentence instead of the save failure's", async () => {

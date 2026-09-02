@@ -126,6 +126,30 @@ describe("Tailnet Web session store", () => {
     expect(store.issue({ actorId: ACTOR, pairedShare: BINDING })).not.toBeNull();
   });
 
+  it("keeps a pairing entry redeemable but never resolvable as a session", () => {
+    let serial = 0;
+    const store = createTailnetWebSessionStore({
+      randomBytes: (size) => Buffer.alloc(size, ++serial),
+    });
+
+    const entry = store.issuePairingEntry();
+    if (entry === null) throw new Error("expected pairing entry");
+
+    expect(store.resolvePairingEntryMutation(entry.cookieToken, entry.csrfToken)).toBe(true);
+    expect(store.resolvePairingEntryMutation(entry.cookieToken, "x".repeat(43))).toBe(false);
+    // A share-less entry carries no authority, so nothing that needs one may
+    // accept it — that is the whole reason it is a separate record kind.
+    expect(store.resolve(entry.cookieToken)).toBeNull();
+    expect(store.resolveMutation(entry.cookieToken, entry.csrfToken)).toBeNull();
+    expect(store.issuePageCsrf(entry.cookieToken, { actorId: ACTOR, pairedShare: BINDING })).toBeNull();
+
+    const issued = issue(store);
+    expect(store.resolvePairingEntryMutation(issued.cookieToken, issued.csrfToken)).toBe(false);
+
+    store.revoke(entry.cookieToken);
+    expect(store.resolvePairingEntryMutation(entry.cookieToken, entry.csrfToken)).toBe(false);
+  });
+
   it("rejects malformed authority and broken random sources", () => {
     const store = createTailnetWebSessionStore();
     expect(store.issue({

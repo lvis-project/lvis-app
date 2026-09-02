@@ -4,9 +4,10 @@
  * This is intentionally separate from the loopback Local API and A2A
  * listeners: it has no bearer secret, no dispatcher, no owner-stream adapter,
  * and no command route unless the boot-only controller option is supplied.
- * Tailscale Serve terminates Tailnet ingress and injects
- * the identity/app-capability headers this listener verifies before exposing
- * only the bounded shared projection.
+ * Tailscale Serve terminates Tailnet ingress and injects the identity and
+ * app-capability headers this listener verifies — against whichever
+ * authorization boundary the host configured — before exposing only the
+ * bounded shared projection.
  *
  * IMPORTANT: any local process able to reach loopback can forge these headers.
  * Tailscale protects the network hop; it does not replace the local boundary.
@@ -50,6 +51,10 @@ import {
   type TailnetWebSessionStore,
 } from "./tailnet-web-session-store.js";
 import { isRecord } from "../shared/is-record.js";
+import {
+  isTailnetAppCapabilityKey,
+  type TailnetAuthorization,
+} from "../shared/tailnet-observer-config.js";
 import {
   SSE_CONTENT_TYPE,
   SSE_HEARTBEAT_MS,
@@ -109,8 +114,8 @@ export interface TailnetSurfaceServerOptions {
   readonly host?: string;
   /** Dedicated nonzero fixed port so a persistent Tailscale Serve target stays valid. */
   readonly port: number;
-  /** Exact app-capability key granted by the tailnet policy. */
-  readonly expectedAppCapability: string;
+  /** Which boundary a Tailnet request must clear before it reaches this listener. */
+  readonly authorization: TailnetAuthorization;
   readonly projectionStore: SharedConversationProjectionStore;
   /** Current main session identity; owner history is never consulted. */
   readonly getCurrentConversationId: () => string;
@@ -257,29 +262,40 @@ interface TailnetWebPageState {
 /** Testable header validator for the Tailscale Serve observer contract. */
 export function isAuthorizedTailnetObserver(
   headers: IncomingHttpHeaders,
-  expectedAppCapability: string,
+  authorization: TailnetAuthorization,
 ): boolean {
-  return authorizedTailnetLogin(headers, expectedAppCapability, "observer") !== undefined;
+  return authorizedTailnetLogin(headers, authorization, "observer") !== undefined;
 }
 
 /** Testable header validator for the explicitly enabled controller contract. */
 export function isAuthorizedTailnetController(
   headers: IncomingHttpHeaders,
-  expectedAppCapability: string,
+  authorization: TailnetAuthorization,
 ): boolean {
-  return authorizedTailnetLogin(headers, expectedAppCapability, "controller") !== undefined;
+  return authorizedTailnetLogin(headers, authorization, "controller") !== undefined;
 }
 
+/**
+ * The human identity behind a request, or nothing.
+ *
+ * Under `tailnet-identity` the role argument is not consulted: separating an
+ * observer from a controller is what LVIS's own share permission decides, and
+ * pairing is what turns an identity into a share at all. Under
+ * `app-capability` the tailnet policy file states the roles and every one of
+ * them must be granted for the matching key.
+ */
 function authorizedTailnetLogin(
   headers: IncomingHttpHeaders,
-  expectedAppCapability: string,
+  authorization: TailnetAuthorization,
   role: "observer" | "controller" | "pairing",
 ): string | undefined {
   const login = singleHeader(headers, "tailscale-user-login");
+  if (!isSafeLogin(login)) return undefined;
+  if (authorization.kind === "tailnet-identity") return login;
+  const expectedAppCapability = authorization.capability;
   const rawCapabilities = singleHeader(headers, "tailscale-app-capabilities");
   if (
-    !isSafeLogin(login)
-    || !isCapabilityKey(expectedAppCapability)
+    !isTailnetAppCapabilityKey(expectedAppCapability)
     || !rawCapabilities
     || rawCapabilities.length > MAX_CAPABILITY_HEADER_CHARS
   ) {
@@ -333,8 +349,8 @@ export function startTailnetSurfaceServer(
   if (!Number.isSafeInteger(options.port) || options.port < 1 || options.port > 65_535) {
     return Promise.reject(new Error("tailnet surface server port must be a nonzero TCP port"));
   }
-  if (!isCapabilityKey(options.expectedAppCapability)) {
-    return Promise.reject(new Error("tailnet surface server requires a valid expected app capability"));
+  if (!isValidTailnetAuthorization(options.authorization)) {
+    return Promise.reject(new Error("tailnet surface server requires a valid authorization boundary"));
   }
   if (
     options.controller !== undefined &&
@@ -521,13 +537,17 @@ async function route(
   const attachmentRoute = path === "/tailnet/v3/attachments";
   const pairingRoute = path === "/tailnet/v2/pairing/claim";
   const pairingEnabled = pairingRoute && options.pairing !== undefined && options.pairedSharing !== undefined;
-  const webDocumentRoute = path === "/tailnet/v2/web";
+  // The tailnet host name is the whole address a person is given, so the root
+  // is the web document rather than a 404 they have no way to interpret.
+  const webDocumentRoute = path === "/tailnet/v2/web" || path === "/";
   const webSnapshotRoute = path === "/tailnet/v2/web/snapshot";
   const webEventsRoute = path === "/tailnet/v2/web/events";
   const webCommandRoute = path === "/tailnet/v2/web/commands";
   const webAttachmentRoute = path === "/tailnet/v3/web/attachments";
   const webLogoutRoute = path === "/tailnet/v2/web/logout";
-  const webRoute = webDocumentRoute || webSnapshotRoute || webEventsRoute || webCommandRoute || webAttachmentRoute || webLogoutRoute;
+  const webPairingClaimRoute = path === "/tailnet/v2/web/pairing/claim";
+  const webRoute = webDocumentRoute || webSnapshotRoute || webEventsRoute || webCommandRoute
+    || webAttachmentRoute || webLogoutRoute || webPairingClaimRoute;
   if (
     !observerRoute
     && !(controllerRoute && controllerBroker)
@@ -602,7 +622,7 @@ async function route(
     sendJson(res, 400, { ok: false, error: "request-body-not-allowed" });
     return;
   }
-  const login = authorizedTailnetLogin(req.headers, options.expectedAppCapability, "observer");
+  const login = authorizedTailnetLogin(req.headers, options.authorization, "observer");
   if (login === undefined) {
     sendJson(res, 401, { ok: false, error: "unauthorized" });
     return;
@@ -694,8 +714,12 @@ async function routeTailnetWeb(
   maxConnections: number,
   maxStreamLifetimeMs: number,
 ): Promise<void> {
-  if (path === "/tailnet/v2/web") {
+  if (path === "/tailnet/v2/web" || path === "/") {
     routeTailnetWebDocument(req, res, options, web, currentScope, controllerBroker, mutationRequestLimiter);
+    return;
+  }
+  if (path === "/tailnet/v2/web/pairing/claim") {
+    await routeTailnetWebPairingClaim(req, res, options, web, mutationRequestLimiter);
     return;
   }
   if (path === "/tailnet/v2/web/snapshot") {
@@ -785,7 +809,7 @@ function routeTailnetWebDocument(
     sendTailnetWebJson(res, web, 403, { ok: false, error: "same-origin-required" });
     return;
   }
-  const login = authorizedTailnetLogin(req.headers, options.expectedAppCapability, "observer");
+  const login = authorizedTailnetLogin(req.headers, options.authorization, "observer");
   if (login === undefined) {
     sendTailnetWebJson(res, web, 401, { ok: false, error: "unauthorized" });
     return;
@@ -808,7 +832,7 @@ function routeTailnetWebDocument(
     "observe",
   );
   if (pairedShare === null || pairedShare === undefined) {
-    sendTailnetWebJson(res, web, 403, { ok: false, error: "pairing-share-required" });
+    sendTailnetWebPairingDocument(req, res, options, web);
     return;
   }
 
@@ -828,7 +852,9 @@ function routeTailnetWebDocument(
         pairedShare: pairedShare.pairedShare,
       });
     } else {
-      if (previousCookie !== undefined && previous !== null) web.sessions.revoke(previousCookie);
+      // Unconditional: the cookie may be a pairing entry, which resolves to no
+      // session yet still occupies a record until its own expiry.
+      if (previousCookie !== undefined) web.sessions.revoke(previousCookie);
       issued = web.sessions.issue({
         actorId: pairedShare.actorId,
         pairedShare: pairedShare.pairedShare,
@@ -844,11 +870,53 @@ function routeTailnetWebDocument(
   }
   const canControl = controllerBroker !== undefined
     && pairedShare.permission === "control"
-    && authorizedTailnetLogin(req.headers, options.expectedAppCapability, "controller") !== undefined;
-  sendTailnetWebDocumentResponse(res, web, issued, {
+    && authorizedTailnetLogin(req.headers, options.authorization, "controller") !== undefined;
+  sendTailnetWebDocumentResponse(res, web, issued, (nonce) => renderTailnetWebDocument(nonce, {
     csrfToken: issued.csrfToken,
     canControl,
-  });
+  }));
+}
+
+/**
+ * Serve the invitation-code page to a browser that has no share yet.
+ *
+ * Reaching this listener at all already proves a Tailscale identity; what is
+ * missing is the pairing that turns that identity into a share. The page is
+ * given its own share-less cookie and CSRF secret so the redemption POST can
+ * carry the same same-origin proof every other web route requires.
+ */
+function sendTailnetWebPairingDocument(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: TailnetSurfaceServerOptions,
+  web: TailnetWebRuntime,
+): void {
+  if (options.pairing === undefined) {
+    // No route on this listener can redeem a code, so an entry form would be a
+    // dead end. Name the state the operator has to fix instead of drawing one.
+    sendTailnetWebJson(res, web, 403, { ok: false, error: "pairing-share-required" });
+    return;
+  }
+  const previousCookie = readTailnetWebCookie(req.headers);
+  if (previousCookie !== undefined) web.sessions.revoke(previousCookie);
+  let entry;
+  try {
+    entry = web.sessions.issuePairingEntry();
+  } catch {
+    sendTailnetWebJson(res, web, 503, { ok: false, error: "web-session-unavailable" });
+    return;
+  }
+  if (entry === null) {
+    sendTailnetWebJson(res, web, 503, { ok: false, error: "web-session-capacity-reached" });
+    return;
+  }
+  const csrfToken = entry.csrfToken;
+  sendTailnetWebDocumentResponse(
+    res,
+    web,
+    entry,
+    (nonce) => renderTailnetWebPairingDocument(nonce, csrfToken),
+  );
 }
 
 function routeTailnetWebSnapshot(
@@ -1156,7 +1224,7 @@ function authorizeTailnetWebRequest(
     sendTailnetWebJson(res, web, 403, { ok: false, error: "csrf-required" });
     return null;
   }
-  const login = authorizedTailnetLogin(req.headers, options.expectedAppCapability, required === "control" ? "controller" : "observer");
+  const login = authorizedTailnetLogin(req.headers, options.authorization, required === "control" ? "controller" : "observer");
   if (login === undefined) {
     req.resume();
     sendTailnetWebJson(res, web, 403, { ok: false, error: "tailnet-role-required" });
@@ -1305,7 +1373,7 @@ function sendTailnetWebDocumentResponse(
   res: ServerResponse,
   _web: TailnetWebRuntime,
   issued: Readonly<{ cookieToken: string; expiresAt: number }>,
-  state: TailnetWebPageState,
+  render: (nonce: string) => string,
 ): void {
   const nonce = randomBytes(16).toString("base64url");
   const remainingSeconds = Math.max(
@@ -1332,12 +1400,94 @@ function sendTailnetWebDocumentResponse(
     "set-cookie": WEB_COOKIE_NAME + "=" + issued.cookieToken
       + "; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=" + remainingSeconds,
   });
-  res.end(renderTailnetWebDocument(nonce, state));
+  res.end(render(nonce));
 }
 
 function clearTailnetWebCookie(): string {
   return WEB_COOKIE_NAME + "=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0";
 }
+function renderTailnetWebPairingDocument(nonce: string, csrfToken: string): string {
+  const bootstrap = JSON.stringify({ csrfToken });
+  return [
+    "<!doctype html>",
+    "<html lang=\"ko\">",
+    "<head>",
+    "<meta charset=\"utf-8\">",
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    "<title>LVIS Tailnet</title>",
+    "<style nonce=\"" + nonce + "\">",
+    ":root { color-scheme: dark; font-family: system-ui, sans-serif; }",
+    "body { margin: 0; background: #101216; color: #f5f7fb; }",
+    "main { max-width: 32rem; margin: 0 auto; padding: 1.5rem; }",
+    "button, input { font: inherit; }",
+    "button { cursor: pointer; }",
+    "input { box-sizing: border-box; width: 100%; }",
+    ".muted { color: #abb4c3; }",
+    ".row { display: flex; gap: .75rem; align-items: center; margin-top: .75rem; }",
+    "</style>",
+    "</head>",
+    "<body>",
+    "<main>",
+    "<h1>LVIS Tailnet</h1>",
+    "<p class=\"muted\">이 기기는 아직 연결되어 있지 않습니다. 데스크톱에서 발급한 초대 코드를 입력하세요.</p>",
+    "<form id=\"pairing\">",
+    "<label for=\"code\">초대 코드</label>",
+    "<input id=\"code\" name=\"code\" autocomplete=\"off\" spellcheck=\"false\" maxlength=\"64\" placeholder=\"lvis-pair-v1.…\">",
+    "<div class=\"row\"><button id=\"submit\" type=\"submit\">연결</button><span id=\"status\" class=\"muted\" aria-live=\"polite\"></span></div>",
+    "</form>",
+    "</main>",
+    "<script nonce=\"" + nonce + "\">",
+    "(() => {",
+    "  const boot = " + bootstrap + ";",
+    "  const form = document.getElementById(\"pairing\");",
+    "  const code = document.getElementById(\"code\");",
+    "  const submit = document.getElementById(\"submit\");",
+    "  const status = document.getElementById(\"status\");",
+    "  const MESSAGES = {",
+    "    \"pairing-code-unavailable\": \"코드가 만료되었거나 이미 사용되었습니다. 데스크톱에서 새 코드를 발급하세요.\",",
+    "    \"invalid-pairing-claim\": \"코드 형식이 올바르지 않습니다.\",",
+    "    \"tailnet-rate-limited\": \"시도가 너무 잦습니다. 잠시 후 다시 시도하세요.\",",
+    "    \"tailnet-role-required\": \"이 Tailscale 계정은 이 데스크톱에 페어링을 요청할 수 없습니다.\",",
+    "    \"pairing-store-unavailable\": \"데스크톱이 페어링을 기록하지 못했습니다.\"",
+    "  };",
+    "  async function claim(event) {",
+    "    event.preventDefault();",
+    "    submit.disabled = true;",
+    "    status.textContent = \"연결하는 중…\";",
+    "    let response;",
+    "    try {",
+    "      response = await fetch(\"/tailnet/v2/web/pairing/claim\", {",
+    "        method: \"POST\",",
+    "        cache: \"no-store\",",
+    "        credentials: \"same-origin\",",
+    "        headers: { \"content-type\": \"application/json\", \"x-lvis-tailnet-csrf\": boot.csrfToken },",
+    "        body: JSON.stringify({ code: code.value.trim() })",
+    "      });",
+    "    } catch {",
+    "      submit.disabled = false;",
+    "      status.textContent = \"데스크톱에 연결하지 못했습니다.\";",
+    "      return;",
+    "    }",
+    "    if (response.status === 202) {",
+    "      status.textContent = \"데스크톱에서 승인을 기다리는 중…\";",
+    "      form.parentNode.appendChild(status);",
+    "      form.hidden = true;",
+    "      window.setTimeout(() => window.location.reload(), 5000);",
+    "      return;",
+    "    }",
+    "    let error = null;",
+    "    try { error = (await response.json()).error; } catch { error = null; }",
+    "    submit.disabled = false;",
+    "    status.textContent = MESSAGES[error] || \"연결하지 못했습니다. 코드를 다시 확인하세요.\";",
+    "  }",
+    "  form.addEventListener(\"submit\", (event) => { void claim(event); });",
+    "})();",
+    "</script>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+}
+
 function renderTailnetWebDocument(nonce: string, state: TailnetWebPageState): string {
   const bootstrap = JSON.stringify({
     csrfToken: state.csrfToken,
@@ -1617,7 +1767,7 @@ async function routeControllerCommand(
     return;
   }
 
-  const login = authorizedTailnetLogin(req.headers, options.expectedAppCapability, "controller");
+  const login = authorizedTailnetLogin(req.headers, options.authorization, "controller");
   if (login === undefined) {
     req.resume();
     sendJson(res, 401, { ok: false, error: "unauthorized" });
@@ -1720,7 +1870,7 @@ async function routeTailnetAttachmentUpload(
     sendJson(res, 403, { ok: false, error: "browser-controller-not-ready" });
     return;
   }
-  const login = authorizedTailnetLogin(req.headers, options.expectedAppCapability, "controller");
+  const login = authorizedTailnetLogin(req.headers, options.authorization, "controller");
   if (login === undefined) {
     req.resume();
     sendJson(res, 401, { ok: false, error: "unauthorized" });
@@ -1968,7 +2118,7 @@ async function routePairingClaim(
     return;
   }
 
-  const login = authorizedTailnetLogin(req.headers, options.expectedAppCapability, "pairing");
+  const login = authorizedTailnetLogin(req.headers, options.authorization, "pairing");
   if (login === undefined) {
     req.resume();
     sendJson(res, 401, { ok: false, error: "unauthorized" });
@@ -2011,6 +2161,79 @@ async function routePairingClaim(
     pending: true,
     expiresAt: claim.expiresAt,
   });
+}
+
+/**
+ * Redeem a one-use invitation code from the browser.
+ *
+ * This is a second path to pairing, not a relaxation of the first: the native
+ * `/tailnet/v2/pairing/claim` still refuses browser context outright, and this
+ * route earns its browser access by clearing the full same-origin web boundary
+ * — Fetch Metadata, Origin, and a page CSRF secret bound to a cookie this
+ * server itself just issued.
+ */
+async function routeTailnetWebPairingClaim(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: TailnetSurfaceServerOptions,
+  web: TailnetWebRuntime,
+  requestLimiter: TailnetRequestLimiter,
+): Promise<void> {
+  if ((req.method ?? "GET") !== "POST") {
+    req.resume();
+    sendTailnetWebJson(res, web, 405, { ok: false, error: "method-not-allowed" });
+    return;
+  }
+  if (!isSameOriginTailnetWebRequest(req.headers, web.origin)) {
+    req.resume();
+    sendTailnetWebJson(res, web, 403, { ok: false, error: "same-origin-required" });
+    return;
+  }
+  const cookieToken = readTailnetWebCookie(req.headers);
+  if (cookieToken === undefined) {
+    req.resume();
+    sendTailnetWebJson(res, web, 401, { ok: false, error: "web-session-required" }, true);
+    return;
+  }
+  const csrfToken = singleHeader(req.headers, WEB_CSRF_HEADER);
+  if (csrfToken === undefined || !web.sessions.resolvePairingEntryMutation(cookieToken, csrfToken)) {
+    req.resume();
+    sendTailnetWebJson(res, web, 403, { ok: false, error: "csrf-required" });
+    return;
+  }
+  const login = authorizedTailnetLogin(req.headers, options.authorization, "pairing");
+  if (login === undefined) {
+    req.resume();
+    sendTailnetWebJson(res, web, 403, { ok: false, error: "tailnet-role-required" });
+    return;
+  }
+  if (!requestLimiter.accept(login, req.socket)) {
+    req.resume();
+    sendTailnetWebJson(res, web, 429, { ok: false, error: "tailnet-rate-limited" });
+    return;
+  }
+  const decoded = await readTailnetPairingClaim(req);
+  if (!decoded.ok) {
+    sendTailnetWebJson(res, web, decoded.status, { ok: false, error: decoded.error });
+    return;
+  }
+  const actorId = options.pairedSharing?.actorIdFor(login);
+  if (actorId === null || actorId === undefined || options.pairing === undefined) {
+    sendTailnetWebJson(res, web, 403, { ok: false, error: "tailnet-role-required" });
+    return;
+  }
+  let claim: { readonly expiresAt: number } | null;
+  try {
+    claim = await options.pairing.claimInvitation(decoded.code, actorId);
+  } catch {
+    sendTailnetWebJson(res, web, 503, { ok: false, error: "pairing-store-unavailable" });
+    return;
+  }
+  if (claim === null) {
+    sendTailnetWebJson(res, web, 409, { ok: false, error: "pairing-code-unavailable" });
+    return;
+  }
+  sendTailnetWebJson(res, web, 202, { ok: true, pending: true, expiresAt: claim.expiresAt });
 }
 
 type DecodedTailnetControllerCommand =
@@ -2547,6 +2770,8 @@ function isTailnetWebSessionStore(value: unknown): value is TailnetWebSessionSto
     && value !== null
     && typeof (value as { issue?: unknown }).issue === "function"
     && typeof (value as { issuePageCsrf?: unknown }).issuePageCsrf === "function"
+    && typeof (value as { issuePairingEntry?: unknown }).issuePairingEntry === "function"
+    && typeof (value as { resolvePairingEntryMutation?: unknown }).resolvePairingEntryMutation === "function"
     && typeof (value as { resolve?: unknown }).resolve === "function"
     && typeof (value as { resolveMutation?: unknown }).resolveMutation === "function"
     && typeof (value as { revoke?: unknown }).revoke === "function"
@@ -2871,15 +3096,8 @@ function isSafeLogin(value: string | undefined): value is string {
     && !hasControlChars(value);
 }
 
-function isCapabilityKey(value: string): boolean {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 512
-    && value !== "__proto__"
-    && value !== "constructor"
-    && value !== "prototype"
-    && !hasControlChars(value)
-    // A capability key is a token spliced into grant strings, so a SPACE in one
-    // would split it in two. Stricter than the shared class on purpose.
-    && !value.includes(" ");
+function isValidTailnetAuthorization(value: TailnetAuthorization | undefined): boolean {
+  if (value === undefined) return false;
+  return value.kind === "tailnet-identity"
+    || (value.kind === "app-capability" && isTailnetAppCapabilityKey(value.capability));
 }
