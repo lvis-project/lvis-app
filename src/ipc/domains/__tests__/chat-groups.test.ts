@@ -8,22 +8,9 @@
  * to "main" — while four tiles quietly shared one conversation.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createHash } from "node:crypto";
+import { sessionUuid } from "../../../__tests__/support/session-uuid.js";
 import { CHANNELS, MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
-
-/**
- * A session id the host would have issued. `isValidSessionId`
- * (memory/memory-manager.ts) admits a UUID core and nothing else, so a fixture
- * conversation cannot be named in prose — `lvis:chat:session-resume` refuses a
- * free-form id before it ever reaches the group lease under test. The id is
- * derived from the readable name so an assertion still says which conversation
- * it means, and a tile's id can be built from its group id.
- */
-function sessionUuid(name: string): string {
-  const hex = createHash("sha256").update(name).digest("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
