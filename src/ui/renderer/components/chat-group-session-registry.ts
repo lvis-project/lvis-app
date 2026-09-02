@@ -268,7 +268,13 @@ export function tileDrawsSession(args: {
   // the card twice: once inside `display:none`, and once in the focused tile,
   // which adopts the session precisely because no DRAWN tile holds it. The
   // second copy is the one the user answers, and the first outlives the answer.
-  if (args.hidden) return false;
+  //
+  // Unless NO tile is drawn — the route left the chat surface (Settings, a
+  // plugin view, the board). Then nobody else can adopt: the owner keeps its
+  // own question and the focused tile adopts a headless one. Both are hidden,
+  // so neither paints it; the window band lends the surface instead.
+  const anyTileDrawn = args.tiles.some((tile) => !tile.hidden);
+  if (args.hidden && anyTileDrawn) return false;
   if (args.owned) return true;
   if (!args.focused) return false;
   // A hidden tile holds its conversation but paints nothing, so it cannot be

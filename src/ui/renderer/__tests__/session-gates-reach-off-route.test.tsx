@@ -3,16 +3,19 @@
  * user whatever is on screen. Two ways a session stops being drawn that the
  * tile did not know about:
  *
- *   (c) the route leaves the chat surface — Settings, a plugin view, the work
+ *   - the route leaves the chat surface — Settings, a plugin view, the work
  *       board — and the whole surface goes display:none while the tile still
  *       believes it is drawn, keeps its approval claim and draws its cards
  *       into the void;
- *   (b') a question ADOPTED from a headless session (routine, side chat,
+ *   - a question ADOPTED from a headless session (routine, side chat,
  *       orphaned sub-agent) is dropped when the idle tile that adopted it
  *       loads another conversation, while the host keeps waiting on it.
  *
  * Both were found by an audit that reproduced them; these are those probes
- * with the assertions turned the right way round.
+ * with the assertions turned the right way round. The third case followed
+ * from the first: once the route hides EVERY tile, a question arriving in
+ * that window has no drawn tile to adopt it, so the owner (or the focused
+ * tile, for a headless session) must keep it for the window band to lend.
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
@@ -94,6 +97,56 @@ describe("gates reach the user when the route leaves the chat surface", () => {
     expect(count(container, "question-overlay")).toBe(1);
 
     await act(async () => { pendingSend.resolve({ ok: true }); await pendingSend.promise; });
+  });
+
+  it("a question that ARRIVES while Settings is open reaches the window band, then the tile when home returns", async () => {
+    const pendingSend = deferred<{ ok: true }>();
+    const { container, api, emitAskUserQuestion, emitViewActivate } = await renderApp({ hasApiKey: true });
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+    await submitChatMessage(container, "turn in flight");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    await act(async () => { emitViewActivate("settings"); });
+    await waitFor(() => expect(chatSurface(container).getAttribute("data-visible")).toBe("false"));
+
+    await act(async () => {
+      emitAskUserQuestion({
+        id: "ask-late",
+        sessionId: MOCK_DEFAULT_SESSION_ID,
+        questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
+        createdAt: Date.now(),
+      });
+    });
+    await waitFor(() => expect(count(windowBand(container), "question-overlay")).toBe(1));
+    expect(count(container, "question-overlay")).toBe(1);
+
+    await act(async () => { emitViewActivate("home"); });
+    await waitFor(() => expect(count(chatSurface(container), "question-overlay")).toBe(1));
+    expect(count(windowBand(container), "question-overlay")).toBe(0);
+    expect(count(container, "question-overlay")).toBe(1);
+
+    await act(async () => { pendingSend.resolve({ ok: true }); await pendingSend.promise; });
+  });
+
+  it("a headless session's question that ARRIVES while Settings is open is adopted by the focused tile and lent to the window band", async () => {
+    const { container, emitAskUserQuestion, emitViewActivate } = await renderApp({ hasApiKey: true });
+    await act(async () => { emitViewActivate("settings"); });
+    await waitFor(() => expect(chatSurface(container).getAttribute("data-visible")).toBe("false"));
+
+    await act(async () => {
+      emitAskUserQuestion({
+        id: "ask-headless-late",
+        sessionId: "routine-headless-session",
+        questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
+        createdAt: Date.now(),
+      });
+    });
+    await waitFor(() => expect(count(windowBand(container), "question-overlay")).toBe(1));
+    expect(count(container, "question-overlay")).toBe(1);
+
+    await act(async () => { emitViewActivate("home"); });
+    await waitFor(() => expect(count(chatSurface(container), "question-overlay")).toBe(1));
+    expect(count(container, "question-overlay")).toBe(1);
   });
 });
 
