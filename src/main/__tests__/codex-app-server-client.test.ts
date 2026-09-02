@@ -216,7 +216,7 @@ describe("CodexAppServerClient", () => {
       args: [
         "app-server",
         "-c",
-        'cli_auth_credentials_store="keyring"',
+        'cli_auth_credentials_store="file"',
         "--strict-config",
         "--disable",
         "plugins",

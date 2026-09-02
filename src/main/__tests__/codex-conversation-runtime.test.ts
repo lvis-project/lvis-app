@@ -226,7 +226,7 @@ describe("CodexConversationRuntime", () => {
     expect(harness.spawnCalls[0]?.args).toEqual([
       "app-server",
       "-c",
-      'cli_auth_credentials_store="keyring"',
+      'cli_auth_credentials_store="file"',
       "--strict-config",
       "--disable",
       "plugins",
