@@ -69,7 +69,13 @@ class FakeEmitter {
 // ---------------------------------------------------------------------------
 class FakeWebContents extends FakeEmitter {
   private _currentUrl: string;
-  public session: { cookies: { get: ReturnType<typeof vi.fn> } };
+  public session: {
+    cookies: {
+      get: ReturnType<typeof vi.fn>;
+      set: ReturnType<typeof vi.fn>;
+      flushStore: ReturnType<typeof vi.fn>;
+    };
+  };
   public isDestroyed = vi.fn(() => false);
   public setWindowOpenHandler = vi.fn();
   public openDevTools = vi.fn();
@@ -81,6 +87,8 @@ class FakeWebContents extends FakeEmitter {
     this.session = {
       cookies: {
         get: vi.fn().mockResolvedValue(cookiesForSession),
+        set: vi.fn().mockResolvedValue(undefined),
+        flushStore: vi.fn().mockResolvedValue(undefined),
       },
     };
   }
@@ -131,7 +139,11 @@ let currentFakeWindow: FakeBrowserWindow;
 
 // Shared partition session returned by session.fromPartition in grace-collect.
 const fakePartitionSession = {
-  cookies: { get: vi.fn() },
+  cookies: {
+    get: vi.fn(),
+    set: vi.fn().mockResolvedValue(undefined),
+    flushStore: vi.fn().mockResolvedValue(undefined),
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -196,9 +208,8 @@ vi.mock("../../lib/logger.js", () => ({
 // ---------------------------------------------------------------------------
 // Import service under test (after all mocks are registered).
 // ---------------------------------------------------------------------------
-const { openAuthWindow, wirePluginAuthPartitionPersistence } = await import(
-  "../auth-window-service.js"
-);
+const { openAuthWindow, wirePluginAuthPartitionPersistence, RETAINED_SESSION_COOKIE_TTL_SECONDS } =
+  await import("../auth-window-service.js");
 
 // Wire no-op persistence so rememberPluginAuthPartition doesn't throw.
 wirePluginAuthPartitionPersistence({
@@ -623,5 +634,177 @@ describe("openAuthWindow — settled/finish() mutual-exclusion guard", () => {
       expect(Array.isArray(cookies)).toBe(true);
       expect(cookies[0].name).toBe("session");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite — vault mode (`retainCookies`) makes the harvested session durable.
+//
+// In vault mode the harvested values live ONLY in the partition. Chromium
+// drops a session cookie (no expirationDate) at process exit, so without the
+// write-back the next launch has no session and the plugin's boot probe is
+// rejected upstream — a login window on every launch. These drive the REAL
+// harvest sites (checkAndCollect and the closed-event grace path) and assert
+// the write-back happens there, with the plugin still seeing no value and no
+// fabricated expiry.
+//
+// MUTATION CAUGHT: removing the `retainAcrossRestart` call at either harvest
+// site, or the `flushStore()` after the writes, fails the matching test.
+// ---------------------------------------------------------------------------
+describe("openAuthWindow — retainCookies makes the harvested session survive a restart", () => {
+  const VAULT_PARTITION = "persist:plugin-auth:sample:portal";
+  // Same cookie the other suites use — it carries no expirationDate.
+  const RESTART_SESSION_COOKIE: Cookie = { ...SESSION_COOKIE, session: true };
+  const BOUNDED_COOKIE: Cookie = { ...SESSION_COOKIE, name: "bounded", expirationDate: 1_900_000_000 };
+
+  function expectBoundedExpiry(details: Record<string, unknown>, startedAtMs: number): void {
+    const nowSec = Math.floor(startedAtMs / 1000);
+    expect(typeof details.expirationDate).toBe("number");
+    expect(details.expirationDate as number).toBeGreaterThanOrEqual(nowSec + RETAINED_SESSION_COOKIE_TTL_SECONDS);
+    expect(details.expirationDate as number).toBeLessThanOrEqual(nowSec + RETAINED_SESSION_COOKIE_TTL_SECONDS + 5);
+  }
+
+  async function loginThroughWebview(
+    fakeWv: FakeWebContents,
+    opts: { retainCookies?: boolean } = { retainCookies: true },
+  ) {
+    const parent = makeParentWindow() as unknown as import("electron").BrowserWindow;
+    const resultPromise = openAuthWindow(parent, {
+      url: "https://sso.example.com/login",
+      completionUrlPatterns: [COMPLETION_PATTERN],
+      cookieHosts: [COOKIE_HOST],
+      persistPartition: VAULT_PARTITION,
+      timeoutMs: 10_000,
+      ...opts,
+    });
+    const outcomePromise = resultPromise.then(
+      (v) => ({ ok: true as const, value: v }),
+      (e: unknown) => ({ ok: false as const, error: e }),
+    );
+    await flushAsync(1);
+    currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
+    fakeWv.navigateTo(COMPLETION_URL);
+    fakeWv.emit("did-navigate", {}, COMPLETION_URL);
+    await flushAsync();
+    return outcomePromise;
+  }
+
+  it("re-sets the session cookie into the partition with a bounded expiry and flushes; the plugin sees neither the value nor the expiry", async () => {
+    const startedAt = Date.now();
+    const fakeWv = new FakeWebContents(COMPLETION_URL, [RESTART_SESSION_COOKIE]);
+
+    const outcome = await loginThroughWebview(fakeWv);
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      const cookies = outcome.value as import("../auth-window-service.js").AuthCookie[];
+      expect(cookies).toHaveLength(1);
+      expect(cookies[0].name).toBe("session");
+      expect(cookies[0].value).toBe("");
+      expect(cookies[0].expirationDate).toBeUndefined();
+    }
+
+    const { set, flushStore } = fakeWv.session.cookies;
+    expect(set).toHaveBeenCalledTimes(1);
+    const details = set.mock.calls[0][0] as Record<string, unknown>;
+    expect(details).toMatchObject({
+      url: "https://portal.example.com/",
+      name: "session",
+      value: "abc123",
+      domain: ".portal.example.com",
+      path: "/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+    });
+    expectBoundedExpiry(details, startedAt);
+    expect(flushStore).toHaveBeenCalledTimes(1);
+    expect(set.mock.invocationCallOrder[0]).toBeLessThan(flushStore.mock.invocationCallOrder[0]);
+  });
+
+  it("leaves a cookie the upstream service already bounded untouched and does not flush for nothing", async () => {
+    const fakeWv = new FakeWebContents(COMPLETION_URL, [BOUNDED_COOKIE]);
+
+    const outcome = await loginThroughWebview(fakeWv);
+
+    expect(outcome.ok).toBe(true);
+    expect(fakeWv.session.cookies.set).not.toHaveBeenCalled();
+    expect(fakeWv.session.cookies.flushStore).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing back when vault mode is off — the plugin receives the values and owns persistence", async () => {
+    const fakeWv = new FakeWebContents(COMPLETION_URL, [RESTART_SESSION_COOKIE]);
+
+    const outcome = await loginThroughWebview(fakeWv, {});
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      const cookies = outcome.value as import("../auth-window-service.js").AuthCookie[];
+      expect(cookies[0].value).toBe("abc123");
+    }
+    expect(fakeWv.session.cookies.set).not.toHaveBeenCalled();
+    expect(fakeWv.session.cookies.flushStore).not.toHaveBeenCalled();
+  });
+
+  it("a failed write-back does not turn a successful login into a failed one", async () => {
+    // The values are live in the partition for this run; only the next launch
+    // needs a fresh login. Rejecting here would make the user re-login NOW for
+    // a session that works.
+    const fakeWv = new FakeWebContents(COMPLETION_URL, [RESTART_SESSION_COOKIE]);
+    fakeWv.session.cookies.set.mockRejectedValueOnce(new Error("cookie store locked"));
+
+    const outcome = await loginThroughWebview(fakeWv);
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      const cookies = outcome.value as import("../auth-window-service.js").AuthCookie[];
+      expect(cookies[0].name).toBe("session");
+    }
+    expect(fakeWv.session.cookies.flushStore).not.toHaveBeenCalled();
+  });
+
+  it("also makes the session durable on the closed-event grace path", async () => {
+    const startedAt = Date.now();
+    const parent = makeParentWindow() as unknown as import("electron").BrowserWindow;
+    let resolveWebviewCookies!: (c: Cookie[]) => void;
+    const hangingCookiePromise = new Promise<Cookie[]>((res) => {
+      resolveWebviewCookies = res;
+    });
+
+    const resultPromise = openAuthWindow(parent, {
+      url: "https://sso.example.com/login",
+      completionUrlPatterns: [COMPLETION_PATTERN],
+      cookieHosts: [COOKIE_HOST],
+      persistPartition: VAULT_PARTITION,
+      retainCookies: true,
+      timeoutMs: 10_000,
+    });
+    const outcomePromise = resultPromise.then(
+      (v) => ({ ok: true as const, value: v }),
+      (e: unknown) => ({ ok: false as const, error: e }),
+    );
+    await flushAsync(1);
+
+    const fakeWv = new FakeWebContents(COMPLETION_URL);
+    fakeWv.session.cookies.get.mockReturnValue(hangingCookiePromise);
+    currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
+    fakeWv.navigateTo(COMPLETION_URL);
+    fakeWv.emit("did-navigate", {}, COMPLETION_URL);
+
+    fakePartitionSession.cookies.get.mockResolvedValue([RESTART_SESSION_COOKIE]);
+    currentFakeWindow.emit("closed");
+    await flushAsync();
+    resolveWebviewCookies([]);
+    await flushAsync();
+
+    const outcome = await outcomePromise;
+    expect(outcome.ok).toBe(true);
+    expect(fakePartitionSession.cookies.set).toHaveBeenCalledTimes(1);
+    const details = fakePartitionSession.cookies.set.mock.calls[0][0] as Record<string, unknown>;
+    expect(details).toMatchObject({ name: "session", value: "abc123", domain: ".portal.example.com" });
+    expectBoundedExpiry(details, startedAt);
+    expect(fakePartitionSession.cookies.flushStore).toHaveBeenCalledTimes(1);
+    // The webview-side jar was never written — grace path owns the harvest.
+    expect(fakeWv.session.cookies.set).not.toHaveBeenCalled();
   });
 });

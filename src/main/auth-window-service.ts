@@ -30,6 +30,7 @@ import { resolveAppIconPath } from "./app-icon.js";
 import {
   withAuthPartitionViewersClosed,
 } from "./auth-partition-viewer-service.js";
+import { normalizeCookieDomain } from "./auth-partition-cookie-jar.js";
 import {
   normalizeAllowedHosts,
   normalizeHost,
@@ -350,26 +351,33 @@ function buildErudaInlineScript(): string {
  * that have not run their list through `normalizeAllowedHosts`.
  */
 export function filterCookiesByHost(cookies: Cookie[], allowedHosts: string[]): AuthCookie[] {
+  return selectCookiesByHost(cookies, allowedHosts).map((c) => ({
+    name: c.name,
+    value: c.value,
+    domain: c.domain,
+    path: c.path,
+    secure: c.secure,
+    httpOnly: c.httpOnly,
+    expirationDate: c.expirationDate,
+  }));
+}
+
+/**
+ * The allow-list half of `filterCookiesByHost`, kept as Electron `Cookie`s with
+ * every attribute intact (`hostOnly`, `sameSite`) for the write-back into the
+ * partition, which the plugin-facing `AuthCookie` shape does not carry.
+ */
+function selectCookiesByHost(cookies: Cookie[], allowedHosts: string[]): Cookie[] {
   const normalizedAllowed = allowedHosts
     .map(normalizeHost)
     .filter((h) => h.length > 0);
   if (normalizedAllowed.length === 0) return [];
-  return cookies
-    .filter((c) => {
-      if (!c.domain) return false;
-      // Electron cookie domains may include a leading dot (".example.com");
-      // `urlHostMatchesAllowList` normalizes the probe host internally.
-      return urlHostMatchesAllowList(c.domain, normalizedAllowed);
-    })
-    .map((c) => ({
-      name: c.name,
-      value: c.value,
-      domain: c.domain,
-      path: c.path,
-      secure: c.secure,
-      httpOnly: c.httpOnly,
-      expirationDate: c.expirationDate,
-    }));
+  return cookies.filter((c) => {
+    if (!c.domain) return false;
+    // Electron cookie domains may include a leading dot (".example.com");
+    // `urlHostMatchesAllowList` normalizes the probe host internally.
+    return urlHostMatchesAllowList(c.domain, normalizedAllowed);
+  });
 }
 
 /**
@@ -417,6 +425,68 @@ export function sanitizeUrlForLog(url: string): string {
 export function redactCookieValues(cookies: AuthCookie[], retain: boolean): AuthCookie[] {
   if (!retain) return cookies;
   return cookies.map((cookie) => ({ ...cookie, value: "" }));
+}
+
+/**
+ * How long a re-set session cookie stays on disk (seconds).
+ *
+ * Chromium drops a cookie that has no `expirationDate` when the process exits,
+ * `persist:` partition or not. In vault mode (`retainCookies`) the partition is
+ * the ONLY place a harvested value lives, so a session cookie would die with
+ * the process and the user would have to log in again on every launch.
+ *
+ * The bound only has to bridge the gap between two app runs — an evening, a
+ * weekend, a holiday week. It does not extend trust: the upstream service still
+ * decides whether the session is live (its rejection clears the plugin's
+ * ledger), and while the app runs the plugin's keep-alive re-proves the session
+ * far more often than this. A week keeps a session the service has long since
+ * dropped from lingering on disk for months.
+ */
+export const RETAINED_SESSION_COOKIE_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * Re-set every harvested session cookie (no `expirationDate`) into the same
+ * partition with a bounded expiry, then flush the store so the write reaches
+ * disk before the window is torn down (writes are batched — see
+ * `link-window-service.ts`). Cookies that already carry an expiry are the
+ * upstream service's own decision and are left untouched.
+ *
+ * Every other attribute is preserved: a host-only cookie is written without a
+ * `domain` so it stays host-only, and a Secure cookie is written against an
+ * `https:` URL because Chromium refuses a Secure cookie from an insecure one.
+ * The value never leaves the host — it is read from the partition and written
+ * back into the same partition.
+ *
+ * Returns the number of cookies re-set. Failures propagate; the caller decides
+ * what a login that succeeded but could not be made durable means.
+ */
+export async function retainSessionCookiesAcrossRestart(
+  ses: Pick<Session, "cookies">,
+  cookies: readonly Cookie[],
+  nowMs: number = Date.now(),
+): Promise<number> {
+  const targets = cookies.flatMap((cookie) => {
+    const host = normalizeCookieDomain(cookie.domain);
+    return typeof cookie.expirationDate !== "number" && host ? [{ cookie, host }] : [];
+  });
+  if (targets.length === 0) return 0;
+  const expirationDate = Math.floor(nowMs / 1000) + RETAINED_SESSION_COOKIE_TTL_SECONDS;
+  for (const { cookie, host } of targets) {
+    const path = cookie.path ?? "/";
+    await ses.cookies.set({
+      url: `${cookie.secure ? "https" : "http"}://${host}${path}`,
+      name: cookie.name,
+      value: cookie.value,
+      ...(cookie.hostOnly ? {} : { domain: cookie.domain }),
+      path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      sameSite: cookie.sameSite,
+      expirationDate,
+    });
+  }
+  await ses.cookies.flushStore();
+  return targets.length;
 }
 
 /**
@@ -727,14 +797,55 @@ export async function openAuthWindow(
       });
     }, timeoutMs);
 
+    // Vault mode keeps the harvested values only in the partition, and Chromium
+    // drops session cookies at exit — so they are made durable at harvest time.
+    // A failure here is logged, not fatal: the login itself succeeded and the
+    // values are live in the partition for this run; only the next launch will
+    // need a fresh login. Counts only — never a value.
+    const retainAcrossRestart = async (ses: Pick<Session, "cookies">, allCookies: Cookie[]) => {
+      if (!retainCookies) return;
+      const scoped = selectCookiesByHost(allCookies, normalizedCookieHosts);
+      try {
+        const retained = await retainSessionCookiesAcrossRestart(ses, scoped);
+        log.debug(
+          {
+            phase: "harvest",
+            partition: effectivePartition,
+            cookieCount: scoped.length,
+            sessionCookiesMadeDurable: retained,
+          },
+          `[auth-window:retain] partition=${effectivePartition} cookies=${scoped.length} sessionCookiesMadeDurable=${retained}`,
+        );
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log.warn(
+          {
+            phase: "harvest",
+            partition: effectivePartition,
+            cookieCount: scoped.length,
+            errorMessage: errMsg,
+          },
+          `[auth-window:retain-failed] partition=${effectivePartition} cookies=${scoped.length} err=${errMsg} — the session will not survive a restart`,
+        );
+      }
+    };
+
+    // One harvest at a time. The attach-time probe, `did-navigate`,
+    // `did-navigate-in-page` and the ERR_ABORTED re-check can all fire on the
+    // same completion URL; the first harvest settles the promise, so the
+    // overlapping ones would only repeat the partition write-back.
+    let harvesting = false;
     const checkAndCollect = async () => {
-      if (settled) return;
+      if (settled || harvesting) return;
       if (!authContents || authContents.isDestroyed()) return;
       const currentUrl = authContents.getURL();
       if (!isCompletionUrl(currentUrl, normalizedCompletionPatterns)) return;
+      harvesting = true;
       try {
-        const allCookies = await (authContents.session as Session).cookies.get({});
+        const harvestSession = authContents.session as Session;
+        const allCookies = await harvestSession.cookies.get({});
         const filtered = filterCookiesByHost(allCookies, normalizedCookieHosts);
+        await retainAcrossRestart(harvestSession, allCookies);
         finish(() => {
           clearTimeout(timer);
           resolve(buildAuthResult(filtered, currentUrl, returnFinalUrl, retainCookies));
@@ -746,6 +857,8 @@ export async function openAuthWindow(
           reject(err as Error);
           if (!authWindow.isDestroyed()) authWindow.close();
         });
+      } finally {
+        harvesting = false;
       }
     };
 
@@ -957,6 +1070,7 @@ export async function openAuthWindow(
           try {
             const allCookies = await partitionSession.cookies.get({});
             const filtered = filterCookiesByHost(allCookies, normalizedCookieHosts);
+            await retainAcrossRestart(partitionSession, allCookies);
             finish(() => {
               log.info(
                 {

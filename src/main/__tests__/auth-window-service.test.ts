@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { Cookie } from "electron";
+import type { Cookie, CookiesSetDetails, Session } from "electron";
 
 // auth-window-service imports `electron` at module load time. Vitest's default
 // node environment can't resolve it, so stub the module to just the shapes
@@ -20,6 +20,8 @@ const {
   sanitizeUrlForLog,
   buildAuthResult,
   redactCookieValues,
+  retainSessionCookiesAcrossRestart,
+  RETAINED_SESSION_COOKIE_TTL_SECONDS,
   buildAuthWindowShellHtml,
   openAuthWindow,
   wirePluginAuthPartitionPersistence,
@@ -531,5 +533,117 @@ describe("retainCookies (session-cookie vault mode)", () => {
   it("does not mutate the harvested array", () => {
     redactCookieValues(harvested, true);
     expect(harvested[0]?.value).toBe("secret-sso");
+  });
+});
+
+/**
+ * The vault keeps harvested values ONLY in the partition, and Chromium drops a
+ * cookie without an expiry at process exit. These pin the write-back that makes
+ * a harvested session cookie survive a restart, and the boundaries around it:
+ * a cookie the upstream service already bounded is not touched, attributes are
+ * preserved, and a failed write is an error the caller sees.
+ */
+describe("retainSessionCookiesAcrossRestart (vault survives a restart)", () => {
+  const NOW_MS = 1_700_000_000_000;
+  const EXPECTED_EXPIRY = Math.floor(NOW_MS / 1000) + RETAINED_SESSION_COOKIE_TTL_SECONDS;
+
+  function vaultSession() {
+    const order: string[] = [];
+    const cookies = {
+      set: vi.fn<(details: CookiesSetDetails) => Promise<void>>(async () => {
+        order.push("set");
+      }),
+      flushStore: vi.fn(async () => {
+        order.push("flush");
+      }),
+    };
+    return { ses: { cookies } as unknown as Pick<Session, "cookies">, cookies, order };
+  }
+
+  it("re-sets a session cookie with a bounded expiry, every other attribute intact, then flushes", async () => {
+    const { ses, cookies, order } = vaultSession();
+    const harvested = cookie({
+      name: "SMSESSION", value: "secret-sso", domain: ".example.com", path: "/app",
+      secure: true, httpOnly: true, sameSite: "lax", session: true, hostOnly: false,
+    });
+
+    await expect(retainSessionCookiesAcrossRestart(ses, [harvested], NOW_MS)).resolves.toBe(1);
+
+    expect(cookies.set).toHaveBeenCalledTimes(1);
+    expect(cookies.set).toHaveBeenCalledWith({
+      url: "https://example.com/app",
+      name: "SMSESSION",
+      value: "secret-sso",
+      domain: ".example.com",
+      path: "/app",
+      secure: true,
+      httpOnly: true,
+      sameSite: "lax",
+      expirationDate: EXPECTED_EXPIRY,
+    });
+    expect(cookies.flushStore).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["set", "flush"]);
+  });
+
+  it("bounds the expiry to days, not months — it bridges a restart, it does not extend trust", () => {
+    expect(RETAINED_SESSION_COOKIE_TTL_SECONDS).toBe(7 * 24 * 60 * 60);
+  });
+
+  it("leaves a cookie the upstream service already bounded untouched", async () => {
+    const { ses, cookies } = vaultSession();
+    const bounded = cookie({ name: "persistent", expirationDate: 1_800_000_000 });
+
+    await expect(retainSessionCookiesAcrossRestart(ses, [bounded], NOW_MS)).resolves.toBe(0);
+
+    expect(cookies.set).not.toHaveBeenCalled();
+    expect(cookies.flushStore).not.toHaveBeenCalled();
+  });
+
+  it("writes only the session cookies of a mixed jar and reports that count", async () => {
+    const { ses, cookies } = vaultSession();
+    const jar = [
+      cookie({ name: "persistent", expirationDate: 1_800_000_000 }),
+      cookie({ name: "session-a", session: true }),
+      cookie({ name: "session-b", session: true }),
+    ];
+
+    await expect(retainSessionCookiesAcrossRestart(ses, jar, NOW_MS)).resolves.toBe(2);
+
+    expect(cookies.set.mock.calls.map(([details]) => details.name)).toEqual(["session-a", "session-b"]);
+    expect(cookies.flushStore).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a host-only cookie host-only (no domain on the write) and uses http for a non-Secure cookie", async () => {
+    const { ses, cookies } = vaultSession();
+    const hostOnly = cookie({
+      name: "JSESSIONID", domain: "portal.example.com", path: "/", secure: false, hostOnly: true, session: true,
+    });
+
+    await retainSessionCookiesAcrossRestart(ses, [hostOnly], NOW_MS);
+
+    const [details] = cookies.set.mock.calls[0] ?? [];
+    expect(details?.url).toBe("http://portal.example.com/");
+    expect(details ? "domain" in details : null).toBe(false);
+    expect(details?.secure).toBe(false);
+  });
+
+  it("surfaces a failed write instead of swallowing it, and does not flush a half-written jar", async () => {
+    const { ses, cookies } = vaultSession();
+    cookies.set.mockRejectedValueOnce(new Error("cookie store locked"));
+
+    await expect(
+      retainSessionCookiesAcrossRestart(ses, [cookie({ name: "s", session: true })], NOW_MS),
+    ).rejects.toThrow(/cookie store locked/);
+
+    expect(cookies.flushStore).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a failed flush — an unflushed write is not durable", async () => {
+    const { ses, cookies } = vaultSession();
+    cookies.flushStore.mockRejectedValueOnce(new Error("flush failed"));
+
+    await expect(
+      retainSessionCookiesAcrossRestart(ses, [cookie({ name: "s", session: true })], NOW_MS),
+    ).rejects.toThrow(/flush failed/);
   });
 });
