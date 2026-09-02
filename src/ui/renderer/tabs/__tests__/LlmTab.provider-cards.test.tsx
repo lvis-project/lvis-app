@@ -1857,6 +1857,62 @@ describe("LlmTab OpenAI model catalogue", () => {
     expect(screen.getByTestId("llm-tab:model-sync-status")).not.toHaveTextContent(/\d+/);
   });
 
+  /** The dot on the card head that carries the same outcome as the sentence. */
+  function syncDotIn(rowId: string): HTMLElement {
+    const card = screen.getByTestId("llm-tab:connections").querySelector<HTMLElement>(`[data-provider-row="${rowId}"]`);
+    if (!card) throw new Error(`no provider card for ${rowId}`);
+    return within(card).getByTestId("llm-provider-sync-dot");
+  }
+
+  it("marks the card head with a synced dot once the endpoint has answered", async () => {
+    const api = makeApi({
+      hasApiKey: storedKeysFor("openai"),
+      listLlmModels: vi.fn().mockResolvedValue({
+        ok: true,
+        vendor: "openai",
+        endpoint: "https://api.openai.com/v1/models",
+        models: ["gpt-from-endpoint"],
+        fetchedAt: "2026-01-01T00:00:00.000Z",
+      } satisfies LlmModelListResult),
+    });
+    await renderTab(api, { model: "" });
+
+    await waitFor(() => expect(syncDotIn("openai")).toHaveAttribute("data-state", "synced"));
+    const dot = syncDotIn("openai");
+    expect(dot).toHaveAttribute("role", "img");
+    expect(dot).toHaveAttribute("aria-label", expect.stringMatching(/Model list synced|모델 목록 동기화됨/));
+    // The sentence stays; the dot is a summary of it, not a replacement.
+    expect(screen.getByTestId("llm-tab:connection-subline:openai"))
+      .toHaveAttribute("data-provider-sync-status", "ready");
+  });
+
+  it("marks the card head with a failed dot when the handshake failed", async () => {
+    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), { model: "" });
+
+    await waitFor(() => expect(syncDotIn("openai")).toHaveAttribute("data-state", "failed"));
+    expect(syncDotIn("openai"))
+      .toHaveAttribute("aria-label", expect.stringMatching(/Model list sync failed|모델 목록 동기화 실패/));
+    expect(screen.getByTestId("llm-tab:connection-subline:openai"))
+      .toHaveAttribute("data-provider-sync-status", "error");
+  });
+
+  it("keeps the dot muted while no handshake has been made", async () => {
+    // No key is stored, so nothing was asked — an unknown, never a failure,
+    // on a card whose signed-in runtime is otherwise healthy.
+    const api = makeApi();
+    installSubscription([codexView({
+      status: { runtime: "ready", connection: "connected", models: [] },
+    })]);
+    await renderTab(api, { vendor: "openai", model: "", hasKey: false });
+
+    await waitFor(() => expect(api.hasApiKey).toHaveBeenCalledWith("openai"));
+    expect(api.listLlmModels).not.toHaveBeenCalled();
+    expect(rowOrder()).toEqual(["codex"]);
+    const dot = syncDotIn("codex");
+    expect(dot).toHaveAttribute("data-state", "unknown");
+    expect(dot).toHaveAttribute("aria-label", expect.stringMatching(/Model list not synced|모델 목록 미동기화/));
+  });
+
   it("distinguishes a failure that left a catalogue standing from one that did not", async () => {
     const api = makeApi({
       hasApiKey: storedKeysFor("openai"),
