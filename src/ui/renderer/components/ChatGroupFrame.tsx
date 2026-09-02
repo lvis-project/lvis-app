@@ -1,5 +1,5 @@
 import {
-  createContext, useCallback, useContext, useMemo, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
   type ReactNode, type RefObject,
 } from "react";
 import {
@@ -108,6 +108,12 @@ interface PaneAction {
   icon: ReactNode;
   /** Rendered pressed, for toggles that have an on state (pin). */
   active?: boolean;
+  /**
+   * Shown but inert. A limit the CONTENT owns — the work board's item cap —
+   * reads in the control itself rather than arriving as a rejection once the
+   * user has already clicked, the same rule the split control follows.
+   */
+  disabled?: boolean;
   onSelect: () => void | Promise<void>;
   /** When present the control opens a menu of these instead of firing. */
   items?: Array<{ id: string; label: string; onSelect: () => void | Promise<void> }>;
@@ -183,7 +189,11 @@ interface PaneFrameProps {
   /** Drawn ahead of the title: the same glyph the sidebar row uses for this
    *  content, so the pane and the row that opened it read as one thing. */
   icon?: ReactNode;
-  /** The content's own actions, after the contributed slot and before split. */
+  /**
+   * The content's own actions, after the contributed slot and before split.
+   * What the CALLER owns; a body can add its own with `usePaneActions`, and
+   * those are drawn in the same row, after these.
+   */
   actions?: PaneAction[];
   /** Extra controls at the head of the trailing cluster, before maximize and
    *  close — what THIS kind of pane owns as a tile (the conversation's work
@@ -254,6 +264,36 @@ export function useChatGroupPanelSlot(): ChatGroupPanelSlot | null {
   return useContext(ChatGroupPanelSlotContext);
 }
 
+/**
+ * The body's channel into the header's action row.
+ *
+ * A built-in view's global actions — "new work item", "refresh" — are driven by
+ * state only that view has: whether its item cap is reached, which fetch to
+ * re-run. Handing them down as a prop would mean lifting the view's whole data
+ * layer into the app shell just to hand the control back, which is the trade
+ * the header slot above already refused for tool activity. So the frame takes
+ * these actions FROM the body and draws them in the same row, with the same
+ * recipe and testids, as the ones its caller passes.
+ */
+const PaneBodyActionsContext = createContext<((actions: PaneAction[]) => void) | null>(null);
+
+/**
+ * Publish this pane body's own global actions into the frame's header.
+ *
+ * `actions` must be referentially stable while it has not changed (`useMemo`) —
+ * a fresh array every render would republish on every render.
+ */
+export function usePaneActions(actions: PaneAction[]): void {
+  const publish = useContext(PaneBodyActionsContext);
+  useEffect(() => {
+    if (!publish) return undefined;
+    publish(actions);
+    // A body that leaves takes its actions with it: the header must not keep
+    // drawing a control for content that is no longer there.
+    return () => publish([]);
+  }, [publish, actions]);
+}
+
 /** The frame every pane is drawn in. The chrome lives here and only here. */
 export function PaneFrame({
   title,
@@ -276,7 +316,11 @@ export function PaneFrame({
   const { t } = useTranslation();
   const [panelSlot, setPanelSlot] = useState<HTMLElement | null>(null);
   const [tile, setTile] = useState<HTMLElement | null>(null);
+  const [bodyActions, setBodyActions] = useState<PaneAction[]>([]);
   const panelSlots = useMemo<ChatGroupPanelSlot>(() => ({ panel: panelSlot, tile }), [panelSlot, tile]);
+  // The caller's actions lead: what OWNS the pane comes before what the content
+  // it happens to be showing contributes.
+  const headerActions = bodyActions.length === 0 ? actions : [...actions, ...bodyActions];
   // The split choice is settled when the popover OPENS, not on every render:
   // the verdict reads the canvas's live size, which is a layout read that
   // belongs in an event, and a verdict taken while the popover is open is
@@ -358,7 +402,7 @@ export function PaneFrame({
         <h2 className="min-w-0 flex-1 truncate text-caption font-medium text-foreground">
           {title}
         </h2>
-        {actions.map((action) =>
+        {headerActions.map((action) =>
           action.items ? (
             <DropdownMenu key={action.id}>
               <Tooltip>
@@ -368,6 +412,7 @@ export function PaneFrame({
                       variant="ghost"
                       size="icon"
                       className={HEADER_BUTTON_CLASS}
+                      disabled={action.disabled}
                       title={action.label}
                       aria-label={action.label}
                       data-testid={`chat-group-action-${action.id}`}
@@ -398,6 +443,7 @@ export function PaneFrame({
                   size="icon"
                   className={HEADER_BUTTON_CLASS}
                   onClick={() => void action.onSelect()}
+                  disabled={action.disabled}
                   title={action.label}
                   aria-label={action.label}
                   aria-pressed={action.active}
@@ -520,14 +566,16 @@ export function PaneFrame({
           copy of it inside the frame said the same thing twice and cost the
           transcript the width to say it. */}
       <ChatGroupPanelSlotContext.Provider value={publishAsideSlot ? panelSlots : null}>
-        <div
-          className={bodyInset === "page"
-            ? "flex min-h-0 min-w-0 flex-1 flex-col p-4"
-            : "flex min-h-0 min-w-0 flex-1 flex-col"}
-          data-body-inset={bodyInset}
-        >
-          {children}
-        </div>
+        <PaneBodyActionsContext.Provider value={setBodyActions}>
+          <div
+            className={bodyInset === "page"
+              ? "flex min-h-0 min-w-0 flex-1 flex-col p-4"
+              : "flex min-h-0 min-w-0 flex-1 flex-col"}
+            data-body-inset={bodyInset}
+          >
+            {children}
+          </div>
+        </PaneBodyActionsContext.Provider>
       </ChatGroupPanelSlotContext.Provider>
       </div>
       {/* The work panel lands here: `contents` makes what the view portals

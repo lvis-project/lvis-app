@@ -222,11 +222,11 @@ export function MemorySearchPanel({ api, project, onOpenSession }: MemorySearchP
   };
 
   return (
-    <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
-      <div className="pb-4">
-        <h2 className="text-xl font-semibold tracking-normal text-foreground">{t("memorySearchPanel.panelTitle")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("memorySearchPanel.panelDescription")}</p>
-      </div>
+    <div
+      className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden"
+      data-testid="memory-search-panel"
+    >
+      <p className="pb-4 text-sm text-muted-foreground">{t("memorySearchPanel.panelDescription")}</p>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
         <Input
           placeholder={t("memorySearchPanel.searchPlaceholder")}

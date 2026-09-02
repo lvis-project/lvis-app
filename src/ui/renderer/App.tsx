@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { MAX_CHAT_GROUPS } from "../../contract/app-contract.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -30,7 +30,7 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
+import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroupGutter, PaneFrame, areaStyle, chatGroupApi, useChatGroups, type ChatGroupSplitAxis } from "./components/ChatGroupFrame.js";
 import { minimumCanvasHeight } from "./components/chat-group-tree.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
@@ -85,7 +85,14 @@ import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
-import { toViewLocation, viewLocationBreadcrumb, type ViewLocation } from "./utils/view-location.js";
+import {
+  BUILTIN_LABEL_KEYS,
+  BUILTIN_VIEW_ICONS,
+  toViewLocation,
+  viewLocationBreadcrumb,
+  type FeatureViewKey,
+  type ViewLocation,
+} from "./utils/view-location.js";
 import { useViewHistory } from "./hooks/use-view-history.js";
 import { useViewHistoryShortcuts } from "./hooks/use-view-history-shortcuts.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
@@ -1748,71 +1755,89 @@ export function App() {
                             </PageShell>
                       </div>
                       {/* Renders the active main-pane content. One branch per view
-                          keeps the router readable; every branch wraps its panel in
-                          the same PageShell (`main-pane-shell`). */}
+                          keeps the router readable; a built-in view goes into the
+                          same frame a conversation gets (`featurePane`), Settings
+                          and plugins still into their own PageShell. */}
                       {(() => {
-                        if (activeView === "memory") {
+                        /*
+                         * A built-in view, drawn as a pane.
+                         *
+                         * The frame carries what used to be a heading INSIDE the
+                         * view: its name, its glyph, and — through
+                         * `usePaneActions` — the global controls that sat beside
+                         * that heading. Closing it does not close the pane: it
+                         * puts the pane back on `home`, so the conversation the
+                         * view was covering comes back (design §3).
+                         *
+                         * The outer element keeps `main-pane-shell` and the tile
+                         * row's own insets, so the pane's outline lands where the
+                         * conversation tiles' outlines do. Moving it onto the
+                         * tiled canvas itself is a later change.
+                         */
+                        const featurePane = (view: FeatureViewKey, body: ReactNode) => {
+                          const PaneIcon = BUILTIN_VIEW_ICONS[view];
                           return (
-                            <PageShell
-                              padded
-                              maxWidth="6xl"
-                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+                            <div
+                              className="flex min-h-0 min-w-0 flex-1 flex-col pb-(--chrome-gap) pl-(--chrome-gap-tight) pr-(--chrome-gap) pt-0"
                               data-testid="main-pane-shell"
+                              /* Which view this shell is holding. `main-pane-shell`
+                                 alone cannot say: the conversation surface is one
+                                 too, and it is in the DOM at the same time. */
+                              data-view={view}
                             >
-                              <MemorySearchPanel
-                                api={api}
-                                project={activeProject ?? defaultWorkspaceProject}
-                                onOpenSession={async (sessionId) => {
-                                  const loaded = await handleLoadSessionAndRefresh(sessionId);
-                                  if (loaded !== false) handleActivateHome();
-                                  return loaded;
-                                }}
-                              />
-                            </PageShell>
+                              <PaneFrame
+                                title={t(BUILTIN_LABEL_KEYS[view])}
+                                icon={<PaneIcon className="h-4 w-4" />}
+                                bodyInset="page"
+                                onClose={handleActivateHome}
+                              >
+                                {body}
+                              </PaneFrame>
+                            </div>
                           );
+                        };
+
+                        if (activeView === "memory") {
+                          return featurePane("memory", (
+                            <MemorySearchPanel
+                              api={api}
+                              project={activeProject ?? defaultWorkspaceProject}
+                              onOpenSession={async (sessionId) => {
+                                const loaded = await handleLoadSessionAndRefresh(sessionId);
+                                if (loaded !== false) handleActivateHome();
+                                return loaded;
+                              }}
+                            />
+                          ));
                         }
 
                         if (activeView === "insights" || activeView === "starred") {
-                          return (
-                            <PageShell
-                              padded
-                              maxWidth="6xl"
-                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
-                              data-testid="main-pane-shell"
-                            >
-                              <StarredView
-                                api={api}
-                                starred={starred}
-                                sessions={sessions}
-                                workspaceProjects={workspaceProjects}
-                                currentSessionId={currentSessionId}
-                                refreshStarred={refreshStarred}
-                                onJumpToSession={handleLoadSessionAndRefresh}
-                                onActivateHome={handleActivateHome}
-                              />
-                            </PageShell>
-                          );
+                          return featurePane(activeView, (
+                            <StarredView
+                              api={api}
+                              starred={starred}
+                              sessions={sessions}
+                              workspaceProjects={workspaceProjects}
+                              currentSessionId={currentSessionId}
+                              refreshStarred={refreshStarred}
+                              onJumpToSession={handleLoadSessionAndRefresh}
+                              onActivateHome={handleActivateHome}
+                            />
+                          ));
                         }
 
                         if (activeView === "routines") {
-                          return (
-                            <PageShell
-                              padded
-                              maxWidth="6xl"
-                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
-                              data-testid="main-pane-shell"
-                            >
-                              <RoutinePanel
-                                api={api}
-                                onOpenSession={(sessionId) => {
-                                  void (async () => {
-                                    const loaded = await handleLoadSessionAndRefresh(sessionId);
-                                    if (loaded !== false) handleActivateHome();
-                                  })();
-                                }}
-                              />
-                            </PageShell>
-                          );
+                          return featurePane("routines", (
+                            <RoutinePanel
+                              api={api}
+                              onOpenSession={(sessionId) => {
+                                void (async () => {
+                                  const loaded = await handleLoadSessionAndRefresh(sessionId);
+                                  if (loaded !== false) handleActivateHome();
+                                })();
+                              }}
+                            />
+                          ));
                         }
 
                         if (activeView === "settings") {
@@ -1844,16 +1869,9 @@ export function App() {
                         }
 
                         if (activeView === "work-board") {
-                          return (
-                            <PageShell
-                              padded
-                              maxWidth="6xl"
-                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
-                              data-testid="main-pane-shell"
-                            >
-                              <WorkBoardPanel api={api} project={activeProject ?? defaultWorkspaceProject} />
-                            </PageShell>
-                          );
+                          return featurePane("work-board", (
+                            <WorkBoardPanel api={api} project={activeProject ?? defaultWorkspaceProject} />
+                          ));
                         }
 
                         // The conversations are rendered OUTSIDE this router — see

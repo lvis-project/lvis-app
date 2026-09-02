@@ -123,3 +123,20 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitNotificationClicked,
   };
 }
+
+/**
+ * Whether the app is showing the conversation rather than a view.
+ *
+ * The conversations stay MOUNTED across view navigation — a tile subscribes to
+ * its group's stream when it mounts, so unmounting them to show another view
+ * would drop the frames of a turn still running. "At home" is therefore whether
+ * the surface is SHOWING, not whether it exists.
+ *
+ * It lives here rather than in each suite because check-test-duplicates rejects
+ * the same helper body in two test files.
+ */
+export function atHome(container: HTMLElement): boolean {
+  return container
+    .querySelector('[data-testid="chat-surface"]')
+    ?.getAttribute("data-visible") === "true";
+}
