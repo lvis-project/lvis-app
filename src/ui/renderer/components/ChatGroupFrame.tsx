@@ -186,6 +186,15 @@ export interface ChatGroupFrameProps {
 interface PaneFrameProps {
   /** Leading edge of the header. */
   title: string;
+  /**
+   * A longer line about what this pane holds, shown on the title's hover.
+   *
+   * A plugin declares one in its manifest, and the host used to draw it as a
+   * second line under a page heading — chrome as tall as the heading itself,
+   * spent on a sentence read once. On the title attribute it is still there for
+   * whoever wants it and costs the pane no height.
+   */
+  description?: string;
   /** Drawn ahead of the title: the same glyph the sidebar row uses for this
    *  content, so the pane and the row that opened it read as one thing. */
   icon?: ReactNode;
@@ -297,6 +306,7 @@ export function usePaneActions(actions: PaneAction[]): void {
 /** The frame every pane is drawn in. The chrome lives here and only here. */
 export function PaneFrame({
   title,
+  description,
   icon,
   actions = [],
   trailing,
@@ -399,7 +409,10 @@ export function PaneFrame({
         className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap-tight) border-b border-border/(--opacity-half) px-(--chrome-gap)"
       >
         {icon ? <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span> : null}
-        <h2 className="min-w-0 flex-1 truncate text-caption font-medium text-foreground">
+        <h2
+          className="min-w-0 flex-1 truncate text-caption font-medium text-foreground"
+          title={description}
+        >
           {title}
         </h2>
         {headerActions.map((action) =>

@@ -394,6 +394,28 @@ describe("useChatGroups pane content", () => {
     expect(result.current.focusedId).toBe("group-2");
   });
 
+  it("focuses the pane a plugin is already open in rather than opening a second guest", () => {
+    // The plugin case is the one with a cost beyond redundancy: two panes on
+    // one `plugin:<id>:<viewId>` are two <webview> guests in the SAME session
+    // partition, so they share cookies, storage and the host's per-webContents
+    // plugin registration while disagreeing about the plugin's state.
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.setPaneContent("main", { view: "plugin:meeting:control" }));
+    act(() => result.current.focus("group-2"));
+
+    act(() => result.current.setPaneContent("group-2", { view: "plugin:meeting:control" }));
+    expect(result.current.focusedId).toBe("main");
+    expect(result.current.contentById["group-2"]).toEqual({ view: "home" });
+
+    // A DIFFERENT view of the same plugin is a different place, and opens where
+    // it was asked for.
+    act(() => result.current.focus("group-2"));
+    act(() => result.current.setPaneContent("group-2", { view: "plugin:meeting:notes" }));
+    expect(result.current.focusedId).toBe("group-2");
+    expect(result.current.contentById["group-2"]).toEqual({ view: "plugin:meeting:notes" });
+  });
+
   it("counts conversations and panes as two ceilings, and gives both back on close", () => {
     const { result } = renderHook(() => useChatGroups("work"));
     act(() => result.current.split("main", "row"));

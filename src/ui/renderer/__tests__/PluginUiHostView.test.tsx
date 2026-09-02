@@ -104,27 +104,23 @@ describe("PluginUiHostView — loading state", () => {
     expect(getByText(/Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다/)).toBeTruthy();
   });
 
-  it("omits host card chrome when showChrome is false", () => {
-    stubLvisApi("", "file:///preload.cjs");
-    const { queryByText, getByText } = render(<PluginUiHostView view={makeView()} showChrome={false} />);
+  it("names the plugin nowhere — the pane's frame does that", () => {
+    // The label and the description used to be a page header the host drew
+    // above the guest. Inside a pane they are the FRAME's title and its
+    // tooltip, so drawing them here too would name the plugin twice, 36px
+    // apart, and put a second box inside the frame's outline.
+    stubLvisApi();
+    const { container, queryByText } = render(<PluginUiHostView view={makeView()} />);
+
     expect(queryByText("미팅")).toBeNull();
     expect(queryByText("회의 세션 테스트")).toBeNull();
-    expect(getByText(/Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다/)).toBeTruthy();
-  });
-
-  it("renders inline plugin views without host card or nested border chrome", () => {
-    stubLvisApi();
-    const { container, getByText } = render(<PluginUiHostView view={makeView()} />);
-
-    expect(getByText("미팅")).toBeTruthy();
-    expect(getByText("회의 세션 테스트")).toBeTruthy();
+    expect(container.querySelector("h1, h2, h3")).toBeNull();
     expect(container.querySelector("webview")).toBeTruthy();
     expect(container.querySelector(".bg-card")).toBeNull();
     expect(container.querySelector(".text-card-foreground")).toBeNull();
-    expect(container.querySelector(".border")).toBeNull();
   });
 
-  it("shows auth error banner above inline plugin content", () => {
+  it("shows auth error banner above the plugin content", () => {
     stubLvisApi("", "file:///preload.cjs");
     const { getByText } = render(
       <PluginUiHostView view={makeView()} authError="플러그인 로그인 실패 code: non-corp-network" />,
@@ -135,23 +131,11 @@ describe("PluginUiHostView — loading state", () => {
 
   it("leaves app-level navigation to the shared toolbar", () => {
     stubLvisApi();
-    const { queryByTestId, getByText } = render(<PluginUiHostView view={makeView()} />);
+    const { queryByTestId, container } = render(<PluginUiHostView view={makeView()} />);
 
-    expect(getByText("미팅")).toBeTruthy();
+    expect(container.querySelector('[data-testid="plugin-page-shell"]')).toBeTruthy();
     expect(queryByTestId("plugin-page-back")).toBeNull();
     expect(queryByTestId("page-shell-back")).toBeNull();
-  });
-
-  it("shows auth error banner for detached plugin content", () => {
-    stubLvisApi("", "file:///preload.cjs");
-    const { getByText } = render(
-      <PluginUiHostView
-        view={makeView()}
-        showChrome={false}
-        authError="플러그인 로그인 실패 code: non-corp-network"
-      />,
-    );
-    expect(getByText("플러그인 로그인 실패 code: non-corp-network")).toBeTruthy();
   });
 
   it("does NOT show loading overlay for embedded-page kind (legacy)", () => {
