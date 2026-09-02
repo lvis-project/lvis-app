@@ -670,15 +670,19 @@ function runAppChecks(dir) {
     );
   }
   ensureAppTestRuntimeAbi(dir);
-  runPackageScripts(dir, ["check:knip"], "lvis-app full checks");
   runAppTypecheckGate(dir, "full checks");
   runPackageScripts(dir, ["test", "build"], "lvis-app full checks");
   // After the suite and the build, not before them and not inside `build`.
-  // This gate reads a hand-written ledger of source paths, so an unrelated
-  // deletion makes it fail; ahead of the suite that failure would end the push
-  // gate without a test having run. It used to be the first command of the
-  // `build` script, which is where CI hit exactly that.
-  runPackageScripts(dir, ["check:sunset-inventory"], "lvis-app full checks");
+  // `check:gate-core` is the one inventory of the hygiene gates CI and this
+  // hook share (Knip baseline, duplicate-helper scan, sunset ledger); ci.yml
+  // calls the same script, so the two lists cannot drift. Each of them reads
+  // a ledger that an unrelated change can make stale; ahead of the suite that
+  // failure would end the push gate without a test having run. The sunset
+  // ledger used to be the first command of the `build` script, which is
+  // where CI hit exactly that. CI-only on purpose, for the pre-push time
+  // budget: `check:screenshot-provenance` (+ self-test), `check:test-coverage`
+  // and the Knip self-test (`test:knip-gate`).
+  runPackageScripts(dir, ["check:gate-core"], "lvis-app full checks");
   // Plugin tool names are validated where the names actually enter the host:
   // `validatePluginManifest` rejects any name outside ^[a-zA-Z_][a-zA-Z0-9_]*$
   // and any duplicate within a manifest, and `ToolRegistry` rejects a name

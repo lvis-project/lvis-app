@@ -127,12 +127,24 @@ const HYGIENE_GATES: ReadonlyArray<{ script: string; file: string }> = [
   { script: "check:sunset-inventory", file: "check-sunset-inventory" },
 ];
 
-const REPOSITORY_HYGIENE = HYGIENE_GATES.flatMap(({ script, file }) => [
-  script,
-  file,
-]);
+/** The composite both ci.yml and the pre-push hook call, so the two gate
+ *  inventories cannot drift. Its members are pinned by "keeps check:gate-core
+ *  in step with its callers" below; a workflow step that names the composite
+ *  counts as naming every member. */
+const HYGIENE_COMPOSITE = {
+  script: "check:gate-core",
+  members: ["check:knip", "check:test-duplicates", "check:sunset-inventory"],
+} as const;
 
-const HYGIENE_SCRIPTS = new Set(HYGIENE_GATES.map(({ script }) => script));
+const REPOSITORY_HYGIENE = [
+  ...HYGIENE_GATES.flatMap(({ script, file }) => [script, file]),
+  HYGIENE_COMPOSITE.script,
+];
+
+const HYGIENE_SCRIPTS = new Set([
+  ...HYGIENE_GATES.map(({ script }) => script),
+  HYGIENE_COMPOSITE.script,
+]);
 
 const packageScripts = (
   JSON.parse(readRepoFile("package.json")) as {
@@ -461,12 +473,10 @@ describe("installer smoke and packaging discipline", () => {
       "ci.yml's build-and-test must run every core hygiene gate: it carries a " +
         "required check name, and a gate outside it stops blocking merges",
     ).toEqual([
-      "check:knip",
       "test:knip-gate",
       "check:screenshot-provenance",
       "check:screenshot-provenance:self-test",
-      "check:test-duplicates",
-      "check:sunset-inventory",
+      "check:gate-core",
     ]);
 
     // `test:a2a-p4-5:evidence` is on the verification side on purpose. It
@@ -528,6 +538,28 @@ describe("installer smoke and packaging discipline", () => {
     // A `needs:` edge would restore the skipping the split removed: a failed
     // gate would take `build` with it and report it as skipped.
     expect(declaresNeeds(gate as string)).toBe(false);
+  });
+
+  it("keeps check:gate-core in step with its callers", () => {
+    const body = packageScripts[HYGIENE_COMPOSITE.script];
+    expect(body, `package.json has no "${HYGIENE_COMPOSITE.script}" script`).toBeDefined();
+    for (const member of HYGIENE_COMPOSITE.members) {
+      expect(
+        mentions(body as string, member),
+        `${HYGIENE_COMPOSITE.script} no longer runs ${member}`,
+      ).toBe(true);
+      expect(HYGIENE_SCRIPTS.has(member), `${member} is not a listed hygiene gate`).toBe(true);
+    }
+    // Both callers, by name: a caller that re-lists the members instead is
+    // the drift the composite exists to end.
+    expect(readRepoFile("scripts/hooks/run-local-checks.mjs")).toContain(
+      `["${HYGIENE_COMPOSITE.script}"]`,
+    );
+    const ci = jobRunCommands(
+      workflowJobs(readRepoFile(".github/workflows/ci.yml")).get("build-and-test") as string,
+    );
+    expect(matched(ci, [HYGIENE_COMPOSITE.script])).toEqual([HYGIENE_COMPOSITE.script]);
+    expect(matched(ci, [...HYGIENE_COMPOSITE.members])).toEqual([]);
   });
 
   it("keeps each hygiene gate's two spellings in step with package.json", () => {

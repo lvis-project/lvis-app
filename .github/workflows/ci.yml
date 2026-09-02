@@ -176,9 +176,16 @@ jobs:
       # step, if these gates leave `build-and-test`, if one of them re-enters
       # the `build` composite, and if the set of asserting commands inside that
       # composite changes without the list above changing with it.
-      - name: Run deterministic Knip gate
+      # `check:gate-core` is the one inventory of the gates both CI and the
+      # pre-push hook (scripts/hooks/run-local-checks.mjs) run: the Knip
+      # baseline, the duplicate-helper scan, the sunset ledger. The two callers
+      # used to list them separately and had drifted. The gates below it are
+      # CI-only on purpose — the Knip self-test, the screenshot-provenance
+      # gate and its self-test cost more than a pre-push budget allows — and
+      # `check:test-coverage` above is CI-only for the same reason.
+      - name: Core hygiene gates
         working-directory: lvis-app
-        run: bun run check:knip && bun run test:knip-gate
+        run: bun run check:gate-core && bun run test:knip-gate
       # The docs-site images are published publicly, and the batch that is there
       # now was captured by hand from a live session — see
       # docs/development/screenshot-reshoot.md. This gate cannot read pixels; it
@@ -189,22 +196,6 @@ jobs:
       - name: Screenshot provenance gate
         working-directory: lvis-app
         run: bun run check:screenshot-provenance:self-test && bun run check:screenshot-provenance
-      # The other half of `check:test-quality`. Duplicated test helpers are a
-      # bookkeeping fact about the test tree, not a statement about whether the
-      # product works, so this scan runs after the suite it would otherwise be
-      # able to end.
-      - name: Scan for duplicate test helpers
-        working-directory: lvis-app
-        run: bun run check:test-duplicates -- --fail-on-duplicates
-      # `docs/development/legacy-sunset-inventory.json` declares, per temporary
-      # code path, the source files that carry it. It goes stale the way the
-      # screenshot manifest did — one change deletes a file, this ledger keeps
-      # naming it — which is why it is here and not in the `build` composite it
-      # used to open. Appended last so the step numbers of the steps above are
-      # the ones the pull request's evidence table records.
-      - name: Legacy sunset inventory gate
-        working-directory: lvis-app
-        run: bun run check:sunset-inventory
 
   windows-permission-tests:
     name: Windows permission path tests

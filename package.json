@@ -85,6 +85,7 @@
     "check:typecheck-tests:self-test": "node scripts/check-test-typecheck-gate-self-test.mjs",
     "check:typecheck-tests:update": "node scripts/check-test-typecheck-baseline.mjs --update-baseline",
     "check:test-duplicates": "node scripts/check-test-duplicates.mjs",
+    "check:gate-core": "bun run check:knip && bun run check:test-duplicates -- --fail-on-duplicates && bun run check:sunset-inventory",
     "test:coverage": "bun run test:prepare && bun run test:vitest -- run --coverage",
     "check:test-coverage": "node scripts/run-test-coverage-gate.mjs",
     "check:test-quality": "bun run check:test-duplicates -- --fail-on-duplicates && bun run check:test-coverage",
