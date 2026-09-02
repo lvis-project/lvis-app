@@ -45,7 +45,7 @@ import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
-import { CHAT_SESSION_DRAG_TYPE } from "./chat-group-drop.js";
+import { CHAT_SESSION_DRAG_TYPE } from "./pane-drop.js";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -1678,7 +1678,7 @@ function onActiveSidebarTabChangeGuard(value: string, onActiveTabChange: (tab: S
 //
 // Pin / export / import USED to sit here. They act on a CONVERSATION, and the
 // part that owns the conversation is the chat group, so they moved into its
-// header (ChatGroupFrame) and into each row's context menu. What took their
+// header (the pane frame) and into each row's context menu. What took their
 // place navigates ROUTES, which is what this sidebar owns. See DESIGN.md
 // "Workbench model".
 // Always rendered (both expanded + collapsed). When the surrounding card is

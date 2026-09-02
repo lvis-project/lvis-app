@@ -8,7 +8,7 @@
  * needs no teaching, and it is the only model where the shape the user wants is
  * expressed by where they let go rather than by a separate control.
  */
-import type { DropEdge } from "./chat-group-tree.js";
+import type { DropEdge } from "./pane-tree.js";
 
 /** The drag payload's MIME type. Own type so a file drag never looks like one. */
 export const CHAT_SESSION_DRAG_TYPE = "application/x-lvis-chat-session";

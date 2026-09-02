@@ -14,23 +14,23 @@
  */
 
 /** Which way a split divides its space. Internal: it reaches callers through
- *  `ChatGroupGutter.axis`, never by name. */
+ *  `PaneGutter.axis`, never by name. */
 export type SplitAxis = "row" | "column";
 
-export interface ChatGroupLeaf {
+export interface PaneLeaf {
   kind: "leaf";
   chatGroupId: string;
 }
 
-interface ChatGroupSplit {
+interface PaneSplit {
   kind: "split";
   axis: SplitAxis;
-  children: ChatGroupNode[];
+  children: PaneNode[];
   /** Fractions of the split's extent, one per child, summing to 1. */
   sizes: number[];
 }
 
-export type ChatGroupNode = ChatGroupLeaf | ChatGroupSplit;
+export type PaneNode = PaneLeaf | PaneSplit;
 
 /** Which side of a tile a session was dropped on. */
 export type DropEdge = "left" | "right" | "top" | "bottom";
@@ -45,18 +45,18 @@ export const AXIS_OF: Record<DropEdge, SplitAxis> = {
 /** A drop on these edges puts the new tile FIRST within its split. */
 const LEADING: ReadonlySet<DropEdge> = new Set<DropEdge>(["left", "top"]);
 
-export function leaf(chatGroupId: string): ChatGroupLeaf {
+export function leaf(chatGroupId: string): PaneLeaf {
   return { kind: "leaf", chatGroupId };
 }
 
 /** Every group id in the tree, left to right, top to bottom. */
-export function leafIds(node: ChatGroupNode): string[] {
+export function leafIds(node: PaneNode): string[] {
   return node.kind === "leaf"
     ? [node.chatGroupId]
     : node.children.flatMap(leafIds);
 }
 
-export function countLeaves(node: ChatGroupNode): number {
+export function countLeaves(node: PaneNode): number {
   return node.kind === "leaf" ? 1 : node.children.reduce((n, c) => n + countLeaves(c), 0);
 }
 
@@ -72,10 +72,10 @@ function evenSizes(count: number): number[] {
  * make two different trees render identically, which would let a test pass on
  * a shape the user cannot actually produce.
  */
-function normalize(node: ChatGroupNode): ChatGroupNode {
+function normalize(node: PaneNode): PaneNode {
   if (node.kind === "leaf") return node;
 
-  const children: ChatGroupNode[] = [];
+  const children: PaneNode[] = [];
   const sizes: number[] = [];
   node.children.forEach((child, at) => {
     const flat = normalize(child);
@@ -109,12 +109,12 @@ function normalize(node: ChatGroupNode): ChatGroupNode {
  * pointing at.
  */
 export function splitLeaf(
-  root: ChatGroupNode,
+  root: PaneNode,
   targetGroupId: string,
   edge: DropEdge,
   newGroupId: string,
-): ChatGroupNode {
-  const rewrite = (node: ChatGroupNode): ChatGroupNode => {
+): PaneNode {
+  const rewrite = (node: PaneNode): PaneNode => {
     if (node.kind === "leaf") {
       if (node.chatGroupId !== targetGroupId) return node;
       const added = leaf(newGroupId);
@@ -136,13 +136,13 @@ export function splitLeaf(
  * Returns the tree unchanged when the id is not in it or is the last leaf —
  * an empty main area is not a state the rest of the app can render.
  */
-export function closeLeaf(root: ChatGroupNode, chatGroupId: string): ChatGroupNode {
+export function closeLeaf(root: PaneNode, chatGroupId: string): PaneNode {
   if (countLeaves(root) <= 1) return root;
   if (!leafIds(root).includes(chatGroupId)) return root;
 
-  const prune = (node: ChatGroupNode): ChatGroupNode | null => {
+  const prune = (node: PaneNode): PaneNode | null => {
     if (node.kind === "leaf") return node.chatGroupId === chatGroupId ? null : node;
-    const kept: ChatGroupNode[] = [];
+    const kept: PaneNode[] = [];
     const sizes: number[] = [];
     node.children.forEach((child, at) => {
       const survivor = prune(child);
@@ -170,7 +170,7 @@ export function closeLeaf(root: ChatGroupNode, chatGroupId: string): ChatGroupNo
  * a tile's box is one number the layout, a drag hit-test, and a measurement in
  * a test all read the same way.
  */
-export interface ChatGroupBox {
+export interface PaneBox {
   chatGroupId: string;
   left: number;
   top: number;
@@ -193,7 +193,7 @@ export interface ChatGroupBox {
  * tile and chat mode's single tile need no special case.
  */
 export function minimumCanvasHeight(
-  boxes: readonly ChatGroupBox[],
+  boxes: readonly PaneBox[],
   tileFloor: number,
 ): number {
   // `box.height` is a PERCENTAGE of the canvas, as `areaStyle` writes it —
@@ -203,18 +203,18 @@ export function minimumCanvasHeight(
   return shortestPercent <= 0 ? tileFloor : Math.ceil((tileFloor * 100) / shortestPercent);
 }
 
-export function layoutBoxes(node: ChatGroupNode): ChatGroupBox[] {
+export function layoutBoxes(node: PaneNode): PaneBox[] {
   const walk = (
-    current: ChatGroupNode,
+    current: PaneNode,
     left: number,
     top: number,
     width: number,
     height: number,
-  ): ChatGroupBox[] => {
+  ): PaneBox[] => {
     if (current.kind === "leaf") {
       return [{ chatGroupId: current.chatGroupId, left, top, width, height }];
     }
-    const boxes: ChatGroupBox[] = [];
+    const boxes: PaneBox[] = [];
     let offset = 0;
     current.children.forEach((child, at) => {
       const share = current.sizes[at] ?? 1 / current.children.length;
@@ -239,7 +239,7 @@ export function layoutBoxes(node: ChatGroupNode): ChatGroupBox[] {
  * boundary line as percentages of the main area: zero-thickness along the
  * split's axis, spanning the pair's shared extent across it.
  */
-export interface ChatGroupGutter {
+export interface PaneGutter {
   /** Stable while the tree's SHAPE is unchanged; a resize keeps it. */
   key: string;
   axis: SplitAxis;
@@ -256,17 +256,17 @@ export interface ChatGroupGutter {
   trailing: number;
 }
 
-export function layoutGutters(node: ChatGroupNode): ChatGroupGutter[] {
+export function layoutGutters(node: PaneNode): PaneGutter[] {
   const walk = (
-    current: ChatGroupNode,
+    current: PaneNode,
     path: number[],
     left: number,
     top: number,
     width: number,
     height: number,
-  ): ChatGroupGutter[] => {
+  ): PaneGutter[] => {
     if (current.kind === "leaf") return [];
-    const gutters: ChatGroupGutter[] = [];
+    const gutters: PaneGutter[] = [];
     const extent = current.axis === "row" ? width : height;
     let offset = 0;
     current.children.forEach((child, at) => {
@@ -311,12 +311,12 @@ export function layoutGutters(node: ChatGroupNode): ChatGroupGutter[] {
  * Returns the tree unchanged when the gutter does not exist in it.
  */
 export function resizeGutter(
-  root: ChatGroupNode,
-  gutter: Pick<ChatGroupGutter, "path" | "index">,
+  root: PaneNode,
+  gutter: Pick<PaneGutter, "path" | "index">,
   leadingShare: number,
-): ChatGroupNode {
+): PaneNode {
   const share = Math.min(1, Math.max(0, leadingShare));
-  const rewrite = (node: ChatGroupNode, depth: number): ChatGroupNode | null => {
+  const rewrite = (node: PaneNode, depth: number): PaneNode | null => {
     if (node.kind === "leaf") return null;
     if (depth === gutter.path.length) {
       const a = node.sizes[gutter.index];

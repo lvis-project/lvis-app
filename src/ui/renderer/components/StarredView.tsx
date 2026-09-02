@@ -14,7 +14,7 @@ import { formatCost, formatTokensExact } from "../../../lib/cost-format.js";
 import { formatHhMm, formatMediumDateTime, formatMonthYear } from "../../../shared/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
 import { shortSessionId } from "../../../shared/session-lookup.js";
-import { usePaneActions } from "./ChatGroupFrame.js";
+import { usePaneActions } from "./PaneFrame.js";
 
 export interface StarredItem {
   id: string;

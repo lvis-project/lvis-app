@@ -54,7 +54,7 @@ test.describe("workspace rail redesign", () => {
 
   test("docked rail: no header count, drag splitter, launcher opens a tab", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
 
     const panel = page.getByTestId(TEST_IDS.chatSidePanel);
     await expect(panel).toBeVisible();
@@ -85,7 +85,7 @@ test.describe("workspace rail redesign", () => {
     // manifests in) and open the panel first; the mode/panel IPC resizes the OS
     // window, so pin the container width LAST so it is the final authority.
     await page.getByTestId("app-mode-chat").click();
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await page.setViewportSize({ width: 908, height: 840 });
 
     // Docked, not a modal drawer: no drawer sheet, no backdrop blur.
@@ -98,7 +98,7 @@ test.describe("workspace rail redesign", () => {
 
   test("a narrow tile floats the panel over its transcript instead of crushing it", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     const motion = page.getByTestId("chat-side-panel-motion");
     await expect(motion).toHaveAttribute("data-panel-mode", "docked");
 

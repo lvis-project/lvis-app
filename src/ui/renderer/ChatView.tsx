@@ -38,7 +38,7 @@ import { SIDE_PANEL_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js
 import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
 import { createPortal } from "react-dom";
 import { FloatingRightLane } from "./components/FloatingRightLane.js";
-import { useChatGroupPanelSlot } from "./components/ChatGroupFrame.js";
+import { usePanePanelSlot } from "./components/PaneFrame.js";
 import { computeToolActivity } from "./utils/tool-activity.js";
 import { sidePanelLayout, useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { SIDE_PANEL_MIN_RESERVE } from "../../shared/side-panel.js";
@@ -273,7 +273,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
   // slot; outside a frame it stays a child of this view and measures it.
   const chatViewRootRef = useRef<HTMLDivElement | null>(null);
   const dockedPanelMotionRef = useRef<HTMLDivElement | null>(null);
-  const panelSlot = useChatGroupPanelSlot();
+  const panelSlot = usePanePanelSlot();
   const inFrame = panelSlot !== null;
   const panelHost = panelSlot?.panel ?? null;
   const tileElement = panelSlot?.tile ?? null;
@@ -937,7 +937,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         </div>
         );
         // Inside a frame the panel is the tile's guest, not this view's — see
-        // ChatGroupFrame's panel slot.
+        // `PaneFrame`'s panel slot.
         return panelHost ? createPortal(wrapper, panelHost) : wrapper;
       })() : null}
     </div>

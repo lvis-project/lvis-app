@@ -3,7 +3,7 @@ import {
   type ReactNode, type RefObject,
 } from "react";
 import {
-  Columns2, Download, Maximize2, Minimize2, PanelRightClose, PanelRightOpen,
+  Columns2, Download, Maximize2, Minimize2,
   Pin, Rows2, Upload, X,
 } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
@@ -28,7 +28,7 @@ import {
   dropIndicatorStyle,
   dropTargetAt,
   type DropTarget,
-} from "./chat-group-drop.js";
+} from "./pane-drop.js";
 import { AXIS_OF,
   closeLeaf,
   countLeaves,
@@ -38,13 +38,12 @@ import { AXIS_OF,
   leafIds,
   resizeGutter,
   splitLeaf,
-  type ChatGroupBox,
-  type ChatGroupGutter,
-  type ChatGroupNode,
+  type PaneBox,
+  type PaneGutter,
+  type PaneNode,
   type DropEdge,
   type SplitAxis,
-} from "./chat-group-tree.js";
-import { TEST_IDS } from "../../../shared/test-ids.js";
+} from "./pane-tree.js";
 
 /**
  * The least a tile may be dragged down to, in px.
@@ -62,11 +61,11 @@ import { TEST_IDS } from "../../../shared/test-ids.js";
  * number is what the tile CONTAINS, so it moves when the composer does, not
  * when the window does.
  */
-export const CHAT_GROUP_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
-export const CHAT_GROUP_MIN_HEIGHT = 280;
+export const PANE_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
+export const PANE_MIN_HEIGHT = 280;
 
 /** The 1px hairline the frame draws itself with, on each of its four sides. */
-const CHAT_GROUP_FRAME_BORDER = 1;
+const PANE_FRAME_BORDER = 1;
 
 /**
  * What a cell's frame loses to the air around it: the half-gutter it carries on
@@ -75,12 +74,12 @@ const CHAT_GROUP_FRAME_BORDER = 1;
  * border. The tile floors above are on the frame's CONTENT, not on the cell, so
  * a split has to subtract this before comparing.
  */
-export const CHAT_GROUP_CELL_INSET = 2 * CHROME_GAP_TIGHT + 2 * CHAT_GROUP_FRAME_BORDER;
+export const PANE_CELL_INSET = 2 * CHROME_GAP_TIGHT + 2 * PANE_FRAME_BORDER;
 
 /** Which way a tile is halved: `row` puts the new tile beside it, `column` under it. */
-export type ChatGroupSplitAxis = SplitAxis;
+export type PaneSplitAxis = SplitAxis;
 /** The drop edge a header split on an axis stands for: the new tile trails. */
-const SPLIT_EDGE: Record<ChatGroupSplitAxis, DropEdge> = { row: "right", column: "bottom" };
+const SPLIT_EDGE: Record<PaneSplitAxis, DropEdge> = { row: "right", column: "bottom" };
 
 /**
  * The pane: an outlined work container with its own header.
@@ -97,9 +96,10 @@ const SPLIT_EDGE: Record<ChatGroupSplitAxis, DropEdge> = { row: "right", column:
  * a frame, and the pane earns it precisely because it repeats.
  *
  * OWNERSHIP. Pin, export, and import act on a CONVERSATION, so they belong to
- * the part that owns the conversation — this header — not to the window band
- * they used to sit in. The work-panel toggle is here for the same reason: each
- * group owns its own panel, so the control that opens it cannot be global.
+ * the part that owns the conversation — the header of the pane drawing it —
+ * not to the window band they used to sit in. The work-panel toggle arrives
+ * the same way, as `trailing` from the conversation: each conversation owns
+ * its own panel, so the control that opens it cannot be global.
  */
 interface PaneAction {
   /** Stable id — also the `data-testid` suffix and the menu command key. */
@@ -117,60 +117,6 @@ interface PaneAction {
   onSelect: () => void | Promise<void>;
   /** When present the control opens a menu of these instead of firing. */
   items?: Array<{ id: string; label: string; onSelect: () => void | Promise<void> }>;
-}
-
-/** A conversation's header action: the pane action, named for its one consumer today. */
-export type ChatGroupAction = PaneAction;
-
-export interface ChatGroupFrameProps {
-  /** Leading edge of the header. The conversation's own title. */
-  title: string;
-  /** Trailing edge, before the panel toggle. */
-  actions: ChatGroupAction[];
-  /** Whether this group currently has focus — drives the border, see above. */
-  focused?: boolean;
-  /** This group's WORK PANEL — the right-hand rail. It belongs to the group
-   *  because it shows what THIS conversation is doing. */
-  panelOpen: boolean;
-  onTogglePanel: () => void;
-  /**
-   * Split off another group beside (`row`) or under (`column`) this one.
-   * Absent when no free conversation source remains.
-   */
-  onSplit?: (axis: ChatGroupSplitAxis) => void;
-  /**
-   * Whether a split on that axis leaves both halves above the tile floors.
-   * Read when the choice opens, so it sees the tile as it is then.
-   */
-  splitFits?: (axis: ChatGroupSplitAxis) => boolean;
-  /**
-   * Take a conversation dropped on this tile.
-   *
-   * `target` is where it landed: an edge splits this tile on that axis, the
-   * centre replaces what it is holding.
-   */
-  onSessionDrop?: (sessionId: string, target: DropTarget) => void;
-  /**
-   * Whether another tile still fits.
-   *
-   * At the ceiling every drop resolves to the centre, so the tile highlights
-   * whole rather than by halves: the limit shows up in the gesture itself
-   * instead of arriving as a rejection once the user has let go.
-   */
-  canSplit?: boolean;
-  /** Close this group. Absent on the last one — a workspace with no group is
-   *  not a state the user can get back out of. */
-  onClose?: () => void;
-  /**
-   * Show only this group, or give the others their space back. Absent while
-   * the group is alone: with nothing to hide, the control would do nothing.
-   */
-  maximized?: boolean;
-  onToggleMaximize?: () => void;
-  /** Raised when anything inside the group is interacted with, so the frame
-   *  can take focus. */
-  onFocus?: () => void;
-  children: ReactNode;
 }
 
 /**
@@ -213,16 +159,32 @@ interface PaneFrameProps {
   /** Raised when anything inside the pane is interacted with, so the frame
    *  can take focus. */
   onFocus?: () => void;
-  /** Whether another tile still fits — see `ChatGroupFrameProps.canSplit`. */
+  /**
+   * Whether another tile still fits.
+   *
+   * At the ceiling every drop resolves to the centre, so the tile highlights
+   * whole rather than by halves: the limit shows up in the gesture itself
+   * instead of arriving as a rejection once the user has let go.
+   */
   canSplit?: boolean;
   /** Split off another tile beside (`row`) or under (`column`) this one. */
-  onSplit?: (axis: ChatGroupSplitAxis) => void;
+  onSplit?: (axis: PaneSplitAxis) => void;
   /** Whether a split on that axis leaves both halves above the tile floors. */
-  splitFits?: (axis: ChatGroupSplitAxis) => boolean;
+  splitFits?: (axis: PaneSplitAxis) => boolean;
   /** Take a conversation dropped on this tile — any pane can receive one. */
   onSessionDrop?: (sessionId: string, target: DropTarget) => void;
   /** Close this tile. Absent on the last one. */
   onClose?: () => void;
+  /**
+   * What closing this pane is called, when it is not "close the pane".
+   *
+   * A conversation pane's close control removes the pane. A ROUTED pane's puts
+   * that pane back on its conversation, so the pane survives — labelling it
+   * "Close pane" there would name something the click does not do. The routed
+   * caller passes the view's own name instead; everything else takes the
+   * default.
+   */
+  closeLabel?: string;
   /** Show only this tile, or give the others their space back. */
   maximized?: boolean;
   onToggleMaximize?: () => void;
@@ -238,14 +200,21 @@ interface PaneFrameProps {
    */
   bodyInset?: "none" | "page";
   /**
-   * Whether to publish the aside slot (`useChatGroupPanelSlot`) beside the
+   * Whether to publish the aside slot (`usePanePanelSlot`) beside the
    * body, as tall as the tile. The conversation's work panel portals into it.
    */
   asideSlot?: boolean;
   children: ReactNode;
 }
 
-const HEADER_BUTTON_CLASS =
+/**
+ * The recipe every control in the header band is drawn with.
+ *
+ * Exported because a pane's `trailing` control is built by whoever owns that
+ * kind of pane, and it has to sit in the same row as the frame's own controls
+ * without being a size or a colour apart from them.
+ */
+export const HEADER_BUTTON_CLASS =
   "h-(--chrome-icon-button) w-(--chrome-icon-button) aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground";
 
 /**
@@ -255,7 +224,7 @@ const HEADER_BUTTON_CLASS =
  * docked/overlay verdict is measured against: measuring the view would
  * measure something the panel's own width changes.
  */
-export interface ChatGroupPanelSlot {
+export interface PanePanelSlot {
   panel: HTMLElement | null;
   tile: HTMLElement | null;
 }
@@ -267,10 +236,10 @@ export interface ChatGroupPanelSlot {
  * apart, because rendering the panel inline and then moving it into the
  * portal one render later would remount everything under it.
  */
-const ChatGroupPanelSlotContext = createContext<ChatGroupPanelSlot | null>(null);
+const PanePanelSlotContext = createContext<PanePanelSlot | null>(null);
 
-export function useChatGroupPanelSlot(): ChatGroupPanelSlot | null {
-  return useContext(ChatGroupPanelSlotContext);
+export function usePanePanelSlot(): PanePanelSlot | null {
+  return useContext(PanePanelSlotContext);
 }
 
 /**
@@ -317,6 +286,7 @@ export function PaneFrame({
   splitFits,
   onSessionDrop,
   onClose,
+  closeLabel,
   maximized = false,
   onToggleMaximize,
   bodyInset = "none",
@@ -324,10 +294,11 @@ export function PaneFrame({
   children,
 }: PaneFrameProps) {
   const { t } = useTranslation();
+  const closeText = closeLabel ?? t("pane.close");
   const [panelSlot, setPanelSlot] = useState<HTMLElement | null>(null);
   const [tile, setTile] = useState<HTMLElement | null>(null);
   const [bodyActions, setBodyActions] = useState<PaneAction[]>([]);
-  const panelSlots = useMemo<ChatGroupPanelSlot>(() => ({ panel: panelSlot, tile }), [panelSlot, tile]);
+  const panelSlots = useMemo<PanePanelSlot>(() => ({ panel: panelSlot, tile }), [panelSlot, tile]);
   // The caller's actions lead: what OWNS the pane comes before what the content
   // it happens to be showing contributes.
   const headerActions = bodyActions.length === 0 ? actions : [...actions, ...bodyActions];
@@ -335,7 +306,7 @@ export function PaneFrame({
   // the verdict reads the canvas's live size, which is a layout read that
   // belongs in an event, and a verdict taken while the popover is open is
   // what the user is looking at.
-  const [splitChoice, setSplitChoice] = useState<Record<ChatGroupSplitAxis, boolean> | null>(null);
+  const [splitChoice, setSplitChoice] = useState<Record<PaneSplitAxis, boolean> | null>(null);
   // Choosing a direction hands focus to the NEW tile; the popover must not
   // return it to the trigger on close, or this tile would take focus back.
   const splitChosenRef = useRef(false);
@@ -360,7 +331,7 @@ export function PaneFrame({
 
   return (
     <section
-      data-testid="chat-group"
+      data-testid="pane"
       data-focused={focused ? "true" : undefined}
       data-drop-target={dropTarget ?? undefined}
       onDragOver={onSessionDrop ? (event) => {
@@ -405,7 +376,7 @@ export function PaneFrame({
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header
-        data-testid="chat-group-header"
+        data-testid="pane-header"
         className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap-tight) border-b border-border/(--opacity-half) px-(--chrome-gap)"
       >
         {icon ? <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span> : null}
@@ -428,7 +399,7 @@ export function PaneFrame({
                       disabled={action.disabled}
                       title={action.label}
                       aria-label={action.label}
-                      data-testid={`chat-group-action-${action.id}`}
+                      data-testid={`pane-action-${action.id}`}
                     >
                       {action.icon}
                     </Button>
@@ -440,7 +411,7 @@ export function PaneFrame({
                 {action.items.map((item) => (
                   <DropdownMenuItem
                     key={item.id}
-                    data-testid={`chat-group-action-${action.id}-${item.id}`}
+                    data-testid={`pane-action-${action.id}-${item.id}`}
                     onClick={() => void item.onSelect()}
                   >
                     {item.label}
@@ -460,7 +431,7 @@ export function PaneFrame({
                   title={action.label}
                   aria-label={action.label}
                   aria-pressed={action.active}
-                  data-testid={`chat-group-action-${action.id}`}
+                  data-testid={`pane-action-${action.id}`}
                 >
                   {action.icon}
                 </Button>
@@ -482,16 +453,16 @@ export function PaneFrame({
                     variant="ghost"
                     size="icon"
                     className={HEADER_BUTTON_CLASS}
-                    title={t("chatGroup.split")}
-                    aria-label={t("chatGroup.split")}
+                    title={t("pane.split")}
+                    aria-label={t("pane.split")}
                     aria-expanded={splitChoice !== null}
-                    data-testid="chat-group-split"
+                    data-testid="pane-split"
                   >
                     <Columns2 className="h-4 w-4" />
                   </Button>
                 </PopoverTrigger>
               </TooltipTrigger>
-              <TooltipContent side="bottom">{t("chatGroup.split")}</TooltipContent>
+              <TooltipContent side="bottom">{t("pane.split")}</TooltipContent>
             </Tooltip>
             <PopoverContent
               side="bottom"
@@ -503,12 +474,12 @@ export function PaneFrame({
                 event.preventDefault();
               }}
               className="flex w-auto gap-1 p-1"
-              aria-label={t("chatGroup.split")}
-              data-testid="chat-group-split-choice"
+              aria-label={t("pane.split")}
+              data-testid="pane-split-choice"
             >
               {splitChoice && !splitChoice.row && !splitChoice.column ? (
-                <p className="px-2 py-1 text-xs text-muted-foreground" data-testid="chat-group-split-no-room">
-                  {t("chatGroup.splitNoRoom")}
+                <p className="px-2 py-1 text-xs text-muted-foreground" data-testid="pane-split-no-room">
+                  {t("pane.splitNoRoom")}
                 </p>
               ) : (["row", "column"] as const).map((axis) => (
                 <Button
@@ -517,7 +488,7 @@ export function PaneFrame({
                   size="sm"
                   className="h-8 gap-2 px-2 text-xs"
                   disabled={splitChoice ? !splitChoice[axis] : false}
-                  data-testid={`chat-group-split-${axis}`}
+                  data-testid={`pane-split-${axis}`}
                   onClick={() => {
                     splitChosenRef.current = true;
                     setSplitChoice(null);
@@ -525,7 +496,7 @@ export function PaneFrame({
                   }}
                 >
                   {axis === "row" ? <Columns2 className="h-4 w-4" /> : <Rows2 className="h-4 w-4" />}
-                  {axis === "row" ? t("chatGroup.splitRow") : t("chatGroup.splitColumn")}
+                  {axis === "row" ? t("pane.splitRow") : t("pane.splitColumn")}
                 </Button>
               ))}
             </PopoverContent>
@@ -544,15 +515,15 @@ export function PaneFrame({
                 size="icon"
                 className={HEADER_BUTTON_CLASS}
                 onClick={onToggleMaximize}
-                title={maximized ? t("chatGroup.restore") : t("chatGroup.maximize")}
-                aria-label={maximized ? t("chatGroup.restore") : t("chatGroup.maximize")}
+                title={maximized ? t("pane.restore") : t("pane.maximize")}
+                aria-label={maximized ? t("pane.restore") : t("pane.maximize")}
                 aria-pressed={maximized}
-                data-testid="chat-group-maximize"
+                data-testid="pane-maximize"
               >
                 {maximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">{maximized ? t("chatGroup.restore") : t("chatGroup.maximize")}</TooltipContent>
+            <TooltipContent side="bottom">{maximized ? t("pane.restore") : t("pane.maximize")}</TooltipContent>
           </Tooltip>
         ) : null}
         {onClose ? (
@@ -563,14 +534,14 @@ export function PaneFrame({
                 size="icon"
                 className={HEADER_BUTTON_CLASS}
                 onClick={onClose}
-                title={t("chatGroup.close")}
-                aria-label={t("chatGroup.close")}
-                data-testid="chat-group-close"
+                title={closeText}
+                aria-label={closeText}
+                data-testid="pane-close"
               >
                 <X className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">{t("chatGroup.close")}</TooltipContent>
+            <TooltipContent side="bottom">{closeText}</TooltipContent>
           </Tooltip>
         ) : null}
         </div>
@@ -578,7 +549,7 @@ export function PaneFrame({
       {/* The conversation list is the WINDOW's sidebar and only that. A second
           copy of it inside the frame said the same thing twice and cost the
           transcript the width to say it. */}
-      <ChatGroupPanelSlotContext.Provider value={publishAsideSlot ? panelSlots : null}>
+      <PanePanelSlotContext.Provider value={publishAsideSlot ? panelSlots : null}>
         <PaneBodyActionsContext.Provider value={setBodyActions}>
           <div
             className={bodyInset === "page"
@@ -589,90 +560,23 @@ export function PaneFrame({
             {children}
           </div>
         </PaneBodyActionsContext.Provider>
-      </ChatGroupPanelSlotContext.Provider>
+      </PanePanelSlotContext.Provider>
       </div>
       {/* The work panel lands here: `contents` makes what the view portals
           in the tile's own flex item (a column beside the conversation) or,
           floating, a box positioned against the tile. */}
       {publishAsideSlot ? (
-        <div ref={setPanelSlot} className="contents" data-testid="chat-group-panel-slot" />
+        <div ref={setPanelSlot} className="contents" data-testid="pane-panel-slot" />
       ) : null}
       {dropTarget ? (
         <div
           aria-hidden={true}
           className="pointer-events-none absolute rounded-md border-2 border-primary bg-primary/(--opacity-subtle)"
           style={dropIndicatorStyle(dropTarget)}
-          data-testid="chat-group-drop-indicator"
+          data-testid="pane-drop-indicator"
         />
       ) : null}
     </section>
-  );
-}
-
-/**
- * The conversation's pane: `PaneFrame` with what a conversation brings to it —
- * its own header actions, the work-panel toggle at the head of the trailing
- * cluster, and the aside slot that panel lands in.
- */
-export function ChatGroupFrame({
-  title,
-  actions,
-  focused,
-  panelOpen,
-  onTogglePanel,
-  onSplit,
-  splitFits,
-  onSessionDrop,
-  canSplit,
-  onClose,
-  maximized = false,
-  onToggleMaximize,
-  onFocus,
-  children,
-}: ChatGroupFrameProps) {
-  const { t } = useTranslation();
-  const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
-
-  return (
-    <PaneFrame
-      title={title}
-      actions={actions}
-      asideSlot
-      bodyInset="none"
-      focused={focused}
-      onFocus={onFocus}
-      canSplit={canSplit}
-      onSplit={onSplit}
-      splitFits={splitFits}
-      onSessionDrop={onSessionDrop}
-      onClose={onClose}
-      maximized={maximized}
-      onToggleMaximize={onToggleMaximize}
-      trailing={
-        /* The work panel is per-GROUP. It shows what THIS conversation is
-           doing, so a single window-level toggle could only ever be right for
-           one of the groups on screen. */
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={HEADER_BUTTON_CLASS}
-              onClick={onTogglePanel}
-              title={panelLabel}
-              aria-label={panelLabel}
-              aria-pressed={panelOpen}
-              data-testid={TEST_IDS.chatGroupPanelToggle}
-            >
-              {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{panelLabel}</TooltipContent>
-        </Tooltip>
-      }
-    >
-      {children}
-    </PaneFrame>
   );
 }
 
@@ -715,10 +619,10 @@ export function chatGroupApi(api: LvisApi, chatGroupId: string): LvisApi {
 
 export interface ChatGroupState {
   id: string;
-  /** The work panel, per group — see ChatGroupFrameProps.panelOpen. */
+  /** The work panel, per pane — its own right-hand rail. */
   panelOpen: boolean;
   /** Where this tile sits, in percentages of the main area. */
-  box: ChatGroupBox;
+  box: PaneBox;
   /**
    * The view is not showing this group right now — chat mode draws one, and
    * maximizing draws one. It stays MOUNTED: its conversation may be mid-turn,
@@ -740,7 +644,7 @@ export const PANE_HOME: ViewLocation = { view: "home" };
 /**
  * The open chat groups, tiled.
  *
- * The geometry is a split tree — see `chat-group-tree.ts` and
+ * The geometry is a split tree — see `pane-tree.ts` and
  * docs/design/tiled-chat-groups.md. Tiles are arranged freely, tmux style: a
  * session dropped on a tile's edge splits that tile on that axis, so 1, 2, 3,
  * and 4 tiles are each reachable in more than one shape.
@@ -763,7 +667,7 @@ export const PANE_HOME: ViewLocation = { view: "home" };
  * sidebar reach a second conversation there without splitting the canvas.
  */
 export function useChatGroups(appMode?: "chat" | "work") {
-  const [tree, setTree] = useState<ChatGroupNode>(() => leaf(MAIN_CHAT_GROUP_ID));
+  const [tree, setTree] = useState<PaneNode>(() => leaf(MAIN_CHAT_GROUP_ID));
   const [panelOpenIds, setPanelOpenIds] = useState<readonly string[]>([]);
   const [focusedId, setFocusedId] = useState(MAIN_CHAT_GROUP_ID);
   // The one tile shown alone, if any. A view choice, like chat mode's: the
@@ -846,7 +750,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
    * beside it for `row`, under it for `column`. The direction is the user's;
    * the control offers only the ones {@link splitFits} allows.
    */
-  const split = useCallback((groupId: string, axis: ChatGroupSplitAxis) => {
+  const split = useCallback((groupId: string, axis: PaneSplitAxis) => {
     dropOnEdge(groupId, SPLIT_EDGE[axis]);
   }, [dropOnEdge]);
 
@@ -856,16 +760,16 @@ export function useChatGroups(appMode?: "chat" | "work") {
    * unmeasured canvas (no element yet) affords any split: nothing to check
    * against, and the gutter floors still hold once it is laid out.
    */
-  const splitFits = useCallback((groupId: string, axis: ChatGroupSplitAxis, canvasSize: { width: number; height: number } | undefined) => {
+  const splitFits = useCallback((groupId: string, axis: PaneSplitAxis, canvasSize: { width: number; height: number } | undefined) => {
     if (!canvasSize) return true;
     const box = layoutBoxes(tree).find((each) => each.chatGroupId === groupId);
     if (!box) return false;
     const extent = axis === "row"
       ? (box.width / 100) * canvasSize.width
       : (box.height / 100) * canvasSize.height;
-    const floor = axis === "row" ? CHAT_GROUP_MIN_WIDTH : CHAT_GROUP_MIN_HEIGHT;
+    const floor = axis === "row" ? PANE_MIN_WIDTH : PANE_MIN_HEIGHT;
     // Each half is a cell; the floor is on what the cell's frame gets to use.
-    return extent / 2 - CHAT_GROUP_CELL_INSET >= floor;
+    return extent / 2 - PANE_CELL_INSET >= floor;
   }, [tree]);
 
   /**
@@ -1070,7 +974,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
   // always a tile the tree holds — closing that tile and adding another both
   // clear it — so it is shown without a second check.
   const shownAlone = appMode === "chat" ? focusedId : maximizedId;
-  const visibleTree: ChatGroupNode = shownAlone === null ? tree : leaf(shownAlone);
+  const visibleTree: PaneNode = shownAlone === null ? tree : leaf(shownAlone);
   const groups = useMemo<ChatGroupState[]>(
     () => {
       const drawn = new Map(layoutBoxes(visibleTree).map((box) => [box.chatGroupId, box]));
@@ -1148,7 +1052,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
     [tree, appMode, focusedId, maximizedId],
   );
 
-  const resize = useCallback((gutter: Pick<ChatGroupGutter, "path" | "index">, leadingShare: number) => {
+  const resize = useCallback((gutter: Pick<PaneGutter, "path" | "index">, leadingShare: number) => {
     setTree((current) => resizeGutter(current, gutter, leadingShare));
   }, []);
 
@@ -1159,7 +1063,7 @@ export function useChatGroups(appMode?: "chat" | "work") {
    * pointer move.
    */
   const previewResize = useCallback(
-    (gutter: Pick<ChatGroupGutter, "path" | "index">, leadingShare: number) => {
+    (gutter: Pick<PaneGutter, "path" | "index">, leadingShare: number) => {
       const next = resizeGutter(tree, gutter, leadingShare);
       return { boxes: layoutBoxes(next), gutters: layoutGutters(next) };
     },
@@ -1204,15 +1108,15 @@ export function areaStyle(box: { left: number; top: number; width: number; heigh
   };
 }
 
-export interface ChatGroupGutterProps {
-  gutter: ChatGroupGutter;
+export interface PaneGutterProps {
+  gutter: PaneGutter;
   /** The tile area, for turning percentages into the pixels the floors are in. */
   canvasRef: RefObject<HTMLElement | null>;
-  previewResize: (gutter: ChatGroupGutter, leadingShare: number) => {
-    boxes: ChatGroupBox[];
-    gutters: ChatGroupGutter[];
+  previewResize: (gutter: PaneGutter, leadingShare: number) => {
+    boxes: PaneBox[];
+    gutters: PaneGutter[];
   };
-  onResize: (gutter: ChatGroupGutter, leadingShare: number) => void;
+  onResize: (gutter: PaneGutter, leadingShare: number) => void;
 }
 
 /**
@@ -1229,12 +1133,12 @@ export interface ChatGroupGutterProps {
  * is committed once on release. Committing per move would re-render every
  * conversation on screen for every pointer event.
  */
-export function ChatGroupGutter({ gutter, canvasRef, previewResize, onResize }: ChatGroupGutterProps) {
+export function PaneGutter({ gutter, canvasRef, previewResize, onResize }: PaneGutterProps) {
   const { t } = useTranslation();
   const canvas = useMeasuredSize(canvasRef);
   const along = gutter.axis === "row" ? canvas.width : canvas.height;
   const pairPx = (along * (gutter.leading + gutter.trailing)) / 100;
-  const floor = gutter.axis === "row" ? CHAT_GROUP_MIN_WIDTH : CHAT_GROUP_MIN_HEIGHT;
+  const floor = gutter.axis === "row" ? PANE_MIN_WIDTH : PANE_MIN_HEIGHT;
   const leadingPx = (along * gutter.leading) / 100;
 
   const paint = useCallback((leadingShare: number) => {
@@ -1242,11 +1146,11 @@ export function ChatGroupGutter({ gutter, canvasRef, previewResize, onResize }: 
     if (!root) return;
     const next = previewResize(gutter, leadingShare);
     for (const box of next.boxes) {
-      const cell = root.querySelector<HTMLElement>(`[data-testid="chat-group-cell:${box.chatGroupId}"]`);
+      const cell = root.querySelector<HTMLElement>(`[data-testid="pane-cell:${box.chatGroupId}"]`);
       if (cell) Object.assign(cell.style, areaStyle(box));
     }
     for (const each of next.gutters) {
-      const bar = root.querySelector<HTMLElement>(`[data-testid="chat-group-gutter:${each.key}"]`);
+      const bar = root.querySelector<HTMLElement>(`[data-testid="pane-gutter:${each.key}"]`);
       if (bar) Object.assign(bar.style, areaStyle(each));
     }
   }, [canvasRef, gutter, previewResize]);
@@ -1259,7 +1163,7 @@ export function ChatGroupGutter({ gutter, canvasRef, previewResize, onResize }: 
     <div
       className="absolute"
       style={areaStyle(gutter)}
-      data-testid={`chat-group-gutter:${gutter.key}`}
+      data-testid={`pane-gutter:${gutter.key}`}
     >
       <EdgeResizeBar
         width={leadingPx}
@@ -1270,8 +1174,8 @@ export function ChatGroupGutter({ gutter, canvasRef, previewResize, onResize }: 
         resetWidth={pairPx / 2}
         onWidthChange={(px) => paint(px / pairPx)}
         onWidthCommit={(px) => onResize(gutter, px / pairPx)}
-        ariaLabel={t("chatGroup.resize")}
-        data-testid={`chat-group-gutter-bar:${gutter.key}`}
+        ariaLabel={t("pane.resize")}
+        data-testid={`pane-gutter-bar:${gutter.key}`}
       />
     </div>
   );
@@ -1301,7 +1205,7 @@ export function buildChatGroupActions({
   onTogglePin: () => void | Promise<void>;
   onExport: (format: "markdown" | "json") => void | Promise<void>;
   onImport: () => void | Promise<void>;
-}): ChatGroupAction[] {
+}): PaneAction[] {
   return [
     {
       // The label states what the click DOES, which flips with state. A fixed

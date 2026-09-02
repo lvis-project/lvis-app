@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dropIndicatorStyle, dropTargetAt } from "../chat-group-drop.js";
+import { dropIndicatorStyle, dropTargetAt } from "../pane-drop.js";
 
 const tile = { left: 100, top: 100, width: 400, height: 300 };
 

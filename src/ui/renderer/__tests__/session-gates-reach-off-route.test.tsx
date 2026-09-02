@@ -169,7 +169,7 @@ describe("an adopted question survives the adopting tile loading another session
       });
     });
     await waitFor(() => expect(count(container, "question-overlay")).toBe(1));
-    const cell = container.querySelector(`[data-testid="chat-group-cell:${MAIN_CHAT_GROUP_ID}"]`)!;
+    const cell = container.querySelector(`[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`)!;
     expect(count(cell, "question-overlay")).toBe(1);
 
     const toggle = container.querySelector<HTMLButtonElement>('[data-testid="sidebar-collapse-toggle"]');

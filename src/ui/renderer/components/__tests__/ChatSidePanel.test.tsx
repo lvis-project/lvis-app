@@ -11,7 +11,7 @@ import { approvalSurfaceStub } from "../../../../../test/renderer/helpers.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 import { ChatSidePanel } from "../ChatSidePanel.js";
-import { ChatGroupFrame } from "../ChatGroupFrame.js";
+import { PaneFrame } from "../PaneFrame.js";
 import { emptyToolActivity } from "../../../../../test/renderer/helpers.js";
 import type { ToolActivityState } from "../ToolActivity.js";
 import { useWorkspaceTabs } from "../../preview/workspace-tabs.js";
@@ -1666,15 +1666,15 @@ describe("ChatSidePanel inside a chat group", () => {
   it("is a self-contained card: its tabs and its own close stay on it, not on the group header", () => {
     const onClose = vi.fn();
     renderPanel(
-      <ChatGroupFrame title="a" actions={[]} panelOpen={true} onTogglePanel={vi.fn()}>
+      <PaneFrame title="a" asideSlot bodyInset="none">
         <HarnessPanel api={api()} sessionId="session-1" targets={[]} files={[]} initialSelectedId={null} onClose={onClose} />
-      </ChatGroupFrame>,
+      </PaneFrame>,
     );
     const panel = screen.getByTestId(TEST_IDS.chatSidePanel);
     expect(panel.className).toContain("rounded-2xl");
     expect(within(panel).getByTestId("chat-side-panel-tab-strip")).toBeTruthy();
     expect(
-      within(screen.getByTestId("chat-group-header")).queryByTestId("chat-side-panel-tab-strip"),
+      within(screen.getByTestId("pane-header")).queryByTestId("chat-side-panel-tab-strip"),
     ).toBeNull();
     // The card stands beside the group header (over it when floating), so
     // the way out is the card's own close — the header's × closes the tile.

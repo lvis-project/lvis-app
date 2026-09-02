@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { act } from "@testing-library/react";
 import { createRoot, type Root } from "react-dom/client";
 import { TooltipProvider } from "../../src/components/ui/tooltip.js";
-import { PaneFrame } from "../../src/ui/renderer/components/ChatGroupFrame.js";
+import { PaneFrame } from "../../src/ui/renderer/components/PaneFrame.js";
 import { PluginUiHostView, type PluginUiExtensionView } from "../../src/plugin-ui-host.js";
 
 const SHELL_URL = "file:///c:/dist/src/plugin-ui-shell.html";

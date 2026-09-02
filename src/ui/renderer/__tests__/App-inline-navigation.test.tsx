@@ -135,7 +135,7 @@ describe("App inline navigation", () => {
     });
     const [, second] = mountedTileIds(container);
     expect(
-      container.querySelector(`[data-testid="chat-group-cell:${second}"] [data-testid="chat-group"]`)
+      container.querySelector(`[data-testid="pane-cell:${second}"] [data-testid="pane"]`)
         ?.getAttribute("data-focused"),
     ).toBe("true");
 

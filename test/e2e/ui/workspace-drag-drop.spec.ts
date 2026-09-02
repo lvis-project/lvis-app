@@ -95,7 +95,7 @@ test.describe("workspace drag-drop add-root (#1458)", () => {
   /** Open the file-browser and return the drop-zone bounding box centre (px). */
   async function openRootsZone(): Promise<{ x: number; y: number }> {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
     await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
     const zone = page.getByTestId("chat-side-panel-project-roots");

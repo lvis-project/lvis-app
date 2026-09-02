@@ -68,7 +68,7 @@ test.describe("workspace rail follow-up", () => {
 
   test("file-browser: project root lists a file and opens its real content", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
 
     await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
@@ -87,7 +87,7 @@ test.describe("workspace rail follow-up", () => {
 
   test("tab bar: many tabs stay reachable via horizontal scroll (diagnosis ②)", async () => {
     await page.setViewportSize({ width: 900, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
 
     // Open enough tabs that the strip is guaranteed to overflow its width. The
@@ -120,7 +120,7 @@ test.describe("workspace rail follow-up", () => {
     writeFileSync(resolve(docsDir, "guide.md"), "# Guide\n\nnested-marker\n", "utf-8");
 
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
     await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 

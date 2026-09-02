@@ -241,12 +241,12 @@ test.describe("chat preview rail", () => {
         { timeout: 20_000 },
       );
 
-      const openButton = ctx.page.getByTestId(TEST_IDS.chatGroupPanelToggle);
+      const openButton = ctx.page.getByTestId(TEST_IDS.panePanelToggle);
       await expect(openButton).toBeVisible({ timeout: 20_000 });
       await expect(ctx.page.getByTestId("chat-preview-open")).toHaveCount(0);
       await expect(ctx.page.getByTestId("chat-preview-rail")).toHaveCount(0);
       // No tool-activity control in the header: the activity lives in the panel.
-      await expect(ctx.page.getByTestId("chat-group-header")).not.toContainText("도구 활동");
+      await expect(ctx.page.getByTestId("pane-header")).not.toContainText("도구 활동");
       const modeToggleBox = await ctx.page.getByTestId("app-mode-toggle").boundingBox();
       const sidePanelButtonBox = await openButton.boundingBox();
       expect(modeToggleBox).not.toBeNull();

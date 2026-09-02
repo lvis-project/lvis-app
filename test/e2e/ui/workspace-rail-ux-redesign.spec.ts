@@ -78,7 +78,7 @@ test.describe("workspace rail UX redesign", () => {
 
   test("file tab: directory/session segment toggle (default directory, session disabled empty)", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await expect(page.getByTestId(TEST_IDS.chatSidePanel)).toBeVisible();
     await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 
@@ -111,7 +111,7 @@ test.describe("workspace rail UX redesign", () => {
 
   test("file tab: the vertical separator has a ≥20px drag hit zone (R1)", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 
     const splitter = page.getByTestId("chat-side-panel-file-splitter");
@@ -128,7 +128,7 @@ test.describe("workspace rail UX redesign", () => {
 
   test("file tab: vertical splitter persists across restart", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
 
     const splitLayout = page.getByTestId("chat-side-panel-file-split-layout");
@@ -149,7 +149,7 @@ test.describe("workspace rail UX redesign", () => {
     await app.close();
     await launch();
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await page.getByTestId(chatSidePanelLauncherTestId("file-browser")).click();
     await expect
       .poll(async () =>
@@ -160,7 +160,7 @@ test.describe("workspace rail UX redesign", () => {
 
   test("browser tab: single address bar + floating search Popover (no duplicate bar)", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await page.getByTestId(chatSidePanelLauncherTestId("browser")).click();
 
     const panel = page.getByTestId(TEST_IDS.chatSidePanel);
@@ -178,7 +178,7 @@ test.describe("workspace rail UX redesign", () => {
 
   test("subagent tab: opens from the launcher and shows the empty state", async () => {
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await expect(page.getByTestId(chatSidePanelLauncherTestId("subagent"))).toBeVisible();
     // side-chat is a first-class launcher item alongside sub-agent — both are
     // live surfaces, both openable from the same empty-state picker.
@@ -201,7 +201,7 @@ test.describe("workspace rail UX redesign", () => {
     // that share ONE childSessionId — the viewer must unify them into a single
     // row whose transcript concatenates both segments.
     await page.setViewportSize({ width: 1400, height: 840 });
-    await page.getByTestId(TEST_IDS.chatGroupPanelToggle).click();
+    await page.getByTestId(TEST_IDS.panePanelToggle).click();
     await page.getByTestId(chatSidePanelLauncherTestId("subagent")).click();
     await expect(page.getByTestId("chat-side-panel-tab-subagent")).toBeVisible();
 
