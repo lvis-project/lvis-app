@@ -6,8 +6,22 @@
  * one, which is what keeps a clear from emptying a tile the caller never meant.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { CHANNELS } from "../../../contract/app-contract.js";
 import { invokeFileIpcHandler } from "./test-helpers.js";
+
+/**
+ * A session id the host would have issued. `isValidSessionId`
+ * (memory/memory-manager.ts) admits a UUID core and nothing else, so a fixture
+ * conversation cannot be named in prose — the channel would refuse a free-form
+ * id at `namedSession` before the store under test is ever consulted. The id is
+ * derived from the readable name so an assertion still says which conversation
+ * it means, and it is the same on every run.
+ */
+function sessionUuid(name: string): string {
+  const hex = createHash("sha256").update(name).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -19,7 +33,8 @@ vi.mock("electron", () => ({
   },
 }));
 
-const PRIMARY_SESSION = "primary-session";
+const PRIMARY_SESSION = sessionUuid("primary-session");
+const TILE_SESSION = sessionUuid("tile-2-session");
 
 async function setup() {
   handlers.clear();
@@ -51,18 +66,18 @@ describe("session-tasks IPC", () => {
     const { store } = await setup();
 
     await expect(
-      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.list, "tile-2-session"),
-    ).resolves.toEqual([{ id: "1", content: "task for tile-2-session", status: "pending" }]);
-    expect(store.list).toHaveBeenCalledWith("tile-2-session");
+      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.list, TILE_SESSION),
+    ).resolves.toEqual([{ id: "1", content: `task for ${TILE_SESSION}`, status: "pending" }]);
+    expect(store.list).toHaveBeenCalledWith(TILE_SESSION);
   });
 
   it("clears the named session's tasks", async () => {
     const { store } = await setup();
 
     await expect(
-      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.clear, "tile-2-session"),
+      invokeFileIpcHandler(handlers, CHANNELS.sessionTasks.clear, TILE_SESSION),
     ).resolves.toEqual({ ok: true });
-    expect(store.clear).toHaveBeenCalledWith("tile-2-session");
+    expect(store.clear).toHaveBeenCalledWith(TILE_SESSION);
   });
 
   // A refusal in the channel's own shape, not a throw: the panel's read is
