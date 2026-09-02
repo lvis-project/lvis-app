@@ -2,27 +2,21 @@ import { describe, expect, it } from "vitest";
 import { readRepoFile } from "./test-helpers.js";
 
 describe("chat Thinking toggle styles", () => {
-  it("uses the shadcn/Radix checkbox component with a semantic unchecked square", () => {
-    // Thinking moved out of the inline InputActionBar checkbox into the
-    // dedicated ThinkingButton popover (toggle + depth) before Send.
-    const component = readRepoFile("src/ui/renderer/components/ThinkingButton.tsx");
+  it("is the reasoning range control, with no trace of the legacy inline checkbox", () => {
+    // Thinking on/off and depth are one range control (level 0 = off) in the
+    // composer's model card; the inline checkbox it replaced styled itself
+    // with hand-rolled `thinking-toggle-*` classes and a hard-coded white.
+    const component = readRepoFile("src/ui/renderer/components/ReasoningSlider.tsx");
     const styles = readRepoFile("src/styles.css");
-    const checkbox = readRepoFile("src/components/ui/checkbox.tsx");
 
-    expect(component).toContain('import { Checkbox } from "../../../components/ui/checkbox.js"');
+    expect(component).toContain('type="range"');
+    expect(component).toContain("accent-primary");
     expect(component).not.toContain("bg-white");
     expect(component).not.toContain("thinking-toggle-input");
     expect(component).not.toContain("thinking-toggle-box");
     expect(component).not.toContain("checked:appearance-auto");
-    expect(component).not.toContain("bg-muted checked:");
-    // Radix exposes selection through data-state="checked".
-    expect(checkbox).toContain("rounded-[4px]");
-    expect(checkbox).toContain("data-[state=checked]:bg-primary");
-    expect(checkbox).not.toContain("data-checked");
 
     expect(styles).not.toContain(".thinking-toggle-input");
     expect(styles).not.toContain(".thinking-toggle-box");
-    expect(checkbox).toContain('from "radix-ui"');
-    expect(checkbox).toContain("CheckboxPrimitive.Root");
   });
 });
