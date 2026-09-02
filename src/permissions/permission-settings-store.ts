@@ -25,7 +25,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { isCommittedAtomicWriteError, writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import {
@@ -1061,15 +1061,6 @@ export async function removeAllowedDirectoryPersist(
       targetKey === null ? entry !== dir : allowedDirectoryKey(entry) !== targetKey,
     );
   }, pathOverride);
-}
-
-function isCommittedAtomicWriteError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === "object"
-    && "committed" in error
-    && (error as { committed?: unknown }).committed === true,
-  );
 }
 
 export interface BeginWorkspaceRootRemovalResult {

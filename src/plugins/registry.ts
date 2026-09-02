@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, resolve } from "node:path";
 import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { logPluginLifecycle, PluginPhase } from "./lifecycle-log.js";
-import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
+import { isCommittedAtomicWriteError, isMissingPathError, writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { FileLockReleaseError, withFileLock, withInProcessFileQueue } from "../lib/with-file-lock.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { resolveTrustedRegistryManifestPath } from "./registry-manifest-trust.js";
@@ -510,11 +510,6 @@ async function withRegistryTransaction<T>(
       return committed.mutationResult;
     }
   });
-}
-
-
-function isCommittedAtomicWriteError(error: unknown): error is Error & { committed: true } {
-  return error instanceof Error && (error as { committed?: unknown }).committed === true;
 }
 
 /**
