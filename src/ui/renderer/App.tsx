@@ -34,7 +34,7 @@ import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, ChatGroupFrame, ChatGroup
 import { minimumCanvasHeight } from "./components/chat-group-tree.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
-import type { PluginViewKey } from "../../shared/view-key.js";
+import type { InlineViewKey, PluginViewKey } from "../../shared/view-key.js";
 import { CONTENT_TITLE_INSET, SHELL_GUTTER, collapsedBandLeadClearance } from "../../shared/shell-geometry.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
@@ -603,8 +603,17 @@ export function App() {
     () => pluginViews.map((view) => toViewKey(view)),
     [pluginViews],
   );
+  // The location lives in the focused pane's content, so navigating is putting
+  // a view IN that pane. `useActiveView` still owns the restore and the
+  // persistence; what it no longer owns is the value. With one focused pane
+  // `contentById[focusedId].view` and the old window-wide `activeView` are the
+  // same string, which is why the router below is untouched.
+  const activeViewPane = useMemo(() => ({
+    view: chatGroups.contentById[chatGroups.focusedId]?.view ?? "home",
+    navigate: (next: InlineViewKey) => chatGroups.setPaneContent(chatGroups.focusedId, { view: next }),
+  }), [chatGroups.contentById, chatGroups.focusedId, chatGroups.setPaneContent]);
   const { activeView, setActiveView, restoresApplied: activeViewRestoresApplied } =
-    useActiveView(api, loadedPluginViewKeys);
+    useActiveView(api, loadedPluginViewKeys, activeViewPane);
   // The location has two halves and each restores itself, so the history needs
   // one signal covering both. Each count only ever rises, so their sum rises
   // exactly when either half is restored — which is all the history reads.
@@ -1128,7 +1137,12 @@ export function App() {
   // at a conversation reads it. The sidebar's bold rows come from here.
   useTurnAttention({
     tiles: tileSessions,
-    attention: { focusedChatGroupId: chatGroups.focusedId, conversationVisible: activeView === "home" },
+    attention: {
+      focusedChatGroupId: chatGroups.focusedId,
+      // The focused PANE's own content, the same fact its `hidden` prop reads.
+      conversationVisible:
+        (chatGroups.contentById[chatGroups.focusedId]?.view ?? "home") === "home",
+    },
     isUnread: conversationActions.isUnread,
     setUnread: conversationActions.onSetUnread,
     onTurnsEnded: refreshSessions,
@@ -1658,7 +1672,13 @@ export function App() {
                                     // question cards into a surface nobody could see, and the
                                     // window-level bands — built for exactly this — drew nothing.
                                     // `conversationVisible` below reads the same fact.
-                                    hidden={group.hidden || activeView !== "home"}
+                                    //
+                                    // The route is asked of THIS pane's own content, not of
+                                    // the window: a pane showing Settings hides its
+                                    // conversation, and a pane still on home does not,
+                                    // whatever its neighbours are showing.
+                                    hidden={group.hidden
+                                      || (chatGroups.contentById[group.id]?.view ?? "home") !== "home"}
                                     onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
                                   >
                                     {({ actions, content, currentSessionId: tileSessionId }) => (
@@ -1790,7 +1810,11 @@ export function App() {
                                   detached settings window on this path. */}
                               <SettingsInlineView
                                 api={api}
-                                chatGroupId={chatGroups.focusedId}
+                                /* The away-authority binding names a CONVERSATION, and
+                                   the focused pane is the one showing Settings — so it
+                                   is the conversation pane focus came from, not the
+                                   focused pane itself, that this means. */
+                                chatGroupId={chatGroups.focusedConversationId}
                                 initialTab={settingsTab}
                                 onSaved={handleInlineSettingsSaved}
                                 onTabChange={setSettingsTab}

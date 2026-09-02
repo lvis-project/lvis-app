@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, createEvent, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { CHAT_GROUP_CELL_INSET, CHAT_GROUP_MIN_HEIGHT, CHAT_GROUP_MIN_WIDTH, ChatGroupFrame, ChatGroupGutter, buildChatGroupActions, chatGroupApi, useChatGroupPanelSlot, useChatGroups, type ChatGroupPanelSlot } from "../ChatGroupFrame.js";
-import { layoutBoxes, layoutGutters, leaf, resizeGutter, splitLeaf, type ChatGroupGutter as ChatGroupGutterShape } from "../chat-group-tree.js";
+import { layoutBoxes, layoutGutters, leaf, leafIds, resizeGutter, splitLeaf, type ChatGroupGutter as ChatGroupGutterShape } from "../chat-group-tree.js";
+import { MAX_CHAT_GROUPS, MAX_PANES } from "../../../../contract/app-contract.js";
 import { CHAT_SESSION_DRAG_TYPE } from "../chat-group-drop.js";
 import { SIDE_PANEL_MIN_WIDTH } from "../../../../shared/side-panel.js";
 import type { LvisApi } from "../../types.js";
@@ -325,6 +326,127 @@ describe("useChatGroups", () => {
     expect(result.current.groups[0]!.panelOpen).toBe(true);
     act(() => result.current.setPanelOpen("main", false));
     expect(result.current.groups[0]!.panelOpen).toBe(false);
+  });
+});
+
+describe("useChatGroups pane content", () => {
+  afterEach(cleanup);
+
+  it("opens every pane on its own conversation", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    expect(result.current.contentById).toEqual({ main: { view: "home" } });
+    expect([...result.current.conversationIds]).toEqual(["main"]);
+
+    act(() => result.current.split("main", "row"));
+    // A pane opened by a split is a conversation pane, exactly as before: the
+    // gesture that makes it is still "put a conversation here".
+    expect(result.current.contentById).toEqual({
+      main: { view: "home" },
+      "group-2": { view: "home" },
+    });
+    expect([...result.current.conversationIds]).toEqual(["main", "group-2"]);
+  });
+
+  it("moves ONE pane's content, leaving its neighbour where it was", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+
+    act(() => result.current.setPaneContent("main", { view: "routines" }));
+    expect(result.current.contentById["main"]).toEqual({ view: "routines" });
+    expect(result.current.contentById["group-2"]).toEqual({ view: "home" });
+    // The pane keeps its conversation while a view is drawn over it — the
+    // transcript is hidden, not taken away.
+    expect(result.current.conversationIds.has("main")).toBe(true);
+
+    act(() => result.current.setPaneContent("main", { view: "home" }));
+    expect(result.current.contentById["main"]).toEqual({ view: "home" });
+  });
+
+  it("reads the window's location off whichever pane has focus", () => {
+    // This IS the `activeView` derivation: the window is where the FOCUSED
+    // pane is, so focusing the other pane moves the window's location without
+    // either pane's content changing.
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.setPaneContent("main", { view: "work-board" }));
+    const activeView = () => result.current.contentById[result.current.focusedId]?.view;
+
+    expect(result.current.focusedId).toBe("group-2");
+    expect(activeView()).toBe("home");
+    act(() => result.current.focus("main"));
+    expect(activeView()).toBe("work-board");
+  });
+
+  it("focuses the pane a non-home view is already open in rather than opening a second", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.setPaneContent("main", { view: "insights" }));
+    act(() => result.current.focus("group-2"));
+
+    act(() => result.current.setPaneContent("group-2", { view: "insights" }));
+    expect(result.current.focusedId).toBe("main");
+    expect(result.current.contentById["group-2"]).toEqual({ view: "home" });
+
+    // Home is exempt — a pane's home is its OWN conversation, not a shared
+    // place, so two panes on home is the normal state and not a duplicate.
+    act(() => result.current.focus("group-2"));
+    act(() => result.current.setPaneContent("group-2", { view: "home" }));
+    expect(result.current.focusedId).toBe("group-2");
+  });
+
+  it("counts conversations and panes as two ceilings, and gives both back on close", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.split("group-2", "row"));
+    act(() => result.current.split("group-3", "row"));
+
+    // Four panes, four conversations: MAX_PANES counts the leaves, and
+    // MAX_CHAT_GROUPS counts the conversation set. Both are full, so the
+    // gesture stops offering a fifth and the drop refuses one.
+    expect(leafIds(result.current.tree)).toHaveLength(MAX_PANES);
+    expect(result.current.conversationIds.size).toBe(MAX_CHAT_GROUPS);
+    expect(result.current.canSplit).toBe(false);
+    let created: string | null = "not-called";
+    act(() => { created = result.current.dropOnEdge("main", "right"); });
+    expect(created).toBeNull();
+
+    // Closing gives back one of each, so the next drop is allowed again.
+    act(() => result.current.close("group-4"));
+    expect(leafIds(result.current.tree)).toHaveLength(3);
+    expect([...result.current.conversationIds]).toEqual(["main", "group-2", "group-3"]);
+    expect(result.current.contentById["group-4"]).toBeUndefined();
+    expect(result.current.canSplit).toBe(true);
+  });
+
+  it("releases the spare's conversation along with its pane", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    act(() => result.current.split("main", "row"));
+    act(() => result.current.split("group-2", "row"));
+    act(() => result.current.split("group-3", "row"));
+    act(() => result.current.focus("group-3"));
+
+    act(() => { result.current.adopt("group-2", () => true, undefined); });
+    // "group-4" was set aside: it must leave the conversation set too, or the
+    // ceiling would count a loop main no longer holds.
+    expect(result.current.conversationIds.has("group-4")).toBe(false);
+    expect(result.current.contentById["group-4"]).toBeUndefined();
+    expect(result.current.conversationIds.size).toBe(MAX_CHAT_GROUPS);
+    expect([...result.current.conversationIds].includes("group-5")).toBe(true);
+  });
+
+  it("names the conversation pane focus is on, and never one that is gone", () => {
+    const { result } = renderHook(() => useChatGroups("work"));
+    expect(result.current.focusedConversationId).toBe("main");
+
+    act(() => result.current.split("main", "row"));
+    expect(result.current.focusedConversationId).toBe("group-2");
+    act(() => result.current.focus("main"));
+    expect(result.current.focusedConversationId).toBe("main");
+
+    // The remembered pane can be closed out from under the binding; the answer
+    // falls back to a pane that still holds a conversation.
+    act(() => result.current.close("main"));
+    expect(result.current.focusedConversationId).toBe("group-2");
   });
 });
 

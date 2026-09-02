@@ -64,6 +64,20 @@ export const MAIN_CHAT_GROUP_ID = "main";
  */
 export const MAX_CHAT_GROUPS = 4;
 
+/**
+ * How many panes the main area may be split into.
+ *
+ * The same number as {@link MAX_CHAT_GROUPS}, and deliberately a SEPARATE fact:
+ * this one is about the canvas, not about loops. A pane's frame has a 448x280
+ * floor, and four is where a full window stops affording another split. A pane
+ * does not have to hold a conversation — a feature panel, a plugin view and
+ * Settings are all pane contents — so counting panes against the conversation
+ * ceiling would charge an empty split for a loop it never opened, and counting
+ * conversations against the pane ceiling would let a window run more loops than
+ * it has tiles to show them in.
+ */
+export const MAX_PANES = 4;
+
 export const CHANNELS = {
   chat: {
     hasProvider: "lvis:chat:has-provider",
