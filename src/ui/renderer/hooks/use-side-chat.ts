@@ -57,6 +57,7 @@ import { historyToEntries } from "../utils/history.js";
 import { isTurnStartEntry } from "../utils/classify-turn-entries.js";
 import type { TurnSummary } from "../components/TranscriptRenderer.js";
 import type { LvisApi } from "../types.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export interface SideChatSessionSummary {
   id: string;
@@ -415,7 +416,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
     try {
       await api.sideChat.abort();
     } catch (err) {
-      setEntries((p) => setAssistantError(p, (err as Error).message, "", "stream-error"));
+      setEntries((p) => setAssistantError(p, errorMessage(err), "", "stream-error"));
     }
   }, [api, resetStreamState, setStreaming]);
 
@@ -490,7 +491,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
         setEntries((p) =>
           setAssistantError(
             p,
-            (err as Error).message,
+            errorMessage(err),
             thought,
             "stream-error",
           ),

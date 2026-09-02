@@ -232,7 +232,7 @@ export function McpTab() {
       setConfigs(configsRes);
       setConfigPath(configPathRes);
     } catch (e) {
-      setError((e as Error).message ?? t("mcpTab.fetchError"));
+      setError(errorMessage(e) || t("mcpTab.fetchError"));
     } finally {
       setLoading(false);
     }

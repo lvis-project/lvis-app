@@ -8,6 +8,7 @@ import type { LvisApi } from "../types.js";
 import { useNotifySaved } from "../context/SavedToastContext.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 const EMPTY_DRAFT: RolePreset = { id: "", name: "", systemPromptAdd: "" };
 
@@ -42,7 +43,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setRolePresets(prompts);
       setRolesLoaded(true);
     } catch (err) {
-      failures.push(`roles: ${(err as Error).message}`);
+      failures.push(`roles: ${errorMessage(err)}`);
       setRolesLoaded(false);
     }
 
@@ -52,14 +53,14 @@ export function RolesTab({ api }: { api: LvisApi }) {
       api.memoryGetUserPrefs(),
     ]);
     if (agents.status === "fulfilled") setAgentsDraft(agents.value);
-    else failures.push(`AGENTS.md: ${(agents.reason as Error).message}`);
+    else failures.push(`AGENTS.md: ${errorMessage(agents.reason)}`);
     if (memory.status === "fulfilled") {
       setMemoryIndex(memory.value);
       setMemoryIndexBase(memory.value);
-    } else failures.push(`MEMORY.md: ${(memory.reason as Error).message}`);
+    } else failures.push(`MEMORY.md: ${errorMessage(memory.reason)}`);
     if (prefs.status === "fulfilled") setUserPrefsDraft(prefs.value);
     else
-      failures.push(`user-preferences.md: ${(prefs.reason as Error).message}`);
+      failures.push(`user-preferences.md: ${errorMessage(prefs.reason)}`);
 
     if (failures.length > 0) {
       setError(failures.join("\n"));
@@ -120,7 +121,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       notifySaved();
       cancelEdit();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -139,7 +140,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       notifySaved();
       if (editingId === id) cancelEdit();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -153,7 +154,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setStatus(t("rolesTab.statusAgentsSaved"));
       notifySaved();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -167,7 +168,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setStatus(t("rolesTab.statusUserPrefsSaved"));
       notifySaved();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -182,7 +183,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setUserPrefsDraft(result.content);
       setStatus(t("rolesTab.statusUserPrefsRefreshed"));
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -212,7 +213,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
         setStatus(t("rolesTab.statusLongTermMemoryUpToDate"));
       }
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -227,7 +228,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setMemoryIndexBase(latest);
       setStatus(t("rolesTab.statusMemoryReloaded"));
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -250,7 +251,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setStatus(t("rolesTab.statusMemorySaved"));
       notifySaved();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -279,7 +280,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setStatus(t("rolesTab.statusQuickMemorySaved"));
       notifySaved();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -306,7 +307,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setStatus(t("rolesTab.statusDetailMemorySaved"));
       notifySaved();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }

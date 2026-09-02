@@ -12,6 +12,7 @@ import {
 import type { DeferredQueueEntry } from "../types.js";
 import { NARROWEST_DEFERRED_SCOPE, type DeferredGrantScope } from "../../../shared/permission-review-status.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export interface DeferredApprovalChipProps {
   /** The user's current composer draft text. Re-evaluated on every change. */
@@ -175,7 +176,7 @@ export function DeferredApprovalChip({
       onResolved?.(decision, target.id);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "deferred-resolve failed");
+      setError(errorMessage(err));
     } finally {
       inFlight.current = false;
       setBusy(false);

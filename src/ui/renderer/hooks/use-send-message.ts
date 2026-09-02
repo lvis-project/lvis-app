@@ -27,6 +27,7 @@ import {
   findSessionByIdPrefix,
 } from "../../../shared/session-lookup.js";
 import type { TranslateFn } from "../../../i18n/translate.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 type Api = ReturnType<typeof getApi>;
 type ChatState = ReturnType<typeof useChatState>;
@@ -375,7 +376,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         // hence recovering the code from the tail. Anything unmapped keeps the
         // previous localized framing — an unmapped failure must not lose it just
         // because this path learned to map the mapped ones.
-        const rawMessage = (err as Error).message;
+        const rawMessage = errorMessage(err);
         const code = err instanceof ChatSendRefusedError
           ? err.code
           : rawMessage.match(/(?:^|Error:\s*)([a-z][a-z0-9-]*)\s*$/)?.[1];

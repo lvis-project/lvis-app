@@ -12,6 +12,7 @@ import {
 import { approvalQueueReducer } from "../../../lib/approval-queue-reducer.js";
 import type { UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import type { ApprovalChoice, ApprovalDecision, ApprovalRequest } from "../types.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export type ApprovalDecisionExtras = Pick<ApprovalDecision, "elicitationContent">;
 
@@ -190,7 +191,7 @@ export function useApproval(): ApprovalQueueApi {
         finishParkedReconciliation();
       },
       (err: unknown) => {
-        console.warn("[use-approval] listPending failed:", (err as Error).message);
+        console.warn("[use-approval] listPending failed:", errorMessage(err));
         // Nothing will read the retired set now — the snapshot it guarded is
         // never coming. Released here too, or a window whose one listPending
         // failed would accumulate ids for the rest of its life.
@@ -261,7 +262,7 @@ export function useApproval(): ApprovalQueueApi {
         });
       } catch (err) {
         // Log only — do NOT re-push. See JSDoc above.
-        console.warn("[lvis] approval.respond failed:", (err as Error).message);
+        console.warn("[lvis] approval.respond failed:", errorMessage(err));
       } finally {
         // Keep the decided request mounted until the IPC request settles. If a
         // new request arrives meanwhile, showing it before this guard releases

@@ -11,6 +11,7 @@ import { formatMediumDateTime } from "../../../shared/format-time.js";
 import { localDateKey, shiftLocalDateKey } from "../../../shared/local-date.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
 import { TelemetrySection } from "./TelemetrySection.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 interface AuditStats {
   totalByType: Record<string, number>;
@@ -91,7 +92,7 @@ export function AuditTab() {
       });
       setResult(res);
     } catch (e) {
-      setError((e as Error).message ?? t("auditTab.searchFailed"));
+      setError(errorMessage(e) || t("auditTab.searchFailed"));
     } finally {
       setLoading(false);
     }

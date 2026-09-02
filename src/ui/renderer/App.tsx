@@ -99,6 +99,7 @@ import {
 import { formatIpcError } from "./format-ipc-error.js";
 import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
 import { TEST_IDS } from "../../shared/test-ids.js";
+import { errorMessage } from "../../shared/error-message.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -250,7 +251,7 @@ export function App() {
 
   const handleExport = useCallback(async (format: "markdown" | "json", sessionId?: string) => {
     try { await api.chatExport(format, sessionId); }
-    catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
+    catch (err) { console.warn("[lvis] export failed:", errorMessage(err)); }
   }, [api]);
 
   // Reverse of handleExport. Returns the new sessionId on success so the caller
@@ -261,7 +262,7 @@ export function App() {
       const result = await api.chatImport();
       return result.ok ? result.sessionId : null;
     } catch (err) {
-      console.warn("[lvis] import failed:", (err as Error).message);
+      console.warn("[lvis] import failed:", errorMessage(err));
       return null;
     }
   }, [api]);
@@ -314,7 +315,7 @@ export function App() {
   // window can address that group once it has left the tree.
   const releaseChatGroupLoop = useCallback((chatGroupId: string) => {
     void chatGroupApi(api, chatGroupId).chatGroupRelease().catch((err: unknown) => {
-      console.warn("[lvis] chat group release failed: %s", (err as Error).message);
+      console.warn("[lvis] chat group release failed: %s", errorMessage(err));
     });
   }, [api]);
 
@@ -776,7 +777,7 @@ export function App() {
         if (loaded !== false) setActiveView("home");
         return loaded;
       } catch (err) {
-        console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
+        console.warn("[lvis] openRoutineSession failed:", errorMessage(err));
         return false;
       }
     },

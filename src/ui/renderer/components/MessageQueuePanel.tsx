@@ -15,6 +15,7 @@ import { ChevronDown, ChevronRight, MessageSquarePlus, ArrowUp, Check, X, Pencil
 import { Badge } from "../../../components/ui/badge.js";
 import type { MessageQueueStore, MessageQueueItem } from "../state/message-queue-store.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 interface MessageQueuePanelProps {
   store: MessageQueueStore;
@@ -187,7 +188,7 @@ function MessageQueueRow({
       onEdit(next);
       setEditing(false);
     } catch (err) {
-      console.warn("[message-queue] edit rejected:", (err as Error).message);
+      console.warn("[message-queue] edit rejected:", errorMessage(err));
     }
   }, [draft, item.text, onEdit, onRemove]);
 

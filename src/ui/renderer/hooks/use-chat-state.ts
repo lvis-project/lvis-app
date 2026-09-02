@@ -25,6 +25,7 @@ import { isMissingStagedEnvelopeErrorMessage } from "../../../shared/staged-orig
 import type { LvisApi } from "../types.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { resetSuggestedReplies } from "./use-suggested-replies.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 function isMissingStagedEnvelopeIpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -759,7 +760,7 @@ export function useChatState(api: LvisApi) {
         }
       } catch (err) {
         failed = true;
-        const error = (err as Error).message;
+        const error = errorMessage(err);
         const stagedEnvelopeFailure = isMissingStagedEnvelopeIpcError(err);
         setEntries((p) =>
           setAssistantError(
@@ -811,7 +812,7 @@ export function useChatState(api: LvisApi) {
         );
       }
     } catch (err) {
-      const error = (err as Error).message;
+      const error = errorMessage(err);
       const stagedEnvelopeFailure = isMissingStagedEnvelopeIpcError(err);
       setEntries((p) =>
         setAssistantError(
@@ -894,7 +895,7 @@ export function useChatState(api: LvisApi) {
         setErrorWithThought(t("useChatState.continueGenerationFailedError", { error: res?.error ?? t("useChatState.unknownError") }));
       }
     } catch (err) {
-      setErrorWithThought(t("useChatState.errorPrefix", { error: (err as Error).message }));
+      setErrorWithThought(t("useChatState.errorPrefix", { error: errorMessage(err) }));
     } finally {
       finishStreamingRequest(requestId);
     }
@@ -956,7 +957,7 @@ export function useChatState(api: LvisApi) {
           : res.summary;
         setEntries((p) => [...p, { kind: "system", text: banner }]);
       } catch (err) {
-        setEntries((p) => [...p, { kind: "system", text: t("useChatState.compactError", { error: (err as Error).message }) }]);
+        setEntries((p) => [...p, { kind: "system", text: t("useChatState.compactError", { error: errorMessage(err) }) }]);
       } finally {
         setIsCompacting(false);
       }

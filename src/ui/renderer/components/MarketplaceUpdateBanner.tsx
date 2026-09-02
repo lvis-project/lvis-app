@@ -12,6 +12,7 @@ import {
   buildNetworkAccessAcknowledgement,
   hasNetworkAccessDisclosure,
 } from "../../../shared/network-access.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 
 
@@ -78,7 +79,7 @@ export function MarketplaceUpdateBanner({
         );
         succeeded.push(u);
       } catch (e) {
-        failed.push({ update: u, message: (e as Error).message });
+        failed.push({ update: u, message: errorMessage(e) });
       }
     }
     setBusy(false);

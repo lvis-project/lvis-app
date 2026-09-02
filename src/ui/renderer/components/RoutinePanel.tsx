@@ -345,7 +345,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
         setError(result.error ?? t("routinePanel.errorAddRoutineFailed"));
       }
     } catch (err) {
-      setError((err as Error).message ?? t("routinePanel.errorAddRoutineFailed"));
+      setError(errorMessage(err) || t("routinePanel.errorAddRoutineFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -368,7 +368,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
       onAdded();
       onClose();
     } catch (err) {
-      setNaturalError((err as Error).message ?? t("routinePanel.errorNaturalParseFailed"));
+      setNaturalError(errorMessage(err) || t("routinePanel.errorNaturalParseFailed"));
     } finally {
       setNaturalParsing(false);
     }

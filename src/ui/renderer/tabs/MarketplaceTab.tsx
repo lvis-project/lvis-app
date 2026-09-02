@@ -32,6 +32,7 @@ import {
   marketplaceProviderPresetFromAsset,
 } from "../../../shared/marketplace-package-assets.js";
 import { isMarketplaceEligibleLLMVendor } from "../../../shared/llm-vendor-defaults.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 type MarketplaceAssetInstallState = Pick<
   MarketplaceSettings,
@@ -288,7 +289,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         /* keep empty install state */
       }
       setPackages(withMarketplaceAssetInstallState(mergeMarketplaceCandidates([]), installed));
-      setPackageStatus(t("marketplaceTab.loadFailed", { message: (err as Error).message }));
+      setPackageStatus(t("marketplaceTab.loadFailed", { message: errorMessage(err) }));
     }
   }, [api, t]);
 
@@ -396,7 +397,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       }
       await refreshPackages();
     } catch (err) {
-      setPackageStatus(t("marketplaceTab.operationFailed", { message: (err as Error).message }));
+      setPackageStatus(t("marketplaceTab.operationFailed", { message: errorMessage(err) }));
     } finally {
       setWorkingSlug(null);
     }
@@ -422,7 +423,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       }
       await refreshPackages();
     } catch (err) {
-      setPackageStatus(t("marketplaceTab.operationFailed", { message: (err as Error).message }));
+      setPackageStatus(t("marketplaceTab.operationFailed", { message: errorMessage(err) }));
     } finally {
       setWorkingSlug(null);
     }
@@ -437,7 +438,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       }
       await refreshPackages();
     } catch (err) {
-      setPackageStatus(t("marketplaceTab.operationFailed", { message: (err as Error).message }));
+      setPackageStatus(t("marketplaceTab.operationFailed", { message: errorMessage(err) }));
     } finally {
       setWorkingSlug(null);
     }

@@ -9,6 +9,7 @@ import type { FileEditDiffData, FileEditHunk } from "../utils/file-diff.js";
 import { countDiffLines } from "../utils/file-diff.js";
 import { getApi } from "../api-client.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 // ─── Main inline diff component (edit_file / apply_patch / write_file inline) ─
 
@@ -350,7 +351,7 @@ export function WriteFileSidecarDiff({
       }
     } catch (err) {
       if (!isMountedRef.current) return;
-      setErrorMsg((err as Error).message ?? t("fileEditDiff.ipcError"));
+      setErrorMsg(errorMessage(err) || t("fileEditDiff.ipcError"));
       setDiffState("error");
     }
   }

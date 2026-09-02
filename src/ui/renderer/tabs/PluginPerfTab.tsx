@@ -4,6 +4,7 @@ import type { LvisApi, PluginPerfStats } from "../types.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { formatClockTime } from "../../../shared/format-time.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 type Row = {
   pluginId: string;
@@ -61,7 +62,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
       const next: Row[] = Object.entries(stats).map(([pluginId, s]) => ({ pluginId, stats: s }));
       setRows(next);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }

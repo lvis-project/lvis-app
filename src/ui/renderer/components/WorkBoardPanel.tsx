@@ -37,6 +37,7 @@ import type {
 import { MAX_ITEMS } from "../../../shared/work-board-types.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { localDateKey, localDayStart } from "../../../shared/local-date.js";
+import { errorMessage } from "../../../shared/error-message.js";
 
 export interface WorkBoardPanelProps {
   api: LvisApi;
@@ -251,7 +252,7 @@ function useWorkBoardRun(api: LvisApi): {
         }
       }).catch((err: unknown) => {
         if (!mountedRef.current) return;
-        patch(id, { busy: false, phase: "error", reason: (err as Error).message });
+        patch(id, { busy: false, phase: "error", reason: errorMessage(err) });
       });
     },
     [api, patch],
@@ -601,7 +602,7 @@ export function WorkItemCreateDialog({ api, project, onClose, onCreated }: Creat
         setError(reason ?? t("workBoard.errorAddFailed"));
       }
     } catch (err) {
-      setError((err as Error).message ?? t("workBoard.errorAddFailed"));
+      setError(errorMessage(err) || t("workBoard.errorAddFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -889,7 +890,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
         }
       } catch (err) {
         if (cancelled) return;
-        setLoadError((err as Error).message ?? t("workBoard.errorLoadFailed"));
+        setLoadError(errorMessage(err) || t("workBoard.errorLoadFailed"));
       }
     })();
     return () => {
@@ -943,7 +944,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
         setActionError(reason ?? t("workBoard.errorSaveFailed"));
       }
     } catch (err) {
-      setActionError((err as Error).message ?? t("workBoard.errorSaveFailed"));
+      setActionError(errorMessage(err) || t("workBoard.errorSaveFailed"));
     } finally {
       setBusy(false);
     }
@@ -971,7 +972,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
         setActionError(reason ?? t("workBoard.errorSaveFailed"));
       }
     } catch (err) {
-      setActionError((err as Error).message ?? t("workBoard.errorSaveFailed"));
+      setActionError(errorMessage(err) || t("workBoard.errorSaveFailed"));
     } finally {
       setBusy(false);
     }
