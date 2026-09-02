@@ -56,6 +56,19 @@ export type RenderAppReturn = {
   emitNotificationClicked: (payload: unknown) => void;
 };
 
+/**
+ * Seed the app mode the shell reads before first paint ("work" is the harness
+ * default), and return the undo. Lives here rather than in each suite because
+ * two suites spelling the same seed is exactly what the duplicate-helper gate
+ * refuses — and a second spelling could drift from the preload key.
+ */
+export function startInChatMode(): () => void {
+  (window as { __lvisInitialAppMode?: string }).__lvisInitialAppMode = "chat";
+  return () => {
+    delete (window as { __lvisInitialAppMode?: string }).__lvisInitialAppMode;
+  };
+}
+
 export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppReturn> {
   const { lvisEnv, pendingApprovals, ...apiOpts } = opts;
   const {
