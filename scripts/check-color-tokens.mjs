@@ -28,8 +28,9 @@
  * same literal shapes in JSX style props and delete this script, exactly as
  * check-opacity-tokens.mjs documents for its own rule.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { walkSourceFiles } from "./lib/source-walk.mjs";
 
 const SRC_DIR = join(process.cwd(), "src", "ui");
 
@@ -65,33 +66,29 @@ function toPosix(p) {
   return sep === "/" ? p : p.split(sep).join("/");
 }
 
-function walk(dir) {
-  // withFileTypes avoids a separate statSync between listing and read (CodeQL
-  // flags that window as a file-system race), matching check-opacity-tokens.
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "node_modules") continue;
-      walk(p);
-    } else if (entry.isFile() && /\.(tsx|ts)$/.test(entry.name)) {
-      const rel = toPosix(relative(process.cwd(), p));
-      if (GRANDFATHERED_FILES.has(rel)) continue;
-      const content = readFileSync(p, "utf8");
-      const lines = content.split("\n");
-      lines.forEach((line, i) => {
-        for (const [label, re] of PATTERNS) {
-          re.lastIndex = 0;
-          for (const m of line.matchAll(re)) {
-            violations.push(`${rel}:${i + 1}  [${label}] ${m[0]}`);
-          }
+function scan(dir) {
+  const files = walkSourceFiles(dir, {
+    skipDirs: new Set(["__tests__", "node_modules"]),
+    extensions: [".ts", ".tsx"],
+  });
+  for (const p of files) {
+    const rel = toPosix(relative(process.cwd(), p));
+    if (GRANDFATHERED_FILES.has(rel)) continue;
+    const content = readFileSync(p, "utf8");
+    const lines = content.split("\n");
+    lines.forEach((line, i) => {
+      for (const [label, re] of PATTERNS) {
+        re.lastIndex = 0;
+        for (const m of line.matchAll(re)) {
+          violations.push(`${rel}:${i + 1}  [${label}] ${m[0]}`);
         }
-      });
-    }
+      }
+    });
   }
 }
 
 try {
-  walk(SRC_DIR);
+  scan(SRC_DIR);
 } catch (e) {
   console.warn(`[color-token-check] skipped: ${e.message}`);
   process.exit(0);

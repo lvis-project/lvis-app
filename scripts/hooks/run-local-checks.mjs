@@ -14,14 +14,16 @@
 //
 // Stages: pre-commit | pre-push | manual. Bypass once with LVIS_HOOKS_SKIP=1.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { parsePrePushUpdates, readPrePushInput } from "./pre-push-ref-updates.mjs";
 import { basename, join, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
 import { withElectronNativeRebuildLock } from "../lib/electron-native-modules.mjs";
 import { ensureElectronAbiBetterSqlite3 } from "./node-native-abi.mjs";
-import { spawnSyncPortable as spawnSync } from "./spawn-command.mjs";
+import { readJsonFile } from "../lib/knip-baseline.mjs";
+import { findTlsBypass, isTlsBypassScanTarget } from "../lib/tls-bypass-patterns.mjs";
+import { runCommand, spawnSyncPortable as spawnSync } from "./spawn-command.mjs";
 import {
   APP_TYPECHECK_GATE_SCRIPTS,
   getMissingPackageScripts,
@@ -79,21 +81,17 @@ function hasFile(path) {
   return existsSync(path);
 }
 
-function readJson(path) {
-  return JSON.parse(readFileSync(path, "utf-8"));
-}
-
 function hasPackageScript(dir, name) {
   const packageJsonPath = join(dir, "package.json");
   if (!hasFile(packageJsonPath)) return false;
-  return Boolean(readJson(packageJsonPath).scripts?.[name]);
+  return Boolean(readJsonFile(packageJsonPath).scripts?.[name]);
 }
 
 function isNamedPackage(dir, name) {
   const packageJsonPath = join(dir, "package.json");
   if (!hasFile(packageJsonPath)) return false;
   try {
-    return readJson(packageJsonPath).name === name;
+    return readJsonFile(packageJsonPath).name === name;
   } catch {
     return false;
   }
@@ -132,18 +130,8 @@ function captureOptional(cmd, args, cwd) {
 }
 
 function run(cmd, args, cwd) {
-  console.log(`\n[checks] ${basename(cwd)} :: ${cmd} ${args.join(" ")}`);
-  const result = spawnSync(cmd, args, {
-    cwd,
-    stdio: ["ignore", "inherit", "inherit"],
-    env: process.env,
-  });
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    throw new Error(`${cmd} ${args.join(" ")} failed in ${cwd}`);
-  }
+  console.log("");
+  runCommand(cmd, args, { cwd, label: `checks ${basename(cwd)}` });
 }
 
 function available(...candidates) {
@@ -168,7 +156,7 @@ function requireElectronNodeVitest(dir) {
   if (!hasFile(packageJsonPath)) {
     throw new Error("[electron-vitest-runner-required] lvis-app package.json is missing");
   }
-  const parsed = readJson(packageJsonPath);
+  const parsed = readJsonFile(packageJsonPath);
   if (
     parsed.scripts?.["test:vitest"] !==
     "node scripts/run-vitest-under-electron.mjs"
@@ -183,7 +171,7 @@ function resolveElectronVersion(dir) {
   const packageJsonPath = join(dir, "node_modules", "electron", "package.json");
   if (!hasFile(packageJsonPath)) return null;
   try {
-    return readJson(packageJsonPath).version || null;
+    return readJsonFile(packageJsonPath).version || null;
   } catch {
     return null;
   }
@@ -592,22 +580,18 @@ function runStagedSafetyChecks(repoRoot) {
   run(commands.git, ["diff", "--cached", "--check"], repoRoot);
   const files = getStagedFiles(repoRoot);
   const violations = [];
-  const dangerousPatterns = [
-    { label: "merge conflict markers", regex: /^(<<<<<<< |=======|>>>>>>> )/m },
-    {
-      label: "TLS verification bypass",
-      regex:
-        /(NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*["']?0|rejectUnauthorized\s*:\s*false|strictSSL\s*:\s*false|verify\s*=\s*False|ssl\._create_unverified_context)/m,
-    },
-  ];
+  const mergeMarkers = /^(<<<<<<< |=======|>>>>>>> )/m;
 
   for (const relativePath of files) {
     const stagedContent = getStagedFileContent(repoRoot, relativePath);
     if (!stagedContent || stagedContent.includes(String.fromCharCode(0))) continue;
-    for (const pattern of dangerousPatterns) {
-      if (pattern.regex.test(stagedContent)) {
-        violations.push(`${relativePath}: ${pattern.label}`);
-      }
+    if (mergeMarkers.test(stagedContent)) {
+      violations.push(`${relativePath}: merge conflict markers`);
+    }
+    // Same pattern list the build runs over dist/ (scripts/lib/tls-bypass-patterns.mjs).
+    if (!isTlsBypassScanTarget(relativePath)) continue;
+    for (const label of findTlsBypass(stagedContent)) {
+      violations.push(`${relativePath}: TLS verification bypass (${label})`);
     }
   }
 

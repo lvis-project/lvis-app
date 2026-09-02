@@ -10,7 +10,7 @@
 // Requires `bun install` to have been run in this worktree already (this
 // script does not install dependencies).
 
-import { spawnSync } from "node:child_process";
+import { runCommand } from "./hooks/spawn-command.mjs";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,17 +25,7 @@ const skipBuild = args.includes("--skip-build");
 const passthroughArgs = args.filter((a) => a !== "--skip-build");
 
 function run(cmd, cmdArgs, opts = {}) {
-  console.log(`[capture-screenshots] $ ${cmd} ${cmdArgs.join(" ")}`);
-  const result = spawnSync(cmd, cmdArgs, {
-    cwd: repoRoot,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-    ...opts,
-  });
-  if (result.status !== 0) {
-    console.error(`[capture-screenshots] "${cmd} ${cmdArgs.join(" ")}" failed (exit=${result.status})`);
-    process.exit(result.status ?? 1);
-  }
+  runCommand(cmd, cmdArgs, { cwd: repoRoot, label: "capture-screenshots", ...opts });
 }
 
 if (!skipBuild || !existsSync(mainEntry)) {

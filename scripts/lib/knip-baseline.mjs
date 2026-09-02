@@ -3,11 +3,25 @@ import {
   closeSync,
   fsyncSync,
   openSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+
+/**
+ * Parse a JSON file, naming it in the error. Every gate that reads a ledger
+ * or a package.json — this one, the shape gate, the pre-push runner — asks
+ * the same question; the answer lives here beside the ledger writer.
+ */
+export function readJsonFile(path, label = basename(path)) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new Error(`${label} is not readable JSON: ${error.message}`);
+  }
+}
 
 export const KNIP_BASELINE_SCHEMA_VERSION = 1;
 

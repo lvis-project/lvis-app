@@ -23,9 +23,10 @@
  * `node scripts/check-source-text-safe.mjs`; the scanner is exported so
  * `test/scripts/source-text-safe.test.mjs` can exercise it against fixtures.
  */
-import { readFileSync, readdirSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { walkSourceFiles } from "./lib/source-walk.mjs";
 
 const ROOTS = ["src", "scripts", "test"];
 const EXTENSIONS = [".ts", ".tsx", ".mjs", ".js", ".jsx", ".json", ".css"];
@@ -44,25 +45,6 @@ const GRANDFATHERED = [
   "src/mcp/__tests__/mcp-app-download.test.ts",
   "src/shared/__tests__/mcp-app-partition.test.ts",
 ];
-
-function listFiles(dir, out = []) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "node_modules" || entry.name === "dist") continue;
-      listFiles(full, out);
-    } else if (EXTENSIONS.some((ext) => entry.name.endsWith(ext))) {
-      out.push(full);
-    }
-  }
-  return out;
-}
 
 function controlByteHits(bytes) {
   const hits = [];
@@ -83,7 +65,12 @@ export function scanSourceTextSafety(repoRoot, roots = ROOTS, grandfathered = GR
   const offenders = [];
   const stale = [];
   for (const root of roots) {
-    for (const file of listFiles(resolve(repoRoot, root))) {
+    const files = walkSourceFiles(resolve(repoRoot, root), {
+      skipDirs: new Set(["node_modules", "dist"]),
+      extensions: EXTENSIONS,
+      tolerateUnreadableDirs: true,
+    });
+    for (const file of files) {
       const rel = relative(repoRoot, file).split("\\").join("/");
       const hits = controlByteHits(readFileSync(file));
       if (hits.length === 0) {

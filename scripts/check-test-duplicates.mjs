@@ -1,5 +1,4 @@
-import { readdirSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { basename, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
 import {
@@ -12,6 +11,7 @@ import {
   isSourceFile,
   isVariableDeclaration,
 } from "typescript/unstable/ast";
+import { walkSourceFiles } from "./lib/source-walk.mjs";
 import { parseSourceFiles } from "./lib/ts7-ast.mjs";
 
 const ROOT = process.cwd();
@@ -75,15 +75,11 @@ export function isScannedTestSource(filePath, root = ROOT) {
 }
 
 export function walk(dir, out = [], root = ROOT) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name), out, root);
-      continue;
-    }
-    const filePath = join(dir, entry.name);
-    if (isScannedTestSource(filePath, root)) out.push(filePath);
-  }
-  return out;
+  return walkSourceFiles(
+    dir,
+    { skipDirs: SKIP_DIRS, accept: (filePath) => isScannedTestSource(filePath, root) },
+    out,
+  );
 }
 
 export function collectHelpers(files, root = ROOT) {

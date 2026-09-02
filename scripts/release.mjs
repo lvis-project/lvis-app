@@ -13,7 +13,7 @@
  * — never checked in. See docs/references/production-release-checklist.md.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { runCommand } from "./hooks/spawn-command.mjs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,14 +27,7 @@ const SKIP_CODE_SIGN = argv.includes("--skip-code-sign");
 const IS_CI = process.env.CI === "true";
 
 function run(cmd, args, opts = {}) {
-  console.log(`[release] $ ${cmd} ${args.join(" ")}`);
-  const r = spawnSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
-  if (r.error) {
-    throw new Error(`${cmd} ${args.join(" ")} failed to spawn: ${r.error.message}`);
-  }
-  if (r.status !== 0) {
-    throw new Error(`${cmd} ${args.join(" ")} exited with code ${r.status}`);
-  }
+  runCommand(cmd, args, { cwd: root, label: "release", ...opts });
 }
 
 function bumpPatch(version) {

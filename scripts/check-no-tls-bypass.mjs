@@ -1,62 +1,47 @@
 #!/usr/bin/env node
 /**
- * check-no-tls-bypass.mjs — §17 C1 CI guard
+ * check-no-tls-bypass.mjs — build-output guard
  *
- * dist/ 내 모든 JS/TS 파일에서 dev-only TLS bypass 패턴이 남아있는지 확인.
- * build 스크립트 끝에 체이닝되어 빌드를 fail시킨다.
+ * Scans every file under dist/ for a TLS-verification bypass and fails the
+ * build when one survived into the bundle. The pattern list is shared with the
+ * pre-push staged-source scan (scripts/lib/tls-bypass-patterns.mjs): this is
+ * the same question asked of the bytes that ship rather than the bytes that
+ * were committed.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { walkSourceFiles } from "./lib/source-walk.mjs";
+import {
+  TLS_BYPASS_SCAN_EXTENSIONS,
+  findTlsBypass,
+} from "./lib/tls-bypass-patterns.mjs";
 
-const FORBIDDEN = [
-  "NODE_TLS_REJECT_UNAUTHORIZED",
-  "ignore-certificate-errors",
-  "PYTHONHTTPSVERIFY",
-];
 const DIST_DIR = join(process.cwd(), "dist");
 
-function walk(dir) {
-  let entries;
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return; // dir doesn't exist — skip
-  }
-  for (const entry of entries) {
-    const p = join(dir, entry);
-    let s;
+let violations = 0;
+try {
+  const files = walkSourceFiles(DIST_DIR, {
+    extensions: TLS_BYPASS_SCAN_EXTENSIONS,
+    tolerateUnreadableDirs: true,
+  });
+  for (const file of files) {
+    let content;
     try {
-      s = statSync(p);
+      content = readFileSync(file, "utf8");
     } catch {
       continue;
     }
-    if (s.isDirectory()) {
-      walk(p);
-    } else if (/\.(js|mjs|cjs|ts)$/.test(entry)) {
-      let content;
-      try {
-        content = readFileSync(p, "utf8");
-      } catch {
-        continue;
-      }
-      for (const needle of FORBIDDEN) {
-        if (content.includes(needle)) {
-          console.error(`[tls-bypass-check] ${p} contains forbidden: ${needle}`);
-          process.exitCode = 1;
-        }
-      }
+    for (const label of findTlsBypass(content)) {
+      console.error(`[tls-bypass-check] ${file} contains forbidden: ${label}`);
+      violations += 1;
     }
   }
-}
-
-try {
-  walk(DIST_DIR);
 } catch (e) {
   console.warn(`[tls-bypass-check] skipped: ${e.message}`);
 }
 
-if (process.exitCode === 1) {
-  console.error("[tls-bypass-check] FAIL — dev-only TLS bypass detected in dist/");
+if (violations > 0) {
+  console.error("[tls-bypass-check] FAIL — TLS-verification bypass detected in dist/");
   process.exit(1);
 }
 console.log("[tls-bypass-check] OK");
