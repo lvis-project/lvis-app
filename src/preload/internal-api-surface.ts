@@ -33,7 +33,7 @@ import type {
   OpenHtmlPreviewWindowPayload,
   OpenHtmlPreviewWindowResult,
 } from "../shared/render-html-preview.js";
-import type { SessionTodoItem } from "../shared/session-todo.js";
+import type { SessionTaskItem } from "../shared/session-tasks.js";
 import type { ChatStreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
@@ -1400,20 +1400,20 @@ export function buildInternalApiSurface() {
     return () => ipcRenderer.removeListener(OVERLAY_V1.dismiss, listener);
   },
 
-  // todo_session_write — assistant's current-turn checklist
-  listSessionTodos: async (sessionId: string) =>
-    ipcRenderer.invoke(CHANNELS.sessionTodo.list, sessionId),
-  clearSessionTodos: async (sessionId: string) =>
-    ipcRenderer.invoke(CHANNELS.sessionTodo.clear, sessionId),
-  onSessionTodoChanged: (
+  // session_tasks — assistant's current-turn checklist
+  listSessionTasks: async (sessionId: string) =>
+    ipcRenderer.invoke(CHANNELS.sessionTasks.list, sessionId),
+  clearSessionTasks: async (sessionId: string) =>
+    ipcRenderer.invoke(CHANNELS.sessionTasks.clear, sessionId),
+  onSessionTasksChanged: (
     handler: (payload: {
       sessionId: string;
-      items: SessionTodoItem[];
+      items: SessionTaskItem[];
     }) => void,
   ) => {
     const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
-    ipcRenderer.on(CHANNELS.sessionTodo.changed, listener);
-    return () => ipcRenderer.removeListener(CHANNELS.sessionTodo.changed, listener);
+    ipcRenderer.on(CHANNELS.sessionTasks.changed, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.sessionTasks.changed, listener);
   },
 
   // agent_spawn — sub-agent lifecycle event stream

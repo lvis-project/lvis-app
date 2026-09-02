@@ -48,7 +48,7 @@ Discovery: `src/hooks/hook-discovery.ts` resolves `~/.config/lvis/hooks/`, globs
 
 ### 1.4 What `src/hooks/post-turn-hook-chain.ts` is (and is NOT)
 
-`PostTurnHookChain` is an **internal, hardcoded** pipeline (mark-stale → checkpoint → saveSession → extractMemory → title → audit → todo → idle-poke) that runs after `queryLoop` resolves. It is **not** a user-script hook surface. The new `Stop` / `PostCompact` lifecycle events (below) are conceptually adjacent but are a **distinct, user-facing** surface — the design keeps them separate and never lets a user hook block the internal persistence chain.
+`PostTurnHookChain` is an **internal, hardcoded** pipeline (mark-stale → checkpoint → saveSession → extractMemory → title → audit → idle-poke) that runs after `queryLoop` resolves. It is **not** a user-script hook surface. The new `Stop` / `PostCompact` lifecycle events (below) are conceptually adjacent but are a **distinct, user-facing** surface — the design keeps them separate and never lets a user hook block the internal persistence chain.
 
 ### 1.5 Audit shape today
 

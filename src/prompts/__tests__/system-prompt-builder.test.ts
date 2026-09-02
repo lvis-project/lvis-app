@@ -508,7 +508,7 @@ describe("SystemPromptBuilder — Section 8 Rolling Summary Preamble (always-on)
   });
 });
 
-describe("SystemPromptBuilder — todo_session_write batching guidance (TPM round-count)", () => {
+describe("SystemPromptBuilder — session_tasks batching guidance (TPM round-count)", () => {
   it("instructs status transitions to ride along the next work-tool call (no dedicated round)", () => {
     const builder = makeSystemPromptBuilder();
     const prompt = builder.build();
@@ -519,7 +519,7 @@ describe("SystemPromptBuilder — todo_session_write batching guidance (TPM roun
     expect(prompt).toContain("나열된 순서대로 실행");
     expect(prompt).toContain("그 작업 도구보다 앞 순서로");
     // No-op prohibition: do not re-send an item in its current status (the
-    // observed in_progress re-mark loop that spent 32/35 todo calls on no change).
+    // observed in_progress re-mark loop that spent 32/35 session_tasks calls on no change).
     expect(prompt).toContain("같은 상태로 다시 보내지 마세요");
     expect(prompt).toContain("오류로 처리됩니다");
   });
@@ -527,13 +527,13 @@ describe("SystemPromptBuilder — todo_session_write batching guidance (TPM roun
   it("does not re-introduce the per-step mandate that forced a dedicated in_progress round before every tool call", () => {
     const builder = makeSystemPromptBuilder();
     const prompt = builder.build();
-    // Regression guard: this exact mandate drove ~11 todo_session_write rounds/turn,
+    // Regression guard: this exact mandate drove ~11 session_tasks rounds/turn,
     // a dominant gpt-5.4-mini TPM contributor once the deferral regression was removed.
     expect(prompt).not.toContain(
       "도구를 호출하기 전에 반드시 해당 단계를 in_progress 로 먼저 업데이트",
     );
     expect(prompt).not.toContain(
-      "todo_session_write → 항목 1 을 in_progress 로 업데이트 (도구 호출 전)",
+      "session_tasks → 항목 1 을 in_progress 로 업데이트 (도구 호출 전)",
     );
   });
 });

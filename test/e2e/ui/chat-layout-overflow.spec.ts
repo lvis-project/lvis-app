@@ -13,7 +13,7 @@ const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
 
 const LONG_ASSISTANT =
   '먼저 mia님의 “오늘(2026-05-06 KST)” 기준 할 일/마감 항목을 찾기 위해 ' +
-  '`{"id":"todo_session_write","arguments":{"steps":[{"title":"개인 작업 스냅샷 확인","status":"pending"},{"title":"승인 상태 확인","status":"in_progress"}]}}` ' +
+  '`{"id":"session_tasks","arguments":{"steps":[{"title":"개인 작업 스냅샷 확인","status":"pending"},{"title":"승인 상태 확인","status":"in_progress"}]}}` ' +
   "이제 mia님의 개인 작업 스냅샷을 맞춰 다시 시도하겠습니다. " +
   '`tool {"tool":"agent_hub_my_work_snapshot","arguments":{"includeDone":false,"long_unbroken_key":"agent_hub_list_approval_requests_agent_hub_list_inbox_agent_hub_my_work_snapshot"}}` ' +
   "승인 요청하신 도구 결과가 반환되지 않아도 레이아웃은 오른쪽으로 밀려나면 안 됩니다.";
@@ -92,12 +92,12 @@ test.describe("chat layout overflow", () => {
         }),
         JSON.stringify({
           role: "assistant",
-          content: "두 번째 중간 설명입니다. `todo_session_write` 결과를 반영합니다. " + LONG_IDENTIFIER,
+          content: "두 번째 중간 설명입니다. `session_tasks` 결과를 반영합니다. " + LONG_IDENTIFIER,
           thought: "두 번째 단계 검증입니다. " + LONG_IDENTIFIER,
           toolCalls: [
             {
               id: "t2",
-              name: "todo_session_write",
+              name: "session_tasks",
               input: {
                 steps: [
                   { title: "개인 작업 스냅샷 확인", status: "done" },
@@ -117,7 +117,7 @@ test.describe("chat layout overflow", () => {
         JSON.stringify({
           role: "tool_result",
           toolUseId: "t2",
-          toolName: "todo_session_write",
+          toolName: "session_tasks",
           content: "5단계 업데이트 완료. " + LONG_RESULT,
         }),
         JSON.stringify({

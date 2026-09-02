@@ -154,7 +154,7 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "feedbackStore",
   "routinesStore",
   "routinesScheduler",
-  "sessionTodoStore",
+  "sessionTasksStore",
   "workBoardStore",
   "workBoardEngine",
   "workBoardReport",

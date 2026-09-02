@@ -276,7 +276,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // Sibling of "no-engine" — the report channel is gated on the reporter.
   "no-reporter": "formatIpcError.noReporter",
   "no-starred-store": "formatIpcError.noStarredStore",
-  "no-session-todo-store": "formatIpcError.noSessionTodoStore",
+  "no-session-tasks-store": "formatIpcError.noSessionTasksStore",
   "provider-not-installed": "formatIpcError.providerNotInstalled",
   "unknown-provider": "formatIpcError.unknownProvider",
   "reviewer-rewire-failed": "formatIpcError.reviewerRewireFailed",

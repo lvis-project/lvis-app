@@ -859,11 +859,6 @@
     },
     {
       "type": "exports",
-      "file": "src/shared/session-todo.ts",
-      "name": "SESSION_TODO_ITEM_STATUSES"
-    },
-    {
-      "type": "exports",
       "file": "src/shared/sidebar-tab.ts",
       "name": "SIDEBAR_TABS"
     },

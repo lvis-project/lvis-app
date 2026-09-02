@@ -5,7 +5,7 @@
  *   - subAgentSpawns: live list of in-flight + recently-completed sub-agents
  *   - loadedSkills: badges shown inline for `skill_load` calls
  *
- * `RemindersList` and `SessionTodoPanel` own their own state since they're
+ * `RemindersList` and `SessionTasksPanel` own their own state since they're
  * simple list views; they live alongside this hook in the App.
  */
 import { useCallback, useEffect, useState } from "react";

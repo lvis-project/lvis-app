@@ -14,7 +14,7 @@ const layers = [
     band: "Electron host",
     boxes: [
       "App.tsx · MainToolbar · ChatView",
-      "MessageQueuePanel · SessionTodoPanel",
+      "MessageQueuePanel · SessionTasksPanel",
       "Reviewer (risk-classifier)",
       "Tool Registry · ConversationLoop",
       "RoutineEngine (shutdown · schedule)",

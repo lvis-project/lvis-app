@@ -85,13 +85,6 @@ export interface PostTurnHookChainDeps {
    * Caller (typically conversation-loop or IPC bridge) can trigger summary handling.
    */
   onCheckpointSuggested?: (sessionId: string, cleanedOutput: string) => void;
-  /**
-   * Session-scoped assistant TO-DO lifecycle — mark side. When the turn just
-   * completed a fully-completed plan, the chain marks it for clear at the next
-   * turn boundary (the conversation loop executes via `clearIfPending`). Marking
-   * never emits, so the panel persists through the completing turn.
-   */
-  sessionTodoStore?: { markForClearIfCompleted(sessionId: string): boolean };
 }
 
 export interface PostTurnHookResult {
@@ -243,18 +236,6 @@ export class PostTurnHookChain {
       });
     } catch (err) {
       log.warn("audit failed: %s", err);
-    }
-
-    // Mark completed session TO-DO for clear at the next turn boundary.
-    //    Deterministic, runs after every turn. Marking does not emit, so the
-    //    panel stays visible through the turn that completed it; the
-    //    conversation loop clears it unconditionally at the next turn start.
-    try {
-      if (this.deps.sessionTodoStore?.markForClearIfCompleted(ctx.sessionId)) {
-        log.info(`mark-session-todo-for-clear: marked session ${ctx.sessionId} for next-turn clear`);
-      }
-    } catch (err) {
-      log.warn("mark-session-todo-for-clear failed: %s", err);
     }
 
     // 7. Idle poke.

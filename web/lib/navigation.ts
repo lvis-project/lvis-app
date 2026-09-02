@@ -19,7 +19,7 @@ export const navigation: NavGroup[] = [
     eyebrow: "Host · Chat",
     items: [
       { title: "채팅 화면 구성", href: "/docs/chat/layout" },
-      { title: "메시지 큐 & TODO", href: "/docs/chat/message-queue" },
+      { title: "메시지 큐 & Tasks", href: "/docs/chat/message-queue" },
       { title: "Tool & Thinking 표시", href: "/docs/chat/tool-thinking" },
       { title: "질문 카드", href: "/docs/chat/question-cards" },
       { title: "플러그인 패널", href: "/docs/chat/plugin-panel" },

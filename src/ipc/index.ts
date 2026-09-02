@@ -25,7 +25,7 @@
  *                 lvis:policy:*
  *   window        window:*, lvis:window:open-html-preview
  *   routines      lvis:routines:*
- *   session-todo  lvis:session-todo:*
+ *   session-tasks  lvis:session-tasks:*
  *   app           lvis:app:*
  *   work-board    lvis:work-board:* (CRUD, lifecycle, run, run-transcript,
  *                 generate-report)
@@ -60,7 +60,7 @@ import { registerDiagnosticsHandlers } from "./domains/diagnostics.js";
 import { registerPermissionsHandlers } from "./domains/permissions.js";
 import { registerWindowHandlers } from "./domains/window.js";
 import { registerRoutineHandlers } from "./domains/routines.js";
-import { registerSessionTodoHandlers } from "./domains/session-todo.js";
+import { registerSessionTasksHandlers } from "./domains/session-tasks.js";
 import { registerAppHandlers } from "./domains/app.js";
 import { registerWorkBoardHandlers } from "./domains/work-board.js";
 import { registerAttachHandlers } from "./domains/attach.js";
@@ -130,7 +130,7 @@ export function registerIpcHandlers(
   registerPermissionsHandlers(deps);
   registerWindowHandlers(deps);
   registerRoutineHandlers(deps);
-  registerSessionTodoHandlers(deps);
+  registerSessionTasksHandlers(deps);
   registerAppHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerAttachHandlers(deps);

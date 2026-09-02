@@ -63,6 +63,7 @@ import { en as en_be_routineEngine } from "./be_routineEngine.js";
 import { en as en_be_routineSchedule } from "./be_routineSchedule.js";
 import { en as en_be_runtimeIndex } from "./be_runtimeIndex.js";
 import { en as en_be_sandboxCapability } from "./be_sandboxCapability.js";
+import { en as en_be_sessionTasks } from "./be_sessionTasks.js";
 import { en as en_be_shellPathPolicy } from "./be_shellPathPolicy.js";
 import { en as en_be_shutdownRoutines } from "./be_shutdownRoutines.js";
 import { en as en_be_skillList } from "./be_skillList.js";
@@ -73,7 +74,6 @@ import { en as en_be_structuredCompact } from "./be_structuredCompact.js";
 import { en as en_be_subagentRunner } from "./be_subagentRunner.js";
 import { en as en_be_systemPromptBuilder } from "./be_systemPromptBuilder.js";
 import { en as en_be_telegramBridge } from "./be_telegramBridge.js";
-import { en as en_be_todoSessionWrite } from "./be_todoSessionWrite.js";
 import { en as en_be_toolSearch } from "./be_toolSearch.js";
 import { en as en_be_tools } from "./be_tools.js";
 import { en as en_be_whitelistBootstrap } from "./be_whitelistBootstrap.js";
@@ -154,7 +154,7 @@ import { en as en_rosePine } from "./rosePine.js";
 import { en as en_routinePanel } from "./routinePanel.js";
 import { en as en_savedToast } from "./savedToast.js";
 import { en as en_sessionResumeDivider } from "./sessionResumeDivider.js";
-import { en as en_sessionTodoPanel } from "./sessionTodoPanel.js";
+import { en as en_sessionTasksPanel } from "./sessionTasksPanel.js";
 import { en as en_settingsContent } from "./settingsContent.js";
 import { en as en_sidebar } from "./sidebar.js";
 import { en as en_skillBadge } from "./skillBadge.js";
@@ -254,6 +254,7 @@ export const generatedEn: Record<string, string> = {
   ...en_be_routineSchedule,
   ...en_be_runtimeIndex,
   ...en_be_sandboxCapability,
+  ...en_be_sessionTasks,
   ...en_be_shellPathPolicy,
   ...en_be_shutdownRoutines,
   ...en_be_skillList,
@@ -264,7 +265,6 @@ export const generatedEn: Record<string, string> = {
   ...en_be_subagentRunner,
   ...en_be_systemPromptBuilder,
   ...en_be_telegramBridge,
-  ...en_be_todoSessionWrite,
   ...en_be_toolSearch,
   ...en_be_tools,
   ...en_be_whitelistBootstrap,
@@ -345,7 +345,7 @@ export const generatedEn: Record<string, string> = {
   ...en_routinePanel,
   ...en_savedToast,
   ...en_sessionResumeDivider,
-  ...en_sessionTodoPanel,
+  ...en_sessionTasksPanel,
   ...en_settingsContent,
   ...en_sidebar,
   ...en_skillBadge,

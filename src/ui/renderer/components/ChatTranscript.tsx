@@ -38,7 +38,7 @@ export function ChatTranscript({
   return (
     <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className={`min-w-0 overflow-x-hidden space-y-4 py-5 ${readingColumnClass}`}>
       {/* Workflow tools (S1+S2): skill badges + ask-user inline.
-          SessionTodoPanel is intentionally NOT here — it sits above the input
+          SessionTasksPanel is intentionally NOT here — it sits above the input
           cluster (see below the ScrollArea) so it stays visible regardless of
           chat scroll position. */}
       {loadedSkills.length > 0 && (

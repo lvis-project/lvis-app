@@ -217,7 +217,6 @@ export async function wireConversation(
     bootAuditLogger,
     llmFetch,
     idleScheduler,
-    sessionTodoStore,
     skillOverlay,
     notificationService,
     rewireReviewerAgent,
@@ -302,7 +301,6 @@ export async function wireConversation(
     settingsService,
     memoryCaptureService,
     auditLogger: bootAuditLogger,
-    sessionTodoStore,
   });
 
   // ApprovalGate already constructed above (before initPluginRuntime) so the
@@ -352,7 +350,6 @@ export async function wireConversation(
     pluginOperationGrants,
     pluginOperationIdentityProvider,
     skillOverlay,
-    sessionTodoStore,
     notificationService,
     auditLogger: bootAuditLogger,
     rewireReviewerAgent,
@@ -461,7 +458,6 @@ export async function wireConversation(
       pluginOperationGrants,
       pluginOperationIdentityProvider,
       skillOverlay,
-      sessionTodoStore,
       notificationService,
       auditLogger: bootAuditLogger,
       rewireReviewerAgent,

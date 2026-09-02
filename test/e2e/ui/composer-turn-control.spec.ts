@@ -111,7 +111,7 @@ test('message queue panel stays a full-bleed band and paints visible actions', a
     // Measure against the dock column the strip lives in, NOT <main>: <main>
     // spans the whole window including the sidebar, so nothing inside the dock
     // can align with it — which is why the equivalent assertion in
-    // session-todo-in-chat.spec.ts is red on main too.
+    // session-tasks-in-chat.spec.ts is red on main too.
     const dockBox = document
       .querySelector('[data-testid="composer-queue-dock"]')
       ?.getBoundingClientRect();

@@ -77,7 +77,7 @@ describe("setupWorkflowStores — skill_load approval gate wiring", () => {
   it("registers skill_load and routes its first-use modal to ctx.approvalGate", async () => {
     const { ctx, registry, probe } = makeCtx();
 
-    await setupWorkflowStores(ctx);
+    await setupWorkflowStores(ctx, []);
 
     const tool = registry.findByName("skill_load");
     expect(tool, "skill_load must be registered by the boot step").toBeDefined();
@@ -103,7 +103,7 @@ describe("setupWorkflowStores — skill_load approval gate wiring", () => {
       auditService: { log: () => {} },
     } as unknown as BootContext;
 
-    await setupWorkflowStores(ctx);
+    await setupWorkflowStores(ctx, []);
 
     const tool = registry.findByName("skill_load");
     const result = await tool!.execute({ skillName: "demo" }, toolCtx("sess-deny"));

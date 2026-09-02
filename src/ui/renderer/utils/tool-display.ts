@@ -9,7 +9,7 @@ const TOOL_DISPLAY_KEYS: Record<string, string> = {
   task_delete: "toolDisplay.taskDelete",
   task_today: "toolDisplay.taskToday",
   task_overdue: "toolDisplay.taskOverdue",
-  todo_session_write: "toolDisplay.todoSessionWrite",
+  session_tasks: "toolDisplay.sessionTasks",
   routine_schedule: "toolDisplay.routineSchedule",
 
   agent_spawn: "toolDisplay.agentSpawn",

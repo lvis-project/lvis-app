@@ -40,7 +40,7 @@ import type { LateBindingRefs } from "./steps/plugin-runtime.js";
 import type { WorkBoardStore } from "../main/work-board-store.js";
 import type { WorkBoardEngine } from "../core/work-board-engine.js";
 import type { WorkBoardReporter } from "../work-board/work-report.js";
-import type { SessionTodoStore } from "../main/session-todo-store.js";
+import type { SessionTasksStore } from "../main/session-tasks-store.js";
 import type { SkillStore } from "../main/skill-store.js";
 import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { PersonaPromptStore } from "../main/persona-prompt-store.js";
@@ -138,7 +138,7 @@ export class BootContext {
   declare workBoardStorage: WorkBoardStorage;
   declare dueSoonTimer: ReturnType<typeof setInterval> | undefined;
   declare startWorkBoardDueSoon: () => void;
-  declare sessionTodoStore: SessionTodoStore;
+  declare sessionTasksStore: SessionTasksStore;
   declare skillStore: SkillStore;
   declare agentProfileStore: AgentProfileStore;
   declare personaPromptStore: PersonaPromptStore;
@@ -290,7 +290,7 @@ const BOOT_CONTEXT_FIELDS = [
   "workBoardStorage",
   "dueSoonTimer",
   "startWorkBoardDueSoon",
-  "sessionTodoStore",
+  "sessionTasksStore",
   "skillStore",
   "agentProfileStore",
   "personaPromptStore",

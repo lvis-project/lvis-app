@@ -189,9 +189,9 @@ const HOST_ONLY_CHANNELS: ReadonlyArray<readonly [string, string, unknown[]]> = 
   // Side chat runs arbitrary tools on a second loop.
   ["sidechat", CHANNELS.sidechat.send, [{ input: "x" }]],
   ["sidechat", CHANNELS.sidechat.list, []],
-  // Routines and the session todo list.
+  // Routines and the session tasks list.
   ["routines", ROUTINES.list, []],
-  ["session-todo", CHANNELS.sessionTodo.list, []],
+  ["session-tasks", CHANNELS.sessionTasks.list, []],
   // Host identity + runtime versions. Read-only, but the response carries
   // `userDataPath` and is returned unprojected.
   ["app", CHANNELS.app.info, []],
@@ -233,7 +233,7 @@ beforeEach(async () => {
     { registerPluginsHandlers },
     { registerSideChatHandlers },
     { registerRoutineHandlers },
-    { registerSessionTodoHandlers },
+    { registerSessionTasksHandlers },
     { registerAppHandlers },
     { registerWorkBoardHandlers },
     { registerPromptHandlers },
@@ -250,7 +250,7 @@ beforeEach(async () => {
     import("../domains/plugins.js"),
     import("../domains/sidechat.js"),
     import("../domains/routines.js"),
-    import("../domains/session-todo.js"),
+    import("../domains/session-tasks.js"),
     import("../domains/app.js"),
     import("../domains/work-board.js"),
     import("../domains/prompts.js"),
@@ -267,7 +267,7 @@ beforeEach(async () => {
   registerPluginsHandlers(deps);
   registerSideChatHandlers(deps);
   registerRoutineHandlers(deps);
-  registerSessionTodoHandlers(deps);
+  registerSessionTasksHandlers(deps);
   registerAppHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerPromptHandlers(deps);

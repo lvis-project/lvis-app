@@ -27,7 +27,7 @@ export interface ChatContextValue {
   chatEndRef: RefObject<HTMLDivElement | null>;
   /**
    * Active chat session id. Lives in the chat context so descendants
-   * (notably SessionTodoPanel) can scope their per-session reactive
+   * (notably SessionTasksPanel) can scope their per-session reactive
    * subscriptions without a separate prop drill. Empty string before the
    * first session id resolves on app boot.
    */

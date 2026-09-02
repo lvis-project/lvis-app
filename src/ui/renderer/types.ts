@@ -59,7 +59,7 @@ import type {
   OpenHtmlPreviewWindowPayload,
   OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
-import type { SessionTodoItem } from "../../shared/session-todo.js";
+import type { SessionTaskItem } from "../../shared/session-tasks.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
@@ -1141,12 +1141,12 @@ export type LvisApi = {
   onAskUserQuestionTimeout?: (
     h: (payload: { requestId: string }) => void,
   ) => () => void;
-  listSessionTodos: (sessionId: string) => Promise<SessionTodoItem[]>;
-  clearSessionTodos: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
-  onSessionTodoChanged: (
+  listSessionTasks: (sessionId: string) => Promise<SessionTaskItem[]>;
+  clearSessionTasks: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+  onSessionTasksChanged: (
     h: (payload: {
       sessionId: string;
-      items: SessionTodoItem[];
+      items: SessionTaskItem[];
     }) => void,
   ) => () => void;
   onAgentSpawnEvent: (

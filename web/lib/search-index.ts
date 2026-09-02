@@ -17,7 +17,7 @@ export const searchIndex: SearchEntry[] = [
 
   // Host · Chat
   { group: "채팅", href: "/docs/chat/layout", title: "채팅 화면 구성", snippet: "App · Sidebar · MainToolbar · 메인 콘텐츠 영역 · ChatView" },
-  { group: "채팅", href: "/docs/chat/message-queue", title: "메시지 큐 & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · 컴포저 위 · 비어 있으면 표시 안 함" },
+  { group: "채팅", href: "/docs/chat/message-queue", title: "메시지 큐 & Tasks", snippet: "MessageQueuePanel + SessionTasksPanel · 컴포저 위 · 비어 있으면 표시 안 함" },
   { group: "채팅", href: "/docs/chat/tool-thinking", title: "Tool & Thinking 표시", snippet: "Tool Registry · 출처 3종 · 백그라운드 셸 · 이미지 보기 · 도구 검색" },
   { group: "채팅", href: "/docs/chat/question-cards", title: "질문 카드", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
   { group: "채팅", href: "/docs/chat/plugin-panel", title: "플러그인 패널", snippet: "manifest ui[] 슬롯 · 번들 Skill · 순수 Tool · 정규식 ^[a-zA-Z_][a-zA-Z0-9_]*$" },

@@ -54,6 +54,7 @@ import { ko as ko_be_routineEngine } from "../generated/be_routineEngine.js";
 import { ko as ko_be_routineSchedule } from "../generated/be_routineSchedule.js";
 import { ko as ko_be_runtimeIndex } from "../generated/be_runtimeIndex.js";
 import { ko as ko_be_sandboxCapability } from "../generated/be_sandboxCapability.js";
+import { ko as ko_be_sessionTasks } from "../generated/be_sessionTasks.js";
 import { ko as ko_be_shellPathPolicy } from "../generated/be_shellPathPolicy.js";
 import { ko as ko_be_shutdownRoutines } from "../generated/be_shutdownRoutines.js";
 import { ko as ko_be_skillList } from "../generated/be_skillList.js";
@@ -64,7 +65,6 @@ import { ko as ko_be_structuredCompact } from "../generated/be_structuredCompact
 import { ko as ko_be_subagentRunner } from "../generated/be_subagentRunner.js";
 import { ko as ko_be_systemPromptBuilder } from "../generated/be_systemPromptBuilder.js";
 import { ko as ko_be_telegramBridge } from "../generated/be_telegramBridge.js";
-import { ko as ko_be_todoSessionWrite } from "../generated/be_todoSessionWrite.js";
 import { ko as ko_be_toolSearch } from "../generated/be_toolSearch.js";
 import { ko as ko_be_tools } from "../generated/be_tools.js";
 import { ko as ko_be_whitelistBootstrap } from "../generated/be_whitelistBootstrap.js";
@@ -145,7 +145,7 @@ import { ko as ko_rosePine } from "../generated/rosePine.js";
 import { ko as ko_routinePanel } from "../generated/routinePanel.js";
 import { ko as ko_savedToast } from "../generated/savedToast.js";
 import { ko as ko_sessionResumeDivider } from "../generated/sessionResumeDivider.js";
-import { ko as ko_sessionTodoPanel } from "../generated/sessionTodoPanel.js";
+import { ko as ko_sessionTasksPanel } from "../generated/sessionTasksPanel.js";
 import { ko as ko_settingsContent } from "../generated/settingsContent.js";
 import { ko as ko_sidebar } from "../generated/sidebar.js";
 import { ko as ko_skillBadge } from "../generated/skillBadge.js";
@@ -245,6 +245,7 @@ export const koMessages: Record<string, string> = {
   ...ko_be_routineSchedule,
   ...ko_be_runtimeIndex,
   ...ko_be_sandboxCapability,
+  ...ko_be_sessionTasks,
   ...ko_be_shellPathPolicy,
   ...ko_be_shutdownRoutines,
   ...ko_be_skillList,
@@ -255,7 +256,6 @@ export const koMessages: Record<string, string> = {
   ...ko_be_subagentRunner,
   ...ko_be_systemPromptBuilder,
   ...ko_be_telegramBridge,
-  ...ko_be_todoSessionWrite,
   ...ko_be_toolSearch,
   ...ko_be_tools,
   ...ko_be_whitelistBootstrap,
@@ -336,7 +336,7 @@ export const koMessages: Record<string, string> = {
   ...ko_routinePanel,
   ...ko_savedToast,
   ...ko_sessionResumeDivider,
-  ...ko_sessionTodoPanel,
+  ...ko_sessionTasksPanel,
   ...ko_settingsContent,
   ...ko_sidebar,
   ...ko_skillBadge,

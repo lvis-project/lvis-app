@@ -2,13 +2,13 @@
  * Boot step — workflow system stores, workflow tool deps, and builtin tool
  * registration (§4.2 Step 4 + §4.4, extracted from boot.ts C18).
  *
- * Constructs the workflow-tool-backing stores (session todos, skills, agent
+ * Constructs the workflow-tool-backing stores (session tasks, skills, agent
  * profiles, persona prompts, skill overlay/approvals, ask-user gate), assembles
  * the {@link WorkflowToolDeps} closure bundle (late-binding the sub-agent runner
  * through a ref), registers the builtin + meta tools, and wires the knowledge
  * retriever + idle scheduler.
  */
-import { SessionTodoStore } from "../../main/session-todo-store.js";
+import { SessionTasksStore } from "../../main/session-tasks-store.js";
 import { AskUserQuestionGate } from "../../main/ask-user-question-gate.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
@@ -29,10 +29,21 @@ import {
 } from "../tools.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
+import type { MemoryManager } from "../../memory/memory-manager.js";
 
 const log = createLogger("lvis");
 
-export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
+/**
+ * @param sessionMetadataStores every MemoryManager that owns conversation
+ *   sidecars (main, side-chat, sub-agent), main first. A session's task list
+ *   is persisted in the sidecar of whichever store already holds that
+ *   session; a session no store has seen yet is a brand-new main conversation
+ *   whose transcript is flushed at the end of its first turn.
+ */
+export async function setupWorkflowStores(
+  ctx: BootContext,
+  sessionMetadataStores: readonly MemoryManager[],
+): Promise<void> {
   const {
     routinesStore,
     getMainWindow,
@@ -45,7 +56,14 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     auditService,
   } = ctx;
 
-  const sessionTodoStore = new SessionTodoStore();
+  const sessionOwner = (sessionId: string): MemoryManager =>
+    sessionMetadataStores.find(
+      (store) => store.hasSessionTranscript(sessionId) || store.hasSessionMetadataFile(sessionId),
+    ) ?? sessionMetadataStores[0];
+  const sessionTasksStore = new SessionTasksStore({
+    load: (sessionId) => sessionOwner(sessionId).loadSessionMetadata(sessionId)?.tasks ?? [],
+    save: (sessionId, items) => sessionOwner(sessionId).saveSessionTasks(sessionId, items),
+  });
   const skillStore = new SkillStore();
   const agentProfileStore = new AgentProfileStore();
   const personaPromptStore = new PersonaPromptStore();
@@ -68,7 +86,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
   const subAgentRunnerRef: { fn: SubAgentRunner | undefined } = { fn: undefined };
   const workflowDeps: WorkflowToolDeps = {
     routinesStore,
-    sessionTodoStore,
+    sessionTasksStore,
     skillStore,
     agentProfileStore,
     skillOverlay,
@@ -139,7 +157,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     auditService,
   });
 
-  ctx.sessionTodoStore = sessionTodoStore;
+  ctx.sessionTasksStore = sessionTasksStore;
   ctx.skillStore = skillStore;
   ctx.agentProfileStore = agentProfileStore;
   ctx.personaPromptStore = personaPromptStore;

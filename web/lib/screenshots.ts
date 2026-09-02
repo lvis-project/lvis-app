@@ -10,8 +10,8 @@ export const shots: Record<string, Shot> = {
   "chat-todo-queue": {
     slug: "chat-todo-queue.png",
     topic: "chat",
-    caption: "메시지 큐와 TODO 리스트가 채팅 본문 위에 떠 있는 상태",
-    captionEn: "Message queue and TODO list floating above the chat body",
+    caption: "메시지 큐와 Tasks 리스트가 채팅 본문 위에 떠 있는 상태",
+    captionEn: "Message queue and Tasks list floating above the chat body",
   },
   "chat-tool-thinking": {
     slug: "chat-tool-thinking.png",

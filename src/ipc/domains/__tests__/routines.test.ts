@@ -40,7 +40,7 @@ function makeDeps(
       add: vi.fn(),
     },
     routinesScheduler: null,
-    sessionTodoStore: null,
+    sessionTasksStore: null,
     conversationLoop: { getSessionId: vi.fn(() => "main-session") },
     memoryManager: {
       listSessionsByRoutine: vi.fn(() => sessions),
