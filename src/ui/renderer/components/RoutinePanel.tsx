@@ -4,7 +4,8 @@
  * Single list with execution mode badge per row, 3 input styles, and the
  * store-enforced persisted routine cap.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Plus, RefreshCw } from "lucide-react";
 import { t } from "../../../i18n/runtime.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
@@ -27,6 +28,7 @@ import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../share
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
 import { errorMessage } from "../../../shared/error-message.js";
+import { usePaneActions } from "./ChatGroupFrame.js";
 
 export interface RoutinePanelProps {
   api: LvisApi;
@@ -705,6 +707,24 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
   const llmCount = routines.filter((r) => r.execution === "llm-session").length;
   const totalCapReached = routines.length >= MAX_PERSISTED_ROUTINES;
 
+  // The panel's global controls, drawn by the pane header. The counts they act
+  // on stay in the body: a badge reports state, it is not a control.
+  usePaneActions(useMemo(() => [
+    {
+      id: "routine-add",
+      label: t("routinePanel.addRoutineButton"),
+      icon: <Plus className="h-4 w-4" />,
+      disabled: totalCapReached,
+      onSelect: () => setShowAddModal(true),
+    },
+    {
+      id: "routine-refresh",
+      label: t("routinePanel.refreshButton"),
+      icon: <RefreshCw className="h-4 w-4" />,
+      onSelect: () => void refresh(),
+    },
+  ], [totalCapReached, refresh]));
+
   return (
     <>
       <div
@@ -712,11 +732,8 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
         data-testid="routine-panel"
       >
         <div className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <h2 className="text-xl font-semibold tracking-normal text-foreground">{t("routinePanel.panelTitle")}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{t("routinePanel.panelDescription")}</p>
-          </div>
-          <div className="flex items-center gap-2">
+          <p className="min-w-0 text-sm text-muted-foreground">{t("routinePanel.panelDescription")}</p>
+          <div className="flex shrink-0 items-center gap-2">
             <Badge variant="outline" title={t("routinePanel.totalRoutineBadgeTitle")}>
               {routines.length}/{MAX_PERSISTED_ROUTINES}
             </Badge>
@@ -726,17 +743,6 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
             {totalCapReached && (
               <span className="text-xs text-destructive">{t("routinePanel.capReachedLabel")}</span>
             )}
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={totalCapReached}
-              onClick={() => setShowAddModal(true)}
-            >
-              {t("routinePanel.addRoutineButton")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => void refresh()}>
-              {t("routinePanel.refreshButton")}
-            </Button>
           </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-3">

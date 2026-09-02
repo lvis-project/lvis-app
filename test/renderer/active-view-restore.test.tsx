@@ -16,7 +16,7 @@
 import "./setup.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
-import { renderApp } from "./render-app.js";
+import { atHome, renderApp } from "./render-app.js";
 import {
   activeSettingsTab,
   clickSidebarNavRow,
@@ -70,15 +70,6 @@ async function waitForActive(container: HTMLElement, testId: string): Promise<vo
   expect(await isActive(container, testId)).toBe(true);
 }
 
-function atHome(container: HTMLElement): boolean {
-  // The conversations stay MOUNTED across view navigation — a tile subscribes
-  // to its group's stream when it mounts, so unmounting them to show another
-  // view would drop the frames of a turn still running. "At home" is therefore
-  // whether the surface is SHOWING, not whether it exists.
-  return container
-    .querySelector('[data-testid="chat-surface"]')
-    ?.getAttribute("data-visible") === "true";
-}
 
 /**
  * Let every pending restore land before concluding that none did.

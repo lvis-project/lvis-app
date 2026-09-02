@@ -3,7 +3,7 @@
 
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Play, Plus, RefreshCw, XCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { t } from "../../../i18n/runtime.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
@@ -39,6 +39,7 @@ import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 import { errorMessage } from "../../../shared/error-message.js";
 import { shortSessionId } from "../../../shared/session-lookup.js";
+import { usePaneActions } from "./ChatGroupFrame.js";
 
 export interface WorkBoardPanelProps {
   api: LvisApi;
@@ -1329,6 +1330,25 @@ export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
   const onRun = useCallback((id: number) => runItem(id), [runItem]);
   const onOpenDetail = useCallback((id: number) => setDetailId(id), []);
 
+  // The board's own global controls. They sat beside the heading this panel no
+  // longer draws; the pane's header carries them now. What is left in the body
+  // is the state they act on — the count and the cap warning — not a control.
+  usePaneActions(useMemo(() => [
+    {
+      id: "work-board-add",
+      label: t("workBoard.addItemButton"),
+      icon: <Plus className="h-4 w-4" />,
+      disabled: capReached,
+      onSelect: () => setShowCreate(true),
+    },
+    {
+      id: "work-board-refresh",
+      label: t("workBoard.refreshButton"),
+      icon: <RefreshCw className="h-4 w-4" />,
+      onSelect: () => void refresh(),
+    },
+  ], [capReached, refresh]));
+
   return (
     <>
       <div
@@ -1336,29 +1356,14 @@ export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
         data-testid="work-board-panel"
       >
         <div className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <h2 className="text-xl font-semibold tracking-normal text-foreground">{t("workBoard.panelTitle")}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{t("workBoard.panelDescription")}</p>
-          </div>
-          <div className="flex items-center gap-2">
+          <p className="min-w-0 text-sm text-muted-foreground">{t("workBoard.panelDescription")}</p>
+          <div className="flex shrink-0 items-center gap-2">
             <Badge variant="outline" title={t("workBoard.panelTitle")}>
               {items.length}/{MAX_ITEMS}
             </Badge>
             {capReached && (
               <span className="text-xs text-destructive">{t("workBoard.capReachedLabel")}</span>
             )}
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={capReached}
-              onClick={() => setShowCreate(true)}
-              data-testid="work-board-add"
-            >
-              {t("workBoard.addItemButton")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => void refresh()}>
-              {t("workBoard.refreshButton")}
-            </Button>
           </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">

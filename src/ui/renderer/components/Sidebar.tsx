@@ -3,10 +3,8 @@ import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import { ViewHistoryNav, type ViewPathNavProps } from "./ViewPathNav.js";
 import {
   Blocks,
-  CalendarDays,
   ChevronRight,
   Folder,
-  KanbanSquare,
   KeyRound,
   LayoutGrid,
   MessageSquareText,
@@ -16,7 +14,6 @@ import {
   Pin,
   PowerOff,
   Plus,
-  Repeat2,
   Search,
   Wrench,
 } from "lucide-react";
@@ -29,6 +26,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { toPluginDoctorViewKey, toPluginSettingsViewKey } from "../utils/plugin-doctor-view.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
+import { BUILTIN_VIEW_ICONS } from "../utils/view-location.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
 import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
@@ -55,6 +53,12 @@ import {
   SIDEBAR_MIN_WIDTH,
 } from "../../../shared/side-panel.js";
 import { formatRelativeTime } from "../../../shared/format-time.js";
+
+// The Features rows draw the same glyph the pane header draws for the view
+// they open — one map, so a row and the header it produces cannot disagree.
+const WorkBoardIcon = BUILTIN_VIEW_ICONS["work-board"];
+const RoutinesIcon = BUILTIN_VIEW_ICONS.routines;
+const InsightsIcon = BUILTIN_VIEW_ICONS.insights;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -2081,7 +2085,7 @@ export function Sidebar({
                 <NavItem
                   viewKey="work-board"
                   label={t("mainToolbar.workBoard")}
-                  icon={<KanbanSquare className="h-4 w-4" />}
+                  icon={<WorkBoardIcon className="h-4 w-4" />}
                   isActive={activeView === "work-board"}
                   onClick={() => {
                     onSelect("work-board");
@@ -2094,7 +2098,7 @@ export function Sidebar({
                 <NavItem
                   viewKey="routines"
                   label={t("mainToolbar.routines")}
-                  icon={<Repeat2 className="h-4 w-4" />}
+                  icon={<RoutinesIcon className="h-4 w-4" />}
                   isActive={activeView === "routines"}
                   onClick={() => {
                     onSelect("routines");
@@ -2112,7 +2116,7 @@ export function Sidebar({
                 <NavItem
                   viewKey="insights"
                   label={t("mainToolbar.insights")}
-                  icon={<CalendarDays className="h-4 w-4" />}
+                  icon={<InsightsIcon className="h-4 w-4" />}
                   isActive={activeView === "insights" || activeView === "starred"}
                   onClick={() => {
                     onSelect("insights");

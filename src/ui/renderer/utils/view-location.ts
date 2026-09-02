@@ -16,6 +16,7 @@
  *   - the marketplace, which opens an external URL and is not an in-app
  *     place at all.
  */
+import { Brain, CalendarDays, KanbanSquare, Repeat2, type LucideIcon } from "lucide-react";
 import {
   SETTINGS_TAB_LABEL_KEYS,
   normalizeSettingsTab,
@@ -123,14 +124,39 @@ export function viewLocationBreadcrumb(
 }
 
 /**
+ * A built-in view that is a PLACE of its own: neither the conversation surface
+ * nor Settings, which are their own shapes. These are the views that become a
+ * pane body with the frame's header carrying their name.
+ */
+export type FeatureViewKey = Exclude<BuiltinViewKey, "home" | "settings">;
+
+/**
  * Built-in view → the label its own sidebar entry already uses. Reused rather
  * than restated so a renamed destination cannot be one thing in the rail and
  * another in the path.
  */
-const BUILTIN_LABEL_KEYS: Record<Exclude<BuiltinViewKey, "home" | "settings">, string> = {
+export const BUILTIN_LABEL_KEYS: Record<FeatureViewKey, string> = {
   "work-board": "mainToolbar.workBoard",
   routines: "mainToolbar.routines",
   insights: "mainToolbar.insights",
   starred: "mainToolbar.insights",
   memory: "mainToolbar.memory",
+};
+
+/**
+ * Built-in view → its glyph, beside the label it is named by.
+ *
+ * The sidebar row that opens a view and the pane header that then carries it
+ * are the same destination seen twice, so they read from one map rather than
+ * each picking an icon: a glyph changed in one place cannot become two
+ * different pictures of the same place. `memory` has no sidebar row today
+ * (removed in the 2026-07 shell refinement, the view stays routable) and is
+ * listed here because the pane header still has to draw it.
+ */
+export const BUILTIN_VIEW_ICONS: Record<FeatureViewKey, LucideIcon> = {
+  "work-board": KanbanSquare,
+  routines: Repeat2,
+  insights: CalendarDays,
+  starred: CalendarDays,
+  memory: Brain,
 };

@@ -14,6 +14,7 @@ import { formatCost, formatTokensExact } from "../../../lib/cost-format.js";
 import { formatHhMm, formatMediumDateTime, formatMonthYear } from "../../../shared/format-time.js";
 import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
 import { shortSessionId } from "../../../shared/session-lookup.js";
+import { usePaneActions } from "./ChatGroupFrame.js";
 
 export interface StarredItem {
   id: string;
@@ -448,18 +449,20 @@ export function StarredView({
 
   const summaryText = llmSummary ?? localSummaryText;
 
+  // The view's one global control, drawn by the pane header now that the
+  // heading it stood beside is the header's own title.
+  usePaneActions(useMemo(() => [
+    {
+      id: "insights-refresh",
+      label: t("starredView.refresh"),
+      icon: <RefreshCw className="h-4 w-4" />,
+      onSelect: () => void refreshStarred(),
+    },
+  ], [t, refreshStarred]));
+
   return (
     <div data-testid="insights-scroll-root" className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-y-auto [scrollbar-gutter:stable] pb-8">
-      <div className="flex shrink-0 flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h2 className="text-xl font-semibold tracking-normal text-foreground">{t("starredView.title")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t("starredView.description")}</p>
-        </div>
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => void refreshStarred()}>
-          <RefreshCw className="h-3.5 w-3.5" />
-          {t("starredView.refresh")}
-        </Button>
-      </div>
+      <p className="shrink-0 pb-4 text-sm text-muted-foreground">{t("starredView.description")}</p>
       <div data-testid="insights-overview-grid" className="grid min-h-0 shrink-0 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <section className="min-h-0 rounded-md border bg-background p-2">
           <div className="mb-2 flex items-center gap-2 px-1 text-sm font-semibold text-foreground">
@@ -631,7 +634,14 @@ export function StarredView({
               {conversationsForDay.length}
             </span>
           </div>
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea
+            /* Radix wraps the viewport content in a `display: table` div that sizes to
+               max-content, so a long unbreakable title makes the row wider than the
+               panel and the viewport clips it — row-level `truncate` never gets to
+               produce its ellipsis. Force that wrapper back to block, the same way
+               the sidebar's session list does. */
+            className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block [&_[data-radix-scroll-area-viewport]>div]:!min-w-0"
+          >
             {conversationsForDay.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">{t("starredView.projectChatsEmpty")}</div>
             ) : (
@@ -675,7 +685,14 @@ export function StarredView({
               {starredForDay.length}
             </span>
           </div>
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea
+            /* Radix wraps the viewport content in a `display: table` div that sizes to
+               max-content, so a long unbreakable title makes the row wider than the
+               panel and the viewport clips it — row-level `truncate` never gets to
+               produce its ellipsis. Force that wrapper back to block, the same way
+               the sidebar's session list does. */
+            className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block [&_[data-radix-scroll-area-viewport]>div]:!min-w-0"
+          >
             {starredForDay.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">{t("starredView.emptyState")}</div>
             ) : (
