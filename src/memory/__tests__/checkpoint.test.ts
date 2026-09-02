@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MemoryManager } from "../memory-manager.js";
+import { isValidSessionId, MemoryManager } from "../memory-manager.js";
 import type { Checkpoint, SessionMetadata } from "../memory-manager.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
@@ -486,11 +486,11 @@ describe("isValidSessionId helper — valid/invalid boundaries", () => {
     await mm.saveSession(SESSION_A, [{ role: "user", content: "msg" }]);
     writeFileSync(
       join(sessionsDir, `${SESSION_A}.meta.json`),
-      JSON.stringify({ parentSessionId: "test-chain-000-aaaa-bbbb" }),
+      JSON.stringify({ parentSessionId: "f502abaa-afc9-46a6-863c-19c8bbe6013c" }),
       "utf-8",
     );
     const meta = mm.loadSessionMetadata(SESSION_A);
-    expect(meta!.parentSessionId).toBe("test-chain-000-aaaa-bbbb");
+    expect(meta!.parentSessionId).toBe("f502abaa-afc9-46a6-863c-19c8bbe6013c");
   });
 
   it("rejects parentSessionId with slash (path-traversal)", async () => {
@@ -857,5 +857,34 @@ describe("pruneCheckpointsDiscardedByRewind", () => {
     await mm.saveSession(SESSION_C, [] as never);
 
     expect(mm.loadSession(SESSION_C)).toEqual([]);
+  });
+});
+
+// ── isValidSessionId — the one shape, shared with the A2A task store and the
+// rationale stores (they import this predicate rather than keeping their own).
+describe("isValidSessionId — one rule for every session id", () => {
+  const UUID = "12434f55-fbb9-4a54-b1a7-fb9638d8eebd";
+
+  it("accepts a bare lowercase UUID and the two minted namespaces", () => {
+    expect(isValidSessionId(UUID)).toBe(true);
+    expect(isValidSessionId(`sub-x-${UUID}`)).toBe(true);
+    expect(isValidSessionId(`sub-e3b0c442-${UUID}`)).toBe(true);
+    expect(isValidSessionId(`a2a-wire-1a2b3c4d-${UUID}`)).toBe(true);
+  });
+
+  it("rejects what the four earlier validators disagreed on", () => {
+    // 257 alphanumerics: passed here (no cap), failed the 256-capped copies.
+    expect(isValidSessionId("a".repeat(257))).toBe(false);
+    // Any free-form token passed the old `[A-Za-z0-9_-]+` rule.
+    expect(isValidSessionId("parent-session")).toBe(false);
+    // Uppercase, a namespace nobody mints, a namespace without a tag, and a
+    // tag outside [a-z0-9].
+    expect(isValidSessionId(UUID.toUpperCase())).toBe(false);
+    expect(isValidSessionId(`side-x-${UUID}`)).toBe(false);
+    expect(isValidSessionId(`sub-${UUID}`)).toBe(false);
+    expect(isValidSessionId(`sub-X_y-${UUID}`)).toBe(false);
+    expect(isValidSessionId("../etc/passwd")).toBe(false);
+    expect(isValidSessionId("")).toBe(false);
+    expect(isValidSessionId(undefined)).toBe(false);
   });
 });

@@ -214,7 +214,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
         instructions: "do",
         sourceTools: ["noop"],
         maxRounds: 2,
-        originSessionId: "parent-session",
+        originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
       });
       // R2-CR-2: tighten — `<=2` would also pass on a regression that bails
       // out at 0 or 1 rounds. The provider script emits 5 valid tool_use
@@ -242,7 +242,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
         resumeId: result.childSessionId,
       });
       expect(
-        runner.getRunStatus(result.childSessionId, "parent-session"),
+        runner.getRunStatus(result.childSessionId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         status: "waiting",
         suspension: result.suspension,
@@ -472,13 +472,13 @@ describe("SubAgentRunner — cross-agent DLP boundary", () => {
         {
           title: "dlp-success",
           instructions: "finish",
-          originSessionId: "parent-session",
+          originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
         },
         { onActivity },
       );
       const snapshot = runner.getRunStatus(
         result.childSessionId,
-        "parent-session",
+        "a1bdc27a-c758-4a74-8955-5e9188412366",
       );
 
       for (const surface of [result, snapshot, onActivity.mock.calls]) {
@@ -516,13 +516,13 @@ describe("SubAgentRunner — cross-agent DLP boundary", () => {
         {
           title: "dlp-error",
           instructions: "fail",
-          originSessionId: "parent-session",
+          originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
         },
         { onError },
       );
       const snapshot = runner.getRunStatus(
         result.childSessionId,
-        "parent-session",
+        "a1bdc27a-c758-4a74-8955-5e9188412366",
       );
 
       expect(result.ok).toBe(false);
@@ -576,7 +576,7 @@ describe("SubAgentRunner — projected terminal status", () => {
       const result = await runner.spawn({
         title: "blocked",
         instructions: "attempt work",
-        originSessionId: "parent-session",
+        originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
       });
 
       expect(result).toMatchObject({
@@ -586,7 +586,7 @@ describe("SubAgentRunner — projected terminal status", () => {
         summary: "prompt refused",
       });
       expect(
-        runner.getRunStatus(result.childSessionId, "parent-session"),
+        runner.getRunStatus(result.childSessionId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         status: "error",
         taskState: "TASK_STATE_REJECTED",
@@ -647,7 +647,7 @@ describe("SubAgentRunner — projected terminal status", () => {
         const result = await runner.spawn({
           title: `non-completing-${stopReason}`,
           instructions: "attempt work",
-          originSessionId: "parent-session",
+          originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
         });
 
         expect(result).toMatchObject({
@@ -657,7 +657,7 @@ describe("SubAgentRunner — projected terminal status", () => {
           turnCount: 0,
         });
         expect(
-          runner.getRunStatus(result.childSessionId, "parent-session"),
+          runner.getRunStatus(result.childSessionId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
         ).toMatchObject({
           status: "error",
           taskState: "TASK_STATE_FAILED",
@@ -738,7 +738,7 @@ describe("SubAgentRunner — projected terminal status", () => {
           cwd: process.cwd(),
           extraAllowedDirectories: [],
           metadata: {
-            sessionId: "parent-session",
+            sessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
             spawnDepth: 0,
             supportsA2AParentDelivery: true,
           },
@@ -747,14 +747,14 @@ describe("SubAgentRunner — projected terminal status", () => {
       const handle = JSON.parse(handleResult.output);
       expect(handle.childSessionId).toBeTruthy();
       expect(
-        runner.getRunStatus(handle.spawnId, "parent-session"),
+        runner.getRunStatus(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         taskState: "TASK_STATE_SUBMITTED",
         status: "running",
       });
 
       expect(
-        runner.interruptRun(handle.spawnId, "parent-session"),
+        runner.interruptRun(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         ok: true,
         run: { taskState: "TASK_STATE_CANCELED", status: "interrupted" },
@@ -786,7 +786,7 @@ describe("SubAgentRunner — projected terminal status", () => {
       expect(events.some((event) => event.type === "error")).toBe(false);
       expect(deliverToParent).toHaveBeenCalledTimes(1);
       expect(deliverToParent.mock.calls[0]![0]).toMatchObject({
-        parentSessionId: "parent-session",
+        parentSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
         childSessionId: handle.childSessionId,
         message: expect.objectContaining({
           taskId: handle.childSessionId,
@@ -796,14 +796,14 @@ describe("SubAgentRunner — projected terminal status", () => {
         }),
       });
       expect(
-        runner.getRunStatus(handle.spawnId, "parent-session"),
+        runner.getRunStatus(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         taskState: "TASK_STATE_CANCELED",
         status: "interrupted",
         stopReason: "interrupted",
       });
       expect(
-        runner.interruptRun(handle.spawnId, "parent-session"),
+        runner.interruptRun(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         ok: false,
         run: { taskState: "TASK_STATE_CANCELED", status: "interrupted" },
@@ -881,7 +881,7 @@ describe("SubAgentRunner — projected terminal status", () => {
           cwd: process.cwd(),
           extraAllowedDirectories: [],
           metadata: {
-            sessionId: "parent-session",
+            sessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
             spawnDepth: 0,
             supportsA2AParentDelivery: true,
           },
@@ -897,13 +897,13 @@ describe("SubAgentRunner — projected terminal status", () => {
       }
       expect(saveSessionMetadata).toHaveBeenCalledTimes(2);
       expect(
-        runner.getRunStatus(handle.spawnId, "parent-session"),
+        runner.getRunStatus(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         taskState: "TASK_STATE_WORKING",
         status: "running",
       });
       expect(
-        runner.interruptRun(handle.spawnId, "parent-session"),
+        runner.interruptRun(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         ok: false,
         run: { taskState: "TASK_STATE_WORKING", status: "running" },
@@ -936,7 +936,7 @@ describe("SubAgentRunner — projected terminal status", () => {
       });
       expect(deliverToParent).toHaveBeenCalledTimes(1);
       expect(deliverToParent.mock.calls[0]![0]).toMatchObject({
-        parentSessionId: "parent-session",
+        parentSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
         childSessionId: handle.childSessionId,
         message: expect.objectContaining({
           taskId: handle.childSessionId,
@@ -944,14 +944,14 @@ describe("SubAgentRunner — projected terminal status", () => {
         }),
       });
       expect(
-        runner.getRunStatus(handle.spawnId, "parent-session"),
+        runner.getRunStatus(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         taskState: "TASK_STATE_FAILED",
         status: "error",
         error: "final metadata write failed",
       });
       expect(
-        runner.interruptRun(handle.spawnId, "parent-session"),
+        runner.interruptRun(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         ok: false,
         run: { taskState: "TASK_STATE_FAILED", status: "error" },
@@ -993,7 +993,7 @@ describe("SubAgentRunner — projected terminal status", () => {
           cwd: process.cwd(),
           extraAllowedDirectories: [],
           metadata: {
-            sessionId: "parent-session",
+            sessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
             spawnDepth: 0,
             supportsA2AParentDelivery: true,
           },
@@ -1007,7 +1007,7 @@ describe("SubAgentRunner — projected terminal status", () => {
         taskState: "TASK_STATE_FAILED",
       });
       expect(
-        runner.getRunStatus(handle.spawnId, "parent-session"),
+        runner.getRunStatus(handle.spawnId, "a1bdc27a-c758-4a74-8955-5e9188412366"),
       ).toMatchObject({
         childSessionId: handle.childSessionId,
         status: "error",
@@ -1027,7 +1027,7 @@ describe("SubAgentRunner — projected terminal status", () => {
         message: "child setup failed",
       });
       expect(deliverToParent.mock.calls[0]?.[0]).toMatchObject({
-        parentSessionId: "parent-session",
+        parentSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
         childSessionId: handle.childSessionId,
         message: expect.objectContaining({
           taskId: handle.childSessionId,
@@ -1402,7 +1402,7 @@ describe("agent_spawn — recursive call refusal", () => {
     // Simulate the executor metadata for a sub-agent invocation.
     const ctxAsSubAgent = {
       cwd: process.cwd(),
-      metadata: { sessionId: "child-1", spawnDepth: 1 },
+      metadata: { sessionId: "1ae80cfb-d8c8-4a02-806d-4f4d2872a62d", spawnDepth: 1 },
       extraAllowedDirectories: [],
     };
     const r = await tool.execute(
@@ -1422,7 +1422,7 @@ describe("agent_spawn — recursive call refusal", () => {
             summary: "ok",
             toolCallCount: 0,
             turnCount: 1,
-            childSessionId: "c",
+            childSessionId: "2e7d2c03-a950-4ae2-85ec-f5b5356885a5",
             entries: [],
             ok: true,
           }),
@@ -1431,7 +1431,7 @@ describe("agent_spawn — recursive call refusal", () => {
     });
     const ctxAsParent = {
       cwd: process.cwd(),
-      metadata: { sessionId: "parent", spawnDepth: 0 },
+      metadata: { sessionId: "e4712596-8b3b-4104-8fbc-4802d1e40a71", spawnDepth: 0 },
       extraAllowedDirectories: [],
     };
     const r = await tool.execute(
@@ -1904,7 +1904,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       const result = await runner.spawn({
         title: "provider-missing",
         instructions: "do",
-        originSessionId: "origin-missing",
+        originSessionId: "b0590dc4-c31e-4ff6-8106-2b5f6d6325d9",
         maxRounds: 1,
       });
 
@@ -1916,7 +1916,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
         subAgentMemoryManager.loadSessionMetadata(result.childSessionId),
       ).toMatchObject({
         sessionKind: "subagent",
-        originSessionId: "origin-missing",
+        originSessionId: "b0590dc4-c31e-4ff6-8106-2b5f6d6325d9",
         subAgentTitle: "provider-missing",
         budgetResumeCount: 0,
         questionAnswerCount: 0,
@@ -1925,10 +1925,10 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
         subAgentSuspensionReason: undefined,
       });
       await expect(
-        runner.resolveSubAgentAddress("origin-missing", result.childSessionId),
+        runner.resolveSubAgentAddress("b0590dc4-c31e-4ff6-8106-2b5f6d6325d9", result.childSessionId),
       ).resolves.toEqual({
         childSessionId: result.childSessionId,
-        parentSessionId: "origin-missing",
+        parentSessionId: "b0590dc4-c31e-4ff6-8106-2b5f6d6325d9",
         childTitle: "provider-missing",
       });
     } finally {
@@ -1947,7 +1947,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       {
         title: "meta",
         instructions: "do",
-        originSessionId: "origin-XYZ",
+        originSessionId: "51941cbf-7fc2-45a8-8401-d2193b48d640",
         sourceTools: ["noop"],
         profileModel: "high",
         profileMode: "execute",
@@ -1996,7 +1996,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       {
         title: "meta-min",
         instructions: "do",
-        originSessionId: "origin-min",
+        originSessionId: "dbf92cab-1af6-4614-815f-ee0e85ca76ab",
         maxRounds: 1,
       },
     );
@@ -2072,7 +2072,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
       {
         title: "trace",
         instructions: "do",
-        originSessionId: "origin-trace",
+        originSessionId: "5ff63492-6b31-40b0-89d5-e32bffe9063b",
         maxRounds: 1,
       },
     );
@@ -2113,12 +2113,12 @@ describe("SubAgentRunner A2A bus facade", () => {
 
     await expect(
       runner.deliverToParent({
-        parentSessionId: "parent-session",
-        childSessionId: "sub-child",
+        parentSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
+        childSessionId: "sub-cd737a61-ca965459-55b1-40f6-8d1a-600e3f7a12ae",
         message: {
           messageId: "message-1",
-          contextId: "parent-session",
-          taskId: "sub-child",
+          contextId: "a1bdc27a-c758-4a74-8955-5e9188412366",
+          taskId: "sub-cd737a61-ca965459-55b1-40f6-8d1a-600e3f7a12ae",
           role: "ROLE_AGENT",
           parts: [{ text: "hello" }],
         },
@@ -2128,17 +2128,17 @@ describe("SubAgentRunner A2A bus facade", () => {
       disposition: "dropped",
       reason: "message-bus-unavailable",
     });
-    await expect(runner.peekParentMailbox("parent-session")).resolves.toEqual(
+    await expect(runner.peekParentMailbox("a1bdc27a-c758-4a74-8955-5e9188412366")).resolves.toEqual(
       [],
     );
     await expect(
-      runner.acknowledgeParentMailbox("parent-session", ["message-1"]),
+      runner.acknowledgeParentMailbox("a1bdc27a-c758-4a74-8955-5e9188412366", ["message-1"]),
     ).resolves.toBe(0);
     expect(() => runner.setParentWakeHandler(null)).not.toThrow();
   });
 
   it("one-shots an initial-metadata failure through the real bus and durable mailbox", async () => {
-    const parentSessionId = "parent-session";
+    const parentSessionId = "a1bdc27a-c758-4a74-8955-5e9188412366";
     const namespace = createInMemoryMailboxNamespace();
     const mailbox = new SubAgentMessageMailbox(namespace.handle);
     const audit = vi.fn();
@@ -2249,9 +2249,9 @@ describe("SubAgentRunner A2A bus facade", () => {
     });
     await expect(
       runner.deliverToParent({
-        parentSessionId: "other-parent",
+        parentSessionId: "bebd469f-b3d4-42a8-8340-f0a27e66162b",
         childSessionId: handle.childSessionId,
-        message: makeReplay("other-parent", "wrong-parent-message"),
+        message: makeReplay("bebd469f-b3d4-42a8-8340-f0a27e66162b", "wrong-parent-message"),
       }),
     ).resolves.toMatchObject({ ok: false, reason: "unknown-child" });
     await expect(
@@ -2423,7 +2423,7 @@ describe("SubAgentRunner workspace lifecycle", () => {
         instructions: "run only after metadata persists",
         projectRoot: removedRoot,
         projectName: "removed-project",
-        originSessionId: "parent-session",
+        originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
       });
       expect(saveSessionMetadata).toHaveBeenCalledTimes(1);
       expect(runTurnSpy).not.toHaveBeenCalled();
@@ -2519,7 +2519,7 @@ describe("spawn cancellation signal", () => {
         {
           title: "cancel-signal",
           instructions: "work",
-          originSessionId: "parent-session",
+          originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
         },
         {},
       );
@@ -2531,9 +2531,9 @@ describe("spawn cancellation signal", () => {
       expect(signal).toBeInstanceOf(AbortSignal);
       expect(signal?.aborted).toBe(false);
 
-      const snapshot = runner.listRunStatuses("parent-session")[0];
+      const snapshot = runner.listRunStatuses("a1bdc27a-c758-4a74-8955-5e9188412366")[0];
       const runId = snapshot?.spawnId ?? snapshot?.childSessionId ?? "";
-      expect(runner.interruptRun(runId, "parent-session")).toMatchObject({ ok: true });
+      expect(runner.interruptRun(runId, "a1bdc27a-c758-4a74-8955-5e9188412366")).toMatchObject({ ok: true });
       expect(signal?.aborted).toBe(true);
 
       releaseTurn();
@@ -2573,7 +2573,7 @@ describe("SubAgentRunner terminal completion step", () => {
       {
         title: "completion order",
         instructions: "do",
-        originSessionId: "parent-session",
+        originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
         spawnId: "spawn-completion-order",
       },
       {
@@ -2584,7 +2584,7 @@ describe("SubAgentRunner terminal completion step", () => {
           // here would already have been readable for a whole scheduling hop.
           observed.push(
             `agent_status:${
-              runner.getRunStatus("spawn-completion-order", "parent-session")?.status
+              runner.getRunStatus("spawn-completion-order", "a1bdc27a-c758-4a74-8955-5e9188412366")?.status
             }`,
           );
         },
@@ -2610,8 +2610,8 @@ describe("SubAgentRunner terminal completion step", () => {
       {
         title: "single frame",
         instructions: "do",
-        originSessionId: "parent-session",
-        spawnId: "spawn-single-frame",
+        originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
+        spawnId: "1f2ffeba-7ce4-4ac6-8a3e-6846649f7785",
       },
       { onTerminal },
     );
@@ -2621,7 +2621,7 @@ describe("SubAgentRunner terminal completion step", () => {
     // retried persistence path does. The observer must not fire again.
     const tracked = (
       runner as unknown as { trackedRuns: Map<string, { title: string }> }
-    ).trackedRuns.get("spawn-single-frame");
+    ).trackedRuns.get("1f2ffeba-7ce4-4ac6-8a3e-6846649f7785");
     expect(tracked).toBeDefined();
     (runner as unknown as {
       finalizeRun: (run: unknown, result: SubAgentSpawnResult) => void;
@@ -2629,7 +2629,7 @@ describe("SubAgentRunner terminal completion step", () => {
       summary: "second finalize",
       toolCallCount: 0,
       turnCount: 0,
-      childSessionId: "spawn-single-frame",
+      childSessionId: "1f2ffeba-7ce4-4ac6-8a3e-6846649f7785",
       entries: [],
       ok: false,
       error: "second finalize",
@@ -2648,7 +2648,7 @@ describe("SubAgentRunner completion mailbox single-shot", () => {
    * go and review the same work again. The completion step records which
    * message carries the report; reading that report retires the queued copy.
    */
-  const parentSessionId = "parent-session";
+  const parentSessionId = "a1bdc27a-c758-4a74-8955-5e9188412366";
   const restore: Array<() => void> = [];
 
   afterEach(() => {

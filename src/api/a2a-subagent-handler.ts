@@ -37,9 +37,9 @@ import { GUIDE_MAX_CHARS } from "../engine/turn/guidance-limits.js";
 import { maskSensitiveData } from "../shared/dlp.js";
 import { createDlpSafeUuid, isSafeStructuralId } from "../shared/dlp-safe-id.js";
 import { A2AHandlerError, type A2ARequestHandler } from "./a2a-router.js";
+import { isValidSessionId } from "../memory/memory-manager.js";
 import {
   A2ATaskStore,
-  CHILD_SESSION_ID_PATTERN,
   isA2ARfc3339Timestamp,
   type A2ATaskCreateResult,
   type A2ATaskContinuationResult,
@@ -84,8 +84,7 @@ function hasValidTenant(params: Record<string, unknown>): boolean {
 }
 
 function isSafeChildSessionId(value: unknown): value is string {
-  return typeof value === "string"
-    && CHILD_SESSION_ID_PATTERN.test(value)
+  return isValidSessionId(value)
     && maskSensitiveData(value).detections.length === 0;
 }
 

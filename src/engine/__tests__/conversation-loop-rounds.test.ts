@@ -937,7 +937,7 @@ describe("ConversationLoop queryLoop", () => {
   it("reads host-truncated tool_result chunks from file-backed artifacts after session reload", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-loop-artifact-"));
     try {
-      const sessionId = "loop-artifact-session";
+      const sessionId = "fbff82d3-2ddc-4460-880d-961ce6e00e6a";
       const memoryManager = new MemoryManager({ lvisDir: dir });
       const longContent = Array.from(
         { length: 160 },

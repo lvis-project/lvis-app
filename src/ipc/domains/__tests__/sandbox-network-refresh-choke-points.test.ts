@@ -32,6 +32,8 @@ vi.mock("electron", () => ({
 
 vi.mock("../../../boot/dev-flags.js", () => ({
   getIsPackaged: vi.fn(() => false),
+  isPackagedElectronProcess: vi.fn(() => false),
+  isE2eTestRuntime: vi.fn(() => false),
 }));
 
 // Hoisted virtual mock for conversation-loop — chat.ts imports it at load time.

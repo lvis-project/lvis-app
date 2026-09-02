@@ -36,39 +36,39 @@ describe("side-chat storage isolation", () => {
     const mainMm = new MemoryManager({ lvisDir: home });
     const sideMm = new MemoryManager({ lvisDir: openFeatureNamespace("side-chat").dir });
 
-    await mainMm.saveSession("main-session", [
+    await mainMm.saveSession("2d2b9e84-a250-4c44-8890-4d620405ff50", [
       { role: "user", content: "main hi" },
       { role: "assistant", content: "main reply" },
     ]);
-    await sideMm.saveSession("side-session", [
+    await sideMm.saveSession("b4d2673e-eaa1-42fe-874f-fca6c175855d", [
       { role: "user", content: "side hi" },
       { role: "assistant", content: "side reply" },
     ]);
 
     // The two stores are separate directories.
-    expect(existsSync(join(home, "sessions", "main-session.jsonl"))).toBe(true);
-    expect(existsSync(join(home, "side-chat", "sessions", "side-session.jsonl"))).toBe(true);
+    expect(existsSync(join(home, "sessions", "2d2b9e84-a250-4c44-8890-4d620405ff50.jsonl"))).toBe(true);
+    expect(existsSync(join(home, "side-chat", "sessions", "b4d2673e-eaa1-42fe-874f-fca6c175855d.jsonl"))).toBe(true);
 
     // Cross-contamination check: main listSessions never sees the side session
     // and vice versa.
     const mainIds = mainMm.listSessions().map((s) => s.id);
     const sideIds = sideMm.listSessions().map((s) => s.id);
-    expect(mainIds).toContain("main-session");
-    expect(mainIds).not.toContain("side-session");
-    expect(sideIds).toContain("side-session");
-    expect(sideIds).not.toContain("main-session");
+    expect(mainIds).toContain("2d2b9e84-a250-4c44-8890-4d620405ff50");
+    expect(mainIds).not.toContain("b4d2673e-eaa1-42fe-874f-fca6c175855d");
+    expect(sideIds).toContain("b4d2673e-eaa1-42fe-874f-fca6c175855d");
+    expect(sideIds).not.toContain("2d2b9e84-a250-4c44-8890-4d620405ff50");
   });
 
   it("clearing the side-chat namespace leaves the main sessions intact", async () => {
     const mainMm = new MemoryManager({ lvisDir: home });
     const sideMm = new MemoryManager({ lvisDir: openFeatureNamespace("side-chat").dir });
-    await mainMm.saveSession("keep-me", [{ role: "user", content: "x" }]);
-    await sideMm.saveSession("drop-me", [{ role: "user", content: "y" }]);
+    await mainMm.saveSession("c1a66b9d-085b-4360-8135-241826537b5d", [{ role: "user", content: "x" }]);
+    await sideMm.saveSession("612eb9ad-ca7e-4f2a-881d-96ed4b390792", [{ role: "user", content: "y" }]);
 
     // Domain-unit clear: rm -rf ~/.lvis/side-chat/
     rmSync(join(home, "side-chat"), { recursive: true, force: true });
 
-    expect(existsSync(join(home, "sessions", "keep-me.jsonl"))).toBe(true);
+    expect(existsSync(join(home, "sessions", "c1a66b9d-085b-4360-8135-241826537b5d.jsonl"))).toBe(true);
     expect(existsSync(join(home, "side-chat"))).toBe(false);
   });
 });

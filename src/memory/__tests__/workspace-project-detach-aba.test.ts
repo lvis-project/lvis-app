@@ -67,9 +67,9 @@ vi.mock("../../lib/with-file-lock.js", async (importOriginal) => ({
 import { MemoryManager } from "../memory-manager.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
-const SESSION_ID = "workspace-detach-aba-wire";
+const SESSION_ID = "924235bd-7564-4e89-8640-8a88a44b6697";
 const ROOT = "C:\\Work\\Alpha";
-const ORIGIN_SESSION_ID = "wire-aba-origin";
+const ORIGIN_SESSION_ID = "16f18812-da82-4e6a-8d83-f594d7fc13aa";
 
 let dir: string;
 let memory: MemoryManager;

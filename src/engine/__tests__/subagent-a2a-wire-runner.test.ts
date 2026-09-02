@@ -397,7 +397,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("fails closed before provider work when a resume WORKING save is tombstoned", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     const binding = makeBinding();
     await saveWaitingMetadata(resumeId, originSessionId, {
@@ -520,7 +520,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("cancels a wire resume when its project is removed during mailbox I/O", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     const binding = makeBinding();
     binding.project.root = makeNonCanonicalProjectRoot();
@@ -627,7 +627,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("refuses the regular resume entry point for fully wire-bound metadata", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     await saveWaitingMetadata(resumeId, originSessionId, {
       a2aWireHandlerId: "wire-handler-a",
@@ -654,7 +654,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("keeps a detached wire task observable but refuses both resume entry points", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     const binding = makeBinding();
     await saveWaitingMetadata(resumeId, originSessionId, {
@@ -709,7 +709,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
     "TASK_STATE_FAILED",
     "TASK_STATE_REJECTED",
   ] as const)("keeps a detached %s wire task observable", async (taskState) => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     const binding = makeBinding();
     await saveWaitingMetadata(resumeId, originSessionId, {
@@ -741,12 +741,12 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it.each([
-    ["handler", "wire-handler-b", "wire-origin-handler-a"],
+    ["handler", "wire-handler-b", "2eb454b8-ed84-4261-8f58-4f486ee05f13"],
     ["internal origin", "wire-handler-a", "wire-origin-handler-b"],
   ])(
     "fails closed before provider work on a mismatched %s",
     async (_field, callerHandlerId, storedInternalOrigin) => {
-      const originSessionId = "wire-origin-handler-a";
+      const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
       const resumeId = makeResumeId(originSessionId);
       const bindingMetadata = {
         a2aWireHandlerId: "wire-handler-a",
@@ -838,7 +838,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   ])(
     "does not downgrade %s metadata into a regular resumable task",
     async (_caseName, buildBindingFields) => {
-      const originSessionId = "wire-origin-handler-a";
+      const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
       const resumeId = makeResumeId(originSessionId);
       writeRawWaitingMetadata(
         resumeId,
@@ -1015,7 +1015,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("fails provider-zero when a persisted project re-authorizes to another root on wire resume", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     const hostRoot = join(tmpHome, "host-project");
     const fallbackRoot = join(tmpHome, "fallback-project");
@@ -1062,7 +1062,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("projects and cancels a persisted wire wait only for its bound handler", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     await saveWaitingMetadata(resumeId, originSessionId, {
       a2aWireHandlerId: "wire-handler-a",
@@ -1107,7 +1107,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("rejects an INPUT_REQUIRED wire binding without its typed prompt", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     writeRawWaitingMetadata(resumeId, originSessionId, {
       a2aWireHandlerId: "wire-handler-a",
@@ -1322,7 +1322,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("routes cancellation to the in-flight wire resume attempt", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     const binding = makeBinding();
     await saveWaitingMetadata(resumeId, originSessionId, {
@@ -1417,7 +1417,7 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it("rejects resume cancellation after terminal persistence ownership is claimed", async () => {
-    const originSessionId = "wire-origin-handler-a";
+    const originSessionId = "2eb454b8-ed84-4261-8f58-4f486ee05f13";
     const resumeId = makeResumeId(originSessionId);
     const binding = makeBinding();
     await saveWaitingMetadata(resumeId, originSessionId, {

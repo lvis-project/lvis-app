@@ -98,3 +98,27 @@ export function createDlpSafeUuid(
   }
   return candidate;
 }
+
+/**
+ * The namespaces a persisted session id may carry, named by the code that
+ * mints them: `sub` for a sub-agent child session (`~/.lvis/subagent/`),
+ * `a2a-wire` for the internal origin an A2A wire handler runs under. The
+ * validator in `memory/memory-manager.ts` builds its regex from this list, so
+ * a new namespace exists only where an id is minted — the rule cannot drift
+ * from the minting code.
+ */
+export const SESSION_ID_NAMESPACE_KINDS = ["sub", "a2a-wire"] as const;
+export type SessionIdNamespaceKind = (typeof SESSION_ID_NAMESPACE_KINDS)[number];
+
+/**
+ * Mint `<kind>-<tag>-<uuid>`: a bare session UUID namespaced by a kind from
+ * {@link SESSION_ID_NAMESPACE_KINDS} and a lowercase alphanumeric tag (a
+ * short hash of the parent, never a raw slice of it). Every session id in the
+ * app is either a bare `createDlpSafeUuid()` or this.
+ */
+export function createNamespacedSessionId(kind: SessionIdNamespaceKind, tag: string): string {
+  if (!/^[a-z0-9]+$/.test(tag)) {
+    throw new Error(`[session-id-tag-rejected] namespace tag must be [a-z0-9]+, got "${tag}"`);
+  }
+  return createDlpSafeUuid(`${kind}-${tag}`);
+}

@@ -74,7 +74,7 @@ import type { ChatEntry } from "../lib/chat-stream-state.js";
 import { serializeHistoryMessage, type SerializedHistoryMessage } from "../shared/chat-history.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { maskSensitiveData } from "../shared/dlp.js";
-import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
+import { createDlpSafeUuid, createNamespacedSessionId } from "../shared/dlp-safe-id.js";
 import { renderAgentProfilePrompt } from "./agent-profile-prompt.js";
 import type { GenericMessage } from "./llm/types.js";
 import type {
@@ -116,8 +116,9 @@ import type {
   ResolvedA2ASender,
 } from "./a2a-agent-message-envelope.js";
 import {
-  A2A_ROLE_AGENT,
   A2ATaskState,
+  A2A_HANDLER_ID_PATTERN,
+  A2A_ROLE_AGENT,
   canTransitionA2ATaskState,
   isA2ATerminalTaskState,
   projectSubAgentResultState,
@@ -407,7 +408,7 @@ interface SubAgentExecutionPolicy {
 
 function buildA2AWireInternalOrigin(handlerId: string): string {
   const handlerTag = sha256Hex(handlerId).slice(0, 8);
-  return createDlpSafeUuid(`a2a-wire-${handlerTag}`);
+  return createNamespacedSessionId("a2a-wire", handlerTag);
 }
 
 function canonicalizeA2AWireMessage(messageText: unknown): string | null {
@@ -416,10 +417,18 @@ function canonicalizeA2AWireMessage(messageText: unknown): string | null {
   return masked.length > 0 && masked.length <= GUIDE_MAX_CHARS ? masked : null;
 }
 
+/** A wire child/resume id is a session id (`sub-<tag>-<uuid>`). */
 function isValidA2AWireId(value: unknown): value is string {
   return isSafeA2AStructuralId(value)
     && value.length <= A2A_WIRE_ID_MAX_CHARS
     && isValidSessionId(value);
+}
+
+/** A wire handler id is an A2A handler name (`shared/a2a.ts`), not a session id. */
+function isValidA2AWireHandlerId(value: unknown): value is string {
+  return isSafeA2AStructuralId(value)
+    && value.length <= A2A_WIRE_ID_MAX_CHARS
+    && A2A_HANDLER_ID_PATTERN.test(value);
 }
 
 function isValidOptionalA2AWireText(
@@ -501,7 +510,7 @@ function normalizeA2AWireSpawnCallbacks(value: unknown): A2AWireSpawnCallbacks |
 export function isValidA2AWireHostBinding(binding: A2AWireHostBinding): boolean {
   const profileName = binding?.profile?.name;
   const projectRoot = binding?.project?.root;
-  return isValidA2AWireId(binding?.handlerId)
+  return isValidA2AWireHandlerId(binding?.handlerId)
     && typeof profileName === "string"
     && profileName.trim().length > 0
     && profileName.length <= 120
@@ -922,28 +931,26 @@ function subAgentStopFailureReason(
 }
 
 /**
- * Build the child loop's session id. It MUST satisfy MemoryManager's
- * `SESSION_ID_REGEX` (`^[a-zA-Z0-9_-]+$`) so `saveSession` persists it (that
- * method throws on an invalid id) and `loadSession` can later re-hydrate it.
- * The previous `${origin}::${uuid}` form contained `::`, which fails the
- * regex — so the child silently fell back to persisting under its bare
- * constructor UUID into the MAIN chat namespace (orphan + pollution). Here we
- * derive a short, stable ORIGIN TAG for human traceability and append a fresh
- * UUID. The `sub-` prefix also keeps the id OUT of the UUID-shaped filters
- * (`^[0-9a-f-]{8,}$`) the main session list uses, so even a misrouted file
- * would never surface there — defense in depth.
+ * Build the child loop's session id: `sub-<origin tag>-<uuid>`, the
+ * namespaced shape `isValidSessionId` (memory-manager) accepts, so
+ * `saveSession` persists it (that method throws on an invalid id) and
+ * `loadSession` can later re-hydrate it. The previous `${origin}::${uuid}`
+ * form contained `::`, which failed validation — so the child silently fell
+ * back to persisting under its bare constructor UUID into the MAIN chat
+ * namespace (orphan + pollution). The `sub-` namespace also keeps the id OUT
+ * of the UUID-shaped filters (`^[0-9a-f-]{8,}$`) the main session list uses,
+ * so even a misrouted file would never surface there — defense in depth.
  *
  * The origin tag is a short SHA-256 hash of the origin session id, NOT a raw
  * slice of it. A raw slice let the child filename correlate directly to the
  * parent session id (an info-leak: anyone reading `~/.lvis/subagent/` could
  * tie a child back to a specific parent chat by prefix match). The hash keeps
  * the tag deterministic (same parent → same tag, useful for grouping) and
- * bounded to the id charset while breaking that correlation.
+ * bounded to the id charset while breaking that correlation. A child with no
+ * origin hashes the empty string, so the shape is the same in every case.
  */
 function buildChildSessionId(originSessionId?: string): string {
-  const origin = originSessionId ?? "";
-  const originTag = origin ? originSessionTag(origin) : "";
-  return createDlpSafeUuid(originTag ? `sub-${originTag}` : "sub");
+  return createNamespacedSessionId("sub", originSessionTag(originSessionId ?? ""));
 }
 
 function originSessionTag(originSessionId: string): string {
@@ -3409,7 +3416,7 @@ export class SubAgentRunner {
     childSessionId: string,
     handlerId: string,
   ): A2AWireBoundMetadata | null {
-    if (!isValidA2AWireId(childSessionId) || !isValidA2AWireId(handlerId)) return null;
+    if (!isValidA2AWireId(childSessionId) || !isValidA2AWireHandlerId(handlerId)) return null;
     const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
     const isDetachedTerminalTask = meta?.projectRoot === undefined
       && meta?.subAgentTaskState !== undefined
@@ -3862,10 +3869,9 @@ export class SubAgentRunner {
     {
       const tagged = /^sub-([0-9a-f]{8})-[0-9a-f]{8}-/.exec(resumeId);
       const idTag = tagged?.[1] ?? "";
-      const expectedTag = originSessionId
-        ? sha256Hex(originSessionId).slice(0, 8)
-        : "";
-      if (idTag !== expectedTag) {
+      // The same derivation `buildChildSessionId` used, so a child spawned
+      // without an origin (tag of the empty string) resumes without one.
+      if (idTag !== originSessionTag(originSessionId ?? "")) {
         return refuseStructurally(
           "sub-agent resume: resumeId does not belong to this session",
         );

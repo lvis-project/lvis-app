@@ -155,7 +155,8 @@ function noopTool(name: string) {
   });
 }
 
-const SESSION_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
+// Mirrors memory-manager's rule: optional `<kind>-<tag>-` namespace + lowercase UUID core.
+const SESSION_ID_REGEX = /^(?:(?:sub|a2a-wire)-[a-z0-9]+-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   let tmpHome: string;
@@ -217,8 +218,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       createdAt: "2026-07-13T00:00:00.000Z",
       envelope: {
         version: 1,
-        originSessionId: "parent-session-mailbox",
-        senderChildSessionId: "sub-sender-mailbox",
+        originSessionId: "24f8c103-919c-4485-8be0-0fbf1e123dcf",
+        senderChildSessionId: "sub-3cf818da-41788b0d-1879-46c4-8248-2ade0528ff93",
         recipientChildSessionId,
         hopCount: 3,
         treeSequence: 1,
@@ -227,8 +228,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       recipientTitle: "recipient-worker",
       message: {
         messageId,
-        contextId: "parent-session-mailbox",
-        taskId: "sub-sender-mailbox",
+        contextId: "24f8c103-919c-4485-8be0-0fbf1e123dcf",
+        taskId: "sub-3cf818da-41788b0d-1879-46c4-8248-2ade0528ff93",
         role: "ROLE_AGENT",
         parts: [{ text: "idle sibling guidance" }],
       },
@@ -409,7 +410,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         instructions: "collect evidence",
         sourceTools: ["noop"],
         maxRounds: 2,
-        originSessionId: "parent-session-1",
+        originSessionId: "092d865f-192a-48ae-8603-8a838c39d4dc",
         toolUseId: "tool-use-1",
         spawnId: "spawn-1",
       });
@@ -417,13 +418,13 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const meta = subStore.loadSessionMetadata(result.childSessionId);
       expect(meta).toMatchObject({
         sessionKind: "subagent",
-        originSessionId: "parent-session-1",
+        originSessionId: "092d865f-192a-48ae-8603-8a838c39d4dc",
         originToolUseId: "tool-use-1",
         spawnId: "spawn-1",
         subAgentTitle: "linked child",
       });
       const transcript = runner.getPersistedTranscript({
-        originSessionId: "parent-session-1",
+        originSessionId: "092d865f-192a-48ae-8603-8a838c39d4dc",
         childSessionId: result.childSessionId,
       });
       expect(transcript.ok).toBe(true);
@@ -439,27 +440,27 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       }
       expect(
         runner
-          .listRunStatuses("parent-session-1")
+          .listRunStatuses("092d865f-192a-48ae-8603-8a838c39d4dc")
           .map((run) => run.childSessionId),
       ).toEqual([result.childSessionId]);
-      expect(runner.listRunStatuses("other-parent-session")).toEqual([]);
+      expect(runner.listRunStatuses("8d71cc54-e13e-4bda-8e5c-ade16726d952")).toEqual([]);
       expect(
-        runner.getRunStatus("spawn-1", "parent-session-1")?.childSessionId,
+        runner.getRunStatus("spawn-1", "092d865f-192a-48ae-8603-8a838c39d4dc")?.childSessionId,
       ).toBe(result.childSessionId);
-      expect(runner.getRunStatus("spawn-1", "other-parent-session")).toBeNull();
+      expect(runner.getRunStatus("spawn-1", "8d71cc54-e13e-4bda-8e5c-ade16726d952")).toBeNull();
       expect(
-        runner.interruptRun("spawn-1", "other-parent-session"),
+        runner.interruptRun("spawn-1", "8d71cc54-e13e-4bda-8e5c-ade16726d952"),
       ).toMatchObject({
         ok: false,
         message: "sub-agent run not found: spawn-1",
       });
-      expect(runner.interruptRun("spawn-1", "parent-session-1")).toMatchObject({
+      expect(runner.interruptRun("spawn-1", "092d865f-192a-48ae-8603-8a838c39d4dc")).toMatchObject({
         ok: false,
         message: "sub-agent run is not running: spawn-1",
       });
 
       const directTranscript = runner.getPersistedTranscript({
-        originSessionId: "parent-session-1",
+        originSessionId: "092d865f-192a-48ae-8603-8a838c39d4dc",
         childSessionId: result.childSessionId,
       });
       expect(directTranscript.ok).toBe(true);
@@ -472,7 +473,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         ).toContain("partial-0");
       }
       const crossOriginDirectTranscript = runner.getPersistedTranscript({
-        originSessionId: "other-parent-session",
+        originSessionId: "8d71cc54-e13e-4bda-8e5c-ade16726d952",
         childSessionId: result.childSessionId,
       });
       expect(crossOriginDirectTranscript).toEqual({
@@ -486,7 +487,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         cumulativeRounds: 1,
       });
       const missingLinkageTranscript = runner.getPersistedTranscript({
-        originSessionId: "parent-session-1",
+        originSessionId: "092d865f-192a-48ae-8603-8a838c39d4dc",
         childSessionId: result.childSessionId,
       });
       expect(missingLinkageTranscript).toEqual({
@@ -514,7 +515,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         title: "interruptible child",
         instructions: "wait until interrupted",
         sourceTools: ["noop"],
-        originSessionId: "parent-session-1",
+        originSessionId: "092d865f-192a-48ae-8603-8a838c39d4dc",
         spawnId: "spawn-interrupt",
         maxRounds: 3,
       });
@@ -522,7 +523,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
       const interrupted = runner.interruptRun(
         "spawn-interrupt",
-        "parent-session-1",
+        "092d865f-192a-48ae-8603-8a838c39d4dc",
       );
 
       expect(interrupted).toMatchObject({
@@ -530,7 +531,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         run: { status: "interrupted", stopReason: "interrupted" },
       });
       expect(
-        runner.getRunStatus("spawn-interrupt", "parent-session-1"),
+        runner.getRunStatus("spawn-interrupt", "092d865f-192a-48ae-8603-8a838c39d4dc"),
       ).toMatchObject({
         status: "interrupted",
         stopReason: "interrupted",
@@ -539,7 +540,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const final = await spawnPromise;
       expect(final.stopReason).toBe("interrupted");
       expect(
-        runner.getRunStatus("spawn-interrupt", "parent-session-1"),
+        runner.getRunStatus("spawn-interrupt", "092d865f-192a-48ae-8603-8a838c39d4dc"),
       ).toMatchObject({
         status: "interrupted",
         stopReason: "interrupted",
@@ -557,7 +558,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   ] as const)(
     "rejects persisted terminal state %s before linking or parent delivery",
     async (taskState) => {
-      const originSessionId = "parent-terminal-resume";
+      const originSessionId = "5ac841fb-8d77-4d14-8003-94d151fa5346";
       const deliverToParent = vi.fn();
       const toolRegistry = new ToolRegistry();
       toolRegistry.register(noopTool("noop"));
@@ -948,7 +949,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   it("fails closed when an INPUT_REQUIRED question was not staged by agent_send", async () => {
-    const originSessionId = "parent-question";
+    const originSessionId = "48c18ddd-1bf4-4a9b-8033-37d44752f46d";
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -1013,9 +1014,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       toolRegistry,
       subAgentMemoryManager: subStore,
     });
-    const originSessionId = "parent-peer";
-    const senderChildSessionId = "sub-sender";
-    const recipientChildSessionId = "sub-recipient";
+    const originSessionId = "5ab183b7-6d7e-41b4-83ee-d927e6f0a265";
+    const senderChildSessionId = "sub-489dea8f-03ff43a1-33a7-48a2-87b9-bc70f76ed0d5";
+    const recipientChildSessionId = "sub-eea1ef20-b91b2ca0-bf65-4c09-88ec-b9ea9dc3f76f";
     await subStore.saveSessionMetadata(senderChildSessionId, {
       sessionKind: "subagent",
       originSessionId,
@@ -1123,23 +1124,23 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     await subStore.saveSessionMetadata(recipientChildSessionId, {
       ...subStore.loadSessionMetadata(recipientChildSessionId)!,
-      originSessionId: "other-parent",
+      originSessionId: "bebd469f-b3d4-42a8-8340-f0a27e66162b",
     });
     await expect(
       runner.resolveSubAgentPeer(senderChildSessionId, recipientChildSessionId),
     ).resolves.toEqual({ ok: false, reason: "cross-origin" });
     await expect(
-      runner.resolveSubAgentPeer(senderChildSessionId, "sub-unknown"),
+      runner.resolveSubAgentPeer(senderChildSessionId, "sub-fb2712b4-0eece203-0755-4b12-81ac-b2daa60166b6"),
     ).resolves.toEqual({ ok: false, reason: "unknown-recipient" });
   });
   it("preserves a persisted INPUT_REQUIRED tree across restart pressure and evicts terminal ownership", async () => {
-    const activeOrigin = "parent-restart-active";
-    const terminalOrigin = "parent-restart-terminal";
+    const activeOrigin = "7edb0fc2-f6fe-480a-8e72-195fde64e22a";
+    const terminalOrigin = "7ed8b840-dc0e-460a-8d06-6e24a3aa08b8";
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
-    const activeChild = "sub-persisted-input-required";
-    const terminalChild = "sub-persisted-completed";
+    const activeChild = "sub-56943b9c-15b02ecc-849c-4c98-8749-233a8c151e73";
+    const terminalChild = "sub-900b6b39-477e3848-f9a7-48c0-88f2-9cce18e71165";
 
     await subStore.saveSession(activeChild, []);
     await subStore.saveSessionMetadata(activeChild, {
@@ -1186,8 +1187,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         {
           version: 1,
           originSessionId,
-          senderChildSessionId: "sub-persisted-sender",
-          recipientChildSessionId: "parent",
+          senderChildSessionId: "sub-bc9ee2ad-259083b0-dbb5-4a5c-8e1d-0dd4624df46a",
+          recipientChildSessionId: "e4712596-8b3b-4104-8fbc-4802d1e40a71",
           hopCount: 1,
         },
         (candidateOriginSessionId) =>
@@ -1365,7 +1366,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   it("joins an idle sibling mailbox into resume and acknowledges only after end-turn commit", async () => {
-    const originSessionId = "parent-session-mailbox";
+    const originSessionId = "24f8c103-919c-4485-8be0-0fbf1e123dcf";
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -1479,7 +1480,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   it.each(["round-cap", "interrupted", "stream-error"] as const)(
     "retains idle sibling mailbox delivery when resume stops with %s",
     async (stopReason) => {
-      const originSessionId = "parent-session-mailbox";
+      const originSessionId = "24f8c103-919c-4485-8be0-0fbf1e123dcf";
       const toolRegistry = new ToolRegistry();
       toolRegistry.register(noopTool("noop"));
       const subStore = makeSubStore();
@@ -1616,7 +1617,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   it("masks a question answer and gates an always-allow tool under parent provenance", async () => {
-    const originSessionId = "parent-question-answer-security";
+    const originSessionId = "661d4a3c-a12f-4467-891e-c60b08cb5472";
     const execute = vi.fn(async () => ({ output: "ran", isError: false }));
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(
@@ -1789,7 +1790,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   it.each(["stream-error", "context-error"] as const)(
     "projects a non-throwing resume %s as FAILED and keeps counters unchanged",
     async (stopReason) => {
-      const originSessionId = "parent-resume-stop-";
+      const originSessionId = "f9f1d720-0ad9-4da0-888f-1cade207363b";
       const toolRegistry = new ToolRegistry();
       toolRegistry.register(noopTool("noop"));
       const subStore = makeSubStore();
@@ -1995,12 +1996,12 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     // text at the top of every following segment — a parent that guided a
     // long-running child would have its one message replayed for the rest of
     // the resume chain.
-    const originSessionId = "parent-directive-round-cap";
+    const originSessionId = "0d5778ef-74e6-4d32-8936-a88d06a3d2b7";
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
     const mailbox = new ParentDirectiveMailbox(
-      openFeatureNamespace("parent-directive-round-cap"),
+      openFeatureNamespace("0d5778ef-74e6-4d32-8936-a88d06a3d2b7"),
     );
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
@@ -2083,12 +2084,12 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     // conclude, so it must not report the directive as consumed. (What the
     // mailbox then holds is a separate decision — the child's terminal
     // projection discards it, since a finished child can never read it.)
-    const originSessionId = "parent-directive-failed";
+    const originSessionId = "7ee34789-8f56-4296-8361-8fdc94b7a3e1";
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
     const mailbox = new ParentDirectiveMailbox(
-      openFeatureNamespace("parent-directive-failed"),
+      openFeatureNamespace("7ee34789-8f56-4296-8361-8fdc94b7a3e1"),
     );
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
@@ -2441,7 +2442,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   it("composes concurrent background resume handles without aliasing or duplicate parent delivery", async () => {
-    const originSessionId = "parent-background-resume";
+    const originSessionId = "17e963b9-1924-4e4b-831f-53d99eac112a";
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -2605,7 +2606,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
   });
   it("terminalizes a resume as FAILED when its final metadata write rejects and denies retry", async () => {
-    const originSessionId = "parent-resume-final-save";
+    const originSessionId = "ea3d61ff-c664-45a4-85d4-0dab3a142945";
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -2691,7 +2692,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   it("rejects a late interrupt after the resume terminal commit point", async () => {
-    const originSessionId = "parent-resume-commit";
+    const originSessionId = "f29f5c55-0e80-4440-8c9b-6a25cb40c4a4";
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -2930,11 +2931,11 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
     // Write a main-kind session metadata under a valid id.
-    await subStore.saveSessionMetadata("not-a-subagent", {
+    await subStore.saveSessionMetadata("sub-e3b0c442-43badc19-3d7b-48b6-878e-1bca49295211", {
       sessionKind: "main",
       sourceTools: ["noop"],
     });
-    const resumed = await runner.resume("not-a-subagent", "continue", "x");
+    const resumed = await runner.resume("sub-e3b0c442-43badc19-3d7b-48b6-878e-1bca49295211", "continue", "x");
     expect(resumed.ok).toBe(false);
     expect(resumed.error).toMatch(/not a sub-agent/i);
   });
@@ -2948,7 +2949,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       toolRegistry,
       subAgentMemoryManager: subStore,
     });
-    const resumed = await runner.resume("sub-does-not-exist", "continue", "x");
+    const resumed = await runner.resume("sub-e3b0c442-1290299c-2a39-42ea-8bf7-ae2f8e44adc7", "continue", "x");
     expect(resumed.ok).toBe(false);
     expect(resumed.error).toMatch(/no session metadata/i);
   });
@@ -2982,8 +2983,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    // Spawn from conversation A (originSessionId = "session-A").
-    const originA = "session-A";
+    // Spawn from conversation A (originSessionId = "1b9342d9-1e35-4d3e-8b6c-c5e977eb2105").
+    const originA = "1b9342d9-1e35-4d3e-8b6c-c5e977eb2105";
     const tagA = createHash("sha256").update(originA).digest("hex").slice(0, 8);
     // We need a real spawn with origin. Manually write metadata under a
     // correctly-tagged id (mirrors what spawn writes when passed originSessionId).
@@ -3064,7 +3065,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    const callerOrigin = "session-A";
+    const callerOrigin = "1b9342d9-1e35-4d3e-8b6c-c5e977eb2105";
     const tag = createHash("sha256")
       .update(callerOrigin)
       .digest("hex")
@@ -3073,7 +3074,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
       sourceTools: ["noop"],
-      originSessionId: "session-collision-target",
+      originSessionId: "0ef83e19-a3c4-4997-8e80-1108844af17b",
       budgetResumeCount: 0,
       questionAnswerCount: 0,
       resumeCount: 0,
@@ -3116,7 +3117,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    // Spawn without originSessionId → untagged id `sub-<uuid>`.
+    // Spawn without originSessionId → the tag hashes the empty origin, so the
+    // id keeps the one `sub-<tag>-<uuid>` shape `isValidSessionId` accepts.
     let restore = patchProvider(waitingSpawnProvider());
     const spawn = await runner.spawn({
       title: "untagged",
@@ -3127,8 +3129,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     restore();
     expect(spawn.ok).toBe(true);
     const resumeId = spawn.childSessionId;
-    // Confirm the id is in untagged form (sub- followed immediately by UUID).
-    expect(resumeId).toMatch(/^sub-[0-9a-f]{8}-[0-9a-f]{4}-/);
+    // Confirm the shape: `sub-` + 8-hex tag + UUID.
+    expect(resumeId).toMatch(/^sub-[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{4}-/);
 
     // A caller with an explicit originSessionId is refused (the id has no tag
     // to match against, so idTag="" but expectedTag is non-empty).
@@ -3189,8 +3191,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     // corrupted or tampered .meta.json (a real spawn always persists a non-empty
     // allowlist because the resolved scoped surface is non-empty after blocklist
     // strip; the only way to get [] is external tampering or corruption).
-    const { createDlpSafeUuid } = await import("../../shared/dlp-safe-id.js");
-    const resumeId = createDlpSafeUuid("sub");
+    const { createNamespacedSessionId } = await import("../../shared/dlp-safe-id.js");
+    const resumeId = createNamespacedSessionId("sub", "e3b0c442");
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
       sourceTools: [], // deliberately empty — corruption signal
@@ -3274,7 +3276,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   it("commits a staged background question only after durable INPUT_REQUIRED metadata", async () => {
-    const originSessionId = "parent-question-order";
+    const originSessionId = "7a17fe53-9ca7-458d-88b1-546cb519f0d3";
     const toolRegistry = new ToolRegistry();
     let runner!: SubAgentRunner;
     toolRegistry.register(createAgentSendTool({ getRuntime: () => runner as unknown as import("../../tools/agent-send.js").AgentSendRuntime }));
@@ -3373,7 +3375,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   it("restores the durable waiting projection when commit and FAILED overwrite both fail", async () => {
-    const originSessionId = "parent-question-fallback";
+    const originSessionId = "2a2ff020-7e25-48c7-8928-9f79b8d2e09d";
     const toolRegistry = new ToolRegistry();
     let runner!: SubAgentRunner;
     toolRegistry.register(createAgentSendTool({ getRuntime: () => runner as unknown as import("../../tools/agent-send.js").AgentSendRuntime }));
@@ -3473,7 +3475,7 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
             summary: "partial work",
             toolCallCount: 3,
             turnCount: 2,
-            childSessionId: "sub-abcd1234-efgh",
+            childSessionId: "sub-694c61eb-6115d94f-6034-4835-8e48-b3ec899e6ca0",
             entries: [],
             ok: true,
             stopReason: "round-cap",
@@ -3486,14 +3488,14 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
       { title: "budget", instructions: "big task" },
       {
         cwd: process.cwd(),
-        metadata: { sessionId: "parent", spawnDepth: 0 },
+        metadata: { sessionId: "e4712596-8b3b-4104-8fbc-4802d1e40a71", spawnDepth: 0 },
         extraAllowedDirectories: [],
       },
     );
     expect(r.isError).toBe(false);
     const parsed = JSON.parse(r.output);
     expect(parsed.incomplete).toBe(true);
-    expect(parsed.resumeId).toBe("sub-abcd1234-efgh");
+    expect(parsed.resumeId).toBe("sub-694c61eb-6115d94f-6034-4835-8e48-b3ec899e6ca0");
   });
 
   it("does NOT surface resumeId on a clean (complete) spawn result", async () => {
@@ -3504,7 +3506,7 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
             summary: "done",
             toolCallCount: 1,
             turnCount: 1,
-            childSessionId: "sub-xyz",
+            childSessionId: "sub-96a79935-ddf8d0af-b8d2-4c48-805d-a8c9b04f05ab",
             entries: [],
             ok: true,
             stopReason: "end_turn",
@@ -3516,7 +3518,7 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
       { title: "clean", instructions: "small task" },
       {
         cwd: process.cwd(),
-        metadata: { sessionId: "parent", spawnDepth: 0 },
+        metadata: { sessionId: "e4712596-8b3b-4104-8fbc-4802d1e40a71", spawnDepth: 0 },
         extraAllowedDirectories: [],
       },
     );
@@ -3530,7 +3532,7 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
       summary: "resumed answer",
       toolCallCount: 0,
       turnCount: 1,
-      childSessionId: "sub-resume-me",
+      childSessionId: "sub-75ee563d-86fc97ad-ce0e-442a-847a-fb30cf3f9af0",
       entries: [],
       ok: true,
       stopReason: "end_turn" as const,
@@ -3541,20 +3543,20 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
       emit: () => undefined,
     });
     const r = await tool.execute(
-      { instructions: "keep going", resumeId: "sub-resume-me" },
+      { instructions: "keep going", resumeId: "sub-75ee563d-86fc97ad-ce0e-442a-847a-fb30cf3f9af0" },
       {
         cwd: process.cwd(),
-        metadata: { sessionId: "parent", spawnDepth: 0 },
+        metadata: { sessionId: "e4712596-8b3b-4104-8fbc-4802d1e40a71", spawnDepth: 0 },
         extraAllowedDirectories: [],
       },
     );
     expect(r.isError).toBe(false);
     // resume() called with (resumeId, continuationInstructions, title, callbacks, originSessionId).
     expect(resumeSpy).toHaveBeenCalledTimes(1);
-    expect((resumeSpy.mock.calls[0] as unknown[])[0]).toBe("sub-resume-me");
+    expect((resumeSpy.mock.calls[0] as unknown[])[0]).toBe("sub-75ee563d-86fc97ad-ce0e-442a-847a-fb30cf3f9af0");
     expect((resumeSpy.mock.calls[0] as unknown[])[1]).toBe("keep going");
-    // 5th arg is originSessionId (from ctx.metadata.sessionId = "parent").
-    expect((resumeSpy.mock.calls[0] as unknown[])[4]).toBe("parent");
+    // 5th arg is originSessionId (from ctx.metadata.sessionId = "e4712596-8b3b-4104-8fbc-4802d1e40a71").
+    expect((resumeSpy.mock.calls[0] as unknown[])[4]).toBe("e4712596-8b3b-4104-8fbc-4802d1e40a71");
     // spawn() never called on the resume path.
     expect(spawnSpy).not.toHaveBeenCalled();
     const parsed = JSON.parse(r.output);
@@ -3569,7 +3571,7 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
             summary: "sub-agent resume: exhausted (resumeCount=3 >= 3)",
             toolCallCount: 0,
             turnCount: 0,
-            childSessionId: "sub-exhausted",
+            childSessionId: "sub-983e476e-8ffc1771-7bd3-44b0-82e1-835d44fd3712",
             entries: [],
             ok: false,
             error: "sub-agent resume: exhausted (resumeCount=3 >= 3)",
@@ -3579,10 +3581,10 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
       emit: () => undefined,
     });
     const r = await tool.execute(
-      { instructions: "continue", resumeId: "sub-exhausted" },
+      { instructions: "continue", resumeId: "sub-983e476e-8ffc1771-7bd3-44b0-82e1-835d44fd3712" },
       {
         cwd: process.cwd(),
-        metadata: { sessionId: "parent", spawnDepth: 0 },
+        metadata: { sessionId: "e4712596-8b3b-4104-8fbc-4802d1e40a71", spawnDepth: 0 },
         extraAllowedDirectories: [],
       },
     );
@@ -3600,10 +3602,10 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     // A resumed/sub-agent context (spawnDepth 1) must not be able to call
     // agent_spawn at all — the depth guard refuses before routing to resume.
     const r = await tool.execute(
-      { instructions: "nested resume", resumeId: "sub-x" },
+      { instructions: "nested resume", resumeId: "sub-07d1bb2c-d73e5160-e94e-4913-863f-de10b10fb3ae" },
       {
         cwd: process.cwd(),
-        metadata: { sessionId: "child", spawnDepth: 1 },
+        metadata: { sessionId: "ddc9e669-1942-44ce-8019-a29d3619a2c1", spawnDepth: 1 },
         extraAllowedDirectories: [],
       },
     );

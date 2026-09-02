@@ -70,7 +70,7 @@ function makeHarness(
       saveSession: () => Promise.resolve(),
       listSessions: () => [],
       loadSession: (sessionId: string) =>
-        sessionId === "resume-target" ? [] : null,
+        sessionId === "d373c881-0d44-4fc3-8456-f52a702c8481" ? [] : null,
       loadSessionMetadata: () => null,
     },
     ...(closeRationaleSession ? { closeRationaleSession } : {}),
@@ -153,14 +153,14 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
     );
 
     const rawSeed = createRequestAnchor({
-      sessionId: "session",
+      sessionId: "3f3af1ec-ebbd-4410-8b41-7ec0d27bbfcb",
       turnId: "turn",
       inputMessageId: "message",
       inputOrigin: "user-keyboard",
       rawIntent,
     });
     const sanitizedSeed = createRequestAnchor({
-      sessionId: "session",
+      sessionId: "3f3af1ec-ebbd-4410-8b41-7ec0d27bbfcb",
       turnId: "turn",
       inputMessageId: "message",
       inputOrigin: "user-keyboard",
@@ -279,7 +279,7 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
     expect(() => fixture.loop.newConversation()).toThrow(closeError);
     expect(fixture.loop.getSessionId()).toBe(originalSessionId);
 
-    expect(() => fixture.loop.loadSession("resume-target")).toThrow(closeError);
+    expect(() => fixture.loop.loadSession("d373c881-0d44-4fc3-8456-f52a702c8481")).toThrow(closeError);
     expect(fixture.loop.getSessionId()).toBe(originalSessionId);
     expect(closeRationaleSession).toHaveBeenCalledTimes(2);
   });

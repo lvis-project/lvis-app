@@ -86,12 +86,12 @@ describe("PREFLIGHT_GUARD trace step — fired path", () => {
     const history = makeHistoryExceedingEstimateThreshold(threshold);
     expect(estimateMessagesTokens(history)).toBeGreaterThanOrEqual(threshold);
 
-    const mem = makeMemoryManager(history, "sess-fired");
+    const mem = makeMemoryManager(history, "691e64c5-38fd-48cc-89cd-d247f6245aca");
     const memoryReviewer = makeMemoryReviewer();
     const loop = new ConversationLoop(
       makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
     );
-    loop.resetAndResume("sess-fired");
+    loop.resetAndResume("691e64c5-38fd-48cc-89cd-d247f6245aca");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
@@ -128,12 +128,12 @@ describe("PREFLIGHT_GUARD trace step — fired path", () => {
     const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
     const history = makeHistoryExceedingEstimateThreshold(threshold);
 
-    const mem = makeMemoryManager(history, "sess-noop");
+    const mem = makeMemoryManager(history, "8a2099ef-3b22-46a7-84ec-1c42b6fc0f00");
     const memoryReviewer = makeMemoryReviewer();
     const loop = new ConversationLoop(
       makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
     );
-    loop.resetAndResume("sess-noop");
+    loop.resetAndResume("8a2099ef-3b22-46a7-84ec-1c42b6fc0f00");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
@@ -164,9 +164,9 @@ describe("PREFLIGHT_GUARD trace step — skipped / not-reached paths", () => {
     const history: GenericMessage[] = [{ role: "user", content: "short history" }];
     expect(estimateMessagesTokens(history)).toBeLessThan(threshold);
 
-    const mem = makeMemoryManager(history, "sess-not-reached");
+    const mem = makeMemoryManager(history, "050713c0-1d80-4e8f-8897-3c571585ddc5");
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-not-reached");
+    loop.resetAndResume("050713c0-1d80-4e8f-8897-3c571585ddc5");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
@@ -192,9 +192,9 @@ describe("PREFLIGHT_GUARD trace step — skipped / not-reached paths", () => {
     const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
     const history = makeHistoryExceedingEstimateThreshold(threshold);
 
-    const mem = makeMemoryManager(history, "sess-disabled");
+    const mem = makeMemoryManager(history, "7e4a73fc-74db-42d9-824a-1d79359e927f");
     const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
-    loop.resetAndResume("sess-disabled");
+    loop.resetAndResume("7e4a73fc-74db-42d9-824a-1d79359e927f");
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 

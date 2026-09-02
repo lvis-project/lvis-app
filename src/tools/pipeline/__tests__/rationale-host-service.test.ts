@@ -25,7 +25,7 @@ import type {
 } from "../rationale-ticket-lifecycle.js";
 
 const NOW = 1_900_000_000_000;
-const SESSION_ID = "session-service";
+const SESSION_ID = "9b9ace7c-bbcf-4824-80fe-71a106b47039";
 const rationaleProvenance = {
   startedFromUserKeyboard: true,
   taint: "none",
@@ -234,7 +234,7 @@ describe("RationaleHostService", () => {
     const state = setup();
     const coordinator = await state.createCoordinator();
     const startInput = {
-      sessionId: "spoofed-session",
+      sessionId: "7781701f-b510-4187-8f80-8a4fd6b79e1a",
       control: {} as never,
       authorized: authorizedRecord(),
       expectedInvocationVersion: 0 as const,

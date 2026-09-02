@@ -28,6 +28,7 @@ import {
 } from "../engine/turn/guidance-limits.js";
 import { hasOnlyKeys, isRecord, isStringArray } from "../shared/is-record.js";
 import { isSafeStructuralId } from "../shared/dlp-safe-id.js";
+import { isValidSessionId } from "../memory/memory-manager.js";
 
 const STORE_VERSION = 1;
 const DEFAULT_FILE_NAME = "tasks.json";
@@ -39,7 +40,6 @@ const DEFAULT_FILE_NAME = "tasks.json";
  * artifact) go through `isSafeStructuralId` in `shared/dlp-safe-id.ts` for
  * the same reason.
  */
-export const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 /** Metadata object keys may not carry C0 controls or DEL. */
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 const TASK_KEYS = new Set(["id", "contextId", "status", "history"]);
@@ -320,8 +320,7 @@ function normalizeRecord(value: unknown, maxHistoryMessages: number): A2ATaskRec
     return null;
   }
   if (
-    typeof value.childSessionId !== "string"
-    || !CHILD_SESSION_ID_PATTERN.test(value.childSessionId)
+    !isValidSessionId(value.childSessionId)
     || maskSensitiveData(value.childSessionId).detections.length > 0
   ) {
     return null;
@@ -776,7 +775,7 @@ export class A2ATaskStore {
     return await this.withLock(async () => {
       if (
         !A2A_HANDLER_ID_PATTERN.test(input.handlerId)
-        || !CHILD_SESSION_ID_PATTERN.test(input.childSessionId)
+        || !isValidSessionId(input.childSessionId)
         || maskSensitiveData(input.handlerId).detections.length > 0
         || maskSensitiveData(input.childSessionId).detections.length > 0
         || !isSafeStructuralId(input.contextId)

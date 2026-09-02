@@ -25,7 +25,7 @@ export function makeConversationLoopSettings(
 
 export function makeConversationLoopMemoryManager(
   messages: GenericMessage[] | null = [],
-  sessionId = "sess-1",
+  sessionId = "abe633f3-a47a-4758-874e-abe9160daf36",
 ): ConversationLoopDeps["memoryManager"] {
   const sessions: Record<string, GenericMessage[]> = messages === null ? {} : { [sessionId]: messages };
   return {

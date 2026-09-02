@@ -74,7 +74,7 @@ interface SetupOptions {
 }
 
 function createAnchor(
-  sessionId = "session-coordinator",
+  sessionId = "3863264e-4954-486d-8547-d1256eb1af1a",
   suffix = "1",
 ): RequestAnchor {
   const anchor = createRequestAnchor({

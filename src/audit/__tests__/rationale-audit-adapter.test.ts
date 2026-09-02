@@ -39,7 +39,7 @@ function ticketEvent(at = NOW): RationaleTicketStoreAuditEvent {
     contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
     kind: "host-rationale-ticket-store-audit",
     operation: "created",
-    sessionId: "session-a",
+    sessionId: "fa57a52d-bf08-4902-8852-9730a3e99db6",
     ticketId: randomUUID(),
     actionDigest: "a".repeat(64),
     invocationDigest: "b".repeat(64),
@@ -135,8 +135,8 @@ describe("DurableRationaleAuditAdapter", () => {
 
     adapter.assertWritable();
     adapter.appendTicket(ticketEvent());
-    adapter.appendProjection("session-a", uiProjection(), NOW);
-    adapter.appendInvocation("session-a", invocationRecord());
+    adapter.appendProjection("fa57a52d-bf08-4902-8852-9730a3e99db6", uiProjection(), NOW);
+    adapter.appendInvocation("fa57a52d-bf08-4902-8852-9730a3e99db6", invocationRecord());
 
     const restarted = new DurableRationaleAuditAdapter({
       auditDir,
@@ -155,7 +155,7 @@ describe("DurableRationaleAuditAdapter", () => {
       "rationale-invocation-lifecycle",
       "rationale-ticket-lifecycle",
     ]);
-    expect(entries.every((entry) => entry.sessionId === "session-a")).toBe(true);
+    expect(entries.every((entry) => entry.sessionId === "fa57a52d-bf08-4902-8852-9730a3e99db6")).toBe(true);
     expect(raw).not.toContain("rawIntent");
     expect(raw).not.toContain("originalInput");
   });
@@ -170,11 +170,11 @@ describe("DurableRationaleAuditAdapter", () => {
     });
     const base = uiProjection();
 
-    expect(() => adapter.appendProjection("session-a", {
+    expect(() => adapter.appendProjection("fa57a52d-bf08-4902-8852-9730a3e99db6", {
       ...base,
       suggestion: "Contact operator@example.com\u0000<script>alert(1)</script>",
     }, NOW)).toThrow(/invalid rationale UI projection/);
-    expect(() => adapter.appendProjection("session-a", {
+    expect(() => adapter.appendProjection("fa57a52d-bf08-4902-8852-9730a3e99db6", {
       ...base,
       canonicalTargets: [join(homedir(), "private", "output")],
     }, NOW)).toThrow(/invalid rationale UI projection/);
@@ -249,7 +249,7 @@ describe("DurableRationaleAuditAdapter", () => {
     adapter.assertWritable();
     const checkpointBeforeRows = sealStore.snapshot();
     adapter.appendTicket(ticketEvent());
-    adapter.appendInvocation("session-a", invocationRecord());
+    adapter.appendInvocation("fa57a52d-bf08-4902-8852-9730a3e99db6", invocationRecord());
     adapter.appendTicket(ticketEvent());
     sealStore.restore(checkpointBeforeRows);
 
@@ -351,4 +351,20 @@ describe("DurableRationaleAuditAdapter", () => {
       expect(statSync(`${restarted.getLogFile()}.lock-target`).mode & 0o777).toBe(0o600);
     },
   );
+});
+
+describe("DurableRationaleAuditAdapter — session id rule is the host's", () => {
+  it("rejects a 256-character id the old control-character check accepted, accepts a namespaced one", () => {
+    const adapter = new DurableRationaleAuditAdapter({
+      auditDir: createAuditDir(),
+      auditSecret: SECRET,
+      sealStore: new MemorySecretStore(),
+      now: () => NOW,
+    });
+    expect(() => adapter.appendProjection("a".repeat(256), uiProjection(), NOW))
+      .toThrow(/invalid rationale audit session id/);
+    adapter.appendProjection("sub-x-12434f55-fbb9-4a54-b1a7-fb9638d8eebd", uiProjection(), NOW);
+    const raw = readFileSync(adapter.getLogFile(), "utf8");
+    expect(raw).toContain("sub-x-12434f55-fbb9-4a54-b1a7-fb9638d8eebd");
+  });
 });
