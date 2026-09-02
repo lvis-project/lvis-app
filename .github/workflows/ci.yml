@@ -85,14 +85,19 @@ jobs:
         # `check:test-quality` stays as the local one-shot README.md documents.
         run: bun run check:test-coverage
         working-directory: lvis-app
-      # A test suite, not a policy gate, which is why it sits with the
+      # Test suites, not policy gates, which is why they sit with the
       # verification steps: alongside its source-only assertions over the
-      # release-signing workflow it exercises the release-tooling libraries
-      # themselves — descriptor reading, signed-manifest verification, packaged
-      # executable selection. Failure means that code is wrong. It runs under
-      # `node --test` rather than vitest, so it needs its own step; it was
-      # invoked by nothing and sat red for twelve days after a batch dependency
-      # merge moved a pin without moving its assertion.
+      # release-signing workflow the evidence suite exercises the
+      # release-tooling libraries themselves — descriptor reading,
+      # signed-manifest verification, packaged executable selection — and
+      # `test:ci-tooling` covers the A2A wire harness and the marketplace-e2e
+      # control script that the dispatch workflows execute. Failure means that
+      # code is wrong. They run under `node --test` rather than vitest (whose
+      # include is `*.test.{ts,tsx}`), so they need their own step; the
+      # evidence suite was once invoked by nothing and sat red for twelve days
+      # after a batch dependency merge moved a pin without moving its
+      # assertion, and the two `test:ci-tooling` suites were never invoked at
+      # all until this step named them.
       #
       # Last of the verification steps, so this narrow suite does not skip the
       # broad one. `packaging-discipline-source.test.ts` pins that position —
@@ -102,7 +107,7 @@ jobs:
       # the code failed either way.
       - name: Run release-tooling tests
         working-directory: lvis-app
-        run: bun run test:a2a-p4-5:evidence
+        run: bun run test:ci-tooling && bun run test:a2a-p4-5:evidence
       # Repository hygiene: manifests, baseline ledgers, and the self-tests of
       # the gates that read them. Nothing below compiles or runs the product; a
       # failure here means a bookkeeping file is stale, not that the code is

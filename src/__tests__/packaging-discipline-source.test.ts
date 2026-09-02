@@ -479,6 +479,7 @@ describe("installer smoke and packaging discipline", () => {
     expect(matched(commands, VERIFIES_THE_CODE)).toEqual([
       "bun run build",
       "bun run test:a2a-p4-5:evidence",
+      "bun run test:ci-tooling",
       "bun run typecheck",
       "check:test-coverage",
       "check:typecheck-tests",
