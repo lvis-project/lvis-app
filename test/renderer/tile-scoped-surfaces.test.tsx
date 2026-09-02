@@ -10,7 +10,7 @@
 import "./setup.js";
 import { describe, it, expect, vi } from "vitest";
 import { act, createEvent, fireEvent, waitFor } from "@testing-library/react";
-import { renderApp } from "./render-app.js";
+import { renderApp, startInChatMode } from "./render-app.js";
 import {
   collectTiles,
   focusTile,
@@ -1096,11 +1096,6 @@ describe("opening a conversation while another is mid-turn", () => {
     return found;
   });
 
-  /** The mode the shell reads before first paint; "work" is the harness default. */
-  const startInChatMode = () => {
-    (window as { __lvisInitialAppMode?: string }).__lvisInitialAppMode = "chat";
-    return () => { delete (window as { __lvisInitialAppMode?: string }).__lvisInitialAppMode; };
-  };
 
   it("chat mode: adopts the conversation without splitting the canvas", async () => {
     const restoreMode = startInChatMode();

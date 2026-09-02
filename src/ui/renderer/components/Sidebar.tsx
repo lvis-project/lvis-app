@@ -95,6 +95,14 @@ export interface SidebarProps {
    * pops OUT of the floating surface into the bare band.
    */
   collapsed: boolean;
+  /**
+   * The expanded card floats OVER the content instead of the shell reserving
+   * room for it (chat mode: a single tile has no width to give). The shell
+   * derives it from the mode verdict; the card then behaves as a transient
+   * surface — it takes focus when it opens, collapses on Escape or a pointer
+   * down on the content beside it, and hands focus back to the toggle.
+   */
+  overlay?: boolean;
   /** Toggle the rail — the leading cluster button next to the traffic lights. */
   onToggleCollapse: () => void;
   /** Expanded card width (px). Ignored while collapsed (fixed icon rail). */
@@ -1636,6 +1644,7 @@ function ClusterStrip({
   collapsed,
   leadClearance,
   onToggleCollapse,
+  toggleRef,
   onOpenUnifiedSearch,
   viewNav,
 }: {
@@ -1643,6 +1652,8 @@ function ClusterStrip({
   /** True on darwin — left-pad the first button past the OS traffic lights. */
   leadClearance: boolean;
   onToggleCollapse: () => void;
+  /** The toggle button — where focus returns when an overlaying card closes. */
+  toggleRef: RefObject<HTMLButtonElement | null>;
   onOpenUnifiedSearch: () => void;
   /** Route history. Only the history half renders here — the path half names
    *  the content, so it belongs on the canvas, not in the chrome. */
@@ -1663,6 +1674,7 @@ function ClusterStrip({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            ref={toggleRef}
             variant="ghost"
             size="icon"
             className="h-(--chrome-icon-button) w-(--chrome-icon-button) aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
@@ -1729,6 +1741,7 @@ export function Sidebar({
   onNewChatForProject,
   streaming,
   collapsed,
+  overlay = false,
   onToggleCollapse,
   width = SIDEBAR_DEFAULT_WIDTH,
   onWidthChange,
@@ -1795,6 +1808,53 @@ export function Sidebar({
   const expandSidebar = useCallback(() => {
     if (collapsed) onToggleCollapse();
   }, [collapsed, onToggleCollapse]);
+  // Overlaying, the card is a transient surface over the content: it takes
+  // focus when it opens, and Escape or a pointer down on the content beside
+  // it collapses it through the shell's own lever, so the toggle, the key,
+  // and the click are one action. The listeners subscribe once per open and
+  // read the latest toggle through a ref, so the shell's inline callback
+  // never re-subscribes them. Focus returns to the toggle on close — the
+  // control the user reached the card from.
+  const asideRef = useRef<HTMLElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const onToggleCollapseRef = useRef(onToggleCollapse);
+  onToggleCollapseRef.current = onToggleCollapse;
+  const overlayOpen = overlay && !collapsed;
+  useEffect(() => {
+    if (!overlayOpen) return;
+    const aside = asideRef.current;
+    if (!aside) return;
+    cardRef.current?.focus({ preventScroll: true });
+    const collapse = () => onToggleCollapseRef.current();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // An editor inside the card (rename, search) owns its own Escape.
+      const target = event.target;
+      if (target instanceof HTMLElement && aside.contains(target) && target.closest("input, textarea, [contenteditable=true]")) return;
+      collapse();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || aside.contains(target)) return;
+      // Portaled surfaces (menus, dialogs, tooltips) mount outside the shell
+      // column; a pick inside one is not a click beside the card.
+      if (!aside.parentElement?.contains(target)) return;
+      collapse();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+      // Hand focus back only when the card had it (or dropped it to the body
+      // as its rows unmounted). A mode flip that leaves the card open as a
+      // pushed sibling keeps focus where the user put it.
+      const active = document.activeElement;
+      const cardHadFocus = !active || active === document.body || aside.contains(active);
+      const toggle = toggleRef.current;
+      if (cardHadFocus && toggle?.isConnected) toggle.focus({ preventScroll: true });
+    };
+  }, [overlayOpen]);
   // Subscription readiness is distinct from API-key presence: when a login
   // runtime is selected, never describe its verification state as an API-key
   // problem or invite the user to configure an unrelated credential.
@@ -1832,7 +1892,9 @@ export function Sidebar({
     // win/linux + non-Electron have no OS lights to align against, so they
     // take `--shell-card-top`.
     <aside
+      ref={asideRef}
       data-testid="primary-sidebar"
+      data-sidebar-overlay={overlayOpen ? "true" : undefined}
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
@@ -1840,7 +1902,11 @@ export function Sidebar({
         // side panel's wrapper uses — the two cards are the same shape and have
         // to sit on the same lines, and the chat group's bottom edge is lined up
         // against this one.
-        "absolute left-(--shell-card-inset) bottom-(--shell-card-inset-bottom) z-30 flex min-h-0 flex-col",
+        "absolute left-(--shell-card-inset) bottom-(--shell-card-inset-bottom) flex min-h-0 flex-col",
+        // Pushed, the card sits under the docked panels' band; overlaying, it
+        // is the floating surface of the moment and must cover everything the
+        // tile draws, the work panel floating at its right edge included.
+        overlayOpen ? "z-50" : "z-30",
         darwinTopClearance ? "top-(--shell-card-top-darwin)" : "top-(--shell-card-top)",
         collapsed && "pointer-events-none",
       ].join(" ")}
@@ -1861,8 +1927,11 @@ export function Sidebar({
         ref={cardRef}
         data-testid="sidebar-card"
         data-surface={collapsed ? "bare" : "card"}
+        // Overlaying, the card receives focus when it opens (see the overlay
+        // effect) — programmatically only, never in the Tab order.
+        tabIndex={overlayOpen ? -1 : undefined}
         className={[
-          "flex min-h-0 flex-col motion-reduce:transition-none",
+          "flex min-h-0 flex-col outline-none motion-reduce:transition-none",
           // Collapse/expand animates the card width. The two states differ in
           // width kind — expanded is `${width}px` (inline), collapsed is content
           // `auto` (`w-auto`) — so `interpolate-size: allow-keywords` is what lets
@@ -1920,6 +1989,7 @@ export function Sidebar({
           collapsed={collapsed}
           leadClearance={darwinTopClearance}
           onToggleCollapse={onToggleCollapse}
+          toggleRef={toggleRef}
           onOpenUnifiedSearch={onOpenUnifiedSearch}
           viewNav={viewNav}
         />

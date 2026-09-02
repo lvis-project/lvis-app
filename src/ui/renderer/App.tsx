@@ -207,6 +207,12 @@ export function App() {
     sidebarCollapsed, setSidebarCollapsed,
     setSidePanelOpen,
   } = useAppMode(api);
+  // In chat mode the expanded sidebar FLOATS over the single conversation tile
+  // instead of pushing it: the band and <main> keep their collapsed geometry
+  // and the card overlays the surface. Work mode keeps the pushed layout —
+  // its tiles have room to give. Derived from appMode alone, so a mode flip
+  // while the card is open re-lays the shell with no second state to drift.
+  const sidebarOverlay = appMode === "chat" && !sidebarCollapsed;
   // Durable expanded-width of the primary navigation sidebar (drag-to-resize on
   // its inner edge). Persists via SystemSettings.sidebarWidth; drives both the
   // sidebar card width and the <main> left-padding reserve in the shell layout.
@@ -1316,9 +1322,12 @@ export function App() {
                   where a title starts: the gutter between the card and the
                   content, plus the content surface's own leading padding.
                   Collapsed, the card retracts but its cluster strip stays bare
-                  on this band, so the path clears THAT strip instead. */}
+                  on this band, so the path clears THAT strip instead.
+                  Overlaying (chat mode, expanded), the band is not pushed
+                  either: it keeps the collapsed lead and the card floats
+                  over the path the way it floats over the tile. */}
               <CustomTitleBar
-                leadClearance={sidebarCollapsed ? collapsedBandLeadClearance(isDarwinPlatform()) : sidebarWidth + SHELL_GUTTER + CONTENT_TITLE_INSET}
+                leadClearance={sidebarCollapsed || sidebarOverlay ? collapsedBandLeadClearance(isDarwinPlatform()) : sidebarWidth + SHELL_GUTTER + CONTENT_TITLE_INSET}
               >
                 <MainToolbar
                   viewNav={viewNav}
@@ -1364,6 +1373,7 @@ export function App() {
                 projects={workspaceProjects}
                 streaming={streaming}
                 collapsed={sidebarCollapsed}
+                overlay={sidebarOverlay}
                 onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
                 width={sidebarWidth}
                 onWidthChange={setSidebarWidth}
@@ -1381,8 +1391,9 @@ export function App() {
               />
               <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
                 <main
+                  data-sidebar-overlay={sidebarOverlay ? "true" : undefined}
                   className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
-                    sidebarCollapsed ? "pl-(--shell-collapsed-rail-reserve)" : ""
+                    sidebarCollapsed || sidebarOverlay ? "pl-(--shell-collapsed-rail-reserve)" : ""
                   }`}
                   // Expanded: reserve the sidebar card width plus one SHELL_GUTTER
                   // of right gap so the floating rail never occludes the canvas.
@@ -1390,7 +1401,10 @@ export function App() {
                   // class above. Inline style so the durable, user-resized width
                   // (SystemSettings.sidebarWidth) drives the reserve directly —
                   // during a drag this tracks the live width for a seamless resize.
-                  style={sidebarCollapsed ? undefined : { paddingLeft: `${sidebarWidth + SHELL_GUTTER}px` }}
+                  // Overlaying (chat mode, expanded) keeps the collapsed reserve:
+                  // the card covers the tile rather than pushing it, so the
+                  // surface neither changes width nor reflows.
+                  style={sidebarCollapsed || sidebarOverlay ? undefined : { paddingLeft: `${sidebarWidth + SHELL_GUTTER}px` }}
                 >
                   {/* Floating notification stack — update/announcement banners are an
                       OVERLAY, not in-flow content. They float over the canvas anchored
@@ -1416,6 +1430,8 @@ export function App() {
                     // wide banner can never slide under the floating rail. Tracks
                     // sidebarWidth by the same CONTENT_TITLE_INSET a view's own title
                     // starts at, so the stack lines up with the content it floats over.
+                    // Deliberately keyed on `sidebarCollapsed`, not the overlay: an
+                    // overlaying card is still a card a banner must not slide under.
                     style={sidebarCollapsed ? undefined : { left: `${sidebarWidth + CONTENT_TITLE_INSET}px` }}
                   >
                     <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
