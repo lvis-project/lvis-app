@@ -97,7 +97,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     const { getByTestId } = render(
       <TooltipProvider>
         <SlashPicker
-          actions={[]}
           plugins={[]}
           onSelectPlugin={vi.fn()}
           onInsert={vi.fn()}

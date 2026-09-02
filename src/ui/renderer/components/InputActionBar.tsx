@@ -31,7 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { PluginEntry } from "./PluginGridButton.js";
-import { SlashPicker, type QuickAction } from "./SlashPicker.js";
+import { SlashPicker } from "./SlashPicker.js";
 import { ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
 import type { ReasoningLevel } from "./ReasoningSlider.js";
 import { getApi } from "../api-client.js";
@@ -53,7 +53,6 @@ export interface InputActionBarProps {
   onSelectPlugin: (viewKey: string) => void;
   onInsertSlashCommand: (cmd: string) => void;
   onRunMcpPrompt: (prompt: McpPromptEntry) => void;
-  commandActions: QuickAction[];
   slashPickerOpen: boolean;
   onSlashPickerOpenChange: (open: boolean) => void;
   // Status sub-row — token progress ring (composed by the caller: ring + cost
@@ -150,7 +149,6 @@ export function InputActionBar({
   onSelectPlugin,
   onInsertSlashCommand,
   onRunMcpPrompt,
-  commandActions,
   slashPickerOpen,
   onSlashPickerOpenChange,
   ringSlot,
@@ -226,7 +224,6 @@ export function InputActionBar({
             The token ring moved to the status sub-row (after permission). */}
         <div className="flex shrink-0 flex-nowrap items-center gap-0.5" data-testid="iab-leading">
           <SlashPicker
-            actions={commandActions}
             plugins={plugins}
             onSelectPlugin={onSelectPlugin}
             onInsert={onInsertSlashCommand}

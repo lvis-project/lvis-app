@@ -19,11 +19,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { Command as CommandIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import { useTranslation } from "../../../i18n/react.js";
-
-export type { QuickAction } from "./command-actions.js";
 
 import type { McpPromptEntry } from "./slash-picker-data.js";
 import { buildComposerMenuSections } from "./slash-picker-data.js";
@@ -32,8 +29,6 @@ import { useNativeMenu } from "../hooks/use-native-context-menu.js";
 import { TEST_IDS } from "../../../shared/test-ids.js";
 
 export interface SlashPickerProps {
-
-  actions: QuickAction[];
   /** Installed plugins — surfaced as their own submenu. */
   plugins: PluginEntry[];
   /** Open a plugin's view by its view key. */
@@ -47,7 +42,6 @@ export interface SlashPickerProps {
 }
 
 export function SlashPicker({
-  actions,
   plugins,
   onSelectPlugin,
   onInsert,
@@ -72,7 +66,6 @@ export function SlashPicker({
       // connected now, and a tile that never opens it pays nothing.
       const runtime = await loadSlashPickerRuntime();
       const sections = buildComposerMenuSections({
-        actions,
         plugins,
         mcpTools: runtime.mcpTools,
         mcpPrompts: runtime.mcpPrompts,
@@ -95,7 +88,7 @@ export function SlashPicker({
       // set, the next ⌘K would only toggle it back off and look swallowed.
       onOpenChange(false);
     }
-  }, [actions, plugins, onInsert, onSelectPlugin, onRunMcpPrompt, showMenu, onOpenChange]);
+  }, [plugins, onInsert, onSelectPlugin, onRunMcpPrompt, showMenu, onOpenChange]);
 
   // ⌘K sets the flag; raising the menu is the same path as a click. This runs
   // in an effect, not the render body: a render can be started and discarded,
