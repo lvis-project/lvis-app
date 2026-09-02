@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { inspectFile } from "../../__tests__/test-helpers.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JsonlRecordFile, parseJsonlLines } from "../jsonl-reader.js";
@@ -58,12 +59,12 @@ describe("JsonlRecordFile", () => {
     await file.append({ id: "a" });
     const before = statSync(path);
     await file.rewrite([{ id: "z" }]);
-    const after = statSync(path);
+    const after = inspectFile(path);
     expect(after.ino).not.toBe(before.ino);
-    expect(readFileSync(path, "utf-8")).toBe('{"id":"z"}\n');
+    expect(after.text).toBe('{"id":"z"}\n');
     expect(readdirSync(join(dir, "nested"))).toEqual(["rows.jsonl"]);
     await file.rewrite([]);
-    expect(readFileSync(path, "utf-8")).toBe("");
+    expect(inspectFile(path).text).toBe("");
   });
 
   it("creates the file owner-only", async () => {

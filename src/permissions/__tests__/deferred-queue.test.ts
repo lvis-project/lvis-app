@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { inspectFile } from "../../__tests__/test-helpers.js";
 import { join } from "node:path";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
 import { PermissionTestResources } from "./test-resources.js";
@@ -98,12 +99,12 @@ describe("DeferredQueue", () => {
     const id = await q.append(SAMPLE);
     const before = statSync(path);
     await q.resolve(id, "approved");
-    const after = statSync(path);
+    const after = inspectFile(path);
     // A rename lands a new inode; an in-place write would have kept the old one.
     expect(after.ino).not.toBe(before.ino);
-    if (process.platform !== "win32") expect(after.mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(after.mode).toBe(0o600);
     expect(readdirSync(join(path, ".."))).toEqual(["deferred-queue.jsonl"]);
-    const lines = readFileSync(path, "utf-8").trim().split("\n");
+    const lines = after.text.trim().split("\n");
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0]).status).toBe("approved");
   });

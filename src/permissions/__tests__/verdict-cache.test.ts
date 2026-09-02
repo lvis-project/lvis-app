@@ -11,6 +11,7 @@
  */
 import { afterEach, describe, it, expect, beforeEach } from "vitest";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { inspectFile } from "../../__tests__/test-helpers.js";
 import { dirname, join } from "node:path";
 import {
   MAX_VERDICT_CACHE_ENTRIES,
@@ -272,9 +273,9 @@ describe("VerdictCache lookup states", () => {
     cache = resources.makeVerdictCache(path);
     expect(cache.lookup(LOOKUP, CTX).reason).toBe("miss-expired");
     await cache.flush();
-    const after = statSync(path);
+    const after = inspectFile(path);
     expect(after.ino).not.toBe(before.ino);
-    expect(readFileSync(path, "utf-8")).toBe("");
+    expect(after.text).toBe("");
   });
 
   it("flush waits for the expired-entry rewrite", async () => {
