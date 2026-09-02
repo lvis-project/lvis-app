@@ -827,6 +827,12 @@ export function App() {
   );
   const subscriptionUnavailableProvider = subscriptionRuntimePolicy.unavailableProvider;
   const subscriptionPendingProvider = subscriptionRuntimePolicy.pendingProvider;
+  // Whether any chat model is configured — a selected subscription runtime, or
+  // an API vendor that names a model. Unknown until the settings snapshot
+  // lands, so the sidebar does not alert on the pre-load defaults.
+  const chatModelConfigured = settingsLoaded
+    ? subscriptionRuntimeSelected || llmModel.length > 0
+    : null;
   const subscriptionImageAttachmentProvider = subscriptionRuntimePolicy.imageAttachmentProvider;
   const subscriptionFileAttachmentProvider = subscriptionRuntimePolicy.fileAttachmentProvider;
   // Plugin/built-in view routing + host-managed plugin auth lifecycle (the 4
@@ -1356,6 +1362,7 @@ export function App() {
                 subscriptionUnavailable={subscriptionUnavailableProvider !== undefined}
                 subscriptionPending={subscriptionPendingProvider !== undefined}
                 subscriptionRuntimePolicy={subscriptionRuntimePolicy}
+                modelConfigured={chatModelConfigured}
                 onOpenSettings={() => onOpenSettings()}
                 onNewChat={onNewChat}
                 onNewChatForProject={onNewChatForProject}

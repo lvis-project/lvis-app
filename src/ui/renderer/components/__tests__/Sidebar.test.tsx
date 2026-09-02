@@ -1157,6 +1157,35 @@ describe("Sidebar nav groups", () => {
   });
 });
 
+describe("Sidebar settings alert (no chat model configured)", () => {
+  // The composer status row used to carry this fact as a green dot; it now
+  // shows only when it is bad, on the entry that fixes it — in both layouts,
+  // since the collapsed rail is where a user spends most of the day.
+  it.each([
+    ["expanded", false],
+    ["collapsed rail", true],
+  ] as const)("marks the Settings entry red when no model is configured (%s)", (_layout, collapsed) => {
+    const { getByTestId, restore } = renderSidebar({ collapsed, modelConfigured: false });
+    const badge = getByTestId("sidebar-settings-alert");
+    expect(getByTestId("sidebar-settings").contains(badge)).toBe(true);
+    expect(badge.className).toContain("bg-destructive");
+    expect(badge.getAttribute("aria-label")).toBe("채팅 모델 미설정");
+    restore();
+  });
+
+  it.each([
+    ["configured", true],
+    ["not yet known", null],
+  ] as const)("shows no badge while the model is %s", (_state, modelConfigured) => {
+    for (const collapsed of [false, true]) {
+      const { queryByTestId, restore } = renderSidebar({ collapsed, modelConfigured });
+      expect(queryByTestId("sidebar-settings-alert")).toBeNull();
+      restore();
+      cleanup();
+    }
+  });
+});
+
 describe("Sidebar current-row scoping", () => {
   it("marks the loaded conversation as the current page only while a conversation is showing", () => {
     const onChat = renderSidebar({ activeView: "home" });

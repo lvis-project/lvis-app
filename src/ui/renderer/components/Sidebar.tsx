@@ -85,6 +85,13 @@ export interface SidebarProps {
   subscriptionUnavailable?: boolean;
   /** Selected subscription runtime is still checking whether chat is available. */
   subscriptionPending?: boolean;
+  /**
+   * Whether a chat model is configured at all — a subscription runtime is
+   * selected, or the API vendor names a model. `null` until the shell's
+   * settings snapshot has landed. The Settings entry carries a red badge
+   * while this is known-false; the composer status row no longer shows it.
+   */
+  modelConfigured?: boolean | null;
   onOpenSettings: () => void;
   onNewChat: () => void;
   streaming: boolean;
@@ -210,6 +217,12 @@ interface NavItemProps {
   trailingSlot?: React.ReactNode;
   /** `menuitem` when the row sits inside a NavGroup flyout. */
   role?: "menuitem";
+  /**
+   * A badge pinned to the icon's corner, drawn in both the expanded row and
+   * the collapsed rail — unlike `trailingSlot`, which only the row has room
+   * for. This is how an entry stays alerting after the sidebar collapses.
+   */
+  iconBadge?: React.ReactNode;
 }
 
 function NavItem({
@@ -227,6 +240,7 @@ function NavItem({
   tooltipLabel,
   trailingSlot,
   role,
+  iconBadge,
 }: NavItemProps) {
   const toneStyle = NAV_TONE[tone];
   const btn = collapsed ? (
@@ -254,7 +268,7 @@ function NavItem({
       {isActive && (
         <span className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-full ${toneStyle.bar}`} />
       )}
-      <span className="h-4 w-4 flex items-center justify-center">{icon}</span>
+      <span className="relative h-4 w-4 flex items-center justify-center">{icon}{iconBadge}</span>
     </button>
   ) : (
     /* Expanded — full-width row */
@@ -281,7 +295,7 @@ function NavItem({
       {isActive && (
         <span className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full ${toneStyle.bar}`} />
       )}
-      <span className="shrink-0 h-4 w-4 flex items-center justify-center">{icon}</span>
+      <span className="relative shrink-0 h-4 w-4 flex items-center justify-center">{icon}{iconBadge}</span>
       <span className="min-w-0 truncate flex-1 text-left">{label}</span>
       {trailingSlot && (
         <span className="ml-auto shrink-0">{trailingSlot}</span>
@@ -1725,6 +1739,7 @@ export function Sidebar({
   onOpenSettings,
   subscriptionUnavailable = false,
   subscriptionPending = false,
+  modelConfigured = null,
   onNewChat,
   onNewChatForProject,
   streaming,
@@ -2166,6 +2181,17 @@ export function Sidebar({
           tone="settings"
           data-testid="sidebar-settings"
           data-tour-anchor="settings-entry"
+          iconBadge={
+            modelConfigured === false ? (
+              <span
+                role="img"
+                data-testid="sidebar-settings-alert"
+                aria-label={t("sidebar.settingsAlertNoModel")}
+                title={t("sidebar.settingsAlertNoModel")}
+                className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-destructive"
+              />
+            ) : undefined
+          }
           trailingSlot={
             runtimePending && !compact ? (
               <span className="text-[10px] text-muted-foreground">

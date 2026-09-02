@@ -3,15 +3,17 @@ export const en = {
   "inputActionBar.attachEnabled": "Attach file/image (up to 5)",
   "inputActionBar.attachDisabledNoApiKey": "Attach disabled — available after setting API key",
   "inputActionBar.attachDisabledLimit": "Attach disabled — 5/5 limit reached",
-  "inputActionBar.statusActive": "Connected",
-  "inputActionBar.statusInactive": "No model configured",
+
   "inputActionBar.statusContextTitle": "Context window usage",
+  "inputActionBar.permissionPickerTitle": "Permission mode",
+  "inputActionBar.permissionPickerMore": "Permission settings…",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "inputActionBar.attachEnabled": "파일/이미지 첨부 (최대 5개)",
   "inputActionBar.attachDisabledNoApiKey": "첨부 비활성 — API 키 설정 후 사용 가능",
   "inputActionBar.attachDisabledLimit": "첨부 비활성 — 5/5 한도 도달",
-  "inputActionBar.statusActive": "연결됨",
-  "inputActionBar.statusInactive": "모델 미설정",
+
   "inputActionBar.statusContextTitle": "컨텍스트 윈도우 사용량",
+  "inputActionBar.permissionPickerTitle": "권한 모드",
+  "inputActionBar.permissionPickerMore": "권한 설정 더보기",
 };
