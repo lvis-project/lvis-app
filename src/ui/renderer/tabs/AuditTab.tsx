@@ -12,6 +12,7 @@ import { localDateKey, shiftLocalDateKey } from "../../../shared/local-date.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
 import { TelemetrySection } from "./TelemetrySection.js";
 import { errorMessage } from "../../../shared/error-message.js";
+import { shortSessionId } from "../../../shared/session-lookup.js";
 
 interface AuditStats {
   totalByType: Record<string, number>;
@@ -292,7 +293,7 @@ export function AuditTab() {
                     const e = entry as unknown as Record<string, unknown>;
                     const ts = (e.timestamp ?? e.ts) as string | undefined;
                     const rowType = (e.type ?? e.decision ?? "—") as string;
-                    const sessionPreview = typeof e.sessionId === "string" ? (e.sessionId as string).slice(0, 8) : undefined;
+                    const sessionPreview = typeof e.sessionId === "string" ? shortSessionId(e.sessionId as string) : undefined;
                     const routeOrTool = (e.route ?? e.tool ?? e.trustOrigin ?? sessionPreview) as string | undefined;
                     const previewRaw = (e.input ?? e.output ?? e.reason ?? "") as string;
                     const preview = typeof previewRaw === "string" ? previewRaw : String(previewRaw);

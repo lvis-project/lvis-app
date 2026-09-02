@@ -38,6 +38,7 @@ import { MAX_ITEMS } from "../../../shared/work-board-types.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { localDateKey, localDayStart } from "../../../shared/local-date.js";
 import { errorMessage } from "../../../shared/error-message.js";
+import { shortSessionId } from "../../../shared/session-lookup.js";
 
 export interface WorkBoardPanelProps {
   api: LvisApi;
@@ -724,7 +725,7 @@ function RunOutputPanel({
         <RunIndicator run={run} />
         {sessionId && (
           <span className="text-[10px] text-muted-foreground" title={sessionId}>
-            {t("workBoard.runSessionLabel", { id: sessionId.slice(0, 8) })}
+            {t("workBoard.runSessionLabel", { id: shortSessionId(sessionId) })}
           </span>
         )}
       </div>

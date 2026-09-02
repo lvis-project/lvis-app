@@ -6,6 +6,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { makeMockLvisApi } from "./mock-lvis-api.js";
 import { t } from "../../src/i18n/runtime.js";
+import { shortSessionId } from "../../src/shared/session-lookup.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -194,7 +195,7 @@ describe("UsageDashboard", () => {
 
   it("renders session Top 5 table", async () => {
     await renderDashboard();
-    await waitFor(() => expect(screen.getByText("sess-abc123".slice(0, 12))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(shortSessionId("sess-abc123"))).toBeTruthy());
   });
 
   it("renders monthly projection line", async () => {

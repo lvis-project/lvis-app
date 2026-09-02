@@ -9,6 +9,7 @@ import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { formatRelativeTime, type RelativeTimeLabels } from "../../../shared/format-time.js";
+import { shortSessionId } from "../../../shared/session-lookup.js";
 
 const RELATIVE_TIME_LABELS: RelativeTimeLabels = {
   justNow: () => t("memorySearchPanel.justNow"),
@@ -76,17 +77,17 @@ function SessionRow({
       type="button"
       className="group w-full rounded-lg border bg-background px-3 py-3 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={() => void handleClick()}
-      aria-label={t("memorySearchPanel.openChatAriaLabel", { title: session.title ?? session.sessionId.slice(0, 8) })}
+      aria-label={t("memorySearchPanel.openChatAriaLabel", { title: session.title ?? shortSessionId(session.sessionId) })}
     >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
         <span className="min-w-0 flex-1 line-clamp-1 text-sm font-semibold leading-snug text-foreground">
-          {session.title || t("memorySearchPanel.sessionFallbackTitle", { id: session.sessionId.slice(0, 8) })}
+          {session.title || t("memorySearchPanel.sessionFallbackTitle", { id: shortSessionId(session.sessionId) })}
         </span>
         <span className="shrink-0 text-[10px] text-muted-foreground">{formatRelativeTime(session.timestamp, RELATIVE_TIME_LABELS)}</span>
       </div>
       <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
         <span className="min-w-0 line-clamp-1 font-mono text-[10px] text-muted-foreground">
-          {session.sessionId.slice(0, 8)}
+          {shortSessionId(session.sessionId)}
         </span>
         <span className="shrink-0 text-[10px] text-muted-foreground">
           {loading ? t("memorySearchPanel.loading") : failed ? t("memorySearchPanel.loadFailed") : onOpenSession ? t("memorySearchPanel.clickToOpen") : t("memorySearchPanel.clickToExpand")}

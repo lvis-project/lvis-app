@@ -55,3 +55,15 @@ export function findSessionByIdPrefix<T extends { id: string }>(
   if (requested.length === 0) return undefined;
   return sessions.find((session) => session.id.startsWith(requested));
 }
+
+/**
+ * How much of a session id a surface shows when the full id would not fit —
+ * a list row, a badge, an aria label. Also the prefix `/load` resolves, so
+ * what the user reads off a row is what they can type back. Seven surfaces
+ * sliced eight characters and one sliced twelve; this is the one number.
+ */
+const SESSION_ID_DISPLAY_LENGTH = 8;
+
+export function shortSessionId(sessionId: string): string {
+  return sessionId.slice(0, SESSION_ID_DISPLAY_LENGTH);
+}
