@@ -161,7 +161,9 @@ describe.each(SURFACES)("Composer [%s]", (surface) => {
     render(<Harness />);
     const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
     expect(ta.getAttribute("data-composer-surface")).toBe(surface);
-    expect(ta.className).toContain("min-h-[40px]");
+    // One natural line is the floor: min-h-0 must win over the Textarea primitive's min-h-[80px].
+    expect(ta.className).toContain("min-h-0");
+    expect(ta.className).not.toMatch(/min-h-\[/);
     expect(ta.className).toContain(surface === "main" ? "max-h-[144px]" : "max-h-[112px]");
     expect(ta.className).toContain("text-body-sm");
     expect(ta.className).toContain("placeholder:text-input-bar-placeholder");
