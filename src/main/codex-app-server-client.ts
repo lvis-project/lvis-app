@@ -351,8 +351,13 @@ export class CodexAppServerClient {
         executable,
         [
           "app-server",
+          // Tokens live in `auth.json` under the isolated CODEX_HOME. The keyring
+          // store needs the user's login keychain, which the isolated HOME (see
+          // sanitizedCodexConversationEnvironment) deliberately hides: macOS
+          // resolves the default keychain from $HOME and the sign-in ends in
+          // "A default keychain could not be found".
           "-c",
-          'cli_auth_credentials_store="keyring"',
+          'cli_auth_credentials_store="file"',
           "--strict-config",
           "--disable",
           "plugins",
