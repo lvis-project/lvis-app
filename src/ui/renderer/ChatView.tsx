@@ -863,6 +863,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         }}
         onOpenPermanentDeny={approvals.openPermanentDeny}
         interactionLocked={approvalHead !== null && approvals.lockedRequestId === approvalHead.id}
+        reviewerSuggestion={approvals.reviewerSuggestion}
       />
       </div>
       {dockedPanelPresent ? (() => {

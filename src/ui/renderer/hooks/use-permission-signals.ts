@@ -1,42 +1,70 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApi } from "../api-client.js";
-import { DEFAULT_TOAST_TTL_MS, LONG_TOAST_TTL_MS } from "../constants.js";
+import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import type {
   PermissionReviewSuggestionPayload,
+  PermissionReviewSuggestionReason,
   UserApprovalHitPayload,
 } from "../../../shared/permissions-events.js";
 import { errorMessage } from "../../../shared/error-message.js";
 
-export type PermissionReviewSuggestionState =
-  (PermissionReviewSuggestionPayload & { busy?: boolean; error?: string }) | null;
+/**
+ * The reviewer suggestion as an approval card draws it: why the host raised
+ * it, the state of the single action it offers, and the two ways out of it.
+ *
+ * The card is per-request and the suggestion is an aggregate over a window of
+ * requests, so the value is built here — one per window — and every dock reads
+ * the same one rather than each card deriving its own.
+ */
+export interface ReviewerSuggestion {
+  reason: PermissionReviewSuggestionReason;
+  /** Approvals inside the host's window, for the "N approvals in M min" line. */
+  allowCount: number;
+  /** The host's window, in ms; the band states it in minutes. */
+  windowMs: number;
+  /** The enable action is in flight — the band's button waits on it. */
+  busy: boolean;
+  /** What the last enable attempt failed with; the band shows it inline. */
+  error?: string;
+  onEnable: () => void;
+  onDismiss: () => void;
+}
 
-export interface UsePermissionToastsResult {
+type ReviewSuggestionState =
+  | (PermissionReviewSuggestionPayload & { busy: boolean; error?: string })
+  | null;
+
+export interface UsePermissionSignalsResult {
   userApprovalHitToast: UserApprovalHitPayload | null;
-  permissionReviewSuggestion: PermissionReviewSuggestionState;
-  handleEnablePermissionReviewSuggestion: () => Promise<void>;
+  reviewerSuggestion: ReviewerSuggestion | null;
 }
 
 /**
- * Owns the two IPC-driven permission disclosure toasts:
- *   • user-approval memory-hit (#793) — auto-dismiss after DEFAULT_TOAST_TTL_MS.
- *   • permission review suggestion — auto-dismiss after LONG_TOAST_TTL_MS, with
- *     an "enable" action that flips the reviewer into LLM/interactive/auto mode.
+ * Owns the two IPC-driven permission disclosures the window subscribes once:
+ *   • user-approval memory-hit — a toast, auto-dismissed after
+ *     DEFAULT_TOAST_TTL_MS, because it reports something that already happened.
+ *   • reviewer suggestion — held state, drawn as a band inside whichever
+ *     approval card is up, with an "enable" action that flips the reviewer
+ *     into LLM/interactive/auto mode.
+ *
+ * The suggestion carries no display timer. Its surface is an approval card, and
+ * a card may not be on screen when the host raises it: a timer would expire the
+ * suggestion in that gap and spend the tracker's whole cooldown on a band
+ * nobody saw. It ends when the user acts on it — enable or dismiss — and the
+ * main-side tracker's cooldown is what bounds how often it can come back.
  *
  * Both subscriptions include defense-in-depth payload validation (the IPC type
  * is a compile-time-only guarantee).
  */
-export function usePermissionToasts(): UsePermissionToastsResult {
+export function usePermissionSignals(): UsePermissionSignalsResult {
   const [userApprovalHitToast, setUserApprovalHitToast] = useState<
     UserApprovalHitPayload | null
   >(null);
   const userApprovalHitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const [permissionReviewSuggestion, setPermissionReviewSuggestion] =
-    useState<PermissionReviewSuggestionState>(null);
-  const permissionReviewSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const [reviewSuggestion, setReviewSuggestion] =
+    useState<ReviewSuggestionState>(null);
 
   // Subscribe to user-approval-hit broadcasts. Returned closure both
   // unsubscribes the IPC listener and cancels any in-flight dismiss timer.
@@ -116,29 +144,14 @@ export function usePermissionToasts(): UsePermissionToastsResult {
         console.warn("[chat] dropping malformed permission review suggestion payload", payload);
         return;
       }
-      if (permissionReviewSuggestionTimerRef.current) {
-        clearTimeout(permissionReviewSuggestionTimerRef.current);
-      }
-      setPermissionReviewSuggestion(payload);
-      permissionReviewSuggestionTimerRef.current = setTimeout(() => {
-        setPermissionReviewSuggestion(null);
-      }, LONG_TOAST_TTL_MS);
+      setReviewSuggestion({ ...payload, busy: false });
     });
     if (!unsubscribe) return;
-    return () => {
-      unsubscribe();
-      if (permissionReviewSuggestionTimerRef.current) {
-        clearTimeout(permissionReviewSuggestionTimerRef.current);
-      }
-    };
+    return unsubscribe;
   }, []);
 
-  const handleEnablePermissionReviewSuggestion = useCallback(async () => {
-    if (permissionReviewSuggestionTimerRef.current) {
-      clearTimeout(permissionReviewSuggestionTimerRef.current);
-      permissionReviewSuggestionTimerRef.current = null;
-    }
-    setPermissionReviewSuggestion((current) =>
+  const enableReviewSuggestion = useCallback(async () => {
+    setReviewSuggestion((current) =>
       current ? { ...current, busy: true, error: undefined } : current,
     );
     try {
@@ -155,9 +168,9 @@ export function usePermissionToasts(): UsePermissionToastsResult {
       if (!modeResult?.ok) {
         throw new Error(modeResult?.message ?? modeResult?.error ?? "mode change failed");
       }
-      setPermissionReviewSuggestion(null);
+      setReviewSuggestion(null);
     } catch (err) {
-      setPermissionReviewSuggestion((current) =>
+      setReviewSuggestion((current) =>
         current
           ? {
               ...current,
@@ -169,9 +182,33 @@ export function usePermissionToasts(): UsePermissionToastsResult {
     }
   }, []);
 
+  // Dismiss clears the held suggestion here and tells the main process nothing:
+  // the tracker's own cooldown already decides when the next one may be raised,
+  // so the band cannot come straight back on the following card.
+  const dismissReviewSuggestion = useCallback(() => {
+    setReviewSuggestion(null);
+  }, []);
+
+  const reviewerSuggestion = useMemo<ReviewerSuggestion | null>(
+    () =>
+      reviewSuggestion
+        ? {
+            reason: reviewSuggestion.reason,
+            allowCount: reviewSuggestion.allowCount,
+            windowMs: reviewSuggestion.windowMs,
+            busy: reviewSuggestion.busy,
+            ...(reviewSuggestion.error === undefined
+              ? {}
+              : { error: reviewSuggestion.error }),
+            onEnable: () => void enableReviewSuggestion(),
+            onDismiss: dismissReviewSuggestion,
+          }
+        : null,
+    [reviewSuggestion, enableReviewSuggestion, dismissReviewSuggestion],
+  );
+
   return {
     userApprovalHitToast,
-    permissionReviewSuggestion,
-    handleEnablePermissionReviewSuggestion,
+    reviewerSuggestion,
   };
 }
