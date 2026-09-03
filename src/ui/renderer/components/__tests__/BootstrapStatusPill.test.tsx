@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { BootstrapStatusPill } from "../BootstrapStatusPill.js";
 import type { BootstrapStatusEvent } from "../../hooks/use-bootstrap-status.js";
@@ -24,7 +24,37 @@ describe("BootstrapStatusPill", () => {
     const pill = screen.getByTestId("bootstrap-status-pill");
     expect(pill.textContent).toContain("플러그인 설치 중");
     expect(pill.getAttribute("title")).toContain("매니지드 플러그인 설치 중");
-    expect((pill as HTMLButtonElement).disabled).toBe(true);
+    expect(pill.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("keeps the in-progress pill hoverable and focusable so its tooltip still opens", () => {
+    const onRetry = vi.fn();
+    renderPill({ phase: "start" }, { onRetry });
+    const pill = screen.getByTestId("bootstrap-status-pill");
+
+    // A native `disabled` button takes `pointer-events: none` from the button
+    // base and leaves the tab order, so neither pointer nor keyboard could
+    // reach what the pill only says in its tooltip.
+    expect((pill as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.focus(pill);
+    expect(screen.getByRole("tooltip").textContent).toContain("매니지드 플러그인 설치 중");
+
+    pill.click();
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("announces which plugin failed instead of leaving it in the hover text", () => {
+    renderPill({
+      phase: "complete",
+      installed: [],
+      failed: [{ id: "meeting", error: "tarball 404" }],
+    });
+
+    const label = screen.getByTestId("bootstrap-status-pill").getAttribute("aria-label");
+    expect(label).toContain("플러그인 부트스트랩 다시 시도");
+    expect(label).toContain("meeting");
+    expect(label).toContain("tarball 404");
   });
 
   it("retries the bootstrap when the error pill is clicked", () => {

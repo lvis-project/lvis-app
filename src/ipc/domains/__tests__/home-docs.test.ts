@@ -7,7 +7,7 @@
  * model returns is not what these handlers decide.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, lstatSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHANNELS } from "../../../contract/app-contract.js";
@@ -356,4 +356,47 @@ describe("home-docs — the user's own half", () => {
       await invokeAppIpcHandler(handlers, CHANNELS.homeDocs.customUpdate, 42),
     ).toEqual({ ok: false, error: "invalid-content" });
   });
+});
+
+describe("home-docs — how the compare-and-set write lands on disk", () => {
+  it("refuses when the doc changed under it and leaves the file byte-identical", async () => {
+    const { memoryManager } = await setup({ agentsMd: "mine\n" });
+    writeFileSync(join(home, "AGENTS.md"), "edited elsewhere\n");
+
+    expect(await memoryManager.updateAgentsMdIfUnchanged("mine\n", "merged\n")).toBe(false);
+    expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("edited elsewhere\n");
+  });
+
+  it("writes when the doc still matches what the caller read", async () => {
+    const { memoryManager } = await setup({ agentsMd: "mine\n" });
+
+    expect(await memoryManager.updateAgentsMdIfUnchanged("mine\n", "merged\n")).toBe(true);
+    expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("merged\n");
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "creates agents.custom.md at the private file mode",
+    async () => {
+      const { memoryManager } = await setup({ agentsMd: "mine\n" });
+      expect(existsSync(join(home, "agents.custom.md"))).toBe(false);
+
+      expect(await memoryManager.updateAgentsCustomMdIfUnchanged("", "my rules\n")).toBe(true);
+      expect(statSync(join(home, "agents.custom.md")).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "replaces a symlinked doc instead of writing through it",
+    async () => {
+      const outside = join(home, "outside.md");
+      writeFileSync(outside, "mine\n");
+      symlinkSync(outside, join(home, "AGENTS.md"));
+      const { memoryManager } = await setup();
+
+      expect(await memoryManager.updateAgentsMdIfUnchanged("mine\n", "merged\n")).toBe(true);
+      expect(readFileSync(outside, "utf8")).toBe("mine\n");
+      expect(lstatSync(join(home, "AGENTS.md")).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("merged\n");
+    },
+  );
 });
