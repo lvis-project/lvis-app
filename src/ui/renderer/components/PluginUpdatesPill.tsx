@@ -55,13 +55,13 @@ export function PluginUpdatesPill({
 
   const summary =
     updates.length === 1
-      ? t("marketplaceUpdateBanner.summaryOne")
-      : t("marketplaceUpdateBanner.summaryMany", { count: updates.length });
+      ? t("pluginUpdatesPill.summaryOne")
+      : t("pluginUpdatesPill.summaryMany", { count: updates.length });
   const details = updates.map((update) => formatUpdateLabel(update)).join(", ");
   // The long form the band has no room for: either the full update list, or —
   // after a partial failure — the counts plus each failure's own message.
   const title = failureSummary
-    ? `${t("marketplaceUpdateBanner.partialSummary", {
+    ? `${t("pluginUpdatesPill.partialSummary", {
         succeeded: failureSummary.succeeded,
         failed: failureSummary.failed,
         names: failureSummary.failedNames.join(", "),
@@ -72,8 +72,8 @@ export function PluginUpdatesPill({
   // reader gets. The update list is different — the count in the label already
   // says what there is to act on — so only the failure joins the name.
   const pillAriaLabel = failureSummary
-    ? `${t("marketplaceUpdateBanner.pillAriaLabel")} ${title}`
-    : t("marketplaceUpdateBanner.pillAriaLabel");
+    ? `${t("pluginUpdatesPill.pillAriaLabel")} ${title}`
+    : t("pluginUpdatesPill.pillAriaLabel");
 
   const handleUpdate = async () => {
     setBusy(true);
@@ -85,7 +85,7 @@ export function PluginUpdatesPill({
         if (hasNetworkAccessDisclosure(u.networkAccess)) {
           const confirmed = await requestNetworkAccessDisclosure(u);
           if (!confirmed) {
-            failed.push({ update: u, message: t("marketplaceUpdateBanner.disclosureCancelled") });
+            failed.push({ update: u, message: t("pluginUpdatesPill.disclosureCancelled") });
             continue;
           }
         }
@@ -127,12 +127,12 @@ export function PluginUpdatesPill({
         busy={busy}
         label={
           busy
-            ? t("marketplaceUpdateBanner.updating")
+            ? t("pluginUpdatesPill.updating")
             : failureSummary
-              ? t("marketplaceUpdateBanner.retryButton")
+              ? t("pluginUpdatesPill.retryButton")
               : updates.length === 1
-                ? t("marketplaceUpdateBanner.pillLabelOne")
-                : t("marketplaceUpdateBanner.pillLabelMany", { count: updates.length })
+                ? t("pluginUpdatesPill.pillLabelOne")
+                : t("pluginUpdatesPill.pillLabelMany", { count: updates.length })
         }
         title={title}
         ariaLabel={pillAriaLabel}
@@ -141,8 +141,8 @@ export function PluginUpdatesPill({
         testId="marketplace-update-action"
         secondaryAction={{
           icon: X,
-          title: t("marketplaceUpdateBanner.skipTitle"),
-          ariaLabel: t("marketplaceUpdateBanner.skipAriaLabel"),
+          title: t("pluginUpdatesPill.skipTitle"),
+          ariaLabel: t("pluginUpdatesPill.skipAriaLabel"),
           onClick: () => void onSkip(),
           disabled: busy,
           testId: "marketplace-update-skip",

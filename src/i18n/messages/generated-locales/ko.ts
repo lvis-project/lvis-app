@@ -69,7 +69,7 @@ import { ko as ko_be_tools } from "../generated/be_tools.js";
 import { ko as ko_be_whitelistBootstrap } from "../generated/be_whitelistBootstrap.js";
 import { ko as ko_be_windowDomain } from "../generated/be_windowDomain.js";
 import { ko as ko_be_windowTitlebarShell } from "../generated/be_windowTitlebarShell.js";
-import { ko as ko_bootstrapStatusBanner } from "../generated/bootstrapStatusBanner.js";
+import { ko as ko_bootstrapStatusPill } from "../generated/bootstrapStatusPill.js";
 import { ko as ko_bottomActionRow } from "../generated/bottomActionRow.js";
 import { ko as ko_catppuccinLatte } from "../generated/catppuccinLatte.js";
 import { ko as ko_catppuccinMocha } from "../generated/catppuccinMocha.js";
@@ -108,7 +108,6 @@ import { ko as ko_llmTab } from "../generated/llmTab.js";
 import { ko as ko_mainToolbar } from "../generated/mainToolbar.js";
 import { ko as ko_marketplaceAnnouncementBanner } from "../generated/marketplaceAnnouncementBanner.js";
 import { ko as ko_marketplaceTab } from "../generated/marketplaceTab.js";
-import { ko as ko_marketplaceUpdateBanner } from "../generated/marketplaceUpdateBanner.js";
 import { ko as ko_mcpAppFullscreenPanel } from "../generated/mcpAppFullscreenPanel.js";
 import { ko as ko_mcpAppPipPanel } from "../generated/mcpAppPipPanel.js";
 import { ko as ko_mcpAppView } from "../generated/mcpAppView.js";
@@ -132,6 +131,7 @@ import { ko as ko_pluginGridButton } from "../generated/pluginGridButton.js";
 import { ko as ko_pluginInstallDialog } from "../generated/pluginInstallDialog.js";
 import { ko as ko_pluginPerfTab } from "../generated/pluginPerfTab.js";
 import { ko as ko_pluginUninstallDialog } from "../generated/pluginUninstallDialog.js";
+import { ko as ko_pluginUpdatesPill } from "../generated/pluginUpdatesPill.js";
 import { ko as ko_privacyTab } from "../generated/privacyTab.js";
 import { ko as ko_reasoningCard } from "../generated/reasoningCard.js";
 import { ko as ko_remoteA2aActionButton } from "../generated/remoteA2aActionButton.js";
@@ -257,7 +257,7 @@ export const koMessages: Record<string, string> = {
   ...ko_be_whitelistBootstrap,
   ...ko_be_windowDomain,
   ...ko_be_windowTitlebarShell,
-  ...ko_bootstrapStatusBanner,
+  ...ko_bootstrapStatusPill,
   ...ko_bottomActionRow,
   ...ko_catppuccinLatte,
   ...ko_catppuccinMocha,
@@ -296,7 +296,6 @@ export const koMessages: Record<string, string> = {
   ...ko_mainToolbar,
   ...ko_marketplaceAnnouncementBanner,
   ...ko_marketplaceTab,
-  ...ko_marketplaceUpdateBanner,
   ...ko_mcpAppFullscreenPanel,
   ...ko_mcpAppPipPanel,
   ...ko_mcpAppView,
@@ -320,6 +319,7 @@ export const koMessages: Record<string, string> = {
   ...ko_pluginInstallDialog,
   ...ko_pluginPerfTab,
   ...ko_pluginUninstallDialog,
+  ...ko_pluginUpdatesPill,
   ...ko_privacyTab,
   ...ko_reasoningCard,
   ...ko_remoteA2aActionButton,
