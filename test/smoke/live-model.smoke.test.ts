@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { VercelUnifiedProvider } from "../../src/engine/llm/vercel/adapter.js";
 import { LLM_VENDOR_DEFAULTS } from "../../src/shared/llm-vendor-defaults.js";
 import type { StreamEvent } from "../../src/engine/llm/types.js";
+import { collectAsyncIterable } from "../../src/__tests__/test-helpers.js";
 
 /**
  * Live model smoke tests — real HTTP to a real provider, real money.
@@ -26,11 +27,6 @@ import type { StreamEvent } from "../../src/engine/llm/types.js";
 const apiKey = process.env.LVIS_SMOKE_OPENROUTER_KEY?.trim() || null;
 const live = !!apiKey;
 
-async function collect(stream: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> {
-  const events: StreamEvent[] = [];
-  for await (const event of stream) events.push(event);
-  return events;
-}
 
 function provider(): VercelUnifiedProvider {
   return new VercelUnifiedProvider(
@@ -45,7 +41,7 @@ const MODEL = "openrouter/auto";
 
 describe.skipIf(!live)("live model smoke (OpenRouter)", () => {
   it("streams a real completion", async () => {
-    const events = await collect(
+    const events = await collectAsyncIterable<StreamEvent>(
       provider().streamTurn({
         model: MODEL,
         systemPrompt: "Answer with the single word: pong",
@@ -66,7 +62,7 @@ describe.skipIf(!live)("live model smoke (OpenRouter)", () => {
   }, 120_000);
 
   it("emits a tool call when given a tool", async () => {
-    const events = await collect(
+    const events = await collectAsyncIterable<StreamEvent>(
       provider().streamTurn({
         model: MODEL,
         systemPrompt:

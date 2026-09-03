@@ -13,6 +13,7 @@ import {
   toRationaleProviderEnvelope,
   type RationaleRequiredControl,
 } from "../../../tools/pipeline/rationale-control.js";
+import { rationaleResponseFor } from "../../../tools/pipeline/__tests__/rationale-fixtures.js";
 import type {
   LLMProvider,
   StreamEvent,
@@ -114,16 +115,8 @@ function fixture(): RationaleRequiredControl {
   });
 }
 
-function responseFor(control: RationaleRequiredControl) {
-  return {
-    contractVersion: 1,
-    anchorId: control.anchor.anchorId,
-    ticketId: control.ticketId,
-    actionDigest: control.action.actionDigest,
-    round: 1,
-    suggestion: "This removes the sealed workspace build output.",
-  } as const;
-}
+const responseFor = (control: RationaleRequiredControl) =>
+  rationaleResponseFor(control, "This removes the sealed workspace build output.");
 
 class RecordingProvider implements LLMProvider {
   readonly vendor = "openai" as const;

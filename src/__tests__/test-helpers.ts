@@ -26,9 +26,13 @@ export function makeMockWebContents() {
  * (`lvis:approval:settled`), so an index into the raw call log reads one of
  * those as a card as soon as an earlier request ends. Suites that count or
  * index the cards select them through here.
+ *
+ * Typed against the call log rather than against {@link makeMockWebContents},
+ * because a suite whose mock takes its own options (a destroyed renderer, a
+ * `send` that throws) still sends the same cards.
  */
 export function sentApprovalCards<T>(
-  wc: ReturnType<typeof makeMockWebContents>,
+  wc: { send: { mock: { calls: unknown[][] } } },
 ): T[] {
   return wc.send.mock.calls
     .map((call) => call as unknown as [string, T])
@@ -267,6 +271,38 @@ export function useTempDirs(prefix: string): (ownPrefix?: string) => string {
     await tracker.cleanup();
   });
   return (ownPrefix = prefix) => tracker.track(mkdtempSync(join(tmpdir(), ownPrefix)));
+}
+
+/**
+ * A factory for paths to `fileName`, each inside a fresh scratch directory this
+ * suite owns. The path is returned, not created: the subject under test is what
+ * creates it, which is what those suites are asserting about.
+ *
+ * The suites that wanted this wrapped {@link useTempDirs} in a local function so
+ * their call sites could stay bare. The wrapper is the duplicated part; the
+ * prefix and the file name are not, and stay at the one place a suite names its
+ * subject. `PermissionTestResources.tmpFilePaths` is the same shape for suites
+ * whose cleanup is owned by that instance rather than by a hook.
+ */
+export function useTempPaths(prefix: string, fileName: string): () => string {
+  const makeDir = useTempDirs(prefix);
+  return () => join(makeDir(), fileName);
+}
+
+/**
+ * A promise plus the handle that settles it, for a test that must observe work
+ * mid-flight — start the call, assert on the state it is now in, then resolve.
+ *
+ * Three suites wrote this out; the only thing that differed between them was the
+ * name of the executor's parameter. `Promise.withResolvers` is the same object,
+ * but it is ES2024 and this tree compiles against `lib: ES2023`.
+ */
+export function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 /** A user transcript entry — the minimal shape every transcript suite starts from. */

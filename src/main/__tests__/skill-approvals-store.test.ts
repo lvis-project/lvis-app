@@ -6,9 +6,8 @@
  * `skill_load` would short-circuit without re-prompting. After R2-CR-3,
  * approvals are bound to sha256(body) — a body swap forces re-approval.
  */
-import { afterEach, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
-  mkdtempSync,
   writeFileSync,
   readFileSync,
   existsSync,
@@ -16,24 +15,11 @@ import {
   readdirSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 import { SkillApprovalsStore, hashSkillMaterial } from "../skill-approvals-store.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempPaths } from "../../__tests__/test-helpers.js";
 import { observeFileHandleSyncs } from "../../__tests__/support/fsync-observer.js";
 
-const tmpDirs: string[] = [];
-
-function tmpFile(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-skill-approvals-"));
-  tmpDirs.push(dir);
-  return join(dir, "skill-approvals.json");
-}
-
-afterEach(async () => {
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
-});
+const tmpFile = useTempPaths("lvis-skill-approvals-", "skill-approvals.json");
 
 describe("SkillApprovalsStore — R2-CR-3 hash-binding", () => {
   it("approve(name, body) → isApproved(name, body) returns true for the same body", async () => {

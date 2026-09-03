@@ -14,6 +14,7 @@ import {
   parseRationaleResponse,
   type RationaleRequiredControl,
 } from "../rationale-control.js";
+import { rationaleResponseFor } from "./rationale-fixtures.js";
 import {
   createRationaleExecutorControlOutcome,
   createRationaleOnlyRoundContract,
@@ -123,13 +124,8 @@ function fixture(display: {
   });
 }
 
-function responseFor(control: RationaleRequiredControl) {
-  return {
-    contractVersion: 1, anchorId: control.anchor.anchorId,
-    ticketId: control.ticketId, actionDigest: control.action.actionDigest,
-    round: 1, suggestion: "봉인된 build 폴더 삭제 작업입니다.",
-  } as const;
-}
+const responseFor = (control: RationaleRequiredControl) =>
+  rationaleResponseFor(control, "봉인된 build 폴더 삭제 작업입니다.");
 
 function event(control: RationaleRequiredControl, name: RationaleTicketEventName) {
   return createRationaleTicketEvent(control, name, name === "rationale-failed"

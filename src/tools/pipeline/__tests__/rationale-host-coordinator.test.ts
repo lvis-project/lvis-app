@@ -19,6 +19,7 @@ import {
   type RationaleRequiredControl,
   type RequestAnchor,
 } from "../rationale-control.js";
+import { rationaleResponseFor } from "./rationale-fixtures.js";
 import {
   RationaleHostCoordinator,
   deriveConservativeRationaleActionSummary,
@@ -147,16 +148,8 @@ function createCandidate(
   };
 }
 
-function responseFor(control: RationaleRequiredControl) {
-  return {
-    contractVersion: 1,
-    anchorId: control.anchor.anchorId,
-    ticketId: control.ticketId,
-    actionDigest: control.action.actionDigest,
-    round: 1,
-    suggestion: "Remove the sealed build target.",
-  } as const;
-}
+const responseFor = (control: RationaleRequiredControl) =>
+  rationaleResponseFor(control, "Remove the sealed build target.");
 
 function setup(options: SetupOptions = {}) {
   const anchor = createAnchor();

@@ -14,10 +14,9 @@ import {
   type ApprovalRequest,
 } from "../../../permissions/approval-gate.js";
 import { PermissionManager } from "../../../permissions/permission-manager.js";
-import { DeferredQueue } from "../../../permissions/reviewer/deferred-queue.js";
+import { makePermissionManager } from "../../../tools/__tests__/executor-reviewer-fixtures.js";
 import {
   LlmRationaleScopeReviewer } from "../../../permissions/reviewer/rationale-scope-reviewer.js";
-import { VerdictCache } from "../../../permissions/reviewer/verdict-cache.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { createDynamicTool } from "../../../tools/base.js";
 import { DurableHostInvocationStartCasStore } from "../../../tools/pipeline/rationale-invocation-journal.js";
@@ -143,22 +142,15 @@ class AttachmentDirectModalProvider implements LLMProvider {
   }
 }
 
-function createPermissionManager(directory: string): PermissionManager {
-  const manager = new PermissionManager(join(directory, "permissions.json"));
-  manager.setMode("auto");
-  manager.setInteractiveAutoApprove("low");
-  manager.setReviewer({
-    classifier: {
-      classify: vi.fn(() => ({
-        level: "medium" as const,
-        reason: "bounded write requires foreground rationale",
-      })),
-    },
-    cache: new VerdictCache(join(directory, "reviewer-cache.jsonl")),
-    deferredQueue: new DeferredQueue(join(directory, "deferred-queue.jsonl")),
-  });
-  return manager;
-}
+const createPermissionManager = (directory: string): PermissionManager =>
+  makePermissionManager(
+    directory,
+    vi.fn(() => ({
+      level: "medium" as const,
+      reason: "bounded write requires foreground rationale",
+    })),
+    "auto",
+  );
 
 describe("foreground rationale real-stack integration", () => {
   it("runs query, executor, host, modal, sealed resume, and audit as one ordered path", async () => {
