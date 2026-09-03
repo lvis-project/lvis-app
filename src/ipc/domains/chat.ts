@@ -2179,6 +2179,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
           return {
             choice: typeof a.choice === "string" ? a.choice : undefined,
             choices: choices && choices.length > 0 ? choices : undefined,
+            // Shape only. Whether this question asked for a typed answer, and
+            // how long that answer may be, is the gate's call against the
+            // request it recorded.
+            freeText: typeof a.freeText === "string" ? a.freeText : undefined,
           };
         })
       : undefined;

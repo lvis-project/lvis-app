@@ -121,8 +121,8 @@
       <tbody>
         <tr>
           <td>1개</td>
-          <td>단일 폼: 질문 텍스트 + 선택지 칩</td>
-          <td>단일 선택은 선택지 클릭 시 즉시 <code>respond</code>. 다중 선택은 "보내기" 버튼으로 전송.</td>
+          <td>단일 폼: 질문 텍스트 + 선택지 칩. <code>allowFreeText</code> 를 요청한 질문은 마지막 답변 행에 입력 필드를 하나 더 그린다.</td>
+          <td>단일 선택은 선택지 클릭 시 즉시 <code>respond</code>. 다중 선택과 수기 입력은 "보내기" 버튼으로 전송.</td>
           <td>"건너뛰기" → <code>dismissed: true</code> 로 LLM 에 전달, LLM 은 기본값으로 fallback.</td>
         </tr>
         <tr>
@@ -142,7 +142,8 @@
     <h2 class="text-base font-semibold mb-3">2. 시나리오 A — 단일 질문 (1/1)</h2>
     <p class="scenario-note">
       가장 흔한 경로. LLM 이 3개 선택지를 emit, <code>recommendedIndex: 1</code> · <code>altIndices: [2]</code> 로 표기.
-      어느 선택지든 클릭하면 즉시 응답하고 활성 카드는 큐에서 제거되며, 답변 회고 버블이 materialize된다. 사용자 수기 입력 필드는 노출하지 않는다.
+      어느 선택지든 클릭하면 즉시 응답하고 활성 카드는 큐에서 제거되며, 답변 회고 버블이 materialize된다.
+      이 질문은 <code>allowFreeText</code> 를 요청하지 않았으므로 입력 필드는 그리지 않는다.
     </p>
 
     <div class="panel p-4">
@@ -396,7 +397,10 @@
   <section>
     <h2 class="text-base font-semibold mb-3">6. 미해결 디자인 메모</h2>
     <ul class="text-sm text-[#c9d1d9] list-disc pl-6 space-y-1.5">
-      <li><strong>선택형 응답 고정</strong>. 질문마다 구체적인 선택지 1~3개를 제공하고 사용자 수기 입력 필드는 두지 않는다.</li>
+      <li><strong>선택지와 입력 필드의 역할 분리</strong>. 질문마다 구체적인 선택지를 1~3개 제공한다.
+        수기 입력 필드는 도구가 <code>allowFreeText</code> 로 요청한 질문에만 나타난다.
+        모델은 그 필드를 '입력' · '기타' 같은 선택지 라벨로 대신 표현하지 않는다 — 선택지는 버튼이므로 그런 라벨은 누를 수만 있고 쓸 수는 없다.
+        사용자가 입력한 텍스트는 선택 라벨과 섞이지 않고 <code>answers[].freeText</code> 로 따로 돌아온다.</li>
       <li><strong>label 자체에 뱃지 baked-in 금지</strong>. 모델은 20자 이하의 고유한 평문 선택지만 emit하고, Recommend / 대안 표기는 <code>recommendedIndex</code> · <code>altIndices</code> 로 시각만 분리한다.</li>
       <li><strong>인덱스 기반 선택 상태</strong>. 라벨 문자열과 렌더 순서를 분리해 키보드 이동과 선택 상태를 안정적으로 유지한다.</li>
       <li><strong><code>request.id</code> 별 상태 보존</strong>. 같은 id 로 재마운트되면 step + drafts 보존, 새 id 면 초기화.</li>
