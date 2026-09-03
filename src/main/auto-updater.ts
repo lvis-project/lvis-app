@@ -11,6 +11,8 @@ import { auditUnauthorized, validateHostRendererSender } from "../ipc/gated.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
 import type { UpdateState } from "../shared/update-state.js";
+import { getLvisAppVersion } from "../shared/app-version.js";
+import { compareSemver, SEMVER_CORE_PATTERN } from "../shared/semver-compare.js";
 import {
   beginAppUpdateInstallRequest,
   clearAppUpdateInstallRequested,
@@ -44,6 +46,13 @@ export interface AutoUpdaterDeps {
   /** Persisted app-update skip state. Exact-version only; a newer version surfaces again. */
   getSkippedVersion?: () => string | undefined;
   setSkippedVersion?: (version: string) => Promise<void> | void;
+  /**
+   * Test seam for the version of the app that is RUNNING. Production resolves
+   * it from the same SoT every other version-gated decision uses
+   * ({@link getLvisAppVersion}); a test injects one so the feed can be made to
+   * offer something older than the running build.
+   */
+  getRunningVersion?: () => string;
 }
 
 /** Minimal surface of electron-updater.autoUpdater we rely on. */
@@ -172,14 +181,52 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
 
   const isSkippedVersion = (version: string): boolean => skippedVersion() === version.trim();
 
+  const runningVersion = (): string => deps.getRunningVersion?.() ?? getLvisAppVersion();
+
+  /**
+   * Is the offered version strictly newer than the build that is running?
+   *
+   * The feed decides what it calls "latest"; only the host knows what is
+   * actually installed. `allowDowngrade = false` reads like it settles this and
+   * does not: a v0.9.0 install was observed being offered v0.8.0 from a feed
+   * whose "latest" had moved backwards. So the host asks the question itself,
+   * once, against its own version SoT — the same one the plugin minAppVersion
+   * gate uses, not `app.getVersion()`, which reports the Electron binary in an
+   * unpackaged run.
+   *
+   * Unparseable running version (the `"unknown"` sentinel a broken install
+   * resolves to) refuses the offer: an update that cannot be shown to be newer
+   * is not one to put in front of the user.
+   */
+  const isNewerThanRunning = (version: string): boolean => {
+    const running = runningVersion();
+    if (!SEMVER_CORE_PATTERN.test(running)) {
+      log.warn(
+        "update v%s refused: the running version (%s) is not a version this host can compare",
+        version,
+        running,
+      );
+      return false;
+    }
+    return compareSemver(version.trim(), running) > 0;
+  };
+
   const broadcastOrSkip = (state: UpdateState): void => {
-    if (
-      (state.kind === "available" || state.kind === "downloaded") &&
-      isSkippedVersion(state.version)
-    ) {
-      log.info("update v%s hidden because the user skipped this version", state.version);
-      broadcast({ kind: "idle" });
-      return;
+    if (state.kind === "available" || state.kind === "downloaded") {
+      if (!isNewerThanRunning(state.version)) {
+        log.warn(
+          "update v%s refused: not newer than the running v%s",
+          state.version,
+          runningVersion(),
+        );
+        broadcast({ kind: "idle" });
+        return;
+      }
+      if (isSkippedVersion(state.version)) {
+        log.info("update v%s hidden because the user skipped this version", state.version);
+        broadcast({ kind: "idle" });
+        return;
+      }
     }
     broadcast(state);
   };

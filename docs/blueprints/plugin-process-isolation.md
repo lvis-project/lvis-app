@@ -775,8 +775,13 @@ The measurement here gates Stage 8 and informs §8.
 
 ### Stage 7 — Confine the pilot
 
-*Scope.* Route the pilot's spawn through the Stage 3 primitive. Fail closed if
-confinement is unavailable on the platform — no unconfined fallback.
+*Scope.* Route the pilot's spawn through the Stage 3 primitive. The child is
+confined exactly as much as the host is: wrapped while `features.osToolSandbox`
+is on, spawned as given while it is off. (This stage originally read "fail
+closed, no unconfined fallback"; that rule required on Windows and Linux a
+sandbox the host itself never ran under, and its cost was every plugin on those
+platforms failing to start. One setting now governs host, workers and plugin
+children alike.)
 
 *What proves it.* **The security claim becomes testable for the first time:** a test
 asserting the child cannot read `~/.lvis/secrets/`, cannot read another plugin's

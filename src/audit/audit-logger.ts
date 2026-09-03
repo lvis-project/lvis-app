@@ -388,9 +388,9 @@ export interface AuditSearchFilter {
  * DEDICATED `<date>.sandbox-gate.jsonl` channel (mirrors the channel-separation
  * convention of `*.permission-shadow.jsonl` / `*.sandbox.jsonl`). This lets the
  * real-world sandbox activation success / degrade / abort / skip rates be
- * monitored before the Linux/Windows `osToolSandbox` default is flipped on (the
- * staged rollout — see settings-store DEFAULT_SETTINGS). Plain JSONL, NOT the
- * HMAC-chained audit-grade channel.
+ * read per platform for the people who turn `osToolSandbox` on (off by default
+ * everywhere — see settings-defaults). Plain JSONL, NOT the HMAC-chained
+ * audit-grade channel.
  */
 export interface SandboxGateAuditEntry {
   /** ISO 8601 — stamped by {@link AuditLogger.logSandboxGate}. */

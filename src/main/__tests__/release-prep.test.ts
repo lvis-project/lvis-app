@@ -416,6 +416,97 @@ describe("auto-updater", () => {
     expect(svc._testOnly.getState()).toEqual({ kind: "available", version: "3.0.1" });
   });
 
+  it("refuses a feed version that is older than the running build", async () => {
+    // Measured on a v0.9.0 install: the feed reported 0.8.0 as its latest and
+    // the badge offered it. `allowDowngrade = false` did not prevent that, so
+    // the host compares against its own version instead of trusting the feed.
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      getRunningVersion: () => "0.9.0",
+    });
+    await svc.triggerCheck();
+
+    u.emit("update-available", { version: "0.8.0" });
+
+    expect(svc._testOnly.getState()).toEqual({ kind: "idle" });
+    expect(fw.sent[fw.sent.length - 1]?.payload).toEqual({ kind: "idle" });
+  });
+
+  it("refuses a feed version equal to the running build", async () => {
+    // "Not strictly newer" is the rule, not "not older": re-offering the build
+    // already installed is the same dead-end for the user.
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      getRunningVersion: () => "0.9.0",
+    });
+    await svc.triggerCheck();
+
+    u.emit("update-available", { version: "0.9.0" });
+
+    expect(svc._testOnly.getState()).toEqual({ kind: "idle" });
+  });
+
+  it("refuses an older version that arrives already downloaded", async () => {
+    // Both offers reach the user through the same broadcast, so the comparison
+    // lives there rather than on the available event alone.
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      getRunningVersion: () => "0.9.0",
+    });
+    await svc.triggerCheck();
+
+    u.emit("update-downloaded", { version: "0.8.0" });
+
+    expect(svc._testOnly.getState()).toEqual({ kind: "idle" });
+  });
+
+  it("refuses every offer when the running version cannot be compared", async () => {
+    // `getLvisAppVersion()` resolves to the "unknown" sentinel when the app's
+    // own package.json cannot be read. An update that cannot be SHOWN to be
+    // newer is not one to put in front of the user.
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      getRunningVersion: () => "unknown",
+    });
+    await svc.triggerCheck();
+
+    u.emit("update-available", { version: "9.9.9" });
+
+    expect(svc._testOnly.getState()).toEqual({ kind: "idle" });
+  });
+
+  it("still offers a version that is genuinely newer than the running build", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      getRunningVersion: () => "0.9.0",
+    });
+    await svc.triggerCheck();
+
+    u.emit("update-available", { version: "0.9.1" });
+
+    expect(svc._testOnly.getState()).toEqual({ kind: "available", version: "0.9.1" });
+  });
+
   it("install IPC rejects plugin shell senders and audits the attempt", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();

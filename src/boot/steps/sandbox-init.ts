@@ -62,9 +62,8 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
 
     // Activation telemetry — which on-signal drove the gate. ONE event per boot
     // is emitted (below) at the terminal outcome so real-world activate/degrade/
-    // abort/skip rates can be monitored before the Linux/Windows osToolSandbox
-    // default is flipped on (the staged rollout). explicit-env takes precedence
-    // (it is the fail-closed signal); else the default/settings flag; else off.
+    // abort/skip rates can be read per platform. explicit-env takes precedence
+    // (it is the fail-closed signal); else the settings flag; else off.
     const sandboxGateOnSignal: "explicit-env" | "default-settings" | "off" =
       explicitEnv ? "explicit-env" : settingOn ? "default-settings" : "off";
 

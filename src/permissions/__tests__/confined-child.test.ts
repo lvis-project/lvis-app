@@ -24,8 +24,13 @@ const wrapWorkerCommandMock = vi.fn<
 const spawnMock = vi.fn();
 const trackMock = vi.fn();
 const admissionMock = vi.fn();
+// Whether the host runs under the OS sandbox. The primitive follows this one
+// answer: wrap while it is true, spawn the caller's command as given while it
+// is false. Defaults to true so the composition cases below see the wrap.
+const sandboxActiveMock = vi.fn<() => boolean>();
 
 vi.mock("../asrt-sandbox.js", () => ({
+  isAsrtSandboxActive: () => sandboxActiveMock(),
   wrapWorkerCommand: (command: string, options?: unknown) =>
     wrapWorkerCommandMock(command, options),
   getDefaultSensitiveReadDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.ssh"],
@@ -53,6 +58,8 @@ function fakeChild() {
 beforeEach(() => {
   wrapWorkerCommandMock.mockReset();
   wrapWorkerCommandMock.mockResolvedValue({ argv: ["/bin/sandbox", "--", "sh", "-c", "x"], env: {} });
+  sandboxActiveMock.mockReset();
+  sandboxActiveMock.mockReturnValue(true);
   spawnMock.mockReset();
   spawnMock.mockImplementation(() => fakeChild());
   trackMock.mockReset();
@@ -166,6 +173,33 @@ describe("spawnConfinedChild", () => {
     });
 
     expect(order).toEqual(["onWrapped", "spawn"]);
+  });
+
+  it("spawns the caller's own command, unwrapped, while the host is not sandboxed", async () => {
+    // A child is confined exactly as much as the host is. With the sandbox
+    // off the host runs its own tools plain, so the child is spawned as given:
+    // no wrap, no `onWrapped` (there is no ASRT state to undo), and no ASRT
+    // env overlay — the caller's baseEnv plus its own extras is the whole env.
+    sandboxActiveMock.mockReturnValue(false);
+    const onWrapped = vi.fn();
+    await spawnConfinedChild({
+      command: "/usr/bin/python3",
+      args: ["-m", "worker", "--socket", "/tmp/w.sock"],
+      label: "worker:x:main",
+      grantMode: "allow-list",
+      baseEnv: { PATH: "/usr/bin" },
+      extraEnv: { HOME: "/home/u/.lvis/sandbox/home" },
+      onWrapped,
+    });
+    expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
+    expect(onWrapped).not.toHaveBeenCalled();
+    const [executable, args, options] = spawnMock.mock.calls[0]!;
+    expect(executable).toBe("/usr/bin/python3");
+    expect(args).toEqual(["-m", "worker", "--socket", "/tmp/w.sock"]);
+    expect(options.env).toEqual({ PATH: "/usr/bin", HOME: "/home/u/.lvis/sandbox/home" });
+    // Still a managed child: admission and tracking do not depend on the wrap.
+    expect(admissionMock).toHaveBeenCalledWith("worker:x:main");
+    expect(trackMock).toHaveBeenCalledTimes(1);
   });
 
   it("checks validity on both sides of the wrap", async () => {
