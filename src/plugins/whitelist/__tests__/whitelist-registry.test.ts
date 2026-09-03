@@ -11,7 +11,7 @@ import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { WhitelistCache, whitelistRegistry } from "../whitelist-registry.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
 import { useTempDirs } from "../../../__tests__/test-helpers.js";
-import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
+import { signedDocumentFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -60,9 +60,7 @@ function makeSigned(opts: {
   expiresAt: string;
   manifestSha?: string;
 }): SignedDoc {
-  const doc = buildWhitelist(opts);
-  const body = JSON.stringify(doc);
-  return { body, signature: signEnvelopeFixture(body, testPrivateKey, testKeyId), doc };
+  return signedDocumentFixture(buildWhitelist(opts), testPrivateKey, testKeyId);
 }
 
 const freshUserData = useTempDirs("lvis-whitelist-test-");

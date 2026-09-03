@@ -14,8 +14,8 @@ import {
   InMemoryHostAnchorRoundCasStore,
   createActionIdentity,
   createRationaleRequiredControl,
-  createRequestAnchor,
 } from "../pipeline/rationale-control.js";
+import { createTestRequestAnchor } from "../pipeline/__tests__/rationale-fixtures.js";
 import {
   createRationaleExecutorControlOutcome,
 } from "../pipeline/rationale-pr1-contract.js";
@@ -31,19 +31,7 @@ import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import type { ToolCategory } from "../types.js";
 
-function requestAnchor() {
-  const anchor = createRequestAnchor({
-    sessionId: "session-rationale",
-    turnId: "turn-rationale",
-    inputMessageId: "message-rationale",
-    inputOrigin: "user-keyboard",
-    rawIntent: "Perform the requested operation.",
-  });
-  if (!anchor) throw new Error("test request anchor was not created");
-  return anchor;
-}
-
-function hostRuntime(anchor = requestAnchor()): {
+function hostRuntime(anchor = createTestRequestAnchor()): {
   runtime: RationaleHostRuntime;
   materialize: ReturnType<typeof vi.fn>;
 } {

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { deferred } from "../../../__tests__/test-helpers.js";
 import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
 
@@ -81,14 +82,6 @@ function replacementRuntime() {
     instance: {},
     methods: new Map(),
   };
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((complete) => {
-    resolve = complete;
-  });
-  return { promise, resolve };
 }
 
 async function observeDeferred(

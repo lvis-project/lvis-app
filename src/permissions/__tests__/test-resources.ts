@@ -38,7 +38,18 @@ export class PermissionTestResources {
    * further directories through the same instance.
    */
   tmpFilePaths(prefix: string, fileName: string): () => string {
-    return () => join(this.makeTmpDir(prefix), fileName);
+    const inFreshDir = this.tmpFileFactory(prefix);
+    return () => inFreshDir(fileName);
+  }
+
+  /**
+   * The same factory for a suite that names more than one file. A permissions
+   * store, a verdict cache and a deferred queue are three files under one
+   * subject, and three more suites wrapped `makeTmpDir` + `join` locally to say
+   * so; only the file name varies per call, and it stays at the call site.
+   */
+  tmpFileFactory(prefix: string): (fileName: string) => string {
+    return (fileName) => join(this.makeTmpDir(prefix), fileName);
   }
 
   trackFlushable<T extends FlushableResource>(resource: T): T {

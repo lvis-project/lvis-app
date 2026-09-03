@@ -29,7 +29,7 @@ import { RevocationCache, revocationRegistry } from "../revocation-registry.js";
 import { parseRevocationDocument } from "../revocation-schema.js";
 import { WHITELIST_PRIMARY_KEY_ID as REVOCATION_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
 import { useTempDirs } from "../../../__tests__/test-helpers.js";
-import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
+import { signedDocumentFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -68,9 +68,7 @@ function makeSigned(opts: {
   minVersions?: Record<string, string>;
   blocked?: Array<{ slug: string; version: string; reason: string }>;
 }): SignedDoc {
-  const doc = buildRevocationDoc(opts);
-  const body = JSON.stringify(doc);
-  return { body, signature: signEnvelopeFixture(body, testPrivateKey, testKeyId), doc };
+  return signedDocumentFixture(buildRevocationDoc(opts), testPrivateKey, testKeyId);
 }
 
 const freshUserData = useTempDirs("lvis-revocation-test-");

@@ -11,12 +11,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Ajv from "ajv";
-import addFormats from "ajv-formats";
 import { parsePluginJson } from "../manifest-validation.js";
 import {
   agentPluginsDocument,
-  permissiveManifestEnvelopeSchema,
+  permissiveManifestValidatorFactory,
 } from "../../__tests__/test-helpers.js";
 
 describe("manifest-validation enriched error messages (#737)", () => {
@@ -30,21 +28,15 @@ describe("manifest-validation enriched error messages (#737)", () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
-  function makeValidator() {
-    // Strict schema mirroring the SDK's additionalProperties:false discipline.
-    const ajv = new Ajv({ allErrors: true });
-    addFormats(ajv);
-    return ajv.compile(
-      permissiveManifestEnvelopeSchema({
-        strict: true,
-        namespaceProperties: {
-          entry: { type: "string" },
-          tools: { type: "array", items: { type: "string" } },
-        },
-        namespaceRequired: ["entry", "tools"],
-      }),
-    );
-  }
+  // Strict envelope, mirroring the SDK's additionalProperties:false discipline.
+  const makeValidator = permissiveManifestValidatorFactory({
+    strict: true,
+    namespaceProperties: {
+      entry: { type: "string" },
+      tools: { type: "array", items: { type: "string" } },
+    },
+    namespaceRequired: ["entry", "tools"],
+  });
 
   it("names the unknown top-level property and includes a reinstall hint", async () => {
     const path = join(workDir, "plugin.json");

@@ -9,8 +9,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Ajv from "ajv";
-import addFormats from "ajv-formats";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
 import { parseWhitelistDocument } from "../../whitelist/whitelist-schema.js";
 import {
@@ -21,7 +19,7 @@ import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" wit
 import {
   agentPluginsDocument,
   lvisSchemaProperties,
-  permissiveManifestEnvelopeSchema,
+  permissiveManifestValidatorFactory,
   pluginManifestWriter,
 } from "../../__tests__/test-helpers.js";
 
@@ -36,23 +34,16 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
-  function makeValidator() {
-    // Permissive AJV schema — the host-side cross-field check is what we want
-    // to exercise here, NOT the SDK schema. Mirrors the test helper pattern in
-    // manifest-validation-error-clarity.test.ts.
-    const ajv = new Ajv({ allErrors: true });
-    addFormats(ajv);
-    return ajv.compile(
-      permissiveManifestEnvelopeSchema({
-        namespaceProperties: {
-          entry: { type: "string" },
-          tools: { type: "array" },
-          hostSecrets: { type: "object" },
-        },
-        namespaceRequired: ["entry", "tools"],
-      }),
-    );
-  }
+  // Permissive envelope — the host-side cross-field check is what this suite
+  // exercises, NOT the SDK schema.
+  const makeValidator = permissiveManifestValidatorFactory({
+    namespaceProperties: {
+      entry: { type: "string" },
+      tools: { type: "array" },
+      hostSecrets: { type: "object" },
+    },
+    namespaceRequired: ["entry", "tools"],
+  });
 
   const writeManifest = pluginManifestWriter(
     { id: "host-secrets-test", name: "Host Secrets Test" },

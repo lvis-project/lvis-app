@@ -12,7 +12,6 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
-import { join } from "node:path";
 
 // vi.mock must be at top level (hoisted). We feed the mock from a
 // per-test setter so each case can shape the lookup result.
@@ -51,10 +50,7 @@ import { PermissionTestResources } from "./test-resources.js";
 
 const resources = new PermissionTestResources();
 
-function tmpFile(name: string): string {
-  const dir = resources.makeTmpDir("lvis-pm-legacy-null-");
-  return join(dir, name);
-}
+const tmpFile = resources.tmpFileFactory("lvis-pm-legacy-null-");
 
 afterEach(async () => {
   await resources.cleanup();

@@ -42,6 +42,23 @@ export function signEnvelopeFixture(
 }
 
 /**
+ * A policy document with its detached signature, as a registry cache is served
+ * the pair: `body` is the exact bytes that were signed, so a suite that mutates
+ * `doc` afterwards is describing a tampered document rather than a second one.
+ *
+ * Both registry suites build this triple the same way; what differs is the
+ * document, and each keeps its own builder for that.
+ */
+export function signedDocumentFixture<T>(
+  doc: T,
+  privateKey: KeyObject,
+  keyId: string,
+): { body: string; signature: string; doc: T } {
+  const body = JSON.stringify(doc);
+  return { body, signature: signEnvelopeFixture(body, privateKey, keyId), doc };
+}
+
+/**
  * The manifest digest an install receipt / rollback record carries:
  * sha256 over the canonical-JSON form, hex. Three plugin suites computed it
  * inline; the canonical form is the part that must not drift.

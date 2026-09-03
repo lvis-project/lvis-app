@@ -10,6 +10,8 @@ import { mkdtempSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import type { ValidateFunction } from "ajv";
+import { resolveAddFormats, resolveAjv } from "../config-schema.js";
 import type { PluginPaths } from "../plugin-paths.js";
 import { resolvePluginPaths } from "../plugin-paths.js";
 import { PLUGIN_DATA_DIR_NAME } from "../plugin-storage-layout.js";
@@ -326,6 +328,28 @@ export function permissiveManifestEnvelopeSchema(options: {
         },
       },
     },
+  };
+}
+
+/**
+ * A factory for AJV validators over {@link permissiveManifestEnvelopeSchema}.
+ *
+ * Three manifest suites compiled their own — same `allErrors`, same formats,
+ * same envelope — differing only in the namespace fields each one is about,
+ * which stay with the caller. A factory rather than one compiled validator,
+ * because a validator carries the errors of its last `validate()` call and
+ * these suites read `.errors` per test.
+ */
+export function permissiveManifestValidatorFactory(
+  options: Parameters<typeof permissiveManifestEnvelopeSchema>[0] = {},
+): () => ValidateFunction {
+  const schema = permissiveManifestEnvelopeSchema(options);
+  const Ajv = resolveAjv();
+  const addFormats = resolveAddFormats();
+  return () => {
+    const ajv = new Ajv({ allErrors: true });
+    addFormats(ajv);
+    return ajv.compile(schema);
   };
 }
 

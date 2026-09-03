@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { StreamTurnParams } from "../types.js";
+import { collectAsyncIterable } from "../../../__tests__/test-helpers.js";
 
 const TURN: StreamTurnParams = {
   model: "gpt-4",
@@ -16,11 +17,6 @@ const TURN: StreamTurnParams = {
   messages: [],
 };
 
-async function drain(iter: AsyncIterable<unknown>): Promise<unknown[]> {
-  const out: unknown[] = [];
-  for await (const event of iter) out.push(event);
-  return out;
-}
 
 describe("createProvider lazy adapter (PR #705)", () => {
   beforeEach(() => {
@@ -60,11 +56,11 @@ describe("createProvider lazy adapter (PR #705)", () => {
 
     expect(ctor).not.toHaveBeenCalled();
 
-    const first = await drain(provider.streamTurn(TURN));
+    const first = await collectAsyncIterable(provider.streamTurn(TURN));
     expect(first).toEqual([{ type: "text_delta", text: "hi" }]);
     expect(ctor).toHaveBeenCalledTimes(1);
 
-    await drain(provider.streamTurn(TURN));
+    await collectAsyncIterable(provider.streamTurn(TURN));
     expect(ctor).toHaveBeenCalledTimes(1);
     expect(innerStreamTurn).toHaveBeenCalledTimes(2);
   });
@@ -90,7 +86,7 @@ describe("createProvider lazy adapter (PR #705)", () => {
       fetch: customFetch,
     });
 
-    await drain(provider.streamTurn(TURN));
+    await collectAsyncIterable(provider.streamTurn(TURN));
 
     expect(ctor).toHaveBeenCalledTimes(1);
     expect(ctor).toHaveBeenCalledWith(
@@ -134,7 +130,7 @@ describe("createProvider lazy adapter (PR #705)", () => {
       providerMetadata,
     });
 
-    await drain(provider.streamTurn(TURN));
+    await collectAsyncIterable(provider.streamTurn(TURN));
 
     expect(ctor).toHaveBeenCalledWith(
       "openai-compatible",
@@ -165,11 +161,11 @@ describe("createProvider lazy adapter (PR #705)", () => {
     const { createProvider } = await import("../provider-factory.js");
     const provider = createProvider({ vendor: "openai", apiKey: "k" });
 
-    await expect(drain(provider.streamTurn(TURN))).rejects.toThrow(
+    await expect(collectAsyncIterable(provider.streamTurn(TURN))).rejects.toThrow(
       "first attempt fails",
     );
 
-    const second = await drain(provider.streamTurn(TURN));
+    const second = await collectAsyncIterable(provider.streamTurn(TURN));
     expect(second).toEqual([{ type: "text_delta", text: "second" }]);
     expect(ctor).toHaveBeenCalledTimes(2);
   });
