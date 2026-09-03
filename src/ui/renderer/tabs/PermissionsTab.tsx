@@ -395,14 +395,12 @@ export function PermissionsTab({
     };
   }, [fetchAll]);
 
-  const handleRevokeApproval = async (key: string, toolName: string, scope: UserApprovalScope) => {
+  // Revoked at once for every scope, persistent included. Removing a stored
+  // decision destroys nothing and grants nothing: the next matching call simply
+  // follows the current policy and may ask again, which is the same position the
+  // user was in before they ever answered.
+  const handleRevokeApproval = async (key: string, toolName: string) => {
     if (!window.lvis?.userApproval) return;
-    if (scope === "persistent") {
-      const confirmed = window.confirm(
-        t("permissionsTab.confirmRevokePersistent", { toolName }),
-      );
-      if (!confirmed) return;
-    }
     setApprovalsBusy(true);
     try {
       try {
@@ -1687,7 +1685,7 @@ export function PermissionsTab({
                           size="sm"
                           className="h-6 px-2 text-[11px]"
                           disabled={approvalsBusy}
-                          onClick={() => void handleRevokeApproval(a.key, a.toolName ?? a.key.slice(0, 12), a.scope)}
+                          onClick={() => void handleRevokeApproval(a.key, a.toolName ?? a.key.slice(0, 12))}
                         >
                           {t("permissionsTab.revokeButton")}
                         </Button>

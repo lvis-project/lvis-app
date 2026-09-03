@@ -2,9 +2,10 @@
  * Vendor + model vision capability lookup.
  *
  * The composer allows attaching images regardless of the active model — users
- * may switch models before sending. At send time we check supportsVision()
- * and surface a confirmation dialog when attaching images to a model that
- * cannot consume them. Confirmed sends drop the image parts.
+ * may switch models before sending. supportsVision() then decides whether the
+ * turn may go out at all: a model that cannot consume images refuses the send,
+ * so the user removes them or picks another model. No send drops image parts on
+ * the way to the provider.
  *
  * Source of truth (2026-04 snapshot):
  *   - Anthropic Claude 3+ family supports vision (3, 3.5, 3.7, 4, 4.5, 4.6, 4.7).

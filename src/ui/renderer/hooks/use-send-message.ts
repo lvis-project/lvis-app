@@ -279,6 +279,22 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         }));
         return;
       }
+      // Vendor vision capability gate. The composer accepts images regardless of
+      // the active model so the user can switch models freely; at send time a
+      // text-only model REFUSES the turn rather than negotiating a silent drop of
+      // the image parts. It sits with the other attachment gates, above the turn
+      // counter and the stream lease, so a refusal leaves the draft and its
+      // attachments exactly as the user left them. The composer disables its send
+      // button on the same condition; this is the authoritative refusal because
+      // Enter and ⌘⏎ reach `handleAsk` without passing through that button.
+      if (
+        hasImageAttachment
+        && !subscriptionRuntimePolicy.subscriptionSelected
+        && !supportsVision(llmVendor, llmModel)
+      ) {
+        setErrorWithThought(t("app.visionNotSupported", { llmModel }));
+        return;
+      }
       const requestId = ++turnRequestRef.current;
       const streamingRequestId = beginStreamingRequest();
       if (debugStreamEnabled) debugLog("handleAsk", "begin", { requestId, streamingRequestId });
@@ -298,27 +314,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       const outgoing = composed.text;
 
 
-      let outgoingAttachments = opts?.inputOrigin === "queue-auto" ? [] : composed.attachments;
-      // Vendor vision capability gate. The composer accepts images
-      // regardless of the active model so the user can switch models
-      // freely; check at send time and confirm before silently dropping
-      // image parts on a text-only model.
-      const hasImageParts = outgoingAttachments.some((p) => p.type === "image");
-      const subscriptionRuntimeOwnsImageCapability = subscriptionRuntimePolicy.subscriptionSelected;
-      if (hasImageParts && !subscriptionRuntimeOwnsImageCapability && !supportsVision(llmVendor, llmModel)) {
-        const proceed = window.confirm(t("app.visionNotSupportedConfirm", { llmModel }));
-        if (!proceed) {
-          // Restore the original (untrimmed) draft text so the user can
-          // switch models and resend without retyping. We use `q` rather
-          // than `t = q.trim()` to preserve any intentional leading /
-          // trailing whitespace or newlines the user typed. setQuestion("")
-          // was called above before we knew about this guard branch.
-          setQuestion(q);
-          if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
-          return;
-        }
-        outgoingAttachments = outgoingAttachments.filter((p) => p.type !== "image");
-      }
+      const outgoingAttachments = opts?.inputOrigin === "queue-auto" ? [] : composed.attachments;
       // Staged modes skip only the user-bubble append. The imported_trigger marker
       // already represents the plugin-authored / app-authored prompt visibly, and
       // rendering the wrapped envelope as a user bubble would misattribute authorship.

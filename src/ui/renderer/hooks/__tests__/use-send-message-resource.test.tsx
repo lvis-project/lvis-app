@@ -14,6 +14,9 @@
  */
 import "../../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, renderHook } from "@testing-library/react";
 import { useSendMessage, type UseSendMessageDeps } from "../use-send-message.js";
 import { useChatState } from "../use-chat-state.js";
@@ -114,6 +117,7 @@ function setup(options?: {
         },
     });
   const setAttachments = vi.fn();
+  const beginStreamingRequest = vi.fn(() => 1);
   const dropUserEntry = vi.fn();
   const appendUserEntry = vi.fn();
   const setErrorWithThought = vi.fn();
@@ -152,7 +156,7 @@ function setup(options?: {
     appendUserEntry,
     dropUserEntry,
     resetStreamAccumulators,
-    beginStreamingRequest: vi.fn(() => 1),
+    beginStreamingRequest,
     finishStreamingRequest: vi.fn(),
     setErrorWithThought,
     handleCompactCommand: options?.handleCompactCommand ?? vi.fn(),
@@ -191,6 +195,7 @@ function setup(options?: {
   });
   return {
     result, chatSend, chatAbort, setQuestion, setAttachments, dropUserEntry, setErrorWithThought,
+    beginStreamingRequest,
     resetStreamAccumulators, markLastAssistantInterrupted, unmarkLastAssistantInterrupted, appendSystemEntry,
     chat: () => chat as unknown as ReturnType<typeof useChatState>,
     emitChatStream,
@@ -602,5 +607,78 @@ describe("handleAsk — /load", () => {
     expect(sessionLoad).toHaveBeenCalledWith("s-held-by-another-tile", expect.any(Function));
     expect(setErrorWithThought).toHaveBeenCalledWith("app.sessionLoadFailed");
     expect(chatSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleAsk — images on a model that cannot read them", () => {
+  const TEXT_ONLY = { llmVendor: "openai" as const, llmModel: "gpt-3.5-turbo" };
+  const IMAGE_ONLY = RAW_LOCAL_ATTACHMENTS.filter((attachment) => attachment.kind === "image");
+
+  it("refuses the send outright and leaves the draft and its attachments alone", async () => {
+    // The refusal is what the user gets instead of a question: nothing is dropped
+    // on the way to a text-only model, and nothing is taken from the composer, so
+    // removing the images or switching models is a one-step recovery.
+    const {
+      result, chatSend, setQuestion, setAttachments, setErrorWithThought, beginStreamingRequest,
+    } = setup({ attachments: IMAGE_ONLY, ...TEXT_ONLY });
+
+    await act(async () => {
+      await result.current.handleAsk("review [Image #1]");
+    });
+
+    expect(chatSend).not.toHaveBeenCalled();
+    // Above the turn counter and the stream lease: no lease is taken, so none has
+    // to be handed back, and the composer never blinks empty.
+    expect(beginStreamingRequest).not.toHaveBeenCalled();
+    expect(setQuestion).not.toHaveBeenCalled();
+    expect(setAttachments).not.toHaveBeenCalled();
+    expect(setErrorWithThought).toHaveBeenCalledWith("app.visionNotSupported");
+  });
+
+  it("sends once the images are gone, on the same text-only model", async () => {
+    const { result, chatSend, setErrorWithThought } = setup({ attachments: [], ...TEXT_ONLY });
+
+    await act(async () => {
+      await result.current.handleAsk("review the brief");
+    });
+
+    expect(setErrorWithThought).not.toHaveBeenCalled();
+    expect(chatSend).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the renderer asks nothing through the browser", () => {
+  it("has no browser confirmation call left anywhere under src/", () => {
+    // Both remaining call sites were removed: a stored permission decision is
+    // revoked at once, and a text-only model refuses images rather than offering
+    // to drop them. The browser dialog blocks the renderer JS thread and its
+    // Chromium alert ignores window focus on macOS, so a new one is a defect
+    // whatever it asks. The update dialog is a main-process `showMessageBox`.
+    const SRC_DIR = resolve(fileURLToPath(import.meta.url), "../../../../..");
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (/\.tsx?$/.test(entry.name)) {
+          const text = readFileSync(full, "utf-8");
+          for (const [index, line] of text.split("\n").entries()) {
+            // Prose naming the removed call is not the removed call. Comments
+            // carry the WHY of its absence, so scanning them would make the
+            // explanation itself the violation.
+            const code = line
+              .replace(/^\s*\*.*$/, "")
+              .replace(/\/\/.*$/, "")
+              .replace(/\/\*.*$/, "");
+            if (/(?:^|[^.\w])(?:window\.|globalThis\.)?confirm\s*\(/.test(code)) {
+              offenders.push(`${full}:${index + 1}`);
+            }
+          }
+        }
+      }
+    };
+    walk(SRC_DIR);
+    expect(offenders).toEqual([]);
   });
 });

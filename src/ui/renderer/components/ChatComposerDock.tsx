@@ -28,6 +28,8 @@ import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
 
 import { subscriptionImageAttachmentLimitViolation, type SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
+import { supportsVision } from "../../../engine/llm/vendor-capabilities.js";
+import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 type InputStatusRow = React.ComponentProps<typeof ComposerStatusRow>["statusRow"];
 
 export interface ChatComposerDockProps {
@@ -76,6 +78,9 @@ export interface ChatComposerDockProps {
   settingsLoaded?: boolean;
   subscriptionUnavailableProvider?: string;
   subscriptionPendingProvider?: string;
+  /** The API-key model the draft would go to — read for the image capability gate. */
+  llmVendor: LLMVendor;
+  llmModel: string;
   rolePresets: RolePreset[];
   activePresetId: string;
   onSelectPreset: (id: string) => void;
@@ -118,6 +123,13 @@ interface ComposerRuntimeGateInput {
   subscriptionPendingProvider?: string;
   /** The draft's current attachments — checked against the selected runtime. */
   attachments: Attachment[];
+  /**
+   * The API-key model the draft would go to. Only consulted when no
+   * subscription runtime is selected — a selected runtime owns its own image
+   * capability and the API-key model is not in the path at all.
+   */
+  llmVendor?: LLMVendor;
+  llmModel?: string;
 }
 
 interface ComposerRuntimeGates {
@@ -135,6 +147,12 @@ interface ComposerRuntimeGates {
    * selected runtime has not verified.
    */
   draftHasUnsupportedAttachment: boolean;
+  /**
+   * The unsupported attachment is an image the API-key model cannot read. It is
+   * the one cause the user can clear from inside the composer — by removing the
+   * images or switching models — so it is the one that earns a written hint.
+   */
+  draftImagesRejectedByModel: boolean;
 }
 
 /**
@@ -151,6 +169,8 @@ export function resolveComposerRuntimeGates({
   subscriptionUnavailableProvider,
   subscriptionPendingProvider,
   attachments,
+  llmVendor,
+  llmModel,
 }: ComposerRuntimeGateInput): ComposerRuntimeGates {
   const runtimeImageAttachmentProvider = subscriptionRuntimePolicy
     ? subscriptionRuntimePolicy.imageAttachmentProvider
@@ -173,11 +193,24 @@ export function resolveComposerRuntimeGates({
   const filesEnabled = subscriptionRuntimePolicy
     ? subscriptionRuntimePolicy.filesEnabled
     : attachmentInputsReady && runtimeFileAttachmentProvider === undefined;
+  // A text-only API-key model cannot carry the draft's images, and the send path
+  // refuses rather than dropping them, so the composer's send affordances go
+  // inert on the same condition instead of offering a turn that will be refused.
+  // A selected subscription runtime is exempt: it owns image capability itself
+  // and the API-key model is not in that path. The model name is only known once
+  // settings have resolved; until then the composer states nothing about it.
+  const draftImagesRejectedByModel =
+    subscriptionRuntimePolicy?.subscriptionSelected !== true
+    && llmVendor !== undefined
+    && llmModel !== undefined
+    && attachments.some((attachment) => attachment.kind === "image")
+    && !supportsVision(llmVendor, llmModel);
   const draftHasUnsupportedAttachment =
     (runtimeImageAttachmentProvider !== undefined
       && attachments.some((attachment) => attachment.kind === "image"))
     || (runtimeFileAttachmentProvider !== undefined
       && attachments.some((attachment) => attachment.kind === "file"))
+    || draftImagesRejectedByModel
     || subscriptionImageAttachmentLimitViolation(
       subscriptionRuntimePolicy?.imageAttachmentLimits,
       attachments
@@ -193,6 +226,7 @@ export function resolveComposerRuntimeGates({
     imagesEnabled,
     filesEnabled,
     draftHasUnsupportedAttachment,
+    draftImagesRejectedByModel,
   };
 }
 
@@ -241,6 +275,8 @@ export function ChatComposerDock({
   settingsLoaded,
   subscriptionUnavailableProvider,
   subscriptionPendingProvider,
+  llmVendor,
+  llmModel,
   rolePresets,
   activePresetId,
   onSelectPreset,
@@ -272,6 +308,7 @@ export function ChatComposerDock({
   // read as one coordinated motion. Reduced-motion users skip the linger
   // entirely (no transition to wait out).
   const [showProjectSelectorSlot, setShowProjectSelectorSlot] = useState(centered);
+  const { t } = useTranslation();
   const prefersReducedMotion = usePrefersReducedMotion();
   useEffect(() => {
     if (centered) {
@@ -313,6 +350,7 @@ export function ChatComposerDock({
     imagesEnabled,
     filesEnabled,
     draftHasUnsupportedAttachment,
+    draftImagesRejectedByModel,
   } = resolveComposerRuntimeGates({
     subscriptionRuntimePolicy,
     subscriptionImageAttachmentProvider,
@@ -321,6 +359,8 @@ export function ChatComposerDock({
     subscriptionUnavailableProvider,
     subscriptionPendingProvider,
     attachments,
+    llmVendor,
+    llmModel,
   });
   const composerInputDisabled = viewMode !== null || (hasApiKey === false && (
     runtimeUnavailable
@@ -487,6 +527,20 @@ export function ChatComposerDock({
           }}
         />
           </ComposerFrame>
+          {/* Says why the send button went quiet, directly under the box that
+              holds the images it is talking about. Without it a disabled send
+              button is the whole message, and the composer stops responding to
+              Enter for a reason nothing on screen states. */}
+          {draftImagesRejectedByModel ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mx-4 mt-1 text-xs text-warning"
+              data-testid="composer-vision-unsupported-hint"
+            >
+              {t("app.visionNotSupported", { llmModel })}
+            </div>
+          ) : null}
           <ComposerStatusRow
             statusRow={inputStatusRow}
             ringSlot={ringSlot}
