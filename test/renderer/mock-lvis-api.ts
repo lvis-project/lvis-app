@@ -779,6 +779,9 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       bootstrapStatusHandlers.add(handler);
       return () => bootstrapStatusHandlers.delete(handler);
     }),
+    // Late-mount snapshot pull. `null` is the host's answer when nothing was
+    // reported yet, which is what most suites want: the mock stays event-driven.
+    getBootstrapStatus: vi.fn(async () => null),
     retryBootstrap: vi.fn(async () => ({ ok: true })),
     // App auto-update bridge — renderer's useAppUpdate hook subscribes
     // immediately at App mount, so the smoke test mock must define these

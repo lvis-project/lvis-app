@@ -44,6 +44,7 @@ import type { ChatStreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
+import type { AppBootstrapStatus } from "../boot/bootstrap-status.js";
 // Type-only: the renderer declares the surface it consumes; this file is the
 // one implementation and is checked against it (`satisfies` below), so a
 // handler shape that drifts on either side is a compile error here.
@@ -740,6 +741,11 @@ export function buildInternalApiSurface() {
     ipcRenderer.on(CHANNELS.bootstrap.status, listener);
     return () => ipcRenderer.removeListener(CHANNELS.bootstrap.status, listener);
   },
+  // Late-mount sync: on a cold boot the events above are all emitted before
+  // this renderer exists, so the subscription alone never sees them. Resolves
+  // `null` when the host has reported nothing yet.
+  getBootstrapStatus: () =>
+    ipcRenderer.invoke(CHANNELS.bootstrap.statusGet) as Promise<AppBootstrapStatus | null>,
   // Banner-driven retry. Re-emits the start/complete/error
   // status sequence so the banner subscriber updates without needing a
   // separate result channel.

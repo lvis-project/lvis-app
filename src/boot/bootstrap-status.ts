@@ -16,9 +16,16 @@
  *   - `complete`    — finished; payload lists installed + failed + skipped
  *   - `error`       — bootstrap itself threw (catalog fetch failure, etc.)
  *
- * The renderer subscribes via `window.lvis.onBootstrapStatus`. There is no
- * persistence — refreshing the app re-emits the latest snapshot from the
- * cached registry state on next boot.
+ * The renderer subscribes via `window.lvis.onBootstrapStatus`, but on a cold
+ * boot the whole sequence is already over before the renderer exists:
+ * `main.ts` awaits `bootstrap()` while the window still shows the splash
+ * document, so every send lands on a webContents with no listener. Each
+ * snapshot is therefore also recorded in module state and served over
+ * `CHANNELS.bootstrap.statusGet`, which the renderer hook pulls once on
+ * mount — a live event that arrives first always wins over the pull, so the
+ * older snapshot can never overwrite a newer event. The record is
+ * process-lifetime only: nothing is written to disk, and the next boot
+ * re-emits from the cached registry state.
  */
 
 import type { BrowserWindow } from "electron";
@@ -52,14 +59,32 @@ export type AppBootstrapStatus =
 export const BOOTSTRAP_STATUS_CHANNEL = "lvis:bootstrap:status";
 
 /**
- * Send a bootstrap status snapshot to the renderer. Safe to call before the
- * window is ready — the send is best-effort and silent on failure (the
- * renderer hook re-syncs from `getBootstrapStatus()` on connect).
+ * The last snapshot passed to `notifyBootstrapStatus`, or `null` before the
+ * first one. Process-lifetime only.
+ */
+let recordedStatus: AppBootstrapStatus | null = null;
+
+/**
+ * The last bootstrap status this process reported. `CHANNELS.bootstrap.statusGet`
+ * serves it so a renderer that mounted after boot still sees the outcome.
+ */
+export function latestBootstrapStatus(): AppBootstrapStatus | null {
+  return recordedStatus;
+}
+
+/**
+ * Record a bootstrap status snapshot and send it to the renderer. Safe to
+ * call before the window is ready — the send is best-effort and silent on
+ * failure, and the record is what a late-mounting renderer reads back over
+ * `CHANNELS.bootstrap.statusGet`.
  */
 export function notifyBootstrapStatus(
   mainWindow: BrowserWindow | null | undefined,
   status: AppBootstrapStatus,
 ): void {
+  // Recorded before the send gate: a cold boot has no listener yet, and that
+  // is precisely the case the pull exists to cover.
+  recordedStatus = status;
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
     mainWindow.webContents.send(BOOTSTRAP_STATUS_CHANNEL, status);

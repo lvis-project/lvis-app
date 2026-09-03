@@ -1283,6 +1283,14 @@ export type LvisApi = {
       | { phase: "error"; message: string }
     ) => void,
   ) => () => void;
+  /**
+   * Late-mount sync for `onBootstrapStatus`: on a cold boot the whole status
+   * sequence is emitted before this renderer exists, so the subscription alone
+   * never sees it. `null` when the host has reported nothing yet.
+   */
+  getBootstrapStatus: () => Promise<
+    import("../../boot/bootstrap-status.js").AppBootstrapStatus | null
+  >;
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onPluginInstallResult: (h: (payload: PluginInstallResultPayload) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;

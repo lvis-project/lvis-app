@@ -10,7 +10,8 @@ import {
   it,
   vi,
 } from "vitest";
-import { hostFrameEvent } from "../../../__tests__/test-helpers.js";
+import { hostFrameEvent, untrustedEvent } from "../../../__tests__/test-helpers.js";
+import { notifyBootstrapStatus } from "../../../boot/bootstrap-status.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const cleanupRoots: string[] = [];
@@ -249,6 +250,33 @@ describe("plugins IPC lifecycle broadcast", () => {
     });
     expect(deps.pluginRuntime.activatePreparedArtifact).toHaveBeenCalledOnce();
     expect(deps.pluginRuntime.listPluginIds()).toContain("meeting");
+  });
+
+  it("serves the recorded bootstrap status to a renderer that mounted after boot", async () => {
+    await setup();
+    // Boot's own emit: on a cold boot there is no window listening yet, which
+    // is why the record — not the send — is what the renderer can still read.
+    notifyBootstrapStatus(null, {
+      phase: "complete",
+      installed: [],
+      failed: [{ id: "meeting", error: "marketplace unreachable" }],
+    });
+
+    await expect(invoke("lvis:bootstrap:status:get")).resolves.toEqual({
+      phase: "complete",
+      installed: [],
+      failed: [{ id: "meeting", error: "marketplace unreachable" }],
+    });
+  });
+
+  it("refuses the recorded bootstrap status to a foreign frame", async () => {
+    const { deps } = await setup();
+    notifyBootstrapStatus(null, { phase: "error", message: "catalog fetch failed" });
+
+    const handler = handlers.get("lvis:bootstrap:status:get");
+    if (!handler) throw new Error("No handler registered for: lvis:bootstrap:status:get");
+    expect(await handler(untrustedEvent())).toBeNull();
+    expect(deps.auditLogger.log).toHaveBeenCalled();
   });
 
   it("broadcasts marketplace install progress and result to every app window", async () => {

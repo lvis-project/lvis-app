@@ -209,6 +209,11 @@ export const CHANNELS = {
     retry: "lvis:bootstrap:retry",
     // Lifecycle status event (main → renderer).
     status: "lvis:bootstrap:status",
+    // Late-mount sync for the status event above. The managed bootstrap runs
+    // to completion before the renderer is loaded on a cold boot, so those
+    // events reach a webContents with no listener; the renderer pulls the
+    // recorded snapshot on connect.
+    statusGet: "lvis:bootstrap:status:get",
   },
   runtime: {
     counts: "lvis:runtime:counts",

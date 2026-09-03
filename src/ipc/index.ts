@@ -14,7 +14,7 @@
  *                 lvis:feedback:*, lvis:ask-user-question:*
  *   sidechat      lvis:sidechat:*
  *   plugins       lvis:plugins:*, lvis:plugin:*, lvis:mcp:*, lvis:runtime:*,
- *                 lvis:agents:*, lvis:skills:*, lvis:bootstrap:retry,
+ *                 lvis:agents:*, lvis:skills:*, lvis:bootstrap:*,
  *                 lvis:marketplace:ping, lvis:host:plugin-theme-notify,
  *                 lvis:notification:clicked
  *   prompts       lvis:prompts:*
