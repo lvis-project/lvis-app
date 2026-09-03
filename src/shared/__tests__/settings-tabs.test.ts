@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  SETTINGS_PATH_PATTERN,
   SETTINGS_SECTIONS,
   SETTINGS_TABS,
   isSettingsSection,
   normalizeSettingsTab,
   parseSettingsPath,
 } from "../settings-tabs.js";
+import manifestSchema from "../../../schemas/plugin-manifest.schema.json" with { type: "json" };
+
+const pathGrammar = new RegExp(SETTINGS_PATH_PATTERN);
 
 describe("normalizeSettingsTab", () => {
   it("keeps every current tab id addressable", () => {
@@ -47,7 +51,7 @@ describe("SETTINGS_SECTIONS", () => {
   it("spells every id in the kebab-case the path grammar accepts", () => {
     for (const [tab, sections] of Object.entries(SETTINGS_SECTIONS)) {
       for (const section of sections) {
-        expect(section).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+        expect(`${tab}/${section}`).toMatch(pathGrammar);
         expect(parseSettingsPath(`${tab}/${section}`)).toEqual({ tab, section });
       }
     }
@@ -57,6 +61,55 @@ describe("SETTINGS_SECTIONS", () => {
     for (const tab of SETTINGS_TABS) {
       expect(SETTINGS_SECTIONS[tab].length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("SETTINGS_PATH_PATTERN", () => {
+  /** The manifest schema's own copy of the grammar, found by its arm's kind. */
+  const schemaPattern = (() => {
+    const arms = (
+      manifestSchema.definitions.pluginOnboardingAction as {
+        oneOf: { properties: { kind: { const: string }; path?: { pattern?: string } } }[];
+      }
+    ).oneOf;
+    return arms.find((arm) => arm.properties.kind.const === "settings")?.properties.path?.pattern;
+  })();
+
+  it("is the grammar the manifest schema shapes an onboarding path with", () => {
+    // The schema runs before the registry does, on a manifest the host has not
+    // loaded yet. Let the two spellings drift and the looser one decides: a
+    // section id the schema rejects can never be linked to, and nothing in the
+    // registry would say so.
+    expect(schemaPattern).toBe(SETTINGS_PATH_PATTERN);
+  });
+
+  it("admits every tab and section this build registers", () => {
+    // The other direction of the same pin. `parseSettingsPath` answers from
+    // the registry and would happily resolve an id the schema forbids.
+    for (const tab of SETTINGS_TABS) expect(tab).toMatch(pathGrammar);
+    for (const sections of Object.values(SETTINGS_SECTIONS)) {
+      for (const section of sections) expect(section).toMatch(pathGrammar);
+    }
+  });
+
+  it.each([
+    ["a bare tab id", "permissions"],
+    ["a tab and a section", "permissions/permissions-os-sandbox"],
+    ["a doubled separator inside a segment", "a--b"],
+  ])("accepts %s", (_case, value) => {
+    expect(pathGrammar.test(value)).toBe(true);
+  });
+
+  it.each([
+    ["a segment opening with a digit", "2fa"],
+    ["a section opening with a digit", "llm/2fa"],
+    ["a bare hyphen", "-"],
+    ["a segment opening with a hyphen", "-llm"],
+    ["an empty path", ""],
+    ["a third segment", "llm/llm-thinking/on"],
+    ["an uppercase segment", "LLM"],
+  ])("rejects %s", (_case, value) => {
+    expect(pathGrammar.test(value)).toBe(false);
   });
 });
 
