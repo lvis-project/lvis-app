@@ -8,9 +8,7 @@ export const en = {
   "marketplaceUpdateBanner.partialSummary": "— {succeeded} succeeded · {failed} failed ({names})",
   "marketplaceUpdateBanner.disclosureCancelled": "network access disclosure cancelled",
   "marketplaceUpdateBanner.updating": "Updating…",
-  "marketplaceUpdateBanner.updateButton": "Update",
   "marketplaceUpdateBanner.retryButton": "Retry",
-  "marketplaceUpdateBanner.dismissAriaLabel": "Dismiss update notification",
   "marketplaceUpdateBanner.skipAriaLabel": "Skip these plugin updates until newer versions",
   "marketplaceUpdateBanner.skipTitle": "Skip until the next plugin update",
 } as const;
@@ -23,9 +21,7 @@ export const ko: Record<keyof typeof en, string> = {
   "marketplaceUpdateBanner.partialSummary": "— 성공 {succeeded} · 실패 {failed} ({names})",
   "marketplaceUpdateBanner.disclosureCancelled": "네트워크 접근 고지 취소됨",
   "marketplaceUpdateBanner.updating": "업데이트 중…",
-  "marketplaceUpdateBanner.updateButton": "업데이트",
   "marketplaceUpdateBanner.retryButton": "재시도",
-  "marketplaceUpdateBanner.dismissAriaLabel": "업데이트 알림 닫기",
   "marketplaceUpdateBanner.skipAriaLabel": "이 플러그인 업데이트를 다음 버전까지 건너뛰기",
   "marketplaceUpdateBanner.skipTitle": "다음 플러그인 업데이트까지 건너뛰기",
 };

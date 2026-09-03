@@ -143,7 +143,7 @@ function broadcastPermissionReviewSuggestion(
   deps: IpcDeps,
   payload: PermissionReviewSuggestionPayload,
 ): void {
-  const mainWindow = deps.getMainWindow?.();
+  const mainWindow = deps.getMainWindow();
   const windows = deps.getAppWindows?.() ?? [mainWindow];
   for (const win of windows) {
     sendToWindow(win, PERMISSIONS.reviewSuggestion, payload);
@@ -185,7 +185,7 @@ function createPermissionReviewSuggestionTracker() {
       if (reason === null) return;
 
       lastSuggestedAt = now;
-      deps.auditLogger?.log?.({
+      deps.auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: "permissions",
         type: "approval",
@@ -216,7 +216,7 @@ function createPermissionReviewSuggestionTracker() {
 export type PermissionConfigBroadcastTarget = Pick<IpcDeps, "getMainWindow" | "getAppWindows">;
 
 export function broadcastPermissionConfigChanged(deps: PermissionConfigBroadcastTarget): void {
-  const mainWindow = deps.getMainWindow?.();
+  const mainWindow = deps.getMainWindow();
   const windows = deps.getAppWindows?.() ?? [mainWindow];
   for (const win of windows) {
     sendToWindow(win, PERMISSIONS.configChanged, {});
