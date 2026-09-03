@@ -38,17 +38,11 @@ import {
   CARD_FIXTURE_OUT_OF_SCOPE_TOOLS,
   pluginCardRuntimeFixture,
 } from "../../plugins/__tests__/plugin-card-runtime-fixture.js";
-import type { MemoryManager } from "../../memory/memory-manager.js";
 import type { Tool } from "../../tools/base.js";
+import { makePromptMemorySource } from "./test-helpers.js";
 
 const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const memoryManager = {
-  getAgentsMd: () => "",
-  getAgentsCustomMd: () => "",
-  getMemoryIndex: () => "",
-  getUserPreferences: () => "",
-  getMemoryContext: () => "",
-} as unknown as MemoryManager;
+const memoryManager = makePromptMemorySource();
 
 function pluginTool(pluginId: string, name: string): Tool {
   return {

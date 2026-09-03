@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 
 import { SystemPromptBuilder } from "../system-prompt-builder.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { makePromptMemorySource } from "./test-helpers.js";
 import { createDynamicTool } from "../../tools/base.js";
 
 function seedRegistry(): ToolRegistry {
@@ -44,13 +45,7 @@ function seedRegistry(): ToolRegistry {
 
 function makeBuilder(toolRegistry: ToolRegistry): SystemPromptBuilder {
   return new SystemPromptBuilder({
-    memoryManager: {
-      getAgentsMd: () => "",
-      getAgentsCustomMd: () => "",
-      getMemoryIndex: () => "",
-      getUserPreferences: () => "",
-      getMemoryContext: () => "",
-    } as never,
+    memoryManager: makePromptMemorySource(),
     toolRegistry,
   });
 }

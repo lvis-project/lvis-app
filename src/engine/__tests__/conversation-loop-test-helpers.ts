@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { makePromptMemorySource } from "../../prompts/__tests__/test-helpers.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage, StreamEvent } from "../llm/types.js";
@@ -31,9 +32,10 @@ export function makeConversationLoopMemoryManager(
 ): ConversationLoopDeps["memoryManager"] {
   const sessions: Record<string, GenericMessage[]> = messages === null ? {} : { [sessionId]: messages };
   return {
+    // The prompt builder reads the PromptMemorySource contract off this double,
+    // so it carries every member the contract requires.
+    ...makePromptMemorySource(),
     listSessions: () => Object.keys(sessions).map((id) => ({ id, modifiedAt: new Date() })),
-    getAgentsMd: () => "",
-    getAgentsCustomMd: () => "",
     getMemoryIndex: () => "",
     getUserPreferences: () => "",
     loadSession: (id: string) => sessions[id] ?? null,

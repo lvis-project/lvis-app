@@ -10,16 +10,11 @@ import { describe, it, expect } from "vitest";
 import { SUGGESTED_REPLIES_OPEN, SUGGESTED_REPLIES_CLOSE } from "../../engine/suggested-replies.js";
 import { SystemPromptBuilder } from "../system-prompt-builder.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { makePromptMemorySource } from "./test-helpers.js";
 
 function buildMinimalPrompt(): string {
   const builder = new SystemPromptBuilder({
-    memoryManager: {
-      getAgentsMd: () => "",
-      getAgentsCustomMd: () => "",
-      getMemoryIndex: () => "",
-      getUserPreferences: () => "",
-      getMemoryContext: () => "",
-    } as never,
+    memoryManager: makePromptMemorySource(),
     toolRegistry: new ToolRegistry(),
     getPluginCards: () => [],
   });
