@@ -155,6 +155,8 @@ function SideChatSession({
     subscriptionUnavailableProvider: chatContext?.subscriptionUnavailableProvider,
     subscriptionPendingProvider: chatContext?.subscriptionPendingProvider,
     attachments,
+    llmVendor: chatContext?.llmVendor,
+    llmModel: chatContext?.llmModel,
   });
   // The side loop runs no local slash commands, so a missing credential blocks
   // the field outright — there is no keyless "/" path to keep open.

@@ -194,6 +194,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     attachments, setAttachments, attachmentNCounter,
     enableThinkingChat, reasoningAvailable, toggleThinking, usageAvailable, subscriptionRuntimePolicy, subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider, subscriptionUnavailableProvider, subscriptionPendingProvider,
     costEstimate, costBadgeClass, activeVendor,
+    llmVendor, llmModel,
   } = useChatContext();
 
   // Checkpoint view-mode — null = live, non-null = viewing a past checkpoint
@@ -831,6 +832,8 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
         settingsLoaded={settingsLoaded}
         subscriptionUnavailableProvider={runtimeUnavailableProvider}
         subscriptionPendingProvider={runtimePendingProvider}
+        llmVendor={llmVendor}
+        llmModel={llmModel}
         rolePresets={rolePresets}
         activePresetId={activePresetId}
         onSelectPreset={setActivePresetId}

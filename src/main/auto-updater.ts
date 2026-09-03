@@ -406,11 +406,11 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
   };
 
   /**
-   * Native confirmation dialog shown via the main process. Replaces
-   * `window.confirm()` which (a) blocks the renderer JS thread, (b)
-   * shows a Chromium-style alert that doesn't respect window focus on
-   * macOS, and (c) sets a bad precedent — every other destructive
-   * confirm in this codebase goes through `dialog.showMessageBox`.
+   * Native confirmation dialog shown via the main process, rather than a
+   * renderer `window.confirm()`: that call blocks the renderer JS thread while
+   * the question is open, and its Chromium-style alert does not respect window
+   * focus on macOS. This is the only confirmation the app asks for; every other
+   * irreversible-looking action either acts at once or refuses outright.
    *
    * Returns `{ confirmed: true }` only when the user clicks 재시작.
    * Cancel / Esc / window close → `{ confirmed: false }`.

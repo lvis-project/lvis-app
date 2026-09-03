@@ -741,6 +741,7 @@ export function ChatGroupSession({
     toggleThinking: env.toggleThinking, costEstimate, costBadgeClass,
     activePricing,
     activeVendor: env.apiUsageProjectionAvailable ? env.llmVendor : undefined,
+    llmVendor: env.llmVendor, llmModel: env.llmModel,
   }), [
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, currentSessionId, hidden, env,
