@@ -38,7 +38,6 @@ export const en = {
   "permissionsTab.errorLoadFailed": "Failed to load data.",
 
   // Revoke approval messages
-  "permissionsTab.confirmRevokePersistent": "[{toolName}] Remove this exact permission decision?\n\nThe next exactly matching call will follow the current policy and may ask again.",
   "permissionsTab.errorRevokeFailed": "Revoke failed: {message}",
   "permissionsTab.successRevokeApproval": "[{toolName}] The exact permission decision was removed.",
   "permissionsTab.errorRevokeRefreshFailed": "[{toolName}] Approval revoked but list refresh failed: {message}",
@@ -298,7 +297,6 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.loading": "로딩 중...",
   "permissionsTab.errorLoadFailed": "데이터를 불러오지 못했습니다.",
 
-  "permissionsTab.confirmRevokePersistent": "[{toolName}] 이 정확 일치 권한 결정을 삭제하시겠습니까?\n\n다음 정확 일치 호출은 현재 정책을 따르며 다시 물을 수 있습니다.",
   "permissionsTab.errorRevokeFailed": "취소 실패: {message}",
   "permissionsTab.successRevokeApproval": "[{toolName}] 정확 일치 권한 결정을 삭제했습니다.",
   "permissionsTab.errorRevokeRefreshFailed": "[{toolName}] 승인이 취소되었으나 목록 새로고침 실패: {message}",

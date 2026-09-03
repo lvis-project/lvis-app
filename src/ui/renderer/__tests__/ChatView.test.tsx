@@ -2597,6 +2597,56 @@ describe("ChatView — reviewer suggestion", () => {
   });
 });
 
+describe("ChatView composer — an image on a model that cannot read one", () => {
+  it("disables the send button and says why, instead of asking at send time", async () => {
+    // The send path refuses this turn rather than dropping the image parts, so
+    // the composer must not present it as sendable. The button alone would say
+    // nothing about which of the composer's several gates closed, and Enter
+    // would go quiet with no visible reason.
+    const { container } = await renderApp({
+      hasApiKey: true,
+      settings: {
+        ...MOCK_DEFAULT_SETTINGS,
+        llm: fakeLlmSettings({ provider: "openai", model: "gpt-3.5-turbo" }),
+      },
+    });
+    (window.lvis as unknown as { attach: unknown }).attach = {
+      openFile: vi.fn(async () => ({
+        canceled: false,
+        rejected: [],
+        files: [{ path: "C:/work/diagram.png", name: "diagram.png", ext: "png", bytes: 4, isImage: true }],
+      })),
+      readImage: vi.fn(async () => ({
+        ok: true,
+        dataUrl: "data:image/png;base64,AAAA",
+        mimeType: "image/png",
+        width: 2,
+        height: 2,
+        bytes: 4,
+      })),
+      saveClipboardImage: vi.fn(async () => ({ ok: false })),
+      discardClipboardImage: vi.fn(async () => ({ ok: true })),
+      openExternal: vi.fn(async () => ({ ok: true })),
+    };
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="iab-attach-button"]')).not.toBeNull();
+    });
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="iab-attach-button"]')!);
+    });
+
+    const hint = await waitFor(() => {
+      const el = container.querySelector('[data-testid="composer-vision-unsupported-hint"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(hint.textContent).toContain("gpt-3.5-turbo");
+    const sendButton = container.querySelector('[data-testid="composer-send-button"]') as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(true);
+  });
+});
+
 afterEach(() => {
   __resetSuggestedRepliesStoreForTests();
   __teardownSuggestedRepliesIpcForTests();

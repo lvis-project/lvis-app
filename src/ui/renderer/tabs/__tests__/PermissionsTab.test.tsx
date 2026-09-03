@@ -1262,3 +1262,42 @@ describe("PermissionsTab background refresh", () => {
     await waitFor(() => expect(screen.queryByTestId("permissions-loading")).toBeNull());
   });
 });
+
+describe("PermissionsTab — revoking a stored approval", () => {
+  it("revokes a persistent decision at once, with nothing to confirm", async () => {
+    // Removing a stored decision destroys nothing and grants nothing: the next
+    // matching call follows the current policy and may ask again. A browser
+    // confirm here blocked the renderer thread to ask about an action that was
+    // already reversible by re-answering the prompt.
+    const confirm = vi.spyOn(window, "confirm");
+    try {
+      const api = installApi([[]]);
+      (api.userApproval.list as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => [
+        {
+          key: "bash:rm",
+          decision: "allow" as const,
+          approvedAt: "2026-01-01T00:00:00.000Z",
+          scope: "persistent" as const,
+          verdictAtApproval: "medium" as const,
+          nlJustification: null,
+          revokedAt: null,
+          toolName: "bash",
+        },
+      ]);
+
+      await act(async () => {
+        render(<PermissionsTab />);
+      });
+      await waitFor(() => expect(screen.getByTestId("permissions-approvals-table")).toBeTruthy());
+
+      await act(async () => {
+        fireEvent.click(screen.getByText(t("permissionsTab.revokeButton")));
+      });
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(api.userApproval.revokeByKey).toHaveBeenCalledWith("bash:rm");
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+});

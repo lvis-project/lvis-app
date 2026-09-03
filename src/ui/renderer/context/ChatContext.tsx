@@ -124,6 +124,14 @@ export interface ChatContextValue {
 
 
   activeVendor?: LLMVendor;
+
+  /**
+   * The API-key runtime the composer would send to. `activeVendor` above is
+   * scoped to the usage projection and goes undefined whenever that projection
+   * is unavailable, so it cannot answer a capability question. These two can.
+   */
+  llmVendor: LLMVendor;
+  llmModel: string;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);

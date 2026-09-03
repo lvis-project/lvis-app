@@ -234,7 +234,7 @@ describe("App.handleAsk — /load command routing", () => {
   });
 });
 
-describe("App.handleAsk — vision confirm gate on a text-only model", () => {
+describe("App.handleAsk — image refusal on a text-only model", () => {
   const textOnlySettings = {
     ...MOCK_DEFAULT_SETTINGS,
     llm: fakeLlmSettings({ provider: "openai", model: "o1-mini" }),
@@ -301,29 +301,37 @@ describe("App.handleAsk — vision confirm gate on a text-only model", () => {
     return { ...rendered, textarea };
   }
 
-  it("cancel at the confirm keeps the draft and does NOT chatSend", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const { api, textarea } = await renderWithImageAttached();
+  it("an image on a text-only model is refused: no chatSend, no confirm, draft kept", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const { api, textarea, container } = await renderWithImageAttached();
 
     await act(async () => {
       fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     });
 
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
+    expect(confirmSpy).not.toHaveBeenCalled();
     expect(api.chatSend).not.toHaveBeenCalled();
-    // Draft (marker) restored so the user can switch models and resend.
+    // Nothing was cleared, so nothing has to be restored: marker and chip stay.
     expect(textarea.value).toContain("[Image #1]");
+    expect(container.querySelector('[data-testid="attachment-chip"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="composer-vision-unsupported-hint"]')).not.toBeNull();
   });
 
-  it("proceed at the confirm sends with the image parts stripped", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const { api, textarea } = await renderWithImageAttached();
+  it("removing the image marker lifts the refusal and the send goes out", async () => {
+    const { api, textarea, container } = await renderWithImageAttached();
+
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "hello without the picture" } });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="attachment-chip"]')).toBeNull();
+    });
+    expect(container.querySelector('[data-testid="composer-vision-unsupported-hint"]')).toBeNull();
 
     await act(async () => {
       fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     });
 
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(1));
     const sentAttachments = api.chatSend.mock.calls[0][1] as Array<{ type?: string }>;
     expect(Array.isArray(sentAttachments)).toBe(true);
