@@ -83,7 +83,7 @@ export function AboutTab({ api }: AboutTabProps) {
       />
 
       {/* ── 시스템 정보 ─────────────────────────────── */}
-      <SettingsSection title={t("generalTab.systemInfoTitle")}>
+      <SettingsSection data-settings-section="about-system-info" title={t("generalTab.systemInfoTitle")}>
         <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
             <Cpu className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />

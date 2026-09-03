@@ -2831,6 +2831,7 @@ export function LlmTab(props: LlmTabProps) {
       {/* Provider configuration — API keys and endpoint settings are edited
           directly here. */}
       <SettingsSection
+        data-settings-section="llm-providers"
         title={t("llmTab.providerConfig")}
         id="llm-providers"
         actions={onOpenMarketplace ? (
@@ -2951,6 +2952,7 @@ export function LlmTab(props: LlmTabProps) {
 
       {/* Section B — Extended Thinking / Reasoning */}
       <SettingsSection
+        data-settings-section="llm-thinking"
         title={t("llmTab.thinkingTitle")}
         description={t("llmTab.thinkingDesc")}
         badge={<ImmediateBadge />}
@@ -3009,6 +3011,7 @@ export function LlmTab(props: LlmTabProps) {
 
       {/* Section C — Fallback Chain */}
       <SettingsSection
+        data-settings-section="llm-fallback"
         title={t("llmTab.fallbackTitle")}
         description={t("llmTab.fallbackDesc")}
         id="llm-fallback"

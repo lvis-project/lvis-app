@@ -669,16 +669,20 @@ export interface PluginHighlightCopy {
 /**
  * What accepting a highlight does. Every arm is inert on its own: the host
  * performs the effect, and the two that do anything only move the user — text
- * into the visible composer, or the settings view onto a tab. Nothing here
- * runs a turn, calls a tool, or reaches the network.
+ * into the visible composer, or the settings view onto a page and the section
+ * within it. Nothing here runs a turn, calls a tool, or reaches the network.
  */
 export type PluginOnboardingAction =
   /** Put `prompt` in the focused conversation's composer, unsent. */
   | { kind: "composer"; prompt: string }
   /**
-   * Move the settings view to `path`. Settings are addressed by TAB, so the
-   * value is a settings tab id (`plugin-config`, `llm`, …); there is no
-   * deeper anchor for a manifest to name.
+   * Move the settings view to `path`: a settings tab id (`plugin-config`,
+   * `llm`, …), optionally followed by `/` and one section within that tab
+   * (`permissions/permissions-os-sandbox`). Naming the section lands the user
+   * on the control the highlight is about instead of on the page that holds
+   * it. The host validates both halves against the tabs and sections this
+   * build actually ships and rejects the manifest otherwise, so a highlight
+   * can never point at a destination that does not exist.
    */
   | { kind: "settings"; path: string }
   /** Say the thing and stop. The card is informational. */

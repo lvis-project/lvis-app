@@ -80,6 +80,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
       />
 
       <SettingsSection
+        data-settings-section="plugin-config-performance"
         title={t("pluginPerfTab.sectionTitle")}
         description={t("pluginPerfTab.sectionDescription")}
         actions={

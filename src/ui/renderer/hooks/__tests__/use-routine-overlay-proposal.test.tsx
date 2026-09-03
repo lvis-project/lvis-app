@@ -10,7 +10,7 @@ import type { PluginOnboardingAction } from "../../../../plugins/public-contract
  *
  * The answer is recorded whichever way it went, and accepting performs the
  * DECLARED action and nothing else: text into a composer, or the settings view
- * onto a tab. A proposal must never travel the `imported_trigger` path the
+ * onto a settings section. A proposal must never travel the `imported_trigger` path the
  * insertion cards use, because nothing about it starts a turn.
  */
 const TILE = "group-1";
@@ -107,13 +107,13 @@ describe("useRoutineOverlay — onboarding proposal answers", () => {
       );
     });
 
-    expect(s.onNavigateToSettings).toHaveBeenCalledWith("plugin-config");
+    expect(s.onNavigateToSettings).toHaveBeenCalledWith({ tab: "plugin-config" });
     expect(s.prefillComposer).not.toHaveBeenCalled();
   });
 
-  it("normalizes a settings tab the host has since renamed", async () => {
+  it("carries the section a two-level path names", async () => {
     const s = setup();
-    s.show(proposalItem({ kind: "settings", path: "plugin-perf" }));
+    s.show(proposalItem({ kind: "settings", path: "plugin-config/plugin-config-installed" }));
 
     await act(async () => {
       await s.hook.result.current.handleProposalAnswer(
@@ -123,7 +123,33 @@ describe("useRoutineOverlay — onboarding proposal answers", () => {
       );
     });
 
-    expect(s.onNavigateToSettings).toHaveBeenCalledWith("plugin-config");
+    expect(s.onNavigateToSettings).toHaveBeenCalledWith({
+      tab: "plugin-config",
+      section: "plugin-config-installed",
+    });
+  });
+
+  it.each([
+    ["a tab id the host has retired", "plugin-perf"],
+    ["a section the named tab does not anchor", "plugin-config/llm-providers"],
+    ["a path with a third segment", "plugin-config/plugin-config-installed/on"],
+  ])("navigates nowhere for %s", async (_case, path) => {
+    // Manifest validation rejects these at load, so reaching one here means the
+    // declared destination is gone. Landing on the default tab instead would
+    // answer the user's "yes" with a page they did not agree to.
+    const s = setup();
+    s.show(proposalItem({ kind: "settings", path }));
+
+    await act(async () => {
+      await s.hook.result.current.handleProposalAnswer(
+        "proposal:meeting:first-task",
+        "accepted",
+        TILE,
+      );
+    });
+
+    expect(s.onNavigateToSettings).not.toHaveBeenCalled();
+    expect(s.answer).toHaveBeenCalledWith("meeting:first-task", "accepted", "en");
   });
 
   it.each(["later", "never"] as const)("records %s without performing the action", async (

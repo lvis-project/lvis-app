@@ -194,7 +194,16 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   }, [api, runMutation, shareDuration]);
 
   return (
-    <div className="space-y-6" data-testid="tailnet-access-content">
+    // The surface carries the deep-link anchor rather than one of its
+    // sections: which section renders depends on whether tailnet sharing is
+    // available at all, so an anchor on an inner one would land nowhere on
+    // exactly the machines a link about it is worth sending.
+    <div
+      className="space-y-6"
+      data-testid="tailnet-access-content"
+      data-settings-section="remote-tailnet"
+      tabIndex={-1}
+    >
       <p className="text-sm text-muted-foreground">{t("tailnetAccessTab.pageDescription")}</p>
 
       {/* Outside the loading and disabled gates below on purpose: this is the

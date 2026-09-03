@@ -44,6 +44,70 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTab, string> = {
 };
 
 /**
+ * Tab → the anchored sections inside it, in the order the page lays them out.
+ *
+ * A tab is where a setting lives; a section is where the switch is. A link that
+ * can only name the tab leaves the reader to find the control among ten others,
+ * which is the whole reason a notice or an onboarding card sends them there —
+ * so the destination model carries one level deeper than the tab.
+ *
+ * Every id here is anchored in the DOM as `data-settings-section="<id>"` by the
+ * component that renders that tab, and the pairing is enforced in both
+ * directions by `src/ui/renderer/__tests__/settings-section-anchors.test.ts`:
+ * an id with no anchor is an unreachable destination, and an anchor missing
+ * from this table is a place nothing can link to.
+ *
+ * Ids are globally unique rather than per-tab, because arrival looks the anchor
+ * up by attribute across the whole panel: two tabs sharing an id would make the
+ * lookup depend on which one happens to be mounted.
+ */
+export const SETTINGS_SECTIONS: Record<SettingsTab, readonly string[]> = {
+  llm: ["llm-providers", "llm-thinking", "llm-fallback", "llm-pricing-overrides"],
+  appearance: ["appearance-language", "appearance-theme", "appearance-font"],
+  chat: ["chat-optimization", "chat-stream-smoothing", "chat-experimental", "chat-privacy"],
+  web: ["web-search-engine", "web-api-key", "web-view-flow"],
+  startup: [
+    "startup-shortcut",
+    "startup-launch",
+    "startup-rendering",
+    "startup-corp-ca",
+    "startup-system-behavior",
+  ],
+  permissions: [
+    "permissions-policy-summary",
+    "permissions-policy",
+    "permissions-approval-dialog",
+    "permissions-os-sandbox",
+    "permissions-adjudication",
+    "permissions-rules",
+    "permissions-directories",
+    "permissions-approvals",
+    "permissions-audit-log",
+  ],
+  "remote-surfaces": [
+    "remote-tailnet",
+    "remote-tailnet-observer",
+    "remote-telegram",
+    "remote-local-api",
+  ],
+  roles: ["roles-agents", "roles-memory", "roles-preferences", "roles-presets", "roles-preview"],
+  usage: ["usage-workspace", "usage-summary"],
+  audit: [
+    "audit-stats",
+    "audit-filter",
+    "audit-results",
+    "audit-bundle",
+    "audit-log-file",
+    "audit-crash",
+    "audit-telemetry",
+  ],
+  mcp: ["mcp-servers"],
+  "plugin-config": ["plugin-config-installed", "plugin-config-performance"],
+  marketplace: ["marketplace-inventory", "marketplace-maintenance", "marketplace-advanced"],
+  about: ["about-system-info"],
+};
+
+/**
  * Strict membership: is this the id of a tab this build actually ships?
  *
  * Separate from `normalizeSettingsTab`, which answers "llm" for anything it
@@ -53,6 +117,37 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTab, string> = {
  */
 export function isSettingsTab(tab: unknown): tab is SettingsTab {
   return typeof tab === "string" && (SETTINGS_TABS as readonly string[]).includes(tab);
+}
+
+/** Is `section` one of the anchors `tab` actually renders? */
+export function isSettingsSection(tab: SettingsTab, section: unknown): boolean {
+  return typeof section === "string" && SETTINGS_SECTIONS[tab].includes(section);
+}
+
+/** A settings destination: the page, and optionally the section within it. */
+export interface SettingsPath {
+  tab: SettingsTab;
+  section?: string;
+}
+
+/**
+ * Parse `"<tab>"` or `"<tab>/<section>"` into a destination this build can
+ * reach, or `null`.
+ *
+ * Fail-closed on purpose, and strict where `normalizeSettingsTab` is lenient.
+ * The callers are trust boundaries — a marketplace announcement's button and a
+ * plugin manifest's onboarding highlight — so a path this build cannot honour
+ * has to yield NO destination. Resolving it to the landing tab would point a
+ * button labelled "turn on the sandbox" at the model page instead.
+ */
+export function parseSettingsPath(path: unknown): SettingsPath | null {
+  if (typeof path !== "string") return null;
+  const segments = path.split("/");
+  if (segments.length > 2) return null;
+  const [tab, section] = segments;
+  if (!isSettingsTab(tab)) return null;
+  if (section === undefined) return { tab };
+  return isSettingsSection(tab, section) ? { tab, section } : null;
 }
 
 export function normalizeSettingsTab(tab: unknown): SettingsTab {

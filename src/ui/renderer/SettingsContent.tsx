@@ -40,6 +40,7 @@ import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
 import { AboutTab, useAppInfo } from "./tabs/AboutTab.js";
 import { StartupTab } from "./tabs/StartupTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
+import { useSettingsSectionArrival } from "./hooks/use-settings-tab.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab, SETTINGS_TAB_LABEL_KEYS, type SettingsTab } from "../../shared/settings-tabs.js";
 import type { MarketplacePackageFilter } from "../../shared/marketplace-package-sections.js";
@@ -146,6 +147,8 @@ export function SettingsContent({
   chatGroupId,
   onSaved,
   initialTab = "llm",
+  sectionTarget = null,
+  onSectionApplied,
   onTabChange,
   exactDenyDraft = null,
   onExactDenySaved,
@@ -160,6 +163,16 @@ export function SettingsContent({
   chatGroupId: string;
   onSaved: () => void;
   initialTab?: string;
+  /**
+   * The section inside `initialTab` a deep link named — one of the ids
+   * `SETTINGS_SECTIONS` lists for that tab — or `null` for an ordinary open.
+   *
+   * A one-shot, and never persisted: it means "the user was just sent here",
+   * which stops being true the moment they arrive. `onSectionApplied` fires
+   * once the panel has consumed it.
+   */
+  sectionTarget?: string | null;
+  onSectionApplied?: () => void;
   /**
    * Reports every in-panel move to a new tab, already normalized. `initialTab`
    * seeds (and re-seeds) the selection, so an embedder could always WRITE the
@@ -271,6 +284,12 @@ export function SettingsContent({
     setTab(normalizeSettingsTab(initialTab));
     clearLastSaveError();
   }, [initialTab, clearLastSaveError]);
+
+  // Deep-link arrival. Ordered after the tab reset above so the anchor it looks
+  // for belongs to the tab the link named: Radix mounts only the active pane,
+  // so a lookup run before that commit would find nothing.
+  const noteSectionApplied = useCallback(() => onSectionApplied?.(), [onSectionApplied]);
+  useSettingsSectionArrival(sectionTarget, noteSectionApplied);
 
   useEffect(() => {
     let alive = true;
