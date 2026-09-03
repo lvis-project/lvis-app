@@ -35,7 +35,11 @@
  * channel at boot).
  */
 import { randomUUID } from "node:crypto";
-import type { SubAgentRunner } from "../engine/subagent-runner.js";
+import {
+  exactToolScope,
+  PARENT_ALL_TOOL_SCOPE,
+  type SubAgentRunner,
+} from "../engine/subagent-runner.js";
 import type {
   ApprovalGate,
   ApprovalDecision,
@@ -148,9 +152,9 @@ function makeTurnRecorder(
  * `web_fetch` is `network` by that rule and so is absent from plan mode, which
  * is the registry's answer rather than this module's.
  *
- * The EXECUTE phase deliberately omits `sourceTools` (passes `undefined`) so
- * the runner grants the FULL parent registry, including other plugins' tools,
- * with only `agent_spawn` stripped.
+ * The EXECUTE phase deliberately asks for `PARENT_ALL_TOOL_SCOPE`, so the
+ * runner grants the FULL parent registry, including other plugins' tools, with
+ * only `agent_spawn` stripped.
  */
 /** Why a run stops when the derivation finds nothing to grant. */
 const PLAN_TOOLS_EMPTY = "no read-tier tools are registered";
@@ -647,9 +651,10 @@ export function createWorkBoardEngine(
       return { status: "error", reason: "sub-agent runner not available" };
     }
 
-    // An EMPTY `sourceTools` means "the whole parent registry" to the runner,
-    // so a registry that yields no read-tier tool must stop the run rather than
-    // hand the plan agent everything it was scoped away from.
+    // A derivation that finds nothing stops the run. `exactToolScope` would
+    // throw on the empty list rather than widen — the type has no inhabitant
+    // that means "nothing, so everything" — but the plan agent still needs to
+    // fail as a run result the board can show, not as an exception.
     const planTools = planReadOnlyToolNames(runner.parentToolRegistry());
     if (planTools.length === 0) {
       await store.setRunResult(itemId, { runStatus: "error" });
@@ -714,7 +719,7 @@ export function createWorkBoardEngine(
         {
           title: `Plan: ${item.title}`,
           instructions: buildPlanPrompt(item),
-          sourceTools: planTools,
+          toolScope: exactToolScope(planTools),
           originSessionId,
           ...(item.projectRoot ? { projectRoot: item.projectRoot } : {}),
           profileMode: "plan",
@@ -774,7 +779,7 @@ export function createWorkBoardEngine(
       }
 
       // ── EXECUTE ────────────────────────────────────────────────────────
-      // `sourceTools` omitted ⇒ the runner grants the FULL parent registry
+      // `PARENT_ALL_TOOL_SCOPE` ⇒ the runner grants the FULL parent registry
       // (incl. plugin tools, `agent_spawn` stripped). Each tool the execute
       // agent calls still hits the SAME ApprovalGate per-tool, so destructive
       // tool use stays independently gated — the plan-approval is the coarse
@@ -786,6 +791,7 @@ export function createWorkBoardEngine(
         {
           title: `Execute: ${item.title}`,
           instructions: buildExecutePrompt(item, plan),
+          toolScope: PARENT_ALL_TOOL_SCOPE,
           originSessionId,
           ...(item.projectRoot ? { projectRoot: item.projectRoot } : {}),
           profileMode: "execute",
@@ -909,7 +915,7 @@ export function createWorkBoardEngine(
         // The read-only registry is what makes "make NO changes" a guarantee
         // rather than a request in the prompt — the same derivation the plan
         // phase runs.
-        sourceTools: surveyTools,
+        toolScope: exactToolScope(surveyTools),
         originSessionId: `work-board-briefing:${kind}`,
         ...(opts.projectRoot ? { projectRoot: opts.projectRoot } : {}),
         profileMode: "plan",

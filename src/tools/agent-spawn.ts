@@ -8,9 +8,12 @@
  * sub-agent is doing.
  */
 import { createDynamicTool, type Tool } from "./base.js";
-import type {
-  SubAgentRunner,
-  SubAgentSpawnResult,
+import {
+  exactToolScope,
+  PARENT_ALL_TOOL_SCOPE,
+  type SubAgentRunner,
+  type SubAgentSpawnResult,
+  type SubAgentToolScope,
 } from "../engine/subagent-runner.js";
 import {
   AGENT_NAME_ALLOWLIST,
@@ -286,16 +289,20 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           isError: true,
         };
       }
+      // The scope is decided ONCE, here, from what the caller actually said: a
+      // usable name list, else the named profile's, else the parent's whole
+      // registry. Downstream never re-reads an array to work out which of the
+      // three was meant — see SubAgentToolScope.
       const requestedSourceTools = Array.isArray(a.sourceTools)
         ? (a.sourceTools as unknown[]).filter(
             (t): t is string => typeof t === "string" && t.trim().length > 0,
           )
-        : undefined;
-      const sourceTools = requestedSourceTools && requestedSourceTools.length > 0
-        ? requestedSourceTools
+        : [];
+      const toolScope: SubAgentToolScope = requestedSourceTools.length > 0
+        ? exactToolScope(requestedSourceTools)
         : profile?.sourceTools && profile.sourceTools.length > 0
-          ? profile.sourceTools
-          : undefined;
+          ? exactToolScope(profile.sourceTools)
+          : PARENT_ALL_TOOL_SCOPE;
       const toolUseId =
         typeof ctx.metadata?.toolUseId === "string"
           ? (ctx.metadata.toolUseId as string)
@@ -421,8 +428,9 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           },
         };
         // Resume RE-HYDRATES a frozen sub-agent; spawn starts a fresh one. The
-        // resume path takes NO sourceTools/profile from the tool call — those are
-        // read from the persisted metadata so a resume cannot re-scope the child.
+        // resume path takes NO tool scope or profile from the tool call — both
+        // are read from the persisted metadata so a resume cannot re-scope the
+        // child.
         const run = async () => resumeId
           ? await runner.resume(
               resumeId,
@@ -446,7 +454,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                 parentAuthoredTask: instructions,
                 spawnId,
                 toolUseId,
-                sourceTools,
+                toolScope,
                 originSessionId,
                 background,
                 projectRoot: ctx.cwd,
@@ -594,7 +602,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                 //
                 // A run the host REFUSED (stopReason "blocked") is excluded: it
                 // never started, so it is not a lost child, and telling the
-                // parent to narrow sourceTools would send it tuning a request
+                // parent to narrow its tool scope would send it tuning a request
                 // that policy — not the provider — turned away.
                 if (result.stopReason === "blocked") return {};
                 return {
