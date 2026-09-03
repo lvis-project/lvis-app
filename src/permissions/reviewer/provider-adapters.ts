@@ -460,13 +460,13 @@ export function createGcpPlaygroundProvider(
 export function reviewerProviderKeyPresent(
   provider: string,
   getSecret: (key: string) => string | null,
-  getEndpoint?: () => string | null,
+  getEndpoint: () => string | null,
 ): boolean {
   if (provider === "foundry") {
     const hasKey = getSecret(FOUNDRY_API_KEY_SECRET) !== null;
     // #766: empty string or whitespace-only endpoint must not be treated as
     // "endpoint present" — createFoundryProvider would reject it at boot.
-    const endpoint = getEndpoint?.();
+    const endpoint = getEndpoint();
     const hasEndpoint = !!endpoint && endpoint.trim() !== "";
     return hasKey && hasEndpoint;
   }

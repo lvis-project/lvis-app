@@ -1,16 +1,15 @@
 // @vitest-environment jsdom
 /**
- * Conversation attribution on the two surfaces that raise an approval:
- * the modal itself and the queue of asks waiting behind it.
+ * Conversation attribution on the surface that raises an approval: the modal
+ * itself.
  *
  * Sub-agents and side chats block on approvals from conversations the user is
- * not looking at, so both surfaces must name the asking conversation.
+ * not looking at, so the modal must name the asking conversation.
  */
 import "../../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
-import { ApprovalQueueStatus } from "../ApprovalQueueStatus.js";
 import type { ApprovalRequest } from "../../types.js";
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
@@ -99,40 +98,5 @@ describe("ToolApprovalContent conversation attribution", () => {
     expect(screen.getByTestId("approval-conversation-id")).toHaveTextContent(
       "대화 없음 (호스트 요청)",
     );
-  });
-});
-
-describe("ApprovalQueueStatus conversation attribution", () => {
-  it("names the conversation for each ask waiting behind the modal", () => {
-    render(
-      <ApprovalQueueStatus
-        queue={[
-          makeRequest({ id: "head", sessionId: "conv-head" }),
-          makeRequest({ id: "next", sessionId: "conv-next" }),
-          makeRequest({ id: "last", sessionId: "conv-last" }),
-        ]}
-      />,
-    );
-
-    const rows = screen.getAllByTestId("approval-queue-item-conversation");
-    // The head of the queue is rendered by the modal, not here.
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toHaveTextContent("대화 conv-next");
-    expect(rows[1]).toHaveTextContent("대화 conv-last");
-  });
-
-  it("marks a queued host request that belongs to no conversation", () => {
-    render(
-      <ApprovalQueueStatus
-        queue={[
-          makeRequest({ id: "head", sessionId: "conv-head" }),
-          makeRequest({ id: "next" }),
-        ]}
-      />,
-    );
-
-    expect(
-      screen.getByTestId("approval-queue-item-conversation"),
-    ).toHaveTextContent("대화 없음 (호스트 요청)");
   });
 });

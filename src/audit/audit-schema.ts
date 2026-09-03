@@ -248,13 +248,8 @@ export interface AuditDeferredResolve extends AuditCommon {
    * deferred entry. Main requires this field for new writes; historical rows
    * written before it existed may omit it, so audit readers must tolerate
    * `undefined`.
-   *
-   * Wider than {@link DeferredApprovalSource}, which is all the live path can
-   * produce: `"natural-language"` was written by an in-chat approval chip that
-   * no longer exists. An audit key is a persisted value, so the reader keeps
-   * admitting the rows that already carry it.
    */
-  approvalSource?: DeferredApprovalSource | "natural-language";
+  approvalSource?: DeferredApprovalSource;
   /**
    * Breadth of the grant an `"approved"` resolution applied. Present only on
    * approvals, since a rejection grants nothing. Rows written before deferred

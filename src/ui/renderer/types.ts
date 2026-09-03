@@ -1647,7 +1647,7 @@ export type LvisPermissionApi = {
    */
   sandboxWindowsInstall: () => Promise<SandboxWindowsInstallResult>;
   /** Subscribe to default-mode repeated-approval hints for LLM permission review. */
-  onReviewSuggestion?: (cb: (payload: PermissionReviewSuggestionPayload) => void) => () => void;
+  onReviewSuggestion: (cb: (payload: PermissionReviewSuggestionPayload) => void) => () => void;
   /** Permission policy — `/permission reviewer ...` slash dispatch. */
   reviewerDispatch: (
     rawArgs: string,
