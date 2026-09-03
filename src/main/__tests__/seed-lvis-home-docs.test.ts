@@ -12,6 +12,10 @@
  *   - a second divergent upgrade lands a timestamped `<file>.new.<ts>` and
  *     leaves the prior `.new` untouched
  *   - an already-offered `.new` identical to the packaged copy is a no-op
+ *   - a version any existing marker already carries — the stale undated one or
+ *     a dated sibling — is not offered a second time
+ *   - a dated marker whose bytes are on the shipped-version allowlist is
+ *     dropped when a newer version is offered
  *   - seeded files are chmod 0o600 (POSIX)
  *
  * Dev-mode resolution (`app.isPackaged === false`) walks up from the module's
@@ -359,5 +363,113 @@ describe("seedLvisHomeDocs — upgrade markers", () => {
       f.startsWith("AGENTS.md.new."),
     );
     expect(dated).toHaveLength(0);
+  });
+});
+
+describe("seedLvisHomeDocs — one offer per packaged version", () => {
+  /**
+   * A seed pass at a pinned wall clock. Dated marker names are minted from
+   * `new Date()`, so two offers landing inside the same millisecond would
+   * share a name; pinning the clock makes each case's expected file set exact
+   * instead of dependent on how long the surrounding filesystem work took.
+   */
+  function seedAt(iso: string): ReturnType<typeof seedLvisHomeDocs> {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(iso));
+    try {
+      return seedLvisHomeDocs();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  /** Divergent user copy + `AGENTS.md.new` at v2 + one dated sibling at v3. */
+  function offerThroughV3(): void {
+    seedLvisHomeDocs();
+    writeFileSync(join(home, "AGENTS.md"), "user edited\n");
+    writeRes("AGENTS.md", "AGENTS v2\n");
+    seedAt("2026-01-01T00:00:00.000Z");
+    writeRes("AGENTS.md", "AGENTS v3\n");
+    seedAt("2026-01-02T00:00:00.000Z");
+  }
+
+  function datedMarkers(): string[] {
+    return readdirSync(home)
+      .filter((f) => f.startsWith("AGENTS.md.new.") && f !== "AGENTS.md.new")
+      .sort();
+  }
+
+  it("adds nothing when a dated sibling already carries the packaged version", () => {
+    offerThroughV3();
+    // The undated marker is stale at v2 and is never refreshed; before the
+    // dated siblings were consulted too, this relaunch minted another copy of
+    // v3, and so did every relaunch after it.
+    const before = readdirSync(home).sort();
+
+    const r = seedAt("2026-01-03T00:00:00.000Z");
+
+    expect(r.upgraded).not.toContain("AGENTS.md");
+    expect(readdirSync(home).sort()).toEqual(before);
+    expect(readFileSync(join(home, "AGENTS.md.new"), "utf8")).toBe("AGENTS v2\n");
+    expect(datedMarkers()).toHaveLength(1);
+  });
+
+  it("adds exactly one dated sibling for a genuinely new packaged version", () => {
+    offerThroughV3();
+    writeRes("AGENTS.md", "AGENTS v4\n");
+
+    const r = seedAt("2026-01-03T00:00:00.000Z");
+
+    expect(r.upgraded).toContain("AGENTS.md");
+    expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("user edited\n");
+    expect(readFileSync(join(home, "AGENTS.md.new"), "utf8")).toBe("AGENTS v2\n");
+    const dated = datedMarkers();
+    expect(dated).toHaveLength(2);
+    expect(dated.map((f) => readFileSync(join(home, f), "utf8")).sort()).toEqual([
+      "AGENTS v3\n",
+      "AGENTS v4\n",
+    ]);
+  });
+
+  it("removes a dated sibling whose bytes are an allowlisted shipped version", () => {
+    writeRes(
+      "AGENTS.md.replaceable-sha256",
+      `${sha256("AGENTS v1\n")}\n${sha256("AGENTS v3\n")}\n`,
+    );
+    offerThroughV3();
+    writeRes("AGENTS.md", "AGENTS v4\n");
+
+    const r = seedAt("2026-01-03T00:00:00.000Z");
+
+    expect(r.upgraded).toContain("AGENTS.md");
+    // v3 shipped, so that marker holds no user work — the same evidence under
+    // which the in-place path would have overwritten the user's own copy.
+    const dated = datedMarkers();
+    expect(dated).toHaveLength(1);
+    expect(readFileSync(join(home, dated[0]), "utf8")).toBe("AGENTS v4\n");
+    // The undated marker is the path a pending upgrade is surfaced under and
+    // is left alone even when its bytes are allowlisted.
+    expect(readFileSync(join(home, "AGENTS.md.new"), "utf8")).toBe("AGENTS v2\n");
+  });
+
+  it("offers each skill version once and keeps every skill marker", () => {
+    const skill = join("skills", "report-writing.md");
+    const skillDir = join(home, "skills");
+    seedLvisHomeDocs();
+    writeFileSync(join(home, skill), "user report\n");
+    writeRes(skill, "report v2\n");
+    expect(seedAt("2026-01-01T00:00:00.000Z").upgraded).toContain(skill);
+    expect(readFileSync(join(home, `${skill}.new`), "utf8")).toBe("report v2\n");
+
+    writeRes(skill, "report v3\n");
+    expect(seedAt("2026-01-02T00:00:00.000Z").upgraded).toContain(skill);
+    const afterV3 = readdirSync(skillDir).sort();
+    expect(afterV3.filter((f) => f.startsWith("report-writing.md.new"))).toHaveLength(2);
+
+    // Skills ship no replaceable-hash allowlist, so nothing about them can be
+    // shown to be a superseded shipped copy and nothing is pruned.
+    expect(seedAt("2026-01-03T00:00:00.000Z").upgraded).not.toContain(skill);
+    expect(readdirSync(skillDir).sort()).toEqual(afterV3);
+    expect(readFileSync(join(home, skill), "utf8")).toBe("user report\n");
   });
 });
