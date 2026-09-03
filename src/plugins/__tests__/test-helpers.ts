@@ -400,6 +400,53 @@ export function agentPluginsDocument(
   return top;
 }
 
+/**
+ * A writer for the `plugin.json` a manifest-validation suite parses.
+ *
+ * The five runtime manifest suites each wrote the same document: one
+ * {@link agentPluginsDocument} carrying a placeholder description, version and
+ * entry plus a single nominal tool, with only the plugin's identity and the
+ * field under test differing. That envelope is the shared artifact — a manifest
+ * the real validator accepts once the field under test is removed — so a suite
+ * that restates it can also drift from it, and a manifest rejected for the
+ * wrong reason reads exactly like the rejection the suite is asserting.
+ *
+ * The identity binds once per suite; `extra` is what the individual call is
+ * about. `directory` is read per call rather than captured, because the scratch
+ * directory is per-test state and stays the suite's to create and remove — one
+ * of these suites writes a second manifest of its own into the same directory.
+ */
+export function pluginManifestWriter(
+  identity: { readonly id: string; readonly name: string },
+  directory: () => string,
+): (extra?: Record<string, unknown>) => Promise<string> {
+  return async (extra = {}) => {
+    const path = join(directory(), "plugin.json");
+    await writeFile(
+      path,
+      JSON.stringify(
+        agentPluginsDocument({
+          id: identity.id,
+          name: identity.name,
+          description: "x",
+          version: "1.0.0",
+          entry: "dist/p.js",
+          tools: [
+            {
+              name: "t_one",
+              description: "t_one tool",
+              inputSchema: { type: "object", properties: {} },
+              _meta: { ui: { visibility: ["model", "app"] } },
+            },
+          ],
+          ...extra,
+        }),
+      ),
+    );
+    return path;
+  };
+}
+
 export async function writeTestPlugin(
   fixture: TestPluginRuntimeFixture,
   options: WriteTestPluginOptions,

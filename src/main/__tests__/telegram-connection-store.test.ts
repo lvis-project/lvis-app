@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createHash, createHmac } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
 import {
@@ -10,7 +9,7 @@ import {
   TELEGRAM_BRIDGE_FEATURE,
 } from "../telegram-connection-store.js";
 import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../__tests__/test-helpers.js";
 
 /**
  * Distinct raw values that must never reach the file. Each one is what the
@@ -26,19 +25,7 @@ const RAW_PAIRING_CODE = "lvis-tg-v1.SENTINELrawPairingCode0123456789abcdefghijk
 const FILE_NAME = "connection.json";
 const HOUR_MS = 60 * 60 * 1_000;
 
-let directories: string[] = [];
-
-afterEach(async () => {
-  for (const directory of directories) await cleanupTmpDir(directory);
-  directories = [];
-});
-
-function tempDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "lvis-telegram-connection-"));
-  directories.push(directory);
-  return directory;
-}
-
+const tempDirectory = useTempDirs("lvis-telegram-connection-");
 
 function hash(domain: string, value: string): string {
   return createHash("sha256").update(domain, "utf8").update("\0", "utf8")

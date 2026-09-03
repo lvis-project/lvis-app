@@ -12,7 +12,7 @@
 import { afterEach, describe, it, expect, beforeEach } from "vitest";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { inspectFile } from "../../__tests__/test-helpers.js";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import {
   MAX_VERDICT_CACHE_ENTRIES,
   VerdictCache,
@@ -27,10 +27,7 @@ import { PermissionTestResources } from "./test-resources.js";
 
 const resources = new PermissionTestResources();
 
-function tmpCachePath(): string {
-  const dir = resources.makeTmpDir("lvis-verdict-cache-");
-  return join(dir, "reviewer-cache.jsonl");
-}
+const tmpCachePath = resources.tmpFilePaths("lvis-verdict-cache-", "reviewer-cache.jsonl");
 
 afterEach(async () => {
   await resources.cleanup();

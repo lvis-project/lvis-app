@@ -14,9 +14,6 @@
  */
 import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 import { generateKeyPairSync, sign, createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { resolveApiKey } from "../resolve-api-key.js";
 import {
   WhitelistCache,
@@ -24,20 +21,14 @@ import {
 } from "../../../plugins/whitelist/whitelist-registry.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../../plugins/marketplace-keys.js";
 import { resetHostSecretCountersForTesting } from "../../../telemetry/host-secret-counters.js";
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import type { SignatureEnvelope } from "../../../plugins/types.js";
 import type { PluginManifest } from "../../../plugins/types.js";
 import { manifestSha } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // -------- helpers --------
 
-const registryCacheRoots: string[] = [];
-
-function freshTmpDir(prefix: string): string {
-  const root = mkdtempSync(join(tmpdir(), prefix));
-  registryCacheRoots.push(root);
-  return root;
-}
+const freshTmpDir = useTempDirs("lvis-resolve-api-key-");
 
 let testPrivateKey: ReturnType<typeof generateKeyPairSync>["privateKey"];
 
@@ -164,11 +155,8 @@ beforeEach(() => {
   whitelistRegistry.resetForTesting();
 });
 
-afterEach(async () => {
+afterEach(() => {
   whitelistRegistry.resetForTesting();
-  for (const root of registryCacheRoots.splice(0)) {
-    await cleanupTmpDir(root);
-  }
 });
 
 describe("resolveApiKey — signal.aborted at entry", () => {

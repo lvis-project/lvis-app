@@ -17,9 +17,9 @@
  * deliberately never the cwd under test: an agreement assertion in which both
  * sides read the same real global cannot catch re-divergence.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { describe, it, expect, beforeEach } from "vitest";
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, dirname, resolve as pathResolve } from "node:path";
 import { RuleBasedRiskClassifier } from "../reviewer/risk-classifier.js";
 import { PermissionManager } from "../permission-manager.js";
@@ -33,7 +33,7 @@ import { dispatchReviewerForHeadless } from "../../tools/pipeline/reviewer-dispa
 import type { Tool } from "../../tools/base.js";
 import type { ToolPermissionContext } from "../../tools/executor.js";
 import { makeRiskClassifierContext } from "./test-helpers.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../__tests__/test-helpers.js";
 
 const rb = new RuleBasedRiskClassifier();
 
@@ -54,18 +54,7 @@ const writeTool = {
   pathFields: ["path"],
 } as unknown as Tool;
 
-let roots: string[] = [];
-
-function makeRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-path-align-"));
-  roots.push(dir);
-  return dir;
-}
-
-afterEach(async () => {
-  for (const dir of roots) await cleanupTmpDir(dir);
-  roots = [];
-});
+const makeRoot = useTempDirs("lvis-path-align-");
 
 describe("reviewer ↔ enforcer path resolution — agreement", () => {
   // `arg` is built from the per-test cwd. `movedVerdict` records whether the

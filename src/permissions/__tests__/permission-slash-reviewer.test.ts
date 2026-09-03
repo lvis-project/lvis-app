@@ -3,7 +3,6 @@
  */
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   parsePermissionReviewerCommand,
   dispatchPermissionReviewerCommand,
@@ -22,10 +21,7 @@ const SETTINGS_PATH = "/nonexistent/settings.json";
 
 const resources = new PermissionTestResources();
 
-function tmpSettingsPath(): string {
-  const dir = resources.makeTmpDir("lvis-perm-reviewer-");
-  return join(dir, "settings.json");
-}
+const tmpSettingsPath = resources.tmpFilePaths("lvis-perm-reviewer-", "settings.json");
 
 afterEach(async () => {
   await resources.cleanup();

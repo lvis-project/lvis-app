@@ -1,12 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { PluginHostApiIncarnation } from "../index.js";
 import { PluginRuntime, type PluginRuntimeOptions } from "../index.js";
 import { createNoopHostApi } from "../sandbox.js";
 import type { PluginManifest } from "../../types.js";
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../../__tests__/test-helpers.js";
 
 type IncarnationCleanup = {
   disposers: Array<() => void>;
@@ -15,13 +12,8 @@ type IncarnationCleanup = {
 };
 
 const incarnationCleanups: IncarnationCleanup[] = [];
-const tempDataDirs: string[] = [];
 
-function makeTempDataDir(): string {
-  const directory = mkdtempSync(join(tmpdir(), "lvis-incarnation-data-"));
-  tempDataDirs.push(directory);
-  return directory;
-}
+const makeTempDataDir = useTempDirs("lvis-incarnation-data-");
 
 afterEach(async () => {
   for (const incarnation of incarnationCleanups.splice(0)) {
@@ -30,9 +22,6 @@ afterEach(async () => {
       await dispose();
     }
     await incarnation.drainOperations();
-  }
-  for (const directory of tempDataDirs.splice(0)) {
-    await cleanupTmpDir(directory);
   }
 });
 

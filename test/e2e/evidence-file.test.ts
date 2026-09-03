@@ -1,33 +1,19 @@
 import {
   chmodSync,
   linkSync,
-  mkdtempSync,
   readFileSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { mergeEvidenceFile } from "./evidence-file.js";
+import { useTempDirs } from "../../src/__tests__/test-helpers.js";
 
-const roots: string[] = [];
-
-function testRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "lvis-evidence-file-"));
-  roots.push(root);
-  return root;
-}
-
-afterEach(() => {
-  for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+const testRoot = useTempDirs("lvis-evidence-file-");
 
 describe("mergeEvidenceFile", () => {
   it("atomically creates a private file and merges through one descriptor", () => {
