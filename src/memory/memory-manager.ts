@@ -4,7 +4,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, re
 import { randomUUID } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
-import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.js";
+import { writeUtf8FileAtomicSync, replaceUtf8FileAtomicSyncIf, isMissingPathError } from "../lib/atomic-file.js";
 import { isSessionTaskItem, type SessionTaskItem } from "../shared/session-tasks.js";
 import { isSessionGoal, type SessionGoal } from "../shared/session-goal.js";
 import { createLogger } from "../lib/logger.js";
@@ -1215,7 +1215,28 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
   };
 }
 
-export class MemoryManager {
+/**
+ * The memory surface a system prompt is assembled from: the agent-context
+ * files, the bounded prompt views of preferences and index, and the relevant
+ * notes for one turn. Every member is required — a prompt builder handed an
+ * object missing one has been mis-wired, and an absent reader must fail rather
+ * than render as an empty section indistinguishable from empty memory.
+ *
+ * Declared here rather than in the prompt module because this module owns both
+ * the implementations and every type they return, which keeps the type
+ * dependency one-way (prompts read memory, memory does not read prompts).
+ */
+export interface PromptMemorySource {
+  getAgentsMd(): string;
+  getAgentsCustomMd(): string;
+  getProjectAgentsMd(projectRoot: string): ProjectAgentsMd;
+  getPromptUserPreferences(): string;
+  getPromptMemoryIndex(): string;
+  getPromptLongTermMemoryOverview(options?: ProjectScopedMemoryOptions): string;
+  selectRelevantMemories(query: string, options?: MemorySelectionOptions): MemorySelection;
+}
+
+export class MemoryManager implements PromptMemorySource {
   private readonly lvisDir: string;
   private readonly memoryDir: string;
   private readonly sessionsDir: string;
@@ -1949,6 +1970,13 @@ export class MemoryManager {
    * The compare-and-set write both agent-context docs share. An absent file
    * compares as `""`, which is what lets a first merge under keep-latest land
    * `agents.custom.md` without a prior read seeing a file that is not there.
+   *
+   * The write goes through the shared atomic primitive, so the successor is
+   * staged and fsynced before the comparison and the destination is replaced
+   * by rename: a reader never sees half a doc, a mismatch leaves the original
+   * byte-identical, the file lands at the private mode every `~/.lvis/` file
+   * gets, and the rename replaces a symlink at the path rather than writing
+   * through it.
    */
   private async replaceHomeDocIfUnchanged(
     name: string,
@@ -1958,10 +1986,11 @@ export class MemoryManager {
     const targetPath = join(this.lvisDir, name);
     let didWrite = false;
     await withFileLock(targetPath, async () => {
-      const current = readUtf8FileIfPresent(targetPath) ?? "";
-      if (current !== expectedContent) return;
-      writeFileSync(targetPath, nextContent, "utf-8");
-      didWrite = true;
+      didWrite = replaceUtf8FileAtomicSyncIf(
+        targetPath,
+        nextContent,
+        () => (readUtf8FileIfPresent(targetPath) ?? "") === expectedContent,
+      );
     });
     return didWrite;
   }

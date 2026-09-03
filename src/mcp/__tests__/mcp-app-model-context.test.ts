@@ -15,6 +15,7 @@ import {
 } from "../mcp-app-model-context.js";
 import { SystemPromptBuilder } from "../../prompts/system-prompt-builder.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { makePromptMemorySource } from "../../prompts/__tests__/test-helpers.js";
 
 const SESSION = "session-1";
 
@@ -185,13 +186,7 @@ describe("serializeAppContext — untrusted app data, fenced", () => {
 describe("the model sees it on the NEXT turn — and only then", () => {
   function builderWith(s: McpAppModelContextStore) {
     return new SystemPromptBuilder({
-      memoryManager: {
-        getAgentsMd: () => "",
-        getAgentsCustomMd: () => "",
-        getMemoryIndex: () => "",
-        getUserPreferences: () => "",
-        getMemoryContext: () => "",
-      } as never,
+      memoryManager: makePromptMemorySource(),
       toolRegistry: new ToolRegistry(),
       getAppModelContext: (sessionId) => s.buildSection(sessionId),
     });

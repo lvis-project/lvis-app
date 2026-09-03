@@ -4,7 +4,7 @@
  */
 import type { BrowserWindow } from "electron";
 import type { SettingsService } from "../data/settings-store.js";
-import type { MemoryManager } from "../memory/memory-manager.js";
+import type { MemoryManager, PromptMemorySource } from "../memory/memory-manager.js";
 import type {
   AutomaticMemoryCaptureSubmitter,
   MemoryCaptureService,
@@ -47,7 +47,9 @@ function authorizeWorkspaceProjectRoot(projectRoot: string, projectName?: string
 }
 
 export function createSystemPromptBuilder(opts: {
-  memoryManager: MemoryManager;
+  // Forwarded to the builder and read for nothing else, so the factory asks
+  // for exactly the builder's contract rather than the whole store.
+  memoryManager: PromptMemorySource;
   toolRegistry: ToolRegistry;
   pluginRuntime: PluginRuntime;
   /**
