@@ -9,9 +9,10 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  unlinkSync,
   constants as fsConstants,
 } from "node:fs";
-import { join, dirname, parse as parsePath } from "node:path";
+import { basename, join, dirname, parse as parsePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lvisHome } from "../shared/lvis-home.js";
 import * as atomicFile from "../lib/atomic-file.js";
@@ -52,12 +53,18 @@ interface SeedOneOptions {
  *     Unsupported paths/platforms and user-edited AGENTS.md, skills/*.md,
  *     and prompts/*.md instead offer divergent packaged updates as
  *     `~/.lvis/<path>.new` for review.
+ *   - A packaged version is offered once, not once per launch: a version any
+ *     existing marker already carries is not offered again, and one whose
+ *     undated name is still held by an earlier offer lands beside it as
+ *     `~/.lvis/<path>.new.<timestamp>`.
  *   - agents/*.md are seed-only. Shared agent operating guidance belongs in
  *     AGENTS.md; updating packaged agent profiles must not create a new
  *     apparent user agent such as `agents/executor.md.new`.
  *
- * User edits are never overwritten. In-place AGENTS.md replacement is gated by
- * an exact SHA-256 allowlist of previously shipped packaged bytes.
+ * User edits are never overwritten, and neither is a marker the user may be
+ * reviewing. In-place AGENTS.md replacement is gated by an exact SHA-256
+ * allowlist of previously shipped packaged bytes; that same allowlist is the
+ * only evidence under which a superseded dated marker is removed.
  *
  * Non-fatal — failures log and continue. Boot must not block on doc seeding.
  */
@@ -115,6 +122,72 @@ function isUpgradeMarkerName(name: string): boolean {
 function sourcePathForUpgradeMarker(markerPath: string): string {
   const markerIndex = markerPath.indexOf(".new");
   return markerIndex === -1 ? markerPath : markerPath.slice(0, markerIndex);
+}
+
+/**
+ * Every existing marker offering `filename` — the undated `<file>.new` plus
+ * any dated `<file>.new.<ts>` sibling — as absolute paths.
+ *
+ * Reads the directory through the same two grammar predicates
+ * {@link listLvisHomeDocUpgradeMarkers} uses, so what counts as a marker is
+ * decided in one place: a second parser here could disagree with that one and
+ * offer a version the listing already reports as pending.
+ */
+function upgradeMarkerPathsFor(home: string, filename: string): string[] {
+  const target = join(home, filename);
+  const dir = dirname(target);
+  const sourceName = basename(target);
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch (err) {
+    if (isMissingPathError(err)) return [];
+    throw err;
+  }
+  return entries
+    .filter(
+      (entry) =>
+        isUpgradeMarkerName(entry) && sourcePathForUpgradeMarker(entry) === sourceName,
+    )
+    .map((entry) => join(dir, entry));
+}
+
+/** A marker the user merged between the directory listing and this read is simply gone. */
+function readMarkerIfPresent(markerPath: string): Buffer | null {
+  try {
+    return readFileSync(markerPath);
+  } catch (err) {
+    if (isMissingPathError(err)) return null;
+    throw err;
+  }
+}
+
+/**
+ * Drop dated siblings whose bytes are a packaged version that already shipped.
+ *
+ * This is the same claim the in-place path makes and it rests on the same
+ * evidence: a marker whose SHA-256 is on the allowlist carries shipped bytes,
+ * so it holds no user work to preserve — the allowlist authorizes overwriting
+ * the user's live doc with exactly those bytes. Docs without an allowlist
+ * (skills, prompts) prune nothing, and the undated marker is left alone
+ * because it is the path a pending upgrade is surfaced under.
+ */
+function pruneSupersededMarkers(
+  markerPaths: string[],
+  undatedMarker: string,
+  replaceableHashes: Set<string>,
+): void {
+  if (replaceableHashes.size === 0) return;
+  for (const markerPath of markerPaths) {
+    if (markerPath === undatedMarker) continue;
+    try {
+      const markerBuf = readRegularFileNoFollow(markerPath);
+      if (markerBuf === null || !replaceableHashes.has(sha256Hex(markerBuf))) continue;
+      unlinkSync(markerPath);
+    } catch (err) {
+      console.warn(`[seed-lvis-home-docs] failed to prune ${markerPath}:`, err);
+    }
+  }
 }
 
 function seedOne(
@@ -203,31 +276,29 @@ function seedOne(
       }
     }
 
-    // If a previous `.new` is sitting unmerged, do not clobber it. Compare:
-    //   - identical to the latest packaged content → no-op (already offered)
-    //   - different → land a timestamped sibling so neither the user's
-    //     review work nor the newer upgrade signal is lost.
-    // try-read-catch-ENOENT instead of existsSync+readFileSync keeps the
-    // check and read atomic.
-    let existingUpgradeBuf: Buffer | null = null;
-    try {
-      existingUpgradeBuf = readFileSync(upgradeTarget);
-    } catch (err) {
-      if (!isMissingPathError(err)) throw err;
-    }
-    if (existingUpgradeBuf !== null) {
-      if (existingUpgradeBuf.equals(packagedBuf)) return;
-      const ts = new Date().toISOString().replace(/[:.]/g, "-");
-      const datedTarget = join(home, `${filename}.new.${ts}`);
-      copyFileSync(packagedSource, datedTarget);
-      enforceUserFileMode(datedTarget);
-      result.upgraded.push(filename);
-      return;
+    // A marker sitting unmerged belongs to the user's review and is never
+    // clobbered, but the offer is per packaged VERSION rather than per launch:
+    // every marker for this doc is consulted, the undated one and each dated
+    // sibling. Comparing against the undated `<file>.new` alone is what made
+    // the set unbounded — that name is never refreshed, so once it went stale
+    // every launch of a differing build added another dated copy and buried
+    // the newest offer under the older ones.
+    const markerPaths = upgradeMarkerPathsFor(home, filename);
+    for (const markerPath of markerPaths) {
+      const markerBuf = readMarkerIfPresent(markerPath);
+      if (markerBuf?.equals(packagedBuf)) return;
     }
 
-    copyFileSync(packagedSource, upgradeTarget);
-    enforceUserFileMode(upgradeTarget);
+    // The undated name is the stable one this doc's pending upgrade is
+    // surfaced under; while an older offer still holds it, a newer version
+    // lands beside it under a timestamp so neither offer is lost.
+    const offerTarget = markerPaths.includes(upgradeTarget)
+      ? join(home, `${filename}.new.${new Date().toISOString().replace(/[:.]/g, "-")}`)
+      : upgradeTarget;
+    copyFileSync(packagedSource, offerTarget);
+    enforceUserFileMode(offerTarget);
     result.upgraded.push(filename);
+    pruneSupersededMarkers(markerPaths, upgradeTarget, replaceableHashes);
   } catch (err) {
     console.warn(`[seed-lvis-home-docs] failed to compare ${filename}:`, err);
   }
