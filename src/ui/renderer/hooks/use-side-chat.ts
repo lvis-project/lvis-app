@@ -76,6 +76,12 @@ interface SideChatSendOptions {
    * turn is still running, interrupts it first — the main composer's rule.
    */
   inputOrigin?: "queue-auto";
+  /**
+   * The conversation this side chat belongs to. Sent on every turn; the host
+   * records it once, on the turn that first gives the side chat a file, and the
+   * sidebar lists the row under that conversation.
+   */
+  parentSessionId?: string;
 }
 
 export interface UseSideChat {
@@ -361,7 +367,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
       // from the stream). A rejected/failed result surfaces as an error entry so
       // the transcript never hangs on a permanent spinner.
       try {
-        const result = await api.sideChat.send(trimmed, opts?.attachments);
+        const result = await api.sideChat.send(trimmed, opts?.attachments, opts?.parentSessionId);
         if (!result.ok) {
           // Localized, not the raw code: this hook used to put the kebab-case string
           // straight in the transcript, so a Korean user tripping a bound read

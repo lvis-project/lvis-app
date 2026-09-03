@@ -106,6 +106,13 @@ export interface AppServices {
    */
   sideChatConversationLoop?: ConversationLoop;
   /**
+   * The side-chat store itself. The conversation list federates it beside the
+   * main store, and a listing is a read of the STORE, not of the loop that
+   * happens to hold one of its sessions. Optional on the same terms as the loop
+   * above: absent in fixtures that boot only the main conversation.
+   */
+  sideChatMemoryManager?: MemoryManager;
+  /**
    * Resolves the loop that owns one tiled chat group.
    *
    * The main area can hold several conversations at once, and a conversation is

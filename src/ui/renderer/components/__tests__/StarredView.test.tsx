@@ -32,6 +32,7 @@ describe("StarredView", () => {
             modifiedAt: now,
             title: "범위 지정 대화",
             sessionKind: "main",
+            family: "main",
             projectRoot: "c:/work/team-a/shared/",
             projectName: "shared",
           },
@@ -40,6 +41,7 @@ describe("StarredView", () => {
             modifiedAt: now,
             title: "일반 대화",
             sessionKind: "main",
+            family: "main",
             projectName: "stale-general",
           },
         ]}
@@ -90,6 +92,7 @@ describe("StarredView", () => {
           modifiedAt: now,
           title: "프로젝트 인사이트",
           sessionKind: "main",
+          family: "main",
           projectName: "workspace",
         }]}
         currentSessionId="sess-ai"
@@ -412,8 +415,8 @@ describe("StarredView", () => {
         api={api}
         starred={[]}
         sessions={[
-          { id: "broken", modifiedAt: "not-a-timestamp", title: "깨진 대화", sessionKind: "main" },
-          { id: "fine", modifiedAt: new Date().toISOString(), title: "정상 대화", sessionKind: "main" },
+          { id: "broken", modifiedAt: "not-a-timestamp", title: "깨진 대화", sessionKind: "main", family: "main" },
+          { id: "fine", modifiedAt: new Date().toISOString(), title: "정상 대화", sessionKind: "main", family: "main" },
         ]}
         workspaceProjects={[]}
         currentSessionId=""

@@ -87,18 +87,21 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
       title: "전체 동기화로 상태 파악",
       modifiedAt: new Date().toISOString(),
       sessionKind: "main",
+      family: "main",
     },
     {
       id: "sess-2",
       title: "사이드 패널 개선",
       modifiedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       sessionKind: "main",
+      family: "main",
     },
     {
       id: "sess-other",
       title: "다른 프로젝트 대화",
       modifiedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       sessionKind: "main",
+      family: "main",
       projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\other-app",
       projectName: "other-app",
     },
@@ -244,6 +247,7 @@ describe("Sidebar project sessions", () => {
         title: "보존된 일반 대화",
         modifiedAt: new Date().toISOString(),
         sessionKind: "main",
+        family: "main",
         projectRoot: staleRoot,
         projectName: "deleted-project",
       }],
@@ -314,6 +318,7 @@ describe("Sidebar legacy default-root session handling", () => {
       title: "레거시 기본 프로젝트 대화",
       modifiedAt: new Date().toISOString(),
       sessionKind: "main",
+      family: "main",
       projectRoot: DEFAULT_ROOT,
       projectName: "workspace",
     };
@@ -460,12 +465,14 @@ describe("Sidebar conversation pinning", () => {
                 title: "전체 동기화로 상태 파악",
                 modifiedAt: new Date().toISOString(),
                 sessionKind: "main",
+                family: "main",
               },
               {
                 id: "sess-2",
                 title: "사이드 패널 개선",
                 modifiedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
                 sessionKind: "main",
+                family: "main",
               },
             ]}
             currentSessionId="sess-1"
@@ -1236,6 +1243,7 @@ describe("Sidebar conversation reveal on scroll", () => {
       title: `${prefix} 대화 ${index}`,
       modifiedAt: new Date(Date.now() - index * 60_000).toISOString(),
       sessionKind: "main" as const,
+      family: "main" as const,
       ...(project ?? {}),
     }));
   }
@@ -1491,53 +1499,89 @@ describe("Sidebar view rows", () => {
   });
 });
 
-describe("Sidebar — work-board run rows", () => {
-  const workBoardRow: SessionSummary = {
-    id: "sub-wb-1",
-    title: "월간 보고서 초안",
-    modifiedAt: new Date().toISOString(),
-    sessionKind: "subagent",
-    workBoardItemId: 7,
-  };
+describe("Sidebar — every conversation family", () => {
   const mainRow: SessionSummary = {
     id: "sess-1",
     title: "전체 동기화로 상태 파악",
     modifiedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
     sessionKind: "main",
+    family: "main",
+  };
+  const routineRow: SessionSummary = {
+    id: "routine-run-1",
+    title: "아침 브리핑",
+    modifiedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    sessionKind: "routine",
+    family: "routine",
+    routineId: "rt-1",
+    routineTitle: "아침 브리핑",
+    routineFiredAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+  };
+  const workBoardRow: SessionSummary = {
+    id: "sub-wb-1",
+    title: "월간 보고서 초안",
+    modifiedAt: new Date().toISOString(),
+    sessionKind: "subagent",
+    family: "work-board",
+    workBoardItemId: 7,
+  };
+  const sideChatRow: SessionSummary = {
+    id: "side-1",
+    title: "환경 변수 확인",
+    modifiedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    sessionKind: "main",
+    family: "side-chat",
+    parentSessionId: "sess-1",
+  };
+  const orphanSideChatRow: SessionSummary = {
+    id: "side-orphan",
+    title: "부모 없는 사이드 챗",
+    modifiedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    sessionKind: "main",
+    family: "side-chat",
   };
 
-  it("draws the Work icon and opens the board item instead of loading a chat", async () => {
-    const onOpenWorkBoardItem = vi.fn();
-    const { getByTestId, onLoadSession, restore } = renderSidebar({
-      sessions: [workBoardRow, mainRow],
-      onOpenWorkBoardItem,
-    });
-    try {
-      await waitFor(() => {
-        expect(getByTestId("sidebar-unassigned-sessions").contains(getByTestId("sidebar-session-sub-wb-1"))).toBe(true);
-      });
-      const glyph = getByTestId("sidebar-session-work-board-sub-wb-1");
-      expect(glyph.getAttribute("aria-label")).toBe("워크보드 작업");
-      const button = getByTestId("sidebar-session-sub-wb-1");
-      expect(button.getAttribute("data-work-board-item")).toBe("7");
-      expect(button.getAttribute("draggable")).toBe("false");
-      expect(button.getAttribute("aria-current")).toBeNull();
-      expect(getByTestId("sidebar-session-sess-1").getAttribute("draggable")).toBe("true");
+  const allRows = [workBoardRow, routineRow, sideChatRow, orphanSideChatRow, mainRow];
 
-      fireEvent.click(button);
-      expect(onOpenWorkBoardItem).toHaveBeenCalledWith(7);
-      expect(onLoadSession).not.toHaveBeenCalled();
+  it("lists a row per family, each with its own glyph and label", async () => {
+    const { getByTestId, restore } = renderSidebar({ sessions: allRows });
+    try {
+      await waitFor(() => getByTestId("sidebar-session-sess-1"));
+      const glyphFamily = (id: string) =>
+        getByTestId(`sidebar-conversation-glyph-${id}`).getAttribute("data-session-family");
+      expect(glyphFamily("sess-1")).toBe("main");
+      expect(glyphFamily("routine-run-1")).toBe("routine");
+      expect(glyphFamily("sub-wb-1")).toBe("work-board");
+      expect(glyphFamily("side-1")).toBe("side-chat");
+
+      // The chat glyph stays unnamed; every other family names itself.
+      expect(getByTestId("sidebar-conversation-glyph-sess-1").getAttribute("aria-hidden")).toBe("true");
+      expect(getByTestId("sidebar-conversation-glyph-routine-run-1").getAttribute("aria-label")).toBe("루틴 실행");
+      expect(getByTestId("sidebar-conversation-glyph-sub-wb-1").getAttribute("aria-label")).toBe("워크보드 작업");
+      expect(getByTestId("sidebar-conversation-glyph-side-1").getAttribute("aria-label")).toBe("사이드 챗");
     } finally {
       restore();
     }
   });
 
-  it("offers only 'open' in the context menu, because the row is not a main-store session", async () => {
-    const onOpenWorkBoardItem = vi.fn();
-    const { getByTestId, showNativeContextMenu, emitNativeContextCommand, onLoadSession, restore } = renderSidebar({
-      sessions: [workBoardRow, mainRow],
-      onOpenWorkBoardItem,
-    });
+  it("keeps every non-main row read-only — no drag, no pin, no active state", async () => {
+    const { getByTestId, queryByTestId, restore } = renderSidebar({ sessions: allRows });
+    try {
+      await waitFor(() => getByTestId("sidebar-session-sess-1"));
+      expect(getByTestId("sidebar-session-sess-1").getAttribute("draggable")).toBe("true");
+      for (const id of ["routine-run-1", "sub-wb-1", "side-1"]) {
+        const button = getByTestId(`sidebar-session-${id}`);
+        expect(button.getAttribute("draggable")).toBe("false");
+        expect(button.getAttribute("aria-current")).toBeNull();
+        expect(queryByTestId(`sidebar-session-pin-${id}`)).toBeNull();
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  it("offers only 'open' in a non-main row's context menu", async () => {
+    const { getByTestId, showNativeContextMenu, restore } = renderSidebar({ sessions: allRows });
     try {
       await waitFor(() => getByTestId("sidebar-session-sub-wb-1"));
       fireEvent.contextMenu(getByTestId("sidebar-session-sub-wb-1"));
@@ -1547,9 +1591,71 @@ describe("Sidebar — work-board run rows", () => {
           commands: ["conversation.open"],
         }));
       });
-      act(() => emitNativeContextCommand("conversation.open"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("opens a routine run through the ordinary session-load path", async () => {
+    const { getByTestId, onLoadSession, restore } = renderSidebar({ sessions: allRows });
+    try {
+      await waitFor(() => getByTestId("sidebar-session-routine-run-1"));
+      fireEvent.click(getByTestId("sidebar-session-routine-run-1"));
+      expect(onLoadSession).toHaveBeenCalledWith("routine-run-1");
+    } finally {
+      restore();
+    }
+  });
+
+  it("opens a work-board row on the board, never as a chat", async () => {
+    const onOpenWorkBoardItem = vi.fn();
+    const { getByTestId, onLoadSession, restore } = renderSidebar({
+      sessions: allRows,
+      onOpenWorkBoardItem,
+    });
+    try {
+      await waitFor(() => getByTestId("sidebar-session-sub-wb-1"));
+      fireEvent.click(getByTestId("sidebar-session-sub-wb-1"));
       expect(onOpenWorkBoardItem).toHaveBeenCalledWith(7);
       expect(onLoadSession).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("nests a side chat under its conversation and opens it with that parent", async () => {
+    const onOpenSideChat = vi.fn();
+    const { getByTestId, onLoadSession, restore } = renderSidebar({
+      sessions: allRows,
+      onOpenSideChat,
+    });
+    try {
+      await waitFor(() => getByTestId("sidebar-conversation-tree-sess-1"));
+      const tree = getByTestId("sidebar-conversation-tree-sess-1");
+      expect(tree.contains(getByTestId("sidebar-session-sess-1"))).toBe(true);
+      expect(tree.contains(getByTestId("sidebar-session-side-1"))).toBe(true);
+
+      fireEvent.click(getByTestId("sidebar-session-side-1"));
+      expect(onOpenSideChat).toHaveBeenCalledWith("side-1", "sess-1");
+      expect(onLoadSession).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("lists a side chat whose conversation is not here at the top level", async () => {
+    const { getByTestId, queryByTestId, restore } = renderSidebar({ sessions: allRows });
+    try {
+      await waitFor(() => getByTestId("sidebar-session-side-orphan"));
+      // No parent row means no tree wrapper — the row stands on its own line,
+      // still carrying the side-chat glyph.
+      expect(queryByTestId("sidebar-conversation-tree-side-orphan")).toBeNull();
+      expect(
+        getByTestId("sidebar-conversation-glyph-side-orphan").getAttribute("data-session-family"),
+      ).toBe("side-chat");
+      expect(
+        getByTestId("sidebar-unassigned-sessions").contains(getByTestId("sidebar-session-side-orphan")),
+      ).toBe(true);
     } finally {
       restore();
     }

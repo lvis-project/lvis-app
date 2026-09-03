@@ -5,6 +5,23 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 import { historyToEntries } from "../utils/history.js";
 import { projectRootEquals } from "../../../shared/project-identity.js";
+import { SESSION_LIST_MAX_LIMIT } from "../../../shared/session-lookup.js";
+
+/**
+ * The conversation families the sidebar lists. Spelled here as the renderer's
+ * copy of the main-process union (`SessionFamily` in `memory/memory-manager`),
+ * the way `sessionKind` already is: the preload boundary carries values, not
+ * types.
+ */
+export type SessionFamily = "main" | "routine" | "work-board" | "side-chat";
+
+/** Every family, which is what the sidebar asks for — nothing is hidden by kind. */
+const ALL_SESSION_FAMILIES: readonly SessionFamily[] = [
+  "main",
+  "routine",
+  "work-board",
+  "side-chat",
+];
 
 export interface SessionSummary {
   id: string;
@@ -12,10 +29,22 @@ export interface SessionSummary {
   title: string;
   sessionKind: "main" | "routine" | "subagent";
   /**
+   * Which conversation family this row belongs to — the main process stamps it
+   * once, from the store the row came out of plus its metadata. Everything the
+   * row draws and does follows from it; no surface re-derives a family from an
+   * id or a kind.
+   */
+  family: SessionFamily;
+  /**
    * Set on a work-board run row: the row is that item's conversation and opens
    * the item on the board rather than loading into a chat tile.
    */
   workBoardItemId?: number;
+  /**
+   * Set on a side-chat row: the conversation the side chat belongs to. The
+   * sidebar lists the row under that conversation rather than beside it.
+   */
+  parentSessionId?: string;
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
@@ -65,7 +94,14 @@ export function useSessionList(api: LvisApi) {
 
   const refreshSessions = useCallback(async () => {
     try {
-      const r = await api.chatSessions({ kind: "main", includeWorkBoardRuns: true });
+      // Every family, and the widest page the handler allows. One page now
+      // carries four families where it used to carry one, so the old default of
+      // 20 rows would have pushed conversations out of the list to make room
+      // for the routine runs and side chats that were added to it.
+      const r = await api.chatSessions({
+        families: [...ALL_SESSION_FAMILIES],
+        limit: SESSION_LIST_MAX_LIMIT,
+      });
       setSessions(r.sessions);
     } catch { /* ignore */ }
   }, [api]);

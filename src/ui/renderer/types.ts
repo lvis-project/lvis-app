@@ -634,7 +634,12 @@ export type LvisApi = {
    * object to LvisApi keep compiling — production preload always defines it.
    */
   sideChat?: {
-    send: (input: string, attachments?: unknown[]) => Promise<
+    send: (
+      input: string,
+      attachments?: unknown[],
+      /** The conversation this side chat belongs to — recorded at its first turn. */
+      parentSessionId?: string,
+    ) => Promise<
       | { ok: true; result: unknown }
       | { ok: false; error: string }
     >;
@@ -778,7 +783,7 @@ export type LvisApi = {
   chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<
     { ok: true } | { ok: false; error: string }
   >;
-  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string; includeWorkBoardRuns?: boolean }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine" | "subagent"; workBoardItemId?: number; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
+  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; families?: Array<"main" | "routine" | "work-board" | "side-chat">; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine" | "subagent"; family: "main" | "routine" | "work-board" | "side-chat"; workBoardItemId?: number; parentSessionId?: string; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: ChatStreamEvent) => void) => () => void;
   /**
    * One tiled chat group's view of the per-conversation channels.

@@ -269,6 +269,49 @@ export interface ToolResultArtifact {
 export type SessionKind = "main" | "routine" | "subagent";
 
 /**
+ * Which of the three session stores a listing was read from.
+ *
+ * The family a row belongs to is not a property of the row alone: `main` names
+ * a conversation in `~/.lvis/sessions/` and a side chat in
+ * `~/.lvis/side-chat/`, and the stores are separate {@link MemoryManager}
+ * instances that cannot see each other. The reader therefore names the store it
+ * asked, and {@link sessionFamilyOf} joins the two halves.
+ */
+export type SessionNamespace = "main" | "side-chat" | "subagent";
+
+/**
+ * The conversation family one sidebar row belongs to — what glyph it draws,
+ * what its click opens, and whether it offers the main store's row actions.
+ *
+ * `main` and `routine` are the two kinds the main store holds; `work-board` is
+ * an item's run and `side-chat` a rail conversation, each in its own store.
+ */
+export type SessionFamily = "main" | "routine" | "work-board" | "side-chat";
+
+/**
+ * The ONE classifier: which family a listed session belongs to, or `null` when
+ * the row is not a conversation the list shows.
+ *
+ * `null` is a real answer rather than a failure. The sub-agent store holds a
+ * child per `agent_spawn` call, and each is already reachable inside its parent
+ * conversation's sub-agent tab, so listing them beside conversations would say
+ * the same thing twice. Only the sub-agent sessions that ARE an item's run —
+ * their origin names a work-board item — surface here.
+ */
+export function sessionFamilyOf(
+  namespace: SessionNamespace,
+  session: Pick<SessionListEntry, "sessionKind" | "workBoardItemId">,
+): SessionFamily | null {
+  if (namespace === "side-chat") return "side-chat";
+  if (namespace === "subagent") {
+    return session.workBoardItemId !== undefined ? "work-board" : null;
+  }
+  if (session.sessionKind === "main") return "main";
+  if (session.sessionKind === "routine") return "routine";
+  return null;
+}
+
+/**
  * One sub-agent row rebuilt from persisted metadata after a restart.
  *
  * Carries only what a panel ROW needs. The transcript is fetched separately,
@@ -323,6 +366,13 @@ export interface SessionListEntry {
    * session that is not a work-board run.
    */
   workBoardItemId?: number;
+  /**
+   * The conversation this session was started from, as the host recorded it at
+   * creation — a sub-agent's spawning parent, a side chat's conversation. Only
+   * a value that is itself a session id is carried; the work-board item origin
+   * arrives as {@link workBoardItemId} instead.
+   */
+  originSessionId?: string;
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
@@ -2903,6 +2953,7 @@ export class MemoryManager implements PromptMemorySource {
           ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
           ...(metadata?.projectName ? { projectName: metadata.projectName } : {}),
           ...(workBoardItemId !== null ? { workBoardItemId } : {}),
+          ...(isValidSessionId(metadata?.originSessionId) ? { originSessionId: metadata.originSessionId } : {}),
           // Branch provenance — already loaded from metadata above, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),

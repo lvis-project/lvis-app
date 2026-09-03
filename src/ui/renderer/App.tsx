@@ -851,6 +851,14 @@ export function App() {
     };
   }, [api, refreshSessions]);
 
+  // A fired routine is a row too. Its conversation runs on the routine engine's
+  // own loop, so no tile ever reports a turn ending for it and nothing else
+  // would tell the list it exists.
+  useEffect(() => {
+    if (typeof api.onRoutineFired !== "function") return undefined;
+    return api.onRoutineFired(() => void refreshSessions());
+  }, [api, refreshSessions]);
+
 
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
   const {
@@ -1101,6 +1109,40 @@ export function App() {
     handleViewSelectWithDoctor("work-board");
     setWorkBoardFocusItemId(itemId);
   }, [handleViewSelectWithDoctor]);
+
+  /**
+   * The side chat a sidebar row asked for, addressed to the tile that must show
+   * it. Held as an event rather than a location for the same reason as the
+   * board item above: the tile consumes it once and the request is spent.
+   *
+   * `nonce` is what makes asking for the SAME side chat twice two requests. The
+   * ids alone would compare equal and the second click would do nothing.
+   */
+  const [sideChatOpenRequest, setSideChatOpenRequest] = useState<
+    { chatGroupId: string; sessionId: string; nonce: number } | null
+  >(null);
+  const sideChatRequestNonce = useRef(0);
+  const openSideChat = useCallback(async (sideChatSessionId: string, parentSessionId?: string) => {
+    // The conversation first: a side chat is shown beside the conversation it
+    // belongs to, and the panel that draws it is that conversation's own. A
+    // parent that cannot be reached is not a reason to refuse the side chat —
+    // it opens beside whatever the focused tile is already holding.
+    if (parentSessionId !== undefined) {
+      try {
+        const loaded = await handleLoadSessionAndRefresh(parentSessionId);
+        if (loaded !== false) setActiveView("home");
+      } catch (err) {
+        console.warn("[lvis] openSideChat parent load failed:", errorMessage(err));
+      }
+    } else {
+      setActiveView("home");
+    }
+    setSideChatOpenRequest({
+      chatGroupId: chatGroupsRef.current.focusedId,
+      sessionId: sideChatSessionId,
+      nonce: ++sideChatRequestNonce.current,
+    });
+  }, [handleLoadSessionAndRefresh, setActiveView]);
 
   /**
    * Open a sidebar row's view in a NEW pane, beside the focused one.
@@ -1372,6 +1414,7 @@ export function App() {
     rolePresets, activePreset, activePresetId, setActivePresetId,
     enableThinkingChat, toggleThinking,
     refreshSessions, sessions, focusChatGroup,
+    sideChatOpenRequest,
     isSessionStarred: (sessionId: string) => Boolean(isSessionStarred(sessionId)),
     handleToggleSessionStar,
     starredIsEntry, starredToggle,
@@ -1421,6 +1464,7 @@ export function App() {
     effectiveLlmReady, chatReadyWithoutApiKey, checkApiKey, onOpenSettings,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     enableThinkingChat, toggleThinking, refreshSessions, focusChatGroup, sessions,
+    sideChatOpenRequest,
     isSessionStarred, handleToggleSessionStar, starredIsEntry, starredToggle,
     statusPersistent, statusVisibleToast, statusPendingCount, handleStatusToastClick,
     statusRemoveToast, statusPushToast, statusUpsertPersistent, statusRemovePersistent,
@@ -1782,6 +1826,8 @@ export function App() {
                   return loaded;
                 }}
                 onOpenWorkBoardItem={openWorkBoardItem}
+                onOpenSideChat={(sideChatSessionId, parentSessionId) =>
+                  void openSideChat(sideChatSessionId, parentSessionId)}
                 hasApiKey={effectiveLlmReady}
                 subscriptionUnavailable={subscriptionUnavailableProvider !== undefined}
                 subscriptionPending={subscriptionPendingProvider !== undefined}

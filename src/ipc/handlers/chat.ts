@@ -36,6 +36,8 @@ import {
   isValidSessionId,
   MAX_PROJECT_NAME_CHARS,
   MAX_PROJECT_ROOT_CHARS,
+  sessionFamilyOf,
+  type SessionFamily,
   type SessionKind,
 } from "../../memory/memory-manager.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
@@ -597,18 +599,76 @@ export async function handleChatSend(
 }
 
 /**
+ * One row of the conversation list, whatever store it came from.
+ *
+ * `family` is the discriminant every consumer switches on: the sidebar picks a
+ * glyph, a label and a click path from it, and never re-derives any of that
+ * from an id. It is stamped once, here, by {@link sessionFamilyOf}.
+ */
+interface SessionListRow {
+  id: string;
+  modifiedAt: string;
+  title: string;
+  sessionKind: SessionKind;
+  family: SessionFamily;
+  /** Present on a work-board run row — the item it opens. */
+  workBoardItemId?: number;
+  /**
+   * Present on a side-chat row — the conversation it belongs to, so the sidebar
+   * can draw it under that conversation instead of beside it.
+   */
+  parentSessionId?: string;
+  routineId?: string;
+  routineTitle?: string;
+  routineFiredAt?: string;
+  projectRoot?: string;
+  projectName?: string;
+  branchedFromCompactNum?: number;
+  branchedAt?: string;
+  archivedAt?: string;
+  unreadSince?: string;
+}
+
+const SESSION_FAMILY_VALUES: ReadonlySet<SessionFamily> = new Set<SessionFamily>([
+  "main",
+  "routine",
+  "work-board",
+  "side-chat",
+]);
+
+/**
+ * The families a caller asked for, or `undefined` when it asked for none.
+ *
+ * `undefined` is the whole existing contract: the request is answered from the
+ * main store alone, under its `kind` filter, exactly as before. A caller that
+ * names families is asking for the federated list instead. Unknown names are
+ * dropped rather than refused — this is a renderer-supplied array crossing a
+ * boundary, and the request stays answerable when a newer renderer names a
+ * family this host does not have.
+ */
+function requestedSessionFamilies(raw: unknown): ReadonlySet<SessionFamily> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const families = new Set<SessionFamily>();
+  for (const value of raw) {
+    if (SESSION_FAMILY_VALUES.has(value as SessionFamily)) families.add(value as SessionFamily);
+  }
+  return families.size > 0 ? families : undefined;
+}
+
+/**
  * PUBLIC `lvis:chat:sessions` — paginated session list + active session id.
  *
- * `includeWorkBoardRuns` adds the conversations work-board items ran. Those are
- * sub-agent sessions in their own namespace, reached through the runner like
- * every other sub-agent read here, and each is joined to its item so the row
- * carries the item's title and project. One row per item — the newest run —
- * because the board, not the session store, is what the row opens. A run
- * whose item no longer exists has nowhere to open and is not listed.
+ * `families` federates the stores. A conversation the app keeps lives in one of
+ * three separate {@link MemoryManager} instances — the main store, the side-chat
+ * store, and the sub-agent store — and a listing of one of them can never see
+ * the others. Each store is therefore listed by its own manager, every row is
+ * stamped with its family here, and the results are merged into one list
+ * ordered by `modifiedAt`. Without `families` the request is answered from the
+ * main store alone, which is what every caller but the sidebar wants.
  */
 export async function handleChatSessions(
   deps: IpcDeps,
-  opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown; projectRoot?: unknown; includeWorkBoardRuns?: unknown },
+  opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown; projectRoot?: unknown; families?: unknown },
 ) {
   const { conversationLoop, memoryManager } = deps;
   const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit)
@@ -624,6 +684,7 @@ export async function handleChatSessions(
   const kind = SESSION_KIND_VALUES.has(opts?.kind as SessionKind | "all")
     ? opts?.kind as SessionKind | "all"
     : "main";
+  const families = requestedSessionFamilies(opts?.families);
   const routineId = typeof opts?.routineId === "string" ? opts.routineId : undefined;
   const requestedProjectRoot = normalizeProjectString(opts?.projectRoot, MAX_PROJECT_ROOT_CHARS);
   const resolvedProject = requestedProjectRoot ? resolveAuthorizedWorkspaceProject(requestedProjectRoot) : undefined;
@@ -634,8 +695,11 @@ export async function handleChatSessions(
     : undefined;
   const includeUnscoped = resolvedProject?.authorized === true && resolvedProject.project?.isDefault === true;
   const sessions = memoryManager
-    .listSessionsPage({ kind, ...(routineId ? { routineId } : {}), ...(projectRoot ? { projectRoot } : {}), ...(includeUnscoped ? { includeUnscoped: true } : {}), limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
-    .map((s) => {
+    // A federated request reads every kind the main store holds and lets the
+    // family filter below decide, so `main` and `routine` come back in one
+    // scan rather than two passes with two cursors.
+    .listSessionsPage({ kind: families ? "all" : kind, ...(routineId ? { routineId } : {}), ...(projectRoot ? { projectRoot } : {}), ...(includeUnscoped ? { includeUnscoped: true } : {}), limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
+    .flatMap((s): SessionListRow[] => {
       // Scrub legacy default-tagged project metadata at the read chokepoint.
       // Pre-PR, markMainActiveAfterTurn persisted projectRoot/projectName
       // (= the default workspace root / "workspace") for EVERY session, no
@@ -648,11 +712,15 @@ export async function handleChatSessions(
       // written post-fix never carry default-root metadata in the first
       // place, so this is a no-op for them.
       const isLegacyDefaultTagged = Boolean(s.projectRoot) && isDefaultWorkspaceRoot(s.projectRoot!);
-      return {
+      const family = sessionFamilyOf("main", s);
+      if (family === null) return [];
+      if (families && !families.has(family)) return [];
+      return [{
         id: s.id,
         modifiedAt: s.modifiedAt.toISOString(),
         title: s.title,
         sessionKind: s.sessionKind,
+        family,
         ...(s.routineId ? { routineId: s.routineId } : {}),
         ...(s.routineTitle ? { routineTitle: s.routineTitle } : {}),
         ...(s.routineFiredAt ? { routineFiredAt: s.routineFiredAt } : {}),
@@ -662,21 +730,23 @@ export async function handleChatSessions(
         ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
         ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
         ...(s.unreadSince ? { unreadSince: s.unreadSince } : {}),
-      };
+      }];
     });
-  if (opts?.includeWorkBoardRuns !== true) {
+  if (!families) {
     return { current: conversationLoop.getSessionId(), sessions };
   }
-  const runRows = await workBoardRunRows(deps, {
-    limit, before, beforeId, after, projectRoot, includeUnscoped,
-  });
-  const merged = [...sessions, ...runRows]
+  const pageWindow = { limit, before, beforeId, after, projectRoot, includeUnscoped };
+  const federated = [
+    ...sessions,
+    ...(families.has("work-board") ? await workBoardRunRows(deps, pageWindow) : []),
+    ...(families.has("side-chat") ? sideChatRows(deps, pageWindow) : []),
+  ]
     .sort((a, b) => {
       const delta = b.modifiedAt.localeCompare(a.modifiedAt);
       return delta !== 0 ? delta : b.id.localeCompare(a.id);
     })
     .slice(0, limit);
-  return { current: conversationLoop.getSessionId(), sessions: merged };
+  return { current: conversationLoop.getSessionId(), sessions: federated };
 }
 
 /**
@@ -694,15 +764,7 @@ async function workBoardRunRows(
     projectRoot?: string;
     includeUnscoped: boolean;
   },
-): Promise<Array<{
-  id: string;
-  modifiedAt: string;
-  title: string;
-  sessionKind: SessionKind;
-  workBoardItemId: number;
-  projectRoot?: string;
-  projectName?: string;
-}>> {
+): Promise<SessionListRow[]> {
   const runner = deps.getSubAgentRunner?.();
   const store = deps.workBoardStore;
   if (!runner || !store) return [];
@@ -713,19 +775,13 @@ async function workBoardRunRows(
     ...(window.after ? { after: window.after } : {}),
   });
   const seen = new Set<number>();
-  const rows: Array<{
-    id: string;
-    modifiedAt: string;
-    title: string;
-    sessionKind: SessionKind;
-    workBoardItemId: number;
-    projectRoot?: string;
-    projectName?: string;
-  }> = [];
+  const rows: SessionListRow[] = [];
   for (const run of runs) {
     const itemId = run.workBoardItemId;
     if (itemId === undefined || seen.has(itemId)) continue;
     seen.add(itemId);
+    const family = sessionFamilyOf("subagent", run);
+    if (family === null) continue;
     const found = await store.get(itemId);
     if (found.status !== "found") continue;
     const item = found.item;
@@ -739,12 +795,52 @@ async function workBoardRunRows(
       modifiedAt: run.modifiedAt.toISOString(),
       title: item.title,
       sessionKind: run.sessionKind,
+      family,
       workBoardItemId: itemId,
       ...(item.projectRoot ? { projectRoot: item.projectRoot } : {}),
       ...(item.projectName ? { projectName: item.projectName } : {}),
     });
   }
   return rows;
+}
+
+/**
+ * Sidebar rows for the workspace rail's side chats, read from the side-chat
+ * store — the one `~/.lvis/side-chat/` manager, never the main one.
+ *
+ * `parentSessionId` is the conversation the side chat was started from, which
+ * the host recorded as the session's origin at its first turn. The sidebar
+ * draws the row under that conversation, so these rows carry no project filter
+ * of their own: a side chat is placed by its parent, and filtering it by a
+ * project it never records would drop it from under a parent that is shown.
+ */
+function sideChatRows(
+  deps: IpcDeps,
+  window: { limit: number; before?: Date; beforeId?: string; after?: Date },
+): SessionListRow[] {
+  const manager = deps.sideChatMemoryManager;
+  if (!manager) return [];
+  return manager
+    .listSessionsPage({
+      kind: "all",
+      limit: window.limit,
+      ...(window.before ? { before: window.before } : {}),
+      ...(window.beforeId ? { beforeId: window.beforeId } : {}),
+      ...(window.after ? { after: window.after } : {}),
+    })
+    .flatMap((s): SessionListRow[] => {
+      const family = sessionFamilyOf("side-chat", s);
+      if (family === null) return [];
+      return [{
+        id: s.id,
+        modifiedAt: s.modifiedAt.toISOString(),
+        title: s.title,
+        sessionKind: s.sessionKind,
+        family,
+        ...(s.originSessionId ? { parentSessionId: s.originSessionId } : {}),
+        ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
+      }];
+    });
 }
 
 /**

@@ -47,6 +47,21 @@ import { useApprovalSurface } from "../hooks/use-approval.js";
 import { ApprovalDock } from "./permissions/ApprovalDock.js";
 import { sessionOwnedBy } from "./chat-group-session-registry.js";
 
+/**
+ * A sidebar row asking one tile to show a stored side chat.
+ *
+ * The rail's conversation loop is window-wide and its store isolated, so a side
+ * chat cannot be loaded into a tile the way a conversation is: it is shown in
+ * the tile's own side-chat tab. `nonce` is what makes the same side chat asked
+ * for twice two requests — the ids alone compare equal and the second ask would
+ * be indistinguishable from no ask at all.
+ */
+export interface SideChatOpenRequest {
+  chatGroupId: string;
+  sessionId: string;
+  nonce: number;
+}
+
 /** The side transcript has no search band; the scroll hook still wants a stable list. */
 const NO_SEARCH_MATCHES: number[] = [];
 
@@ -62,7 +77,17 @@ const NO_COMMAND_ACTIONS: never[] = [];
 const NO_INLINE_PLUGINS: never[] = [];
 const NOOP_SELECT_PLUGIN = () => {};
 
-export function SideChatView({ api }: { api: LvisApi }) {
+export function SideChatView({ api, openRequest, onSessionsChanged }: {
+  api: LvisApi;
+  /** A stored side chat this panel has been asked to show. */
+  openRequest?: SideChatOpenRequest | undefined;
+  /**
+   * A turn here creates or moves a row in the window's conversation list — a
+   * side chat is listed under the conversation it belongs to — and the list is
+   * read, not pushed, so it has to be told.
+   */
+  onSessionsChanged?: (() => void | Promise<void>) | undefined;
+}) {
   const { t } = useTranslation();
   // If side chat is unavailable (preload without the surface), surface a stable
   // disabled state rather than a broken composer.
@@ -77,15 +102,26 @@ export function SideChatView({ api }: { api: LvisApi }) {
       </div>
     );
   }
-  return <SideChatSession api={api} sideChat={sideChat} />;
+  return (
+    <SideChatSession
+      api={api}
+      sideChat={sideChat}
+      openRequest={openRequest}
+      onSessionsChanged={onSessionsChanged}
+    />
+  );
 }
 
 function SideChatSession({
   api,
   sideChat,
+  openRequest,
+  onSessionsChanged,
 }: {
   api: LvisApi;
   sideChat: NonNullable<LvisApi["sideChat"]>;
+  openRequest?: SideChatOpenRequest | undefined;
+  onSessionsChanged?: (() => void | Promise<void>) | undefined;
 }) {
   const { t } = useTranslation();
   // Called BEFORE `useMessageQueue` below, so the transcript's stream listener
@@ -100,6 +136,7 @@ function SideChatSession({
     sessionId,
     send,
     newSession,
+    loadSession,
     abort,
     isCurrentTurnEvent,
   } = useSideChat(api);
@@ -184,25 +221,43 @@ function SideChatSession({
   // drain (`queue-auto`). A user send composes the draft's attachments into
   // content parts and clears the field, as the main composer does; the drain
   // carries text only, because queued rows never held attachments.
+  // The conversation this panel is a column of. A side chat belongs to it, and
+  // the host writes that down on the turn that first gives this side chat a
+  // file — so it rides along on every send rather than on a separate call the
+  // panel would have to know when to make.
+  const parentSessionId = chatContext?.currentSessionId;
   const handleAsk = useCallback(
     (
       text: string,
       _intent?: UserKeyboardIntentSnapshot,
       opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
     ) => {
+      const parent = parentSessionId ? { parentSessionId } : {};
+      const settle = (turn: Promise<void>) => turn.finally(() => void onSessionsChanged?.());
       if (opts?.inputOrigin === "queue-auto") {
-        return send(text, { injectHint: opts.injectHint, inputOrigin: "queue-auto" });
+        return settle(send(text, { injectHint: opts.injectHint, inputOrigin: "queue-auto", ...parent }));
       }
       const composed = composeOutgoing({ raw: text, activePreset: null, attachments });
       setDraft("");
       setAttachments([]);
-      return send(composed.text, {
+      return settle(send(composed.text, {
         attachments: composed.attachments,
         ...(opts?.injectHint ? { injectHint: opts.injectHint } : {}),
-      });
+        ...parent,
+      }));
     },
-    [send, attachments],
+    [send, attachments, parentSessionId, onSessionsChanged],
   );
+
+  // A stored side chat the sidebar asked this panel to show. Keyed on the
+  // request's nonce so asking for the same one twice loads it twice — the
+  // second click of a row the user is already looking at still means "go there".
+  const consumedOpenNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!openRequest || consumedOpenNonceRef.current === openRequest.nonce) return;
+    consumedOpenNonceRef.current = openRequest.nonce;
+    void loadSession(openRequest.sessionId);
+  }, [openRequest, loadSession]);
 
   const {
     messageQueueStore,
