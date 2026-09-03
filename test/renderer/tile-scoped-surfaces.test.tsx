@@ -62,7 +62,7 @@ describe("permission disclosure toasts with two tiles", () => {
     });
   });
 
-  it("raises the review suggestion once however many conversations are open", async () => {
+  it("subscribes the reviewer suggestion once however many conversations are open", async () => {
     const { container, api } = await renderApp({ hasApiKey: true });
     const onSuggestion = permissionSubscription(api, "onReviewSuggestion");
     await waitFor(() => expect(onSuggestion).toHaveBeenCalled());
@@ -87,11 +87,12 @@ describe("permission disclosure toasts with two tiles", () => {
       });
     });
 
-    await waitFor(() => {
-      expect(
-        container.querySelectorAll('[data-testid="permission-review-suggestion-toast"]'),
-      ).toHaveLength(1);
-    });
+    // The suggestion is the window's, and its surface is an approval card. With
+    // no card up in either tile it draws nowhere — a per-tile copy would show
+    // the same offer twice for one run of approvals.
+    expect(
+      container.querySelectorAll('[data-testid="reviewer-suggestion-band"]'),
+    ).toHaveLength(0);
   });
 });
 

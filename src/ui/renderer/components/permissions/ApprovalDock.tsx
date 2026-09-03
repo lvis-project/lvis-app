@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { canonicalStringify } from "../../../../shared/canonical-json.js";
 import { useTranslation } from "../../../../i18n/react.js";
 import type { ApprovalDecisionExtras } from "../../hooks/use-approval.js";
+import type { ReviewerSuggestion } from "../../hooks/use-permission-signals.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import type { UserApprovalVerdict } from "../../../../shared/permissions-events.js";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
@@ -48,6 +49,12 @@ export interface ApprovalDockProps {
   ) => void | Promise<void>;
   onOpenPermanentDeny?: (request: ApprovalRequest, verdict: UserApprovalVerdict) => void;
   interactionLocked?: boolean;
+  /**
+   * The window's held reviewer suggestion, drawn as a band inside the card.
+   * A card is the only place it appears, so a suggestion raised while none is
+   * up waits for the next one.
+   */
+  reviewerSuggestion?: ReviewerSuggestion | null;
 }
 
 /**
@@ -128,6 +135,7 @@ export function ApprovalDock({
   onDecide,
   onOpenPermanentDeny,
   interactionLocked = false,
+  reviewerSuggestion = null,
 }: ApprovalDockProps) {
   const { t } = useTranslation();
   const titleId = useId();
@@ -373,6 +381,7 @@ export function ApprovalDock({
         onOpenPermanentDeny={onOpenPermanentDeny}
         proposedChoice={proposedChoice}
         interactionLocked={interactionLocked}
+        reviewerSuggestion={reviewerSuggestion}
       />
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">

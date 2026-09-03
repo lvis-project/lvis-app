@@ -49,7 +49,6 @@ import type { ExactDenyDraft } from "./exact-permission-decision.js";
 
 // ─── Imports: types / constants / helpers / components / tabs ────────
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
-import { Button } from "../../components/ui/button.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { getPluginInstallAliases } from "./utils/plugin-install-aliases.js";
 import { pluginIconFor } from "./utils/plugin-icon.js";
@@ -73,7 +72,7 @@ import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { ApprovalSurfaceProvider, useApproval, useApprovalClaimsVersion, type ApprovalSurfaceContextValue } from "./hooks/use-approval.js";
-import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
+import { usePermissionSignals } from "./hooks/use-permission-signals.js";
 import { useApprovalSentence } from "./hooks/use-approval-sentence.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useStarred } from "./hooks/use-starred.js";
@@ -550,15 +549,12 @@ export function App() {
     }
     return null;
   }, [tileSessions]);
-  // Approval-memory hit + permission review suggestion. Both report on the
-  // WINDOW's permission settings, not on one conversation, so they are
-  // subscribed and rendered once here — per tile they would raise the same
-  // toast in every open conversation at once.
-  const {
-    userApprovalHitToast,
-    permissionReviewSuggestion,
-    handleEnablePermissionReviewSuggestion,
-  } = usePermissionToasts();
+  // Approval-memory hit + reviewer suggestion. Both report on the WINDOW's
+  // permission settings, not on one conversation, so they are subscribed once
+  // here — per tile they would raise the same disclosure in every open
+  // conversation at once. The hit is a toast rendered below; the suggestion
+  // goes into the approval surface value, so whichever card is up draws it.
+  const { userApprovalHitToast, reviewerSuggestion } = usePermissionSignals();
   const [exactDenyDraft, setExactDenyDraft] = useState<ExactDenyDraft | null>(null);
   // `/allow <sentence>` is typed into the focused tile's composer, so it
   // addresses the out-of-directory card shown in that tile; with none there,
@@ -696,7 +692,8 @@ export function App() {
     openPermanentDeny: handleOpenPermanentDeny,
     lockedRequestId: exactDenyDraft?.requestId ?? null,
     proposal: approvalProposal,
-  }), [approvals, handleOpenPermanentDeny, exactDenyDraft, approvalProposal]);
+    reviewerSuggestion,
+  }), [approvals, handleOpenPermanentDeny, exactDenyDraft, approvalProposal, reviewerSuggestion]);
 
   // Auth status for every plugin that declares `manifest.auth`
 
@@ -1812,43 +1809,6 @@ export function App() {
                         </div>
                       );
                     })()}
-                    {permissionReviewSuggestion && (
-                      <div
-                        data-testid="permission-review-suggestion-toast"
-                        role="status"
-                        aria-live="polite"
-                        className="flex min-w-0 items-center gap-2 rounded-md border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.1)] px-3 py-2 text-xs text-[hsl(var(--warning))]"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <span className="font-medium">{t("chatView.permissionReviewSuggestionTitle")}</span>
-                          <span className="ml-2 text-muted-foreground">
-                            {permissionReviewSuggestion.reason === "allow-always"
-                              ? t("chatView.permissionReviewSuggestionAllowAlways")
-                              : t("chatView.permissionReviewSuggestionRepeat", {
-                                  count: permissionReviewSuggestion.allowCount,
-                                  minutes: Math.max(1, Math.round(permissionReviewSuggestion.windowMs / 60000)),
-                                })}
-                          </span>
-                          {permissionReviewSuggestion.error && (
-                            <span className="ml-2 text-[hsl(var(--destructive))]">
-                              {permissionReviewSuggestion.error}
-                            </span>
-                          )}
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 shrink-0 px-2 text-xs"
-                          disabled={permissionReviewSuggestion.busy === true}
-                          onClick={() => void handleEnablePermissionReviewSuggestion()}
-                        >
-                          {permissionReviewSuggestion.busy === true
-                            ? t("chatView.permissionReviewSuggestionBusy")
-                            : t("chatView.permissionReviewSuggestionAction")}
-                        </Button>
-                      </div>
-                    )}
                   </div>
                   {fallbackToast && (
                     <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
@@ -2182,6 +2142,7 @@ export function App() {
                         windowApprovalHead !== null
                           && exactDenyDraft?.requestId === windowApprovalHead.id
                       }
+                      reviewerSuggestion={reviewerSuggestion}
                     />
                   </div>
                   {/* StatusBar notifications render inside ChatView, directly above
