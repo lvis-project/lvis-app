@@ -42,6 +42,7 @@ function makeMockPM() {
     addAlwaysDeniedPersist: vi.fn(),
     removeRule: vi.fn(),
     getVisibilityDenyRules: vi.fn(() => [{ pattern: "dangerous_*" }]),
+    setDeferredEntryAsk: vi.fn(),
   };
 }
 
