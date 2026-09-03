@@ -148,6 +148,12 @@ export interface SidebarProps {
   currentSessionId?: string;
   /** Load a selected session from the project conversation list. */
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
+  /**
+   * Open a work-board item from its conversation row. A run's session lives
+   * in the sub-agent namespace and cannot be loaded into a chat tile, so the
+   * row opens the item on the board — where its run transcripts already are.
+   */
+  onOpenWorkBoardItem?: (itemId: number) => void;
   /** Start a new main-chat session scoped to the selected project root. */
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   /** Re-fetch the workspace project list (after a context-menu mutation e.g. remove). */
@@ -945,6 +951,8 @@ function SessionRow({
   session,
   active,
   onLoadSession,
+  workBoardItemId,
+  onOpenWorkBoardItem,
   isPinned,
   onTogglePin,
   onOpenMenu,
@@ -959,6 +967,9 @@ function SessionRow({
   session: SessionSummary;
   active: boolean;
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
+  /** Set when the row is a work-board item's conversation — the glyph and the click follow the board. */
+  workBoardItemId?: number;
+  onOpenWorkBoardItem?: (itemId: number) => void;
   /** Truthy when this conversation is pinned — pinned rows sort to the top and show a persistent filled pin. */
   isPinned?: boolean;
   /** Toggle this conversation's pin — omitted entirely hides the pin affordance. */
@@ -1037,6 +1048,18 @@ function SessionRow({
           >
             <span className="h-2 w-2 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
           </span>
+        ) : workBoardItemId !== undefined ? (
+          /* The board glyph is what tells this row apart from a chat, so it is
+             named for assistive tech rather than hidden like the chat glyph. */
+          <WorkBoardIcon
+            className={[
+              "h-3.5 w-3.5",
+              isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
+            ].join(" ")}
+            role="img"
+            aria-label={t("sidebar.workBoardConversation")}
+            data-testid={`sidebar-session-work-board-${session.id}`}
+          />
         ) : (
           <MessageSquareText
             className={[
@@ -1065,12 +1088,22 @@ function SessionRow({
           aria-current={active ? "page" : undefined}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid={`sidebar-session-${session.id}`}
-          onClick={() => void onLoadSession?.(session.id)}
+          data-work-board-item={workBoardItemId}
+          title={workBoardItemId !== undefined ? t("sidebar.workBoardConversation") : undefined}
+          onClick={() => {
+            if (workBoardItemId !== undefined) onOpenWorkBoardItem?.(workBoardItemId);
+            else void onLoadSession?.(session.id);
+          }}
           // Dragging a conversation onto a tile is how the main area is
           // arranged: the edge it lands on says whether to split that tile or
-          // replace what it holds. A click still just opens it in place.
-          draggable
+          // replace what it holds. A click still just opens it in place. A
+          // work-board row has no tile form, so it does not drag.
+          draggable={workBoardItemId === undefined}
           onDragStart={(event) => {
+            if (workBoardItemId !== undefined) {
+              event.preventDefault();
+              return;
+            }
             event.dataTransfer.setData(CHAT_SESSION_DRAG_TYPE, session.id);
             event.dataTransfer.effectAllowed = "copy";
           }}
@@ -1129,6 +1162,7 @@ function ProjectSessionList({
   conversationSurfaceVisible,
   streaming,
   onLoadSession,
+  onOpenWorkBoardItem,
   onNewChatForProject,
   onRefreshProjects,
   onProjectError,
@@ -1147,6 +1181,7 @@ function ProjectSessionList({
   collapsed: boolean;
   sessions: SessionSummary[];
   currentSessionId?: string;
+  onOpenWorkBoardItem?: (itemId: number) => void;
   /**
    * Whether a CONVERSATION is what the window is showing.
    *
@@ -1253,8 +1288,11 @@ function ProjectSessionList({
       return next;
     });
 
+  // Main conversations and the work-board rows — a run's session is a
+  // sub-agent session by kind, admitted here because it is an item's
+  // conversation; the row itself says so with the board glyph.
   const mainSessions = useMemo(
-    () => sessions.filter((session) => session.sessionKind === "main"),
+    () => sessions.filter((session) => session.sessionKind === "main" || session.workBoardItemId !== undefined),
     [sessions],
   );
   // Named (real, user-visible) projects — the default/base-directory binding
@@ -1355,29 +1393,50 @@ function ProjectSessionList({
     } as NativeContextMenuHandlers;
   };
 
-  const renderSessionRow = (session: SessionSummary) => (
-    <SessionRow
-      key={session.id}
-      session={session}
-      active={conversationSurfaceVisible && session.id === currentSessionId}
-      onLoadSession={onLoadSession}
-      isPinned={isSessionPinned(session.id)}
-      onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}
-      onOpenMenu={(event) => openNativeContextMenu(event, "conversation", conversationMenuHandlers(session))}
-      unread={conversationActions?.isUnread(session.id)}
-      responding={conversationActions?.isResponding(session.id)}
-      archived={conversationActions?.isArchived(session.id)}
-      renaming={renamingKey === `session:${session.id}`}
-      onCommitRename={conversationActions
-        ? (title) => {
-            setRenamingKey(null);
-            void conversationActions.onRename(session.id, title);
-          }
-        : undefined}
-      onCancelRename={() => setRenamingKey(null)}
-      t={t}
-    />
-  );
+  const renderSessionRow = (session: SessionSummary) => {
+    // A work-board row is the item's conversation, not a chat session: it
+    // cannot be loaded, renamed, archived or deleted here (those act on the
+    // main session store, where this id does not exist), so it offers the one
+    // thing it can do — open the item — and nothing that would misfire.
+    const workBoardItemId = session.workBoardItemId;
+    if (workBoardItemId !== undefined) {
+      const open = () => onOpenWorkBoardItem?.(workBoardItemId);
+      return (
+        <SessionRow
+          key={session.id}
+          session={session}
+          active={false}
+          workBoardItemId={workBoardItemId}
+          onOpenWorkBoardItem={onOpenWorkBoardItem}
+          onOpenMenu={(event) => openNativeContextMenu(event, "conversation", { "conversation.open": open })}
+          t={t}
+        />
+      );
+    }
+    return (
+      <SessionRow
+        key={session.id}
+        session={session}
+        active={conversationSurfaceVisible && session.id === currentSessionId}
+        onLoadSession={onLoadSession}
+        isPinned={isSessionPinned(session.id)}
+        onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}
+        onOpenMenu={(event) => openNativeContextMenu(event, "conversation", conversationMenuHandlers(session))}
+        unread={conversationActions?.isUnread(session.id)}
+        responding={conversationActions?.isResponding(session.id)}
+        archived={conversationActions?.isArchived(session.id)}
+        renaming={renamingKey === `session:${session.id}`}
+        onCommitRename={conversationActions
+          ? (title) => {
+              setRenamingKey(null);
+              void conversationActions.onRename(session.id, title);
+            }
+          : undefined}
+        onCancelRename={() => setRenamingKey(null)}
+        t={t}
+      />
+    );
+  };
 
   // Archived conversations leave the default listing. They are not deleted, so
   // the toggle below brings them straight back — the reason archive is worth
@@ -1808,6 +1867,7 @@ export function Sidebar({
   projects,
   currentSessionId,
   onLoadSession,
+  onOpenWorkBoardItem,
   onRefreshProjects,
   onProjectError,
   activeSidebarTab = "chats",
@@ -2297,6 +2357,7 @@ export function Sidebar({
                     conversationSurfaceVisible={activeView === "home"}
                     streaming={streaming}
                     onLoadSession={onLoadSession}
+                    onOpenWorkBoardItem={onOpenWorkBoardItem}
                     onNewChatForProject={onNewChatForProject}
                     onRefreshProjects={onRefreshProjects}
                     onProjectError={onProjectError}

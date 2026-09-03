@@ -26,7 +26,7 @@
  * shared state (`sessionId`, `history`, `cumulativeUsage`), and lets each
  * spawn audit-log under a child sessionId tagged with the origin session id.
  */
-import type { RestoredSubAgentSession } from "../memory/memory-manager.js";
+import type { ListSessionsOptions, RestoredSubAgentSession, SessionListEntry } from "../memory/memory-manager.js";
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
@@ -2220,6 +2220,25 @@ export class SubAgentRunner {
   listPersistedSpawnsForOrigin(originSessionId: string): RestoredSubAgentSession[] {
     if (!isValidSessionId(originSessionId)) return [];
     return this.deps.subAgentMemoryManager.listSubAgentSessionsForOrigin(originSessionId);
+  }
+
+  /**
+   * The sub-agent sessions work-board items spawned, newest first — the rows
+   * the sidebar's conversation list shows beside the main sessions.
+   *
+   * Same reason as above for routing through the runner: the children live in
+   * the sub-agent namespace, which only this class holds. The memory manager
+   * owns the classification (which origin names an item); this method only
+   * carries the page window through.
+   */
+  listWorkBoardRunSessions(
+    options: Pick<ListSessionsOptions, "limit" | "before" | "beforeId" | "after"> = {},
+  ): SessionListEntry[] {
+    return this.deps.subAgentMemoryManager.listSessionsPage({
+      ...options,
+      kind: "subagent",
+      workBoardRuns: true,
+    });
   }
 
   /**

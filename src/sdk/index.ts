@@ -47,7 +47,7 @@ import type { handleUsageSummary, handleUsageRange } from "../ipc/handlers/usage
 // the contract: if a handler's shape changes, these types change with it.
 
 /** Paginated session list + active session id ({@link handleChatSessions}). */
-export type ListSessionsResult = ReturnType<typeof handleChatSessions>;
+export type ListSessionsResult = Awaited<ReturnType<typeof handleChatSessions>>;
 /** Optional pagination/kind query for {@link LvisClient.listSessions}. */
 export type ListSessionsQuery = Parameters<typeof handleChatSessions>[1];
 /** Active session serialized history ({@link handleChatGetHistory}). */

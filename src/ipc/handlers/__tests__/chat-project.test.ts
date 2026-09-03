@@ -181,7 +181,7 @@ describe("markMainActiveAfterTurn project metadata", () => {
 });
 
 describe("handleChatSessions row state", () => {
-  it("carries the archived and unread marks the sidebar draws from", () => {
+  it("carries the archived and unread marks the sidebar draws from", async () => {
     const listSessionsPage = vi.fn(() => [{
       id: "session-1",
       modifiedAt: new Date("2026-08-27T00:00:00Z"),
@@ -200,7 +200,7 @@ describe("handleChatSessions row state", () => {
       memoryManager: { listSessionsPage },
     } as unknown as IpcDeps;
 
-    const { sessions } = handleChatSessions(deps, { kind: "main" });
+    const { sessions } = await handleChatSessions(deps, { kind: "main" });
     expect(sessions[0]).toMatchObject({ id: "session-1", archivedAt: "2026-08-27T01:00:00Z", unreadSince: "2026-08-27T02:00:00Z" });
     expect(sessions[1]).not.toHaveProperty("archivedAt");
     expect(sessions[1]).not.toHaveProperty("unreadSince");
@@ -208,7 +208,7 @@ describe("handleChatSessions row state", () => {
 });
 
 describe("handleChatSessions project filters", () => {
-  it("does not add a project filter when the caller requests the project sidebar list", () => {
+  it("does not add a project filter when the caller requests the project sidebar list", async () => {
     const listSessionsPage = vi.fn(() => []);
     const deps = {
       conversationLoop: {
@@ -219,14 +219,14 @@ describe("handleChatSessions project filters", () => {
       },
     } as unknown as IpcDeps;
 
-    expect(handleChatSessions(deps, { kind: "main" })).toEqual({
+    expect(await handleChatSessions(deps, { kind: "main" })).toEqual({
       current: "session-1",
       sessions: [],
     });
     expect(listSessionsPage.mock.calls[0]?.[0]).not.toHaveProperty("projectRoot");
   });
 
-  it("does not let an arbitrary renderer projectRoot widen the session scope", () => {
+  it("does not let an arbitrary renderer projectRoot widen the session scope", async () => {
     const listSessionsPage = vi.fn(() => []);
     const deps = {
       conversationLoop: {
@@ -237,7 +237,7 @@ describe("handleChatSessions project filters", () => {
       },
     } as unknown as IpcDeps;
 
-    handleChatSessions(deps, { kind: "main", projectRoot: "C:\\unapproved\\project" });
+    await handleChatSessions(deps, { kind: "main", projectRoot: "C:\\unapproved\\project" });
 
     expect(listSessionsPage.mock.calls[0]?.[0]).toMatchObject({
       projectRoot: "__lvis_unauthorized_project_root__",
@@ -256,7 +256,7 @@ describe("handleChatSessions legacy default-root metadata scrub", () => {
   // reader — heals both consumers from a single source.
   const DEFAULT_ROOT = "C:\\Users\\example\\.lvis\\workspace";
 
-  it("strips projectRoot/projectName from a legacy session tagged with the default workspace root", () => {
+  it("strips projectRoot/projectName from a legacy session tagged with the default workspace root", async () => {
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(DEFAULT_ROOT);
     try {
       const listSessionsPage = vi.fn(() => [{
@@ -272,7 +272,7 @@ describe("handleChatSessions legacy default-root metadata scrub", () => {
         memoryManager: { listSessionsPage },
       } as unknown as IpcDeps;
 
-      const result = handleChatSessions(deps, { kind: "main" });
+      const result = await handleChatSessions(deps, { kind: "main" });
 
       expect(result.sessions).toHaveLength(1);
       expect(result.sessions[0]).not.toHaveProperty("projectRoot");
@@ -282,7 +282,7 @@ describe("handleChatSessions legacy default-root metadata scrub", () => {
     }
   });
 
-  it("keeps projectRoot/projectName for a session scoped to an explicit (non-default) project", () => {
+  it("keeps projectRoot/projectName for a session scoped to an explicit (non-default) project", async () => {
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(DEFAULT_ROOT);
     try {
       const listSessionsPage = vi.fn(() => [{
@@ -298,7 +298,7 @@ describe("handleChatSessions legacy default-root metadata scrub", () => {
         memoryManager: { listSessionsPage },
       } as unknown as IpcDeps;
 
-      const result = handleChatSessions(deps, { kind: "main" });
+      const result = await handleChatSessions(deps, { kind: "main" });
 
       expect(result.sessions[0]).toMatchObject({
         projectRoot: "C:\\workspace\\alpha",
@@ -307,5 +307,67 @@ describe("handleChatSessions legacy default-root metadata scrub", () => {
     } finally {
       cwdSpy.mockRestore();
     }
+  });
+});
+
+describe("handleChatSessions work-board runs", () => {
+  const main = {
+    id: "session-main",
+    modifiedAt: new Date("2026-09-03T10:00:00Z"),
+    title: "main chat",
+    sessionKind: "main",
+  };
+  const runs = [
+    { id: "sub-a1", modifiedAt: new Date("2026-09-03T11:00:00Z"), title: "Execute: 월간 보고서", sessionKind: "subagent", workBoardItemId: 7 },
+    { id: "sub-a0", modifiedAt: new Date("2026-09-03T09:00:00Z"), title: "Plan: 월간 보고서", sessionKind: "subagent", workBoardItemId: 7 },
+    { id: "sub-gone", modifiedAt: new Date("2026-09-03T08:00:00Z"), title: "Execute: deleted", sessionKind: "subagent", workBoardItemId: 9 },
+  ];
+  const makeDeps = () => {
+    const listWorkBoardRunSessions = vi.fn(() => runs);
+    const get = vi.fn(async (id: number) => id === 7
+      ? { status: "found" as const, itemId: 7, item: { id: 7, title: "월간 보고서 초안", projectRoot: "C:\\ws\\alpha", projectName: "alpha" } }
+      : { status: "not_found" as const, itemId: id });
+    const deps = {
+      conversationLoop: { getSessionId: () => "session-main" },
+      memoryManager: { listSessionsPage: vi.fn(() => [main]) },
+      getSubAgentRunner: () => ({ listWorkBoardRunSessions }),
+      workBoardStore: { get },
+    } as unknown as IpcDeps;
+    return { deps, listWorkBoardRunSessions, get };
+  };
+
+  it("lists one row per item, titled by the item, merged by time with the main sessions", async () => {
+    const { deps, listWorkBoardRunSessions } = makeDeps();
+    const { sessions } = await handleChatSessions(deps, { kind: "main", includeWorkBoardRuns: true });
+    expect(listWorkBoardRunSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 20 }));
+    expect(sessions.map((s) => s.id)).toEqual(["sub-a1", "session-main"]);
+    expect(sessions[0]).toMatchObject({
+      id: "sub-a1",
+      title: "월간 보고서 초안",
+      sessionKind: "subagent",
+      workBoardItemId: 7,
+      projectRoot: "C:\\ws\\alpha",
+      projectName: "alpha",
+      modifiedAt: "2026-09-03T11:00:00.000Z",
+    });
+    // The plan child of the same item is folded into the newer row; the run
+    // whose item is gone has nothing to open and is not listed.
+    expect(sessions.some((s) => s.id === "sub-a0" || s.id === "sub-gone")).toBe(false);
+  });
+
+  it("leaves the list untouched, and the runner unasked, without the flag", async () => {
+    const { deps, listWorkBoardRunSessions } = makeDeps();
+    const { sessions } = await handleChatSessions(deps, { kind: "main" });
+    expect(sessions.map((s) => s.id)).toEqual(["session-main"]);
+    expect(listWorkBoardRunSessions).not.toHaveBeenCalled();
+  });
+
+  it("lists nothing extra when the runner or the board is not wired", async () => {
+    const deps = {
+      conversationLoop: { getSessionId: () => "session-main" },
+      memoryManager: { listSessionsPage: vi.fn(() => [main]) },
+    } as unknown as IpcDeps;
+    const { sessions } = await handleChatSessions(deps, { kind: "main", includeWorkBoardRuns: true });
+    expect(sessions.map((s) => s.id)).toEqual(["session-main"]);
   });
 });

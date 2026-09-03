@@ -47,6 +47,13 @@ import { usePaneActions } from "./PaneFrame.js";
 export interface WorkBoardPanelProps {
   api: LvisApi;
   project?: ProjectIdentity;
+  /**
+   * An item another surface asked the board to open — the sidebar's
+   * conversation row. The board opens the item's detail with its latest run
+   * transcript expanded, then reports the request consumed.
+   */
+  focusItemId?: number | null;
+  onFocusConsumed?: () => void;
 }
 
 const TITLE_MAX = 256;
@@ -695,6 +702,8 @@ interface DetailDialogProps {
   api: LvisApi;
   itemId: number;
   run: WorkItemRunState | undefined;
+  /** Expand the newest run's transcript as soon as the item loads. */
+  openLatestRun?: boolean;
   onClose: () => void;
   onChanged: () => void;
   onRun: (id: number) => void;
@@ -784,18 +793,22 @@ const STATUS_LABEL: Record<WorkItemResolved["status_resolved"], string> = {
 // transcript (the plan+execute conversation) is fetched on demand from
 // `sessions/<id>/<runId>.jsonl` via getWorkBoardRunTranscript. This makes the
 // accumulation visible — re-runs add rows here instead of wiping prior work.
-function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved }) {
+function RunHistorySection({
+  api,
+  item,
+  initialOpenRunId,
+}: {
+  api: LvisApi;
+  item: WorkItemResolved;
+  /** A run to show expanded on mount — the newest one when the item was reached from its conversation row. */
+  initialOpenRunId?: string;
+}) {
   const history = item.runHistory ?? [];
   const [openRun, setOpenRun] = useState<string | null>(null);
   const [events, setEvents] = useState<RunTranscriptEvent[]>([]);
   const [loading, setLoading] = useState(false);
-  if (history.length === 0) return null;
 
-  const toggle = async (runId: string) => {
-    if (openRun === runId) {
-      setOpenRun(null);
-      return;
-    }
+  const load = useCallback(async (runId: string) => {
     setOpenRun(runId);
     setEvents([]);
     if (typeof api.getWorkBoardRunTranscript !== "function") return;
@@ -806,6 +819,21 @@ function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved
     } finally {
       setLoading(false);
     }
+  }, [api, item.id]);
+
+  useEffect(() => {
+    if (initialOpenRunId === undefined) return;
+    void load(initialOpenRunId);
+  }, [initialOpenRunId, load]);
+
+  if (history.length === 0) return null;
+
+  const toggle = async (runId: string) => {
+    if (openRun === runId) {
+      setOpenRun(null);
+      return;
+    }
+    await load(runId);
   };
 
   return (
@@ -857,7 +885,7 @@ function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved
   );
 }
 
-export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onRun }: DetailDialogProps) {
+export function WorkItemDetailDialog({ api, itemId, run, openLatestRun, onClose, onChanged, onRun }: DetailDialogProps) {
   const [item, setItem] = useState<WorkItemResolved | null>(null);
   const [loadError, setLoadError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -1060,7 +1088,11 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
             </div>
             {actionError && <p className="text-sm text-destructive" data-testid="work-board-detail-error">{actionError}</p>}
             <RunOutputPanel item={item} run={run} />
-            <RunHistorySection api={api} item={item} />
+            <RunHistorySection
+              api={api}
+              item={item}
+              initialOpenRunId={openLatestRun ? item.runHistory?.at(-1)?.runId : undefined}
+            />
           </div>
         )}
 
@@ -1544,15 +1576,25 @@ function ReportResultBlock({
 
 // ─── Main Panel ─────────────────────────────────────────────────────────────────
 
-export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
+export function WorkBoardPanel({ api, project, focusItemId, onFocusConsumed }: WorkBoardPanelProps) {
   const [items, setItems] = useState<WorkItemResolved[]>([]);
   const [proposals, setProposals] = useState<WorkProposal[]>([]);
   const [pendingProposalId, setPendingProposalId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
+  // True while the open detail was reached from a conversation row: that
+  // arrival is about the run, so the latest transcript opens with it.
+  const [detailOpensLatestRun, setDetailOpensLatestRun] = useState(false);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
+
+  useEffect(() => {
+    if (focusItemId === undefined || focusItemId === null) return;
+    setDetailId(focusItemId);
+    setDetailOpensLatestRun(true);
+    onFocusConsumed?.();
+  }, [focusItemId, onFocusConsumed]);
 
   const refresh = useCallback(async () => {
     if (typeof api.listWorkBoard !== "function") return;
@@ -1812,9 +1854,14 @@ export function WorkBoardPanel({ api, project }: WorkBoardPanelProps) {
           api={api}
           itemId={detailId}
           run={runState[detailId]}
-          onClose={() => setDetailId(null)}
+          openLatestRun={detailOpensLatestRun}
+          onClose={() => {
+            setDetailId(null);
+            setDetailOpensLatestRun(false);
+          }}
           onChanged={() => {
             setDetailId(null);
+            setDetailOpensLatestRun(false);
             void refresh();
           }}
           onRun={onRun}

@@ -184,6 +184,14 @@ normalized project key.
 The work board can still integrate with plugin and subagent flows, but the host
 owns storage, approvals, and audit.
 
+Item runs execute as sub-agent sessions whose origin names the item
+(`work-board:<itemId>`), so their conversations live in the isolated sub-agent
+namespace, never in the main chat store. The sidebar's conversation list shows
+one row per item that has run, carrying the Work icon and the item's title; the
+row is read-only (no rename, archive, pin, or drag) and opens the board item
+with its newest run transcript expanded. Briefing runs
+(`work-board-briefing:<kind>`) are not listed.
+
 ## Plugin Runtime
 
 Plugin installation and runtime behavior are governed by manifest declarations,

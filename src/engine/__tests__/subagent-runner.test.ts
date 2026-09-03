@@ -108,6 +108,7 @@ function fakeSubAgentMemoryManager(memory: Partial<PromptMemorySource> = {}) {
     // round-trip is pinned by the PR-B suite against a REAL MemoryManager).
     saveSessionMetadata: () => Promise.resolve(),
     listSessions: () => [],
+    listSessionsPage: () => [],
     load: () => undefined,
   } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["subAgentMemoryManager"];
 }
@@ -2967,5 +2968,30 @@ describe("SubAgentRunner completion mailbox single-shot", () => {
     await expect(
       fixture.runner.peekParentMailbox(parentSessionId),
     ).resolves.toEqual([]);
+  });
+});
+
+describe("listWorkBoardRunSessions", () => {
+  it("asks the sub-agent namespace for work-board runs with the caller's page window", () => {
+    const toolRegistry = new ToolRegistry();
+    const listSessionsPage = vi.fn(() => []);
+    const subAgentMemoryManager = {
+      ...fakeSubAgentMemoryManager(),
+      listSessionsPage,
+    } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["subAgentMemoryManager"];
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager,
+    });
+    const before = new Date("2026-09-03T00:00:00Z");
+    runner.listWorkBoardRunSessions({ limit: 3, before, beforeId: "x" });
+    expect(listSessionsPage).toHaveBeenCalledWith({
+      limit: 3,
+      before,
+      beforeId: "x",
+      kind: "subagent",
+      workBoardRuns: true,
+    });
   });
 });

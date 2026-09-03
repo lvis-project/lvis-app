@@ -55,6 +55,7 @@ import {
   MAX_PROPOSAL_BLOCKERS,
   MAX_PROPOSAL_EVIDENCE,
   PROPOSAL_KEY_MAX,
+  workBoardOriginSessionId,
 } from "../shared/work-board-types.js";
 import { createLogger } from "../lib/logger.js";
 import {
@@ -675,7 +676,7 @@ export function createWorkBoardEngine(
       }
     }
 
-    const originSessionId = `work-board:${itemId}`;
+    const originSessionId = workBoardOriginSessionId(itemId);
     const runId = randomUUID();
     const startedAt = new Date(Date.now()).toISOString();
 

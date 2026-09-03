@@ -124,3 +124,43 @@ describe("Work Board — briefing buttons", () => {
     );
   });
 });
+
+describe("Work Board — focus from the sidebar", () => {
+  afterEach(() => cleanup());
+
+  it("opens the item's detail with its newest run transcript expanded, then releases the focus", async () => {
+    const { api } = stubApi(async () => ({ status: "ok" as const, kind: "daily", markdown: "" }) as unknown as WorkBoardBriefingResult);
+    const startedAt = "2026-09-03T10:00:00.000Z";
+    const getWorkBoardItem = vi.fn(async (itemId: number) => ({
+      status: "found" as const,
+      itemId,
+      item: {
+        id: itemId,
+        title: "월간 보고서 초안",
+        status: "in_progress",
+        status_resolved: "in_progress",
+        priority: "medium",
+        created_at: startedAt,
+        updated_at: startedAt,
+        runHistory: [
+          { runId: "run-old", startedAt: "2026-09-02T10:00:00.000Z", endedAt: "2026-09-02T10:05:00.000Z", status: "completed" },
+          { runId: "run-new", startedAt, endedAt: "2026-09-03T10:05:00.000Z", status: "completed" },
+        ],
+      },
+    }));
+    const getWorkBoardRunTranscript = vi.fn(async () => ({
+      events: [{ ts: startedAt, phase: "executing", kind: "turn", turn: 1, text: "hello from run" }],
+    }));
+    Object.assign(api, { getWorkBoardItem, getWorkBoardRunTranscript });
+    const onFocusConsumed = vi.fn();
+
+    render(<WorkBoardPanel api={api} focusItemId={7} onFocusConsumed={onFocusConsumed} />);
+
+    await waitFor(() => expect(screen.getByTestId("work-board-detail-dialog")).toBeTruthy());
+    expect(getWorkBoardItem).toHaveBeenCalledWith(7);
+    await waitFor(() => expect(getWorkBoardRunTranscript).toHaveBeenCalledWith(7, "run-new"));
+    await waitFor(() => expect(screen.getByText(/hello from run/)).toBeTruthy());
+    expect(getWorkBoardRunTranscript).not.toHaveBeenCalledWith(7, "run-old");
+    expect(onFocusConsumed).toHaveBeenCalledTimes(1);
+  });
+});
