@@ -20,6 +20,7 @@ import {
   AGENT_PLUGINS_SCHEMA_URL,
   AGENT_PLUGINS_TOP_LEVEL_FIELDS,
   LVIS_EXTENSION_NAMESPACE,
+  MAX_PLUGIN_ONBOARDING_HIGHLIGHTS,
   flattenAgentPluginsManifest,
   foreignManifestTopLevelFields,
 } from "../public-contract.js";
@@ -851,6 +852,41 @@ export async function parsePluginJson(
           `"hostSecrets": { "read": ["llm.apiKey.openai"] }`,
         );
       }
+    }
+  }
+
+  // Onboarding highlight identity. The schema bounds the LIST and the shape of
+  // each `id`; what it cannot express is that two entries must not carry the
+  // SAME id. That is not cosmetic here: `<pluginId>:<id>` is the key the user's
+  // answer is stored under, so a duplicate would let one card's "never show
+  // this" silence a different card the user never saw. The count is re-checked
+  // alongside it for the same reason `hostSecrets` re-checks its own bounds — a
+  // plugin shipped against a stale SDK schema must not widen what it declares.
+  const onboardingRaw: unknown = (parsed as { onboarding?: unknown }).onboarding;
+  const highlightsRaw: unknown =
+    onboardingRaw && typeof onboardingRaw === "object" && !Array.isArray(onboardingRaw)
+      ? (onboardingRaw as { highlights?: unknown }).highlights
+      : undefined;
+  if (Array.isArray(highlightsRaw)) {
+    if (highlightsRaw.length > MAX_PLUGIN_ONBOARDING_HIGHLIGHTS) {
+      fail(
+        "onboarding.highlights",
+        `has ${highlightsRaw.length} entries; at most ${MAX_PLUGIN_ONBOARDING_HIGHLIGHTS} are allowed (manifest_schema)`,
+        `"onboarding": { "highlights": [{ "id": "pick-a-folder", "copy": { "en": { "headline": "…", "body": "…", "actionLabel": "…" } }, "action": { "kind": "none" } }] }`,
+      );
+    }
+    const seenHighlightIds = new Set<string>();
+    for (let i = 0; i < highlightsRaw.length; i += 1) {
+      const id: unknown = (highlightsRaw[i] as { id?: unknown })?.id;
+      if (typeof id !== "string") continue;
+      if (seenHighlightIds.has(id)) {
+        fail(
+          `onboarding.highlights[${i}].id`,
+          `value '${id}' is a duplicate; highlight ids must be unique within a plugin (manifest_schema)`,
+          `"onboarding": { "highlights": [{ "id": "pick-a-folder", … }, { "id": "try-search", … }] }`,
+        );
+      }
+      seenHighlightIds.add(id);
     }
   }
 

@@ -205,9 +205,13 @@ Key boundaries:
   Bundled `manifest.skills` contribute instructions, while host-selected plugin
   scope and `tool_search` control model-visible Tool discovery;
 - plugin UI can render in host slots but cannot bypass permission review;
-- optional `manifest.onboarding.firstTask` copy is inert, localized metadata:
-  the host may prefill the visible composer, but it never auto-submits or invokes
-  a tool, and undeclared or unusable plugins produce no proposal;
+- optional `manifest.onboarding` copy is inert, localized metadata. A plugin
+  declares one `firstTask` and up to five `highlights`; the host asks each as a
+  tile overlay card once and remembers the answer — accept, later, or never — in
+  `~/.lvis/onboarding/proposals.json`. Accepting performs the declared `action`
+  and only that (prefill the visible composer, or move the settings view onto a
+  tab); nothing auto-submits, starts a turn, or invokes a tool, and undeclared or
+  unusable plugins produce no proposal;
 - marketplace metadata should not override local policy or managed-plugin rules.
 - boot verifies each installed payload's receipt before parsing its manifest.
   Receipt hashing and manifest validation run with bounded concurrency, but

@@ -285,6 +285,18 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
         return () => tourStartHandlers.delete(handler);
       }),
     },
+    // No plugin declares onboarding in the default fixture, so the host has
+    // nothing to propose and stages no card.
+    //
+    // The cast is the price of `MockLvisApi` being `Record<string, Mock>`: a
+    // namespaced surface is not a `Mock`, so the literal fails the index
+    // signature. Five surfaces above and below carry that error untyped rather
+    // than cast; widening the type is a change every consumer of `api.<fn>`
+    // would feel, and it is not this one's to make.
+    onboarding: {
+      listPending: vi.fn(async () => ({ ok: true, pending: [] })),
+      answer: vi.fn(async () => ({ ok: true, pending: [] })),
+    } as unknown as Mock,
     getSettings: vi.fn(overrides.getSettings ?? (async () => settings)),
     updateSettings: vi.fn(async (p: unknown) => {
       settings = { ...(settings as object), ...(p as object) };

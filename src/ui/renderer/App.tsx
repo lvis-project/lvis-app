@@ -36,7 +36,6 @@ import { parseInlineViewKey, type InlineViewKey, type PluginViewKey } from "../.
 import { CONTENT_TITLE_INSET, SHELL_GUTTER, collapsedBandLeadClearance } from "../../shared/shell-geometry.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
-import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { ApprovalDock, WINDOW_DOCK_MIN_HEIGHT } from "./components/permissions/ApprovalDock.js";
 import { AskUserQuestionCard } from "./components/AskUserQuestionCard.js";
@@ -83,7 +82,8 @@ import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
-import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
+import { normalizeSettingsTab, type SettingsTab } from "../../shared/settings-tabs.js";
+import type { OnboardingProposalDisposition } from "../../main/onboarding-proposal-store.js";
 import {
   BUILTIN_LABEL_KEYS,
   BUILTIN_VIEW_ICONS,
@@ -120,7 +120,7 @@ function measuredCanvasSize(canvas: HTMLElement | null) {
 }
 
 export function App() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const api = useMemo(() => getApi(), []);
 
   // Block default file:// navigation when a file is dropped onto the window
@@ -189,7 +189,6 @@ export function App() {
 
   // App state
   const {
-    tourCompleted,
     onTourComplete,
     onTourDismiss,
     checkApiKey,
@@ -586,15 +585,6 @@ export function App() {
   // the overlay lookup map, and the routine/overlay IPC subscriptions. A card's
   // primary action reaches its tile through the registry, so the turn starts in
   // the conversation the card was shown in. See use-routine-overlay.ts.
-  const {
-    addFireRef,
-    runningRoutines,
-    handlePluginPrimaryAction,
-    handleRoutineAcknowledge,
-  } = useRoutineOverlay({
-    api, t, registry: chatGroupSessions, focusedChatGroupId: chatGroups.focusedId,
-  });
-
   // Marketplace + plugin UI extensions
   const {
     pluginViews,
@@ -654,6 +644,23 @@ export function App() {
     if (to.view === "settings") setSettingsTab(to.settingsTab ?? "llm");
     setActiveView(to.view);
   }, [setSettingsTab, setActiveView]);
+  // Composed after `navigateToLocation` because an accepted onboarding proposal
+  // may name a settings tab, and the move is this window's to make.
+  const navigateToSettingsTab = useCallback(
+    (settingsTab: SettingsTab) => navigateToLocation({ view: "settings", settingsTab }),
+    [navigateToLocation],
+  );
+  const {
+    addFireRef,
+    runningRoutines,
+    handlePluginPrimaryAction,
+    handleRoutineAcknowledge,
+    handleProposalAnswer,
+  } = useRoutineOverlay({
+    api, t, locale, registry: chatGroupSessions, focusedChatGroupId: chatGroups.focusedId,
+    onNavigateToSettings: navigateToSettingsTab,
+  });
+
   const viewHistory = useViewHistory(location, navigateToLocation, restoresApplied);
   useViewHistoryShortcuts(viewHistory);
 
@@ -1360,6 +1367,13 @@ export function App() {
       void handlePluginPrimaryAction(id, chatGroupId);
     },
     onRoutineAcknowledge: handleRoutineAcknowledge,
+    onProposalAnswer: (
+      id: string,
+      disposition: OnboardingProposalDisposition,
+      chatGroupId: string,
+    ) => {
+      void handleProposalAnswer(id, disposition, chatGroupId);
+    },
     approvalSentenceInterceptSubmit: interceptApprovalSentence,
     activeProject: activeProject ?? defaultWorkspaceProject,
     workspaceProjects,
@@ -1382,7 +1396,7 @@ export function App() {
     searchCloseOverlay, searchToggleOverlay,
     handleExport, handleImport, pluginEntries, handleViewSelectWithDoctor, appMode,
     commandActions, slashPickerOpen, overlayCardTileForWindow,
-    handlePluginPrimaryAction, handleRoutineAcknowledge,
+    handlePluginPrimaryAction, handleRoutineAcknowledge, handleProposalAnswer,
     interceptApprovalSentence,
     activeProject, defaultWorkspaceProject, workspaceProjects,
     onNewChatForProject, refreshWorkspaceProjects, handleProjectError,
@@ -2129,6 +2143,9 @@ export function App() {
                         void handlePluginPrimaryAction(id, chatGroupId);
                       }}
                       onRoutineAcknowledge={handleRoutineAcknowledge}
+                      onProposalAnswer={(id, disposition, chatGroupId) => {
+                        void handleProposalAnswer(id, disposition, chatGroupId);
+                      }}
                     />
                     {strandedQuestion !== null && (
                       <div data-testid={TEST_IDS.questionOverlay}>
@@ -2184,11 +2201,6 @@ export function App() {
               api={api}
               onComplete={onTourComplete}
               onDismiss={onTourDismiss}
-            />
-            <PostTourFirstTask
-              onPrefillComposer={focusedSession.prefillComposer}
-              pluginCards={pluginCards}
-              tourCompleted={tourCompleted}
             />
             <DevConsoleToggle />
           </OverlayContextProvider>

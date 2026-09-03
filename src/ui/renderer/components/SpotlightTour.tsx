@@ -57,10 +57,10 @@ export interface SpotlightTourProps {
    */
   initialScenarioId?: string;
   /**
-   * Tutorial-X5 — fired right after the user reaches the last step of a
-   * scenario and the tour closes (NOT on early-dismissal). The host's
-   * `PostTourFirstTask` listens for this so it can offer the user a
-   * real first plugin task without a dead-end UX transition.
+   * Fired right after the user reaches the last step of a scenario and the
+   * tour closes (NOT on early-dismissal). The host opens its plugin-onboarding
+   * proposal gate on this, so the user is offered a real first plugin task
+   * instead of a dead-end UX transition.
    */
   onComplete?: (scenarioId: string) => void;
 
@@ -316,8 +316,8 @@ export function SpotlightTour({
         });
       }
       setActiveScenarioId(null);
-      // Tutorial-X5 — notify the host the scenario completed so a
-      // post-tour first-task offer can render. Wrapped in try/catch
+      // Notify the host the scenario completed so the onboarding proposal
+      // gate can open. Wrapped in try/catch
       // because consumer code lives outside this component's
       // reliability envelope; a thrown callback must not block tour
       // close-out.

@@ -659,13 +659,73 @@ export interface PluginFirstTaskCopy {
   composerPrompt: string;
 }
 
+/** Per-locale display copy for one onboarding highlight. */
+export interface PluginHighlightCopy {
+  headline: string;
+  body: string;
+  actionLabel: string;
+}
+
+/**
+ * What accepting a highlight does. Every arm is inert on its own: the host
+ * performs the effect, and the two that do anything only move the user — text
+ * into the visible composer, or the settings view onto a tab. Nothing here
+ * runs a turn, calls a tool, or reaches the network.
+ */
+export type PluginOnboardingAction =
+  /** Put `prompt` in the focused conversation's composer, unsent. */
+  | { kind: "composer"; prompt: string }
+  /**
+   * Move the settings view to `path`. Settings are addressed by TAB, so the
+   * value is a settings tab id (`plugin-config`, `llm`, …); there is no
+   * deeper anchor for a manifest to name.
+   */
+  | { kind: "settings"; path: string }
+  /** Say the thing and stop. The card is informational. */
+  | { kind: "none" };
+
+/**
+ * One onboarding highlight or new-feature promotion.
+ *
+ * `id` is the plugin's own stable name for this proposal, and half of the key
+ * the host remembers the user's answer under — renaming it asks the question
+ * again.
+ */
+export interface PluginOnboardingHighlight {
+  /** Stable kebab-case id, unique within the declaring plugin. */
+  id: string;
+  /** Lower numbers are proposed first; an omitted priority sorts last. */
+  priority?: number;
+  /** Normalized lower-case BCP-47 tags; English is the required fallback. */
+  copy: Record<string, PluginHighlightCopy>;
+  action: PluginOnboardingAction;
+}
+
+/**
+ * How many highlights one plugin may declare.
+ *
+ * A nag budget rather than a storage limit: each highlight is a question the
+ * user answers once, and a plugin free to declare twenty would spend the whole
+ * first session on its own tour.
+ */
+export const MAX_PLUGIN_ONBOARDING_HIGHLIGHTS = 5;
+
 export interface PluginOnboardingSpec {
+  /**
+   * The first thing to do after the tour. One per plugin, and proposed ahead
+   * of that plugin's highlights.
+   */
   firstTask?: {
     /** Lower numbers are proposed first. */
     priority: number;
     /** Normalized lower-case BCP-47 tags; English is the required fallback. */
     locales: Record<string, PluginFirstTaskCopy>;
   };
+  /**
+   * Capability highlights and new-feature promotions, at most
+   * {@link MAX_PLUGIN_ONBOARDING_HIGHLIGHTS}.
+   */
+  highlights?: PluginOnboardingHighlight[];
 }
 
 /**

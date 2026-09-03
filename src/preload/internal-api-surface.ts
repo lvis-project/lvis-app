@@ -13,6 +13,10 @@ import {
   type SkillInstallResultPayload,
 } from "../contract/app-contract.js";
 import { t } from "../i18n/index.js";
+import type {
+  OnboardingProposalDisposition,
+  PendingOnboardingProposal,
+} from "../main/onboarding-proposal-store.js";
 import { parseEnvForcedSettingsPaths } from "../shared/env-backed-settings.js";
 import { ipcUserKeyboardIntent } from "./gesture-intent.js";
 import { mcpApiSurface } from "./mcp-api-surface.js";
@@ -458,6 +462,27 @@ export function buildInternalApiSurface() {
       ipcRenderer.on(CHANNELS.tour.start, listener);
       return () => ipcRenderer.removeListener(CHANNELS.tour.start, listener);
     },
+  },
+  // Plugin onboarding proposals. `listPending` is what the renderer calls once
+  // the tour gate opens; the host answers with the ordered pending list AND
+  // stages the head of it as an overlay card, so which proposal is asked next
+  // is never decided here. `answer` records the user's word and stages whatever
+  // follows it.
+  onboarding: {
+    listPending: async (locale: string) =>
+      ipcRenderer.invoke(CHANNELS.onboarding.listPending, { locale }) as Promise<
+        | { ok: true; pending: PendingOnboardingProposal[] }
+        | { ok: false; error: string; message: string }
+      >,
+    answer: async (
+      key: string,
+      disposition: OnboardingProposalDisposition,
+      locale: string,
+    ) =>
+      ipcRenderer.invoke(CHANNELS.onboarding.answer, { key, disposition, locale }) as Promise<
+        | { ok: true; pending: PendingOnboardingProposal[] }
+        | { ok: false; error: string; message: string }
+      >,
   },
   // Open an http(s) URL in the system browser. Main-side validates the
   // scheme and rejects file://, javascript:, and any other handler.

@@ -676,15 +676,15 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       state: "visible",
       timeout: 60_000,
     });
-    // Neutralize the post-tour first-task nudge (PostTourFirstTask). With
-    // onboardingCompleted seeded true the chain sits at "done" → tourCompleted,
-    // and a seeded repository plugin (e.g. meeting) yields a proposal, so the
-    // z-9000 bottom-right card renders and intercepts pointer events over the
-    // composer/toolbar. No spec asserts this overlay, so hide it globally — CSS
-    // applies even if it mounts after this point. Specs that need it can scope
-    // it back in. Keeps the harness locale/onboarding-state agnostic.
+    // Neutralize the plugin onboarding proposal card. With onboardingCompleted
+    // seeded true the host treats the harness as a returning user, so the gate
+    // is open at boot and a seeded repository plugin (e.g. meeting) yields a
+    // proposal on every run. No spec asserts it, and a card in the floating
+    // lane takes pointer events the specs aim elsewhere — so hide it globally.
+    // CSS applies even if it mounts after this point, and specs that need it
+    // can scope it back in. Keeps the harness locale/onboarding-state agnostic.
     await win.addStyleTag({
-      content: '[data-testid="post-tour-first-task"]{display:none !important;}',
+      content: '[data-overlay-source="proposal"]{display:none !important;}',
     });
     await use(win);
   },

@@ -863,10 +863,10 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
       timeout: 60_000,
     });
     // Same overlay-neutralization as test/e2e/ui/fixtures.ts mainWindow fixture:
-    // the post-tour first-task nudge is state-dependent and not something any
-    // capture key wants floating over the shot.
+    // the plugin onboarding proposal card is state-dependent and not something
+    // any capture key wants floating over the shot.
     await win.addStyleTag({
-      content: '[data-testid="post-tour-first-task"]{display:none !important;}',
+      content: '[data-overlay-source="proposal"]{display:none !important;}',
     });
     // Deterministic captures: kill CSS transitions/animations globally so a
     // mid-tween frame is never captured, and hide the blinking caret. This is
