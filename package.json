@@ -117,7 +117,7 @@
     "@ai-sdk/google-vertex": "^5.0.0",
     "@ai-sdk/openai": "^4.0.0",
     "@ai-sdk/openai-compatible": "~3.0.0",
-    "@anthropic-ai/sandbox-runtime": "0.0.73",
+    "@anthropic-ai/sandbox-runtime": "0.0.74",
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@openai/codex": "0.147.0",
