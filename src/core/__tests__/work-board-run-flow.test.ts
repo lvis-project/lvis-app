@@ -28,8 +28,12 @@ import { WorkBoardStore } from "../../main/work-board-store.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
 import type { SubAgentRunner } from "../../engine/subagent-runner.js";
+import { ToolRegistry } from "../../tools/registry.js";
 import type { LoadedAgentProfile } from "../../main/agent-profile-store.js";
-import { scriptedApprovalGate as fakeGate } from "../../work-board/__tests__/board-test-fixtures.js";
+import {
+  boardParentToolRegistry,
+  scriptedApprovalGate as fakeGate,
+} from "../../work-board/__tests__/board-test-fixtures.js";
 import type { WorkBoardRunEvent } from "../../shared/work-board-types.js";
 
 function tempBoard(): {
@@ -72,6 +76,7 @@ function fakeRunner(opts?: {
   holdPlan?: Promise<void>;
 }): { runner: SubAgentRunner; calls: SpawnCall[] } {
   const calls: SpawnCall[] = [];
+  const registry = boardParentToolRegistry();
   const runner = {
     async spawn(input: {
       title: string;
@@ -111,6 +116,7 @@ function fakeRunner(opts?: {
         ok: true,
       };
     },
+    parentToolRegistry: () => registry,
   } as unknown as SubAgentRunner;
   return { runner, calls };
 }
@@ -163,13 +169,12 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(planCall.sourceTools).toBeDefined();
       expect(planCall.sourceTools!.length).toBeGreaterThan(0);
       expect(planCall.sourceTools).toContain("read_file");
-      expect(planCall.sourceTools).toContain("index_search");
+      expect(planCall.sourceTools).toContain("sample_lookup");
       // No write/mutation tools leak into the plan allowlist.
       for (const forbidden of [
         "write_file",
-        "edit_file",
-        "delete_file",
         "run_shell",
+        "web_fetch",
         "agent_spawn",
       ]) {
         expect(planCall.sourceTools).not.toContain(forbidden);
@@ -181,6 +186,72 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       const execCall = calls[1];
       expect(execCall.profileMode).toBe("execute");
       expect(execCall.sourceTools).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("derives the PLAN grant from tool CATEGORY, so a plugin's read tool is in and web_fetch is out", async () => {
+    // The grant used to be a written list of tool NAMES, three of which named
+    // one plugin's tools — host code carrying a plugin's vocabulary. Reading
+    // `requiredTier(category)` off the registry instead means a plugin's read
+    // tool is granted for what it declares, and a tool the registry calls
+    // `network` (web_fetch, always, by design) is not read-tier and so is not
+    // in plan mode at all.
+    const { store, cleanup } = tempBoard();
+    try {
+      const created = await store.create({ title: "category derivation" });
+      if (created.status !== "created") throw new Error("setup failed");
+
+      const { runner, calls } = fakeRunner();
+      const { gate } = fakeGate("allow-once");
+      const engine = createWorkBoardEngine({
+        store,
+        getRunner: () => runner,
+        approvalGate: gate,
+        emitProgress: () => {},
+      });
+
+      expect((await engine.runItem(created.itemId)).status).toBe("completed");
+      const granted = calls[0].sourceTools;
+
+      // (a) every read-tier tool, whoever owns it — including a plugin's.
+      expect(granted).toEqual(expect.arrayContaining(["read_file", "grep_files", "sample_lookup"]));
+      // (b) nothing above the read tier: write, shell, network, meta.
+      expect(granted).not.toContain("write_file");
+      expect(granted).not.toContain("run_shell");
+      expect(granted).not.toContain("web_fetch");
+      expect(granted).not.toContain("agent_spawn");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("stops the run rather than widening when the registry holds no read-tier tool", async () => {
+    // An empty `sourceTools` reads to the runner as "the whole parent
+    // registry", so an empty derivation must fail the run instead of handing
+    // the plan agent the surface it was scoped away from.
+    const { store, cleanup } = tempBoard();
+    try {
+      const created = await store.create({ title: "empty derivation" });
+      if (created.status !== "created") throw new Error("setup failed");
+
+      const { runner, calls } = fakeRunner();
+      const { gate } = fakeGate("allow-once");
+      const engine = createWorkBoardEngine({
+        store,
+        getRunner: () => ({
+          ...runner,
+          parentToolRegistry: () => new ToolRegistry(),
+        } as unknown as SubAgentRunner),
+        approvalGate: gate,
+        emitProgress: () => {},
+      });
+
+      const result = await engine.runItem(created.itemId);
+      expect(result.status).toBe("error");
+      expect(result.reason).toContain("read-tier");
+      expect(calls).toHaveLength(0);
     } finally {
       await cleanup();
     }

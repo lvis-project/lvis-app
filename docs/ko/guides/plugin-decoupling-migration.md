@@ -27,7 +27,6 @@
 2. PluginRuntime 확장
 - `getPluginManifest(pluginId)`
 - `listPluginManifests()`
-- `findPluginIdByCapability(capability)`
 - `listPluginIdsByCapability(capability)`
 - `listIpcBindings()`
 

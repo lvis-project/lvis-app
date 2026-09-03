@@ -14,6 +14,9 @@ import { WorkBoardStore } from "../../main/work-board-store.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import type { WorkItemListResult, WorkItemResolved } from "../../shared/work-board-types.js";
 import type { TranscriptStorage } from "../run-transcript.js";
+import { ToolRegistry } from "../../tools/registry.js";
+import { createDynamicTool } from "../../tools/base.js";
+import type { ToolCategory } from "../../shared/permission-review-status.js";
 
 /** Board reader stub returning a fixed `ok` list (structurally satisfies the
  * narrow reader interfaces used by the due-soon scanner and the reporter). */
@@ -90,4 +93,42 @@ export function scriptedApprovalGate(choice: ApprovalChoice): {
     },
   } as unknown as ApprovalGate;
   return { gate, requests };
+}
+
+/**
+ * The parent {@link ToolRegistry} a work-board run is scoped from — one tool
+ * per permission category, plus a plugin-owned read tool.
+ *
+ * The plan phase derives its grant from `requiredTier(category)`, so a suite
+ * asserting what plan mode receives needs a registry whose categories are the
+ * variable. It is a real registry rather than a stub: the derivation reads the
+ * same `listAll()` the runner narrows, and a stub would let the two drift.
+ */
+export function boardParentToolRegistry(): ToolRegistry {
+  const registry = new ToolRegistry();
+  const tool = (name: string, category: ToolCategory, pluginId?: string) =>
+    createDynamicTool({
+      name,
+      description: name,
+      source: pluginId ? "plugin" : "builtin",
+      category,
+      // The registry requires a meta tool to say how it is decided; the other
+      // categories may not carry an override at all.
+      ...(category === "meta" ? { decisionOverride: "ask" as const } : {}),
+      ...(pluginId ? { pluginId } : {}),
+      jsonSchema: { type: "object" },
+      execute: async () => ({ output: "", isError: false }),
+    });
+  registry.registerBatch([
+    tool("read_file", "read"),
+    tool("grep_files", "read"),
+    tool("write_file", "write"),
+    tool("run_shell", "shell"),
+    tool("web_fetch", "network"),
+    tool("agent_spawn", "meta"),
+    // A plugin's own read tool. Plan mode grants it because of the category it
+    // declares — the host names no plugin anywhere in the derivation.
+    tool("sample_lookup", "read", "sample-plugin"),
+  ]);
+  return registry;
 }

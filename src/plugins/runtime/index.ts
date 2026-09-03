@@ -7247,17 +7247,6 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     return result;
   }
 
-  findPluginIdByCapability(capability: string): string | undefined {
-    const matches = this.listPluginIdsByCapability(capability);
-    if (matches.length > 1) {
-      log.warn(
-        `Multiple plugins declare capability '${capability}': ${matches.join(", ")}. ` +
-        `Using '${matches[0]}'. Ensure only one plugin provides this capability.`,
-      );
-    }
-    return matches[0];
-  }
-
   listPluginIdsByCapability(capability: string): string[] {
     const result: string[] = [];
     for (const [pluginId, plugin] of this.plugins) {

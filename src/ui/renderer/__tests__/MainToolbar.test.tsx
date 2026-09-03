@@ -138,6 +138,24 @@ describe("MainToolbar", () => {
     expect(screen.queryByTestId("app-update-badge-available")).toBeNull();
   });
 
+  it("draws the Dev badge as the band's shared status pill, keyboard hint and all", () => {
+    // It used to re-assemble the pill out of a ghost Button with its own font
+    // and padding, so the one control the band draws twice looked like two
+    // shapes. The keyboard hint rides along as the pill's trailing slot; the
+    // accessible name is still the control's, not the hint's.
+    vi.stubGlobal("__lvisDevMode", true);
+    const onOpenDevTools = vi.fn();
+    renderWithProvider(defaultProps({ onOpenDevTools }));
+
+    const pill = screen.getByTestId("dev-tools-toggle");
+    expect(pill.getAttribute("aria-label")).toBe("Dev Tools (Cmd/Ctrl+Shift+D)");
+    expect(pill.textContent).toContain("Dev");
+    expect(pill.textContent).toContain("⇧⌘D");
+
+    fireEvent.click(pill);
+    expect(onOpenDevTools).toHaveBeenCalledOnce();
+  });
+
   it("no longer renders the work-panel toggle (each chat group owns its panel)", () => {
     // One window-level button cannot mean the right thing once more than one
     // conversation is on screen, so the control moved into the group header.

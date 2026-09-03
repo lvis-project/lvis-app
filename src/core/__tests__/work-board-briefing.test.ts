@@ -19,7 +19,10 @@ import { createWorkBoardEngine } from "../work-board-engine.js";
 import type { SubAgentRunner } from "../../engine/subagent-runner.js";
 import type { ApprovalGate } from "../../permissions/approval-gate.js";
 import { BRIEFING_PROPOSAL_SOURCE_ID } from "../../shared/work-board-types.js";
-import { tempBoardStore as tempBoard } from "../../work-board/__tests__/board-test-fixtures.js";
+import {
+  boardParentToolRegistry,
+  tempBoardStore as tempBoard,
+} from "../../work-board/__tests__/board-test-fixtures.js";
 
 interface SurveySpawn {
   title: string;
@@ -36,7 +39,9 @@ function fakeRunner(answers: string[]): {
   spawns: SurveySpawn[];
 } {
   const spawns: SurveySpawn[] = [];
+  const registry = boardParentToolRegistry();
   const runner = {
+    parentToolRegistry: () => registry,
     async spawn(input: SurveySpawn) {
       spawns.push(input);
       return {
@@ -102,6 +107,7 @@ describe("WorkBoardEngine — briefing survey", () => {
       // Read-only at the registry, not merely in the prompt.
       expect(spawn.sourceTools).toContain("read_file");
       expect(spawn.sourceTools).not.toContain("write_file");
+      expect(spawn.sourceTools).not.toContain("web_fetch");
       expect(spawn.profileMode).toBe("plan");
       // Autonomous: it is told there is nobody to ask.
       expect(spawn.instructions).toContain("AUTONOMOUSLY");
@@ -249,7 +255,9 @@ describe("WorkBoardEngine — briefing survey", () => {
   it("surfaces a survey that could not run as an error", async () => {
     const { store, cleanup } = tempBoard();
     try {
+      const registry = boardParentToolRegistry();
       const runner = {
+        parentToolRegistry: () => registry,
         async spawn() {
           return {
             summary: "no LLM provider configured",
@@ -278,7 +286,9 @@ describe("WorkBoardEngine — briefing survey", () => {
       let release: (() => void) | undefined;
       const gate = new Promise<void>((resolve) => { release = resolve; });
       let spawnCount = 0;
+      const registry = boardParentToolRegistry();
       const runner = {
+        parentToolRegistry: () => registry,
         async spawn() {
           spawnCount += 1;
           await gate;
