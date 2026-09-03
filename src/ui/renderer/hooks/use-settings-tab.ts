@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import { normalizeSettingsTab, type SettingsTab } from "../../../shared/settings-tabs.js";
+import { usePrefersReducedMotion } from "./use-prefers-reduced-motion.js";
 
 export interface UseSettingsTabResult {
   /** Which settings page the inline panel is on. */
@@ -100,6 +101,13 @@ export function useSettingsSectionArrival(
   onApplied: () => void,
 ): void {
   const [ringed, setRinged] = useState<HTMLElement | null>(null);
+  const reducedMotion = usePrefersReducedMotion();
+
+  // Read through a ref, not a dependency. Arrival is one event: re-running the
+  // effect because the OS toggle flipped would scroll and re-ring a section the
+  // user navigated away from reading minutes ago.
+  const reducedMotionRef = useRef(reducedMotion);
+  reducedMotionRef.current = reducedMotion;
 
   useEffect(() => {
     if (section === null) return;
@@ -110,9 +118,10 @@ export function useSettingsSectionArrival(
         `[data-settings-section="${section}"]`,
       );
       if (node) {
-        const reducedMotion =
-          window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-        node.scrollIntoView({ block: "start", behavior: reducedMotion ? "auto" : "smooth" });
+        node.scrollIntoView({
+          block: "start",
+          behavior: reducedMotionRef.current ? "auto" : "smooth",
+        });
         // The scroll already put the section where it belongs; focusing with
         // `preventScroll` moves the keyboard caret there without a second jump.
         node.focus({ preventScroll: true });
