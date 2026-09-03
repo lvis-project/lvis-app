@@ -402,6 +402,7 @@ function SideChatSession({
         }}
         onOpenPermanentDeny={approvals.openPermanentDeny}
         interactionLocked={approvalHead !== null && approvals.lockedRequestId === approvalHead.id}
+        reviewerSuggestion={approvals.reviewerSuggestion}
       />
     </div>
   );

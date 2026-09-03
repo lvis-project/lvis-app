@@ -27,6 +27,7 @@ export function approvalSurfaceStub(): ApprovalSurfaceContextValue {
     openPermanentDeny: vi.fn(),
     lockedRequestId: null,
     proposal: null,
+    reviewerSuggestion: null,
   };
 }
 

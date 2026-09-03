@@ -167,7 +167,7 @@
     "src/ui/renderer/__tests__/AppNotificationToast.test.tsx": 1,
     "src/ui/renderer/__tests__/AppPluginAuth.test.tsx": 1,
     "src/ui/renderer/__tests__/AssistantCard.test.tsx": 2,
-    "src/ui/renderer/__tests__/ChatView.test.tsx": 12,
+    "src/ui/renderer/__tests__/ChatView.test.tsx": 4,
     "src/ui/renderer/__tests__/CompactedToolResult.test.tsx": 1,
     "src/ui/renderer/__tests__/FileEditDiff.test.tsx": 1,
     "src/ui/renderer/__tests__/PluginConfigTab.test.tsx": 4,

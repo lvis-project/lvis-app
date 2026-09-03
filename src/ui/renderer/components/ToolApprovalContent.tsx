@@ -19,6 +19,7 @@ import { ChevronDown } from "lucide-react";
 import { buildApprovalScopeOptions } from "../../../permissions/approval-scope-options.js";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
+import type { ReviewerSuggestion } from "../hooks/use-permission-signals.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
 import type {
   ParentEscalationCause,
@@ -456,6 +457,74 @@ function ParentEscalationBand({ notice }: { notice: ParentEscalationNotice }) {
   );
 }
 
+/**
+ * Offers to hand the reviewing over to the LLM reviewer, at the moment the
+ * user is answering yet another ask by hand.
+ *
+ * The suggestion is about the run of approvals the user just made, not about
+ * this one request, so it is deliberately quieter than every other band here:
+ * it must never read as part of what is being asked. Enabling is one gesture
+ * and the failure of that gesture stays inside the band, because the decision
+ * the card exists for has to remain answerable either way.
+ */
+function ReviewerSuggestionBand({ suggestion }: { suggestion: ReviewerSuggestion }) {
+  const { t: tBand } = useTranslation();
+  return (
+    <div
+      className="flex min-w-0 items-start gap-2 rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-faint) px-3 py-2"
+      data-testid="reviewer-suggestion-band"
+      data-reviewer-suggestion-reason={suggestion.reason}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-warning">
+          {tBand("chatView.permissionReviewSuggestionTitle")}
+        </p>
+        <p className="mt-0.5 break-words text-[11px] text-muted-foreground">
+          {suggestion.reason === "allow-always"
+            ? tBand("chatView.permissionReviewSuggestionAllowAlways")
+            : tBand("chatView.permissionReviewSuggestionRepeat", {
+                count: suggestion.allowCount,
+                minutes: Math.max(1, Math.round(suggestion.windowMs / 60000)),
+              })}
+        </p>
+        {suggestion.error ? (
+          <p
+            className="mt-0.5 break-words text-[10px] text-destructive"
+            data-testid="reviewer-suggestion-error"
+          >
+            {suggestion.error}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          disabled={suggestion.busy}
+          data-testid="reviewer-suggestion-enable"
+          onClick={suggestion.onEnable}
+        >
+          {suggestion.busy
+            ? tBand("chatView.permissionReviewSuggestionBusy")
+            : tBand("chatView.permissionReviewSuggestionAction")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          data-testid="reviewer-suggestion-dismiss"
+          onClick={suggestion.onDismiss}
+        >
+          {tBand("chatView.permissionReviewSuggestionDismiss")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function ToolApprovalContent({
   open,
   request,
@@ -465,6 +534,7 @@ export function ToolApprovalContent({
   onOpenPermanentDeny,
   interactionLocked = false,
   proposedChoice = null,
+  reviewerSuggestion = null,
 }: {
   open: boolean;
   request: ApprovalRequest | null;
@@ -485,6 +555,8 @@ export function ToolApprovalContent({
   interactionLocked?: boolean;
   /** Approval-sentence preselection: focuses the named decision button. */
   proposedChoice?: ApprovalChoice | null;
+  /** The window's held reviewer suggestion; `null` draws no band. */
+  reviewerSuggestion?: ReviewerSuggestion | null;
 }) {
   const { t: tHook } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -987,6 +1059,16 @@ export function ToolApprovalContent({
                 it must not sit below a fold or inside one card variant. */}
             {request.parentEscalation ? (
               <ParentEscalationBand notice={request.parentEscalation} />
+            ) : null}
+
+            {/* Below the escalation band, above the impact summary. The
+                escalation band accounts for THIS ask and the user needs it to
+                answer; the reviewer suggestion is about the run of asks around
+                it and offers a settings change. Request context first, standing
+                advice second — the reverse would put an offer the user can
+                ignore ahead of the fact they cannot. */}
+            {reviewerSuggestion ? (
+              <ReviewerSuggestionBand suggestion={reviewerSuggestion} />
             ) : null}
 
             {!isRationaleApproval && (

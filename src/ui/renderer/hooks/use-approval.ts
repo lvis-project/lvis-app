@@ -12,6 +12,7 @@ import {
 import { approvalQueueReducer } from "../../../lib/approval-queue-reducer.js";
 import type { UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import type { ApprovalChoice, ApprovalDecision, ApprovalRequest } from "../types.js";
+import type { ReviewerSuggestion } from "./use-permission-signals.js";
 import { errorMessage } from "../../../shared/error-message.js";
 
 export type ApprovalDecisionExtras = Pick<ApprovalDecision, "elicitationContent">;
@@ -298,6 +299,13 @@ export interface ApprovalSurfaceContextValue extends ApprovalQueueApi {
   lockedRequestId: string | null;
   /** `/allow <sentence>` proposal: the request it names and the choice to pre-select. */
   proposal: { requestId: string; choice: ApprovalChoice } | null;
+  /**
+   * The window's held reviewer suggestion, drawn as a band inside whichever
+   * card is up. It is one aggregate over a window of approvals, so it belongs
+   * to the surface value rather than to a request: every dock offers the same
+   * one, and acting on it in any card ends it in all of them.
+   */
+  reviewerSuggestion: ReviewerSuggestion | null;
 }
 
 const ApprovalSurfaceContext = createContext<ApprovalSurfaceContextValue | null>(null);
