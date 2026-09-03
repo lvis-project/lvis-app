@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 190
+ * Fragments: 188
  */
 import { en as en_app } from "./app.js";
 import { en as en_appearanceTab } from "./appearanceTab.js";
@@ -106,7 +106,6 @@ import { en as en_dockedApprovalCard } from "./dockedApprovalCard.js";
 import { en as en_errorBoundary } from "./errorBoundary.js";
 import { en as en_executiveGraphite } from "./executiveGraphite.js";
 import { en as en_fileEditDiff } from "./fileEditDiff.js";
-import { en as en_firstTaskProposals } from "./firstTaskProposals.js";
 import { en as en_forest } from "./forest.js";
 import { en as en_formatIpcError } from "./formatIpcError.js";
 import { en as en_generalTab } from "./generalTab.js";
@@ -144,7 +143,6 @@ import { en as en_pluginGridButton } from "./pluginGridButton.js";
 import { en as en_pluginInstallDialog } from "./pluginInstallDialog.js";
 import { en as en_pluginPerfTab } from "./pluginPerfTab.js";
 import { en as en_pluginUninstallDialog } from "./pluginUninstallDialog.js";
-import { en as en_postTourFirstTask } from "./postTourFirstTask.js";
 import { en as en_privacyTab } from "./privacyTab.js";
 import { en as en_reasoningCard } from "./reasoningCard.js";
 import { en as en_remoteA2aActionButton } from "./remoteA2aActionButton.js";
@@ -298,7 +296,6 @@ export const generatedEn: Record<string, string> = {
   ...en_errorBoundary,
   ...en_executiveGraphite,
   ...en_fileEditDiff,
-  ...en_firstTaskProposals,
   ...en_forest,
   ...en_formatIpcError,
   ...en_generalTab,
@@ -336,7 +333,6 @@ export const generatedEn: Record<string, string> = {
   ...en_pluginInstallDialog,
   ...en_pluginPerfTab,
   ...en_pluginUninstallDialog,
-  ...en_postTourFirstTask,
   ...en_privacyTab,
   ...en_reasoningCard,
   ...en_remoteA2aActionButton,

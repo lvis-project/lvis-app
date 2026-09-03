@@ -1467,6 +1467,9 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 │   ├── 출장-절차.md     # 개별 기억 파일
 │   └── 분기-보고서-템플릿.md
 ├── plugins/<id>/notes/  # 플러그인 자체 메모는 자기 디렉토리에 격리
+├── onboarding/          # 첫 실행 안내 도메인
+│   ├── tour-state.json  # SpotlightTour 진행/완료 상태
+│   └── proposals.json   # 플러그인 온보딩 제안에 사용자가 준 답
 ├── sessions/            # LVIS session history
 │   └── <session-id>.jsonl
 ├── audit/               # AuditLogger (회전·retention)
@@ -3115,6 +3118,7 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 | `notificationEvents` | `Array<{ event, titleField?, bodyField? }>` | `registerPluginNotifications()` 가 manifest 만 읽어 OS 알림 핸들러를 자동 배선. |
 | `ui` | `PluginUiExtension[]` | UI slot 마운트 명세. manifest slot key 는 현재 historical `"sidebar"` 값을 사용하지만, 렌더링 표면은 플러그인 뷰/분리 창 경로가 담당한다. |
 | `publisher` | string | 감사 로그·마켓플레이스 표시. |
+| `onboarding` | `PluginOnboardingSpec` (선택) | 첫 실행 안내 선언. `firstTask` 는 투어 직후 제안할 한 건, `highlights[]` 는 기능 소개·신규 기능 홍보를 최대 5건이며 각 항목의 `id` 는 플러그인 안에서 유일해야 한다. 모두 inert metadata 다. 호스트가 타일 오버레이 카드로 한 번씩 물어보고 사용자의 답(승인 / 다음에 다시 보기 / 그만 보기)을 `~/.lvis/onboarding/proposals.json` 에 `<pluginId>:<proposalId>` 키로 기록한다. 승인했을 때 벌어지는 일은 `action` 이 정하며 (`composer` 프리필 / `settings` 탭 이동 / 없음), 턴을 시작하거나 도구를 호출하지 않는다. |
 | `configSchema` | `PluginConfigSchema` (선택) | JSON Schema draft-07 subset으로 Host의 typed config form을 선언한다.                                                                                                                                                                                                                                                                                                              |
 
 > **제거된 계약:** `toolSchemas`, `uiActions`, `uiTool`, `uiAction`,

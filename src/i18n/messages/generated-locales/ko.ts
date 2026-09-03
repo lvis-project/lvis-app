@@ -97,7 +97,6 @@ import { ko as ko_dockedApprovalCard } from "../generated/dockedApprovalCard.js"
 import { ko as ko_errorBoundary } from "../generated/errorBoundary.js";
 import { ko as ko_executiveGraphite } from "../generated/executiveGraphite.js";
 import { ko as ko_fileEditDiff } from "../generated/fileEditDiff.js";
-import { ko as ko_firstTaskProposals } from "../generated/firstTaskProposals.js";
 import { ko as ko_forest } from "../generated/forest.js";
 import { ko as ko_formatIpcError } from "../generated/formatIpcError.js";
 import { ko as ko_generalTab } from "../generated/generalTab.js";
@@ -135,7 +134,6 @@ import { ko as ko_pluginGridButton } from "../generated/pluginGridButton.js";
 import { ko as ko_pluginInstallDialog } from "../generated/pluginInstallDialog.js";
 import { ko as ko_pluginPerfTab } from "../generated/pluginPerfTab.js";
 import { ko as ko_pluginUninstallDialog } from "../generated/pluginUninstallDialog.js";
-import { ko as ko_postTourFirstTask } from "../generated/postTourFirstTask.js";
 import { ko as ko_privacyTab } from "../generated/privacyTab.js";
 import { ko as ko_reasoningCard } from "../generated/reasoningCard.js";
 import { ko as ko_remoteA2aActionButton } from "../generated/remoteA2aActionButton.js";
@@ -289,7 +287,6 @@ export const koMessages: Record<string, string> = {
   ...ko_errorBoundary,
   ...ko_executiveGraphite,
   ...ko_fileEditDiff,
-  ...ko_firstTaskProposals,
   ...ko_forest,
   ...ko_formatIpcError,
   ...ko_generalTab,
@@ -327,7 +324,6 @@ export const koMessages: Record<string, string> = {
   ...ko_pluginInstallDialog,
   ...ko_pluginPerfTab,
   ...ko_pluginUninstallDialog,
-  ...ko_postTourFirstTask,
   ...ko_privacyTab,
   ...ko_reasoningCard,
   ...ko_remoteA2aActionButton,

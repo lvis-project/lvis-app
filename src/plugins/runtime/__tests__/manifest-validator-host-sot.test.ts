@@ -24,6 +24,7 @@ import type { PluginManifest } from "../../types.js";
 import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
+import { MAX_PLUGIN_ONBOARDING_HIGHLIGHTS } from "../../public-contract.js";
 import { TOOL_NAME_PATTERN, isValidToolName } from "../../../tools/types.js";
 
 const CRLF_GUARD_PATTERN = "[\\r\\n]";
@@ -56,7 +57,7 @@ function patternNodesMissingCrlfGuard(value: unknown, path = "$"): string[] {
   return missing;
 }
 
-function manifestWithFirstTask(firstTask: Record<string, unknown>,
+function manifestWithOnboarding(onboarding: Record<string, unknown>,
 ): Record<string, unknown> {
   return agentPluginsDocument({
     id: "sample-onboarding-plugin",
@@ -66,8 +67,13 @@ function manifestWithFirstTask(firstTask: Record<string, unknown>,
     publisher: "LVIS",
     entry: "dist/index.js",
     tools: [],
-    onboarding: { firstTask },
+    onboarding,
   });
+}
+
+function manifestWithFirstTask(firstTask: Record<string, unknown>,
+): Record<string, unknown> {
+  return manifestWithOnboarding({ firstTask });
 }
 
 const validFirstTask = {
@@ -84,8 +90,13 @@ const validFirstTask = {
 
 describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("enforces the same tools[].name grammar the schema pins", () => {
-    const toolDefinition = (manifestSchema as { definitions: Record<string, { properties: Record<string, { pattern?: string }> }> })
-      .definitions.tool;
+    // Narrowed to the ONE definition this reads. A `Record` over every
+    // definition stopped overlapping once a definition without `properties`
+    // landed (`pluginOnboardingAction` is a `oneOf`), and widening the record
+    // to make that assignable would stop typing what is actually read.
+    const toolDefinition = (manifestSchema as {
+      definitions: { tool: { properties: Record<string, { pattern?: string }> } };
+    }).definitions.tool;
     expect(toolDefinition.properties.name.pattern).toBe(TOOL_NAME_PATTERN.source);
     expect(isValidToolName("sample_tool")).toBe(true);
     expect(isValidToolName("_private")).toBe(true);
@@ -284,7 +295,106 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     expect(validator(manifestWithFirstTask(firstTask))).toBe(false);
   });
 
-  it("REJECTS a tool _meta carrying the legacy xyz.lvis/pathFields key (fail-closed — the dual-read was removed)", async () => {
+  it("accepts declared onboarding highlights alongside a first task", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator(manifestWithOnboarding({
+        firstTask: validFirstTask,
+        highlights: [
+          {
+            id: "pick-a-folder",
+            priority: 20,
+            copy: {
+              en: {
+                headline: "Choose a folder to index",
+                body: "Name one folder and search it in plain language.",
+                actionLabel: "Choose a folder",
+              },
+            },
+            action: { kind: "composer", prompt: "Add a folder to index" },
+          },
+          {
+            id: "open-the-settings",
+            copy: {
+              en: {
+                headline: "Set the scan schedule",
+                body: "Decide when the index refreshes.",
+                actionLabel: "Open settings",
+              },
+            },
+            action: { kind: "settings", path: "plugin-config" },
+          },
+          {
+            id: "nothing-to-do",
+            copy: {
+              en: {
+                headline: "Search now understands dates",
+                body: "Ask for last week and it means last week.",
+                actionLabel: "Got it",
+              },
+            },
+            action: { kind: "none" },
+          },
+        ],
+      })),
+    ).toBe(true);
+  });
+
+  const validHighlight = {
+    id: "pick-a-folder",
+    copy: {
+      en: {
+        headline: "Choose a folder to index",
+        body: "Name one folder and search it in plain language.",
+        actionLabel: "Choose a folder",
+      },
+    },
+    action: { kind: "none" },
+  };
+
+  it.each([
+    ["missing copy", { id: "pick-a-folder", action: { kind: "none" } }],
+    ["missing action", { id: "pick-a-folder", copy: validHighlight.copy }],
+    ["missing id", { copy: validHighlight.copy, action: { kind: "none" } }],
+    ["non-kebab id", { ...validHighlight, id: "Pick_A_Folder" }],
+    ["missing English fallback", {
+      ...validHighlight,
+      copy: { ko: { headline: "h", body: "b", actionLabel: "a" } },
+    }],
+    ["composer action without a prompt", {
+      ...validHighlight,
+      action: { kind: "composer" },
+    }],
+    ["settings action without a path", {
+      ...validHighlight,
+      action: { kind: "settings" },
+    }],
+    ["unknown action kind", { ...validHighlight, action: { kind: "run-tool" } }],
+    ["action carrying an extra field", {
+      ...validHighlight,
+      action: { kind: "none", autoSubmit: true },
+    }],
+    ["a composerPrompt smuggled into highlight copy", {
+      ...validHighlight,
+      copy: {
+        en: { ...validHighlight.copy.en, composerPrompt: "do the thing" },
+      },
+    }],
+  ])("rejects malformed onboarding highlight: %s", async (_name, highlight) => {
+    const validator = await buildManifestValidator();
+    expect(validator(manifestWithOnboarding({ highlights: [highlight] }))).toBe(false);
+  });
+
+  it("rejects more highlights than a plugin may declare", async () => {
+    const validator = await buildManifestValidator();
+    const tooMany = Array.from({ length: MAX_PLUGIN_ONBOARDING_HIGHLIGHTS + 1 }, (_, i) => ({
+      ...validHighlight,
+      id: `highlight-${i}`,
+    }));
+    expect(validator(manifestWithOnboarding({ highlights: tooMany }))).toBe(false);
+  });
+
+    it("REJECTS a tool _meta carrying the legacy xyz.lvis/pathFields key (fail-closed — the dual-read was removed)", async () => {
     // The `_meta` vendor namespace rename (`xyz.lvis/* → lvisai/*`) removed the
     // transitional dual-read AND the schema's legacy property. Because tool `_meta`
     // is `additionalProperties:false`, a manifest still declaring the legacy key is

@@ -9,6 +9,10 @@
 //   - queueIndex / queueTotal counter (shown when queue ≥ 2)
 //   - dismiss (X) — permanent removal
 //   - snooze removed (production smoke test: UX risk)
+//   - a proposal card ANSWERS instead of confirming (see `dispositions`). That
+//     is not the snooze above returning: a snooze re-showed a result nobody had
+//     been asked about, on a timer; an answer is what the user gives to a
+//     question the card put to them, and the host stores it.
 //
 // Isolation: only summary and session id flow here. Full content stays in the
 // normal conversation session model.
@@ -76,6 +80,24 @@ export interface OverlayCardProps {
 
   /** `app` = an MCP App's `ui/message` staged for user confirmation (no turn in flight). */
   kind?: "routine" | "plugin" | "app";
+
+  /**
+   * A proposal is a question the user answers ONCE, so its card carries the
+   * answer instead of a single confirm: `onAccept` runs the proposed action,
+   * and the two refusals differ in whether the question may come back.
+   *
+   * This is not the snooze the header says was removed. A snooze re-showed a
+   * RESULT the user had already been handed, on a timer, having asked nothing;
+   * these three are the answers to a question that WAS asked, and the host
+   * stores whichever one it gets. When set, they replace the single primary
+   * action — `primaryActionLabel` is then the accept label, supplied by the
+   * proposing plugin.
+   */
+  dispositions?: {
+    onAccept: () => void;
+    onLater: () => void;
+    onNever: () => void;
+  };
 }
 
 function relativeTimeLabels(t: (key: string, vars?: Record<string, string | number>) => string): RelativeTimeLabels {
@@ -104,6 +126,7 @@ export function OverlayCard({
   expanded,
   onExpandedChange,
   kind = "routine",
+  dispositions,
 }: OverlayCardProps) {
   const { t } = useTranslation();
   const [isOverflowing, setIsOverflowing] = useState(false);
@@ -265,7 +288,41 @@ export function OverlayCard({
         ) : (
           <p className="text-xs text-muted-foreground/(--opacity-half)">{t("overlayCard.noSummary")}</p>
         )}
-        {!running && !onPrimaryAction && notice && (
+        {!running && dispositions && (
+          <div
+            className="mt-2 flex flex-wrap items-center justify-end gap-1.5"
+            data-testid="overlay-card-dispositions"
+          >
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs text-muted-foreground hover:text-foreground"
+              data-testid="overlay-card-disposition-never"
+              onClick={dispositions.onNever}
+            >
+              {t("overlayCard.proposalNeverButton")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs text-muted-foreground hover:text-foreground"
+              data-testid="overlay-card-disposition-later"
+              onClick={dispositions.onLater}
+            >
+              {t("overlayCard.proposalLaterButton")}
+            </Button>
+            <Button
+              size="sm"
+              variant="default"
+              className="h-7 text-xs"
+              data-testid="overlay-card-disposition-accept"
+              onClick={dispositions.onAccept}
+            >
+              {primaryActionLabel ?? t("overlayCard.pluginPrimaryAction")}
+            </Button>
+          </div>
+        )}
+        {!running && !dispositions && !onPrimaryAction && notice && (
           <p
             data-testid="overlay-card-notice"
             className="mt-2 text-[11px] text-muted-foreground/(--opacity-stronger)"
@@ -273,7 +330,7 @@ export function OverlayCard({
             {notice}
           </p>
         )}
-        {!running && onPrimaryAction && (
+        {!running && !dispositions && onPrimaryAction && (
           <div className="mt-2 flex justify-end">
             <Button
               size="sm"

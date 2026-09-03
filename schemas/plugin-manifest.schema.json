@@ -956,8 +956,143 @@
               }
             }
           }
+        },
+        "highlights": {
+          "type": "array",
+          "description": "Capability highlights and new-feature promotions. The host proposes each one once and remembers the user's answer, so the ceiling is a nag budget rather than a storage limit.",
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/definitions/pluginOnboardingHighlight"
+          }
         }
       }
+    },
+    "pluginOnboardingHighlight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "copy",
+        "action"
+      ],
+      "properties": {
+        "id": {
+          "description": "Stable kebab-case id, unique within the declaring plugin. Half of the key the user's answer is stored under, so renaming it asks the question again.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "not": {
+            "pattern": "[\\r\\n]"
+          },
+          "maxLength": 64
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "copy": {
+          "type": "object",
+          "description": "Complete localized display copy. English is required as the deterministic fallback.",
+          "minProperties": 1,
+          "maxProperties": 16,
+          "required": [
+            "en"
+          ],
+          "propertyNames": {
+            "pattern": "^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$",
+            "not": {
+              "pattern": "[\\r\\n]"
+            },
+            "maxLength": 35
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/pluginHighlightCopy"
+          }
+        },
+        "action": {
+          "$ref": "#/definitions/pluginOnboardingAction"
+        }
+      }
+    },
+    "pluginHighlightCopy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headline",
+        "body",
+        "actionLabel"
+      ],
+      "properties": {
+        "headline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 320
+        },
+        "actionLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "pluginOnboardingAction": {
+      "description": "What accepting the highlight does. Inert on its own: the host performs the effect, and the two arms that do anything only move the user — text into the visible composer, or the settings view onto a tab.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "prompt"
+          ],
+          "properties": {
+            "kind": {
+              "const": "composer"
+            },
+            "prompt": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "settings"
+            },
+            "path": {
+              "description": "Settings are addressed by tab, so this is a settings tab id.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "none"
+            }
+          }
+        }
+      ]
     },
     "pluginFirstTaskCopy": {
       "type": "object",

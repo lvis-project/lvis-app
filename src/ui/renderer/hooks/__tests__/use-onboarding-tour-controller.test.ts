@@ -13,10 +13,12 @@ function createApi(options: {
   const getSettings = vi.fn(async () => ({
     features: { onboardingCompleted: options.onboardingCompleted ?? false },
   }));
+  const listPending = vi.fn(async () => ({ ok: true as const, pending: [] }));
   const api = {
     hasApiKey,
     getSettings,
     updateSettings,
+    onboarding: { listPending },
     tour: {
       getState: vi.fn(async () => ({
         ok: true,
@@ -29,12 +31,12 @@ function createApi(options: {
       start,
     },
   };
-  return { api: api as never, getSettings, hasApiKey, start, updateSettings };
+  return { api: api as never, getSettings, hasApiKey, listPending, start, updateSettings };
 }
 
 describe("useOnboardingTourController", () => {
   it("starts the optional tour once for a fresh keyless workspace and persists a dismissal once", async () => {
-    const { api, start, updateSettings } = createApi();
+    const { api, start, updateSettings, listPending } = createApi();
     const { result, rerender } = renderHook(() => useOnboardingTourController(api));
 
     await waitFor(() => expect(start).toHaveBeenCalledWith("first-boot-essentials"));
@@ -45,9 +47,36 @@ describe("useOnboardingTourController", () => {
     await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({
       features: { onboardingCompleted: true },
     }));
+    // A dismissal is not a completion: the user said they did not want to be
+    // walked through the app, so no proposal is put in front of them either.
+    expect(listPending).not.toHaveBeenCalled();
+
     act(() => result.current.onTourComplete());
     expect(updateSettings).toHaveBeenCalledTimes(1);
-    expect(result.current.tourCompleted).toBe(false);
+  });
+
+  it("asks the host for proposals once, after the tour completes", async () => {
+    const { api, start, listPending } = createApi();
+    const { result, rerender } = renderHook(() => useOnboardingTourController(api));
+
+    await waitFor(() => expect(start).toHaveBeenCalledWith("first-boot-essentials"));
+    expect(listPending).not.toHaveBeenCalled();
+
+    act(() => result.current.onTourComplete());
+    await waitFor(() => expect(listPending).toHaveBeenCalledTimes(1));
+
+    // The gate opens once per launch, however many times the tree re-renders.
+    rerender();
+    act(() => result.current.onTourComplete());
+    expect(listPending).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for proposals at boot for a returning user, who gets no tour", async () => {
+    const returning = createApi({ completedScenario: true });
+    renderHook(() => useOnboardingTourController(returning.api));
+
+    await waitFor(() => expect(returning.listPending).toHaveBeenCalledTimes(1));
+    expect(returning.start).not.toHaveBeenCalled();
   });
 
   it("does not start for a returning user or an already configured provider", async () => {

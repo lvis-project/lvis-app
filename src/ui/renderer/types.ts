@@ -85,6 +85,12 @@ export type { CheckpointTrigger, Checkpoint } from "../../memory/memory-manager.
 // Remote A2A action status is the controller's own status record.
 import type { RemoteA2AActionStatus } from "../../main/remote-a2a-action-controller.js";
 export type { RemoteA2AActionStatus };
+// Onboarding proposals are selected and stored in main; the renderer only
+// renders what it is handed and reports the answer back.
+import type {
+  OnboardingProposalDisposition,
+  PendingOnboardingProposal,
+} from "../../main/onboarding-proposal-store.js";
 
 // Plugin / hook trust rows and perf stats are the host row types.
 import type { PluginPerfStats } from "../../plugins/runtime/index.js";
@@ -683,6 +689,26 @@ export type LvisApi = {
       | { ok: false; error: string; message: string }
     >;
     onStart: (handler: (payload: { scenarioId: string }) => void) => () => void;
+  };
+  /**
+   * Plugin onboarding proposals — the host asks each declared proposal once and
+   * remembers the answer under `~/.lvis/onboarding/proposals.json`. Both calls
+   * stage the head of the remaining queue as an overlay card, so the renderer
+   * never chooses which proposal comes next.
+   */
+  onboarding: {
+    listPending: (locale: string) => Promise<
+      | { ok: true; pending: PendingOnboardingProposal[] }
+      | { ok: false; error: string; message: string }
+    >;
+    answer: (
+      key: string,
+      disposition: OnboardingProposalDisposition,
+      locale: string,
+    ) => Promise<
+      | { ok: true; pending: PendingOnboardingProposal[] }
+      | { ok: false; error: string; message: string }
+    >;
   };
   /** Open an http(s) URL in the system browser. Main-side rejects any other scheme. */
   openExternalUrl: (url: string) => Promise<{
