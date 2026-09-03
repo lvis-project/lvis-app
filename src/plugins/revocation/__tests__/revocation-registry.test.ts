@@ -8,7 +8,7 @@
  * fetch is faked with the test-only `online: false` flag, same convention
  * as `whitelist-registry.test.ts`.
  */
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // `evaluate()` before `init()` reports itself through the module logger,
 // because the audit sink it would otherwise use arrives via the very call that
@@ -24,14 +24,11 @@ const loggerMock = vi.hoisted(() => ({
 vi.mock("../../../lib/logger.js", () => ({
   createLogger: () => loggerMock,
 }));
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { RevocationCache, revocationRegistry } from "../revocation-registry.js";
 import { parseRevocationDocument } from "../revocation-schema.js";
 import { WHITELIST_PRIMARY_KEY_ID as REVOCATION_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
@@ -76,18 +73,7 @@ function makeSigned(opts: {
   return { body, signature: signEnvelopeFixture(body, testPrivateKey, testKeyId), doc };
 }
 
-const tempRoots: string[] = [];
-function freshUserData(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-revocation-test-"));
-  tempRoots.push(dir);
-  return dir;
-}
-
-afterAll(async () => {
-  for (const root of tempRoots) {
-    await cleanupTmpDir(root);
-  }
-});
+const freshUserData = useTempDirs("lvis-revocation-test-");
 
 beforeEach(() => {
   revocationRegistry.resetForTesting();

@@ -1,5 +1,4 @@
 import {
-  mkdtempSync,
   existsSync,
   readFileSync,
   statSync,
@@ -7,11 +6,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { platform } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import {
   MemorySecretStore,
   type SecretStore,
@@ -38,7 +36,6 @@ import {
   type InvocationAuditRecord,
 } from "../rationale-ticket-lifecycle.js";
 
-const directories: string[] = [];
 const TEST_SECRET = "rationale-invocation-journal-test-secret-v1";
 const CHECKPOINT_A = "rationale-invocation-journal-checkpoint-v1-a";
 const CHECKPOINT_B = "rationale-invocation-journal-checkpoint-v1-b";
@@ -119,11 +116,7 @@ function persistedSnapshot(filePath: string): {
   }).snapshot;
 }
 
-function directory(): string {
-  const value = mkdtempSync(join(tmpdir(), "lvis-invocation-journal-"));
-  directories.push(value);
-  return value;
-}
+const directory = useTempDirs("lvis-invocation-journal-");
 
 function uuid(value: number): string {
   return `00000000-0000-4000-8000-${value.toString(16).padStart(12, "0")}`;
@@ -247,12 +240,9 @@ function terminal(
   );
 }
 
-afterEach(async () => {
+afterEach(() => {
   controlsByInvocation.clear();
   sealStoresByPath.clear();
-  for (const value of directories.splice(0)) {
-    await cleanupTmpDir(value);
-  }
 });
 
 describe("DurableHostInvocationStartCasStore", () => {

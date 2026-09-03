@@ -1,7 +1,9 @@
-import { vi } from "vitest";
-import { closeSync, fstatSync, openSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { afterAll, vi } from "vitest";
+import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createTmpDirTracker } from "./support/tmp-dir-teardown.js";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type { IpcMainInvokeEvent } from "electron";
 import { IPC_APPROVAL_REQUEST } from "../permissions/approval-gate.js";
@@ -236,6 +238,35 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
  */
 export function readRepoFile(path: string): string {
   return readFileSync(resolve(REPO_ROOT, path), "utf8");
+}
+
+/**
+ * A factory for scratch directories under the OS temp dir, removed together
+ * when the suite finishes.
+ *
+ * Fourteen suites each carried the same three lines — `mkdtempSync`, push onto
+ * a suite-local array, return it — plus a hook to drain that array. The array
+ * is the part worth removing: each copy is another place a teardown can be
+ * written wrong or forgotten, and the directory a suite makes is the same
+ * artifact in every one of them. Registering the `afterAll` here means a suite
+ * declares only what it creates.
+ *
+ * `prefix` labels the suite's directories. A call may pass its own label when
+ * one suite makes directories for more than one purpose, which is why the four
+ * suites that took the prefix per call fold into the same helper as the ten
+ * that fixed it once.
+ *
+ * Removal goes through {@link createTmpDirTracker}, not a second `rm` ladder:
+ * the transient-lock retry that teardown needs has one owner
+ * (`support/tmp-dir-teardown.ts`) and a copy here is what that file exists to
+ * prevent.
+ */
+export function useTempDirs(prefix: string): (ownPrefix?: string) => string {
+  const tracker = createTmpDirTracker();
+  afterAll(async () => {
+    await tracker.cleanup();
+  });
+  return (ownPrefix = prefix) => tracker.track(mkdtempSync(join(tmpdir(), ownPrefix)));
 }
 
 /** A user transcript entry — the minimal shape every transcript suite starts from. */

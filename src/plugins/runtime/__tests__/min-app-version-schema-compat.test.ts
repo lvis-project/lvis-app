@@ -8,11 +8,11 @@
  * network-access-manifest).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
-import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
+import { pluginManifestWriter } from "../../__tests__/test-helpers.js";
 
 describe("manifest requires.minAppVersion — host-owned schema validator path", () => {
   let workDir: string;
@@ -23,21 +23,10 @@ describe("manifest requires.minAppVersion — host-owned schema validator path",
     await rm(workDir, { recursive: true, force: true });
   });
 
-  async function writeManifest(extra: Record<string, unknown>): Promise<string> {
-    const path = join(workDir, "plugin.json");
-    await writeFile(
-      path,
-      JSON.stringify(agentPluginsDocument({
-        id: "min-app-version-compat-test",
-        name: "Min App Version Compat Test",
-        description: "x",
-        version: "1.0.0",
-        entry: "dist/p.js",
-        tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-        ...extra,
-      })));
-    return path;
-  }
+  const writeManifest = pluginManifestWriter(
+    { id: "min-app-version-compat-test", name: "Min App Version Compat Test" },
+    () => workDir,
+  );
 
   it("accepts requires.minAppVersion under the real (additionalProperties:false) requires block — the local-indexer shape", async () => {
     const validator = await buildManifestValidator();

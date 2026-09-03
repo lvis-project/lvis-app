@@ -22,6 +22,7 @@ import {
   agentPluginsDocument,
   lvisSchemaProperties,
   permissiveManifestEnvelopeSchema,
+  pluginManifestWriter,
 } from "../../__tests__/test-helpers.js";
 
 describe("manifest hostSecrets.read[] validator (#893)", () => {
@@ -53,21 +54,10 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
     );
   }
 
-  async function writeManifest(extra: Record<string, unknown>): Promise<string> {
-    const path = join(workDir, "plugin.json");
-    await writeFile(
-      path,
-      JSON.stringify(agentPluginsDocument({
-        id: "host-secrets-test",
-        name: "Host Secrets Test",
-        description: "x",
-        version: "1.0.0",
-        entry: "dist/p.js",
-        tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-        ...extra,
-      })));
-    return path;
-  }
+  const writeManifest = pluginManifestWriter(
+    { id: "host-secrets-test", name: "Host Secrets Test" },
+    () => workDir,
+  );
 
   it("accepts a well-formed `llm.apiKey.<vendor>` allowlist", async () => {
     const path = await writeManifest({
