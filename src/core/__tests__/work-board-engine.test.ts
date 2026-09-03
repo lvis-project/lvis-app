@@ -20,6 +20,7 @@ import type { WorkBoardRunEvent } from "../../shared/work-board-types.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import { readRunTranscript } from "../../work-board/run-transcript.js";
 import {
+  boardParentToolRegistry,
   memTranscriptStorage,
   scriptedApprovalGate as fakeGate,
   tempBoardStore as tempBoard,
@@ -37,6 +38,7 @@ interface SpawnCall {
 /** Fake runner that records each spawn and returns a phase-specific summary. */
 function fakeRunner(): { runner: SubAgentRunner; calls: SpawnCall[] } {
   const calls: SpawnCall[] = [];
+  const registry = boardParentToolRegistry();
   const runner = {
     async spawn(input: {
       title: string;
@@ -62,6 +64,7 @@ function fakeRunner(): { runner: SubAgentRunner; calls: SpawnCall[] } {
         ok: true,
       };
     },
+    parentToolRegistry: () => registry,
   } as unknown as SubAgentRunner;
   return { runner, calls };
 }
@@ -96,7 +99,7 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
       expect(calls).toHaveLength(2);
       expect(calls[0].profileMode).toBe("plan");
       expect(calls[0].sourceTools).toContain("read_file");
-      expect(calls[0].sourceTools).not.toContain("web_fetch_disallowed");
+      expect(calls[0].sourceTools).not.toContain("write_file");
       expect(calls[1].profileMode).toBe("execute");
       // Execute omits sourceTools → full parent registry.
       expect(calls[1].sourceTools).toBeUndefined();
@@ -303,7 +306,9 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
    * a duplicate turn:1 row from this.
    */
   function floodingRunner(): SubAgentRunner {
+    const registry = boardParentToolRegistry();
     return {
+      parentToolRegistry: () => registry,
       async spawn(
         input: { profileMode?: string; originSessionId?: string },
         callbacks?: SubAgentSpawnCallbacks,

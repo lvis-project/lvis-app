@@ -40,8 +40,9 @@ const LITERAL_KEY = /\bt\(\s*"([a-zA-Z][\w]*(?:\.[\w-]+)+)"/g;
 
 describe("i18n keys used in source", () => {
   it("all resolve to a real catalog entry", () => {
-    // English is the fallback catalog and is loaded eagerly; the other six
-    // are lazy, and the parity check next door already proves they match it.
+    // English is the fallback catalog and is loaded eagerly; Korean, the only
+    // other supported locale, is lazy, and the parity check next door already
+    // proves it matches.
     const catalog = messages.en as Record<string, string>;
     const missing = new Map<string, string[]>();
 

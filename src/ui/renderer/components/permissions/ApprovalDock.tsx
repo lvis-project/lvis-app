@@ -5,6 +5,7 @@ import type { ApprovalDecisionExtras } from "../../hooks/use-approval.js";
 import type { ReviewerSuggestion } from "../../hooks/use-permission-signals.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import type { UserApprovalVerdict } from "../../../../shared/permissions-events.js";
+import { Badge } from "../../../../components/ui/badge.js";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import { MODAL_DIALOG_SELECTOR, TEST_IDS, testIdSelector } from "../../../../shared/test-ids.js";
 
@@ -354,13 +355,14 @@ export function ApprovalDock({
           {title}
         </h2>
         {remaining > 0 ? (
-          <span
-            className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
+          <Badge
+            variant="outline"
+            className="shrink-0 font-normal text-muted-foreground"
             data-testid={TEST_IDS.approvalDockQueueDepth}
             aria-label={t("toolApprovalDialog.pendingCount", { count: remaining })}
           >
             1 / {queue.length}
-          </span>
+          </Badge>
         ) : null}
       </header>
       <p id={descriptionId} className="sr-only">

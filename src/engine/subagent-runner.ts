@@ -33,7 +33,6 @@ import {
 } from "../shared/subagent-policy.js";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
-import { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type {
   TurnInputRequired,
   TurnStopReason,
@@ -2512,6 +2511,21 @@ export class SubAgentRunner {
   }
 
   /**
+   * The parent registry every child is scoped from — the same one
+   * `buildChildDeps` narrows with `sourceTools`.
+   *
+   * A caller that needs a SUBSET of the parent surface reads the registry's own
+   * per-tool `category` through this and derives the names, instead of writing
+   * a name list that has to be edited whenever a tool is added. Deriving is
+   * what keeps host code free of plugin-specific names: a plugin tool joins a
+   * derived set because of what it declares, not because the host learned it
+   * exists.
+   */
+  parentToolRegistry(): ToolRegistry {
+    return this.deps.toolRegistry;
+  }
+
+  /**
    * Resume-axis cumulative ceiling, scaled to the CONFIGURED budget so the
    * resume-loop protection stays proportional instead of becoming an absolute
    * ceiling that binds below what one spawn is allowed to run.
@@ -2653,20 +2667,10 @@ export class SubAgentRunner {
     // A builder carries mutable project/session overlay state. Never share it
     // with a child: doing so can make the child read the parent's project
     // memory, or leave child state behind for the next parent turn.
-    const parentPromptBuilder = this.deps.parentDeps.systemPromptBuilder;
-    const childSystemPromptBuilder = typeof parentPromptBuilder.createIsolated === "function"
-      ? parentPromptBuilder.createIsolated({
-          memoryManager: this.deps.subAgentMemoryManager,
-          toolRegistry: scopedRegistry,
-        })
-      // Hosts that do not implement the concrete builder must still fail
-      // closed: build a fresh one bound to the child's OWN memory store and
-      // scoped registry. Reusing the parent builder is what leaked the
-      // parent's project overlay into the child.
-      : new SystemPromptBuilder({
-          memoryManager: this.deps.subAgentMemoryManager,
-          toolRegistry: scopedRegistry,
-        });
+    const childSystemPromptBuilder = this.deps.parentDeps.systemPromptBuilder.createIsolated({
+      memoryManager: this.deps.subAgentMemoryManager,
+      toolRegistry: scopedRegistry,
+    });
 
     const childDeps: ConversationLoopDeps = {
       ...this.deps.parentDeps,

@@ -64,6 +64,8 @@ import {
 } from "../work-board/run-transcript.js";
 import type { SubAgentActivityUpdate } from "../engine/subagent-runner.js";
 import { errorMessage } from "../shared/error-message.js";
+import { requiredTier } from "../permissions/permission-manager.js";
+import type { ToolRegistry } from "../tools/registry.js";
 
 const log = createLogger("work-board-engine");
 
@@ -127,30 +129,37 @@ function makeTurnRecorder(
 }
 
 /**
- * Read-only tool surface for the PLAN phase. The plan agent investigates the
- * task but must NOT mutate state — so it gets list/search/read tools only. The
- * EXECUTE phase deliberately omits `sourceTools` (passes `undefined`) so the
- * runner grants the FULL parent registry, including other plugins' tools, with
- * only `agent_spawn` stripped. Naming the read-only set explicitly (rather than
- * relying on a posture hint) keeps the no-mutation guarantee enforced at the
- * registry, not just suggested in the prompt.
+ * Read-only tool surface for the PLAN phase, DERIVED from the parent registry:
+ * every registered tool whose permission category needs no more than the read
+ * tier (`requiredTier(category) === "read"`).
  *
- * The `index_*` entries are the document-index plugin's own read-only tools.
- * Naming them here grants nothing: a name the parent registry does not hold is
- * simply not granted, so the list degrades to the builtins when that plugin is
- * absent.
+ * The plan agent investigates the task but must NOT mutate state. Deriving the
+ * set from the registry keeps the no-mutation guarantee enforced where the
+ * permission manager itself enforces it, so plan mode and the gate cannot
+ * disagree about what "read" means — and it keeps plugin tool names out of host
+ * code: a plugin's read tools are granted because of the category they declare,
+ * with the host naming no plugin and holding no list to edit when one is
+ * installed or removed.
+ *
+ * The STATIC `category` decides. A tool that carries a `categoryForInput` reads
+ * as its declared category here, whatever a particular call's arguments would
+ * have made it: a category that depends on the input is not a read-tier tool.
+ * `web_fetch` is `network` by that rule and so is absent from plan mode, which
+ * is the registry's answer rather than this module's.
+ *
+ * The EXECUTE phase deliberately omits `sourceTools` (passes `undefined`) so
+ * the runner grants the FULL parent registry, including other plugins' tools,
+ * with only `agent_spawn` stripped.
  */
-const PLAN_READONLY_TOOLS: readonly string[] = [
-  "read_file",
-  "list_files",
-  "glob_files",
-  "grep_files",
-  "index_search",
-  "index_documents",
-  "index_get_document",
-  "web_search",
-  "web_fetch",
-];
+/** Why a run stops when the derivation finds nothing to grant. */
+const PLAN_TOOLS_EMPTY = "no read-tier tools are registered";
+
+function planReadOnlyToolNames(registry: ToolRegistry): string[] {
+  return registry
+    .listAll()
+    .filter((tool) => requiredTier(tool.category) === "read")
+    .map((tool) => tool.name);
+}
 
 export interface WorkBoardEngineDeps {
   /** Board persistence — the engine writes plan/output/runStatus through this. */
@@ -637,6 +646,16 @@ export function createWorkBoardEngine(
       return { status: "error", reason: "sub-agent runner not available" };
     }
 
+    // An EMPTY `sourceTools` means "the whole parent registry" to the runner,
+    // so a registry that yields no read-tier tool must stop the run rather than
+    // hand the plan agent everything it was scoped away from.
+    const planTools = planReadOnlyToolNames(runner.parentToolRegistry());
+    if (planTools.length === 0) {
+      await store.setRunResult(itemId, { runStatus: "error" });
+      emit({ itemId, phase: "error", message: PLAN_TOOLS_EMPTY });
+      return { status: "error", reason: PLAN_TOOLS_EMPTY };
+    }
+
     // Resolve the agent profile (model override) once for both phases. A named
     // profile that does not exist is an explicit error — no silent default.
     let profile: LoadedAgentProfile | null = null;
@@ -694,7 +713,7 @@ export function createWorkBoardEngine(
         {
           title: `Plan: ${item.title}`,
           instructions: buildPlanPrompt(item),
-          sourceTools: [...PLAN_READONLY_TOOLS],
+          sourceTools: planTools,
           originSessionId,
           ...(item.projectRoot ? { projectRoot: item.projectRoot } : {}),
           profileMode: "plan",
@@ -868,6 +887,10 @@ export function createWorkBoardEngine(
       if (!runner) {
         return { status: "error", kind, reason: "sub-agent runner not available" };
       }
+      const surveyTools = planReadOnlyToolNames(runner.parentToolRegistry());
+      if (surveyTools.length === 0) {
+        return { status: "error", kind, reason: PLAN_TOOLS_EMPTY };
+      }
 
       const listed = await store.list(
         opts.projectRoot
@@ -883,9 +906,9 @@ export function createWorkBoardEngine(
         title: `Briefing: ${kind}`,
         instructions: buildBriefingPrompt(kind, openItems),
         // The read-only registry is what makes "make NO changes" a guarantee
-        // rather than a request in the prompt — the same reason the plan phase
-        // names the set explicitly.
-        sourceTools: [...PLAN_READONLY_TOOLS],
+        // rather than a request in the prompt — the same derivation the plan
+        // phase runs.
+        sourceTools: surveyTools,
         originSessionId: `work-board-briefing:${kind}`,
         ...(opts.projectRoot ? { projectRoot: opts.projectRoot } : {}),
         profileMode: "plan",
