@@ -149,7 +149,6 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "refreshMarketplaceFetcherConfig",
   "refreshActiveLlmWildcard",
   "refreshSandboxNetworkConfig",
-  "knowledgeAvailable",
   "starredStore",
   "feedbackStore",
   "routinesStore",

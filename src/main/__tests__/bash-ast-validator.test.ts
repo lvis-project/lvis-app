@@ -262,8 +262,8 @@ describe("BashAstValidator — non-bash 도구", () => {
     assert.equal(r.decision, "allow");
   });
 
-  it("knowledge_search → allow (non-bash tool)", () => {
-    const r = validator.validate("knowledge_search", { query: "sudo rm -rf /" });
+  it("index_search → allow (non-bash tool)", () => {
+    const r = validator.validate("index_search", { query: "sudo rm -rf /" });
     assert.equal(r.decision, "allow");
   });
 

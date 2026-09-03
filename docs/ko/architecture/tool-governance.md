@@ -227,7 +227,6 @@ Plugin 제거:
 | agent_list | read | allow |
 | agent_spawn | write | ask (default) |
 | ask_user_question | write | ask (default) |
-| knowledge_search / document_* | read | ask (default; plugin dependency gated) |
 | render_html | write | ask (default) |
 | request_plugin | read | ask (default) |
 | routine_schedule | write | ask (default) |

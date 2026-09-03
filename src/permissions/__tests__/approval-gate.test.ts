@@ -903,7 +903,7 @@ describe("ApprovalGate", () => {
     const gate = new ApprovalGate(wc as never);
     const req = makeRequest({
       id: "req-readonly",
-      toolName: "knowledge_search",
+      toolName: "index_search",
       isReadOnly: true,
       mode: "default",
     });
@@ -923,7 +923,7 @@ describe("ApprovalGate", () => {
     const gate = new ApprovalGate(wc as never);
     const req = makeRequest({
       id: "req-readonly-plan",
-      toolName: "knowledge_search",
+      toolName: "index_search",
       isReadOnly: true,
       mode: "plan",
     });

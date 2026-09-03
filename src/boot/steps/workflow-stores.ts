@@ -5,8 +5,8 @@
  * Constructs the workflow-tool-backing stores (session tasks, skills, agent
  * profiles, persona prompts, skill overlay/approvals, ask-user gate), assembles
  * the {@link WorkflowToolDeps} closure bundle (late-binding the sub-agent runner
- * through a ref), registers the builtin + meta tools, and wires the knowledge
- * retriever + idle scheduler.
+ * through a ref), registers the builtin + meta tools, and wires the idle
+ * scheduler.
  */
 import { SessionTasksStore } from "../../main/session-tasks-store.js";
 import { SessionGoalStore } from "../../main/session-goal-store.js";
@@ -25,7 +25,7 @@ import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
   registerToolSearchMetaTool,
-  wireKnowledgeAndIdleScheduler,
+  wireIdleScheduler,
   type WorkflowToolDeps,
 } from "../tools.js";
 import { createLogger } from "../../lib/logger.js";
@@ -53,8 +53,6 @@ export async function setupWorkflowStores(
     networkFetch,
     toolRegistry,
     settingsService,
-    pluginRuntime,
-    auditService,
   } = ctx;
 
   const sessionOwner = (sessionId: string): MemoryManager =>
@@ -159,12 +157,8 @@ export async function setupWorkflowStores(
   // tool-level deferral is the only plugin/MCP schema exposure path.
   registerToolSearchMetaTool(toolRegistry);
 
-  // §4.4 HybridRetriever + Knowledge Tools DI, §6.1 IdleSchedulerService.
-  const { idleScheduler, knowledgeAvailable } = await wireKnowledgeAndIdleScheduler({
-    pluginRuntime,
-    toolRegistry,
-    auditService,
-  });
+  // §6.1 IdleSchedulerService.
+  const idleScheduler = await wireIdleScheduler();
 
   ctx.sessionTasksStore = sessionTasksStore;
   ctx.sessionGoalStore = sessionGoalStore;
@@ -176,5 +170,4 @@ export async function setupWorkflowStores(
   ctx.askUserQuestionGate = askUserQuestionGate;
   ctx.subAgentRunnerRef = subAgentRunnerRef;
   ctx.idleScheduler = idleScheduler;
-  ctx.knowledgeAvailable = knowledgeAvailable;
 }

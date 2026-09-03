@@ -18,17 +18,14 @@
  *
  * Capabilities reduction (Ph1/Ph2) narrowed this from a 12-string vocabulary to
  * the two the host actually gates on:
- *  - 5 DEAD strings (ms-graph-consumer, background-watcher, document-indexer,
- *    lifecycle-observer, routine-provider) had zero read sites and were removed.
+ *  - 6 DEAD strings (ms-graph-consumer, background-watcher, document-indexer,
+ *    lifecycle-observer, routine-provider, worker-client) have zero read sites
+ *    and were removed. They stay valid free-form manifest declarations, so an
+ *    installed manifest still declaring one loads as a no-op.
  *  - 4 event-source strings (mail-source, calendar-source, meeting-recorder,
  *    knowledge-index) are no longer author-declared — emit authorization is now
  *    INFERRED from the plugin's `emittedEvents` namespace ({@link canEmitEvent}).
  *    They survive only as internal effect labels in EVENT_NAMESPACE_CAPABILITY.
- *  - `worker-client` is NOT dead: it is a live host discovery key
- *    (`findPluginIdByCapability` in boot/tools.ts wires knowledge tools to the
- *    local-indexer). But it is matched as a plain declared string, not a
- *    host-enforced gate, so it is not in this enforced set. It — like any legacy
- *    capability string — remains a valid free-form manifest declaration.
  *
  * The manifest schema (`schemas/plugin-manifest.schema.json`) NO LONGER mirrors
  * this as an enum: it accepts any format-valid string so an installed manifest

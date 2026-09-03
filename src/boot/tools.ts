@@ -4,10 +4,7 @@
 
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
-import type { PluginRuntime } from "../plugins/runtime.js";
-import type { AuditService } from "../main/audit-service.js";
 import { type Tool } from "../tools/base.js";
-import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
 import { createRenderHtmlTool } from "../tools/render-html.js";
 import { createWebSearchTool } from "../tools/web-search.js";
 import { createWebFetchTool } from "../tools/web-fetch.js";
@@ -44,10 +41,6 @@ import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
-import { HybridRetriever } from "../main/hybrid-retriever.js";
-import type { WorkerSearchClient } from "../main/hybrid-retriever.js";
-import type { KnowledgeWorkerClient } from "../tools/knowledge-search.js";
-import { DisabledCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor } from "../main/idle-scheduler.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
@@ -60,114 +53,32 @@ export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
   toolRegistry.register(createToolSearchTool());
 }
 
-export interface KnowledgeWiringResult {
-  idleScheduler?: IdleSchedulerService;
-  knowledgeAvailable: boolean;
-}
-
-type KnowledgePluginInstance = {
-  getWorkerClient?: () => WorkerSearchClient & KnowledgeWorkerClient;
-};
-
-export async function wireKnowledgeAndIdleScheduler(opts: {
-  pluginRuntime: PluginRuntime;
-  toolRegistry: ToolRegistry;
-  auditService: AuditService;
-}): Promise<KnowledgeWiringResult> {
-  const { pluginRuntime, toolRegistry, auditService } = opts;
-  let idleScheduler: IdleSchedulerService | undefined;
-  let knowledgeAvailable = false;
+/**
+ * §6.1 idle scheduler — the idle/throttle state machine the shared idle
+ * consumers subscribe to (preference refresh, memory consolidation, post-turn
+ * signalling, conversation loop). It takes only `powerMonitor`: indexing does
+ * not defer through it, because the local-indexer plugin's FolderAutoIndexer
+ * indexes eagerly in its own background worker process.
+ *
+ * Constructed unconditionally. Every consumer guards on the scheduler being
+ * present and does nothing at all without it, so anything that can leave it
+ * unbuilt disables idle work outright rather than degrading it.
+ */
+export async function wireIdleScheduler(): Promise<IdleSchedulerService | undefined> {
   try {
-    const workerClientPluginId = pluginRuntime.findPluginIdByCapability("worker-client");
-    const hasWorkerClient = workerClientPluginId
-      ? await pluginRuntime.withPluginInstanceLease<KnowledgePluginInstance, boolean>(
-          workerClientPluginId,
-          async (plugin) => typeof plugin.getWorkerClient === "function",
-        )
-      : false;
-    if (workerClientPluginId && hasWorkerClient) {
-      const withWorkerClient = async <T>(
-        operation: (client: WorkerSearchClient & KnowledgeWorkerClient) => Promise<T>,
-      ): Promise<T> => pluginRuntime.withPluginInstanceLease<KnowledgePluginInstance, T>(
-        workerClientPluginId,
-        async (plugin) => {
-          const client = plugin.getWorkerClient?.();
-          if (!client) {
-            throw new Error(`plugin '${workerClientPluginId}' no longer exposes getWorkerClient()`);
-          }
-          return operation(client);
-        },
-      );
-      const workerSearchClient: WorkerSearchClient = {
-        searchBm25: (query, topK) => withWorkerClient((client) => client.searchBm25(query, topK)),
-        searchVector: (query, topK) => withWorkerClient((client) => client.searchVector(query, topK)),
-      };
-      const knowledgeWorkerClient: KnowledgeWorkerClient = {
-        listDocuments: () => withWorkerClient((client) => client.listDocuments()),
-        getStructure: (docId) => withWorkerClient((client) => client.getStructure(docId)),
-        getPageContent: (docId, pages) => withWorkerClient((client) => client.getPageContent(docId, pages)),
-      };
-      const cloudAdapter = new DisabledCloudIndexAdapter();
-      const hybridRetriever = new HybridRetriever({
-        workerClient: workerSearchClient,
-        cloudAdapter,
-      });
-      const knowledgeTools = createKnowledgeSearchTools({
-        hybridRetriever,
-        workerClient: knowledgeWorkerClient,
-      });
-      for (const tool of knowledgeTools) {
-        toolRegistry.register(tool);
-      }
-      knowledgeAvailable = true;
-      log.info("boot: knowledge tools registered (%d tools)", knowledgeTools.length);
-
-      // §6.1 IdleScheduler: idle/throttle state machine for the shared idle
-      // consumers (preference-refresh, post-turn signalling, conversation-loop).
-      // Indexing no longer defers through this scheduler — the local-indexer
-      // plugin's FolderAutoIndexer indexes eagerly in its background worker
-      // process — so the scheduler is constructed without an index worker
-      // client and only drives idle-state notifications.
-
-      try {
-        const { powerMonitor } = await import("electron");
-        idleScheduler = new IdleSchedulerService({
-          powerMonitor: adaptPowerMonitor(powerMonitor),
-        });
-        idleScheduler.start();
-      } catch (err) {
-        log.warn(
-          "boot: idle-scheduler setup failed (non-fatal): %s",
-          (err as Error).message,
-        );
-      }
-    } else {
-      log.warn(
-        "boot: worker-client capability missing getWorkerClient() — knowledge tools skipped",
-      );
-      auditService.log({
-        timestamp: new Date().toISOString(),
-        sessionId: "boot",
-        type: "error",
-        payload: {
-          reason: "knowledge tools skipped — getWorkerClient missing",
-          pluginId: workerClientPluginId ?? "(capability:worker-client not found)",
-        },
-      });
-    }
-  } catch (err) {
-    log.warn("boot: knowledge tools DI failed (non-fatal): %s", (err as Error).message);
-    auditService.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "boot",
-      type: "error",
-      payload: {
-        reason: "knowledge tools DI failed",
-        error: (err as Error).message,
-      },
+    const { powerMonitor } = await import("electron");
+    const idleScheduler = new IdleSchedulerService({
+      powerMonitor: adaptPowerMonitor(powerMonitor),
     });
+    idleScheduler.start();
+    return idleScheduler;
+  } catch (err) {
+    log.warn(
+      "boot: idle-scheduler setup failed (non-fatal): %s",
+      (err as Error).message,
+    );
+    return undefined;
   }
-  return { idleScheduler, knowledgeAvailable };
 }
 
 export interface WorkflowToolDeps {

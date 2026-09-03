@@ -375,7 +375,6 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 app-visible 플러그인 tool
 | `meeting-recorder` | **enforced** | `meeting.*` emit 게이트. |
 | `knowledge-index` | **enforced** | `index.*` emit 게이트. |
 | `background-watcher` | advisory | 플러그인 자체 lifecycle (`start()` hook) 에서 폴러/감시자를 기동한다는 선언. 런타임 게이트 없음 (향후 enforce 예정). |
-| `worker-client` | advisory | 외부 프로세스(Python uv 등) 워커 래퍼 선언. |
 | `lifecycle-observer` | advisory | `getInstalledPluginIds` / `onPluginsChanged` 사용 선언 |
 | `host:overlay` | **enforced** | `triggerConversation()` 호출 필수. 사용자가 입력하지 않은 plugin-authored prompt 를 host overlay 에 staged 하고, 사용자 확인 후 main chat 에 삽입하는 surface — 일반 plugin 에 부여하지 말 것. 자세한 설계는 [`overlay-trigger.md`](./overlay-trigger.md) 참조. |
 
@@ -953,7 +952,7 @@ LVIS 는 IPC/RPC 를 **시스템 레벨 전용**으로 확정한다. 플러그�
 
 **파일:** `lvis-plugin-local-indexer/src/hostPlugin.ts:210-303`
 
-- `capabilities: ["knowledge-index", "worker-client"]`.
+- `capabilities: ["knowledge-index"]`.
 - Python subprocess (30s 폴링) 로 FileWatcher 대신 운영 — `index_scan` 은 멱등 설계.
 - `index_add_folder` 는 `/etc`, `/usr`, `~/.ssh` 등 위험 경로를 플러그인이 스스로 차단 — HostApi 레벨 제어 없음.
 - 각 tool `inputSchema` 필수: `index_add_folder` 는 path 인자를 `_meta["lvisai/pathFields"]` 로 선언한다 (effective category 는 host 가 분류).

@@ -286,7 +286,6 @@ export async function queryLoop(
     // Tool-Level Deferral — per-turn tool_search counter (mirror pluginExpansions).
     let toolSearches = 0;
     const promotedToolNamesForTurn: string[] = [];
-    let knowledgeCallCount = 0;
     let roundIndex = 0;
     let toolTrustOrigin = bounds.toolTrustOrigin;
     // The turn's STAGED origin (`overlay:*` / `app:*`), which forces write/shell/network
@@ -1217,15 +1216,10 @@ export async function queryLoop(
         continue;
       }
 
-      // §11 knowledge depth cap
-      const capResult = applyKnowledgeDepthCap(toolUsesForExecutor, knowledgeCallCount);
-      knowledgeCallCount = capResult.nextCount;
-
       // §4.5.2 step 9 — TOOL_EXECUTE
       self.tracer.step("TOOL_EXECUTE", {
         round: roundIndex,
-        toolNames: capResult.allowed.map((tu) => tu.name),
-        capped: capResult.blocked.length,
+        toolNames: toolUsesForExecutor.map((tu) => tu.name),
       });
       const executeOptions = {
           callbacks: {
@@ -1410,7 +1404,7 @@ export async function queryLoop(
             }
           : undefined;
       const replayBlockedResultsById = new Map<string, ToolResult>();
-      const executableToolUses = capResult.allowed.filter((toolUse) => {
+      const executableToolUses = toolUsesForExecutor.filter((toolUse) => {
         if (
           bounds.requestAnchor === undefined ||
           (cancelledSiblingProposalDigests.size === 0 && !cancelledSiblingProposalGuardIncomplete)
@@ -1476,7 +1470,7 @@ export async function queryLoop(
       const executedResultsById = new Map(
         rationaleBatch.results.map((result) => [result.tool_use_id, result] as const),
       );
-      const toolResults = capResult.allowed.map((toolUse): ToolResult =>
+      const toolResults = toolUsesForExecutor.map((toolUse): ToolResult =>
         replayBlockedResultsById.get(toolUse.id) ??
         executedResultsById.get(toolUse.id) ?? {
           tool_use_id: toolUse.id,
@@ -1488,25 +1482,18 @@ export async function queryLoop(
       if (rationaleBatch.rationaleUsage) {
         recordProviderUsage(rationaleBatch.rationaleUsage, false);
       }
-      toolTrustOrigin = nextToolTrustOrigin(toolTrustOrigin, capResult.allowed, toolResults);
+      toolTrustOrigin = nextToolTrustOrigin(toolTrustOrigin, toolUsesForExecutor, toolResults);
 
-      for (let i = 0; i < capResult.allowed.length; i++) {
+      for (let i = 0; i < toolUsesForExecutor.length; i++) {
         allToolCalls.push({
-          name: capResult.allowed[i].name,
-          input: capResult.allowed[i].input,
+          name: toolUsesForExecutor[i].name,
+          input: toolUsesForExecutor[i].input,
           result: toolResults[i]?.content ?? "(missing)",
         });
       }
-      for (const blocked of capResult.blocked) {
-        const origTool = toolUsesForExecutor.find((tu) => tu.id === blocked.tool_use_id);
-        if (origTool) {
-          allToolCalls.push({ name: origTool.name, input: origTool.input, result: blocked.content });
-        }
-      }
 
       // tool_result 히스토리 append → loop back
-      const allResults = [...toolResults, ...capResult.blocked];
-      for (const tr of allResults) {
+      for (const tr of toolResults) {
         const meta = toolResultMeta(
           tr,
           toolMetaByUseId.get(tr.tool_use_id),
@@ -1524,7 +1511,7 @@ export async function queryLoop(
       }
       if (abortSignal?.aborted) {
         log.info(
-          `queryLoop: EARLY-EXIT(tool-abort) — round=${roundIndex} toolResults=${allResults.length}`,
+          `queryLoop: EARLY-EXIT(tool-abort) — round=${roundIndex} toolResults=${toolResults.length}`,
         );
         // No streamed text exists on the tool-abort path: empty prose plus the
         // interrupted marker; the renderer badge carries the whole meaning.
@@ -1540,7 +1527,7 @@ export async function queryLoop(
       // Intra-turn micro-compact — mark older tool_results stale before the
       // next round assembles its request (`messagesForRound`), so the next
       const inputRequiredControls = toolResults.flatMap((toolResult) => {
-        const toolUse = capResult.allowed.find((candidate) =>
+        const toolUse = toolUsesForExecutor.find((candidate) =>
           candidate.id === toolResult.tool_use_id);
         const meta = toolMetaByUseId.get(toolResult.tool_use_id);
         return !toolResult.is_error
@@ -1617,7 +1604,7 @@ export async function queryLoop(
           }
         }
       }
-      if (capResult.allowed.some((tu) => tu.name === "skill_load")) {
+      if (toolUsesForExecutor.some((tu) => tu.name === "skill_load")) {
         systemPrompt = self.buildSystemPromptForScope(
           scope,
           stagedOrigin,
@@ -1715,57 +1702,8 @@ function subAgentHistoryMeta(
 }
 
 // ---------------------------------------------------------------------------
-// Knowledge-tool depth cap.
-// ---------------------------------------------------------------------------
-
-const KNOWLEDGE_DEPTH_CAP = 3;
-const KNOWLEDGE_TOOL_NAMES = new Set<string>([
-  "knowledge_search",
-  "document_list",
-  "document_structure",
-  "document_page_content",
-]);
-
-interface KnowledgeCapResult {
-
-  allowed: ToolUseBlock[];
-
-  blocked: Array<{ tool_use_id: string; content: string; is_error: boolean }>;
-
-  nextCount: number;
-}
-
-function applyKnowledgeDepthCap(
-  toolUses: ToolUseBlock[],
-  currentCount: number,
-  cap: number = KNOWLEDGE_DEPTH_CAP,
-): KnowledgeCapResult {
-  const allowed: ToolUseBlock[] = [];
-  const blocked: KnowledgeCapResult["blocked"] = [];
-  let count = currentCount;
-  for (const tu of toolUses) {
-    if (KNOWLEDGE_TOOL_NAMES.has(tu.name)) {
-      if (count >= cap) {
-        blocked.push({
-          tool_use_id: tu.id,
-          content: t("be_knowledgeCap.depthCapBlocked", { name: tu.name, cap: String(cap) }),
-          is_error: true,
-        });
-        continue;
-      }
-      count += 1;
-    }
-    allowed.push(tu);
-  }
-  return { allowed, blocked, nextCount: count };
-}
-
-// ---------------------------------------------------------------------------
 // Persisted tool_result renderer metadata.
 // ---------------------------------------------------------------------------
-
-/** A knowledge-cap blocked result — no execution, so no timing or verdict. */
-type BlockedToolResult = { tool_use_id: string; content: string; is_error: boolean };
 
 /**
  * Renderer metadata for one persisted tool_result: display fields for the tool
@@ -1773,7 +1711,7 @@ type BlockedToolResult = { tool_use_id: string; content: string; is_error: boole
  * transcript rebuilds the row from, so they are assembled in one place.
  */
 function toolResultMeta(
-  result: ToolResult | BlockedToolResult,
+  result: ToolResult,
   callMeta: ToolCallMeta | undefined,
   review: PermissionReviewEvent | undefined,
 ): MessageMeta | undefined {

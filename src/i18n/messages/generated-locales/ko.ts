@@ -27,8 +27,6 @@ import { ko as ko_be_dlp } from "../generated/be_dlp.js";
 import { ko as ko_be_errorClassifier } from "../generated/be_errorClassifier.js";
 import { ko as ko_be_executor } from "../generated/be_executor.js";
 import { ko as ko_be_hookRunner } from "../generated/be_hookRunner.js";
-import { ko as ko_be_knowledgeCap } from "../generated/be_knowledgeCap.js";
-import { ko as ko_be_knowledgeSearch } from "../generated/be_knowledgeSearch.js";
 import { ko as ko_be_main } from "../generated/be_main.js";
 import { ko as ko_be_mcpClient } from "../generated/be_mcpClient.js";
 import { ko as ko_be_mcpGovernance } from "../generated/be_mcpGovernance.js";
@@ -221,8 +219,6 @@ export const koMessages: Record<string, string> = {
   ...ko_be_errorClassifier,
   ...ko_be_executor,
   ...ko_be_hookRunner,
-  ...ko_be_knowledgeCap,
-  ...ko_be_knowledgeSearch,
   ...ko_be_main,
   ...ko_be_mcpClient,
   ...ko_be_mcpGovernance,

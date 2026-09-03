@@ -673,7 +673,6 @@ capability 는 호스트가 특정 pluginId 를 몰라도 통합 지점을 결�
 | `mail-source` | 이메일 소스 연결 | advisory | ms-graph |
 | `calendar-source` | 캘린더 소스 연결 | advisory | ms-graph |
 | `background-watcher` | 플러그인 `start()` lifecycle 안에서 폴러/워처 기동 | advisory | ms-graph |
-| `worker-client` | 외부 프로세스(Python 등) 워커 래퍼 | advisory | local-indexer |
 | `knowledge-index` | 문서 인덱스/검색 제공 | advisory | local-indexer |
 | `ms-graph-consumer` | HostApi 의 MS Graph 메서드 사용 | **강제** (§B-5) | ms-graph |
 
@@ -912,7 +911,7 @@ Meeting / Microsoft 365 (Outlook 메일+캘린더) / Local Indexer 의 실제 �
 아래 항목은 가이드·스키마·정책상 정의되어 있지만 **현재 런타임에서 강제되지 않는** 사항이거나 아직 도구/스크립트가 없는 사항입니다. 향후 스프린트에서 좁힐 대상.
 
 1. **`notificationEvents.event ⊂ eventSubscriptions` 교차 검증** — 선언했지만 구독하지 않아 알림이 절대 뜨지 않는 상태 경고가 없음.
-2. **`capabilities` enum 화** — 현재 `ms-graph-consumer` 만 런타임에서 강제. 나머지는 자유 문자열. 정책 게이트 확장 필요 (예: `worker-client` 선언 플러그인만 Python runtime 사용 허용).
+2. **`capabilities` enum 화** — 현재 `ms-graph-consumer` 만 런타임에서 강제. 나머지는 자유 문자열. 정책 게이트 확장 필요.
 3. **`eventSubscriptions` 민감 이벤트 allowlist / 네임스페이스 정책** — 임의 플러그인이 `email.*`, `calendar.*` 같은 타 플러그인 네임스페이스를 구독할 수 있음.
 4. **프로덕션 marketplace 공개키 회전** — `src/plugins/marketplace-keys.ts` 의 POC 키는 프로덕션 릴리스 전 실제 운영 키로 교체해야 함.
 5. **`ui[]` kind 별 필드 규약** 은 스키마가 담고 있지만, 실제 로더는 엄격한 fallback 처리(`entry ?? page`)를 하므로 일부 오탈자가 silent 하게 넘어갈 여지가 남음.

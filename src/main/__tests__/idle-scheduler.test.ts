@@ -6,7 +6,7 @@
  * 실행: `cd lvis-app && npm test`
  *
  * SECURITY_GATE: 5-state 전이 로직 회귀 방지 게이트.
- * KNOWLEDGE_DEPTH_CAP/IdleScheduler 핵심 전이 변경 시 반드시 이 스위트가 green이어야 함.
+ * IdleScheduler 핵심 전이 변경 시 반드시 이 스위트가 green이어야 함.
  *
  * 검증 케이스 20개:
  *   1) enqueue priority sort — P0 먼저, FIFO 보존

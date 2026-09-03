@@ -149,7 +149,6 @@ export class BootContext {
   declare askUserQuestionGate: AskUserQuestionGate;
   declare subAgentRunnerRef: { fn: SubAgentRunner | undefined };
   declare idleScheduler: IdleSchedulerService | undefined;
-  declare knowledgeAvailable: boolean;
 
   // ── Marketplace (setupMarketplace) ─────────────────────────────────────────
   declare marketplaceFetcher: MarketplaceFetcher;
@@ -302,7 +301,6 @@ const BOOT_CONTEXT_FIELDS = [
   "askUserQuestionGate",
   "subAgentRunnerRef",
   "idleScheduler",
-  "knowledgeAvailable",
   "marketplaceFetcher",
   "pluginMarketplace",
   "refreshMarketplaceFetcherConfig",

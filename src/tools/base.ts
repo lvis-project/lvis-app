@@ -8,8 +8,7 @@
  * Every tool registered with the §6.4 {@link ./registry.js ToolRegistry}
  * implements {@link Tool}, regardless of whether it was hand-written as
  * a {@link ZodTool} subclass or generated dynamically via
- * {@link createDynamicTool} (plugin manifest, MCP discovery,
- * knowledge-search factory).
+ * {@link createDynamicTool} (plugin manifest, MCP discovery).
  *
  * This is the single source of truth for the tool contract — the
  * permission manager, the 8-step executor pipeline, the system prompt
@@ -255,9 +254,8 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
 
 /**
  * Specification consumed by {@link createDynamicTool}. Runtime-built
- * tools (plugin manifest registration, MCP discovery, knowledge-search
- * factory) supply a raw JSON Schema and an execute callback rather
- * than a Zod schema + subclass.
+ * tools (plugin manifest registration, MCP discovery) supply a raw JSON
+ * Schema and an execute callback rather than a Zod schema + subclass.
  */
 export interface DynamicToolSpec {
   name: string;
@@ -297,11 +295,10 @@ export interface DynamicToolSpec {
 }
 
 /**
- * Factory for runtime-built tools. Plugin manifest registration, MCP
- * discovery, and the knowledge-search factory call this to skip the
- * abstract subclass ceremony and pass a spec object — the returned
- * value is a fully-fledged {@link Tool} ready for
- * {@link ToolRegistry.register}.
+ * Factory for runtime-built tools. Plugin manifest registration and MCP
+ * discovery call this to skip the abstract subclass ceremony and pass a
+ * spec object — the returned value is a fully-fledged {@link Tool} ready
+ * for {@link ToolRegistry.register}.
  */
 export function createDynamicTool(spec: DynamicToolSpec): Tool {
   return {
