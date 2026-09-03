@@ -26,6 +26,7 @@ import {
   appOwnedSandboxTempRoot,
   getDefaultSensitiveReadDenyPaths,
   getDefaultSensitiveWriteDenyPaths,
+  isAsrtSandboxActive,
   wrapWorkerCommand,
 } from "./asrt-sandbox.js";
 import { buildSandboxedChildEnv } from "../tools/safe-env.js";
@@ -91,37 +92,59 @@ export interface ConfinedChildSpec {
 }
 
 /**
- * Wrap, spawn, and register a confined child.
+ * Spawn and register a child, wrapped when the host is sandboxed.
+ *
+ * A child is confined exactly as much as the host is — no more, no less. With
+ * the OS sandbox active the command is wrapped by ASRT and the caller's
+ * {@link ConfinedChildSpec.onWrapped} fires; with it inactive the command is
+ * spawned as given, `onWrapped` does not fire, and no confinement marker is
+ * left anywhere, so every reader of "is this child confined" answers no. The
+ * host's own tools take the same two paths on the same setting; a child that
+ * demanded a wrap the host itself does not run under would be asserting a
+ * promise the host never made.
  *
  * Throws with the ASRT per-command state already incremented if the failure
- * happens after {@link ConfinedChildSpec.onWrapped} fires; the caller's
- * cleanup owns the decrement.
+ * happens after `onWrapped` fires; the caller's cleanup owns the decrement.
  */
 export async function spawnConfinedChild(spec: ConfinedChildSpec): Promise<ChildProcess> {
   spec.assertStillValid?.();
 
+  const { executable, args, wrappedEnv } = await resolveSpawnLine(spec);
+  spec.assertStillValid?.();
+
+  assertManagedChildProcessAdmissionOpen(spec.label);
+  const child = spawn(executable, args, {
+    stdio: spec.stdio ?? ["ignore", "pipe", "pipe"],
+    shell: false,
+    windowsHide: true,
+    env: composeConfinedEnv(spec.baseEnv, wrappedEnv, spec.extraEnv ?? {}),
+  });
+  trackManagedChildProcess(child, { label: spec.label });
+  return child;
+}
+
+/**
+ * What actually gets spawned: the ASRT-wrapped argv while the sandbox is
+ * active, the caller's own command otherwise. The two are one function so the
+ * decision is made in one place and `onWrapped` cannot fire on the plain path.
+ */
+async function resolveSpawnLine(
+  spec: ConfinedChildSpec,
+): Promise<{ executable: string; args: string[]; wrappedEnv: NodeJS.ProcessEnv }> {
+  if (!isAsrtSandboxActive()) {
+    return { executable: spec.command, args: [...spec.args], wrappedEnv: {} };
+  }
   const { cmdline, binShell } = buildConfinedCommandLine(spec.command, spec.args);
   const { argv, env } = await wrapWorkerCommand(cmdline, {
     filesystem: buildFilesystemConfinement(spec),
     ...(binShell !== undefined ? { binShell } : {}),
   });
   spec.onWrapped?.();
-  spec.assertStillValid?.();
-
-  const [executable, ...wrappedArgs] = argv;
+  const [executable, ...args] = argv;
   if (executable === undefined) {
     throw new Error(`[confined-child] ASRT returned an empty argv for ${spec.label}`);
   }
-
-  assertManagedChildProcessAdmissionOpen(spec.label);
-  const child = spawn(executable, wrappedArgs, {
-    stdio: spec.stdio ?? ["ignore", "pipe", "pipe"],
-    shell: false,
-    windowsHide: true,
-    env: composeConfinedEnv(spec.baseEnv, env, spec.extraEnv ?? {}),
-  });
-  trackManagedChildProcess(child, { label: spec.label });
-  return child;
+  return { executable, args, wrappedEnv: env };
 }
 
 /**

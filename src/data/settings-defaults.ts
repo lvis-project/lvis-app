@@ -222,14 +222,23 @@ export const DEFAULT_SETTINGS: AppSettings = {
     //
     // Computed from `process.platform` at default-construction; stable per-process.
     //
-    // Safe to stage independently of `hostClassifiesRisk` (which stays ON on all
-    // platforms): on a non-sandbox (or non-filesystem-confined) platform the
-    // foreground read-relaxation is coupled to the active sandbox FILESYSTEM-
-    // CONTAINING the host (ToolExecutor.sandboxFsContainedProvider), so it falls
-    // back to the pre-exec ask there. When ON, boot activates ASRT if the platform
-    // sandbox can run, else the default/settings path DEGRADES gracefully (loud
-    // warning, non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1` env opt-in
-    // stays fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.
-    osToolSandbox: process.platform === "darwin",
+    // OFF on every platform, and one policy follows from it: the host, its
+    // workers and its plugin children all run exactly as confined as this
+    // setting says — unconfined while it is off, under ASRT once it is on.
+    // Turning it on is where the platform work happens (Windows needs its
+    // one-time provisioning from Settings > Permissions); until then nothing
+    // is spawned as if a sandbox existed. The former darwin-only default made
+    // macOS the one platform where plugin isolation was exercised and left
+    // Windows and Linux with a plugin path that required a sandbox the host
+    // had never asked for.
+    //
+    // Independent of `hostClassifiesRisk` (ON everywhere): with no sandbox the
+    // foreground read-relaxation, which is coupled to the sandbox FILESYSTEM-
+    // CONTAINING the host (ToolExecutor.sandboxFsContainedProvider), falls back
+    // to the pre-exec ask. When ON, boot activates ASRT if the platform sandbox
+    // can run, else the default/settings path DEGRADES (loud warning,
+    // non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1` env opt-in stays
+    // fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.
+    osToolSandbox: false,
   },
 };
