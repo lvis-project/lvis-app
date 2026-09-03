@@ -1215,7 +1215,28 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
   };
 }
 
-export class MemoryManager {
+/**
+ * The memory surface a system prompt is assembled from: the agent-context
+ * files, the bounded prompt views of preferences and index, and the relevant
+ * notes for one turn. Every member is required — a prompt builder handed an
+ * object missing one has been mis-wired, and an absent reader must fail rather
+ * than render as an empty section indistinguishable from empty memory.
+ *
+ * Declared here rather than in the prompt module because this module owns both
+ * the implementations and every type they return, which keeps the type
+ * dependency one-way (prompts read memory, memory does not read prompts).
+ */
+export interface PromptMemorySource {
+  getAgentsMd(): string;
+  getAgentsCustomMd(): string;
+  getProjectAgentsMd(projectRoot: string): ProjectAgentsMd;
+  getPromptUserPreferences(): string;
+  getPromptMemoryIndex(): string;
+  getPromptLongTermMemoryOverview(options?: ProjectScopedMemoryOptions): string;
+  selectRelevantMemories(query: string, options?: MemorySelectionOptions): MemorySelection;
+}
+
+export class MemoryManager implements PromptMemorySource {
   private readonly lvisDir: string;
   private readonly memoryDir: string;
   private readonly sessionsDir: string;
