@@ -19,7 +19,7 @@ import {
   pluginManifestWriter,
 } from "../../__tests__/test-helpers.js";
 
-const highlight = (id: string) => ({
+const highlight = (id: string, action: Record<string, unknown> = { kind: "none" }) => ({
   id,
   copy: {
     en: {
@@ -28,8 +28,12 @@ const highlight = (id: string) => ({
       actionLabel: "Choose a folder",
     },
   },
-  action: { kind: "none" as const },
+  action,
 });
+
+/** A highlight whose accept moves the settings view to `path`. */
+const settingsHighlight = (path: unknown) =>
+  highlight("open-the-switch", { kind: "settings", path });
 
 describe("manifest onboarding.highlights cross-field checks", () => {
   let workDir: string;
@@ -88,6 +92,48 @@ describe("manifest onboarding.highlights cross-field checks", () => {
     await expect(parsePluginJson(path, makeValidator())).rejects.toThrow(
       new RegExp(`at most ${MAX_PLUGIN_ONBOARDING_HIGHLIGHTS}`),
     );
+  });
+
+  it.each([
+    ["a bare tab id", "permissions"],
+    ["a tab and one of its sections", "permissions/permissions-os-sandbox"],
+  ])("accepts a settings action naming %s", async (_case, path) => {
+    const manifestPath = await writeManifest({
+      onboarding: { highlights: [settingsHighlight(path)] },
+    });
+    const parsed = await parsePluginJson(manifestPath, makeValidator());
+    expect(parsed.onboarding?.highlights?.[0]?.action).toEqual({ kind: "settings", path });
+  });
+
+  it.each([
+    ["a tab this build does not ship", "sandbox"],
+    ["a tab id the host has retired", "tailnet-access"],
+    ["a section the named tab does not anchor", "llm/permissions-os-sandbox"],
+    ["a section nothing anchors", "permissions/turn-it-on"],
+    ["a third path segment", "permissions/permissions-os-sandbox/on"],
+    ["a trailing separator", "permissions/"],
+  ])("rejects a settings action naming %s", async (_case, path) => {
+    // Rejected at LOAD, not at accept: a card whose destination does not exist
+    // would still render, still be answered "yes", and then do nothing.
+    const manifestPath = await writeManifest({
+      onboarding: { highlights: [settingsHighlight(path)] },
+    });
+    await expect(parsePluginJson(manifestPath, makeValidator())).rejects.toThrow(
+      /does not name a settings page this build ships/,
+    );
+  });
+
+  it("leaves a composer action alone", async () => {
+    const manifestPath = await writeManifest({
+      onboarding: {
+        highlights: [highlight("prefill", { kind: "composer", prompt: "Index my notes" })],
+      },
+    });
+    const parsed = await parsePluginJson(manifestPath, makeValidator());
+    expect(parsed.onboarding?.highlights?.[0]?.action).toEqual({
+      kind: "composer",
+      prompt: "Index my notes",
+    });
   });
 
   it("leaves a manifest without highlights alone", async () => {

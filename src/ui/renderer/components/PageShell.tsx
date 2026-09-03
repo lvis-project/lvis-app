@@ -170,6 +170,13 @@ export interface SettingsSectionProps {
   actions?: ReactNode;
   /** Optional id for anchor scroll. */
   id?: string;
+  /**
+   * Deep-link anchor: one of the ids `SETTINGS_SECTIONS` lists for the tab this
+   * section belongs to. Setting it also makes the section programmatically
+   * focusable, so arrival can move focus to the option the link named rather
+   * than leaving the reader at the top of the page.
+   */
+  "data-settings-section"?: string;
   className?: string;
   children: ReactNode;
 }
@@ -180,12 +187,15 @@ export function SettingsSection({
   badge,
   actions,
   id,
+  "data-settings-section": settingsSection,
   className,
   children,
 }: SettingsSectionProps) {
   return (
     <section
       id={id}
+      data-settings-section={settingsSection}
+      tabIndex={settingsSection === undefined ? undefined : -1}
       className={cn(
         "min-w-0 border-t border-border/(--opacity-medium) py-5 first:border-t-0 first:pt-0 last:pb-0",
         className,

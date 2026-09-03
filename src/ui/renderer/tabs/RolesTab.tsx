@@ -509,6 +509,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
           Agents / Memory / Preferences / Roles / Preview are stacked and all
           visible, so the whole memory + persona surface scrolls as one page. */}
       <SettingsSection
+        data-settings-section="roles-agents"
         id={AGENTS_SECTION_ID}
         title={t("rolesTab.sectionAgents")}
         badge={
@@ -687,7 +688,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection title={t("rolesTab.sectionMemory")}>
+      <SettingsSection data-settings-section="roles-memory" title={t("rolesTab.sectionMemory")}>
         <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
           <Textarea
             value={memoryIndex}
@@ -785,7 +786,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection title={t("rolesTab.sectionPreferences")}>
+      <SettingsSection data-settings-section="roles-preferences" title={t("rolesTab.sectionPreferences")}>
         <div className="space-y-3">
           <Textarea
             value={userPrefsDraft}
@@ -816,7 +817,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection title={t("rolesTab.sectionRoles")}>
+      <SettingsSection data-settings-section="roles-presets" title={t("rolesTab.sectionRoles")}>
         <div className="space-y-3">
           <div className="space-y-2">
             {rolePresets.map((preset) => (
@@ -909,7 +910,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection title={t("rolesTab.sectionPreview")}>
+      <SettingsSection data-settings-section="roles-preview" title={t("rolesTab.sectionPreview")}>
         <pre className="overflow-auto rounded-md bg-muted/(--opacity-half) p-3 text-xs leading-5">
           {`AGENTS.md                  -> project / org / agent operating context
 agents.custom.md            -> your own agent context under keep-latest, read after AGENTS.md

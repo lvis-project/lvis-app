@@ -24,6 +24,7 @@ import {
   flattenAgentPluginsManifest,
   foreignManifestTopLevelFields,
 } from "../public-contract.js";
+import { parseSettingsPath } from "../../shared/settings-tabs.js";
 import type {
   PluginManifest,
   PluginToolOperationPolicy,
@@ -887,6 +888,25 @@ export async function parsePluginJson(
         );
       }
       seenHighlightIds.add(id);
+
+      // Onboarding `settings` destinations. The schema can only say the path
+      // is a kebab segment or a pair of them; only the host knows which tabs
+      // and sections this build ships. Validating here rather than at accept
+      // time is what makes the destination trustworthy: a card whose action
+      // points nowhere would render, be answered "yes", and then do nothing.
+      const action: unknown = (highlightsRaw[i] as { action?: unknown })?.action;
+      const actionPath: unknown =
+        action && typeof action === "object" && !Array.isArray(action) &&
+        (action as { kind?: unknown }).kind === "settings"
+          ? (action as { path?: unknown }).path
+          : undefined;
+      if (actionPath !== undefined && parseSettingsPath(actionPath) === null) {
+        fail(
+          `onboarding.highlights[${i}].action.path`,
+          `value ${JSON.stringify(actionPath)} does not name a settings page this build ships; use "<tab>" or "<tab>/<section>" (manifest_schema)`,
+          `"action": { "kind": "settings", "path": "permissions/permissions-os-sandbox" }`,
+        );
+      }
     }
   }
 

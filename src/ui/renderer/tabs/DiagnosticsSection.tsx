@@ -169,7 +169,7 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
   return (
     <>
       {/* ── Bundle export ── */}
-      <SettingsSection title={t("auditTab.bundleSectionTitle")}>
+      <SettingsSection data-settings-section="audit-bundle" title={t("auditTab.bundleSectionTitle")}>
         <p className="text-[11px] text-muted-foreground">{t("auditTab.bundleSectionDesc")}</p>
         <label className="flex items-center gap-2 text-xs">
           <input
@@ -197,6 +197,7 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
 
       {/* ── Log tail viewer ── */}
       <SettingsSection
+        data-settings-section="audit-log-file"
         title={t("auditTab.logSectionTitle")}
         actions={
           <div className="flex items-center gap-2">
@@ -237,6 +238,7 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
 
       {/* ── Crash list ── */}
       <SettingsSection
+        data-settings-section="audit-crash"
         title={t("auditTab.crashSectionTitle")}
         actions={
           <Button size="sm" className="h-8" variant="outline" onClick={() => void refreshCrashes()}>

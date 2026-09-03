@@ -18,6 +18,8 @@ export function SettingsInlineView({
   api,
   chatGroupId,
   initialTab,
+  sectionTarget = null,
+  onSectionApplied,
   onSaved,
   onTabChange,
   exactDenyDraft = null,
@@ -32,6 +34,12 @@ export function SettingsInlineView({
    */
   chatGroupId: string;
   initialTab: string;
+  /**
+   * The section inside `initialTab` a deep link named, or `null`. One-shot:
+   * the panel reports back through `onSectionApplied` and the window drops it.
+   */
+  sectionTarget?: string | null;
+  onSectionApplied?: () => void;
   onSaved: () => void;
   /** Required here (unlike on `SettingsContent`): the inline panel is the app's
    *  own settings surface, so dropping the read-back would leave the app unable
@@ -48,6 +56,8 @@ export function SettingsInlineView({
       chatGroupId={chatGroupId}
       onSaved={onSaved}
       initialTab={initialTab}
+      sectionTarget={sectionTarget}
+      onSectionApplied={onSectionApplied}
       onTabChange={onTabChange}
       exactDenyDraft={exactDenyDraft}
       onExactDenySaved={onExactDenySaved}

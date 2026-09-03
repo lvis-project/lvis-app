@@ -929,6 +929,7 @@ export function PermissionsTab({
 
         {/* ── 현재 권한 정책 요약 ── */}
         <SettingsSection
+          data-settings-section="permissions-policy-summary"
           title={t("permissionsTab.currentPolicySummaryTitle")}
           description={t("permissionsTab.currentPolicySummaryDescription")}
         >
@@ -946,6 +947,7 @@ export function PermissionsTab({
 
         {/* ── Section A: Permission Policy Preset ── */}
         <SettingsSection
+          data-settings-section="permissions-policy"
           title={t("permissionsTab.policyTitle")}
           description={t("permissionsTab.policyDescription")}
         >
@@ -1043,6 +1045,7 @@ export function PermissionsTab({
 
         {/* ── Section B: Explicit Approval Policy ── */}
         <SettingsSection
+          data-settings-section="permissions-approval-dialog"
           title={t("permissionsTab.approvalDialogTitle")}
           description={t("permissionsTab.approvalDialogDescription")}
         >
@@ -1068,6 +1071,7 @@ export function PermissionsTab({
 
         {/* ── OS Tool Sandbox ── */}
         <SettingsSection
+          data-settings-section="permissions-os-sandbox"
           title={t("permissionsTab.osSandboxTitle")}
           description={t("permissionsTab.osSandboxDescription")}
         >
@@ -1212,6 +1216,7 @@ export function PermissionsTab({
 
         {/* ── Sub-agent parent adjudication (tier 2 of the approval chain) ── */}
         <SettingsSection
+          data-settings-section="permissions-adjudication"
           title={t("permissionsTab.adjudicationTitle")}
           description={t("permissionsTab.adjudicationDescription")}
         >
@@ -1437,6 +1442,7 @@ export function PermissionsTab({
 
         {/* ── Section C: Rule Editor ── */}
         <SettingsSection
+          data-settings-section="permissions-rules"
           title={t("permissionsTab.rulesTitle")}
           description={<>{t("permissionsTab.rulesDescriptionBefore")}<code className="text-[10px]">mcp_*</code>{t("permissionsTab.rulesDescriptionAfter")}</>}
         >
@@ -1522,6 +1528,7 @@ export function PermissionsTab({
 
         {/* ── Section D: Additional Directories ── */}
         <SettingsSection
+          data-settings-section="permissions-directories"
           title={t("permissionsTab.directoriesTitle")}
           description={t("permissionsTab.directoriesDescription")}
           actions={
@@ -1622,6 +1629,7 @@ export function PermissionsTab({
 
         {/* ── 사용자 승인 기록 ── */}
         <SettingsSection
+          data-settings-section="permissions-approvals"
           title={t("permissionsTab.approvalsTitle", { count: userApprovals.length })}
           description={t("permissionsTab.approvalsDescription")}
           actions={
@@ -1700,6 +1708,7 @@ export function PermissionsTab({
 
         {/* ── Audit Log ── */}
         <SettingsSection
+          data-settings-section="permissions-audit-log"
           title={t("permissionsTab.auditLogTitle")}
           description={t("permissionsTab.auditLogDescription")}
           actions={

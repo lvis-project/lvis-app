@@ -92,6 +92,7 @@ export function TelemetrySection() {
 
   return (
     <SettingsSection
+      data-settings-section="audit-telemetry"
       title={t("auditTab.telemetrySectionTitle")}
       description={t("auditTab.telemetrySectionDesc")}
     >

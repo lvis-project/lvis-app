@@ -76,6 +76,7 @@ export function WorkspaceStatsSection({ api, onNavigate }: WorkspaceStatsSection
 
   return (
     <SettingsSection
+      data-settings-section="usage-workspace"
       title={t("generalTab.workspaceTitle")}
       description={t("generalTab.workspaceDescription")}
       actions={

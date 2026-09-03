@@ -490,6 +490,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       </div>
 
       <SettingsSection
+        data-settings-section="marketplace-inventory"
         title={t("marketplaceTab.inventoryTitle")}
         description={packageStatus}
         actions={
@@ -649,6 +650,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       {/* Update check + offline cache — plain on/off settings that used to be
           reachable only through the environment. */}
       <SettingsSection
+        data-settings-section="marketplace-maintenance"
         title={t("marketplaceTab.maintenanceTitle")}
         description={t("marketplaceTab.maintenanceDescription")}
       >
@@ -712,6 +714,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           API key + private-network toggle) lives behind this collapse.
           Default-deployment users never have to interact with it. */}
       <SettingsSection
+        data-settings-section="marketplace-advanced"
         title={t("marketplaceTab.advancedTitle")}
         description={t("marketplaceTab.advancedDescription")}
       >

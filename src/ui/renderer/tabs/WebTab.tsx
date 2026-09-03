@@ -93,6 +93,7 @@ export function WebTab(props: WebTabProps) {
       />
 
       <SettingsSection
+        data-settings-section="web-search-engine"
         title={t("webTab.searchEngineTitle")}
         description={t("webTab.searchEngineDescription")}
         badge={
@@ -112,6 +113,7 @@ export function WebTab(props: WebTabProps) {
 
       {webInfo.needsKey && (
         <SettingsSection
+          data-settings-section="web-api-key"
           title={t("webTab.apiKeyTitle", { label: webInfo.label })}
         >
           <div className="space-y-2">
@@ -127,6 +129,7 @@ export function WebTab(props: WebTabProps) {
 
       {/* ── 외부 URL 표시 정책 (relocated from Appearance — browsing behavior) ── */}
       <SettingsSection
+        data-settings-section="web-view-flow"
         title={t("appearanceTab.webViewSectionTitle")}
         description={t("appearanceTab.webViewSectionDescription")}
         actions={

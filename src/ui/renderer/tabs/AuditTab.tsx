@@ -143,7 +143,7 @@ export function AuditTab() {
 
         {/* ── Stats Bar ── */}
         {stats && (
-          <SettingsSection title={t("auditTab.statsTitle")}>
+          <SettingsSection data-settings-section="audit-stats" title={t("auditTab.statsTitle")}>
             <div className="flex flex-wrap gap-3">
               <div className="rounded-md border px-3 py-2 text-center">
                 <p className="text-xs text-muted-foreground">{t("auditTab.statsTotalItems")}</p>
@@ -181,7 +181,7 @@ export function AuditTab() {
         )}
 
         {/* ── Filters ── */}
-        <SettingsSection title={t("auditTab.filterTitle")}>
+        <SettingsSection data-settings-section="audit-filter" title={t("auditTab.filterTitle")}>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">{t("auditTab.filterDateFrom")}</Label>
@@ -235,6 +235,7 @@ export function AuditTab() {
 
         {/* ── Results ── */}
         <SettingsSection
+          data-settings-section="audit-results"
           title={result.total > 0 ? t("auditTab.resultsWithCount", { count: result.total.toLocaleString() }) : t("auditTab.resultsTitle")}
           actions={
             totalPages > 1 ? (

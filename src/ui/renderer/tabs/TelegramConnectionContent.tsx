@@ -202,6 +202,7 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
 
   return (
     <SettingsSection
+      data-settings-section="remote-telegram"
       title={t("telegramConnection.sectionTitle")}
       description={t("telegramConnection.sectionDescription")}
       actions={

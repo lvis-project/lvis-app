@@ -210,8 +210,11 @@ Key boundaries:
   tile overlay card once and remembers the answer — accept, later, or never — in
   `~/.lvis/onboarding/proposals.json`. Accepting performs the declared `action`
   and only that (prefill the visible composer, or move the settings view onto a
-  tab); nothing auto-submits, starts a turn, or invokes a tool, and undeclared or
-  unusable plugins produce no proposal;
+  destination written `<tab>` or `<tab>/<section>`, so the reader lands on the
+  control rather than on the page that holds it); nothing auto-submits, starts a
+  turn, or invokes a tool, and undeclared or unusable plugins produce no
+  proposal. The host validates both halves of the path against the tabs and
+  sections its build ships and rejects the manifest otherwise;
 - marketplace metadata should not override local policy or managed-plugin rules.
 - boot verifies each installed payload's receipt before parsing its manifest.
   Receipt hashing and manifest validation run with bounded concurrency, but

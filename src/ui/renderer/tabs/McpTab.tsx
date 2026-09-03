@@ -393,7 +393,9 @@ export function McpTab() {
         description={t("mcpTab.pageDescription")}
       />
 
-      <div className="flex flex-col gap-4">
+      {/* The server list and the toolbar that adds to it are the whole page
+          below the header, so they are one deep-link anchor rather than two. */}
+      <div className="flex flex-col gap-4" data-settings-section="mcp-servers" tabIndex={-1}>
         {/* 배너 */}
         {banner && (
           <div

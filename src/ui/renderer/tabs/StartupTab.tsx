@@ -265,6 +265,7 @@ export function StartupTab() {
 
       {/* Global shortcut — show/hide window toggle */}
       <SettingsSection
+        data-settings-section="startup-shortcut"
         title={t("startupTab.shortcutSectionTitle")}
         description={t("startupTab.shortcutSectionDesc")}
       >
@@ -340,6 +341,7 @@ export function StartupTab() {
 
       {/* Launch at startup */}
       <SettingsSection
+        data-settings-section="startup-launch"
         title={t("startupTab.launchSectionTitle")}
         description={t("startupTab.launchSectionDesc")}
       >
@@ -378,6 +380,7 @@ export function StartupTab() {
           renderer. It was `LVIS_KEEP_GPU=1` and nothing else, which a packaged
           app's user cannot set. */}
       <SettingsSection
+        data-settings-section="startup-rendering"
         title={t("startupTab.renderingSectionTitle")}
         description={t("startupTab.renderingSectionDesc")}
       >
@@ -415,6 +418,7 @@ export function StartupTab() {
           with a TLS-inspecting proxy the browser half works while every model
           call fails. This is the control for the half that fails. */}
       <SettingsSection
+        data-settings-section="startup-corp-ca"
         title={t("startupTab.corpCaSectionTitle")}
         description={t("startupTab.corpCaSectionDesc")}
       >
@@ -485,6 +489,7 @@ export function StartupTab() {
 
       {/* Window close behavior (moved from the former General tab) */}
       <SettingsSection
+        data-settings-section="startup-system-behavior"
         title={t("generalTab.systemBehaviorTitle")}
         description={t("generalTab.systemBehaviorDescription")}
       >

@@ -135,7 +135,7 @@ export function LocalApiSurfacesSection() {
 
   if (loading) {
     return (
-      <SettingsSection title={t("localApiSurfaces.sectionTitle")}>
+      <SettingsSection data-settings-section="remote-local-api" title={t("localApiSurfaces.sectionTitle")}>
         <p className="text-sm text-muted-foreground" data-testid="local-api-surfaces-loading">
           {t("localApiSurfaces.loading")}
         </p>
@@ -145,6 +145,7 @@ export function LocalApiSurfacesSection() {
 
   return (
     <SettingsSection
+      data-settings-section="remote-local-api"
       title={t("localApiSurfaces.sectionTitle")}
       description={t("localApiSurfaces.sectionDescription")}
     >

@@ -1073,8 +1073,12 @@
               "const": "settings"
             },
             "path": {
-              "description": "Settings are addressed by tab, so this is a settings tab id.",
+              "description": "A settings tab id, optionally followed by '/' and one section within that tab (\"permissions\", \"permissions/permissions-os-sandbox\"). The pattern only shapes the string; the host checks both halves against the tabs and sections its build actually ships and rejects the manifest when either is unknown.",
               "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)?$",
+              "not": {
+                "pattern": "[\\r\\n]"
+              },
               "minLength": 1,
               "maxLength": 64
             }
