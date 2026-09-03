@@ -78,7 +78,7 @@ import { en as en_be_tools } from "./be_tools.js";
 import { en as en_be_whitelistBootstrap } from "./be_whitelistBootstrap.js";
 import { en as en_be_windowDomain } from "./be_windowDomain.js";
 import { en as en_be_windowTitlebarShell } from "./be_windowTitlebarShell.js";
-import { en as en_bootstrapStatusBanner } from "./bootstrapStatusBanner.js";
+import { en as en_bootstrapStatusPill } from "./bootstrapStatusPill.js";
 import { en as en_bottomActionRow } from "./bottomActionRow.js";
 import { en as en_catppuccinLatte } from "./catppuccinLatte.js";
 import { en as en_catppuccinMocha } from "./catppuccinMocha.js";
@@ -117,7 +117,6 @@ import { en as en_llmTab } from "./llmTab.js";
 import { en as en_mainToolbar } from "./mainToolbar.js";
 import { en as en_marketplaceAnnouncementBanner } from "./marketplaceAnnouncementBanner.js";
 import { en as en_marketplaceTab } from "./marketplaceTab.js";
-import { en as en_marketplaceUpdateBanner } from "./marketplaceUpdateBanner.js";
 import { en as en_mcpAppFullscreenPanel } from "./mcpAppFullscreenPanel.js";
 import { en as en_mcpAppPipPanel } from "./mcpAppPipPanel.js";
 import { en as en_mcpAppView } from "./mcpAppView.js";
@@ -141,6 +140,7 @@ import { en as en_pluginGridButton } from "./pluginGridButton.js";
 import { en as en_pluginInstallDialog } from "./pluginInstallDialog.js";
 import { en as en_pluginPerfTab } from "./pluginPerfTab.js";
 import { en as en_pluginUninstallDialog } from "./pluginUninstallDialog.js";
+import { en as en_pluginUpdatesPill } from "./pluginUpdatesPill.js";
 import { en as en_privacyTab } from "./privacyTab.js";
 import { en as en_reasoningCard } from "./reasoningCard.js";
 import { en as en_remoteA2aActionButton } from "./remoteA2aActionButton.js";
@@ -266,7 +266,7 @@ export const generatedEn: Record<string, string> = {
   ...en_be_whitelistBootstrap,
   ...en_be_windowDomain,
   ...en_be_windowTitlebarShell,
-  ...en_bootstrapStatusBanner,
+  ...en_bootstrapStatusPill,
   ...en_bottomActionRow,
   ...en_catppuccinLatte,
   ...en_catppuccinMocha,
@@ -305,7 +305,6 @@ export const generatedEn: Record<string, string> = {
   ...en_mainToolbar,
   ...en_marketplaceAnnouncementBanner,
   ...en_marketplaceTab,
-  ...en_marketplaceUpdateBanner,
   ...en_mcpAppFullscreenPanel,
   ...en_mcpAppPipPanel,
   ...en_mcpAppView,
@@ -329,6 +328,7 @@ export const generatedEn: Record<string, string> = {
   ...en_pluginInstallDialog,
   ...en_pluginPerfTab,
   ...en_pluginUninstallDialog,
+  ...en_pluginUpdatesPill,
   ...en_privacyTab,
   ...en_reasoningCard,
   ...en_remoteA2aActionButton,

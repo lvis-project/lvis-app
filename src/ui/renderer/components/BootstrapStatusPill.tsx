@@ -41,9 +41,9 @@ export function BootstrapStatusPill({
         tone="muted"
         icon={RefreshCw}
         busy
-        label={t("bootstrapStatusBanner.pillInstalling")}
-        title={t("bootstrapStatusBanner.installing")}
-        ariaLabel={t("bootstrapStatusBanner.installing")}
+        label={t("bootstrapStatusPill.pillInstalling")}
+        title={t("bootstrapStatusPill.installing")}
+        ariaLabel={t("bootstrapStatusPill.installing")}
         disabled
         testId="bootstrap-status-pill"
       />
@@ -53,8 +53,8 @@ export function BootstrapStatusPill({
   if (status.phase === "error") {
     return (
       <FailurePill
-        label={t("bootstrapStatusBanner.pillError")}
-        title={t("bootstrapStatusBanner.bootstrapError", { message: truncate(status.message) })}
+        label={t("bootstrapStatusPill.pillError")}
+        title={t("bootstrapStatusPill.bootstrapError", { message: truncate(status.message) })}
         onRetry={onRetry}
         onDismiss={onDismiss}
       />
@@ -66,9 +66,9 @@ export function BootstrapStatusPill({
       <ToolbarStatusPill
         tone="warning"
         icon={Info}
-        label={t("bootstrapStatusBanner.pillSkipped")}
-        title={t("bootstrapStatusBanner.skipped", { skippedReason: status.skippedReason })}
-        ariaLabel={t("bootstrapStatusBanner.dismissNotification")}
+        label={t("bootstrapStatusPill.pillSkipped")}
+        title={t("bootstrapStatusPill.skipped", { skippedReason: status.skippedReason })}
+        ariaLabel={t("bootstrapStatusPill.dismissNotification")}
         onClick={onDismiss}
         testId="bootstrap-status-pill"
       />
@@ -78,14 +78,14 @@ export function BootstrapStatusPill({
   if (status.failed.length > 0) {
     return (
       <FailurePill
-        label={t("bootstrapStatusBanner.pillFailed")}
+        label={t("bootstrapStatusPill.pillFailed")}
         title={
           status.failed.length === 1
-            ? t("bootstrapStatusBanner.singlePluginFailed", {
+            ? t("bootstrapStatusPill.singlePluginFailed", {
                 id: status.failed[0].id,
                 error: truncate(status.failed[0].error),
               })
-            : t("bootstrapStatusBanner.multiplePluginsFailed", { count: status.failed.length })
+            : t("bootstrapStatusPill.multiplePluginsFailed", { count: status.failed.length })
         }
         onRetry={onRetry}
         onDismiss={onDismiss}
@@ -122,13 +122,13 @@ function FailurePill({
       icon={AlertTriangle}
       label={label}
       title={title}
-      ariaLabel={`${t("bootstrapStatusBanner.pillRetryAriaLabel")} ${title}`}
+      ariaLabel={`${t("bootstrapStatusPill.pillRetryAriaLabel")} ${title}`}
       onClick={onRetry}
       testId="bootstrap-status-pill"
       secondaryAction={{
         icon: X,
-        title: t("bootstrapStatusBanner.dismissNotification"),
-        ariaLabel: t("bootstrapStatusBanner.dismissNotification"),
+        title: t("bootstrapStatusPill.dismissNotification"),
+        ariaLabel: t("bootstrapStatusPill.dismissNotification"),
         onClick: onDismiss,
         testId: "bootstrap-status-dismiss",
       }}
