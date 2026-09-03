@@ -109,7 +109,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.sidechat.send, async (e, payload: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.send, e); return UNAUTHORIZED_FRAME; }
-    const p = (payload ?? {}) as { input?: unknown; attachments?: unknown };
+    const p = (payload ?? {}) as { input?: unknown; attachments?: unknown; parentSessionId?: unknown };
     if (typeof p.input !== "string") {
       return { ok: false as const, error: "invalid-input" };
     }
@@ -153,6 +153,9 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
       p.input as string,
       attachments,
     );
+    // Read now, not after the turn: `new` and `load` swap the loop's session,
+    // and the side chat this turn belongs to is the one it started on.
+    const turnSideChatSessionId = loop.getSessionId();
     const turnPromise = (async () => {
       return runStreamedTurn(
         loop,
@@ -165,8 +168,17 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
             : {}),
         },
       );
-    })().finally(() => {
+    })().finally(async () => {
       if (activeSideStreamTurn === turnPromise) activeSideStreamTurn = null;
+      // After the turn, never before it. The turn is what gives this side chat
+      // a file, and an await between the streaming guard above and the
+      // `activeSideStreamTurn` assignment below would open exactly the window
+      // that guard exists to close.
+      await recordSideChatOrigin(
+        deps.sideChatMemoryManager,
+        turnSideChatSessionId,
+        p.parentSessionId,
+      );
     });
     activeSideStreamTurn = turnPromise;
     try {
@@ -230,4 +242,44 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
     await abortActiveSideTurn();
     return { ok: true as const };
   });
+}
+
+/**
+ * Record which conversation a side chat belongs to — once, at its first turn.
+ *
+ * The sidebar draws a side chat under its conversation, and nothing else in the
+ * app knew that relation: the rail's loop is window-wide and its store is
+ * isolated, so the link has to be written down when it is still observable. The
+ * renderer supplies the conversation its tile was holding when the turn was
+ * sent; the host validates the SHAPE and stores it as the session's origin, the
+ * same field a sub-agent child records its spawning parent in.
+ *
+ * Existence is deliberately not checked. A conversation that has not taken a
+ * turn yet has no file, and a side chat started beside it belongs to it all the
+ * same; the value is a grouping key the sidebar matches against rows it already
+ * has, never a path or an authority, so its id shape is the whole guard.
+ *
+ * Written once: a side chat is not re-parented by being used later beside a
+ * different conversation. The rail's New-session button is how a new one — and
+ * so a new parent — begins.
+ */
+async function recordSideChatOrigin(
+  sideChatMemoryManager: IpcDeps["sideChatMemoryManager"],
+  sideChatSessionId: string,
+  parentSessionId: unknown,
+): Promise<void> {
+  if (!sideChatMemoryManager || !isValidSessionId(parentSessionId)) return;
+  try {
+    const current = sideChatMemoryManager.loadSessionMetadata(sideChatSessionId);
+    if (current?.originSessionId !== undefined) return;
+    await sideChatMemoryManager.saveSessionMetadata(sideChatSessionId, {
+      ...(current ?? {}),
+      originSessionId: parentSessionId,
+    });
+  } catch (err) {
+    // A side chat that cannot record its parent is still a side chat: it lists
+    // at the top level instead of under one. Failing the turn would trade a
+    // working conversation for a sidebar detail.
+    log.warn("side-chat origin not recorded: %s", err);
+  }
 }

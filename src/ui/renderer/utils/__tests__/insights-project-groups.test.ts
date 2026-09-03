@@ -12,6 +12,7 @@ function session(overrides: Partial<SessionSummary>): SessionSummary {
     modifiedAt: "2026-07-04T00:00:00.000Z",
     title: "대화",
     sessionKind: "main",
+    family: "main",
     ...overrides,
   };
 }

@@ -42,15 +42,19 @@ function makeApi() {
   };
 }
 
-function renderView(api: LvisApi, chatContext?: Partial<ChatContextValue>) {
+function renderView(
+  api: LvisApi,
+  chatContext?: Partial<ChatContextValue>,
+  view?: Partial<React.ComponentProps<typeof SideChatView>>,
+) {
   return render(
     <TooltipProvider>
       <ApprovalSurfaceProvider value={approvalSurfaceStub()}>
         {chatContext ? (
           <ChatContextProvider value={chatContext as ChatContextValue}>
-            <SideChatView api={api} />
+            <SideChatView api={api} {...view} />
           </ChatContextProvider>
-        ) : <SideChatView api={api} />}
+        ) : <SideChatView api={api} {...view} />}
       </ApprovalSurfaceProvider>
     </TooltipProvider>,
   );
@@ -237,5 +241,55 @@ describe("SideChatView — the main composer's input system", () => {
 
     emit({ type: "done", streamId: 1 });
     expect(view.getByTestId("composer-send-button")).toBeTruthy();
+  });
+});
+
+describe("SideChatView — the conversation a side chat belongs to", () => {
+  it("sends the tile's conversation with the turn, so the host can record the parentage", async () => {
+    const { api, spies } = makeApi();
+    renderView(api, { currentSessionId: "parent-session", hasApiKey: true });
+    await startTurn("hello");
+    expect(spies.send).toHaveBeenCalledWith("hello", expect.anything(), "parent-session");
+  });
+
+  it("tells the window its conversation list is stale once the turn settles", async () => {
+    const { api } = makeApi();
+    const onSessionsChanged = vi.fn();
+    renderView(api, { currentSessionId: "parent-session", hasApiKey: true }, { onSessionsChanged });
+    await startTurn("hello");
+    await waitFor(() => expect(onSessionsChanged).toHaveBeenCalled());
+  });
+
+  it("loads the side chat a sidebar row asked for, once per request", async () => {
+    const { api } = makeApi();
+    const load = api.sideChat!.load as ReturnType<typeof vi.fn>;
+    load.mockResolvedValue({ ok: true, sessionId: "side-9", messages: [] });
+    const request = { chatGroupId: "main", sessionId: "side-9", nonce: 1 };
+    const { rerender } = renderView(api, undefined, { openRequest: request });
+    await waitFor(() => expect(load).toHaveBeenCalledWith("side-9"));
+
+    // The same request re-delivered is the same ask, not a second one.
+    await act(async () => {
+      rerender(
+        <TooltipProvider>
+          <ApprovalSurfaceProvider value={approvalSurfaceStub()}>
+            <SideChatView api={api} openRequest={request} />
+          </ApprovalSurfaceProvider>
+        </TooltipProvider>,
+      );
+    });
+    expect(load).toHaveBeenCalledTimes(1);
+
+    // A fresh nonce is a fresh ask, even for the side chat already shown.
+    await act(async () => {
+      rerender(
+        <TooltipProvider>
+          <ApprovalSurfaceProvider value={approvalSurfaceStub()}>
+            <SideChatView api={api} openRequest={{ ...request, nonce: 2 }} />
+          </ApprovalSurfaceProvider>
+        </TooltipProvider>,
+      );
+    });
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
   });
 });

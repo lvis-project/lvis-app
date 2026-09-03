@@ -72,10 +72,12 @@ type ApiOverrides = {
     modifiedAt: string;
     title?: string;
     sessionKind?: "main" | "routine" | "subagent";
+    family?: "main" | "routine" | "work-board" | "side-chat";
     routineId?: string;
     routineTitle?: string;
     routineFiredAt?: string;
     workBoardItemId?: number;
+    parentSessionId?: string;
   }>;
   currentSession?: string;
   starred?: unknown[];
@@ -192,11 +194,21 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 } {
   let settings = overrides.settings ?? MOCK_DEFAULT_SETTINGS;
   let personaPrompts = overrides.personaPrompts ?? [];
-  const sessions = (overrides.sessions ?? []).map((session) => ({
-    ...session,
-    title: session.title ?? `세션 ${session.id.slice(0, 8)}`,
-    sessionKind: session.sessionKind ?? "main",
-  }));
+  const sessions = (overrides.sessions ?? []).map((session) => {
+    const sessionKind = session.sessionKind ?? "main";
+    return {
+      ...session,
+      title: session.title ?? `세션 ${session.id.slice(0, 8)}`,
+      sessionKind,
+      // The handler stamps the family; a fixture that names one keeps it, and
+      // one that does not gets the family its other fields already imply, so a
+      // test written before families still describes the row it meant.
+      family: session.family
+        ?? (session.workBoardItemId !== undefined
+          ? "work-board" as const
+          : sessionKind === "routine" ? "routine" as const : "main" as const),
+    };
+  });
   const currentSession = overrides.currentSession ?? MOCK_DEFAULT_SESSION_ID;
   let sentTurnCount = 0;
   const starred = overrides.starred ?? [];
@@ -453,13 +465,18 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
-    chatSessions: vi.fn(async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string; includeWorkBoardRuns?: boolean }) => {
+    chatSessions: vi.fn(async (opts?: { kind?: "main" | "routine" | "all"; families?: Array<"main" | "routine" | "work-board" | "side-chat">; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
       const afterTime = opts?.after ? Date.parse(opts.after) : Number.NaN;
       const filtered = sessions.filter((session) => {
-        const kind = opts?.kind ?? "main";
-        if (kind !== "all" && session.sessionKind !== kind) {
-          if (!(opts?.includeWorkBoardRuns === true && session.workBoardItemId !== undefined)) return false;
+        // Mirrors the handler: a `families` request selects by family and
+        // ignores `kind`; without one, `kind` governs the main store alone.
+        const family = session.family;
+        if (opts?.families) {
+          if (!opts.families.includes(family)) return false;
+        } else {
+          const kind = opts?.kind ?? "main";
+          if (kind !== "all" && session.sessionKind !== kind) return false;
         }
         if (opts?.routineId && session.routineId !== opts.routineId) return false;
         const t = Date.parse(session.modifiedAt);

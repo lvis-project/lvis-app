@@ -211,6 +211,8 @@ export class BootContext {
   declare conversationLoop: ConversationLoop;
   /** Side-chat (workspace rail) — 2nd loop with isolated `~/.lvis/side-chat/` store. */
   declare sideChatConversationLoop: ConversationLoop;
+  /** The side-chat store — the conversation list reads it beside the main one. */
+  declare sideChatMemoryManager: MemoryManager;
   /** Resolves the loop behind one tiled chat group — see IpcDeps. */
   declare resolveChatGroupLoop: (chatGroupId: string) => ConversationLoop;
   /** Releases that loop when the tile closes — see IpcDeps. */
@@ -331,6 +333,7 @@ const BOOT_CONTEXT_FIELDS = [
   "postTurnHookChain",
   "conversationLoop",
   "sideChatConversationLoop",
+  "sideChatMemoryManager",
   "resolveChatGroupLoop",
   "releaseChatGroupLoop",
   "findLoopBySessionId",

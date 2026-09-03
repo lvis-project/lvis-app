@@ -76,6 +76,12 @@ export interface ChatGroupEnvironment {
 
   // the window's conversation list and stars
   refreshSessions: () => void | Promise<void>;
+  /**
+   * A stored side chat a sidebar row asked for, naming the tile that must show
+   * it. Every tile is handed the same request and only the one it names acts —
+   * the panel that draws a side chat is one conversation's own column.
+   */
+  sideChatOpenRequest?: { chatGroupId: string; sessionId: string; nonce: number } | null;
   /** Bring a chat group forward, including one chat mode has folded away. Returns whether focus moved. */
   focusChatGroup: (chatGroupId: string) => boolean;
   sessions: readonly { id: string; title: string }[];
@@ -794,6 +800,10 @@ export function ChatGroupSession({
         onAttachmentWarning={handleAttachmentWarning}
         sidePanelOpen={panelOpen}
         onSidePanelOpenChange={onSidePanelOpenChange}
+        sideChatOpenRequest={env.sideChatOpenRequest?.chatGroupId === chatGroupId
+          ? env.sideChatOpenRequest
+          : undefined}
+        onSessionsChanged={env.refreshSessions}
         blogLayout={env.appMode === "work"}
         activeProject={env.activeProject}
         workspaceProjects={env.workspaceProjects}

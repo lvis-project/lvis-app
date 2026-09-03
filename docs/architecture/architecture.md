@@ -186,11 +186,46 @@ owns storage, approvals, and audit.
 
 Item runs execute as sub-agent sessions whose origin names the item
 (`work-board:<itemId>`), so their conversations live in the isolated sub-agent
-namespace, never in the main chat store. The sidebar's conversation list shows
-one row per item that has run, carrying the Work icon and the item's title; the
-row is read-only (no rename, archive, pin, or drag) and opens the board item
-with its newest run transcript expanded. Briefing runs
-(`work-board-briefing:<kind>`) are not listed.
+namespace, never in the main chat store. Briefing runs
+(`work-board-briefing:<kind>`) are not runs of an item.
+
+## Conversation List
+
+Every conversation the app keeps is listed in the sidebar's conversation tab.
+They do not all live in one place: the app runs three separate `MemoryManager`
+instances — the main store (`~/.lvis/sessions/`), the side-chat store
+(`~/.lvis/side-chat/`) and the sub-agent store (`~/.lvis/subagent/`) — and a
+listing of one of them can never see the others.
+
+`lvis:chat:sessions` federates them. Its `families` option selects which
+conversation families to read; each store is listed by its own manager, every
+row is stamped with its family by the one classifier (`sessionFamilyOf`), and
+the rows are merged into a single list ordered by `modifiedAt`. A request that
+names no family is answered from the main store alone under its `kind` filter,
+which is what every caller but the sidebar wants.
+
+| Family | Store | Row | Opens |
+| --- | --- | --- | --- |
+| `main` | main | chat glyph, the conversation's title | the conversation, in the focused tile |
+| `routine` | main (`sessionKind: "routine"`) | routine glyph, the run's title | the run, through the same session-load path the routine panel uses |
+| `work-board` | sub-agent (origin names an item) | work glyph, the item's title | the board item, newest run transcript expanded |
+| `side-chat` | side-chat | side-chat glyph, indented under its conversation | the conversation, then that tile's side-chat tab showing this side chat |
+
+A sub-agent session that is not an item's run has no family and is not listed:
+it is already reachable inside its parent conversation's sub-agent tab, and a
+row beside the conversation would say the same thing twice.
+
+Only a `main` row carries the main store's actions. Every other family is
+read-only in the list — open, and nothing else: no rename, archive, pin, delete
+or drag, because those act on the main session store and three of the four
+families do not live in it. Archived conversations keep their existing
+behaviour; archiving hides a row, and a family never did.
+
+A side chat records the conversation it was started beside as its
+`originSessionId`, written by the host on the turn that first gives the side
+chat a file. The sidebar draws the row under that conversation. A side chat
+whose conversation is not in the list — a page that did not reach it, a
+conversation since deleted — is listed in its own right rather than dropped.
 
 ## Plugin Runtime
 

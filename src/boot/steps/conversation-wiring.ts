@@ -401,6 +401,7 @@ export async function wireConversation(
     ...sideChatRationaleBindings,
   });
   ctx.sideChatConversationLoop = sideChatConversationLoop;
+  ctx.sideChatMemoryManager = sideChatMemoryManager;
 
   // Tiled chat groups — the main area can hold several conversations at once.
   //

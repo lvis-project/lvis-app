@@ -310,39 +310,75 @@ describe("handleChatSessions legacy default-root metadata scrub", () => {
   });
 });
 
-describe("handleChatSessions work-board runs", () => {
+describe("handleChatSessions federated families", () => {
   const main = {
     id: "session-main",
     modifiedAt: new Date("2026-09-03T10:00:00Z"),
     title: "main chat",
     sessionKind: "main",
   };
+  const routine = {
+    id: "session-routine",
+    modifiedAt: new Date("2026-09-03T07:00:00Z"),
+    title: "아침 브리핑",
+    sessionKind: "routine",
+    routineId: "rt-1",
+    routineTitle: "아침 브리핑",
+    routineFiredAt: "2026-09-03T07:00:00.000Z",
+  };
+  const sideChats = [
+    {
+      id: "side-1",
+      modifiedAt: new Date("2026-09-03T10:30:00Z"),
+      title: "환경 변수 확인",
+      sessionKind: "main",
+      originSessionId: "session-main",
+    },
+  ];
   const runs = [
     { id: "sub-a1", modifiedAt: new Date("2026-09-03T11:00:00Z"), title: "Execute: 월간 보고서", sessionKind: "subagent", workBoardItemId: 7 },
     { id: "sub-a0", modifiedAt: new Date("2026-09-03T09:00:00Z"), title: "Plan: 월간 보고서", sessionKind: "subagent", workBoardItemId: 7 },
     { id: "sub-gone", modifiedAt: new Date("2026-09-03T08:00:00Z"), title: "Execute: deleted", sessionKind: "subagent", workBoardItemId: 9 },
+    { id: "sub-plain", modifiedAt: new Date("2026-09-03T12:00:00Z"), title: "a spawned agent", sessionKind: "subagent" },
   ];
+  const ALL_FAMILIES = ["main", "routine", "work-board", "side-chat"] as const;
   const makeDeps = () => {
     const listWorkBoardRunSessions = vi.fn(() => runs);
     const get = vi.fn(async (id: number) => id === 7
       ? { status: "found" as const, itemId: 7, item: { id: 7, title: "월간 보고서 초안", projectRoot: "C:\\ws\\alpha", projectName: "alpha" } }
       : { status: "not_found" as const, itemId: id });
+    const listSessionsPage = vi.fn(() => [main, routine]);
+    const listSideChatSessionsPage = vi.fn(() => sideChats);
     const deps = {
       conversationLoop: { getSessionId: () => "session-main" },
-      memoryManager: { listSessionsPage: vi.fn(() => [main]) },
+      memoryManager: { listSessionsPage },
+      sideChatMemoryManager: { listSessionsPage: listSideChatSessionsPage },
       getSubAgentRunner: () => ({ listWorkBoardRunSessions }),
       workBoardStore: { get },
     } as unknown as IpcDeps;
-    return { deps, listWorkBoardRunSessions, get };
+    return { deps, listWorkBoardRunSessions, listSessionsPage, listSideChatSessionsPage, get };
   };
 
-  it("lists one row per item, titled by the item, merged by time with the main sessions", async () => {
-    const { deps, listWorkBoardRunSessions } = makeDeps();
-    const { sessions } = await handleChatSessions(deps, { kind: "main", includeWorkBoardRuns: true });
+  it("stamps a family on every row and merges the four stores by time", async () => {
+    const { deps, listWorkBoardRunSessions, listSessionsPage } = makeDeps();
+    const { sessions } = await handleChatSessions(deps, { families: [...ALL_FAMILIES] });
     expect(listWorkBoardRunSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 20 }));
-    expect(sessions.map((s) => s.id)).toEqual(["sub-a1", "session-main"]);
+    // A federated request reads every kind the main store holds in one scan.
+    expect(listSessionsPage).toHaveBeenCalledWith(expect.objectContaining({ kind: "all" }));
+    expect(sessions.map((s) => [s.id, s.family])).toEqual([
+      ["sub-a1", "work-board"],
+      ["side-1", "side-chat"],
+      ["session-main", "main"],
+      ["session-routine", "routine"],
+    ]);
+  });
+
+  it("carries the item's title and project on a work-board row, one row per item", async () => {
+    const { deps } = makeDeps();
+    const { sessions } = await handleChatSessions(deps, { families: [...ALL_FAMILIES] });
     expect(sessions[0]).toMatchObject({
       id: "sub-a1",
+      family: "work-board",
       title: "월간 보고서 초안",
       sessionKind: "subagent",
       workBoardItemId: 7,
@@ -350,24 +386,45 @@ describe("handleChatSessions work-board runs", () => {
       projectName: "alpha",
       modifiedAt: "2026-09-03T11:00:00.000Z",
     });
-    // The plan child of the same item is folded into the newer row; the run
-    // whose item is gone has nothing to open and is not listed.
-    expect(sessions.some((s) => s.id === "sub-a0" || s.id === "sub-gone")).toBe(false);
+    // The plan child of the same item folds into the newer row; the run whose
+    // item is gone has nowhere to open; a plain spawned agent is not a run of
+    // an item and belongs to no family the list shows.
+    expect(sessions.some((s) => ["sub-a0", "sub-gone", "sub-plain"].includes(s.id))).toBe(false);
   });
 
-  it("leaves the list untouched, and the runner unasked, without the flag", async () => {
-    const { deps, listWorkBoardRunSessions } = makeDeps();
+  it("carries the conversation a side chat belongs to", async () => {
+    const { deps } = makeDeps();
+    const { sessions } = await handleChatSessions(deps, { families: [...ALL_FAMILIES] });
+    expect(sessions.find((s) => s.id === "side-1")).toMatchObject({
+      family: "side-chat",
+      title: "환경 변수 확인",
+      parentSessionId: "session-main",
+    });
+  });
+
+  it("answers a family-less request from the main store alone, under its kind", async () => {
+    const { deps, listWorkBoardRunSessions, listSideChatSessionsPage, listSessionsPage } = makeDeps();
     const { sessions } = await handleChatSessions(deps, { kind: "main" });
+    expect(listSessionsPage).toHaveBeenCalledWith(expect.objectContaining({ kind: "main" }));
+    expect(sessions.map((s) => s.id)).toEqual(["session-main", "session-routine"]);
+    expect(listWorkBoardRunSessions).not.toHaveBeenCalled();
+    expect(listSideChatSessionsPage).not.toHaveBeenCalled();
+  });
+
+  it("reads only the stores whose family was asked for", async () => {
+    const { deps, listWorkBoardRunSessions, listSideChatSessionsPage } = makeDeps();
+    const { sessions } = await handleChatSessions(deps, { families: ["main"] });
     expect(sessions.map((s) => s.id)).toEqual(["session-main"]);
     expect(listWorkBoardRunSessions).not.toHaveBeenCalled();
+    expect(listSideChatSessionsPage).not.toHaveBeenCalled();
   });
 
-  it("lists nothing extra when the runner or the board is not wired", async () => {
+  it("lists nothing extra when the runner, the board or the side-chat store is not wired", async () => {
     const deps = {
       conversationLoop: { getSessionId: () => "session-main" },
       memoryManager: { listSessionsPage: vi.fn(() => [main]) },
     } as unknown as IpcDeps;
-    const { sessions } = await handleChatSessions(deps, { kind: "main", includeWorkBoardRuns: true });
+    const { sessions } = await handleChatSessions(deps, { families: [...ALL_FAMILIES] });
     expect(sessions.map((s) => s.id)).toEqual(["session-main"]);
   });
 });

@@ -10,6 +10,7 @@ import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { type StatusBarProps } from "./components/StatusBar.js";
 import { ChatSidePanel } from "./components/ChatSidePanel.js";
+import type { SideChatOpenRequest } from "./components/SideChatView.js";
 
 
 
@@ -154,6 +155,13 @@ export interface ChatViewProps {
   /** Controlled right-side work panel state, toggled from the title bar. */
   sidePanelOpen?: boolean;
   onSidePanelOpenChange: (open: boolean) => void;
+  /**
+   * A stored side chat a sidebar row asked THIS tile to show. Addressed to one
+   * tile because the panel that draws it is one conversation's own column.
+   */
+  sideChatOpenRequest?: SideChatOpenRequest | undefined;
+  /** Tell the window its conversation list is stale — a side-chat turn moves a row in it. */
+  onSessionsChanged?: (() => void | Promise<void>) | undefined;
   /** Constrain transcript and composer to a centered reading column. */
   blogLayout?: boolean;
   /** Active project — drives the empty-state composer's project selector trigger label. */
@@ -170,7 +178,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, onProposalAnswer, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, onProposalAnswer, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, sideChatOpenRequest, onSessionsChanged, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   const approvals = useApprovalSurface();
   const approvalHead = pendingApprovals[0] ?? null;
@@ -434,6 +442,15 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
     workspaceTabs.ensureContainerTab("subagent");
     onSidePanelOpenChange(true);
   }, [currentSessionId, subAgentSpawns, workspaceTabs, onSidePanelOpenChange]);
+
+  // A sidebar row asked for a side chat: the rail has to be open and on its
+  // side-chat tab before the panel below can show what it loaded.
+  const sideChatOpenNonce = sideChatOpenRequest?.nonce;
+  useEffect(() => {
+    if (sideChatOpenNonce === undefined) return;
+    workspaceTabs.ensureContainerTab("side-chat");
+    onSidePanelOpenChange(true);
+  }, [sideChatOpenNonce, workspaceTabs, onSidePanelOpenChange]);
 
   useEffect(() => {
     if (previewModel.targets.length === 0) {
@@ -940,6 +957,8 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
             onWidthCommit={handleSidePanelWidthCommit}
             resizeElementRef={dockedPanelMotionRef}
             onClose={() => onSidePanelOpenChange(false)}
+            sideChatOpenRequest={sideChatOpenRequest}
+            onSessionsChanged={onSessionsChanged}
             activity={toolActivity}
             onOpenActivityItem={routeActivityItem}
             onOpenActivityItemPinned={routeActivityItemPinned}

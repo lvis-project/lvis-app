@@ -51,6 +51,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     mcpAppModelContext: ctx.mcpAppModelContext,
     conversationLoop: ctx.conversationLoop,
     sideChatConversationLoop: ctx.sideChatConversationLoop,
+    sideChatMemoryManager: ctx.sideChatMemoryManager,
     // Tiled chat groups resolve their own loop through this. It is assembled
     // by name like everything else here, so leaving it out is how the IPC
     // domain ends up unable to build any group but the primary.

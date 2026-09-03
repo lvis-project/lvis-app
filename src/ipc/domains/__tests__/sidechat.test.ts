@@ -71,10 +71,23 @@ function makeMainLoop() {
   };
 }
 
-function register(sideLoop: unknown, mainLoop: unknown, piiRedactEnabled = false) {
+function makeSideChatStore(existing?: Record<string, unknown>) {
+  return {
+    loadSessionMetadata: vi.fn(() => existing ?? null),
+    saveSessionMetadata: vi.fn(async () => {}),
+  };
+}
+
+function register(
+  sideLoop: unknown,
+  mainLoop: unknown,
+  piiRedactEnabled = false,
+  sideChatMemoryManager: unknown = makeSideChatStore(),
+) {
   const deps = {
     conversationLoop: mainLoop,
     sideChatConversationLoop: sideLoop,
+    sideChatMemoryManager,
     auditLogger: { log: vi.fn() },
     getMainWindow: () => ({ webContents: {} }),
     settingsService: {
@@ -82,6 +95,7 @@ function register(sideLoop: unknown, mainLoop: unknown, piiRedactEnabled = false
     },
   };
   registerSideChatHandlers(deps as never);
+  return { sideChatMemoryManager };
 }
 
 beforeEach(() => {
@@ -339,5 +353,48 @@ describe("side-chat IPC domain", () => {
     const handler = handlers.get(CHANNELS.sidechat.send)!;
     const result = await handler(ev("file:///index.html"), { input: "hello" });
     expect(result).toMatchObject({ ok: false, error: "side-chat-unavailable" });
+  });
+});
+
+describe("side-chat parentage", () => {
+  const PARENT = "89df5053-7dd8-4550-85c5-1a11011f7868";
+
+  it("records the conversation a side chat belongs to on its first turn", async () => {
+    const store = makeSideChatStore();
+    register(makeSideLoop(), makeMainLoop(), false, store);
+    const handler = handlers.get(CHANNELS.sidechat.send)!;
+
+    await handler(ev("file:///index.html"), { input: "hello", parentSessionId: PARENT });
+
+    expect(store.saveSessionMetadata).toHaveBeenCalledWith(
+      "34fd6270-309d-4e47-878b-75c0742a6ac2",
+      expect.objectContaining({ originSessionId: PARENT }),
+    );
+  });
+
+  it("does not re-parent a side chat that already has a conversation", async () => {
+    const store = makeSideChatStore({ originSessionId: "11111111-2222-3333-4444-555555555555" });
+    register(makeSideLoop(), makeMainLoop(), false, store);
+    const handler = handlers.get(CHANNELS.sidechat.send)!;
+
+    await handler(ev("file:///index.html"), { input: "hello", parentSessionId: PARENT });
+
+    expect(store.saveSessionMetadata).not.toHaveBeenCalled();
+  });
+
+  it("ignores a parent that is not a session id, and still runs the turn", async () => {
+    const store = makeSideChatStore();
+    const side = makeSideLoop();
+    register(side, makeMainLoop(), false, store);
+    const handler = handlers.get(CHANNELS.sidechat.send)!;
+
+    const result = await handler(ev("file:///index.html"), {
+      input: "hello",
+      parentSessionId: "../../etc/passwd",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(side.runTurn).toHaveBeenCalledTimes(1);
+    expect(store.saveSessionMetadata).not.toHaveBeenCalled();
   });
 });

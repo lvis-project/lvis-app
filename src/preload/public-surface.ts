@@ -87,7 +87,7 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
     }, chatGroupId),
   chatGuide: async (input: string) => ipcRenderer.invoke(CHANNELS.chat.guide, input, chatGroupId),
   chatNew: async (opts?: { projectRoot?: string; projectName?: string }) => ipcRenderer.invoke(CHANNELS.chat.new, opts, chatGroupId),
-  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string; includeWorkBoardRuns?: boolean }) =>
+  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; families?: Array<"main" | "routine" | "work-board" | "side-chat">; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
     ipcRenderer.invoke(CHANNELS.chat.sessions, opts) as Promise<{
       current: string;
       sessions: Array<{
@@ -95,8 +95,12 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
         modifiedAt: string;
         title: string;
         sessionKind: "main" | "routine" | "subagent";
+        /** Which conversation family the row belongs to — its glyph, label and click path. */
+        family: "main" | "routine" | "work-board" | "side-chat";
         /** Present on a work-board run row — the item it opens. */
         workBoardItemId?: number;
+        /** Present on a side-chat row — the conversation it is listed under. */
+        parentSessionId?: string;
         routineId?: string;
         routineTitle?: string;
         routineFiredAt?: string;

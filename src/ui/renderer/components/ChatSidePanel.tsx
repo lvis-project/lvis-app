@@ -28,7 +28,7 @@ import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
-import { SideChatView } from "./SideChatView.js";
+import { SideChatView, type SideChatOpenRequest } from "./SideChatView.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
 import type { SubAgentSpawn } from "../subagents/types.js";
@@ -661,6 +661,10 @@ export interface ChatSidePanelProps {
   resizeElementRef?: { current: HTMLElement | null };
   /** The card's own close. It stands beside the group header, over it when floating, so this is the way out. */
   onClose: () => void;
+  /** A stored side chat a sidebar row asked this tile's rail to show. */
+  sideChatOpenRequest?: SideChatOpenRequest | undefined;
+  /** Tell the window its conversation list is stale — a side-chat turn moves a row in it. */
+  onSessionsChanged?: (() => void | Promise<void>) | undefined;
   /**
    * What this conversation did — the empty launcher shows it above the tab
    * picker, so an open panel with nothing in it still says something, and the
@@ -689,6 +693,8 @@ export function ChatSidePanel({
   onWidthCommit,
   resizeElementRef,
   onClose,
+  sideChatOpenRequest,
+  onSessionsChanged,
   activity,
   onOpenActivityItem,
   onOpenActivityItemPinned,
@@ -1019,7 +1025,11 @@ export function ChatSidePanel({
             // Side chat — a second, independently-streaming chat session driven
             // by a dedicated ConversationLoop in main. The view subscribes to the
             // DEDICATED side-chat IPC channel, fully isolated from the main chat.
-            <SideChatView api={api} />
+            <SideChatView
+              api={api}
+              openRequest={sideChatOpenRequest}
+              onSessionsChanged={onSessionsChanged}
+            />
           ) : (
             <PreviewWorkspace api={api} sessionId={sessionId} targets={previewTargets} selectedId={selectedId} onSelect={onSelect} />
           )}

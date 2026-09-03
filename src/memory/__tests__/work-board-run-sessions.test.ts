@@ -1,17 +1,18 @@
 /**
- * Work-board runs in the session list.
+ * What the session list calls each row.
  *
- * A run is a sub-agent session whose `originSessionId` names a work-board
- * item. The memory manager is the one place that turns that origin into
- * `workBoardItemId`, so the sidebar, the IPC handler and the runner all agree
- * on which sessions are runs — and which are not (a chat's own sub-agents,
- * the briefing runs).
+ * A work-board run is a sub-agent session whose `originSessionId` names a
+ * work-board item. The memory manager is the one place that turns that origin
+ * into `workBoardItemId`, so the sidebar, the IPC handler and the runner all
+ * agree on which sessions are runs — and which are not (a chat's own
+ * sub-agents, the briefing runs). `sessionFamilyOf` is the one place that turns
+ * a store plus a row into the family the sidebar draws.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MemoryManager } from "../memory-manager.js";
+import { MemoryManager, sessionFamilyOf } from "../memory-manager.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   parseWorkBoardOriginSessionId,
@@ -97,5 +98,49 @@ describe("listSessions with workBoardRuns", () => {
     expect(all.find((entry) => entry.id === RUN)?.workBoardItemId).toBe(12);
     expect(all.find((entry) => entry.id === BRIEFING)).not.toHaveProperty("workBoardItemId");
     expect(all.find((entry) => entry.id === CHAT_CHILD)).not.toHaveProperty("workBoardItemId");
+  });
+});
+
+describe("sessionFamilyOf", () => {
+  it("names the family from the store the row came out of plus its metadata", () => {
+    expect(sessionFamilyOf("main", { sessionKind: "main" })).toBe("main");
+    expect(sessionFamilyOf("main", { sessionKind: "routine" })).toBe("routine");
+    expect(sessionFamilyOf("side-chat", { sessionKind: "main" })).toBe("side-chat");
+    expect(sessionFamilyOf("subagent", { sessionKind: "subagent", workBoardItemId: 12 })).toBe("work-board");
+  });
+
+  it("has no family for a sub-agent that is not an item's run", () => {
+    // Those are reachable inside their parent conversation's sub-agent tab;
+    // a row beside the conversation would say the same thing twice.
+    expect(sessionFamilyOf("subagent", { sessionKind: "subagent" })).toBeNull();
+  });
+
+  it("has no family for a kind the main store should not be holding", () => {
+    expect(sessionFamilyOf("main", { sessionKind: "subagent" })).toBeNull();
+  });
+});
+
+describe("originSessionId on a listed row", () => {
+  let dir: string;
+  let mm: MemoryManager;
+  const SIDE = "eeeeeeee-1111-2222-3333-444444444444";
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), "lvis-session-origin-"));
+    mm = new MemoryManager({ lvisDir: dir });
+    await mm.saveSession(SIDE, [{ role: "user", content: "side" }]);
+    await mm.saveSessionMetadata(SIDE, { sessionKind: "main", originSessionId: MAIN });
+    await mm.saveSession(MAIN, [{ role: "user", content: "hello" }]);
+    await mm.saveSessionMetadata(MAIN, { sessionKind: "main" });
+  });
+
+  afterEach(async () => {
+    await cleanupTmpDir(dir);
+  });
+
+  it("carries the conversation a session was started from, and nothing when there is none", () => {
+    const rows = mm.listSessions({ kind: "all" });
+    expect(rows.find((entry) => entry.id === SIDE)?.originSessionId).toBe(MAIN);
+    expect(rows.find((entry) => entry.id === MAIN)).not.toHaveProperty("originSessionId");
   });
 });

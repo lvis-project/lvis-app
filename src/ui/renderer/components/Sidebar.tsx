@@ -15,6 +15,7 @@ import {
   Plus,
   Search,
   Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
@@ -42,7 +43,8 @@ import { isSidebarTab } from "../../../shared/sidebar-tab.js";
 import { CLUSTER_LEAD_PAD_DARWIN, RAIL_CONTROL_SIZE_CLASS, SHELL_GUTTER } from "../../../shared/shell-geometry.js";
 import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
-import type { SessionSummary } from "../hooks/use-sessions.js";
+import type { SessionFamily, SessionSummary } from "../hooks/use-sessions.js";
+import { tabIcon } from "./ChatSidePanelPreview.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
 import { CHAT_SESSION_DRAG_TYPE } from "./pane-drop.js";
@@ -59,6 +61,30 @@ const WorkBoardIcon = BUILTIN_VIEW_ICONS["work-board"];
 const RoutinesIcon = BUILTIN_VIEW_ICONS.routines;
 const InsightsIcon = BUILTIN_VIEW_ICONS.insights;
 const SettingsIcon = BUILTIN_VIEW_ICONS.settings;
+
+/**
+ * What a conversation row draws, per family.
+ *
+ * Each glyph is the one its own surface already uses — the nav row's view icon
+ * for a routine run and a work-board run, the workspace tab's icon for a side
+ * chat — read from those maps rather than picked again here, so a row and the
+ * place it opens cannot show different pictures of the same thing. `main` keeps
+ * the chat glyph it has always had.
+ */
+const SESSION_FAMILY_ICONS: Record<SessionFamily, LucideIcon> = {
+  main: MessageSquareText,
+  routine: RoutinesIcon,
+  "work-board": WorkBoardIcon,
+  "side-chat": tabIcon("side-chat"),
+};
+
+/** What assistive tech reads for each family's glyph. */
+const SESSION_FAMILY_LABEL_KEYS: Record<SessionFamily, string> = {
+  main: "sidebar.mainConversation",
+  routine: "sidebar.routineConversation",
+  "work-board": "sidebar.workBoardConversation",
+  "side-chat": "sidebar.sideChatConversation",
+};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -154,6 +180,13 @@ export interface SidebarProps {
    * row opens the item on the board — where its run transcripts already are.
    */
   onOpenWorkBoardItem?: (itemId: number) => void;
+  /**
+   * Open a side chat from its row: the conversation it belongs to in the
+   * focused tile, then that tile's side-chat tab showing this side chat. The
+   * rail's loop is window-wide and its store isolated, so the row cannot be
+   * loaded into a tile the way a conversation is.
+   */
+  onOpenSideChat?: (sideChatSessionId: string, parentSessionId?: string) => void;
   /** Start a new main-chat session scoped to the selected project root. */
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   /** Re-fetch the workspace project list (after a context-menu mutation e.g. remove). */
@@ -951,8 +984,9 @@ function SessionRow({
   session,
   active,
   onLoadSession,
-  workBoardItemId,
-  onOpenWorkBoardItem,
+  family = "main",
+  nested = false,
+  onOpenFamilyRow,
   isPinned,
   onTogglePin,
   onOpenMenu,
@@ -967,9 +1001,16 @@ function SessionRow({
   session: SessionSummary;
   active: boolean;
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
-  /** Set when the row is a work-board item's conversation — the glyph and the click follow the board. */
-  workBoardItemId?: number;
-  onOpenWorkBoardItem?: (itemId: number) => void;
+  /**
+   * Which conversation family this row is. `main` is the ordinary chat row and
+   * the only one with the main store's actions behind it; every other family
+   * draws its own glyph and offers exactly one thing — open.
+   */
+  family?: SessionFamily;
+  /** A side chat, drawn indented under the conversation it belongs to. */
+  nested?: boolean;
+  /** Open a non-`main` row. The families differ in where that lands; the row does not. */
+  onOpenFamilyRow?: () => void;
   /** Truthy when this conversation is pinned — pinned rows sort to the top and show a persistent filled pin. */
   isPinned?: boolean;
   /** Toggle this conversation's pin — omitted entirely hides the pin affordance. */
@@ -990,11 +1031,19 @@ function SessionRow({
 }) {
   const time = formatRelativeSessionTime(session.modifiedAt, t);
   const pinLabel = isPinned ? t("sidebar.unpinConversation") : t("sidebar.pinConversation");
+  const FamilyIcon = SESSION_FAMILY_ICONS[family];
+  const familyLabel = t(SESSION_FAMILY_LABEL_KEYS[family]);
   return (
     <div
       onContextMenu={onOpenMenu}
+      data-session-family={family}
       className={[
         "group relative flex w-full min-w-0 items-center rounded-md transition-colors",
+        // A nested row is a child of the conversation above it. The indent is
+        // the whole statement of that, so it is on the row rather than a
+        // wrapper: the row still spans the list and still highlights edge to
+        // edge, it just starts further in.
+        nested ? "pl-4" : "",
         active
           ? "bg-primary/(--opacity-subtle) text-primary"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -1048,27 +1097,23 @@ function SessionRow({
           >
             <span className="h-2 w-2 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
           </span>
-        ) : workBoardItemId !== undefined ? (
-          /* The board glyph is what tells this row apart from a chat, so it is
-             named for assistive tech rather than hidden like the chat glyph. */
-          <WorkBoardIcon
-            className={[
-              "h-3.5 w-3.5",
-              isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
-            ].join(" ")}
-            role="img"
-            aria-label={t("sidebar.workBoardConversation")}
-            data-testid={`sidebar-session-work-board-${session.id}`}
-          />
         ) : (
-          <MessageSquareText
+          /* The glyph is what tells one family's row from another's, so on every
+             family but `main` it is named for assistive tech. The chat glyph
+             stays hidden from it: on a list that is mostly chats, naming each
+             one would read the same word down the whole column. */
+          <FamilyIcon
             className={[
               "h-3.5 w-3.5",
               // Hidden — not removed. The glyph keeps reserving the square so the
               // swap costs no layout.
               isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
             ].join(" ")}
-            aria-hidden="true"
+            data-testid={`sidebar-conversation-glyph-${session.id}`}
+            data-session-family={family}
+            {...(family === "main"
+              ? { "aria-hidden": "true" as const }
+              : { role: "img", "aria-label": familyLabel })}
           />
         )}
       </span>
@@ -1088,19 +1133,19 @@ function SessionRow({
           aria-current={active ? "page" : undefined}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid={`sidebar-session-${session.id}`}
-          data-work-board-item={workBoardItemId}
-          title={workBoardItemId !== undefined ? t("sidebar.workBoardConversation") : undefined}
+          data-session-family={family}
+          title={family === "main" ? undefined : familyLabel}
           onClick={() => {
-            if (workBoardItemId !== undefined) onOpenWorkBoardItem?.(workBoardItemId);
+            if (family !== "main") onOpenFamilyRow?.();
             else void onLoadSession?.(session.id);
           }}
           // Dragging a conversation onto a tile is how the main area is
           // arranged: the edge it lands on says whether to split that tile or
-          // replace what it holds. A click still just opens it in place. A
-          // work-board row has no tile form, so it does not drag.
-          draggable={workBoardItemId === undefined}
+          // replace what it holds. A click still just opens it in place. Only a
+          // main conversation has a tile form, so only it drags.
+          draggable={family === "main"}
           onDragStart={(event) => {
-            if (workBoardItemId !== undefined) {
+            if (family !== "main") {
               event.preventDefault();
               return;
             }
@@ -1163,6 +1208,7 @@ function ProjectSessionList({
   streaming,
   onLoadSession,
   onOpenWorkBoardItem,
+  onOpenSideChat,
   onNewChatForProject,
   onRefreshProjects,
   onProjectError,
@@ -1182,6 +1228,7 @@ function ProjectSessionList({
   sessions: SessionSummary[];
   currentSessionId?: string;
   onOpenWorkBoardItem?: (itemId: number) => void;
+  onOpenSideChat?: (sideChatSessionId: string, parentSessionId?: string) => void;
   /**
    * Whether a CONVERSATION is what the window is showing.
    *
@@ -1288,13 +1335,36 @@ function ProjectSessionList({
       return next;
     });
 
-  // Main conversations and the work-board rows — a run's session is a
-  // sub-agent session by kind, admitted here because it is an item's
-  // conversation; the row itself says so with the board glyph.
-  const mainSessions = useMemo(
-    () => sessions.filter((session) => session.sessionKind === "main" || session.workBoardItemId !== undefined),
-    [sessions],
-  );
+  // Which side chats hang under which conversation. A side chat records the
+  // conversation it was started beside, and the row is drawn under it — but
+  // only when that conversation is in this list at all. One whose parent is not
+  // here (a page that did not reach it, a conversation since deleted) has
+  // nothing to nest under and is listed in its own right instead of vanishing.
+  const sideChatsByParent = useMemo(() => {
+    const listedIds = new Set(
+      sessions.filter((session) => session.family !== "side-chat").map((session) => session.id),
+    );
+    const byParent = new Map<string, SessionSummary[]>();
+    for (const session of sessions) {
+      if (session.family !== "side-chat") continue;
+      const parent = session.parentSessionId;
+      if (parent === undefined || !listedIds.has(parent)) continue;
+      const bucket = byParent.get(parent);
+      if (bucket) bucket.push(session);
+      else byParent.set(parent, [session]);
+    }
+    return byParent;
+  }, [sessions]);
+
+  // Every row that stands on its own line in the list: the conversations, the
+  // routine runs, the work-board runs, and the side chats with no parent here.
+  // A nested side chat is drawn by its parent's row, so it is not one of these.
+  const topLevelSessions = useMemo(() => {
+    const nestedIds = new Set(
+      [...sideChatsByParent.values()].flat().map((session) => session.id),
+    );
+    return sessions.filter((session) => !nestedIds.has(session.id));
+  }, [sessions, sideChatsByParent]);
   // Named (real, user-visible) projects — the default/base-directory binding
   // is EXCLUDED here so it is never rendered as a project group or a
   // pickable entry: "no explicit project" is the normal state for a
@@ -1311,13 +1381,13 @@ function ProjectSessionList({
   const sessionsByProject = useMemo(
     () => namedProjects.map((project) => {
       const projectSessions = sortWithPinnedFirst(
-        mainSessions.filter((session) => session.projectRoot && projectRootEquals(session.projectRoot, project.projectRoot)),
+        topLevelSessions.filter((session) => session.projectRoot && projectRootEquals(session.projectRoot, project.projectRoot)),
         (session) => isSessionPinned(session.id),
       );
       return { project, projectSessions };
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- isSessionPinned is derived fresh each render from isSessionStarred (a stable-enough dep); listing it would require useCallback ceremony for no behavioral benefit.
-    [mainSessions, namedProjects, isSessionStarred],
+    [topLevelSessions, namedProjects, isSessionStarred],
   );
   // Every conversation NOT scoped to a named project — no projectRoot at all
   // (the common case once "no explicit project" stops persisting default
@@ -1332,12 +1402,12 @@ function ProjectSessionList({
   // plain, ungrouped list — the conventional "general chats" pattern — rather
   // than wrapped in a fake project header. Pinned conversations sort first.
   const ungroupedSessions = useMemo(() => {
-    const plain = mainSessions.filter(
+    const plain = topLevelSessions.filter(
       (session) => !session.projectRoot || !namedProjects.some((project) => projectRootEquals(project.projectRoot, session.projectRoot)),
     );
     return sortWithPinnedFirst(plain, (session) => isSessionPinned(session.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mainSessions, namedProjects, isSessionStarred]);
+  }, [topLevelSessions, namedProjects, isSessionStarred]);
 
   // Collapsed rail: deliberately NOT wired to the add-project menu. The rail
   // renders no projects at all, and it has nowhere to host the adjacency
@@ -1393,27 +1463,54 @@ function ProjectSessionList({
     } as NativeContextMenuHandlers;
   };
 
-  const renderSessionRow = (session: SessionSummary) => {
-    // A work-board row is the item's conversation, not a chat session: it
-    // cannot be loaded, renamed, archived or deleted here (those act on the
-    // main session store, where this id does not exist), so it offers the one
-    // thing it can do — open the item — and nothing that would misfire.
-    const workBoardItemId = session.workBoardItemId;
-    if (workBoardItemId !== undefined) {
-      const open = () => onOpenWorkBoardItem?.(workBoardItemId);
-      return (
-        <SessionRow
-          key={session.id}
-          session={session}
-          active={false}
-          workBoardItemId={workBoardItemId}
-          onOpenWorkBoardItem={onOpenWorkBoardItem}
-          onOpenMenu={(event) => openNativeContextMenu(event, "conversation", { "conversation.open": open })}
-          t={t}
-        />
-      );
+  // Where one family's row lands when it is clicked. Every family but `main`
+  // opens the surface that already owns its transcript; `main` has no entry
+  // here because it loads into the tile through `onLoadSession`.
+  const openFamilyRow = (session: SessionSummary): (() => void) | undefined => {
+    switch (session.family) {
+      case "main":
+        return undefined;
+      case "routine":
+        // A routine run IS a session in the main store — the routine panel
+        // opens it by loading it, and so does this row.
+        return () => void onLoadSession?.(session.id);
+      case "work-board":
+        return session.workBoardItemId === undefined
+          ? undefined
+          : () => onOpenWorkBoardItem?.(session.workBoardItemId!);
+      case "side-chat":
+        return () => onOpenSideChat?.(session.id, session.parentSessionId);
     }
+  };
+
+  // A row that is not a main conversation is READ-ONLY here: it cannot be
+  // renamed, archived, pinned, deleted or dragged, because those act on the
+  // main session store and three of the four families do not live in it. It
+  // offers the one thing it can do — open — and nothing that would misfire.
+  const renderFamilyRow = (session: SessionSummary, nested: boolean) => {
+    const open = openFamilyRow(session);
     return (
+      <SessionRow
+        key={session.id}
+        session={session}
+        active={false}
+        family={session.family}
+        nested={nested}
+        {...(open ? { onOpenFamilyRow: open } : {})}
+        onOpenMenu={(event) => openNativeContextMenu(
+          event,
+          "conversation",
+          (open ? { "conversation.open": open } : {}) as NativeContextMenuHandlers,
+        )}
+        t={t}
+      />
+    );
+  };
+
+  const renderSessionRow = (session: SessionSummary) => {
+    if (session.family !== "main") return renderFamilyRow(session, false);
+    const sideChats = sideChatsByParent.get(session.id);
+    const row = (
       <SessionRow
         key={session.id}
         session={session}
@@ -1435,6 +1532,13 @@ function ProjectSessionList({
         onCancelRename={() => setRenamingKey(null)}
         t={t}
       />
+    );
+    if (!sideChats || sideChats.length === 0) return row;
+    return (
+      <div key={session.id} data-testid={`sidebar-conversation-tree-${session.id}`}>
+        {row}
+        {sideChats.map((child) => renderFamilyRow(child, true))}
+      </div>
     );
   };
 
@@ -1868,6 +1972,7 @@ export function Sidebar({
   currentSessionId,
   onLoadSession,
   onOpenWorkBoardItem,
+  onOpenSideChat,
   onRefreshProjects,
   onProjectError,
   activeSidebarTab = "chats",
@@ -2358,6 +2463,7 @@ export function Sidebar({
                     streaming={streaming}
                     onLoadSession={onLoadSession}
                     onOpenWorkBoardItem={onOpenWorkBoardItem}
+                    onOpenSideChat={onOpenSideChat}
                     onNewChatForProject={onNewChatForProject}
                     onRefreshProjects={onRefreshProjects}
                     onProjectError={onProjectError}
