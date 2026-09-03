@@ -2002,18 +2002,12 @@ export class MemoryManager implements PromptMemorySource {
    * manual edit that landed while the refresh was waiting on the model.
    */
   async updateUserPreferencesIfUnchanged(expectedContent: string, nextContent: string): Promise<boolean> {
-    const targetPath = join(this.lvisDir, "user-preferences.md");
-    let didWrite = false;
-    await withFileLock(targetPath, async () => {
-      const current = readUtf8FileIfPresent(targetPath) ?? "";
-      if (current !== expectedContent) return;
-      writeFileSync(targetPath, nextContent, "utf-8");
-      this.userPreferences = nextContent;
-      didWrite = true;
-    });
-    if (!didWrite) {
-      this.userPreferences = this.readFile("user-preferences.md");
-    }
+    const didWrite = await this.replaceHomeDocIfUnchanged(
+      "user-preferences.md",
+      expectedContent,
+      nextContent,
+    );
+    this.userPreferences = didWrite ? nextContent : this.readFile("user-preferences.md");
     return didWrite;
   }
 

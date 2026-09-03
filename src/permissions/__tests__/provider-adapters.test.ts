@@ -613,14 +613,14 @@ describe("createGcpPlaygroundProvider", () => {
 describe("reviewerProviderKeyPresent", () => {
   it("openai → checks llm.apiKey.openai", () => {
     const getSecret = vi.fn((key: string) => (key === "llm.apiKey.openai" ? "sk-x" : null));
-    expect(reviewerProviderKeyPresent("openai", getSecret)).toBe(true);
+    expect(reviewerProviderKeyPresent("openai", getSecret, () => null)).toBe(true);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.openai");
   });
 
   it("anthropic → checks llm.apiKey.claude (M2: vendor map, not llm.apiKey.anthropic)", () => {
     // UI sends "anthropic"; canonical vendor is "claude" — must look up llm.apiKey.claude
     const getSecret = vi.fn((key: string) => (key === "llm.apiKey.claude" ? "x" : null));
-    expect(reviewerProviderKeyPresent("anthropic", getSecret)).toBe(true);
+    expect(reviewerProviderKeyPresent("anthropic", getSecret, () => null)).toBe(true);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.claude");
     expect(getSecret).not.toHaveBeenCalledWith("llm.apiKey.anthropic");
   });
@@ -628,13 +628,13 @@ describe("reviewerProviderKeyPresent", () => {
   it("anthropic → false when only llm.apiKey.anthropic present (M2: regression guard)", () => {
     // Ensure the old (broken) key path no longer satisfies the check
     const getSecret = vi.fn((key: string) => (key === "llm.apiKey.anthropic" ? "x" : null));
-    expect(reviewerProviderKeyPresent("anthropic", getSecret)).toBe(false);
+    expect(reviewerProviderKeyPresent("anthropic", getSecret, () => null)).toBe(false);
   });
 
   it("google → checks llm.apiKey.gemini (M2: vendor map, not llm.apiKey.google)", () => {
     // UI sends "google"; canonical vendor is "gemini"
     const getSecret = vi.fn((key: string) => (key === "llm.apiKey.gemini" ? "k" : null));
-    expect(reviewerProviderKeyPresent("google", getSecret)).toBe(true);
+    expect(reviewerProviderKeyPresent("google", getSecret, () => null)).toBe(true);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
     expect(getSecret).not.toHaveBeenCalledWith("llm.apiKey.google");
   });
@@ -660,14 +660,6 @@ describe("reviewerProviderKeyPresent", () => {
     const getEndpoint = vi.fn(() => "https://e.services.ai.azure.com");
     expect(reviewerProviderKeyPresent("foundry", getSecret, getEndpoint)).toBe(true);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.azure-foundry");
-  });
-
-  it("foundry → false when getEndpoint not supplied (conservative)", () => {
-    const getSecret = vi.fn((key: string) =>
-      key === FOUNDRY_API_KEY_SECRET ? "k" : null,
-    );
-    // No getEndpoint supplied → treated as no endpoint
-    expect(reviewerProviderKeyPresent("foundry", getSecret)).toBe(false);
   });
 
   // ── #766 regression: empty / whitespace endpoint must not be truthy ──
@@ -699,21 +691,21 @@ describe("reviewerProviderKeyPresent", () => {
 
   it("gcp-playground → false when API key absent", () => {
     const getSecret = vi.fn((_key: string) => null);
-    expect(reviewerProviderKeyPresent("gcp-playground", getSecret)).toBe(false);
+    expect(reviewerProviderKeyPresent("gcp-playground", getSecret, () => null)).toBe(false);
   });
 
   it("gcp-playground → true when llm.apiKey.gemini is present", () => {
     const getSecret = vi.fn((key: string) =>
       key === GCP_PLAYGROUND_API_KEY_SECRET ? "AIza-key" : null,
     );
-    expect(reviewerProviderKeyPresent("gcp-playground", getSecret)).toBe(true);
+    expect(reviewerProviderKeyPresent("gcp-playground", getSecret, () => null)).toBe(true);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
   });
 
   it("unknown provider → false, fail-closed (getSecret not called)", () => {
     // MAJOR-3 R2: unknown provider name now returns false without probing getSecret.
     const getSecret = vi.fn((_key: string) => null);
-    expect(reviewerProviderKeyPresent("unknown-provider", getSecret)).toBe(false);
+    expect(reviewerProviderKeyPresent("unknown-provider", getSecret, () => null)).toBe(false);
     expect(getSecret).not.toHaveBeenCalled();
   });
 });
@@ -906,7 +898,7 @@ describe("reviewerProviderKeyPresent (MEDIUM-3 — prototype-safe lookup)", () =
     // MAJOR-3 R2: unknown UI name no longer falls through to `?? provider` → fail-closed.
     // getSecret must NOT be called for an unknown provider (no secret-store probe).
     const getSecret = vi.fn((_key: string) => null);
-    expect(reviewerProviderKeyPresent("unknown-provider", getSecret)).toBe(false);
+    expect(reviewerProviderKeyPresent("unknown-provider", getSecret, () => null)).toBe(false);
     expect(getSecret).not.toHaveBeenCalled();
   });
 
@@ -915,7 +907,7 @@ describe("reviewerProviderKeyPresent (MEDIUM-3 — prototype-safe lookup)", () =
     // would return the Object constructor function. With Object.create(null) +
     // hasOwnProperty check + MAJOR-3 fail-closed, unknown names return false immediately.
     const getSecret = vi.fn((_key: string) => null);
-    expect(reviewerProviderKeyPresent("constructor", getSecret)).toBe(false);
+    expect(reviewerProviderKeyPresent("constructor", getSecret, () => null)).toBe(false);
     // MAJOR-3: fail-closed means getSecret is never called for an unmapped provider.
     expect(getSecret).not.toHaveBeenCalled();
   });

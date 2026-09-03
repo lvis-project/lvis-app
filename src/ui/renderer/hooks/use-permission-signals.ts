@@ -118,7 +118,7 @@ export function usePermissionSignals(): UsePermissionSignalsResult {
     } catch {
       return;
     }
-    const unsubscribe = api.permission.onReviewSuggestion?.((payload) => {
+    const unsubscribe = api.permission.onReviewSuggestion((payload) => {
       if (
         !payload ||
         (payload.reason !== "allow-always" && payload.reason !== "repeat-allow") ||
@@ -146,7 +146,6 @@ export function usePermissionSignals(): UsePermissionSignalsResult {
       }
       setReviewSuggestion({ ...payload, busy: false });
     });
-    if (!unsubscribe) return;
     return unsubscribe;
   }, []);
 
