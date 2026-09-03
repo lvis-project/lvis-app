@@ -8,7 +8,9 @@ export const en = {
   "bootstrapStatusPill.pillRetryAriaLabel": "Retry plugin bootstrap",
   "bootstrapStatusPill.bootstrapError": "Plugin bootstrap failed: {message}",
   "bootstrapStatusPill.dismissNotification": "Close notification",
-  "bootstrapStatusPill.skipped": "Marketplace bootstrap skipped: {skippedReason}",
+  "bootstrapStatusPill.skippedE2eIsolated": "Managed plugin bootstrap is off in isolated test mode.",
+  "bootstrapStatusPill.skippedNoBaseUrl": "No marketplace address is configured, so no managed plugins were checked.",
+  "bootstrapStatusPill.skippedCatalogUnreachable": "The marketplace catalog could not be reached, so no managed plugins were checked.",
   "bootstrapStatusPill.singlePluginFailed": "Plugin {id} installation failed: {error}",
   "bootstrapStatusPill.multiplePluginsFailed": "{count} plugins failed to install",
 } as const;
@@ -21,7 +23,9 @@ export const ko: Record<keyof typeof en, string> = {
   "bootstrapStatusPill.pillRetryAriaLabel": "플러그인 부트스트랩 다시 시도",
   "bootstrapStatusPill.bootstrapError": "플러그인 부트스트랩 실패: {message}",
   "bootstrapStatusPill.dismissNotification": "알림 닫기",
-  "bootstrapStatusPill.skipped": "마켓플레이스 부트스트랩 건너뜀: {skippedReason}",
+  "bootstrapStatusPill.skippedE2eIsolated": "격리된 테스트 모드에서는 매니지드 플러그인 부트스트랩을 실행하지 않습니다.",
+  "bootstrapStatusPill.skippedNoBaseUrl": "마켓플레이스 주소가 설정되지 않아 매니지드 플러그인을 확인하지 않았습니다.",
+  "bootstrapStatusPill.skippedCatalogUnreachable": "마켓플레이스 카탈로그에 연결하지 못해 매니지드 플러그인을 확인하지 않았습니다.",
   "bootstrapStatusPill.singlePluginFailed": "플러그인 {id} 설치 실패: {error}",
   "bootstrapStatusPill.multiplePluginsFailed": "{count}개 플러그인 설치 실패",
 };

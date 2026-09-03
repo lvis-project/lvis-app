@@ -8,9 +8,9 @@ import type { AppBootstrapStatus } from "../../../shared/bootstrap-status.js";
  * The host emits one of three lifecycle states around
  * `ensureManagedInstalled()`:
  *   - `start`       — install pipeline kicked off; render a quiet spinner
- *   - `complete`    — finished; expose `installed` + `failed` + `skippedReason`
- *                     so the UI can render "all set", "N failed", or
- *                     "marketplace not configured" depending on shape
+ *   - `complete`    — finished; expose `installed` + `failed` + `skipped` so
+ *                     the UI can render "all set", "N failed", or the
+ *                     translated sentence for the skip code, depending on shape
  *   - `error`       — bootstrap itself threw; expose `message` for the banner
  *
  * `installing` is a derived flag (true between start and complete/error).

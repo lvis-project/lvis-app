@@ -62,12 +62,41 @@ describe("BootstrapStatusPill", () => {
       phase: "complete",
       installed: [],
       failed: [],
-      skippedReason: "marketplace not configured",
+      skipped: { reason: "no-base-url" },
     });
 
     const label = screen.getByTestId("bootstrap-status-pill").getAttribute("aria-label");
     expect(label).toContain("알림 닫기");
-    expect(label).toContain("marketplace not configured");
+    expect(label).toContain("마켓플레이스 주소가 설정되지 않아");
+  });
+
+  it("translates each skip code into its own sentence, with no marketplace claim on the isolated skip", () => {
+    // The old surface interpolated one English reason string into one Korean
+    // sentence that began "마켓플레이스 부트스트랩 건너뜀" — so an E2E-isolated run,
+    // which has nothing to do with the marketplace, was reported as one.
+    renderPill({
+      phase: "complete",
+      installed: [],
+      failed: [],
+      skipped: { reason: "e2e-isolated" },
+    });
+
+    const title = screen.getByTestId("bootstrap-status-pill").getAttribute("title") ?? "";
+    expect(title).toContain("격리된 테스트 모드");
+    expect(title).not.toContain("마켓플레이스");
+  });
+
+  it("appends the failed request's own message to the translated catalog sentence", () => {
+    renderPill({
+      phase: "complete",
+      installed: [],
+      failed: [],
+      skipped: { reason: "catalog-unreachable", detail: "ENOTFOUND marketplace" },
+    });
+
+    const title = screen.getByTestId("bootstrap-status-pill").getAttribute("title") ?? "";
+    expect(title).toContain("마켓플레이스 카탈로그에 연결하지 못해");
+    expect(title).toContain("ENOTFOUND marketplace");
   });
 
   it("retries the bootstrap when the error pill is clicked", () => {
@@ -123,13 +152,13 @@ describe("BootstrapStatusPill", () => {
   it("dismisses the skipped-bootstrap report from the pill itself", () => {
     const onDismiss = vi.fn();
     renderPill(
-      { phase: "complete", installed: [], failed: [], skippedReason: "marketplace not configured" },
+      { phase: "complete", installed: [], failed: [], skipped: { reason: "no-base-url" } },
       { onDismiss },
     );
 
     const pill = screen.getByTestId("bootstrap-status-pill");
     expect(pill.textContent).toContain("부트스트랩 건너뜀");
-    expect(pill.getAttribute("title")).toContain("marketplace not configured");
+    expect(pill.getAttribute("title")).toContain("마켓플레이스 주소가 설정되지 않아");
     // Nothing to retry — a skip is a decision, not a failure.
     expect(screen.queryByTestId("bootstrap-status-dismiss")).toBeNull();
 

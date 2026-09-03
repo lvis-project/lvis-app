@@ -14,6 +14,8 @@ import { assertLocalCatalogFetcherAllowed, isDevModeUnlocked } from "../boot/dev
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
 import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
+import { describeBootstrapSkip } from "../shared/bootstrap-status.js";
+import type { BootstrapSkip } from "../shared/bootstrap-status.js";
 import { resolveDependencies } from "./dependency-resolver.js";
 import {
   assertPluginCandidateAppCompatible,
@@ -1174,12 +1176,13 @@ export class PluginMarketplaceService {
     failed: Array<{ id: string; error: string }>;
     /**
      * Present only when the whole pass was skipped rather than completed, and
-     * says why. Same meaning as `resolveManagedPluginBootstrap`'s `reason`:
-     * nothing was attempted, so an empty `installed`/`failed` is the absence of
-     * work rather than a clean run. Boot forwards it to the status surface,
-     * which would otherwise render silence for the case it exists to report.
+     * says why. Same closed vocabulary as `resolveManagedPluginBootstrap`'s
+     * `reason`: nothing was attempted, so an empty `installed`/`failed` is the
+     * absence of work rather than a clean run. Boot forwards it to the status
+     * surface, which would otherwise render silence for the case it exists to
+     * report.
      */
-    skippedReason?: string;
+    skipped?: BootstrapSkip;
   }> {
     if (
       options?.mode !== "pre-start-sync" &&
@@ -1231,10 +1234,15 @@ export class PluginMarketplaceService {
     } catch (err) {
       // The network boundary: an unreachable catalog is data about the outcome,
       // not a default to paper over. Returning the bare empty result would tell
-      // boot the same story a clean no-op does.
-      const skippedReason = `catalog unreachable: ${(err as Error).message}`;
-      log.warn(`ensureManagedInstalled: skipping — ${skippedReason}`);
-      return { ...result, skippedReason };
+      // boot the same story a clean no-op does. The code is what travels; the
+      // request's own message rides along as untranslated `detail`, because
+      // only this boundary has text nobody wrote for a user to read.
+      const skipped: BootstrapSkip = {
+        reason: "catalog-unreachable",
+        detail: (err as Error).message,
+      };
+      log.warn(`ensureManagedInstalled: skipping — ${describeBootstrapSkip(skipped)}`);
+      return { ...result, skipped };
     }
     const managed = plugins.filter((p) => normalizeInstallPolicy(p) === "admin");
     // Registry read errors must propagate. ENOENT is already
