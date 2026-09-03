@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/button.js";
 import { isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import type { OverlayCardPlacement } from "./components/chat-group-session-registry.js";
+import type { OnboardingProposalDisposition } from "../../main/onboarding-proposal-store.js";
 import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { type StatusBarProps } from "./components/StatusBar.js";
@@ -140,6 +141,12 @@ export interface ChatViewProps {
   onPluginPrimaryAction?: (overlayItemId: string, chatGroupId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
+  /** The user's answer to an onboarding proposal card shown in this tile. */
+  onProposalAnswer?: (
+    overlayItemId: string,
+    disposition: OnboardingProposalDisposition,
+    chatGroupId: string,
+  ) => void;
   /** Toast surface rendered directly above the composer input. */
   statusBar?: StatusBarProps;
   /** App-owned toast producer for attachment capability warnings. */
@@ -163,7 +170,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, onProposalAnswer, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   const approvals = useApprovalSurface();
   const approvalHead = pendingApprovals[0] ?? null;
@@ -691,6 +698,7 @@ export function ChatView({ api, chatGroupId, overlayCardTile, onAsk, onRunMcpPro
           overlayCardTile={overlayCardTile}
           onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
           onRoutineAcknowledge={onRoutineAcknowledge}
+          onProposalAnswer={onProposalAnswer}
         />
       </FloatingRightLane>
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">

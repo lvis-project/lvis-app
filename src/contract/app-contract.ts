@@ -526,6 +526,13 @@ export const CHANNELS = {
     dismiss: "lvis:tour:dismiss",
     start: "lvis:tour:start",
   },
+  // Plugin onboarding proposals. INTERNAL, same posture as `tour`: absent from
+  // PUBLIC_CHANNELS / EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE, so only the
+  // host renderer reaches them.
+  onboarding: {
+    listPending: "lvis:onboarding:proposals:list-pending",
+    answer: "lvis:onboarding:proposals:answer",
+  },
   prompts: {
     listSummaries: "lvis:prompts:list-summaries",
     list: "lvis:prompts:list",

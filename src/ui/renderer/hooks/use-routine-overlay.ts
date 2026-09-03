@@ -11,6 +11,8 @@ import {
 } from "../components/chat-group-session-registry.js";
 import type { TranslateFn } from "../../../i18n/translate.js";
 import { errorMessage } from "../../../shared/error-message.js";
+import { normalizeSettingsTab, type SettingsTab } from "../../../shared/settings-tabs.js";
+import type { OnboardingProposalDisposition } from "../../../main/onboarding-proposal-store.js";
 
 type Api = ReturnType<typeof getApi>;
 
@@ -25,6 +27,11 @@ export interface UseRoutineOverlayResult {
   runningRoutines: Set<string>;
   handlePluginPrimaryAction: (overlayItemId: string, chatGroupId: string) => Promise<void>;
   handleRoutineAcknowledge: (routineId: string, firedAt: string) => void;
+  handleProposalAnswer: (
+    overlayItemId: string,
+    disposition: OnboardingProposalDisposition,
+    chatGroupId: string,
+  ) => Promise<void>;
 }
 
 /**
@@ -44,14 +51,24 @@ export interface UseRoutineOverlayResult {
 export function useRoutineOverlay({
   api,
   t,
+  locale,
   registry,
   focusedChatGroupId,
+  onNavigateToSettings,
 }: {
   api: Api;
   t: TranslateFn;
+  /** The locale an accepted proposal's follow-up list is resolved in. */
+  locale: string;
   registry: ChatGroupSessionRegistry;
   /** The tile a card with no origin conversation is pinned to on arrival. */
   focusedChatGroupId: string;
+  /**
+   * Move the settings view onto a tab. A proposal's `settings` action names one
+   * — settings have no finer address than a tab — and the window owns
+   * navigation, so it supplies the move.
+   */
+  onNavigateToSettings: (tab: SettingsTab) => void;
 }): UseRoutineOverlayResult {
   // runningRoutines tracks in-flight LLM sessions.
   const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
@@ -189,7 +206,11 @@ export function useRoutineOverlay({
       if (!item) return;
 
       const { source, pendingPrompt, summary } = item;
-      if (source.kind === "routine" || !pendingPrompt) return;
+      // Only the two INSERTION sources reach this handler. A routine has its own
+      // primary action, and a proposal answers rather than inserts — see
+      // `handleProposalAnswer`.
+      if (source.kind !== "plugin" && source.kind !== "app") return;
+      if (!pendingPrompt) return;
 
       // Resolved from the card's ORIGIN, not from the surface that rendered
       // it. The two agree whenever the origin conversation is open — that is
@@ -239,5 +260,51 @@ export function useRoutineOverlay({
     [api],
   );
 
-  return { addFireRef, runningRoutines, handlePluginPrimaryAction, handleRoutineAcknowledge };
+  // The user's answer to an onboarding proposal. Accepting performs the action
+  // the manifest declared — and only that: text into a composer, or the
+  // settings view onto a tab. Nothing here starts a turn, which is why a
+  // proposal never travels the `imported_trigger` path the insertion cards use.
+  //
+  // The answer is recorded whichever way it went, including "accepted": all
+  // three are final for this launch, and two of them are final for good. The
+  // host's reply re-stages whatever is still unanswered, so the next question
+  // arrives only after this one has one.
+  const handleProposalAnswer = useCallback(
+    async (
+      overlayItemId: string,
+      disposition: OnboardingProposalDisposition,
+      chatGroupId: string,
+    ) => {
+      const item = overlayItemsRef.current.get(overlayItemId);
+      if (!item || item.source.kind !== "proposal") return;
+      const { pluginId, proposalId, action } = item.source;
+      overlayItemsRef.current.delete(overlayItemId);
+
+      if (disposition === "accepted") {
+        if (action.kind === "composer") {
+          // The tile the card was pinned to, for the same reason an insertion
+          // card inserts there: focus can move between the paint and the click.
+          const tile = registry.read(item.adoptedChatGroupId ?? chatGroupId);
+          if (tile) tile.prefillComposer(action.prompt);
+        } else if (action.kind === "settings") {
+          onNavigateToSettings(normalizeSettingsTab(action.path));
+        }
+      }
+
+      try {
+        await api.onboarding.answer(`${pluginId}:${proposalId}`, disposition, locale);
+      } catch (err) {
+        console.warn("[lvis] onboarding proposal answer failed:", errorMessage(err));
+      }
+    },
+    [api, locale, onNavigateToSettings, registry],
+  );
+
+  return {
+    addFireRef,
+    runningRoutines,
+    handlePluginPrimaryAction,
+    handleRoutineAcknowledge,
+    handleProposalAnswer,
+  };
 }

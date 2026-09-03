@@ -16,6 +16,8 @@
 //   - plugin / app (insertion-type): primary action deferred to
 //     `onPluginPrimaryAction`, and withheld entirely when the card's origin
 //     conversation is no longer open.
+//   - proposal: a plugin's onboarding question. Three answers instead of one
+//     confirm, and the host performs the accepted action itself.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useOverlayContext } from "../context/OverlayContext.js";
@@ -23,6 +25,7 @@ import { OverlayCard } from "./OverlayCard.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { FLOATING_LANE_ITEM_WIDTH } from "./FloatingRightLane.js";
 import type { OverlayCardPlacement } from "./chat-group-session-registry.js";
+import type { OnboardingProposalDisposition } from "../../../main/onboarding-proposal-store.js";
 
 export interface OverlayCardRegionProps {
   /**
@@ -51,10 +54,21 @@ export interface OverlayCardRegionProps {
    */
   onPluginPrimaryAction: (overlayItemId: string, chatGroupId: string) => void;
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
+  /**
+   * The user's answer to an onboarding proposal, with the tile that showed the
+   * card — an accepted composer action prefills THAT conversation, the same
+   * rule the insertion cards follow.
+   */
+  onProposalAnswer?: (
+    overlayItemId: string,
+    disposition: OnboardingProposalDisposition,
+    chatGroupId: string,
+  ) => void;
 }
 
 export function OverlayCardRegion({
   chatGroupId, actionChatGroupId, overlayCardTile, onPluginPrimaryAction, onRoutineAcknowledge,
+  onProposalAnswer,
 }: OverlayCardRegionProps) {
   const { t } = useTranslation();
   const { queue, dismiss, openSession, expandedCardIds, setCardExpanded } =
@@ -145,6 +159,49 @@ export function OverlayCardRegion({
             } : undefined}
             primaryActionLabel={t("overlayCardRegion.viewResult")}
             kind="routine"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Onboarding proposal — the card ASKS, and the three buttons are the answer.
+  // No `pendingPrompt` and no turn: what accepting does lives in
+  // `source.action` and is performed by the host, so an unanswerable card
+  // cannot exist here the way an orphaned insertion card can.
+  if (active.source.kind === "proposal") {
+    const answer = (disposition: OnboardingProposalDisposition) => () => {
+      dismiss(active.id);
+      onProposalAnswer?.(active.id, disposition, actionChatGroupId);
+    };
+    return (
+      <div
+        data-testid="overlay-card-region"
+        data-overlay-surface={chatGroupId ?? "window"}
+        data-overlay-source="proposal"
+        className={regionClassName}
+      >
+        <div className="pointer-events-auto">
+          <OverlayCard
+            key={active.id}
+            title={active.title}
+            summary={active.summary}
+            firedAt={active.createdAt}
+            running={false}
+            queueIndex={queueIndex}
+            queueTotal={queueTotal}
+            onPrev={prev}
+            onNext={next}
+            onDismiss={() => dismiss(active.id)}
+            expanded={expanded}
+            onExpandedChange={onExpandedChange}
+            primaryActionLabel={active.primaryActionLabel}
+            dispositions={{
+              onAccept: answer("accepted"),
+              onLater: answer("later"),
+              onNever: answer("never"),
+            }}
+            kind="plugin"
           />
         </div>
       </div>

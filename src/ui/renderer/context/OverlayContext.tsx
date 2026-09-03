@@ -21,6 +21,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import type { PluginOnboardingAction } from "../../../plugins/public-contract.js";
 
 export type OverlayItemSource =
   | { kind: "routine"; routineId: string; firedAt: string }
@@ -30,7 +31,16 @@ export type OverlayItemSource =
   // own, so its message is staged here for an explicit user click. Same insertion shape
   // as `plugin` (a `pendingPrompt` that becomes an `imported_trigger` on confirm), with
   // its own provenance: the prompt is wrapped in `<app-message source="app:<serverId>">`.
-  | { kind: "app"; serverId: string; eventId: string };
+  | { kind: "app"; serverId: string; eventId: string }
+  // A plugin's onboarding proposal, staged by main once the tour gate opens.
+  // It ASKS rather than stages: it carries no `pendingPrompt` and starts no
+  // turn, and `action` is what accepting it does — performed by the host.
+  | {
+      kind: "proposal";
+      pluginId: string;
+      proposalId: string;
+      action: PluginOnboardingAction;
+    };
 
 export interface OverlayItem {
   /** Unique id: `${source.kind}-${unique}` */
@@ -156,7 +166,8 @@ export function OverlayContextProvider({
   const addFire = useCallback((item: OverlayItem) => {
     setQueue((prev) => {
       // Stale fire replace: source.kind === "routine" + same routineId → replace;
-      // source.kind === "plugin" + same (pluginId, eventId) → replace.
+      // source.kind === "plugin" + same (pluginId, eventId) → replace;
+      // source.kind === "proposal" + same (pluginId, proposalId) → replace.
       // Stale guard: for routine items, only replace if incoming firedAt >= existing firedAt.
       // Date.parse() defensive comparison — handles any ISO string normalisation differences.
       // Invalid timestamp on incoming item → drop (stale-by-default); invalid existing → accept incoming.
@@ -189,6 +200,16 @@ export function OverlayContextProvider({
         if (item.source.kind === "plugin" && it.source.kind === "plugin") {
           const replaced = it.source.pluginId === item.source.pluginId
             && it.source.eventId === item.source.eventId;
+          if (replaced) inheritedPin ??= it.adoptedChatGroupId;
+          return !replaced;
+        }
+        // A proposal is one QUESTION, and main may stage it again — a second
+        // window opening, or a re-list after an answer. Two cards asking the
+        // same thing would take two answers for one stored key, so the newer
+        // push replaces the older card rather than joining it.
+        if (item.source.kind === "proposal" && it.source.kind === "proposal") {
+          const replaced = it.source.pluginId === item.source.pluginId
+            && it.source.proposalId === item.source.proposalId;
           if (replaced) inheritedPin ??= it.adoptedChatGroupId;
           return !replaced;
         }

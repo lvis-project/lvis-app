@@ -319,6 +319,8 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:memory:user-prefs:refresh",
         "lvis:memory:user-prefs:update",
         "lvis:notification:clicked",
+        "lvis:onboarding:proposals:answer",
+        "lvis:onboarding:proposals:list-pending",
         "lvis:permission:add-rule",
         "lvis:permission:get-mode",
         "lvis:permission:list-rules",

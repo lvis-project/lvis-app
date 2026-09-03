@@ -438,6 +438,10 @@ describe("preload contextBridge world shape lock", () => {
           "onWorkBoardRunProgress": "function",
           "onWorkBoardRunStarted": "function",
           "onWorkProposalChanged": "function",
+          "onboarding": [
+            "answer",
+            "listPending",
+          ],
           "openExternalUrl": "function",
           "pauseSessionGoal": "function",
           "permission": [
