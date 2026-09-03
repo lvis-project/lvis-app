@@ -1,7 +1,9 @@
 import { vi } from "vitest";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import type { ConversationLoopDeps } from "../conversation-loop.js";
-import type { GenericMessage } from "../llm/types.js";
+import type { GenericMessage, StreamEvent } from "../llm/types.js";
+import type { CompactWithBoundaryResult } from "../structured-compact.js";
+import { CompressionStatus } from "../../shared/compact-status.js";
 
 export function makeConversationLoopSettings(
   autoCompact = true,
@@ -129,5 +131,65 @@ export function makeHistoryExceedingEstimateThreshold(threshold: number): Generi
   return [
     { role: "user", content: "a".repeat(Math.ceil(charsPerMsg)) },
     { role: "assistant", content: "b".repeat(Math.ceil(charsPerMsg)) },
+  ];
+}
+
+/**
+ * A compact result that looks like a real one: the history collapses to a
+ * boundary stub plus the two most recent messages, and the boundary carries a
+ * summary the preamble renderer can read.
+ *
+ * The suites that mock `compactWithBoundary` need the shape the loop reads
+ * back, not a real compaction — and both of them read back the same fields, so
+ * a second copy is a second answer to "what did compaction return".
+ */
+export function makeSyntheticCompactResult(
+  originalMessages: GenericMessage[],
+): CompactWithBoundaryResult {
+  const boundaryStub: GenericMessage = {
+    role: "user",
+    content: "[compact boundary stub]",
+    meta: {
+      compactBoundary: true,
+      compactNum: 1,
+      checkpointMeta: {
+        removedMessages: Math.max(0, originalMessages.length - 2),
+        freedTokens: 1_000,
+        compactNum: 1,
+        trigger: "auto-compact",
+      },
+    },
+  };
+  const recent = originalMessages.slice(-2);
+  return {
+    status: CompressionStatus.SUMMARIZED,
+    boundary: {
+      id: "test-boundary-1",
+      compactNum: 1,
+      summary: { goal: "test", constraints: "", progress: "", decisions: "", files: [], nextSteps: "", criticalContext: "", currentPlan: "", verificationState: "", openBlockers: "", unsafePendingActions: "", lastToolBoundary: "" },
+      toolBoundaryLedger: [],
+      pinnedArtifacts: [],
+      createdAt: new Date().toISOString(),
+    } as unknown as NonNullable<CompactWithBoundaryResult["boundary"]>,
+    newHistory: [boundaryStub, ...recent],
+    removedCount: originalMessages.length - recent.length - 1,
+    estimatedAfter: 100,
+    truncatedCount: 0,
+  };
+}
+
+/**
+ * The turn a scripted provider serves when the model answers and stops: one
+ * text delta, then `message_complete` with `end_turn`.
+ *
+ * The subagent suites each script this same clean round before asserting on
+ * what the spawn persisted; the answer text is the only part that is theirs.
+ */
+export function endTurnScript(text: string): StreamEvent[][] {
+  return [
+    [
+      { type: "text_delta", text },
+      { type: "message_complete", stopReason: "end_turn" },
+    ],
   ];
 }

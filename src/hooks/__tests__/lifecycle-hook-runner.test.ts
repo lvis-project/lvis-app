@@ -10,12 +10,12 @@ import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import { runOneHookScript, type RunnableHook } from "../script-hook-runner.js";
 import type { LifecycleHookStdin } from "../script-hook-types.js";
-import { hasNode } from "./test-helpers.js";
+import { hasExecutable } from "./test-helpers.js";
 
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 const ENV_FIXTURE = resolve(FIXTURE_ROOT, "cmd-lifecycle-env.js");
 
-const HAS_NODE = hasNode();
+const HAS_NODE = hasExecutable("node");
 
 function lifecycleRunnable(command: string[]): RunnableHook {
   return {

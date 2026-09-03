@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runGateScript } from "./gate-script-runner.js";
+import { runGateScript, writeFixtureFile as write } from "./gate-script-runner.js";
 
 /**
  * The gate exists to catch drift between the `:root` pixel tokens in
@@ -17,12 +17,6 @@ import { runGateScript } from "./gate-script-runner.js";
  */
 const SCRIPT = resolve(process.cwd(), "scripts/check-shell-geometry-tokens.mjs");
 const roots: string[] = [];
-
-function write(root: string, rel: string, source: string): void {
-  const path = join(root, rel);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, source, "utf-8");
-}
 
 function css(gap: string, gapTight: string, cardInset = "var(--chrome-gap)"): string {
   return `@layer base {\n  :root {\n    --chrome-band-height: 36px;\n    --chrome-gap: ${gap};\n    --chrome-gap-tight: ${gapTight};\n    --chrome-icon-button: 24px;\n    --chrome-gap-hair: 2px;\n  }\n  :root {\n    --shell-card-inset: ${cardInset};\n    --shell-collapsed-rail-reserve: 64px;\n  }\n}\n`;

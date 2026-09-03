@@ -1,17 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assertInstalledPluginVersion } from "../use-plugin-marketplace.js";
-import type { PluginCardSummary } from "../../types.js";
-
-function card(input: Partial<PluginCardSummary> & Pick<PluginCardSummary, "id" | "version">): PluginCardSummary {
-  return {
-    name: input.id,
-    description: "",
-    sampleTools: [],
-    capabilities: [],
-    tools: [],
-    ...input,
-  };
-}
+import { pluginCardSummary as card } from "../../tabs/__tests__/test-helpers.js";
 
 describe("assertInstalledPluginVersion", () => {
   it("accepts matching installed manifest versions", () => {

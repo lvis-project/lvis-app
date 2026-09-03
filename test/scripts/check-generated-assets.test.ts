@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { deflateSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
+import { writeFixtureFile as write } from "./gate-script-runner.js";
 
 const REPO_ROOT = process.cwd();
 const SCRIPT = resolve(REPO_ROOT, "scripts/check-generated-assets.mjs");
@@ -75,12 +76,6 @@ function git(root: string, args: string[]) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
   }
   return result;
-}
-
-function write(root: string, rel: string, contents: string): void {
-  const path = join(root, rel);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, contents, "utf-8");
 }
 
 function writeBytes(root: string, rel: string, contents: Buffer): void {

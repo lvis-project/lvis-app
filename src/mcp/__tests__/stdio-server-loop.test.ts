@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { PassThrough } from "node:stream";
 import { frameMessage, StdioFrameDecoder } from "../stdio-framing.js";
+import { nextFramedMessage as nextResponse } from "./test-helpers.js";
 import { StdioServerLoop, type StdioRequestHandler } from "../experimental/stdio-server-loop.js";
 import { PluginMcpServer, type PluginToolDelegate } from "../plugin-mcp-server.js";
 import type { PluginManifest } from "../../plugins/types.js";
@@ -58,21 +59,6 @@ describe("stdio-framing", () => {
     expect(decoder.push(Buffer.concat([bad, good])).map((m) => m.id)).toEqual([9]);
   });
 });
-
-/** Read the next framed response off an output stream as a promise. */
-function nextResponse(stream: PassThrough): Promise<Record<string, unknown>> {
-  const decoder = new StdioFrameDecoder();
-  return new Promise((resolve) => {
-    const onData = (chunk: Buffer) => {
-      const msgs = decoder.push(chunk);
-      if (msgs.length > 0) {
-        stream.off("data", onData);
-        resolve(msgs[0]);
-      }
-    };
-    stream.on("data", onData);
-  });
-}
 
 describe("StdioServerLoop — subprocess serving core over real streams", () => {
   function wire(delegate: PluginToolDelegate) {

@@ -13,7 +13,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { PassThrough } from "node:stream";
 import { homedir } from "node:os";
-import { frameMessage, StdioFrameDecoder } from "../../../mcp/stdio-framing.js";
+import { frameMessage } from "../../../mcp/stdio-framing.js";
+import { nextFramedMessage as nextFramed } from "../../../mcp/__tests__/test-helpers.js";
 import type { PluginManifest, RuntimePlugin } from "../../types.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
@@ -61,21 +62,6 @@ const MANIFEST: PluginManifest = {
 const CLIENT_META = {
   _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
 };
-
-/** Read the next framed message off a stream. */
-function nextFramed(stream: PassThrough): Promise<Record<string, unknown>> {
-  const decoder = new StdioFrameDecoder();
-  return new Promise((resolve) => {
-    const onData = (chunk: Buffer) => {
-      const messages = decoder.push(chunk);
-      if (messages.length > 0) {
-        stream.off("data", onData);
-        resolve(messages[0]);
-      }
-    };
-    stream.on("data", onData);
-  });
-}
 
 interface Harness {
   readonly child: PluginChildRuntime;

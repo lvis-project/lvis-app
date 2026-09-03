@@ -29,14 +29,10 @@ import {
 } from "../a2a-subagent-handler.js";
 import { A2ATaskStore } from "../a2a-task-store.js";
 import { UUID_PATTERN } from "../../shared/uuid.js";
+import { monotonicIsoClock as clock } from "./a2a-test-helpers.js";
 
 const HANDLER_ID = "profile-a";
 const TASK_ID = "sub-7bc35644-8737bb97-eb8b-4e75-85c9-1e9b9abd3671";
-
-function clock() {
-  let tick = 0;
-  return () => new Date(Date.UTC(2026, 6, 14, 1, 0, tick++)).toISOString();
-}
 
 function completedResult(
   childSessionId = TASK_ID,

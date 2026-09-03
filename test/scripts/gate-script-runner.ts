@@ -1,4 +1,6 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 /**
  * Runs a build-gate script the way CI does — as a child `node` process — so a
@@ -26,4 +28,18 @@ export function runGateScript(
     encoding: "utf-8",
     ...(env ? { env } : {}),
   });
+}
+
+/**
+ * Write one file into a gate's fixture tree, creating the directories the
+ * relative path implies.
+ *
+ * Every gate test builds its tree the same way — a handful of files at paths
+ * the gate is hard-wired to look for — so the mkdir-then-write is the shared
+ * part and the paths and contents are the test.
+ */
+export function writeFixtureFile(root: string, rel: string, contents: string): void {
+  const path = join(root, rel);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, contents, "utf-8");
 }

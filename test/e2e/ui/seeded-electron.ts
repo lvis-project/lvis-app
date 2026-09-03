@@ -308,3 +308,26 @@ export async function sendRendererStreamEvent(
     win.webContents.send("lvis:chat:stream", ev);
   }, event);
 }
+
+/**
+ * Resize the app's main window to `w` x `h` content pixels.
+ *
+ * "Main" is the largest visible, non-destroyed window: a spec that has opened
+ * a plugin or approval window must still size the shell it is measuring, and
+ * area is the only property that distinguishes them from the main process.
+ */
+export async function setWindowSize(
+  app: ElectronApplication,
+  w: number,
+  h: number,
+): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, size) => {
+    const windows = BrowserWindow.getAllWindows().filter(
+      (window) => !window.isDestroyed() && window.isVisible(),
+    );
+    const target = windows.sort(
+      (a, b) => b.getSize()[0] * b.getSize()[1] - a.getSize()[0] * a.getSize()[1],
+    )[0];
+    if (target) target.setContentSize(size.w, size.h);
+  }, { w, h });
+}

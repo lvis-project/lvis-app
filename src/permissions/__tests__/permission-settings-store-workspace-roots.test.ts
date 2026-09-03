@@ -1,14 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   addAllowedDirectoryPersist,
@@ -20,15 +18,9 @@ import {
 } from "../permission-settings-store.js";
 import * as atomicFile from "../../lib/atomic-file.js";
 import { canonicalizePathForMatch } from "../sensitive-paths.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirFile } from "../../__tests__/test-helpers.js";
 
-const tempRoots: string[] = [];
-
-function fixture(): { root: string; settings: string } {
-  const root = mkdtempSync(join(tmpdir(), "lvis-permission-roots-"));
-  tempRoots.push(root);
-  return { root, settings: join(root, "settings.json") };
-}
+const fixture = useTempDirFile("lvis-permission-roots-", "settings.json");
 
 /**
  * The journal exactly as it sits on disk.
@@ -44,16 +36,13 @@ function journalOnDisk(settings: string): unknown {
   return parsed.permissions.pendingWorkspaceRootRemovals;
 }
 
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks();
-  for (const root of tempRoots.splice(0)) {
-    await cleanupTmpDir(root);
-  }
 });
 
 describe("workspace-root settings mutations", () => {
   it("stores a real canonical identity and de-duplicates a lexical alias", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     const child = join(project, "child");
     mkdirSync(child, { recursive: true });
@@ -68,7 +57,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("removes every canonical-equivalent stored alias in one locked mutation", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     const child = join(project, "child");
     const other = join(root, "other");
@@ -87,7 +76,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("serializes concurrent additions without losing either root", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const first = join(root, "first");
     const second = join(root, "second");
     mkdirSync(first);
@@ -104,7 +93,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("serializes a concurrent remove and add without resurrection or lost update", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const removed = join(root, "removed");
     const added = join(root, "added");
     mkdirSync(removed);
@@ -122,7 +111,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("keeps the frozen target identity when a directory alias is retargeted", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const targetA = join(root, "target-a");
     const targetB = join(root, "target-b");
     const alias = join(root, "alias");
@@ -145,7 +134,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("can remove the frozen target after its original alias becomes broken", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const target = join(root, "target");
     const alias = join(root, "alias");
     mkdirSync(target);
@@ -164,7 +153,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("atomically cuts an active root over to a durable pending intent", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     mkdirSync(project);
     await addAllowedDirectoryPersist(project, settings);
@@ -187,7 +176,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("converges begin successfully when the atomic rename committed before parent fsync failed", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     mkdirSync(project);
     await addAllowedDirectoryPersist(project, settings);
@@ -211,7 +200,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("converges completion successfully when the atomic rename committed before parent fsync failed", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     mkdirSync(project);
     await addAllowedDirectoryPersist(project, settings);
@@ -232,7 +221,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("completes only the exact operation id across a remove/re-add/remove ABA", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     mkdirSync(project);
     await addAllowedDirectoryPersist(project, settings);
@@ -248,7 +237,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("keeps a root out of the active list when a damaged journal entry still names it", () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     const other = join(root, "other");
     mkdirSync(project);
@@ -270,7 +259,7 @@ describe("workspace-root settings mutations", () => {
   it.each([null, "primitive", 7])(
     "leaves the active list alone for a pending journal entry that names nothing: %j",
     (candidate) => {
-      const { root, settings } = fixture();
+      const { dir: root, path: settings } = fixture();
       const project = join(root, "project");
       mkdirSync(project);
       writeFileSync(settings, JSON.stringify({
@@ -302,7 +291,7 @@ describe("workspace-root settings mutations", () => {
   // write that queued the intent dropped the path from `additionalDirectories`
   // at the same time. Stated as a claim next to the code, so it is tested here.
   it("an emptied journal does not bring a root back", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     mkdirSync(project);
     await addAllowedDirectoryPersist(project, settings);
@@ -342,7 +331,7 @@ describe("workspace-root settings mutations", () => {
   // Pinned as a test because the alternative to stating the limit is a comment
   // claiming a guarantee this store does not make.
   it("cannot mask a root when a damaged intent lost its paths and the list still has it", () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     mkdirSync(project);
     writeFileSync(settings, JSON.stringify({
@@ -365,7 +354,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("keeps a journal that is not a list at all, and still answers with the roots", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     const second = join(root, "second");
     mkdirSync(project);
@@ -406,7 +395,7 @@ describe("workspace-root settings mutations", () => {
   });
 
   it("keeps pending fail-closed when a hand edit reintroduces the active path", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     mkdirSync(project);
     await addAllowedDirectoryPersist(project, settings);
@@ -449,7 +438,7 @@ describe("a settings file the store cannot fully interpret", () => {
     second: string;
     queued: string;
   } {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = canonicalizePathForMatch(join(root, "project"));
     const second = canonicalizePathForMatch(join(root, "second"));
     const queued = canonicalizePathForMatch(join(root, "queued"));
@@ -533,7 +522,7 @@ describe("a settings file the store cannot fully interpret", () => {
   // the comment beside the masking claiming an in-app add cannot reach this
   // state — it can.
   it("accepts an add for a root only the unreadable entry names, then drops it on the next read", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = canonicalizePathForMatch(join(root, "project"));
     mkdirSync(join(root, "project"));
     writeFileSync(settings, JSON.stringify({
@@ -579,7 +568,7 @@ describe("a settings file the store cannot parse at all", () => {
   const DAMAGED = '{ "permissions": { "additionalDirectories": ["/srv/keep"], ';
 
   it("reports the condition rather than answering with an empty directory list", () => {
-    const { settings } = fixture();
+    const { path: settings } = fixture();
     writeFileSync(settings, DAMAGED);
 
     const read = readPermissionSettings(settings);
@@ -591,7 +580,7 @@ describe("a settings file the store cannot parse at all", () => {
   });
 
   it("refuses to write over it instead of replacing the user's document", async () => {
-    const { root, settings } = fixture();
+    const { dir: root, path: settings } = fixture();
     const project = join(root, "project");
     mkdirSync(project);
     writeFileSync(settings, DAMAGED);

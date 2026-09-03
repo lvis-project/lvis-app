@@ -1,5 +1,3 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,15 +7,9 @@ import {
   writePermissionSettings,
 } from "../permission-settings-store.js";
 import { reconcileWorkspaceRoots } from "../workspace-root-reconciler.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirFile } from "../../__tests__/test-helpers.js";
 
-const cleanupDirs: string[] = [];
-
-function tempSettings(): { dir: string; path: string } {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-root-reconcile-"));
-  cleanupDirs.push(dir);
-  return { dir, path: join(dir, "settings.json") };
-}
+const tempSettings = useTempDirFile("lvis-root-reconcile-", "settings.json");
 
 async function seed(path: string, roots: string[]): Promise<void> {
   await writePermissionSettings({ additionalDirectories: roots }, path);
@@ -27,11 +19,8 @@ function codedError(code: string, message = "sensitive filesystem detail"): Erro
   return Object.assign(new Error(message), { code });
 }
 
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks();
-  for (const dir of cleanupDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
 });
 
 describe("reconcileWorkspaceRoots", () => {

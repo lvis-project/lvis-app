@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
+import { sendRendererStreamEvent as sendStreamEvent } from './seeded-electron.js';
 
 /**
  * #916 force-recover OFF-override banner + #917 recovery_exhausted banner.
@@ -18,17 +19,6 @@ import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
  *   B4 (#917): after recovery_exhausted, compact_started (normal) does NOT
  *      replace the error banner (StatusBar still shows error text).
  */
-
-async function sendStreamEvent(
-  app: import('@playwright/test').PlaywrightTestArgs['page'] extends never ? never : import('playwright').ElectronApplication,
-  event: Record<string, unknown>,
-): Promise<void> {
-  await app.evaluate(({ BrowserWindow }, ev) => {
-    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
-    if (!win) return;
-    win.webContents.send('lvis:chat:stream', ev);
-  }, event);
-}
 
 test.describe('compact recovery banners (#916 + #917)', () => {
   test('B1 (#916): force-recover compact_started shows OFF-override warning in StatusBar', async ({

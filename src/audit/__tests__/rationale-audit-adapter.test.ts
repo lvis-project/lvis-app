@@ -14,7 +14,7 @@ import { useTempPaths } from "../../__tests__/test-helpers.js";
 import lockfile from "proper-lockfile";
 import { describe, expect, it } from "vitest";
 import { RATIONALE_CONTROL_CONTRACT_VERSION } from "../../tools/pipeline/rationale-control.js";
-import type { InvocationAuditRecord } from "../../tools/pipeline/rationale-ticket-lifecycle.js";
+import { authorizedInvocationRecord as invocationRecord } from "../../tools/pipeline/__tests__/rationale-fixtures.js";
 import type { RationaleUiAuditProjection } from "../../tools/pipeline/rationale-resume-contract.js";
 import type { RationaleTicketStoreAuditEvent } from "../../tools/pipeline/rationale-ticket-store.js";
 import { MemorySecretStore, type SecretStore } from "../hmac-chain.js";
@@ -56,21 +56,6 @@ class SnapshotSecretStore implements SecretStore {
     this.values.clear();
     for (const [name, value] of snapshot) this.values.set(name, value);
   }
-}
-
-function invocationRecord(): InvocationAuditRecord {
-  return {
-    contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
-    ticketId: randomUUID(),
-    actionDigest: "c".repeat(64),
-    invocationDigest: "d".repeat(64),
-    toolUseId: "tool-use-a",
-    authorizationReceiptId: randomUUID(),
-    invocationStartLeaseId: null,
-    version: 0,
-    state: "authorized",
-    automaticRetry: "forbidden",
-  };
 }
 
 function uiProjection(): RationaleUiAuditProjection {

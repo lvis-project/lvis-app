@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { ApprovalGate } from "../../../permissions/approval-gate.js";
 import { buildPermissionEvaluationContext } from "../../../permissions/evaluation-context.js";
@@ -10,7 +9,6 @@ import type { RationaleAuditSink } from "../../../audit/rationale-audit-adapter.
 import {
   createRequestAnchor,
   createTriggeringBatchDisposition,
-  RATIONALE_CONTROL_CONTRACT_VERSION,
   type RequestAnchor,
 } from "../rationale-control.js";
 import { RationaleHostCoordinator } from "../rationale-host-coordinator.js";
@@ -19,6 +17,7 @@ import {
 } from "../rationale-host-service.js";
 import type { RationaleControlCandidate } from "../rationale-orchestrator.js";
 import { createReviewerScopeReevaluation } from "../rationale-pr1-contract.js";
+import { authorizedInvocationRecord } from "./rationale-fixtures.js";
 import type {
   HostInvocationStartCas,
   InvocationAuditRecord,
@@ -114,18 +113,7 @@ function createCandidate(anchor: RequestAnchor): RationaleControlCandidate {
 }
 
 function authorizedRecord(): InvocationAuditRecord {
-  return {
-    contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
-    ticketId: randomUUID(),
-    actionDigest: "a".repeat(64),
-    invocationDigest: "b".repeat(64),
-    toolUseId: "tool-use-service",
-    authorizationReceiptId: randomUUID(),
-    invocationStartLeaseId: null,
-    version: 0,
-    state: "authorized",
-    automaticRetry: "forbidden",
-  };
+  return authorizedInvocationRecord({ toolUseId: "tool-use-service" });
 }
 
 function setup() {

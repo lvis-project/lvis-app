@@ -5,6 +5,7 @@ import {
   type A2AMessage,
 } from "../../shared/a2a.js";
 import { A2ATaskStore } from "../a2a-task-store.js";
+import { monotonicIsoClock as clock } from "./a2a-test-helpers.js";
 
 function memoryNamespace(seed?: unknown) {
   let value = seed === undefined ? undefined : structuredClone(seed);
@@ -30,11 +31,6 @@ function memoryNamespace(seed?: unknown) {
       nextWriteError = error;
     },
   };
-}
-
-function clock() {
-  let tick = 0;
-  return () => new Date(Date.UTC(2026, 6, 14, 0, 0, tick++)).toISOString();
 }
 
 function userMessage(messageId: string, text = "hello"): A2AMessage {

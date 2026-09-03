@@ -11,7 +11,10 @@ import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { WhitelistCache, whitelistRegistry } from "../whitelist-registry.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
 import { useTempDirs } from "../../../__tests__/test-helpers.js";
-import { signedDocumentFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
+import {
+  signedDocumentFixture,
+  stubSignedDocumentFetch,
+} from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -458,32 +461,6 @@ describe("WhitelistRegistry — issuedAt guard on the fetched document", () => {
    * document paths are served; anything else 404s, which is what an
    * unmatched request should look like.
    */
-  function serveSignedDocument(body: string, signature: string): void {
-    vi.stubGlobal("fetch", async (input: string | URL) => {
-      const path = new URL(String(input)).pathname;
-      const payload =
-        path.endsWith("/whitelist.json")
-          ? body
-          : path.endsWith("/whitelist.json.sig")
-            ? signature
-            : null;
-      if (payload === null) {
-        return {
-          ok: false,
-          status: 404,
-          headers: { get: () => null },
-          text: async () => "not found",
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        headers: { get: () => null },
-        text: async () => payload,
-      };
-    });
-  }
-
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -496,7 +473,7 @@ describe("WhitelistRegistry — issuedAt guard on the fetched document", () => {
       issuedAt: "2027-01-01T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
     });
-    serveSignedDocument(future.body, future.signature);
+    stubSignedDocumentFetch("whitelist.json", future.body, future.signature);
 
     const audits: string[] = [];
     await whitelistRegistry.init({
@@ -520,7 +497,7 @@ describe("WhitelistRegistry — issuedAt guard on the fetched document", () => {
       issuedAt: "2026-05-17T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
     });
-    serveSignedDocument(genuine.body, genuine.signature);
+    stubSignedDocumentFetch("whitelist.json", genuine.body, genuine.signature);
     await whitelistRegistry.init({ userDataDir, online: true, now: () => now });
 
     expect(whitelistRegistry.status()).toMatchObject({ state: "fresh", source: "remote" });

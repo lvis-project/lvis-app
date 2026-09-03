@@ -4,6 +4,7 @@ import { BashTool } from "../shell-tools.js";
 import { ToolExecutor, type ToolCallMeta } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
+import { permissionManagerReturning as pmReturning } from "./executor-reviewer-fixtures.js";
 import {
   ApprovalGate,
   type ApprovalRequest,
@@ -76,12 +77,6 @@ function explicitlySandboxOff(platform: "darwin" | "linux" | "win32"): void {
   __resetActiveSandboxCapabilityForTest();
   setSandboxRequestedAtBoot(false);
 }
-function pmReturning(result: ReturnType<PermissionManager["checkDetailed"]>): PermissionManager {
-  const pm = new PermissionManager("/tmp/nonexistent-windows-partial-shell.json");
-  pm.checkDetailed = () => result;
-  return pm;
-}
-
 function gateResolving(
   choice: "allow-once" | "deny-once",
   auditLogger?: AuditLogger,

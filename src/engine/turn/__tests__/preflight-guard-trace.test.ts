@@ -20,6 +20,7 @@ import {
   makeConversationLoopMemoryReviewer as makeMemoryReviewer,
   makeConversationLoopSettings as makeSettings,
   makeConversationTurnProvider as makeTurnProvider,
+  makeSyntheticCompactResult,
 } from "../../__tests__/conversation-loop-test-helpers.js";
 
 // vi.mock is hoisted — intercept compactWithBoundary so the fired path
@@ -46,38 +47,6 @@ class RecordingTracer implements ConversationTracer {
   }
 }
 
-function makeSyntheticCompactResult(originalMessages: GenericMessage[]): import("../../structured-compact.js").CompactWithBoundaryResult {
-  const boundaryStub: GenericMessage = {
-    role: "user",
-    content: "[compact boundary stub]",
-    meta: {
-      compactBoundary: true,
-      compactNum: 1,
-      checkpointMeta: {
-        removedMessages: Math.max(0, originalMessages.length - 2),
-        freedTokens: 1_000,
-        compactNum: 1,
-        trigger: "auto-compact",
-      },
-    },
-  };
-  const recent = originalMessages.slice(-2);
-  return {
-    status: CompressionStatus.SUMMARIZED,
-    boundary: {
-      id: "test-boundary-1",
-      compactNum: 1,
-      summary: { goal: "test", constraints: "", progress: "", decisions: "", files: [], nextSteps: "", criticalContext: "", currentPlan: "", verificationState: "", openBlockers: "", unsafePendingActions: "", lastToolBoundary: "" },
-      toolBoundaryLedger: [],
-      pinnedArtifacts: [],
-      createdAt: new Date().toISOString(),
-    } as unknown as NonNullable<import("../../structured-compact.js").CompactWithBoundaryResult["boundary"]>,
-    newHistory: [boundaryStub, ...recent],
-    removedCount: originalMessages.length - recent.length - 1,
-    estimatedAfter: 100,
-    truncatedCount: 0,
-  };
-}
 
 describe("PREFLIGHT_GUARD trace step — fired path", () => {
   it("emits PREFLIGHT_GUARD(fired) then COMPACTION_RESULT(applied) with threshold + source, no message content", async () => {

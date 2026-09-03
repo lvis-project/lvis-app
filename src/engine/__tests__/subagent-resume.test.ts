@@ -50,6 +50,7 @@ import {
 } from "../a2a-agent-message-mailbox.js";
 import { A2A_AGENT_MAX_TRACKED_TREES } from "../a2a-agent-message-envelope.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { endTurnScript } from "./conversation-loop-test-helpers.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 let loopAuditLoggers: AuditLogger[] = [];
@@ -192,12 +193,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   // A clean spawn (ends on round 1) so the child JSONL + meta are written and a
   // later resume has real history to re-hydrate.
   function cleanSpawnProvider(): ScriptedProvider {
-    return new ScriptedProvider([
-      [
-        { type: "text_delta", text: "spawn answer" },
-        { type: "message_complete", stopReason: "end_turn" },
-      ],
-    ]);
+    return new ScriptedProvider(endTurnScript("spawn answer"));
   }
 
   function waitingSpawnProvider(): ScriptedProvider {

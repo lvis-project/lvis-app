@@ -112,6 +112,20 @@ export function invokeRegisteredHandlerWithEvent<T = unknown>(
   return fn(event, ...args) as T;
 }
 
+/**
+ * {@link invokeRegisteredHandlerWithEvent} bound to one handler map, for a
+ * suite that registers once and then drives many channels.
+ *
+ * The suites that wanted this had each written the map lookup out again as a
+ * local `invoke`, which is a third copy of "what a missing handler does".
+ */
+export function makeRegisteredHandlerInvoker(
+  handlers: Map<string, RegisteredHandler>,
+): <T = unknown>(channel: string, event: unknown, ...args: unknown[]) => T {
+  return (channel, event, ...args) =>
+    invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
+}
+
 export function makeMockPermissionManager() {
   return {
     getMode: vi.fn(() => "default"),
@@ -287,6 +301,27 @@ export function useTempDirs(prefix: string): (ownPrefix?: string) => string {
 export function useTempPaths(prefix: string, fileName: string): () => string {
   const makeDir = useTempDirs(prefix);
   return () => join(makeDir(), fileName);
+}
+
+/**
+ * A fresh scratch directory this suite owns, plus a path to `fileName` inside
+ * it. Neither is created beyond the directory itself: the subject under test
+ * writes the file, which is what those suites assert about.
+ *
+ * The pair is the helper because the suites that wanted it assert on both — a
+ * settings file and the root it sits under, where the root is also the
+ * workspace directory the settings name. {@link useTempPaths} is the same
+ * helper for a suite that needs only the path.
+ */
+export function useTempDirFile(
+  prefix: string,
+  fileName: string,
+): () => { dir: string; path: string } {
+  const makeDir = useTempDirs(prefix);
+  return () => {
+    const dir = makeDir();
+    return { dir, path: join(dir, fileName) };
+  };
 }
 
 /**

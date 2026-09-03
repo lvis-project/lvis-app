@@ -22,6 +22,7 @@ import {
   makeConversationLoopMemoryReviewer as makeMemoryReviewer,
   makeConversationLoopSettings as makeSettings,
   makeConversationTurnProvider as makeTurnProvider,
+  makeSyntheticCompactResult,
 } from "./conversation-loop-test-helpers.js";
 
 // ─── Module mock — intercept compactWithBoundary ──────────────────────────────
@@ -45,42 +46,6 @@ beforeEach(() => {
   vi.mocked(compactWithBoundary).mockClear();
 });
 
-/**
- * Build a synthetic CompactWithBoundaryResult that looks like a real compact.
- * The newHistory replaces all messages with a single boundary stub + one recent message.
- */
-function makeSyntheticCompactResult(originalMessages: GenericMessage[]): import("../structured-compact.js").CompactWithBoundaryResult {
-  const boundaryStub: GenericMessage = {
-    role: "user",
-    content: "[compact boundary stub]",
-    meta: {
-      compactBoundary: true,
-      compactNum: 1,
-      checkpointMeta: {
-        removedMessages: Math.max(0, originalMessages.length - 2),
-        freedTokens: 1_000,
-        compactNum: 1,
-        trigger: "auto-compact",
-      },
-    },
-  };
-  const recent = originalMessages.slice(-2);
-  return {
-    status: CompressionStatus.SUMMARIZED,
-    boundary: {
-      id: "test-boundary-1",
-      compactNum: 1,
-      summary: { goal: "test", constraints: "", progress: "", decisions: "", files: [], nextSteps: "", criticalContext: "", currentPlan: "", verificationState: "", openBlockers: "", unsafePendingActions: "", lastToolBoundary: "" },
-      toolBoundaryLedger: [],
-      pinnedArtifacts: [],
-      createdAt: new Date().toISOString(),
-    } as unknown as NonNullable<import("../structured-compact.js").CompactWithBoundaryResult["boundary"]>,
-    newHistory: [boundaryStub, ...recent],
-    removedCount: originalMessages.length - recent.length - 1,
-    estimatedAfter: 100,
-    truncatedCount: 0,
-  };
-}
 
 function makeSyntheticNoopResult(messages: GenericMessage[]): import("../structured-compact.js").CompactWithBoundaryResult {
   return {

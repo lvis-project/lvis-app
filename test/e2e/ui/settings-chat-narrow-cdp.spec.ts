@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.js';
 import { closeInlineSettings } from './inline-settings.js';
+import { setWindowSize } from './seeded-electron.js';
 import { TEST_IDS, execModeTestId } from "../../../src/shared/test-ids.js";
 
 type WindowBounds = { x: number; y: number; width: number; height: number };
@@ -36,14 +37,6 @@ async function activateSettingsWithoutResize(
     if (!target) throw new Error('main window is unavailable');
     target.webContents.send('lvis:view:activate', { viewKey: 'settings', settingsTab: tab });
   }, settingsTab);
-}
-
-async function setWindowSize(app: import('@playwright/test').ElectronApplication, w: number, h: number) {
-  await app.evaluate(({ BrowserWindow }, size) => {
-    const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed() && window.isVisible());
-    const target = windows.sort((a, b) => b.getSize()[0] * b.getSize()[1] - a.getSize()[0] * a.getSize()[1])[0];
-    if (target) target.setContentSize(size.w, size.h);
-  }, { w, h });
 }
 
 async function readNarrowLayoutMetrics(page: import('@playwright/test').Page) {

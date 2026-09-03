@@ -12,7 +12,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
 import { UNAUTHORIZED_FRAME } from "../../gated.js";
 import { setProcessPlatform } from "../../../__tests__/support/process-platform.js";
-import { foreignFrameEvent, hostFrameEvent } from "../../../__tests__/test-helpers.js";
+import {
+  foreignFrameEvent,
+  hostFrameEvent,
+  makeRegisteredHandlerInvoker,
+} from "../../../__tests__/test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
@@ -112,11 +116,7 @@ vi.mock("../../../permissions/asrt-windows-support.js", async (importOriginal) =
   };
 });
 
-function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(event, ...args);
-}
+const invoke = makeRegisteredHandlerInvoker(handlers);
 
 function makeDeps() {
   return {
