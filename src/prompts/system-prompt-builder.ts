@@ -502,7 +502,28 @@ export class SystemPromptBuilder {
       refresh: "on-change",
       build: () => {
         const content = memoryManager.getAgentsMd();
-        return content ? `<lvis-agents-context>\n${content}\n</lvis-agents-context>` : "";
+        // `agents.custom.md` is the user's own content, split out from the live
+        // doc by keep-latest so a packaged update can replace AGENTS.md without
+        // taking their edits with it. It is emitted LAST inside the same block
+        // so that on conflict the model reads the user's sentence after the
+        // packaged one — the split must not quietly demote what they wrote.
+        const custom = memoryManager.getAgentsCustomMd().trim();
+        if (!content && !custom) return "";
+        return [
+          "<lvis-agents-context>",
+          ...(content ? [content] : []),
+          ...(custom
+            ? [
+                "",
+                `<lvis-agents-custom-context>`,
+                t("be_systemPromptBuilder.agentsCustomContextIntro"),
+                "",
+                custom,
+                "</lvis-agents-custom-context>",
+              ]
+            : []),
+          "</lvis-agents-context>",
+        ].join("\n");
       },
     });
 

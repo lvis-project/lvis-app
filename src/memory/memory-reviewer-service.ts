@@ -12,26 +12,39 @@ const MEMORY_REVIEW_TASKS = [
   "preference",
   "consolidation",
   "recap",
+  "merge",
 ] as const;
 
 export type MemoryReviewTask = (typeof MEMORY_REVIEW_TASKS)[number];
 
 type MemoryReviewerLane = "foreground" | "background";
 
-/** Recaps are user-visible and therefore jump ahead of idle maintenance work. */
+/**
+ * Recaps are user-visible and therefore jump ahead of idle maintenance work.
+ * A merge is too: the user pressed a button and is watching a spinner for it.
+ */
 const MEMORY_REVIEWER_TASK_LANES: Readonly<Record<MemoryReviewTask, MemoryReviewerLane>> = {
   capture: "background",
   preference: "background",
   consolidation: "background",
   recap: "foreground",
+  merge: "foreground",
 };
 
-/** Host-owned output ceilings for bounded background reviewer calls. */
+/**
+ * Host-owned output ceilings for bounded background reviewer calls.
+ *
+ * `merge` is the outlier because its output is a whole document rather than a
+ * compact profile: a ceiling sized like the others would truncate the merged
+ * doc mid-section and the user would apply an instruction set that stops
+ * partway through.
+ */
 export const MEMORY_REVIEWER_MAX_TOKENS: Readonly<Record<MemoryReviewTask, number>> = {
   capture: 380,
   preference: 1_600,
   consolidation: 1_400,
   recap: 1_200,
+  merge: 8_000,
 };
 
 export interface MemoryReviewerCallOptions {
@@ -76,6 +89,8 @@ const TASK_INSTRUCTIONS: Readonly<Record<MemoryReviewTask, string>> = {
     "Create a compact, derived long-term-memory overview of durable facts, constraints, goals, preferences, and uncertainty.",
   recap:
     "Create an accurate, compact recap of the supplied context only. Do not add facts that are not supported by that context.",
+  merge:
+    "Combine the supplied documents into one document, preserving every instruction the user wrote. Do not add guidance that appears in neither.",
 };
 
 /**

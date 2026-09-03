@@ -59,6 +59,7 @@ import type { RoutineEngine } from "../routines/routine-engine.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
 import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
+import type { AgentsDocMergeService } from "../memory/agents-doc-merge-service.js";
 import type { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../memory/memory-consolidation-service.js";
 import type { McpManager } from "../mcp/mcp-manager.js";
 import type { PluginLoopbackManager } from "../mcp/plugin-loopback-manager.js";
@@ -219,6 +220,7 @@ export class BootContext {
   /** The loop behind an already-open chat group, or none — see IpcDeps. */
   declare findChatGroupLoop: (chatGroupId: string) => ConversationLoop | undefined;
   declare preferenceRefreshService: PreferenceRefreshService;
+  declare agentsDocMergeService: AgentsDocMergeService;
   declare memoryConsolidationService: MemoryConsolidationService;
   declare memoryMaintenanceCoordinator: MemoryMaintenanceCoordinator;
   declare workBoardEngine: WorkBoardEngine;
@@ -334,6 +336,7 @@ const BOOT_CONTEXT_FIELDS = [
   "findLoopBySessionId",
   "findChatGroupLoop",
   "preferenceRefreshService",
+  "agentsDocMergeService",
   "memoryConsolidationService",
   "memoryMaintenanceCoordinator",
   "workBoardEngine",

@@ -79,6 +79,7 @@ import { isMissingPathError } from "../lib/atomic-file.js";
 const log = createLogger("marketplace");
 
 import {
+  isMarketplaceAnnouncementAction,
   isMarketplaceAnnouncementLevel,
   type MarketplaceAnnouncement,
 } from "../shared/marketplace-announcements.js";
@@ -363,7 +364,12 @@ function isMarketplaceAnnouncement(value: unknown): value is MarketplaceAnnounce
     isMarketplaceAnnouncementLevel(value.level) &&
     typeof value.createdAt === "string" &&
     (value.startsAt === null || typeof value.startsAt === "string") &&
-    (value.endsAt === null || typeof value.endsAt === "string")
+    (value.endsAt === null || typeof value.endsAt === "string") &&
+    // Already in host shape: the dev catalog is written by hand against the
+    // normalized type, not the wire one, so there is no version gate to apply
+    // and no `min_app_version` field to read.
+    Array.isArray(value.actions) &&
+    value.actions.every(isMarketplaceAnnouncementAction)
   );
 }
 

@@ -305,6 +305,9 @@ export function wireAnnouncementCheck(input: AnnouncementCheckInput): void {
         createdAt: a.createdAt,
         startsAt: a.startsAt,
         endsAt: a.endsAt,
+        // In the key so that re-pointing a live announcement's button
+        // rebroadcasts, the same way a corrected title does.
+        actions: a.actions,
       })),
       dismissed: normalizeDismissedAnnouncementIds(dismissed),
     });

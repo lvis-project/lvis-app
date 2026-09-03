@@ -86,6 +86,7 @@ import {
   isActiveViewKey,
   isCloseBehavior,
   normalizeTelemetry,
+  normalizeHomeDocs,
   acceptTelemetryText,
   TELEMETRY_TEXT_KEYS,
 } from "./settings-normalization.js";
@@ -415,6 +416,8 @@ export interface AppSettings {
   webSearch: WebSearchSettings;
   marketplace: MarketplaceSettings;
   routine: RoutineSettings;
+  /** How `~/.lvis` reference docs follow the shipped ones. */
+  homeDocs: HomeDocsSettings;
   privacy: PrivacySettings;
   updates: UpdateSettings;
   telemetry: TelemetrySettings;
@@ -741,6 +744,23 @@ export interface TelemetrySettings {
 
 
 
+/**
+ * How the `~/.lvis` reference docs follow the shipped ones.
+ *
+ * Default OFF, and off is the behavior that shipped before this setting: a
+ * divergent packaged doc is offered as an upgrade marker and nothing moves
+ * until the user answers. Turning it on changes where the user's own content
+ * lives, not whether it survives — `agents.custom.md` holds it, and the system
+ * prompt reads it after the live doc so it still wins on conflict.
+ */
+export interface HomeDocsSettings {
+  /**
+   * Keep the live `~/.lvis/AGENTS.md` on the packaged version, carrying the
+   * user's own content in `agents.custom.md` from then on.
+   */
+  keepLatest: boolean;
+}
+
 export interface PrivacySettings {
   piiRedactEnabled: boolean;
 }
@@ -936,6 +956,18 @@ export class SettingsService {
     }
     if (partial.routine) {
       this.settings.routine = { ...this.settings.routine, ...partial.routine };
+    }
+    if (partial.homeDocs) {
+      // Field-level validation (mirrors `system`/`telemetry`): a non-boolean
+      // keepLatest read as truthy would move the user's AGENTS.md into
+      // agents.custom.md on the next packaged update, which is a file move a
+      // malformed payload must not be able to trigger.
+      const nextHomeDocs: HomeDocsSettings = { ...this.settings.homeDocs };
+      acceptField(
+        nextHomeDocs, "keepLatest", partial.homeDocs.keepLatest,
+        isBooleanValue, "homeDocs", PATCHED_FIELD,
+      );
+      this.settings.homeDocs = nextHomeDocs;
     }
     if (partial.privacy) {
       this.settings.privacy = { ...this.settings.privacy, ...partial.privacy };
@@ -1521,6 +1553,7 @@ export class SettingsService {
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
         marketplace,
         routine: normalizedRoutine,
+        homeDocs: normalizeHomeDocs(parsed.homeDocs),
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: normalizeTelemetry(parsed.telemetry),
