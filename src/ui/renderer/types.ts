@@ -10,6 +10,7 @@ import type {
 import type { ChatStreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import type { AppBootstrapStatus } from "../../shared/bootstrap-status.js";
+import type { RoutineRunRow, SessionFamily, SessionListRow } from "../../shared/session-lookup.js";
 import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
@@ -783,7 +784,7 @@ export type LvisApi = {
   chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<
     { ok: true } | { ok: false; error: string }
   >;
-  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; families?: Array<"main" | "routine" | "work-board" | "side-chat">; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine" | "subagent"; family: "main" | "routine" | "work-board" | "side-chat"; workBoardItemId?: number; parentSessionId?: string; routineId?: string; routineTitle?: string; routineFiredAt?: string; projectRoot?: string; projectName?: string; branchedFromCompactNum?: number }> }>;
+  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; families?: SessionFamily[]; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: SessionListRow[] }>;
   onChatStream: (h: (e: ChatStreamEvent) => void) => () => void;
   /**
    * One tiled chat group's view of the per-conversation channels.
@@ -1105,7 +1106,7 @@ export type LvisApi = {
   listRoutineSessions: (
     routineId: string,
     limit?: number,
-  ) => Promise<Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>>;
+  ) => Promise<RoutineRunRow[]>;
   // ─── Work Board — personal board CRUD + lifecycle ───
   // Result envelopes are the store's discriminated `status` unions (or
   // `{ ok:false, error }` for unauthorized-frame / no-store). Shared types come

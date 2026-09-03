@@ -1122,14 +1122,14 @@ export function App() {
     { chatGroupId: string; sessionId: string; nonce: number } | null
   >(null);
   const sideChatRequestNonce = useRef(0);
-  const openSideChat = useCallback(async (sideChatSessionId: string, parentSessionId?: string) => {
+  const openSideChat = useCallback(async (sideChatSessionId: string, originSessionId?: string) => {
     // The conversation first: a side chat is shown beside the conversation it
     // belongs to, and the panel that draws it is that conversation's own. A
     // parent that cannot be reached is not a reason to refuse the side chat —
     // it opens beside whatever the focused tile is already holding.
-    if (parentSessionId !== undefined) {
+    if (originSessionId !== undefined) {
       try {
-        const loaded = await handleLoadSessionAndRefresh(parentSessionId);
+        const loaded = await handleLoadSessionAndRefresh(originSessionId);
         if (loaded !== false) setActiveView("home");
       } catch (err) {
         console.warn("[lvis] openSideChat parent load failed:", errorMessage(err));
@@ -1826,8 +1826,8 @@ export function App() {
                   return loaded;
                 }}
                 onOpenWorkBoardItem={openWorkBoardItem}
-                onOpenSideChat={(sideChatSessionId, parentSessionId) =>
-                  void openSideChat(sideChatSessionId, parentSessionId)}
+                onOpenSideChat={(sideChatSessionId, originSessionId) =>
+                  void openSideChat(sideChatSessionId, originSessionId)}
                 hasApiKey={effectiveLlmReady}
                 subscriptionUnavailable={subscriptionUnavailableProvider !== undefined}
                 subscriptionPending={subscriptionPendingProvider !== undefined}

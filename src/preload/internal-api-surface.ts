@@ -1248,10 +1248,11 @@ export function buildInternalApiSurface() {
     ipcRenderer.on(ROUTINES.failed, listener);
     return () => ipcRenderer.removeListener(ROUTINES.failed, listener);
   },
-  // Routine session history — unified conversation sessions scoped by routineId
+  // Routine session history — the same conversation rows the sidebar lists,
+  // scoped by routineId, plus the opening snippet the panel shows.
   listRoutineSessions: async (routineId: string, limit?: number) =>
     ipcRenderer.invoke(ROUTINES.listSessions, routineId, limit) as Promise<
-      Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>
+      import("../shared/session-lookup.js").RoutineRunRow[]
     >,
 
   // ─── Work Board ──────────────────────────────────

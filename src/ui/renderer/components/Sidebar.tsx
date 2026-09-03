@@ -43,7 +43,8 @@ import { isSidebarTab } from "../../../shared/sidebar-tab.js";
 import { CLUSTER_LEAD_PAD_DARWIN, RAIL_CONTROL_SIZE_CLASS, SHELL_GUTTER } from "../../../shared/shell-geometry.js";
 import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
-import type { SessionFamily, SessionSummary } from "../hooks/use-sessions.js";
+import type { SessionSummary } from "../hooks/use-sessions.js";
+import type { SessionFamily } from "../../../shared/session-lookup.js";
 import { tabIcon } from "./ChatSidePanelPreview.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectRootEquals, workspaceRootsToProjects } from "../../../shared/project-identity.js";
@@ -53,7 +54,7 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from "../../../shared/side-panel.js";
-import { formatRelativeTime } from "../../../shared/format-time.js";
+import { formatRelativeSessionTime } from "../../../shared/format-time.js";
 
 // A nav row draws the same glyph the pane header draws for the view it opens —
 // one map, so a row and the header it produces cannot disagree.
@@ -186,7 +187,7 @@ export interface SidebarProps {
    * rail's loop is window-wide and its store isolated, so the row cannot be
    * loaded into a tile the way a conversation is.
    */
-  onOpenSideChat?: (sideChatSessionId: string, parentSessionId?: string) => void;
+  onOpenSideChat?: (sideChatSessionId: string, originSessionId?: string) => void;
   /** Start a new main-chat session scoped to the selected project root. */
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   /** Re-fetch the workspace project list (after a context-menu mutation e.g. remove). */
@@ -845,15 +846,6 @@ function RevealingSessionList({
   );
 }
 
-function formatRelativeSessionTime(modifiedAt: string, t: ReturnType<typeof useTranslation>["t"]): string {
-  return formatRelativeTime(modifiedAt, {
-    justNow: () => t("sidebar.justNow"),
-    minutesAgo: (count) => t("sidebar.minutesAgo", { count }),
-    hoursAgo: (count) => t("sidebar.hoursAgo", { count }),
-    daysAgo: (count) => t("sidebar.daysAgo", { count }),
-  });
-}
-
 function projectTestId(root: string, fallback: string): string {
   const safe = (root || fallback).replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   return safe || "default";
@@ -1228,7 +1220,7 @@ function ProjectSessionList({
   sessions: SessionSummary[];
   currentSessionId?: string;
   onOpenWorkBoardItem?: (itemId: number) => void;
-  onOpenSideChat?: (sideChatSessionId: string, parentSessionId?: string) => void;
+  onOpenSideChat?: (sideChatSessionId: string, originSessionId?: string) => void;
   /**
    * Whether a CONVERSATION is what the window is showing.
    *
@@ -1347,7 +1339,7 @@ function ProjectSessionList({
     const byParent = new Map<string, SessionSummary[]>();
     for (const session of sessions) {
       if (session.family !== "side-chat") continue;
-      const parent = session.parentSessionId;
+      const parent = session.originSessionId;
       if (parent === undefined || !listedIds.has(parent)) continue;
       const bucket = byParent.get(parent);
       if (bucket) bucket.push(session);
@@ -1479,7 +1471,7 @@ function ProjectSessionList({
           ? undefined
           : () => onOpenWorkBoardItem?.(session.workBoardItemId!);
       case "side-chat":
-        return () => onOpenSideChat?.(session.id, session.parentSessionId);
+        return () => onOpenSideChat?.(session.id, session.originSessionId);
     }
   };
 

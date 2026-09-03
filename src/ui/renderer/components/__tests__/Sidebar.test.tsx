@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Sidebar } from "../Sidebar.js";
 import type { SessionSummary } from "../../hooks/use-sessions.js";
+import { sessionRow } from "../../../../../test/renderer/mock-lvis-api.js";
 import type { ProjectIdentity } from "../../../../shared/project-identity.js";
 import type { SidebarTab } from "../../hooks/use-sidebar-tab.js";
 import type {
@@ -82,29 +83,19 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     ],
   }));
   const sessions: SessionSummary[] = overrides.sessions ?? [
-    {
-      id: "sess-1",
-      title: "전체 동기화로 상태 파악",
-      modifiedAt: new Date().toISOString(),
-      sessionKind: "main",
-      family: "main",
-    },
-    {
+    sessionRow({ id: "sess-1", title: "전체 동기화로 상태 파악", modifiedAt: new Date().toISOString() }),
+    sessionRow({
       id: "sess-2",
       title: "사이드 패널 개선",
       modifiedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-      sessionKind: "main",
-      family: "main",
-    },
-    {
+    }),
+    sessionRow({
       id: "sess-other",
       title: "다른 프로젝트 대화",
       modifiedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      sessionKind: "main",
-      family: "main",
       projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\other-app",
       projectName: "other-app",
-    },
+    }),
   ];
 
   const props: Parameters<typeof Sidebar>[0] = {
@@ -313,15 +304,13 @@ describe("Sidebar legacy default-root session handling", () => {
     // shape pre-PR persistence produced (projectRoot=defaultRoot,
     // projectName="workspace").
     const DEFAULT_ROOT = "C:\\Users\\example\\workspace\\lvis-project\\lvis-app";
-    const legacySession: SessionSummary = {
+    const legacySession: SessionSummary = sessionRow({
       id: "legacy-session",
       title: "레거시 기본 프로젝트 대화",
       modifiedAt: new Date().toISOString(),
-      sessionKind: "main",
-      family: "main",
       projectRoot: DEFAULT_ROOT,
       projectName: "workspace",
-    };
+    });
     const { getByTestId, getByText, queryByTestId, restore } = renderSidebar({
       sessions: [legacySession],
       currentSessionId: "legacy-session",
@@ -1238,12 +1227,10 @@ describe("Sidebar conversation reveal on scroll", () => {
     prefix: string,
     project?: { projectRoot: string; projectName: string },
   ): SessionSummary[] {
-    return Array.from({ length: count }, (_unused, index) => ({
+    return Array.from({ length: count }, (_unused, index) => sessionRow({
       id: `${prefix}-${index}`,
       title: `${prefix} 대화 ${index}`,
       modifiedAt: new Date(Date.now() - index * 60_000).toISOString(),
-      sessionKind: "main" as const,
-      family: "main" as const,
       ...(project ?? {}),
     }));
   }
@@ -1500,46 +1487,40 @@ describe("Sidebar view rows", () => {
 });
 
 describe("Sidebar — every conversation family", () => {
-  const mainRow: SessionSummary = {
+  const mainRow: SessionSummary = sessionRow({
     id: "sess-1",
     title: "전체 동기화로 상태 파악",
     modifiedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    sessionKind: "main",
-    family: "main",
-  };
-  const routineRow: SessionSummary = {
+  });
+  const routineRow: SessionSummary = sessionRow({
     id: "routine-run-1",
     title: "아침 브리핑",
     modifiedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
     sessionKind: "routine",
-    family: "routine",
     routineId: "rt-1",
     routineTitle: "아침 브리핑",
     routineFiredAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-  };
-  const workBoardRow: SessionSummary = {
+  });
+  const workBoardRow: SessionSummary = sessionRow({
     id: "sub-wb-1",
     title: "월간 보고서 초안",
     modifiedAt: new Date().toISOString(),
     sessionKind: "subagent",
-    family: "work-board",
     workBoardItemId: 7,
-  };
-  const sideChatRow: SessionSummary = {
+  });
+  const sideChatRow: SessionSummary = sessionRow({
     id: "side-1",
     title: "환경 변수 확인",
     modifiedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    sessionKind: "main",
     family: "side-chat",
-    parentSessionId: "sess-1",
-  };
-  const orphanSideChatRow: SessionSummary = {
+    originSessionId: "sess-1",
+  });
+  const orphanSideChatRow: SessionSummary = sessionRow({
     id: "side-orphan",
     title: "부모 없는 사이드 챗",
     modifiedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    sessionKind: "main",
     family: "side-chat",
-  };
+  });
 
   const allRows = [workBoardRow, routineRow, sideChatRow, orphanSideChatRow, mainRow];
 

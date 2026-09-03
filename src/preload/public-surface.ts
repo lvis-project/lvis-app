@@ -15,6 +15,7 @@ import type {
   UserKeyboardIntentSnapshot,
 } from "../shared/chat-origin.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
+import type { SessionFamily, SessionListRow } from "../shared/session-lookup.js";
 import type { ChatStreamEvent } from "../lib/chat-stream-state.js";
 // Type-only: this builder implements part of the renderer-declared surface.
 import type { LvisApi } from "../ui/renderer/types.js";
@@ -87,28 +88,12 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
     }, chatGroupId),
   chatGuide: async (input: string) => ipcRenderer.invoke(CHANNELS.chat.guide, input, chatGroupId),
   chatNew: async (opts?: { projectRoot?: string; projectName?: string }) => ipcRenderer.invoke(CHANNELS.chat.new, opts, chatGroupId),
-  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; families?: Array<"main" | "routine" | "work-board" | "side-chat">; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
+  // The row shape is the shared list contract, not a copy of it: the bridge
+  // forwards what main assembled, so re-spelling it here could only drift.
+  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; families?: SessionFamily[]; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
     ipcRenderer.invoke(CHANNELS.chat.sessions, opts) as Promise<{
       current: string;
-      sessions: Array<{
-        id: string;
-        modifiedAt: string;
-        title: string;
-        sessionKind: "main" | "routine" | "subagent";
-        /** Which conversation family the row belongs to — its glyph, label and click path. */
-        family: "main" | "routine" | "work-board" | "side-chat";
-        /** Present on a work-board run row — the item it opens. */
-        workBoardItemId?: number;
-        /** Present on a side-chat row — the conversation it is listed under. */
-        parentSessionId?: string;
-        routineId?: string;
-        routineTitle?: string;
-        routineFiredAt?: string;
-        projectRoot?: string;
-        projectName?: string;
-        branchedFromCompactNum?: number;
-        branchedAt?: string;
-      }>;
+      sessions: SessionListRow[];
     }>,
   // Conversation UX
   chatGetHistory: async () =>
