@@ -1490,3 +1490,68 @@ describe("Sidebar view rows", () => {
     }
   });
 });
+
+describe("Sidebar — work-board run rows", () => {
+  const workBoardRow: SessionSummary = {
+    id: "sub-wb-1",
+    title: "월간 보고서 초안",
+    modifiedAt: new Date().toISOString(),
+    sessionKind: "subagent",
+    workBoardItemId: 7,
+  };
+  const mainRow: SessionSummary = {
+    id: "sess-1",
+    title: "전체 동기화로 상태 파악",
+    modifiedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    sessionKind: "main",
+  };
+
+  it("draws the Work icon and opens the board item instead of loading a chat", async () => {
+    const onOpenWorkBoardItem = vi.fn();
+    const { getByTestId, onLoadSession, restore } = renderSidebar({
+      sessions: [workBoardRow, mainRow],
+      onOpenWorkBoardItem,
+    });
+    try {
+      await waitFor(() => {
+        expect(getByTestId("sidebar-unassigned-sessions").contains(getByTestId("sidebar-session-sub-wb-1"))).toBe(true);
+      });
+      const glyph = getByTestId("sidebar-session-work-board-sub-wb-1");
+      expect(glyph.getAttribute("aria-label")).toBe("워크보드 작업");
+      const button = getByTestId("sidebar-session-sub-wb-1");
+      expect(button.getAttribute("data-work-board-item")).toBe("7");
+      expect(button.getAttribute("draggable")).toBe("false");
+      expect(button.getAttribute("aria-current")).toBeNull();
+      expect(getByTestId("sidebar-session-sess-1").getAttribute("draggable")).toBe("true");
+
+      fireEvent.click(button);
+      expect(onOpenWorkBoardItem).toHaveBeenCalledWith(7);
+      expect(onLoadSession).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("offers only 'open' in the context menu, because the row is not a main-store session", async () => {
+    const onOpenWorkBoardItem = vi.fn();
+    const { getByTestId, showNativeContextMenu, emitNativeContextCommand, onLoadSession, restore } = renderSidebar({
+      sessions: [workBoardRow, mainRow],
+      onOpenWorkBoardItem,
+    });
+    try {
+      await waitFor(() => getByTestId("sidebar-session-sub-wb-1"));
+      fireEvent.contextMenu(getByTestId("sidebar-session-sub-wb-1"));
+      await waitFor(() => {
+        expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
+          kind: "conversation",
+          commands: ["conversation.open"],
+        }));
+      });
+      act(() => emitNativeContextCommand("conversation.open"));
+      expect(onOpenWorkBoardItem).toHaveBeenCalledWith(7);
+      expect(onLoadSession).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+});

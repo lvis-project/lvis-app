@@ -87,14 +87,16 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
     }, chatGroupId),
   chatGuide: async (input: string) => ipcRenderer.invoke(CHANNELS.chat.guide, input, chatGroupId),
   chatNew: async (opts?: { projectRoot?: string; projectName?: string }) => ipcRenderer.invoke(CHANNELS.chat.new, opts, chatGroupId),
-  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
+  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string; includeWorkBoardRuns?: boolean }) =>
     ipcRenderer.invoke(CHANNELS.chat.sessions, opts) as Promise<{
       current: string;
       sessions: Array<{
         id: string;
         modifiedAt: string;
         title: string;
-        sessionKind: "main" | "routine";
+        sessionKind: "main" | "routine" | "subagent";
+        /** Present on a work-board run row — the item it opens. */
+        workBoardItemId?: number;
         routineId?: string;
         routineTitle?: string;
         routineFiredAt?: string;

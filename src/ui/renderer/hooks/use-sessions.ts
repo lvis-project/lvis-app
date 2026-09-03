@@ -10,7 +10,12 @@ export interface SessionSummary {
   id: string;
   modifiedAt: string;
   title: string;
-  sessionKind: "main" | "routine";
+  sessionKind: "main" | "routine" | "subagent";
+  /**
+   * Set on a work-board run row: the row is that item's conversation and opens
+   * the item on the board rather than loading into a chat tile.
+   */
+  workBoardItemId?: number;
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
@@ -60,7 +65,7 @@ export function useSessionList(api: LvisApi) {
 
   const refreshSessions = useCallback(async () => {
     try {
-      const r = await api.chatSessions({ kind: "main" });
+      const r = await api.chatSessions({ kind: "main", includeWorkBoardRuns: true });
       setSessions(r.sessions);
     } catch { /* ignore */ }
   }, [api]);

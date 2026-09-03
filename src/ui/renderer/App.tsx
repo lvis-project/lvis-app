@@ -837,6 +837,21 @@ export function App() {
     void refreshStarred();
   }, [refreshSessions, refreshStarred, searchOpen]);
 
+  // A work-board run is a row in the conversation list, so the list has to
+  // move when a run starts (the row appears) and when it ends (its time and
+  // order change) — the same way a chat turn ending refreshes it.
+  useEffect(() => {
+    const unsubscribeStarted = api.onWorkBoardRunStarted(() => void refreshSessions());
+    const unsubscribeFinished = api.onWorkBoardRunFinished(() => void refreshSessions());
+    const unsubscribeFailed = api.onWorkBoardRunFailed(() => void refreshSessions());
+    return () => {
+      unsubscribeStarted();
+      unsubscribeFinished();
+      unsubscribeFailed();
+    };
+  }, [api, refreshSessions]);
+
+
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
   const {
     llmVendor,
@@ -1077,6 +1092,15 @@ export function App() {
     }
     handleViewSelect(key);
   }, [handleViewSelect, onOpenSettings, pluginCards, statusPushToast, t]);
+
+  // The item a sidebar row asked the board to open, held until the board has
+  // opened it. An event, not a location, for the same reason as the settings
+  // section target above.
+  const [workBoardFocusItemId, setWorkBoardFocusItemId] = useState<number | null>(null);
+  const openWorkBoardItem = useCallback((itemId: number) => {
+    handleViewSelectWithDoctor("work-board");
+    setWorkBoardFocusItemId(itemId);
+  }, [handleViewSelectWithDoctor]);
 
   /**
    * Open a sidebar row's view in a NEW pane, beside the focused one.
@@ -1595,7 +1619,12 @@ export function App() {
 
     if (view === "work-board") {
       return viewPane("work-board", (
-        <WorkBoardPanel api={api} project={activeProject ?? defaultWorkspaceProject} />
+        <WorkBoardPanel
+          api={api}
+          project={activeProject ?? defaultWorkspaceProject}
+          focusItemId={workBoardFocusItemId}
+          onFocusConsumed={() => setWorkBoardFocusItemId(null)}
+        />
       ));
     }
 
@@ -1752,6 +1781,7 @@ export function App() {
                   if (loaded !== false) setActiveView("home");
                   return loaded;
                 }}
+                onOpenWorkBoardItem={openWorkBoardItem}
                 hasApiKey={effectiveLlmReady}
                 subscriptionUnavailable={subscriptionUnavailableProvider !== undefined}
                 subscriptionPending={subscriptionPendingProvider !== undefined}

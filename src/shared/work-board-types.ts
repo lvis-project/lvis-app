@@ -339,6 +339,30 @@ export interface WorkItemChangedEventPayload {
  *   - `error`             — the run threw; `message` carries the failure reason.
  */
 /**
+ * The `originSessionId` a work-board run's sub-agent children are spawned
+ * under. The engine writes it at spawn time and the session list reads it back
+ * to recognise those children as one item's conversation, so the two sides
+ * share this one composer/parser rather than each spelling the format.
+ *
+ * Only an item id qualifies: the briefing runs use their own origin prefix and
+ * must never resolve to an item.
+ */
+const WORK_BOARD_ORIGIN_PREFIX = "work-board:";
+
+export function workBoardOriginSessionId(itemId: number): string {
+  return `${WORK_BOARD_ORIGIN_PREFIX}${itemId}`;
+}
+
+/** The item id an origin names, or `null` for anything that is not an item origin. */
+export function parseWorkBoardOriginSessionId(origin: unknown): number | null {
+  if (typeof origin !== "string" || !origin.startsWith(WORK_BOARD_ORIGIN_PREFIX)) return null;
+  const rest = origin.slice(WORK_BOARD_ORIGIN_PREFIX.length);
+  if (!/^[1-9][0-9]{0,15}$/.test(rest)) return null;
+  const id = Number(rest);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
+/**
  * Lifecycle phase of an in-flight run — shared by the live {@link WorkBoardRunEvent}
  * and the persisted {@link RunTranscriptEvent}.
  */

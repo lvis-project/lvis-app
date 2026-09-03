@@ -15,6 +15,7 @@ import {
 } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 import { projectRootEquals, projectRootKey } from "../shared/project-identity.js";
+import { parseWorkBoardOriginSessionId } from "../shared/work-board-types.js";
 import { discoverProjectAgentsMd, type ProjectAgentsMd } from "./project-agents-md.js";
 import { maskSensitiveData } from "../shared/dlp.js";
 import { estimateTokens } from "../shared/token-estimate.js";
@@ -288,6 +289,13 @@ export interface RestoredSubAgentSession {
 
 export interface ListSessionsOptions {
   kind?: SessionKind | "all";
+  /**
+   * Only the sub-agent sessions a work-board item spawned (their
+   * `originSessionId` names an item). Meaningful with `kind: "subagent"` on the
+   * sub-agent namespace manager; a session that carries any other origin —
+   * a chat parent, a briefing run — is not a work-board run.
+   */
+  workBoardRuns?: boolean;
   routineId?: string;
   projectRoot?: string;
   includeUnscoped?: boolean;
@@ -309,6 +317,12 @@ export interface SessionListEntry {
   title: string;
   preview: string;
   sessionKind: SessionKind;
+  /**
+   * The work-board item whose run this sub-agent session is — derived here,
+   * once, from the origin the engine wrote at spawn time. Absent on every
+   * session that is not a work-board run.
+   */
+  workBoardItemId?: number;
   routineId?: string;
   routineTitle?: string;
   routineFiredAt?: string;
@@ -638,6 +652,15 @@ const SESSION_ID_REGEX = new RegExp(
  */
 export function isValidSessionId(id: unknown): id is string {
   return typeof id === "string" && SESSION_ID_REGEX.test(id);
+}
+/**
+ * What a sub-agent's persisted `originSessionId` may name: the conversation
+ * that spawned it, or the work-board item a host-orchestrated run belongs to.
+ * Readers that need a *conversation* keep guarding with `isValidSessionId`;
+ * the item origin is read back only so the session list can find the runs.
+ */
+function isPersistedOriginSessionId(id: unknown): id is string {
+  return isValidSessionId(id) || parseWorkBoardOriginSessionId(id) !== null;
 }
 /** The wire handler id is an A2A handler name (`shared/a2a.ts`), not a session id. */
 function isValidA2AWireHandlerId(id: unknown): id is string {
@@ -1021,11 +1044,15 @@ function extractSearchableContent(messages: unknown[]): string {
 
 function matchesSessionScope(
   metadata: SessionMetadata | null,
-  options: Pick<ListSessionsOptions, "kind" | "routineId" | "projectRoot" | "includeUnscoped">,
+  options: Pick<ListSessionsOptions, "kind" | "workBoardRuns" | "routineId" | "projectRoot" | "includeUnscoped">,
 ): boolean {
   const kind = options.kind ?? "main";
   const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
   if (kind !== "all" && sessionKind !== kind) return false;
+  if (
+    options.workBoardRuns === true &&
+    (sessionKind !== "subagent" || parseWorkBoardOriginSessionId(metadata?.originSessionId) === null)
+  ) return false;
   if (options.routineId !== undefined && metadata?.routineId !== options.routineId) return false;
   if (
     options.projectRoot !== undefined &&
@@ -1095,7 +1122,7 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     : undefined;
   const profileModel = typeof raw.profileModel === "string" ? raw.profileModel : undefined;
   const profileMode = typeof raw.profileMode === "string" ? raw.profileMode : undefined;
-  const originSessionId = isValidSessionId(raw.originSessionId) ? raw.originSessionId : undefined;
+  const originSessionId = isPersistedOriginSessionId(raw.originSessionId) ? raw.originSessionId : undefined;
   const subAgentTaskState = typeof raw.subAgentTaskState === "string"
     && (A2A_PROJECTED_TASK_STATE_VALUES as readonly string[]).includes(raw.subAgentTaskState)
     ? raw.subAgentTaskState as A2AProjectedTaskState
@@ -2788,6 +2815,9 @@ export class MemoryManager implements PromptMemorySource {
       .map((session) => {
         const metadata = session.metadata;
         const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
+        const workBoardItemId = sessionKind === "subagent"
+          ? parseWorkBoardOriginSessionId(metadata?.originSessionId)
+          : null;
         const summary = session.size > MAX_SESSION_FILE_BYTES
           ? {
               title: metadata?.routineTitle
@@ -2807,6 +2837,7 @@ export class MemoryManager implements PromptMemorySource {
           routineFiredAt: metadata?.routineFiredAt,
           ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
           ...(metadata?.projectName ? { projectName: metadata.projectName } : {}),
+          ...(workBoardItemId !== null ? { workBoardItemId } : {}),
           // Branch provenance — already loaded from metadata, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
@@ -2893,6 +2924,9 @@ export class MemoryManager implements PromptMemorySource {
       .map((session) => {
         const metadata = session.metadata;
         const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
+        const workBoardItemId = sessionKind === "subagent"
+          ? parseWorkBoardOriginSessionId(metadata?.originSessionId)
+          : null;
         const summary = session.size > MAX_SESSION_FILE_BYTES
           ? {
               title: metadata?.routineTitle
@@ -2912,6 +2946,7 @@ export class MemoryManager implements PromptMemorySource {
           routineFiredAt: metadata?.routineFiredAt,
           ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
           ...(metadata?.projectName ? { projectName: metadata.projectName } : {}),
+          ...(workBoardItemId !== null ? { workBoardItemId } : {}),
           // Branch provenance — already loaded from metadata above, no extra disk IO
           ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
           ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),

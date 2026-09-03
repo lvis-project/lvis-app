@@ -39,6 +39,7 @@ import {
   type SessionKind,
 } from "../../memory/memory-manager.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
+import { projectRootEquals } from "../../shared/project-identity.js";
 import { isDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import {
   runStreamedTurn,
@@ -595,10 +596,19 @@ export async function handleChatSend(
   });
 }
 
-/** PUBLIC `lvis:chat:sessions` — paginated session list + active session id. */
-export function handleChatSessions(
+/**
+ * PUBLIC `lvis:chat:sessions` — paginated session list + active session id.
+ *
+ * `includeWorkBoardRuns` adds the conversations work-board items ran. Those are
+ * sub-agent sessions in their own namespace, reached through the runner like
+ * every other sub-agent read here, and each is joined to its item so the row
+ * carries the item's title and project. One row per item — the newest run —
+ * because the board, not the session store, is what the row opens. A run
+ * whose item no longer exists has nowhere to open and is not listed.
+ */
+export async function handleChatSessions(
   deps: IpcDeps,
-  opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown; projectRoot?: unknown },
+  opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown; projectRoot?: unknown; includeWorkBoardRuns?: unknown },
 ) {
   const { conversationLoop, memoryManager } = deps;
   const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit)
@@ -654,10 +664,87 @@ export function handleChatSessions(
         ...(s.unreadSince ? { unreadSince: s.unreadSince } : {}),
       };
     });
-  return {
-    current: conversationLoop.getSessionId(),
-    sessions,
-  };
+  if (opts?.includeWorkBoardRuns !== true) {
+    return { current: conversationLoop.getSessionId(), sessions };
+  }
+  const runRows = await workBoardRunRows(deps, {
+    limit, before, beforeId, after, projectRoot, includeUnscoped,
+  });
+  const merged = [...sessions, ...runRows]
+    .sort((a, b) => {
+      const delta = b.modifiedAt.localeCompare(a.modifiedAt);
+      return delta !== 0 ? delta : b.id.localeCompare(a.id);
+    })
+    .slice(0, limit);
+  return { current: conversationLoop.getSessionId(), sessions: merged };
+}
+
+/**
+ * Sidebar rows for work-board runs: one per item, the item's title, the item's
+ * project. The page window is the caller's so a cursor walks both sources the
+ * same way; the project rule is the one the main list already applied.
+ */
+async function workBoardRunRows(
+  deps: IpcDeps,
+  window: {
+    limit: number;
+    before?: Date;
+    beforeId?: string;
+    after?: Date;
+    projectRoot?: string;
+    includeUnscoped: boolean;
+  },
+): Promise<Array<{
+  id: string;
+  modifiedAt: string;
+  title: string;
+  sessionKind: SessionKind;
+  workBoardItemId: number;
+  projectRoot?: string;
+  projectName?: string;
+}>> {
+  const runner = deps.getSubAgentRunner?.();
+  const store = deps.workBoardStore;
+  if (!runner || !store) return [];
+  const runs = runner.listWorkBoardRunSessions({
+    limit: window.limit,
+    ...(window.before ? { before: window.before } : {}),
+    ...(window.beforeId ? { beforeId: window.beforeId } : {}),
+    ...(window.after ? { after: window.after } : {}),
+  });
+  const seen = new Set<number>();
+  const rows: Array<{
+    id: string;
+    modifiedAt: string;
+    title: string;
+    sessionKind: SessionKind;
+    workBoardItemId: number;
+    projectRoot?: string;
+    projectName?: string;
+  }> = [];
+  for (const run of runs) {
+    const itemId = run.workBoardItemId;
+    if (itemId === undefined || seen.has(itemId)) continue;
+    seen.add(itemId);
+    const found = await store.get(itemId);
+    if (found.status !== "found") continue;
+    const item = found.item;
+    if (
+      window.projectRoot !== undefined &&
+      !projectRootEquals(item.projectRoot, window.projectRoot) &&
+      !(window.includeUnscoped && item.projectRoot === undefined)
+    ) continue;
+    rows.push({
+      id: run.id,
+      modifiedAt: run.modifiedAt.toISOString(),
+      title: item.title,
+      sessionKind: run.sessionKind,
+      workBoardItemId: itemId,
+      ...(item.projectRoot ? { projectRoot: item.projectRoot } : {}),
+      ...(item.projectName ? { projectName: item.projectName } : {}),
+    });
+  }
+  return rows;
 }
 
 /**

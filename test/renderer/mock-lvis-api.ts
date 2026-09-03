@@ -71,10 +71,11 @@ type ApiOverrides = {
     id: string;
     modifiedAt: string;
     title?: string;
-    sessionKind?: "main" | "routine";
+    sessionKind?: "main" | "routine" | "subagent";
     routineId?: string;
     routineTitle?: string;
     routineFiredAt?: string;
+    workBoardItemId?: number;
   }>;
   currentSession?: string;
   starred?: unknown[];
@@ -452,12 +453,14 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
-    chatSessions: vi.fn(async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => {
+    chatSessions: vi.fn(async (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string; includeWorkBoardRuns?: boolean }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
       const afterTime = opts?.after ? Date.parse(opts.after) : Number.NaN;
       const filtered = sessions.filter((session) => {
         const kind = opts?.kind ?? "main";
-        if (kind !== "all" && session.sessionKind !== kind) return false;
+        if (kind !== "all" && session.sessionKind !== kind) {
+          if (!(opts?.includeWorkBoardRuns === true && session.workBoardItemId !== undefined)) return false;
+        }
         if (opts?.routineId && session.routineId !== opts.routineId) return false;
         const t = Date.parse(session.modifiedAt);
         if (!Number.isNaN(afterTime) && t < afterTime) return false;
@@ -724,8 +727,9 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       workBoardItemChangedHandlers.add(handler);
       return () => workBoardItemChangedHandlers.delete(handler);
     }),
-    onWorkBoardRunningStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
-    onWorkBoardRunningFinished: vi.fn((_h: (id: number) => void) => () => {}),
+    onWorkBoardRunStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
+    onWorkBoardRunFinished: vi.fn((_h: (p: unknown) => void) => () => {}),
+    onWorkBoardRunFailed: vi.fn((_h: (p: unknown) => void) => () => {}),
     onWorkBoardFailed: vi.fn((_h: (event: { itemId: number; error: string }) => void) => () => {}),
     onWorkBoardDueSoon: vi.fn((_h: (p: unknown) => void) => () => {}),
     // Overlay trigger lifecycle. Tests that don't exercise the
