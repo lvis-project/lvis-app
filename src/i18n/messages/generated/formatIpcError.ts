@@ -66,6 +66,16 @@ export const en = {
   "formatIpcError.contentTooLarge": "The requested content exceeds the allowed size.",
   "formatIpcError.invalidContent": "The content format is incorrect.",
   "formatIpcError.missingTokens": "Token information is missing.",
+
+  // ~/.lvis reference docs
+  "formatIpcError.unknownUpgradeMarker": "That update is no longer available.",
+  "formatIpcError.unsupportedUpgradeTarget": "This file has no action here. Open it and edit it directly.",
+  "formatIpcError.homeDocApplyFailed": "The shipped version could not be applied.",
+  "formatIpcError.nothingToMerge": "There is nothing to merge yet.",
+  "formatIpcError.noMergeArtifact": "No merged document is waiting for review.",
+  "formatIpcError.agentsDocChanged": "The document changed since the merge started. Reload it and merge again.",
+  "formatIpcError.agentsDocMergeUnavailable": "The merge needs a configured model.",
+  "formatIpcError.agentsDocMergeFailed": "The merge could not be completed.",
   "formatIpcError.argsNotObject": "Tool arguments must be an object.",
   "formatIpcError.argsNotJson": "Tool arguments are not in valid JSON format.",
   "formatIpcError.invalidArgs": "Invalid tool arguments.",
@@ -258,6 +268,16 @@ export const ko: Record<keyof typeof en, string> = {
   "formatIpcError.contentTooLarge": "요청한 내용이 허용 크기를 초과했습니다.",
   "formatIpcError.invalidContent": "내용 형식이 올바르지 않습니다.",
   "formatIpcError.missingTokens": "토큰 정보가 누락되었습니다.",
+
+  // ~/.lvis reference docs
+  "formatIpcError.unknownUpgradeMarker": "그 업데이트 안내는 더 이상 남아 있지 않습니다.",
+  "formatIpcError.unsupportedUpgradeTarget": "이 파일에는 여기서 실행할 동작이 없습니다. 파일을 열어 직접 편집하세요.",
+  "formatIpcError.homeDocApplyFailed": "배포본을 적용하지 못했습니다.",
+  "formatIpcError.nothingToMerge": "아직 병합할 내용이 없습니다.",
+  "formatIpcError.noMergeArtifact": "확인을 기다리는 병합 문서가 없습니다.",
+  "formatIpcError.agentsDocChanged": "병합을 시작한 뒤 문서가 바뀌었습니다. 다시 읽어 온 다음 병합하세요.",
+  "formatIpcError.agentsDocMergeUnavailable": "병합하려면 모델 설정이 필요합니다.",
+  "formatIpcError.agentsDocMergeFailed": "병합을 마치지 못했습니다.",
   "formatIpcError.argsNotObject": "도구 인자는 객체여야 합니다.",
   "formatIpcError.argsNotJson": "도구 인자가 올바른 JSON 형식이 아닙니다.",
   "formatIpcError.invalidArgs": "잘못된 도구 인자입니다.",

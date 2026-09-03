@@ -2,15 +2,25 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
+import { Switch } from "../../../components/ui/switch.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import type { RolePreset } from "../../../data/role-presets.js";
-import type { LvisApi } from "../types.js";
+import { isIpcErrorResult, type LvisApi } from "../types.js";
+import type { HomeDocsStatus } from "../../../ipc/domains/home-docs.js";
 import { useNotifySaved } from "../context/SavedToastContext.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
+import { FileEditDiff } from "../components/FileEditDiff.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { errorMessage } from "../../../shared/error-message.js";
+import { formatIpcError } from "../format-ipc-error.js";
 
 const EMPTY_DRAFT: RolePreset = { id: "", name: "", systemPromptAdd: "" };
+
+/**
+ * Stable anchor for the agent-context controls, so a link into Settings can
+ * name this section rather than a scroll offset that moves with the page.
+ */
+const AGENTS_SECTION_ID = "settings-agents-md";
 
 export function RolesTab({ api }: { api: LvisApi }) {
   const { t } = useTranslation();
@@ -19,6 +29,15 @@ export function RolesTab({ api }: { api: LvisApi }) {
   const [draft, setDraft] = useState<RolePreset>(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [agentsDraft, setAgentsDraft] = useState("");
+  const [agentsBase, setAgentsBase] = useState("");
+  const [customDraft, setCustomDraft] = useState("");
+  const [customBase, setCustomBase] = useState("");
+  const [keepLatest, setKeepLatest] = useState(false);
+  const [homeDocs, setHomeDocs] = useState<HomeDocsStatus | null>(null);
+  const [markerDiff, setMarkerDiff] = useState<
+    { markerPath: string; live: string; content: string } | null
+  >(null);
+  const [merged, setMerged] = useState<string | null>(null);
   const [memoryIndex, setMemoryIndex] = useState("");
   const [memoryIndexBase, setMemoryIndexBase] = useState("");
   const [userPrefsDraft, setUserPrefsDraft] = useState("");
@@ -47,13 +66,28 @@ export function RolesTab({ api }: { api: LvisApi }) {
       setRolesLoaded(false);
     }
 
-    const [agents, memory, prefs] = await Promise.allSettled([
+    const [agents, memory, prefs, docs, custom, settings] = await Promise.allSettled([
       api.memoryGetAgentsMd(),
       api.memoryGetIndex(),
       api.memoryGetUserPrefs(),
+      api.homeDocsStatus(),
+      api.homeDocsGetCustom(),
+      api.getSettings(),
     ]);
-    if (agents.status === "fulfilled") setAgentsDraft(agents.value);
-    else failures.push(`AGENTS.md: ${errorMessage(agents.reason)}`);
+    if (agents.status === "fulfilled") {
+      setAgentsDraft(agents.value);
+      setAgentsBase(agents.value);
+    } else failures.push(`AGENTS.md: ${errorMessage(agents.reason)}`);
+    if (docs.status === "fulfilled") {
+      setHomeDocs(docs.value);
+      setMerged(docs.value.mergedContent);
+    } else failures.push(`~/.lvis: ${errorMessage(docs.reason)}`);
+    if (custom.status === "fulfilled") {
+      setCustomDraft(custom.value);
+      setCustomBase(custom.value);
+    } else failures.push(`agents.custom.md: ${errorMessage(custom.reason)}`);
+    if (settings.status === "fulfilled") setKeepLatest(settings.value.homeDocs.keepLatest);
+    else failures.push(`settings: ${errorMessage(settings.reason)}`);
     if (memory.status === "fulfilled") {
       setMemoryIndex(memory.value);
       setMemoryIndexBase(memory.value);
@@ -150,9 +184,146 @@ export function RolesTab({ api }: { api: LvisApi }) {
     setSaving("agents");
     setError(null);
     try {
-      await api.memoryUpdateAgentsMd(agentsDraft);
+      // Keep-latest moves authorship: the live doc is the packaged reference
+      // from then on, and the editor writes what the user owns.
+      if (keepLatest) {
+        const result = await api.homeDocsUpdateCustom(customDraft);
+        if (!result.ok) throw new Error(formatIpcError(result.error, undefined));
+        setCustomBase(customDraft);
+      } else {
+        await api.memoryUpdateAgentsMd(agentsDraft);
+        setAgentsBase(agentsDraft);
+      }
       setStatus(t("rolesTab.statusAgentsSaved"));
       notifySaved();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const reloadHomeDocs = useCallback(async () => {
+    const [docs, agents, custom] = await Promise.all([
+      api.homeDocsStatus(),
+      api.memoryGetAgentsMd(),
+      api.homeDocsGetCustom(),
+    ]);
+    setHomeDocs(docs);
+    setMerged(docs.mergedContent);
+    setAgentsDraft(agents);
+    setAgentsBase(agents);
+    setCustomDraft(custom);
+    setCustomBase(custom);
+  }, [api]);
+
+  const toggleKeepLatest = async (next: boolean) => {
+    setSaving("home-docs-keep-latest");
+    setError(null);
+    try {
+      const result = await api.updateSettings({ homeDocs: { keepLatest: next } });
+      if (isIpcErrorResult(result)) throw new Error(formatIpcError(result.error, undefined));
+      setKeepLatest(next);
+      notifySaved();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const showMarkerDiff = async (markerPath: string) => {
+    setSaving("home-docs-diff");
+    setError(null);
+    try {
+      const result = await api.homeDocsReadMarker(markerPath);
+      if (!result.ok) throw new Error(formatIpcError(result.error, undefined));
+      setMarkerDiff({ markerPath, live: result.live, content: result.content });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const applyPackaged = async (markerPath: string) => {
+    setSaving("home-docs-apply");
+    setError(null);
+    try {
+      const result = await api.homeDocsApplyPackaged(markerPath);
+      if (!result.ok) throw new Error(formatIpcError(result.error, undefined));
+      setMarkerDiff(null);
+      await reloadHomeDocs();
+      setStatus(
+        result.movedToCustom
+          ? t("rolesTab.statusPackagedAppliedWithCustom")
+          : t("rolesTab.statusPackagedApplied"),
+      );
+      notifySaved();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const keepMine = async (markerPath: string) => {
+    setSaving("home-docs-keep-mine");
+    setError(null);
+    try {
+      const result = await api.homeDocsKeepMine(markerPath);
+      if (!result.ok) throw new Error(formatIpcError(result.error, undefined));
+      setMarkerDiff(null);
+      await reloadHomeDocs();
+      setStatus(t("rolesTab.statusKeptMine"));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const runMerge = async (markerPath?: string) => {
+    setSaving("home-docs-merge");
+    setError(null);
+    try {
+      const result = await api.homeDocsMerge(markerPath);
+      if (!result.ok) throw new Error(formatIpcError(result.error, undefined));
+      setMerged(result.content);
+      setStatus(t("rolesTab.statusMerged"));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const applyMerged = async () => {
+    setSaving("home-docs-apply-merged");
+    setError(null);
+    try {
+      // The baseline is what this surface last loaded, so an edit that landed
+      // while the model was working is a conflict rather than a silent loss.
+      const result = await api.homeDocsApplyMerged(keepLatest ? customBase : agentsBase);
+      if (!result.ok) throw new Error(formatIpcError(result.error, undefined));
+      setMerged(null);
+      await reloadHomeDocs();
+      setStatus(t("rolesTab.statusMergedApplied"));
+      notifySaved();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const discardMerged = async () => {
+    setSaving("home-docs-discard-merged");
+    setError(null);
+    try {
+      await api.homeDocsDiscardMerged();
+      setMerged(null);
+      setStatus(t("rolesTab.statusMergedDiscarded"));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -323,6 +494,10 @@ export function RolesTab({ api }: { api: LvisApi }) {
   const preferencesBusy =
     saving === "preferences" || saving === "refresh-preferences";
 
+  const homeDocsBusy = saving?.startsWith("home-docs") === true;
+  const markers = homeDocs?.markers ?? [];
+  const agentsMarker = markers.find((marker) => marker.actionable);
+
   return (
     <div className="min-w-0 space-y-6">
       <SettingsPageHeader
@@ -334,6 +509,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
           Agents / Memory / Preferences / Roles / Preview are stacked and all
           visible, so the whole memory + persona surface scrolls as one page. */}
       <SettingsSection
+        id={AGENTS_SECTION_ID}
         title={t("rolesTab.sectionAgents")}
         badge={
           loading ? (
@@ -341,11 +517,37 @@ export function RolesTab({ api }: { api: LvisApi }) {
           ) : undefined
         }
       >
-        <div className="space-y-3">
+        <div className="space-y-3" data-testid="roles-tab:agents-section">
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+            <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+              {keepLatest
+                ? homeDocs?.customDisplayPath ?? ""
+                : homeDocs?.agentsDisplayPath ?? ""}
+            </span>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {t("rolesTab.keepLatestLabel")}
+              </span>
+              <Switch
+                checked={keepLatest}
+                onCheckedChange={(next: boolean) => void toggleKeepLatest(next)}
+                disabled={homeDocsBusy}
+                aria-label={t("rolesTab.keepLatestLabel")}
+                data-testid="roles-tab:keep-latest"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("rolesTab.keepLatestHint")}</p>
+
           <Textarea
-            value={agentsDraft}
-            onChange={(event) => setAgentsDraft(event.target.value)}
+            value={keepLatest ? customDraft : agentsDraft}
+            onChange={(event) =>
+              keepLatest
+                ? setCustomDraft(event.target.value)
+                : setAgentsDraft(event.target.value)
+            }
             className="min-h-[320px] font-mono text-xs"
+            data-testid="roles-tab:agents-editor"
           />
           <div className="flex justify-end">
             <Button
@@ -358,6 +560,130 @@ export function RolesTab({ api }: { api: LvisApi }) {
                 : t("rolesTab.saveAgentsButton")}
             </Button>
           </div>
+
+          {keepLatest ? (
+            <div className="space-y-2" data-testid="roles-tab:packaged-view">
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge variant="secondary">{t("rolesTab.packagedBadge")}</Badge>
+                <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+                  {homeDocs?.agentsDisplayPath ?? ""}
+                </span>
+              </div>
+              <Textarea
+                value={agentsDraft}
+                readOnly
+                className="min-h-[160px] font-mono text-xs"
+              />
+            </div>
+          ) : null}
+
+          {markers.length > 0 ? (
+            <div className="space-y-2" data-testid="roles-tab:upgrade-markers">
+              <div className="text-xs font-medium text-foreground">
+                {t("rolesTab.upgradeMarkersTitle", { count: String(markers.length) })}
+              </div>
+              {markers.map((marker) => (
+                <div
+                  key={marker.markerPath}
+                  className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
+                >
+                  <span className="min-w-0 truncate font-mono text-xs">
+                    {marker.markerDisplayPath}
+                  </span>
+                  {marker.actionable ? (
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={homeDocsBusy}
+                        onClick={() => void showMarkerDiff(marker.markerPath)}
+                        data-testid={`roles-tab:marker-diff:${marker.markerPath}`}
+                      >
+                        {t("rolesTab.viewDiffButton")}
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={homeDocsBusy}
+                        onClick={() => void applyPackaged(marker.markerPath)}
+                        data-testid={`roles-tab:marker-apply:${marker.markerPath}`}
+                      >
+                        {t("rolesTab.applyPackagedButton")}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={homeDocsBusy}
+                        onClick={() => void keepMine(marker.markerPath)}
+                        data-testid={`roles-tab:marker-keep:${marker.markerPath}`}
+                      >
+                        {t("rolesTab.keepMineButton")}
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {t("rolesTab.markerReadOnlyNote")}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {markerDiff ? (
+            <FileEditDiff
+              data={{
+                path: homeDocs?.agentsDisplayPath ?? markerDiff.markerPath,
+                tool: "write_file",
+                hunks: [{ oldText: markerDiff.live, newText: markerDiff.content }],
+              }}
+            />
+          ) : null}
+
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={homeDocsBusy}
+              onClick={() => void runMerge(agentsMarker?.markerPath)}
+              data-testid="roles-tab:merge-agents"
+            >
+              {saving === "home-docs-merge"
+                ? t("rolesTab.mergingLabel")
+                : t("rolesTab.mergeButton")}
+            </Button>
+          </div>
+
+          {merged !== null ? (
+            <div className="space-y-2" data-testid="roles-tab:merged-result">
+              <div className="text-xs font-medium text-foreground">
+                {t("rolesTab.mergedTitle")}
+              </div>
+              <Textarea
+                value={merged}
+                readOnly
+                className="min-h-[240px] font-mono text-xs"
+              />
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={homeDocsBusy}
+                  onClick={() => void discardMerged()}
+                  data-testid="roles-tab:merged-discard"
+                >
+                  {t("rolesTab.discardMergedButton")}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={homeDocsBusy}
+                  onClick={() => void applyMerged()}
+                  data-testid="roles-tab:merged-apply"
+                >
+                  {t("rolesTab.applyMergedButton")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </SettingsSection>
 
@@ -586,6 +912,8 @@ export function RolesTab({ api }: { api: LvisApi }) {
       <SettingsSection title={t("rolesTab.sectionPreview")}>
         <pre className="overflow-auto rounded-md bg-muted/(--opacity-half) p-3 text-xs leading-5">
           {`AGENTS.md                  -> project / org / agent operating context
+agents.custom.md            -> your own agent context under keep-latest, read after AGENTS.md
+AGENTS.md.merged            -> merge awaiting review; never read by the runtime
 memories/MEMORY.md          -> urgent memory, references, and saved-memory index
 memories/*.md               -> detailed long-term memories with references
 user-preferences.md         -> compact durable user preferences only

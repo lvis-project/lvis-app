@@ -75,6 +75,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
     offlineCacheEnabled: true,
   },
   routine: {},
+  homeDocs: {
+    // Off is the pre-existing behavior: a packaged update is offered as an
+    // upgrade marker and the user's live doc is never moved unprompted.
+    keepLatest: false,
+  },
   privacy: {
     piiRedactEnabled: false,
   },

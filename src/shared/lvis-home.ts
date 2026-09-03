@@ -20,6 +20,32 @@ export function lvisHome(): string {
 }
 
 /**
+ * The three names the agent-context doc occupies in `~/.lvis`.
+ *
+ * They are spelled once here because four modules have to agree on them and
+ * disagreement is invisible: the seeder decides which file an upgrade marker
+ * belongs to, the memory manager decides which file the prompt reads, the IPC
+ * domain decides which file an apply writes, and the merge job decides which
+ * file it may never write. A second spelling anywhere makes one of those four
+ * act on a file the other three do not know about.
+ */
+
+/** Live agent context. Seeded from packaged resources; read on every turn. */
+export const AGENTS_DOC_NAME = "AGENTS.md";
+
+/**
+ * The user's own agent context under keep-latest, composed after the live doc
+ * so it wins on conflict. Absent while keep-latest has never been engaged.
+ */
+export const AGENTS_CUSTOM_DOC_NAME = "agents.custom.md";
+
+/**
+ * Review artifact of the model-assisted merge. It is never what the runtime
+ * reads: applying it is a separate, explicit write onto the live doc.
+ */
+export const AGENTS_MERGED_DOC_NAME = "AGENTS.md.merged";
+
+/**
  * How the LVIS home directory ended up being protected.
  *
  * Not an implementation detail: `0o700`/`0o600` is a POSIX-only control, so on

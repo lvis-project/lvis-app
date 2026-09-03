@@ -32,6 +32,7 @@ import { readPermissionSettings } from "../../permissions/permission-settings-st
 import { retainedDescendantWorkspaceRoots } from "../../permissions/workspace-root-reconciler.js";
 import { broadcastPermissionConfigChangedFromHost } from "../permission-config-broadcast.js";
 import { PreferenceRefreshService } from "../../memory/preference-refresh-service.js";
+import { AgentsDocMergeService } from "../../memory/agents-doc-merge-service.js";
 import { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../../memory/memory-consolidation-service.js";
 import { MemoryReviewerService } from "../../memory/memory-reviewer-service.js";
 import { SubAgentRunner } from "../../engine/subagent-runner.js";
@@ -514,6 +515,10 @@ export async function wireConversation(
     memoryReviewer,
     isIdleRefreshEnabled: () => settingsService.get("features")?.idlePreferenceRefresh ?? false,
   });
+  const agentsDocMergeService = new AgentsDocMergeService({
+    memoryManager,
+    memoryReviewer,
+  });
   const memoryConsolidationService = new MemoryConsolidationService({
     memoryManager,
     memoryReviewer,
@@ -693,6 +698,7 @@ export async function wireConversation(
   ctx.postTurnHookChain = postTurnHookChain;
   ctx.conversationLoop = conversationLoop;
   ctx.preferenceRefreshService = preferenceRefreshService;
+  ctx.agentsDocMergeService = agentsDocMergeService;
   ctx.memoryConsolidationService = memoryConsolidationService;
   ctx.memoryMaintenanceCoordinator = memoryMaintenanceCoordinator;
   ctx.workBoardEngine = workBoardEngine;

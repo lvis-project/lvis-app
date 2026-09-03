@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { basename, join, dirname, parse as parsePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lvisHome } from "../shared/lvis-home.js";
+import { AGENTS_DOC_NAME, lvisHome } from "../shared/lvis-home.js";
 import * as atomicFile from "../lib/atomic-file.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { isMissingPathError } from "../lib/atomic-file.js";
@@ -79,7 +79,7 @@ export function seedLvisHomeDocs(): { seeded: string[]; upgraded: string[] } {
     return result;
   }
 
-  seedOne(home, "AGENTS.md", result, {
+  seedOne(home, AGENTS_DOC_NAME, result, {
     upgradePolicy: "marker",
     replaceableHashesResource: "AGENTS.md.replaceable-sha256",
   });
@@ -110,6 +110,130 @@ export function listLvisHomeDocUpgradeMarkers(home = lvisHome()): LvisHomeDocUpg
     }
   }
   return markers.sort((a, b) => a.markerPath.localeCompare(b.markerPath));
+}
+
+/**
+ * The one gate between a caller-supplied marker path and the filesystem.
+ *
+ * Every operation below takes a path that arrived over IPC, so none of them may
+ * join it onto the home directory directly: `../` or an absolute path would
+ * then reach any file the app can open. Membership in
+ * {@link listLvisHomeDocUpgradeMarkers}'s own result is the test, which also
+ * means a marker the user merged a moment ago is simply not found rather than
+ * recreated.
+ */
+function resolveUpgradeMarker(
+  markerPath: string,
+  home: string,
+): LvisHomeDocUpgradeMarker | null {
+  return listLvisHomeDocUpgradeMarkers(home)
+    .find((marker) => marker.markerPath === markerPath) ?? null;
+}
+
+/** Bytes of a pending upgrade marker, or `null` when it is not one. */
+export function readLvisHomeDocUpgradeMarker(
+  markerPath: string,
+  home = lvisHome(),
+): string | null {
+  const marker = resolveUpgradeMarker(markerPath, home);
+  if (marker === null) return null;
+  const buf = readMarkerIfPresent(join(home, marker.markerPath));
+  return buf === null ? null : buf.toString("utf8");
+}
+
+/**
+ * Bytes of the live doc a marker offers to replace, or `null` when either is
+ * absent. The source path is derived from the validated marker rather than
+ * accepted from the caller, so this reaches no file the marker listing does
+ * not already name.
+ */
+export function readLvisHomeDocSource(
+  markerPath: string,
+  home = lvisHome(),
+): string | null {
+  const marker = resolveUpgradeMarker(markerPath, home);
+  if (marker === null) return null;
+  const buf = readMarkerIfPresent(join(home, marker.sourcePath));
+  return buf === null ? null : buf.toString("utf8");
+}
+
+/**
+ * Remove one pending upgrade marker — the user keeping what they have.
+ *
+ * Returns whether a marker was removed, so the caller can tell "kept mine"
+ * from "that offer is already gone".
+ */
+export function discardLvisHomeDocUpgradeMarker(
+  markerPath: string,
+  home = lvisHome(),
+): boolean {
+  const marker = resolveUpgradeMarker(markerPath, home);
+  if (marker === null) return false;
+  try {
+    unlinkSync(join(home, marker.markerPath));
+    return true;
+  } catch (err) {
+    if (isMissingPathError(err)) return false;
+    throw err;
+  }
+}
+
+/**
+ * Retire every marker for `markerPath`'s doc that carries the bytes just
+ * applied, the named one included.
+ *
+ * Applying a version answers every offer of that same version at once. Leaving
+ * a byte-identical dated sibling behind would re-offer content the live doc
+ * now holds, and the user would be asked the same question again with no way
+ * to tell it apart from a genuinely newer build.
+ */
+export function retireAppliedLvisHomeDocUpgradeMarkers(
+  markerPath: string,
+  appliedBytes: string,
+  home = lvisHome(),
+): void {
+  const marker = resolveUpgradeMarker(markerPath, home);
+  if (marker === null) return;
+  const appliedMarker = join(home, marker.markerPath);
+  const applied = Buffer.from(appliedBytes, "utf8");
+  for (const sibling of upgradeMarkerPathsFor(home, marker.sourcePath)) {
+    if (sibling !== appliedMarker) {
+      const bytes = readMarkerIfPresent(sibling);
+      if (bytes === null || !bytes.equals(applied)) continue;
+    }
+    try {
+      unlinkSync(sibling);
+    } catch (err) {
+      if (isMissingPathError(err)) continue;
+      console.warn(`[seed-lvis-home-docs] failed to retire ${sibling}:`, err);
+    }
+  }
+}
+
+/**
+ * Whether `content` is bytes this app has shipped as the packaged AGENTS.md.
+ *
+ * Keep-latest moves the user's live doc aside as their own content before a
+ * packaged version replaces it. Shipped bytes are not their content — moving
+ * those into `agents.custom.md` would hand the model two copies of the same
+ * reference and label one of them as the user's own instruction.
+ *
+ * The evidence is the same allowlist the in-place replacement path trusts,
+ * plus the packaged copy currently on disk, which is shipped by definition and
+ * need not wait for the next build to appear in that list.
+ */
+export function isShippedAgentsMdContent(content: string): boolean {
+  const buf = Buffer.from(content, "utf8");
+  if (readReplaceableHashes("AGENTS.md.replaceable-sha256").has(sha256Hex(buf))) {
+    return true;
+  }
+  const packagedSource = resolvePackagedResource(AGENTS_DOC_NAME);
+  if (packagedSource === null) return false;
+  try {
+    return readFileSync(packagedSource).equals(buf);
+  } catch {
+    return false;
+  }
 }
 
 function isUpgradeMarkerName(name: string): boolean {

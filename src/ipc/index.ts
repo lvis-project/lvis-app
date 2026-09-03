@@ -18,6 +18,7 @@
  *                 lvis:marketplace:ping, lvis:host:plugin-theme-notify,
  *                 lvis:notification:clicked
  *   prompts       lvis:prompts:*
+ *   home-docs     lvis:home-docs:* — ~/.lvis reference docs + upgrade markers
  *   usage         lvis:usage:*
  *   audit         lvis:audit:*, lvis:dlp:*
  *   diagnostics   lvis:diagnostics:*, lvis:logs:tail
@@ -54,6 +55,7 @@ import { registerChatHandlers } from "./domains/chat.js";
 import { registerSideChatHandlers } from "./domains/sidechat.js";
 import { registerPluginsHandlers } from "./domains/plugins.js";
 import { registerPromptHandlers } from "./domains/prompts.js";
+import { registerHomeDocsHandlers } from "./domains/home-docs.js";
 import { registerUsageHandlers } from "./domains/usage.js";
 import { registerAuditHandlers } from "./domains/audit.js";
 import { registerDiagnosticsHandlers } from "./domains/diagnostics.js";
@@ -125,6 +127,7 @@ export function registerIpcHandlers(
   registerSideChatHandlers(deps);
   registerPluginsHandlers(deps);
   registerPromptHandlers(deps);
+  registerHomeDocsHandlers(deps);
   registerUsageHandlers(deps);
   registerAuditHandlers(deps);
   registerDiagnosticsHandlers(deps);
