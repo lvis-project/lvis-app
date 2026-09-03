@@ -70,6 +70,7 @@ const TARGETS = [
   // entry outside src/preload/.
   "src/floating-dock-preload.ts",
   // Main-side producers paired with the preload/domain consumers above.
+  "src/boot/bootstrap-status.ts",
   "src/boot/plugins.ts",
   "src/boot/steps/ipc-bridge.ts",
   "src/boot/steps/post-boot.ts",

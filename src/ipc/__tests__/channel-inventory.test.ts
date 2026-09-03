@@ -205,6 +205,22 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
     expect(CHANNEL_GESTURE[event]).toBeUndefined();
   });
 
+  it("keeps the bootstrap status event outbound-only, beside its invoke twin", () => {
+    // The event channel had a second spelling in `src/boot/bootstrap-status.ts`
+    // that no gate compared against the contract, because only the invoke
+    // channel below reaches `ipcMain` and so only that one is in the snapshot.
+    // An outbound event needs its own lock or the literal can drift again.
+    const event = CHANNELS.bootstrap.status;
+    expect(event).toBe("lvis:bootstrap:status");
+    expect(channels).not.toContain(event);
+    expect(PUBLIC_CHANNELS).not.toContain(event);
+    expect(isPublicChannel(event)).toBe(false);
+    expect(CHANNEL_GESTURE[event]).toBeUndefined();
+    // The late-mount pull is the registered half, and stays in the snapshot.
+    expect(CHANNELS.bootstrap.statusGet).toBe("lvis:bootstrap:status:get");
+    expect(channels).toContain(CHANNELS.bootstrap.statusGet);
+  });
+
   it("locks the sorted unique channel list", () => {
     const sorted = [...new Set(channels)].sort();
     expect(sorted).toMatchInlineSnapshot(`
