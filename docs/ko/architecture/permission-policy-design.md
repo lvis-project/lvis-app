@@ -430,9 +430,7 @@ dialog button takes — one grant, one audit row, one queue mutation.
 
 Audit chain: `AuditDeferredResolve.approvalSource` records which surface carried
 the gesture — `"button"` for the queue dialog, `"question-card"` for the answer
-to the host's question. The reader also admits `"natural-language"`, written by
-an in-chat approval chip that no longer exists; an audit key is a persisted
-value, so historical rows keep parsing.
+to the host's question.
 
 **Foreground reviewer dock path:** auto-review MED/HIGH foreground requests
 open the main-owned bottom-floating approval dock. The dock decision is bound to the
