@@ -2679,11 +2679,6 @@
     },
     {
       "type": "types",
-      "file": "src/ui/renderer/hooks/use-permission-toasts.ts",
-      "name": "PermissionReviewSuggestionState"
-    },
-    {
-      "type": "types",
       "file": "src/ui/renderer/hooks/use-side-chat.ts",
       "name": "SideChatSessionSummary"
     },

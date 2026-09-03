@@ -518,7 +518,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       installedVersion: "1.0.0",
       latestVersion: "2.0.0",
     }]);
-    await expect(marketplace.getByTestId("marketplace-update-banner")).toBeVisible();
+    await expect(marketplace.getByTestId("marketplace-update-action")).toBeVisible();
     await marketplace.getByTestId("marketplace-update-action").click();
     await expect.poll(async () => (await cards()).find((card) => card.id === slug)?.version)
       .toBe("2.0.0");
