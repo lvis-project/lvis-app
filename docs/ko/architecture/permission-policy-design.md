@@ -410,22 +410,29 @@ interface RoutineScope {
 
 On match, the loader rewrites `mode → "strict"` + `disabledMigratedAt = <now>` and persists the rewrite synchronously. Persistence failure (locked file / read-only mount) is logged but the in-memory result is still `strict`, so the user never silently lands on the new pass-through-LOW semantic. A user who later deliberately picks `disabled` (slash command or hand-edit) gets the new pass-through semantic without re-migration because the marker is already present.
 
-**Natural-language approval intent (issue #690 P4):**
+**Asking about a deferred entry:**
 
-`src/permissions/approval-intent.ts` exports a pure matcher
-`detectApprovalIntent(text)` that recognises in-chat approval/rejection
-phrases (Korean + English, with negation guards). Renderer
-`DeferredApprovalChip` uses it to surface a non-blocking confirmation
-chip when (a) the user has typed an intent phrase AND (b) exactly one
-deferred-queue entry is pending. Clicking the chip calls
-`permission.deferredResolve(id, decision, reason, "natural-language")`
-— never auto-resolves without an explicit click.
+A deferred entry is a question — "may this run?" — so the host asks it with the
+same card every other question uses (`AskUserQuestionGate.ask`) rather than with
+an approval widget of its own. `DeferredEntry.sessionId` records the
+conversation whose turn deferred the call, and the card is routed to that tile:
+a window holds several conversations side by side, and the question belongs to
+the one that raised it. An entry raised outside a conversation (local API,
+plugin panel) carries no session, is never asked, and stays reachable only
+through the queue dialog.
 
-Audit chain: `AuditDeferredResolve.approvalSource: "button" |
-"natural-language"` captures provenance. The matcher is intentionally
-conservative (max 24 char input, single-sentence only, ambiguity →
-"none", negation modifiers convert approve → "none") so a stray LLM
-tool-output reflection cannot inject approval.
+The card offers approve / deny / decide-later. Approve appears only when the
+entry recorded a grant, because the resolve path refuses an approval that would
+grant nothing; it applies the narrowest breadth, since widening writes
+settings.json and only the queue dialog states that in full. Deciding later
+leaves the entry pending. Both answered outcomes take the same resolve path the
+dialog button takes — one grant, one audit row, one queue mutation.
+
+Audit chain: `AuditDeferredResolve.approvalSource` records which surface carried
+the gesture — `"button"` for the queue dialog, `"question-card"` for the answer
+to the host's question. The reader also admits `"natural-language"`, written by
+an in-chat approval chip that no longer exists; an audit key is a persisted
+value, so historical rows keep parsing.
 
 **Foreground reviewer dock path:** auto-review MED/HIGH foreground requests
 open the main-owned bottom-floating approval dock. The dock decision is bound to the

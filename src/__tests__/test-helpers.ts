@@ -135,6 +135,7 @@ export function makeMockPermissionManager() {
     addAlwaysDeniedPersist: vi.fn(),
     removeRule: vi.fn(),
     getVisibilityDenyRules: vi.fn(() => []),
+    setDeferredEntryAsk: vi.fn(),
   };
 }
 

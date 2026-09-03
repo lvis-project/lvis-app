@@ -41,7 +41,7 @@ import type { TelegramConnectionOwnerApi } from "../../shared/telegram-connectio
 import type { AwayAuthorityOwnerApi } from "../../shared/away-authority-arm.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
-import type { ToolCategory, ToolSource, RiskLevel, DeferredGrantScope } from "../../shared/permission-review-status.js";
+import type { ToolCategory, ToolSource, RiskLevel, DeferredApprovalSource, DeferredGrantScope } from "../../shared/permission-review-status.js";
 import type {
   AssistantAgentSummary,
   AssistantSkillSummary,
@@ -1443,6 +1443,8 @@ export type RemoveRuleResult =
 export interface DeferredQueueEntry {
   id: string;
   ts: string;
+  /** Conversation that raised the entry; absent when there was none. */
+  sessionId?: string;
   toolName: string;
   source: ToolSource;
   category: ToolCategory;
@@ -1540,20 +1542,18 @@ export type LvisPermissionApi = {
   /**
    * Permission policy — resolve a pending entry with user gesture.
    *
-   * `approvalSource` records how the user gestured:
-   *   - "button"           — clicked the DeferredQueuePanel button
-   *   - "natural-language" — clicked the chat-surface chip after the
-   *                          renderer's intent matcher detected an
-   *                          approval phrase. NOT auto-applied; the
-   *                          chip still requires an explicit click.
-   * Required: every deferred resolution must explicitly declare
-   * provenance before main writes the tamper-evident audit row.
+   * `approvalSource` records which surface the user gestured on. The renderer
+   * only ever gestures on the queue panel button; `"question-card"` is written
+   * by main, for the answer to the question the host asked in the tile whose
+   * turn deferred the call. Required: every deferred resolution must
+   * explicitly declare provenance before main writes the tamper-evident audit
+   * row.
    */
   deferredResolve: (
     id: string,
     decision: "approved" | "rejected",
     reason: string | undefined,
-    approvalSource: "button" | "natural-language",
+    approvalSource: DeferredApprovalSource,
     options?: { scope?: DeferredGrantScope; acknowledgeWarnings?: boolean },
   ) => Promise<
     | { ok: true; entry: DeferredQueueEntry }

@@ -83,4 +83,43 @@ describe("TailnetAccessContent", () => {
       expect(createCurrentConversationShare).toHaveBeenCalledWith(PAIRING_ID, "observe", "8h");
     });
   });
+
+  // Handing over control is the one grant here that revoking cannot take back —
+  // whatever the other side drove has already run — so it is asked twice. The
+  // question is drawn in the row rather than by a window-modal browser dialog
+  // that would freeze the whole app for one pairing.
+  it("asks again in the row before granting control, and grants on confirm", async () => {
+    const { api, createCurrentConversationShare } = makeApi();
+    render(<TailnetAccessContent api={api} />);
+
+    fireEvent.change(await screen.findByTestId("tailnet-access-share-permission"), {
+      target: { value: "control" },
+    });
+    fireEvent.click(screen.getByTestId("tailnet-access-create-share"));
+
+    expect(await screen.findByTestId("tailnet-access-control-confirm")).toHaveTextContent(
+      "Allow this paired account to send messages",
+    );
+    expect(createCurrentConversationShare).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("tailnet-access-control-confirm-accept"));
+
+    await waitFor(() => {
+      expect(createCurrentConversationShare).toHaveBeenCalledWith(PAIRING_ID, "control", "8h");
+    });
+  });
+
+  it("cancelling the control question grants nothing", async () => {
+    const { api, createCurrentConversationShare } = makeApi();
+    render(<TailnetAccessContent api={api} />);
+
+    fireEvent.change(await screen.findByTestId("tailnet-access-share-permission"), {
+      target: { value: "control" },
+    });
+    fireEvent.click(screen.getByTestId("tailnet-access-create-share"));
+    fireEvent.click(await screen.findByTestId("tailnet-access-control-confirm-cancel"));
+
+    expect(screen.queryByTestId("tailnet-access-control-confirm")).toBeNull();
+    expect(createCurrentConversationShare).not.toHaveBeenCalled();
+  });
 });

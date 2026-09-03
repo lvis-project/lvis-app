@@ -44,6 +44,14 @@ export type DeferredGrant = { kind: "directory"; path: string };
 export interface DeferredEntry {
   id: string;
   ts: string;
+  /**
+   * The conversation whose turn produced the entry. A deferred approval is a
+   * question put to the user, and a window now holds several conversations side
+   * by side, so it can only be asked in the tile that raised it. Absent when the
+   * invocation belonged to no conversation (local API, plugin panel); those
+   * entries are never asked and the queue dialog stays their only surface.
+   */
+  sessionId?: string;
   toolName: string;
   source: ToolSource;
   category: ToolCategory;
@@ -73,11 +81,19 @@ function defaultPath(): string {
 export class DeferredQueue {
   private readonly file: JsonlRecordFile<DeferredEntry>;
   private readonly onPendingChange?: (summary: { pending: number }) => void;
+  private readonly onEntryPending?: (entry: DeferredEntry) => void;
   private entries: DeferredEntry[] | null = null;
 
   constructor(
     filePath?: string,
     onPendingChange?: (summary: { pending: number }) => void,
+    /**
+     * Fired once per newly appended entry, carrying the entry itself. The
+     * count-only `onPendingChange` above drives a badge; this one drives the
+     * ask, which needs the tool, the verdict, and the session to put the
+     * question in front of the right conversation.
+     */
+    onEntryPending?: (entry: DeferredEntry) => void,
   ) {
     this.file = new JsonlRecordFile<DeferredEntry>(filePath ?? defaultPath(), {
       accept: (parsed): parsed is DeferredEntry => {
@@ -88,6 +104,7 @@ export class DeferredQueue {
       onReadFailure: (err) => log.warn(`failed to read deferred-queue: %s`, (err as Error).message),
     });
     this.onPendingChange = onPendingChange;
+    this.onEntryPending = onEntryPending;
   }
 
   private ensureLoaded(): void {
@@ -100,6 +117,8 @@ export class DeferredQueue {
    * can correlate with audit log records.
    */
   async append(params: {
+    /** Conversation that raised this; omitted when there is none. */
+    sessionId?: string;
     toolName: string;
     source: ToolSource;
     category: ToolCategory;
@@ -123,6 +142,11 @@ export class DeferredQueue {
     this.entries!.push(entry);
     await this.file.append(entry);
     this.emitPendingChange();
+    try {
+      this.onEntryPending?.(entry);
+    } catch (err) {
+      log.warn(`failed to announce pending deferred entry: %s`, (err as Error).message);
+    }
     return id;
   }
 

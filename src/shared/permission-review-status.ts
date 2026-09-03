@@ -50,6 +50,16 @@ export type DeferredGrantScope = "session" | "always";
 /** Narrowest breadth a deferred approval can carry. */
 export const NARROWEST_DEFERRED_SCOPE: DeferredGrantScope = "session";
 
+/**
+ * Which surface carried the gesture that resolved a deferred entry.
+ *
+ * `"button"` is the queue dialog's own button. `"question-card"` is the answer
+ * to the question the host asks in the tile whose turn deferred the call: a
+ * deferred approval is a question to the user, so it is drawn by the same card
+ * every other question uses rather than by an approval widget of its own.
+ */
+export type DeferredApprovalSource = "button" | "question-card";
+
 export type ApprovalPurposeSuggestion = {
   text: string;
   source: "conversation" | "tool-input";

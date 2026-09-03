@@ -29,7 +29,7 @@ import {
 } from "./host-shell-execution-plan.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
-import type { DeferredQueue } from "./reviewer/deferred-queue.js";
+import type { DeferredEntry, DeferredQueue } from "./reviewer/deferred-queue.js";
 import { globMatch } from "../lib/glob-matcher.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
@@ -264,6 +264,12 @@ export interface PermissionCheckContext {
  * (rather than the temporary "reviewer → ask" mapping).
  */
 export interface ReviewerDispatchInput {
+  /**
+   * Conversation whose turn is being reviewed. Recorded on a deferred entry so
+   * the question reaches the tile that raised it. Absent for invocations that
+   * belong to no conversation.
+   */
+  sessionId?: string;
   source: ToolSource;
   category: ToolCategory;
   /** Manifest-declared path-bearing argument selectors. Dotted selectors are supported. */
@@ -422,6 +428,14 @@ export class PermissionManager {
   private reviewerClassifier: RiskClassifier | null = null;
   private verdictCache: VerdictCache | null = null;
   private deferredQueue: DeferredQueue | null = null;
+  /**
+   * Host surface that puts a newly deferred entry to the user as a question.
+   * Wired after boot by the IPC layer, which owns both the question gate and
+   * the resolve path the answer maps onto. Null until then, and null in tests
+   * that exercise the manager alone — a deferred entry nobody asks about is
+   * still reachable through the queue dialog.
+   */
+  private askDeferredEntry: ((entry: DeferredEntry) => void) | null = null;
   private reviewerCacheScope: Record<string, unknown> = {};
   /**
    * Runtime degrade flag — true when the persisted reviewer mode is "llm"
@@ -755,6 +769,20 @@ export class PermissionManager {
    */
   getDeferredQueue(): DeferredQueue | null {
     return this.deferredQueue;
+  }
+
+  /**
+   * Wire the surface that asks the user about a newly deferred entry. The
+   * manager holds the slot rather than the queue because the queue instance is
+   * replaced on every reviewer re-wire while the manager is not.
+   */
+  setDeferredEntryAsk(fn: (entry: DeferredEntry) => void): void {
+    this.askDeferredEntry = fn;
+  }
+
+  /** Called by {@link DeferredQueue} for each newly appended pending entry. */
+  onDeferredEntryPending(entry: DeferredEntry): void {
+    this.askDeferredEntry?.(entry);
   }
 
   /**
@@ -1724,6 +1752,7 @@ export class PermissionManager {
 
     if (shouldDefer) {
       const deferredId = await queue.append({
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         toolName,
         source: input.source,
         category: input.category,

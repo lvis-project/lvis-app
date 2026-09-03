@@ -56,6 +56,8 @@ export async function dispatchReviewerForHeadless(
   hostShellExecutionPlan?: HostShellExecutionPlan,
   abortSignal?: AbortSignal,
   auditInput?: Record<string, unknown>,
+  /** Conversation whose turn this call belongs to; recorded on a deferred entry. */
+  sessionId?: string,
 ): Promise<
   | { allowed: true; permissionResult: PermissionCheckResult }
   | { allowed: false; message: string; permissionResult: PermissionCheckResult }
@@ -64,6 +66,7 @@ export async function dispatchReviewerForHeadless(
     const reason = "strict mode requires explicit user approval";
     const verdict: RiskVerdict = { level: "high", reason };
     const deferredId = await permissionManager.getDeferredQueue()?.append({
+      ...(sessionId ? { sessionId } : {}),
       toolName,
       source,
       category,
@@ -108,6 +111,7 @@ export async function dispatchReviewerForHeadless(
   const reviewer = await permissionManager.dispatchReviewer(
     toolName,
     {
+      ...(sessionId ? { sessionId } : {}),
       source,
       category,
       pathFields,

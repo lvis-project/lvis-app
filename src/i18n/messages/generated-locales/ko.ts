@@ -14,7 +14,6 @@ import { ko as ko_be_agentList } from "../generated/be_agentList.js";
 import { ko as ko_be_agentModeMap } from "../generated/be_agentModeMap.js";
 import { ko as ko_be_agentSpawn } from "../generated/be_agentSpawn.js";
 import { ko as ko_be_approvalGate } from "../generated/be_approvalGate.js";
-import { ko as ko_be_approvalIntent } from "../generated/be_approvalIntent.js";
 import { ko as ko_be_askUserQuestion } from "../generated/be_askUserQuestion.js";
 import { ko as ko_be_askUserQuestionGate } from "../generated/be_askUserQuestionGate.js";
 import { ko as ko_be_bashAstValidator } from "../generated/be_bashAstValidator.js";
@@ -23,6 +22,7 @@ import { ko as ko_be_chatDomain } from "../generated/be_chatDomain.js";
 import { ko as ko_be_chatStreamState } from "../generated/be_chatStreamState.js";
 import { ko as ko_be_conversationLoop } from "../generated/be_conversationLoop.js";
 import { ko as ko_be_costEstimator } from "../generated/be_costEstimator.js";
+import { ko as ko_be_deferredApproval } from "../generated/be_deferredApproval.js";
 import { ko as ko_be_dlp } from "../generated/be_dlp.js";
 import { ko as ko_be_errorClassifier } from "../generated/be_errorClassifier.js";
 import { ko as ko_be_executor } from "../generated/be_executor.js";
@@ -89,7 +89,6 @@ import { ko as ko_composerProjectSelector } from "../generated/composerProjectSe
 import { ko as ko_constants } from "../generated/constants.js";
 import { ko as ko_customTitleBar } from "../generated/customTitleBar.js";
 import { ko as ko_defaultTourScenarios } from "../generated/defaultTourScenarios.js";
-import { ko as ko_deferredApprovalChip } from "../generated/deferredApprovalChip.js";
 import { ko as ko_deferredQueueDialog } from "../generated/deferredQueueDialog.js";
 import { ko as ko_deferredQueuePanel } from "../generated/deferredQueuePanel.js";
 import { ko as ko_devToolsPanel } from "../generated/devToolsPanel.js";
@@ -206,7 +205,6 @@ export const koMessages: Record<string, string> = {
   ...ko_be_agentModeMap,
   ...ko_be_agentSpawn,
   ...ko_be_approvalGate,
-  ...ko_be_approvalIntent,
   ...ko_be_askUserQuestion,
   ...ko_be_askUserQuestionGate,
   ...ko_be_bashAstValidator,
@@ -215,6 +213,7 @@ export const koMessages: Record<string, string> = {
   ...ko_be_chatStreamState,
   ...ko_be_conversationLoop,
   ...ko_be_costEstimator,
+  ...ko_be_deferredApproval,
   ...ko_be_dlp,
   ...ko_be_errorClassifier,
   ...ko_be_executor,
@@ -281,7 +280,6 @@ export const koMessages: Record<string, string> = {
   ...ko_constants,
   ...ko_customTitleBar,
   ...ko_defaultTourScenarios,
-  ...ko_deferredApprovalChip,
   ...ko_deferredQueueDialog,
   ...ko_deferredQueuePanel,
   ...ko_devToolsPanel,

@@ -82,6 +82,16 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   const [shareDuration, setShareDuration] = useState<TailnetShareDurationPreset>("8h");
   const [sharePermission, setSharePermission] = useState<TailnetSharePermission>("observe");
   const [issuedInvitation, setIssuedInvitation] = useState<TailnetSharingCreatedInvitation | null>(null);
+  /**
+   * Pairing whose control share is one confirmation away.
+   *
+   * Handing someone control of the running conversation is the one action here
+   * that cannot be taken back by revoking it later — whatever they drove has
+   * already run — so it is asked twice. The question is drawn in the row it
+   * belongs to rather than in a window-modal dialog, which would freeze the
+   * whole app for a decision about one pairing.
+   */
+  const [controlShareToConfirm, setControlShareToConfirm] = useState<string | null>(null);
   const { copied, copy: copyToClipboard, reset: resetCopied } = useCopyFlash();
 
   const refresh = useCallback(async () => {
@@ -165,12 +175,23 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   }, [copyToClipboard, issuedInvitation]);
 
   const createShare = useCallback((pairingId: string) => {
-    if (sharePermission === "control" && !globalThis.confirm(t("tailnetAccessTab.controlConfirm"))) return;
+    if (sharePermission === "control") {
+      setControlShareToConfirm(pairingId);
+      return;
+    }
     void runMutation(
       `share:${pairingId}`,
       () => api.tailnetSharing.createCurrentConversationShare(pairingId, sharePermission, shareDuration),
     );
-  }, [api, runMutation, shareDuration, sharePermission, t]);
+  }, [api, runMutation, shareDuration, sharePermission]);
+
+  const confirmControlShare = useCallback((pairingId: string) => {
+    setControlShareToConfirm(null);
+    void runMutation(
+      `share:${pairingId}`,
+      () => api.tailnetSharing.createCurrentConversationShare(pairingId, "control", shareDuration),
+    );
+  }, [api, runMutation, shareDuration]);
 
   return (
     <div className="space-y-6" data-testid="tailnet-access-content">
@@ -306,7 +327,12 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
                   size="sm"
                   value={sharePermission}
                   disabled={busy !== null}
-                  onChange={(event) => setSharePermission(event.target.value as TailnetSharePermission)}
+                  onChange={(event) => {
+                    // The pending question was about a control grant; changing
+                    // the access level makes it a question about something else.
+                    setControlShareToConfirm(null);
+                    setSharePermission(event.target.value as TailnetSharePermission);
+                  }}
                   data-testid="tailnet-access-share-permission"
                 >
                   <NativeSelectOption value="observe">{t("tailnetAccessTab.observe")}</NativeSelectOption>
@@ -336,9 +362,42 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
                 {activePairings.map((pairing) => (
                   <li key={pairing.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-card/(--opacity-half) px-3 py-2">
                     <code className="font-mono text-xs">Tailnet · {pairing.actorFingerprint}</code>
-                    <Button size="sm" disabled={busy !== null} onClick={() => createShare(pairing.id)}>
-                      {t("tailnetAccessTab.createShare")}
-                    </Button>
+                    {controlShareToConfirm === pairing.id ? (
+                      <div
+                        className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2"
+                        data-testid="tailnet-access-control-confirm"
+                      >
+                        <p className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+                          {t("tailnetAccessTab.controlConfirm")}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy !== null}
+                          onClick={() => setControlShareToConfirm(null)}
+                          data-testid="tailnet-access-control-confirm-cancel"
+                        >
+                          {t("tailnetAccessTab.controlConfirmCancel")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={busy !== null}
+                          onClick={() => confirmControlShare(pairing.id)}
+                          data-testid="tailnet-access-control-confirm-accept"
+                        >
+                          {t("tailnetAccessTab.controlConfirmAccept")}
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        disabled={busy !== null}
+                        onClick={() => createShare(pairing.id)}
+                        data-testid="tailnet-access-create-share"
+                      >
+                        {t("tailnetAccessTab.createShare")}
+                      </Button>
+                    )}
                   </li>
                 ))}
               </ul>

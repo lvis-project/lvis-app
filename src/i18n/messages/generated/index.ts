@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 190
+ * Fragments: 189
  */
 import { en as en_app } from "./app.js";
 import { en as en_appearanceTab } from "./appearanceTab.js";
@@ -23,7 +23,6 @@ import { en as en_be_agentList } from "./be_agentList.js";
 import { en as en_be_agentModeMap } from "./be_agentModeMap.js";
 import { en as en_be_agentSpawn } from "./be_agentSpawn.js";
 import { en as en_be_approvalGate } from "./be_approvalGate.js";
-import { en as en_be_approvalIntent } from "./be_approvalIntent.js";
 import { en as en_be_askUserQuestion } from "./be_askUserQuestion.js";
 import { en as en_be_askUserQuestionGate } from "./be_askUserQuestionGate.js";
 import { en as en_be_bashAstValidator } from "./be_bashAstValidator.js";
@@ -32,6 +31,7 @@ import { en as en_be_chatDomain } from "./be_chatDomain.js";
 import { en as en_be_chatStreamState } from "./be_chatStreamState.js";
 import { en as en_be_conversationLoop } from "./be_conversationLoop.js";
 import { en as en_be_costEstimator } from "./be_costEstimator.js";
+import { en as en_be_deferredApproval } from "./be_deferredApproval.js";
 import { en as en_be_dlp } from "./be_dlp.js";
 import { en as en_be_errorClassifier } from "./be_errorClassifier.js";
 import { en as en_be_executor } from "./be_executor.js";
@@ -98,7 +98,6 @@ import { en as en_composerProjectSelector } from "./composerProjectSelector.js";
 import { en as en_constants } from "./constants.js";
 import { en as en_customTitleBar } from "./customTitleBar.js";
 import { en as en_defaultTourScenarios } from "./defaultTourScenarios.js";
-import { en as en_deferredApprovalChip } from "./deferredApprovalChip.js";
 import { en as en_deferredQueueDialog } from "./deferredQueueDialog.js";
 import { en as en_deferredQueuePanel } from "./deferredQueuePanel.js";
 import { en as en_devToolsPanel } from "./devToolsPanel.js";
@@ -215,7 +214,6 @@ export const generatedEn: Record<string, string> = {
   ...en_be_agentModeMap,
   ...en_be_agentSpawn,
   ...en_be_approvalGate,
-  ...en_be_approvalIntent,
   ...en_be_askUserQuestion,
   ...en_be_askUserQuestionGate,
   ...en_be_bashAstValidator,
@@ -224,6 +222,7 @@ export const generatedEn: Record<string, string> = {
   ...en_be_chatStreamState,
   ...en_be_conversationLoop,
   ...en_be_costEstimator,
+  ...en_be_deferredApproval,
   ...en_be_dlp,
   ...en_be_errorClassifier,
   ...en_be_executor,
@@ -290,7 +289,6 @@ export const generatedEn: Record<string, string> = {
   ...en_constants,
   ...en_customTitleBar,
   ...en_defaultTourScenarios,
-  ...en_deferredApprovalChip,
   ...en_deferredQueueDialog,
   ...en_deferredQueuePanel,
   ...en_devToolsPanel,
