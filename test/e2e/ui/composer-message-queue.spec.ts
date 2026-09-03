@@ -11,7 +11,7 @@
  * - BottomActionRow 가 TokenRing slot + ⇧⏎ kbd + Send 노출
  * - InputActionBar trailing 순서: 📎 → 권한 → (승인) → 페르소나 → Thinking
  * - MessageQueuePanel sentinel: 큐 비면 panel 자체 미렌더
- * - ApprovalQueueStatus floating chip 제거 (DOM 부재)
+ * - 승인 대기열 floating chip 제거 (DOM 부재)
  */
 import { test, expect } from './fixtures';
 import { TEST_IDS, testIdSelector } from "../../../src/shared/test-ids.js";
@@ -180,13 +180,10 @@ test('queue-auto 자동 인입 — done event 시 큐 항목이 user bubble + "�
   await expect(mainWindow.locator('text=끝나면 요약').first()).toBeVisible();
 });
 
-test('ApprovalQueueStatus floating chip 제거 (v6 spec)', async ({ mainWindow, t }) => {
-  // ApprovalQueueStatus 는 fixed bottom-right floating chip 였음.
-  // v6: 대화 흐름 안쪽 서피스로 통합 → floating 부재.
-  // 기존 컴포넌트는 className 에 fixed bottom-4 right-4 z-40 사용.
-  // 아예 마운트 안 하므로 .fixed.bottom-4.right-4.z-40 가 없어야 함.
-  const candidates = mainWindow.locator(
-    `div.fixed.bottom-4.right-4.z-40:has-text("${t('approvalQueueStatus.pendingApprovals')}")`,
-  );
-  await expect(candidates).toHaveCount(0);
+test('승인 대기열 floating chip 제거 (v6 spec)', async ({ mainWindow }) => {
+  // 대기열 깊이를 알리던 chip 은 fixed bottom-right 로 떠 있었다.
+  // v6: 대화 흐름 안쪽 서피스로 통합 → floating 부재. 컴포넌트 자체가 삭제되어
+  // 문구 대신 그 컴포넌트가 달고 있던 testid 와 위치 클래스로 부재를 잠근다.
+  await expect(mainWindow.getByTestId('approval-queue-status')).toHaveCount(0);
+  await expect(mainWindow.locator('div.fixed.bottom-4.right-4.z-40')).toHaveCount(0);
 });

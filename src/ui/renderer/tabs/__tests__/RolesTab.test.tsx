@@ -83,6 +83,11 @@ describe("RolesTab — ~/.lvis reference doc upgrades", () => {
     renderRolesTab(api);
 
     expect(await screen.findByTestId("roles-tab:upgrade-markers")).toBeInTheDocument();
+    // The pending markers belong to the AGENTS.md section, not a surface of
+    // their own: a marker rendered outside it has no path shown beside it.
+    expect(screen.getByTestId("roles-tab:agents-section")).toContainElement(
+      screen.getByTestId("roles-tab:upgrade-markers"),
+    );
     expect(screen.getByText(t("rolesTab.markerReadOnlyNote"))).toBeInTheDocument();
     expect(
       screen.queryByTestId("roles-tab:marker-apply:skills/report.md.new"),

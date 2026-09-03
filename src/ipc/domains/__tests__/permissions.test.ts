@@ -192,6 +192,7 @@ function makeDeps(options: {
       setDenyRules: vi.fn(),
     },
     rewireReviewerAgent: vi.fn(),
+    getMainWindow: vi.fn(() => appWindows[0]),
     getAppWindows: vi.fn(() => appWindows),
     askUserQuestionGate,
   };
