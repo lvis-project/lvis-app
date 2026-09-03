@@ -20,7 +20,7 @@ import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { ExecutionMode } from "../shared/permission-mode.js";
 import type { HookTrustOrigin, ScriptHookType } from "../hooks/script-hook-types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
-import type { DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
+import type { DeferredApprovalSource, DeferredGrantScope, RiskLevel } from "../shared/permission-review-status.js";
 
 
 /**
@@ -245,12 +245,16 @@ export interface AuditDeferredResolve extends AuditCommon {
   resolution: "approved" | "rejected";
   /**
    * Issue #690 P4 — provenance of the user gesture that resolved the
-   * deferred entry. "button" is the existing panel-click path;
-   * "natural-language" is the in-chat intent-matched chip path. Main
-   * requires this field for new writes; historical rows written before
-   * P4 may omit it, so audit readers must tolerate `undefined`.
+   * deferred entry. Main requires this field for new writes; historical rows
+   * written before it existed may omit it, so audit readers must tolerate
+   * `undefined`.
+   *
+   * Wider than {@link DeferredApprovalSource}, which is all the live path can
+   * produce: `"natural-language"` was written by an in-chat approval chip that
+   * no longer exists. An audit key is a persisted value, so the reader keeps
+   * admitting the rows that already carry it.
    */
-  approvalSource?: "button" | "natural-language";
+  approvalSource?: DeferredApprovalSource | "natural-language";
   /**
    * Breadth of the grant an `"approved"` resolution applied. Present only on
    * approvals, since a rejection grants nothing. Rows written before deferred

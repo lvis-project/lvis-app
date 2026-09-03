@@ -372,8 +372,13 @@
       <tbody>
         <tr>
           <td><code>ask_user_question</code> 도구 emit</td>
-          <td><code>{id, questions[], createdAt}</code></td>
-          <td>FIFO 큐에 추가하고 <code>QuestionOverlay</code>가 head 한 건을 composer dock에 마운트.</td>
+          <td><code>{id, sessionId, questions[], createdAt}</code></td>
+          <td>FIFO 큐에 추가하고 <code>QuestionOverlay</code>가 head 한 건을 composer dock에 마운트. <code>sessionId</code>가 카드를 질문한 대화의 타일로 보낸다.</td>
+        </tr>
+        <tr>
+          <td>보류된 승인 emit (호스트 발신)</td>
+          <td><code>{id, sessionId, questions: [{question, choices}], createdAt}</code></td>
+          <td>도구 호출이 승인 대기열로 밀리면 호스트가 같은 카드로 묻는다. 선택지는 허용 · 거절 · 나중에 결정이고, 대기열 항목이 부여할 권한을 기록해 둔 경우에만 허용이 나타난다.</td>
         </tr>
         <tr>
           <td>단일 질문에서 선택지 클릭</td>
@@ -406,6 +411,10 @@
       <li><strong><code>request.id</code> 별 상태 보존</strong>. 같은 id 로 재마운트되면 step + drafts 보존, 새 id 면 초기화.</li>
       <li><strong>비모달 dock 배치</strong>. 카드는 <code>ChatComposerDock</code>의 아래쪽 <code>QuestionOverlay</code>에 위치한다. viewport 전역 modal, backdrop, focus trap 없이 현재 대화 맥락과 composer를 함께 유지한다.</li>
       <li><strong>답변 회고 버블</strong>. <code>ask_user_answer</code> entry로 현재 구현되어 응답/건너뛰기 결과를 세션 reload 후에도 보여준다.</li>
+      <li><strong>질문의 출처는 둘</strong>. 하나는 <code>ask_user_question</code> 도구이고, 다른 하나는 호스트다.
+        보류된 승인은 "이걸 실행해도 될까요"라는 질문이므로 별도 위젯이 아니라 이 카드가 그린다.
+        카드는 질문한 대화의 타일에만 나타나고, 답변은 승인 대기열 대화상자의 버튼과 같은 처리 경로를 지나며
+        감사 기록에 <code>approvalSource: "question-card"</code>로 남는다.</li>
     </ul>
   </section>
 

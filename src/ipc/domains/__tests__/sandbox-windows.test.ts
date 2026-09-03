@@ -120,7 +120,7 @@ const invoke = makeRegisteredHandlerInvoker(handlers);
 
 function makeDeps() {
   return {
-    conversationLoop: { permissionManager: { getMode: () => "default" } },
+    conversationLoop: { permissionManager: { getMode: () => "default", setDeferredEntryAsk: vi.fn() } },
     approvalGate: {},
     auditLogger: { log: vi.fn() },
     toolRegistry: { setDenyRules: vi.fn() },

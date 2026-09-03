@@ -31,6 +31,7 @@ import type {
   UserApprovalScope,
   UserApprovalVerdict,
 } from "../shared/permissions-events.js";
+import type { DeferredApprovalSource } from "../shared/permission-review-status.js";
 import type { MarketplaceAnnouncementPayload } from "../shared/marketplace-announcements.js";
 import type { AiProviderPingIpcResult } from "../shared/ai-provider-ping.js";
 import type {
@@ -993,7 +994,7 @@ export function buildInternalApiSurface() {
       reason: string | undefined,
       // Required: callers must explicitly opt into a provenance value
       // before main writes the HMAC-chained audit row.
-      approvalSource: "button" | "natural-language",
+      approvalSource: DeferredApprovalSource,
       // Grant breadth + adjacency acknowledgement for an approval. Omitting
       // `scope` grants the narrowest breadth; main never widens on its own.
       options?: { scope?: "session" | "always"; acknowledgeWarnings?: boolean },

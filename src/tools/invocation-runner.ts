@@ -1150,6 +1150,7 @@ export async function runToolInvocation(
         const deferredGrantPath = suggestedParent ?? outOfAllowedTarget.filePath;
         const deferredId = deferredQueue
           ? await deferredQueue.append({
+            ...(sessionId === undefined ? {} : { sessionId }),
             toolName: toolUse.name,
             source,
             category: invocationCategory,

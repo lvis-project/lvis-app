@@ -25,8 +25,12 @@ import { sendToWindow } from "../safe-send.js";
 import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import {
   NARROWEST_DEFERRED_SCOPE,
+  type DeferredApprovalSource,
   type DeferredGrantScope,
 } from "../../shared/permission-review-status.js";
+import type { DeferredEntry } from "../../permissions/reviewer/deferred-queue.js";
+import { createLogger } from "../../lib/logger.js";
+import { t } from "../../i18n/index.js";
 import type { IpcDeps } from "../types.js";
 import type {
   PermissionDirCommand,
@@ -62,6 +66,8 @@ import {
   handleGetMode,
   handleSetPermissionMode,
 } from "../handlers/permissions.js";
+
+const log = createLogger("lvis");
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -689,6 +695,209 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     };
   });
 
+  /**
+   * The one resolve path for a deferred entry.
+   *
+   * Two gestures reach it — the queue dialog's button and the answer to the
+   * question the host asks in the tile that deferred the call — and both must
+   * land the same grant, the same audit row, and the same queue mutation.
+   * `approvalSource` is the only thing that differs, and it is recorded rather
+   * than branched on.
+   */
+  const resolveDeferredEntry = async (request: {
+    id: string;
+    decision: "approved" | "rejected";
+    reason?: string;
+    approvalSource: DeferredApprovalSource;
+    /**
+     * Grant breadth for an `"approved"` decision. `"always"` writes
+     * settings.json and must therefore be an explicitly confirmed choice,
+     * never a default.
+     */
+    scope: DeferredGrantScope;
+    /**
+     * Explicit acknowledgement of adjacency warnings. Never defaulted to
+     * true: this is the same widening gate the foreground card enforces
+     * with its warning checkbox, and it lives in
+     * `dispatchPermissionDirCommand` for both callers.
+     */
+    acknowledgeWarnings: boolean;
+  }) => {
+    const pm = conversationLoop.permissionManager;
+    const queue = pm?.getDeferredQueue();
+    if (!queue) return { ok: false as const, error: "no-deferred-queue" };
+    if (deferredResolveInFlight.has(request.id)) {
+      return { ok: false as const, error: "already-resolving" };
+    }
+    deferredResolveInFlight.add(request.id);
+    try {
+      const current = queue.get(request.id);
+      if (!current) return { ok: false as const, error: "not-found" };
+      if (current.status !== "pending") {
+        if (current.status === request.decision) return { ok: true as const, entry: current };
+        return { ok: false as const, error: "already-resolved", entry: current };
+      }
+      if (!auditLogger.isPermissionAuditChainReady()) {
+        return { ok: false as const, error: "permission-audit-not-ready" };
+      }
+
+      // An approval must GRANT something. The original call is long dead —
+      // its turn ended and its tool_use_id is consumed — so approving can
+      // only mean "make the next equivalent call succeed". When the lane
+      // recorded no reconstructable grant there is nothing to make succeed,
+      // and recording an approval would tell the user their click did
+      // something it did not. Refuse instead.
+      if (request.decision === "approved") {
+        if (!current.grant) {
+          return { ok: false as const, error: "no-grant-available" };
+        }
+        const { dispatchPermissionDirCommand } = await import(
+          "../../permissions/permission-slash.js"
+        );
+        const lifecycle = getWorkspaceRootLifecycle();
+        // Mirrors the dirDispatch handler: a settings mutation must never
+        // fall back to the slash dispatcher's settings-only path.
+        if (request.scope === "always" && !lifecycle) {
+          return { ok: false as const, error: "workspace lifecycle unavailable" };
+        }
+        const dirResult = await dispatchPermissionDirCommand(
+          {
+            verb: "allow",
+            path: current.grant.path,
+            session: request.scope === "session",
+            acknowledgeWarnings: request.acknowledgeWarnings,
+          },
+          undefined,
+          lifecycle,
+        );
+        if (!dirResult.ok) {
+          // `requiresAcknowledgement` is the adjacency gate — the same one
+          // the foreground card renders as a warning checkbox. Pass it back
+          // so the caller can ask, rather than acknowledging on their behalf.
+          return {
+            ok: false as const,
+            error: "grant-failed",
+            reason: dirResult.error,
+            ...(dirResult.requiresAcknowledgement
+              ? { requiresAcknowledgement: true, warnings: dirResult.warnings ?? [] }
+              : {}),
+          };
+        }
+        if (dirResult.verb !== "allow") {
+          return { ok: false as const, error: "grant-failed", reason: "unexpected result" };
+        }
+        if (dirResult.sessionOnly && dirResult.sessionDirectory) {
+          conversationLoop.addSessionAdditionalDirectory(dirResult.sessionDirectory);
+        }
+        broadcastPermissionConfigChanged(deps);
+      }
+      try {
+        await auditLogger.appendPermissionAuditEntry({
+          decision: "deferred_resolve",
+          auditId: randomUUID(),
+          ts: new Date().toISOString(),
+          trustOrigin: "user-keyboard",
+          tool: current.toolName,
+          source: current.source,
+          category: current.category,
+          reviewerVerdict: current.verdict,
+          queueId: current.id,
+          resolution: request.decision,
+          approvalSource: request.approvalSource,
+          ...(request.decision === "approved" ? { grantScope: request.scope } : {}),
+          ...(request.reason ? { reason: request.reason } : {}),
+        });
+      } catch (err) {
+        return {
+          ok: false as const,
+          error: "permission-audit-write-failed",
+          message: (err as Error).message,
+        };
+      }
+      const resolved = await queue.resolve(
+        request.id,
+        request.decision,
+        request.reason,
+        request.decision === "approved" ? request.scope : undefined,
+      );
+      if (!resolved) return { ok: false as const, error: "not-found" };
+      if (resolved.status !== request.decision) {
+        return { ok: false as const, error: "already-resolved", entry: resolved };
+      }
+      return { ok: true as const, entry: resolved };
+    } finally {
+      deferredResolveInFlight.delete(request.id);
+    }
+  };
+
+  /**
+   * Put a newly deferred entry to the user as a question, in the tile whose
+   * turn deferred it.
+   *
+   * A deferred approval is a question — "may this run?" — so it is drawn by the
+   * card every other question uses instead of by a widget of its own, and it
+   * belongs to the conversation that raised it rather than to the window. An
+   * entry with no conversation (local API, plugin panel) is not asked; the
+   * queue dialog stays its surface.
+   *
+   * "Approve" is offered only when the entry recorded a grant, because the
+   * resolve path refuses an approval that would grant nothing — an option that
+   * can only fail is not an option. Leaving the question unanswered keeps the
+   * entry pending, which is what the third choice says out loud.
+   */
+  const askDeferredApproval = async (entry: DeferredEntry): Promise<void> => {
+    const gate = deps.askUserQuestionGate;
+    if (!gate || !entry.sessionId) return;
+    const approveChoice = t("be_deferredApproval.choiceApprove");
+    const rejectChoice = t("be_deferredApproval.choiceReject");
+    const deferChoice = t("be_deferredApproval.choiceKeepDeferred");
+    const choices = entry.grant
+      ? [approveChoice, rejectChoice, deferChoice]
+      : [rejectChoice, deferChoice];
+    const response = await gate.ask({
+      sessionId: entry.sessionId,
+      questions: [
+        {
+          question: entry.grant
+            ? t("be_deferredApproval.questionWithGrant", {
+                toolName: entry.toolName,
+                path: entry.grant.path,
+              })
+            : t("be_deferredApproval.question", { toolName: entry.toolName }),
+          choices,
+          summaryHint: t("be_deferredApproval.summaryHint"),
+        },
+      ],
+    });
+    const answer = response.answers?.[0]?.choice;
+    if (answer !== approveChoice && answer !== rejectChoice) return;
+    const result = await resolveDeferredEntry({
+      id: entry.id,
+      decision: answer === approveChoice ? "approved" : "rejected",
+      approvalSource: "question-card",
+      // The narrowest breadth the lane offers. Widening writes settings.json,
+      // which is a choice the queue dialog states in full; a three-word card
+      // choice cannot state it, so it never makes it.
+      scope: NARROWEST_DEFERRED_SCOPE,
+      // The adjacency gate is a warning list plus a checkbox, which this card
+      // has no room to show. An unacknowledged approval fails here and the
+      // entry stays pending for the queue dialog, which does show them —
+      // acknowledging on the user's behalf is the one thing it must not do.
+      acknowledgeWarnings: false,
+    });
+    if (!result.ok) {
+      log.warn("deferred approval answer not applied: %s", result.error);
+    }
+  };
+  // Nothing awaits the question: the deferred call's turn is over, so the ask
+  // runs on its own and the catch is what keeps a rejected promise from
+  // escaping into the process.
+  conversationLoop.permissionManager?.setDeferredEntryAsk((entry) => {
+    askDeferredApproval(entry).catch((err: unknown) => {
+      log.warn("deferred approval could not be asked: %s", (err as Error).message);
+    });
+  });
+
   // Resolve a pending entry — gated. The renderer's button click
   // dispatches with `decision` ∈ {"approved","rejected"}.
   ipcMain.handle(
@@ -701,26 +910,11 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         reason?: string;
         intent?: unknown;
         /**
-         * Issue #690 P4 — provenance of the approval gesture. "button"
-         * means the user clicked a panel button (existing path);
-         * "natural-language" means the renderer's intent matcher
-         * recognised an in-chat phrase AND the user explicitly
-         * confirmed via the suggestion chip. Required: callers must
-         * explicitly declare provenance for audit-chain entries.
+         * Provenance of the approval gesture. Required: callers declare which
+         * surface the user gestured on so the audit chain records it.
          */
-        approvalSource: "button" | "natural-language";
-        /**
-         * Grant breadth for an `"approved"` decision. Absent ⇒ the narrowest
-         * ("session"). `"always"` writes settings.json and must therefore be
-         * an explicitly confirmed choice, never a default.
-         */
+        approvalSource: DeferredApprovalSource;
         scope?: DeferredGrantScope;
-        /**
-         * Explicit acknowledgement of adjacency warnings. Never defaulted to
-         * true: this is the same widening gate the foreground card enforces
-         * with its warning checkbox, and it lives in
-         * `dispatchPermissionDirCommand` for both callers.
-         */
         acknowledgeWarnings?: boolean;
       },
     ) => {
@@ -738,7 +932,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
           params.reason !== undefined &&
           (typeof params.reason !== "string" || params.reason.length > 1_000)
         ) ||
-        (params.approvalSource !== "button" && params.approvalSource !== "natural-language") ||
+        (params.approvalSource !== "button" && params.approvalSource !== "question-card") ||
         (
           params.scope !== undefined &&
           params.scope !== "session" &&
@@ -749,119 +943,16 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       ) {
         return { ok: false, error: "invalid-params" };
       }
-      const approvalSource = params.approvalSource;
-      // Absent scope resolves narrow. An "always" grant only happens when the
-      // caller said so.
-      const scope: DeferredGrantScope = params.scope ?? NARROWEST_DEFERRED_SCOPE;
-      const pm = conversationLoop.permissionManager;
-      const queue = pm?.getDeferredQueue();
-      if (!queue) return { ok: false, error: "no-deferred-queue" };
-      if (deferredResolveInFlight.has(params.id)) {
-        return { ok: false, error: "already-resolving" };
-      }
-      deferredResolveInFlight.add(params.id);
-      try {
-        const current = queue.get(params.id);
-        if (!current) return { ok: false, error: "not-found" };
-        if (current.status !== "pending") {
-          if (current.status === params.decision) return { ok: true, entry: current };
-          return { ok: false, error: "already-resolved", entry: current };
-        }
-        if (!auditLogger.isPermissionAuditChainReady()) {
-          return { ok: false, error: "permission-audit-not-ready" };
-        }
-        const auditReason =
-          approvalSource === "natural-language"
-            ? "natural-language chip click"
-            : params.reason;
-
-        // An approval must GRANT something. The original call is long dead —
-        // its turn ended and its tool_use_id is consumed — so approving can
-        // only mean "make the next equivalent call succeed". When the lane
-        // recorded no reconstructable grant there is nothing to make succeed,
-        // and recording an approval would tell the user their click did
-        // something it did not. Refuse instead.
-        if (params.decision === "approved") {
-          if (!current.grant) {
-            return { ok: false, error: "no-grant-available" };
-          }
-          const { dispatchPermissionDirCommand } = await import(
-            "../../permissions/permission-slash.js"
-          );
-          const lifecycle = getWorkspaceRootLifecycle();
-          // Mirrors the dirDispatch handler: a settings mutation must never
-          // fall back to the slash dispatcher's settings-only path.
-          if (scope === "always" && !lifecycle) {
-            return { ok: false, error: "workspace lifecycle unavailable" };
-          }
-          const dirResult = await dispatchPermissionDirCommand(
-            {
-              verb: "allow",
-              path: current.grant.path,
-              session: scope === "session",
-              acknowledgeWarnings: params.acknowledgeWarnings === true,
-            },
-            undefined,
-            lifecycle,
-          );
-          if (!dirResult.ok) {
-            // `requiresAcknowledgement` is the adjacency gate — the same one
-            // the foreground card renders as a warning checkbox. Pass it back
-            // so the caller can ask, rather than acknowledging on their behalf.
-            return {
-              ok: false,
-              error: "grant-failed",
-              reason: dirResult.error,
-              ...(dirResult.requiresAcknowledgement
-                ? { requiresAcknowledgement: true, warnings: dirResult.warnings ?? [] }
-                : {}),
-            };
-          }
-          if (dirResult.verb !== "allow") {
-            return { ok: false, error: "grant-failed", reason: "unexpected result" };
-          }
-          if (dirResult.sessionOnly && dirResult.sessionDirectory) {
-            conversationLoop.addSessionAdditionalDirectory(dirResult.sessionDirectory);
-          }
-          broadcastPermissionConfigChanged(deps);
-        }
-        try {
-          await auditLogger.appendPermissionAuditEntry({
-            decision: "deferred_resolve",
-            auditId: randomUUID(),
-            ts: new Date().toISOString(),
-            trustOrigin: "user-keyboard",
-            tool: current.toolName,
-            source: current.source,
-            category: current.category,
-            reviewerVerdict: current.verdict,
-            queueId: current.id,
-            resolution: params.decision,
-            approvalSource,
-            ...(params.decision === "approved" ? { grantScope: scope } : {}),
-            ...(auditReason ? { reason: auditReason } : {}),
-          });
-        } catch (err) {
-          return {
-            ok: false,
-            error: "permission-audit-write-failed",
-            message: (err as Error).message,
-          };
-        }
-        const resolved = await queue.resolve(
-          params.id,
-          params.decision,
-          auditReason,
-          params.decision === "approved" ? scope : undefined,
-        );
-        if (!resolved) return { ok: false, error: "not-found" };
-        if (resolved.status !== params.decision) {
-          return { ok: false, error: "already-resolved", entry: resolved };
-        }
-        return { ok: true, entry: resolved };
-      } finally {
-        deferredResolveInFlight.delete(params.id);
-      }
+      return resolveDeferredEntry({
+        id: params.id,
+        decision: params.decision,
+        ...(params.reason === undefined ? {} : { reason: params.reason }),
+        approvalSource: params.approvalSource,
+        // Absent scope resolves narrow. An "always" grant only happens when
+        // the caller said so.
+        scope: params.scope ?? NARROWEST_DEFERRED_SCOPE,
+        acknowledgeWarnings: params.acknowledgeWarnings === true,
+      });
     },
   );
 

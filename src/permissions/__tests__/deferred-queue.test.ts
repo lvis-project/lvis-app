@@ -115,4 +115,29 @@ describe("DeferredQueue", () => {
     expect(onPendingChange).toHaveBeenNthCalledWith(1, { pending: 1 });
     expect(onPendingChange).toHaveBeenNthCalledWith(2, { pending: 0 });
   });
+
+  it("records the conversation that raised the entry", async () => {
+    const q = new DeferredQueue(tmpQueuePath());
+    await q.append({ ...SAMPLE, sessionId: "session-a" });
+    expect(q.listPending()[0].sessionId).toBe("session-a");
+  });
+
+  it("an entry raised outside a conversation carries no session", async () => {
+    const q = new DeferredQueue(tmpQueuePath());
+    await q.append(SAMPLE);
+    expect(q.listPending()[0].sessionId).toBeUndefined();
+  });
+
+  it("announces each appended entry so the host can ask about it", async () => {
+    const onEntryPending = vi.fn();
+    const q = new DeferredQueue(tmpQueuePath(), undefined, onEntryPending);
+    const id = await q.append({ ...SAMPLE, sessionId: "session-a" });
+    await q.resolve(id, "approved");
+    expect(onEntryPending).toHaveBeenCalledOnce();
+    expect(onEntryPending.mock.calls[0][0]).toMatchObject({
+      id,
+      sessionId: "session-a",
+      status: "pending",
+    });
+  });
 });

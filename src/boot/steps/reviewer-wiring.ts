@@ -297,6 +297,9 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   const deferredQueue = new DeferredQueue(
     deps.deferredQueuePath,
     deps.onDeferredPendingChange,
+    // Routed through the manager, not held here: a re-wire builds a new queue
+    // while the manager (and the ask surface wired onto it) survives.
+    (entry) => deps.permissionManager.onDeferredEntryPending(entry),
   );
 
   let classifier: RiskClassifier;

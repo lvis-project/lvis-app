@@ -179,7 +179,6 @@
     "src/ui/renderer/components/__tests__/ChatSidePanel.test.tsx": 4,
     "src/ui/renderer/components/__tests__/Composer.test.tsx": 1,
     "src/ui/renderer/components/__tests__/ComposerProjectSelector.test.tsx": 2,
-    "src/ui/renderer/components/__tests__/DeferredApprovalChip.test.tsx": 6,
     "src/ui/renderer/components/__tests__/DeferredQueuePanel.test.tsx": 1,
     "src/ui/renderer/components/__tests__/DevConsoleToggle.test.tsx": 2,
     "src/ui/renderer/components/__tests__/inline-slash-menu.test.tsx": 2,

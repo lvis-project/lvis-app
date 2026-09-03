@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState, type RefObject } from "react";
 import { SessionTasksPanel } from "./SessionTasksPanel.js";
 import { SessionGoalPanel } from "./SessionGoalPanel.js";
 import { MessageQueuePanel } from "./MessageQueuePanel.js";
-import { DeferredApprovalChip } from "./DeferredApprovalChip.js";
 import { StatusBar, type StatusBarProps } from "./StatusBar.js";
 import { Composer, ComposerFrame, type ComposerHandle } from "./Composer.js";
 import { ComposerStatusRow, InputActionBar } from "./InputActionBar.js";
@@ -354,11 +353,6 @@ export function ChatComposerDock({
         />
       </div>
       <div className={`${dockColumnClass} overflow-x-hidden pb-1`}>
-        {/* §8 agent-approval surface — interactive natural-language approval
-            chip. Renders directly above the composer (the position its own
-            contract describes); self-hides unless the draft expresses an
-            approve/reject intent AND exactly one queue entry is pending. */}
-        <DeferredApprovalChip draftText={question} />
         {/* ONE input box: textarea + the single InputActionBar (action row).
             The session line — model / permission / active / ring — is drawn
             UNDER the box by ComposerStatusRow, not inside it: what is inside

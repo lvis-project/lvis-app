@@ -182,7 +182,7 @@ test('queue-auto 자동 인입 — done event 시 큐 항목이 user bubble + "�
 
 test('ApprovalQueueStatus floating chip 제거 (v6 spec)', async ({ mainWindow, t }) => {
   // ApprovalQueueStatus 는 fixed bottom-right floating chip 였음.
-  // v6: in-flow DeferredApprovalChip 으로 통합 → floating 부재.
+  // v6: 대화 흐름 안쪽 서피스로 통합 → floating 부재.
   // 기존 컴포넌트는 className 에 fixed bottom-4 right-4 z-40 사용.
   // 아예 마운트 안 하므로 .fixed.bottom-4.right-4.z-40 가 없어야 함.
   const candidates = mainWindow.locator(

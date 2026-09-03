@@ -16,6 +16,8 @@ import {
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
+/** The ask callback registration handed to the permission manager. */
+let askDeferredEntry: ((entry: unknown) => void) | null = null;
 const recordApprovalMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock("electron", () => ({
@@ -92,6 +94,8 @@ function makeDeps(options: {
   durableApprovalRecordAllowed?: boolean;
   snapshotArgs?: unknown;
   snapshotVerdict?: "low" | "medium" | "high";
+  /** Index into the card's own choice list the simulated user picks. */
+  answerChoiceIndex?: number;
 } = {}) {
   const appWindows = [
     {
@@ -122,6 +126,24 @@ function makeDeps(options: {
     getVisibilityDenyRules: vi.fn(() => []),
     getDeferredQueue: vi.fn(() => options.queue ?? null),
     isReviewerDegradedToRule: vi.fn(() => false),
+    // Registration hands the host's ask surface to the manager; the tests keep
+    // the callback so they can drive it the way a newly deferred entry would.
+    setDeferredEntryAsk: vi.fn((fn: (entry: unknown) => void) => {
+      askDeferredEntry = fn;
+    }),
+  };
+  // Answers by POSITION, not by label: the labels are localized, and a test
+  // that spelled one out would be asserting the catalog rather than the map
+  // from the user's pick to the resolution.
+  const askUserQuestionGate = {
+    ask: vi.fn(async (input: { questions: { choices: string[] }[] }) =>
+      options.answerChoiceIndex === undefined
+        ? { requestId: "q-1", dismissed: true }
+        : {
+            requestId: "q-1",
+            answers: [{ choice: input.questions[0].choices[options.answerChoiceIndex] }],
+          },
+    ),
   };
   const workspaceRootLifecycle = {
     allowDirectory: vi.fn(async (root: string) => [root]),
@@ -171,22 +193,25 @@ function makeDeps(options: {
     },
     rewireReviewerAgent: vi.fn(),
     getAppWindows: vi.fn(() => appWindows),
+    askUserQuestionGate,
   };
   // The lifecycle is no longer a dep field: `ipc/domains/workspace.ts` publishes
   // the one instance and every consumer resolves it through the authority.
   setWorkspaceRootLifecycle(
     options.workspaceLifecycleAvailable === false ? undefined : workspaceRootLifecycle,
   );
-  return { deps, permissionManager, appWindows, workspaceRootLifecycle };
+  return { deps, permissionManager, appWindows, workspaceRootLifecycle, askUserQuestionGate };
 }
 
 async function setup(options: Parameters<typeof makeDeps>[0] = {}) {
   handlers.clear();
   vi.clearAllMocks();
-  const { deps, permissionManager, appWindows, workspaceRootLifecycle } = makeDeps(options);
+  askDeferredEntry = null;
+  const { deps, permissionManager, appWindows, workspaceRootLifecycle, askUserQuestionGate } =
+    makeDeps(options);
   const { registerPermissionsHandlers } = await import("../permissions.js");
   registerPermissionsHandlers(deps as never);
-  return { deps, permissionManager, appWindows, workspaceRootLifecycle };
+  return { deps, permissionManager, appWindows, workspaceRootLifecycle, askUserQuestionGate };
 }
 
 beforeEach(() => {
@@ -938,11 +963,10 @@ describe("permissions IPC handlers", () => {
     expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledOnce();
   });
 
-  // ── Issue #690 P4 — approvalSource provenance in audit row ────────────
-  // Round-1 test-engineer CRITICAL-1: end-to-end IPC → audit
-  // integration assertion that the natural-language provenance reaches
-  // the audit chain.
-  it("deferredResolve records PII-free approvalSource='natural-language' in the audit entry", async () => {
+  // ── approvalSource provenance in the audit row ────────────────────────
+  // End-to-end IPC → audit assertion that the surface the user gestured on
+  // reaches the audit chain.
+  it("deferredResolve records the question-card provenance in the audit entry", async () => {
     const entry = makeDeferredEntry();
     const queue = {
       get: vi.fn(() => entry),
@@ -957,8 +981,7 @@ describe("permissions IPC handlers", () => {
     const result = await invoke(PERMISSIONS.deferredResolve, {
       id: "deferred-1",
       decision: "approved",
-      reason: "natural-language match: 허용해 주세요",
-      approvalSource: "natural-language",
+      approvalSource: "question-card",
       intent: USER_INTENT,
     });
 
@@ -967,21 +990,30 @@ describe("permissions IPC handlers", () => {
       expect.objectContaining({
         decision: "deferred_resolve",
         resolution: "approved",
-        approvalSource: "natural-language",
+        approvalSource: "question-card",
         queueId: "deferred-1",
-        reason: "natural-language chip click",
       }),
     );
-    const auditEntry = deps.auditLogger.appendPermissionAuditEntry.mock.calls[0]?.[0] as
-      | { reason?: string }
-      | undefined;
-    expect(auditEntry?.reason).not.toContain("허용해 주세요");
-    expect(queue.resolve).toHaveBeenCalledWith(
-      "deferred-1",
-      "approved",
-      "natural-language chip click",
-      "session",
-    );
+    expect(queue.resolve).toHaveBeenCalledWith("deferred-1", "approved", undefined, "session");
+  });
+
+  // The in-chat approval chip that wrote this provenance is gone, and with it
+  // the value: an audit row may still carry it, but nothing may write one.
+  it("deferredResolve refuses the retired natural-language provenance", async () => {
+    const entry = makeDeferredEntry();
+    const queue = { get: vi.fn(() => entry), resolve: vi.fn() };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "natural-language",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toEqual({ ok: false, error: "invalid-params" });
+    expect(queue.resolve).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
   });
 
   it("deferredResolve rejects omitted approvalSource as invalid-params", async () => {
@@ -1026,6 +1058,121 @@ describe("permissions IPC handlers", () => {
     expect(result).toEqual({ ok: false, error: "invalid-params" });
     expect(queue.resolve).not.toHaveBeenCalled();
     expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("a deferred approval is asked as a question in the tile that raised it", () => {
+  function makeQueue(entry: Record<string, unknown>) {
+    return {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({ ...entry, status })),
+    };
+  }
+
+  it("asks the conversation whose turn deferred the call", async () => {
+    const entry = makeDeferredEntry({ sessionId: "session-a" });
+    const { askUserQuestionGate } = await setup({ queue: makeQueue(entry) });
+
+    askDeferredEntry?.(entry);
+    await vi.waitFor(() => expect(askUserQuestionGate.ask).toHaveBeenCalledOnce());
+
+    expect(askUserQuestionGate.ask.mock.calls[0][0]).toMatchObject({
+      sessionId: "session-a",
+    });
+  });
+
+  it("two conversations each get their own question, never the other's", async () => {
+    const first = makeDeferredEntry({ id: "deferred-a", sessionId: "session-a" });
+    const second = makeDeferredEntry({ id: "deferred-b", sessionId: "session-b" });
+    const { askUserQuestionGate } = await setup({ queue: makeQueue(first) });
+
+    askDeferredEntry?.(first);
+    askDeferredEntry?.(second);
+    await vi.waitFor(() => expect(askUserQuestionGate.ask).toHaveBeenCalledTimes(2));
+
+    const asked = askUserQuestionGate.ask.mock.calls.map(
+      (call) => (call[0] as unknown as { sessionId: string }).sessionId,
+    );
+    expect(asked).toEqual(["session-a", "session-b"]);
+  });
+
+  it("an entry raised outside a conversation is not asked", async () => {
+    const entry = makeDeferredEntry();
+    const { askUserQuestionGate } = await setup({ queue: makeQueue(entry) });
+
+    askDeferredEntry?.(entry);
+
+    expect(askUserQuestionGate.ask).not.toHaveBeenCalled();
+  });
+
+  it("approving applies the entry's grant at the narrowest breadth", async () => {
+    const entry = makeDeferredEntry({ sessionId: "session-a" });
+    const queue = makeQueue(entry);
+    const { deps } = await setup({ queue, answerChoiceIndex: 0 });
+
+    askDeferredEntry?.(entry);
+    await vi.waitFor(() => expect(queue.resolve).toHaveBeenCalledOnce());
+
+    expect(queue.resolve).toHaveBeenCalledWith("deferred-1", "approved", undefined, "session");
+    expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "deferred_resolve",
+        resolution: "approved",
+        approvalSource: "question-card",
+        grantScope: "session",
+      }),
+    );
+  });
+
+  it("denying rejects the entry", async () => {
+    const entry = makeDeferredEntry({ sessionId: "session-a" });
+    const queue = makeQueue(entry);
+    await setup({ queue, answerChoiceIndex: 1 });
+
+    askDeferredEntry?.(entry);
+    await vi.waitFor(() => expect(queue.resolve).toHaveBeenCalledOnce());
+
+    expect(queue.resolve).toHaveBeenCalledWith("deferred-1", "rejected", undefined, undefined);
+  });
+
+  it("keeping it deferred leaves the entry pending", async () => {
+    const entry = makeDeferredEntry({ sessionId: "session-a" });
+    const queue = makeQueue(entry);
+    const { deps, askUserQuestionGate } = await setup({ queue, answerChoiceIndex: 2 });
+
+    askDeferredEntry?.(entry);
+    await vi.waitFor(() => expect(askUserQuestionGate.ask).toHaveBeenCalledOnce());
+
+    expect(queue.resolve).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("an unanswered question leaves the entry pending", async () => {
+    const entry = makeDeferredEntry({ sessionId: "session-a" });
+    const queue = makeQueue(entry);
+    const { askUserQuestionGate } = await setup({ queue });
+
+    askDeferredEntry?.(entry);
+    await vi.waitFor(() => expect(askUserQuestionGate.ask).toHaveBeenCalledOnce());
+
+    expect(queue.resolve).not.toHaveBeenCalled();
+  });
+
+  // An approval the resolve path would refuse is not an option: an entry with
+  // no recorded grant can only be denied or left pending.
+  it("offers no approval for an entry that recorded no grant", async () => {
+    const entry = makeDeferredEntry({ sessionId: "session-a", grant: undefined });
+    const queue = makeQueue(entry);
+    const { askUserQuestionGate } = await setup({ queue, answerChoiceIndex: 0 });
+
+    askDeferredEntry?.(entry);
+    await vi.waitFor(() => expect(queue.resolve).toHaveBeenCalledOnce());
+
+    const question = (askUserQuestionGate.ask.mock.calls[0][0] as {
+      questions: { choices: string[] }[];
+    }).questions[0];
+    expect(question.choices).toHaveLength(2);
+    expect(queue.resolve).toHaveBeenCalledWith("deferred-1", "rejected", undefined, undefined);
   });
 });
 
