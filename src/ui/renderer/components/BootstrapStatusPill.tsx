@@ -14,10 +14,10 @@
 import { AlertTriangle, Info, RefreshCw, X } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { ToolbarStatusPill } from "./ToolbarStatusPill.js";
-import type { BootstrapStatusEvent } from "../hooks/use-bootstrap-status.js";
+import type { AppBootstrapStatus } from "../../../shared/bootstrap-status.js";
 
 export interface BootstrapStatusPillProps {
-  status: BootstrapStatusEvent | null;
+  status: AppBootstrapStatus | null;
   onDismiss: () => void;
   onRetry: () => void;
 }

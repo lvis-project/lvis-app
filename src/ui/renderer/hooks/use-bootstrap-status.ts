@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
+import type { AppBootstrapStatus } from "../../../shared/bootstrap-status.js";
 
 /**
  * Managed bootstrap status subscription.
@@ -22,13 +23,8 @@ import type { LvisApi } from "../types.js";
  * applied only while none has arrived, so a stale snapshot resolving late can
  * never overwrite a newer event.
  */
-export type BootstrapStatusEvent =
-  | { phase: "start" }
-  | { phase: "complete"; installed: string[]; failed: Array<{ id: string; error: string }>; skippedReason?: string }
-  | { phase: "error"; message: string };
-
 export interface BootstrapStatusState {
-  status: BootstrapStatusEvent | null;
+  status: AppBootstrapStatus | null;
   /** True between `start` and a terminal (complete/error) event. */
   installing: boolean;
 }
@@ -36,7 +32,7 @@ export interface BootstrapStatusState {
 export function useBootstrapStatus(
   api: LvisApi,
 ): BootstrapStatusState & { dismiss: () => void; retry: () => Promise<void> } {
-  const [status, setStatus] = useState<BootstrapStatusEvent | null>(null);
+  const [status, setStatus] = useState<AppBootstrapStatus | null>(null);
   const [installing, setInstalling] = useState(false);
   const liveEventRef = useRef(false);
 

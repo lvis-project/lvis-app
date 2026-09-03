@@ -29,31 +29,7 @@
  */
 
 import type { BrowserWindow } from "electron";
-
-export interface BootstrapStatusStart {
-  phase: "start";
-}
-
-export interface BootstrapStatusComplete {
-  phase: "complete";
-  /** Plugin IDs successfully installed during this bootstrap. */
-  installed: string[];
-  /** Plugins that failed (network, signature, dependency) with error detail. */
-  failed: Array<{ id: string; error: string }>;
-  /** Reason from `resolveManagedPluginBootstrap` when the call was skipped. */
-  skippedReason?: string;
-}
-
-export interface BootstrapStatusError {
-  phase: "error";
-  /** Single sentence — surfaced verbatim to the renderer banner. */
-  message: string;
-}
-
-export type AppBootstrapStatus =
-  | BootstrapStatusStart
-  | BootstrapStatusComplete
-  | BootstrapStatusError;
+import type { AppBootstrapStatus } from "../shared/bootstrap-status.js";
 
 /** IPC channel name. Mirrored in preload.ts and the renderer hook. */
 export const BOOTSTRAP_STATUS_CHANNEL = "lvis:bootstrap:status";
