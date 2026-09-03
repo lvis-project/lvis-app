@@ -44,6 +44,7 @@ import type { Tool } from "../../tools/base.js";
 const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const memoryManager = {
   getAgentsMd: () => "",
+  getAgentsCustomMd: () => "",
   getMemoryIndex: () => "",
   getUserPreferences: () => "",
   getMemoryContext: () => "",

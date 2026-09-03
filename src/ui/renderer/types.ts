@@ -100,6 +100,7 @@ import type { UsageDailySummaryInput, UsageDailySummaryResult } from "../../ipc/
 // Settings: the renderer sees the host AppSettings minus the main-only
 // `a2aRemote` block, expressed once by the IPC projection type.
 import type { RendererSettingsSnapshot as AppSettings } from "../../ipc/domains/settings.js";
+import type { HomeDocsStatus } from "../../ipc/domains/home-docs.js";
 import type { MemoryCaptureMode } from "../../data/settings-store.js";
 export type { AppSettings, MemoryCaptureMode };
 
@@ -895,6 +896,31 @@ export type LvisApi = {
       }
     | { ok: false; error: string }
   >;
+  /** `~/.lvis` reference docs: pending packaged updates + the merge artifact. */
+  homeDocsStatus: () => Promise<HomeDocsStatus>;
+  homeDocsReadMarker: (markerPath: string) => Promise<
+    | { ok: true; content: string; live: string }
+    | { ok: false; error: string }
+  >;
+  homeDocsApplyPackaged: (markerPath: string) => Promise<
+    | { ok: true; movedToCustom: boolean }
+    | { ok: false; error: string }
+  >;
+  homeDocsKeepMine: (markerPath: string) => Promise<
+    { ok: true } | { ok: false; error: string }
+  >;
+  homeDocsGetCustom: () => Promise<string>;
+  homeDocsUpdateCustom: (content: string) => Promise<
+    { ok: true } | { ok: false; error: string }
+  >;
+  homeDocsMerge: (markerPath?: string) => Promise<
+    | { ok: true; content: string; mergedAt: string; sources: string[] }
+    | { ok: false; error: string }
+  >;
+  homeDocsApplyMerged: (expectedContent: string) => Promise<
+    { ok: true } | { ok: false; error: string }
+  >;
+  homeDocsDiscardMerged: () => Promise<{ ok: true }>;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
   memoryRefreshLongTerm: () => Promise<LongTermMemoryConsolidationResult>;
   listAgentProfiles: () => Promise<{ agents: AssistantAgentSummary[] }>;

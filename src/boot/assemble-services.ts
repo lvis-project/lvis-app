@@ -70,6 +70,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     skillArtifactStore: ctx.skillArtifactStore,
     idleScheduler: ctx.idleScheduler,
     preferenceRefreshService: ctx.preferenceRefreshService,
+    agentsDocMergeService: ctx.agentsDocMergeService,
     memoryConsolidationService: ctx.memoryConsolidationService,
     memoryMaintenanceCoordinator: ctx.memoryMaintenanceCoordinator,
     bashAstValidator: ctx.bashAstValidator,

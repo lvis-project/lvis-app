@@ -33,6 +33,7 @@ export type FenceTag =
   | "lvis-memory-index"
   | "lvis-user-memory"
   | "lvis-preference-source"
+  | "lvis-agents-merge-source"
   | "lvis-memory-consolidation-source"
   | "lvis-long-term-memory-overview"
   | "lvis-parent-directive"

@@ -117,6 +117,7 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
       searchSessions: vi.fn(() => []),
       getMemoryContext: vi.fn(() => ""),
       getAgentsMd: vi.fn(() => "# Agents"),
+      getAgentsCustomMd: vi.fn(() => ""),
       updateAgentsMd: vi.fn(),
       getUserPreferences: vi.fn(() => "# Preferences"),
       updateUserPreferences: vi.fn(),

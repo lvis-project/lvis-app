@@ -130,6 +130,7 @@ function makeMinimalDeps(loop: ReturnType<typeof makeConversationLoop>) {
       updateMemoryIndexIfUnchanged: vi.fn(() => true),
       updateMemoryIndexSections: vi.fn(),
       getAgentsMd: vi.fn(() => ""),
+      getAgentsCustomMd: vi.fn(() => ""),
       updateAgentsMd: vi.fn(),
       getUserPreferences: vi.fn(() => ""),
       updateUserPreferences: vi.fn(),

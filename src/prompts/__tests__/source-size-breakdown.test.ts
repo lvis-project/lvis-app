@@ -35,6 +35,7 @@ function makeBuilderWithMemory(): SystemPromptBuilder {
   return new SystemPromptBuilder({
     memoryManager: {
       getAgentsMd: () => "# Agents\n\nProject conventions go here.",
+      getAgentsCustomMd: () => "",
       getMemoryIndex: () => "# Memory Index\n\n- [A](./a.md)\n- [B](./b.md)",
       getUserPreferences: () => "Prefers concise answers.",
       getMemoryContext: () => "",
