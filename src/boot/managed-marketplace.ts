@@ -182,10 +182,19 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
         ensureResult.failed,
       );
     }
+    if (ensureResult.skippedReason) {
+      log.warn(
+        `boot: managed plugin bootstrap skipped: ${ensureResult.skippedReason}`,
+      );
+    }
     notifyBootstrapStatus(mainWindow, {
       phase: "complete",
       installed: ensureResult.installed,
       failed: ensureResult.failed,
+      // A skipped pass reports empty lists exactly like a clean one, so without
+      // the reason the renderer cannot tell "nothing to do" from "nothing was
+      // attempted" and shows nothing at all.
+      skippedReason: ensureResult.skippedReason,
     });
   } catch (err) {
     const message = (err as Error).message;

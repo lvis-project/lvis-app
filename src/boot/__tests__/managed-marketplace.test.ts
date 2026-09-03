@@ -34,6 +34,91 @@ describe("resolveManagedPluginBootstrap", () => {
   });
 });
 
+/**
+ * The unreachable-catalog outcome is the one the status surface exists for, and
+ * it is the one that looks identical to a clean run on the wire: empty
+ * `installed`, empty `failed`. Only the forwarded reason separates them.
+ */
+describe("runManagedBootstrap skip reporting", () => {
+  afterEach(() => {
+    _resetBootstrapInFlightForTest();
+  });
+
+  function captureStatusWindow(): {
+    window: never;
+    sends: Array<[string, unknown]>;
+  } {
+    const sends: Array<[string, unknown]> = [];
+    const window = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, payload: unknown) => {
+          sends.push([channel, payload]);
+        },
+      },
+    } as unknown as never;
+    return { window, sends };
+  }
+
+  it("forwards the ensure result's skippedReason on the complete event", async () => {
+    const { window, sends } = captureStatusWindow();
+    const ensureManagedInstalled = vi.fn(async () => ({
+      installed: [],
+      updated: [],
+      removed: [],
+      failed: [],
+      skippedReason: "catalog unreachable: ENOTFOUND marketplace",
+    }));
+
+    await runManagedBootstrap({
+      pluginMarketplace: { ensureManagedInstalled } as unknown as PluginMarketplaceService,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      mainWindow: window,
+      mode: "repair-missing-only",
+      activatePreparedArtifact: vi.fn(),
+      marketplace: {
+        backend: "real-cloud" as const,
+        cloudBaseUrl: "https://marketplace.example.com",
+      },
+    });
+
+    expect(sends.map(([, payload]) => payload)).toEqual([
+      { phase: "start" },
+      {
+        phase: "complete",
+        installed: [],
+        failed: [],
+        skippedReason: "catalog unreachable: ENOTFOUND marketplace",
+      },
+    ]);
+  });
+
+  it("leaves skippedReason undefined when the pass actually ran", async () => {
+    const { window, sends } = captureStatusWindow();
+    const ensureManagedInstalled = vi.fn(async () => ({
+      installed: ["calendar"],
+      updated: [],
+      removed: [],
+      failed: [],
+    }));
+
+    await runManagedBootstrap({
+      pluginMarketplace: { ensureManagedInstalled } as unknown as PluginMarketplaceService,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      mainWindow: window,
+      mode: "repair-missing-only",
+      activatePreparedArtifact: vi.fn(),
+      marketplace: {
+        backend: "real-cloud" as const,
+        cloudBaseUrl: "https://marketplace.example.com",
+      },
+    });
+
+    const complete = sends.at(-1)?.[1] as { skippedReason?: string };
+    expect(complete.skippedReason).toBeUndefined();
+  });
+});
+
 describe("runManagedBootstrap concurrency", () => {
   afterEach(() => {
     _resetBootstrapInFlightForTest();
