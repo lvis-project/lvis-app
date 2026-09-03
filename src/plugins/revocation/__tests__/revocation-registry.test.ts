@@ -29,7 +29,10 @@ import { RevocationCache, revocationRegistry } from "../revocation-registry.js";
 import { parseRevocationDocument } from "../revocation-schema.js";
 import { WHITELIST_PRIMARY_KEY_ID as REVOCATION_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
 import { useTempDirs } from "../../../__tests__/test-helpers.js";
-import { signedDocumentFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
+import {
+  signedDocumentFixture,
+  stubSignedDocumentFetch,
+} from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -382,32 +385,6 @@ describe("RevocationRegistry — issuedAt guard on the fetched document", () => 
    * The registry's source URLs are module constants, so the seam for the
    * online path is the global `fetch` the shared fetcher calls.
    */
-  function serveSignedDocument(body: string, signature: string): void {
-    vi.stubGlobal("fetch", async (input: string | URL) => {
-      const path = new URL(String(input)).pathname;
-      const payload =
-        path.endsWith("/revocation.json")
-          ? body
-          : path.endsWith("/revocation.json.sig")
-            ? signature
-            : null;
-      if (payload === null) {
-        return {
-          ok: false,
-          status: 404,
-          headers: { get: () => null },
-          text: async () => "not found",
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        headers: { get: () => null },
-        text: async () => payload,
-      };
-    });
-  }
-
   it("discards a fetched doc dated implausibly far ahead without advancing the mark", async () => {
     const now = Date.parse("2026-05-18T00:00:00.000Z");
     const userDataDir = freshUserData();
@@ -416,7 +393,7 @@ describe("RevocationRegistry — issuedAt guard on the fetched document", () => 
       issuedAt: "2027-01-01T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
     });
-    serveSignedDocument(future.body, future.signature);
+    stubSignedDocumentFetch("revocation.json", future.body, future.signature);
 
     const audits: string[] = [];
     await revocationRegistry.init({
@@ -441,7 +418,7 @@ describe("RevocationRegistry — issuedAt guard on the fetched document", () => 
       expiresAt: "2030-01-01T00:00:00.000Z",
       blocked: [{ slug: "meeting", version: "1.0.0", reason: "test" }],
     });
-    serveSignedDocument(genuine.body, genuine.signature);
+    stubSignedDocumentFetch("revocation.json", genuine.body, genuine.signature);
     await revocationRegistry.init({ userDataDir, online: true, now: () => now });
 
     expect(revocationRegistry.evaluate("meeting", "1.0.0")).toMatchObject({ kind: "block" });

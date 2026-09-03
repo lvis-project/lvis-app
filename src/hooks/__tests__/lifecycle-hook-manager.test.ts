@@ -17,13 +17,13 @@ import { resolve } from "node:path";
 import { ScriptHookManager } from "../script-hook-manager.js";
 import type { HookConfigEntry } from "../hook-config.js";
 import type { LifecycleHookEvent } from "../script-hook-types.js";
-import { hasNode } from "./test-helpers.js";
+import { hasExecutable } from "./test-helpers.js";
 
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 const ECHO = resolve(FIXTURE_ROOT, "cmd-lifecycle-echo.js");
 const DENY = resolve(FIXTURE_ROOT, "cmd-lifecycle-deny.js");
 
-const HAS_NODE = hasNode();
+const HAS_NODE = hasExecutable("node");
 
 function lifecycleEntry(
   event: LifecycleHookEvent,

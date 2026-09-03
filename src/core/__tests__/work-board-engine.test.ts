@@ -9,32 +9,22 @@
  * temp path (the namespace is never touched).
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { WorkBoardStore } from "../../main/work-board-store.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
 import type {
   SubAgentRunner,
   SubAgentSpawnCallbacks,
 } from "../../engine/subagent-runner.js";
-import type {
-  ApprovalGate,
-  ApprovalDecision,
-  ApprovalChoice,
-} from "../../permissions/approval-gate.js";
 import type { WorkBoardRunEvent } from "../../shared/work-board-types.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import { readRunTranscript } from "../../work-board/run-transcript.js";
-import { memTranscriptStorage } from "../../work-board/__tests__/board-test-fixtures.js";
+import {
+  memTranscriptStorage,
+  scriptedApprovalGate as fakeGate,
+  tempBoardStore as tempBoard,
+} from "../../work-board/__tests__/board-test-fixtures.js";
 import { assistantEntry } from "../../__tests__/test-helpers.js";
-
-function tempBoard() {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-wbe-"));
-  const store = new WorkBoardStore(join(dir, "board.json"));
-  return { store, cleanup: () => cleanupTmpDir(dir) };
-}
 
 interface SpawnCall {
   title: string;
@@ -74,21 +64,6 @@ function fakeRunner(): { runner: SubAgentRunner; calls: SpawnCall[] } {
     },
   } as unknown as SubAgentRunner;
   return { runner, calls };
-}
-
-/** Fake gate that returns a scripted choice and records the request. */
-function fakeGate(choice: ApprovalChoice): {
-  gate: ApprovalGate;
-  requests: unknown[];
-} {
-  const requests: unknown[] = [];
-  const gate = {
-    async requestAndWait(req: unknown): Promise<ApprovalDecision> {
-      requests.push(req);
-      return { requestId: "x", choice };
-    },
-  } as unknown as ApprovalGate;
-  return { gate, requests };
 }
 
 describe("WorkBoardEngine — plan→approve→execute", () => {

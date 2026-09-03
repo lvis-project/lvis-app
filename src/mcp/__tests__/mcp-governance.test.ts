@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { McpGovernance } from "../mcp-governance.js";
 import type { McpGovernancePolicy, McpServerApproval } from "../types.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
+import { governanceWithPolicy } from "./test-helpers.js";
 
 const testDir = join(tmpdir(), `lvis-mcp-governance-${process.pid}`);
 const policyPath = join(testDir, "mcp-policy.json");
@@ -39,12 +40,6 @@ function makePolicy(status: "approved" | "revoked"): McpGovernancePolicy {
       policyRefreshIntervalMs: 20,
     },
   };
-}
-
-function governanceWithPolicy(policy: McpGovernancePolicy): McpGovernance {
-  const governance = new McpGovernance("/nonexistent/mcp-policy.json");
-  (governance as unknown as { policy: McpGovernancePolicy }).policy = policy;
-  return governance;
 }
 
 function basePolicy(server: Partial<McpServerApproval>): McpGovernancePolicy {

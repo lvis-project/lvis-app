@@ -21,23 +21,10 @@ import "../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
-import { submitChatMessage, deferred } from "../../../../test/renderer/helpers.js";
+import { approvalRequest, submitChatMessage, deferred } from "../../../../test/renderer/helpers.js";
 import { MOCK_DEFAULT_SESSION_ID } from "../../../../test/renderer/mock-lvis-api.js";
 import { MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 
-const approval = (overrides: Record<string, unknown>) => ({
-  id: "req-gate",
-  category: "tool",
-  toolName: "read_file",
-  toolCategory: "read",
-  args: { path: "/tmp/notes.md" },
-  reason: "read the notes",
-  createdAt: Date.now(),
-  requireExplicit: false,
-  nonce: "nonce-gate",
-  hmac: "hmac-gate",
-  ...overrides,
-});
 const chatSurface = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-testid="chat-surface"]')!;
 const windowBand = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-testid="window-approval-scope"]')!;
 const count = (root: ParentNode, id: string) => root.querySelectorAll(`[data-testid="${id}"]`).length;
@@ -50,7 +37,7 @@ describe("gates reach the user when the route leaves the chat surface", () => {
     await submitChatMessage(container, "turn in flight");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
-    await act(async () => { emitApproval(approval({ sessionId: MOCK_DEFAULT_SESSION_ID })); });
+    await act(async () => { emitApproval(approvalRequest({ sessionId: MOCK_DEFAULT_SESSION_ID })); });
     await waitFor(() => expect(count(container, "approval-dock")).toBe(1));
     expect(count(windowBand(container), "approval-dock")).toBe(0);
 

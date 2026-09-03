@@ -19,10 +19,10 @@
  * `HookConfigEntry` pointing at a Node / Python command fixture.
  */
 import { describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { ScriptHookManager } from "../script-hook-manager.js";
 import type { HookConfigEntry } from "../hook-config.js";
+import { hasExecutable } from "./test-helpers.js";
 
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 const ECHO = resolve(FIXTURE_ROOT, "cmd-lifecycle-echo.js");
@@ -31,16 +31,8 @@ const SLOW = resolve(FIXTURE_ROOT, "cmd-slow.py");
 const EXIT_FAIL = resolve(FIXTURE_ROOT, "cmd-exit-fail.py");
 const BAD_JSON = resolve(FIXTURE_ROOT, "cmd-badjson.py");
 
-function hasBin(bin: string, arg = "--version"): boolean {
-  try {
-    execFileSync(bin, [arg], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-const HAS_NODE = hasBin("node");
-const HAS_PY = hasBin("python3");
+const HAS_NODE = hasExecutable("node");
+const HAS_PY = hasExecutable("python3");
 
 function upsEntry(command: string[], over: Partial<HookConfigEntry> = {}): HookConfigEntry {
   return {

@@ -12,6 +12,7 @@ import { describe, it, expect, vi } from "vitest";
 import { act, createEvent, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp, startInChatMode } from "./render-app.js";
 import {
+  approvalRequest,
   collectTiles,
   focusTile,
   forceOverflowingSummaries,
@@ -517,19 +518,13 @@ describe("a card pinned to a tile stays put when focus moves", () => {
 });
 
 describe("a turn parked on an approval, with two tiles", () => {
-  const request = (overrides: Record<string, unknown>) => ({
-    id: "req-parked-turn",
-    category: "tool",
-    toolName: "read_file",
-    toolCategory: "read",
-    args: { path: "/tmp/notes.md" },
-    reason: "read the notes",
-    createdAt: Date.now(),
-    requireExplicit: false,
-    nonce: "nonce-parked-turn",
-    hmac: "hmac-parked-turn",
-    ...overrides,
-  });
+  const request = (overrides: Record<string, unknown>) =>
+    approvalRequest({
+      id: "req-parked-turn",
+      nonce: "nonce-parked-turn",
+      hmac: "hmac-parked-turn",
+      ...overrides,
+    });
   const band = (tile: { element: HTMLElement }) =>
     tile.element.querySelector('[data-testid="approval-waiting-band"]');
   const dock = (within: HTMLElement) =>
@@ -747,19 +742,17 @@ describe("a turn parked on an approval, with two tiles", () => {
 });
 
 describe("cards raised by one of three tiles", () => {
-  const request = (overrides: Record<string, unknown>) => ({
-    id: "req-middle-tile",
-    category: "tool",
-    toolName: "write_file",
-    toolCategory: "write",
-    args: { path: "/tmp/out.md" },
-    reason: "write the summary",
-    createdAt: Date.now(),
-    requireExplicit: false,
-    nonce: "nonce-middle-tile",
-    hmac: "hmac-middle-tile",
-    ...overrides,
-  });
+  const request = (overrides: Record<string, unknown>) =>
+    approvalRequest({
+      id: "req-middle-tile",
+      toolName: "write_file",
+      toolCategory: "write",
+      args: { path: "/tmp/out.md" },
+      reason: "write the summary",
+      nonce: "nonce-middle-tile",
+      hmac: "hmac-middle-tile",
+      ...overrides,
+    });
   const dock = (within: HTMLElement) =>
     within.querySelectorAll('[data-testid="approval-dock"]');
   const composer = (tile: { element: HTMLElement }) =>

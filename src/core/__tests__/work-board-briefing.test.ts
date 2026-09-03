@@ -14,21 +14,12 @@
  *     card it already filed rather than adding a second one.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { WorkBoardStore } from "../../main/work-board-store.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
 import type { SubAgentRunner } from "../../engine/subagent-runner.js";
 import type { ApprovalGate } from "../../permissions/approval-gate.js";
 import { BRIEFING_PROPOSAL_SOURCE_ID } from "../../shared/work-board-types.js";
-
-function tempBoard(): { store: WorkBoardStore; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-wbb-"));
-  const store = new WorkBoardStore(join(dir, "board.json"));
-  return { store, cleanup: () => cleanupTmpDir(dir) };
-}
+import { tempBoardStore as tempBoard } from "../../work-board/__tests__/board-test-fixtures.js";
 
 interface SurveySpawn {
   title: string;

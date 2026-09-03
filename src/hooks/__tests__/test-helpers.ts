@@ -4,13 +4,16 @@ import { join, resolve } from "node:path";
 import type { DiscoveredHook } from "../hook-discovery.js";
 
 /**
- * Whether a `node` binary is on PATH. Lifecycle hook fixtures shell out to
- * `node`, so suites use this to `it.skipIf(!HAS_NODE)` in environments without
- * it (e.g. minimal CI images).
+ * Whether `binary` answers `--version` on PATH. Hook fixtures shell out to a
+ * real interpreter, so suites use this to `it.skipIf(!HAS_NODE)` in
+ * environments without one (e.g. minimal CI images).
+ *
+ * The binary is the parameter because four suites probed for one — `node`,
+ * `python3` — with the same try/execFileSync/catch body under four names.
  */
-export function hasNode(): boolean {
+export function hasExecutable(binary: string): boolean {
   try {
-    execFileSync("node", ["--version"], { stdio: "ignore" });
+    execFileSync(binary, ["--version"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -63,7 +66,8 @@ export function hookDirLayout(tmpDir: string): HookDirLayout {
   };
 }
 
-const REPO_HOOK_FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
+/** The repo's checked-in hook fixture tree, the root every hook suite spawns from. */
+export const REPO_HOOK_FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 
 /** A {@link fixtureHook} rooted at the repo's checked-in `test/fixtures/hooks`. */
 export function repoFixtureHook(

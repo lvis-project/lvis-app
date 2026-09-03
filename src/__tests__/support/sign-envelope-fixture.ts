@@ -10,6 +10,7 @@
  * `check:test-duplicates` flags a second copy of this helper.
  */
 import { createHash, sign, type KeyObject } from "node:crypto";
+import { vi } from "vitest";
 import type { SignatureEnvelope } from "../../plugins/types.js";
 import { canonicalJSON } from "../../plugins/whitelist/canonical-json.js";
 
@@ -65,4 +66,44 @@ export function signedDocumentFixture<T>(
  */
 export function manifestSha(manifest: unknown): string {
   return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
+}
+
+/**
+ * Serve one signed policy document, and nothing else, over the global `fetch`
+ * both registries reach the network through.
+ *
+ * The registries' source URLs are module constants, so the global is the only
+ * seam. `documentFileName` is the document each registry asks for
+ * (`whitelist.json`, `revocation.json`); its `.sig` sidecar is served
+ * alongside and every other path 404s, which is what an unmatched request
+ * should look like.
+ */
+export function stubSignedDocumentFetch(
+  documentFileName: string,
+  body: string,
+  signature: string,
+): void {
+  vi.stubGlobal("fetch", async (input: string | URL) => {
+    const path = new URL(String(input)).pathname;
+    const payload =
+      path.endsWith(`/${documentFileName}`)
+        ? body
+        : path.endsWith(`/${documentFileName}.sig`)
+          ? signature
+          : null;
+    if (payload === null) {
+      return {
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        text: async () => "not found",
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => payload,
+    };
+  });
 }

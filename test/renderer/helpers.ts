@@ -365,3 +365,30 @@ export async function sidebarNavRowActive(group: SidebarNavGroup, rowTestId: str
   await closeSidebarGroup(group);
   return active;
 }
+
+/**
+ * A pending tool-approval request as the host emits it, in the read lane every
+ * approval surface draws first.
+ *
+ * The card the renderer draws is built from these fields, so the shape is the
+ * fixture and the identity is not: a suite that needs to tell two cards apart,
+ * or that raises a write instead of a read, passes those in. Three describes
+ * had written the same ten fields out to change three of them.
+ */
+export function approvalRequest(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "req-approval",
+    category: "tool",
+    toolName: "read_file",
+    toolCategory: "read",
+    args: { path: "/tmp/notes.md" },
+    reason: "read the notes",
+    createdAt: Date.now(),
+    requireExplicit: false,
+    nonce: "nonce-approval",
+    hmac: "hmac-approval",
+    ...overrides,
+  };
+}

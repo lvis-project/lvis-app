@@ -9,34 +9,18 @@
  * behavior is identical to today.
  */
 import { describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { ScriptHookManager, type HookDispatchPayload } from "../script-hook-manager.js";
-import type { DiscoveredHook } from "../hook-discovery.js";
 import type { HookConfigEntry } from "../hook-config.js";
+import {
+  hasExecutable,
+  REPO_HOOK_FIXTURE_ROOT as FIXTURE_ROOT,
+  repoFixtureHook as shHook,
+} from "./test-helpers.js";
 
-const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 const shellOpts = process.platform === "win32" ? { timeoutMs: 20_000 } : undefined;
 
-function hasPython(): boolean {
-  try {
-    execFileSync("python3", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-const HAS_PYTHON = hasPython();
-
-function shHook(fileName: string, type: "pre" | "post" | "perm" = "pre"): DiscoveredHook {
-  return {
-    path: resolve(FIXTURE_ROOT, fileName),
-    fileName,
-    hookType: type,
-    sha256: "test",
-    size: 0,
-  };
-}
+const HAS_PYTHON = hasExecutable("python3");
 
 function configEntry(over: Partial<HookConfigEntry> & Pick<HookConfigEntry, "id" | "command">): HookConfigEntry {
   return {

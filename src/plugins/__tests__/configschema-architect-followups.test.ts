@@ -256,6 +256,7 @@ import {
   makeMockApprovalGate,
   makeMockConversationLoop,
   makeMockPermissionManager,
+  makeRegisteredHandlerInvoker,
   untrustedEvent,
 } from "../../__tests__/test-helpers.js";
 import { agentPluginsDocument } from "./test-helpers.js";
@@ -337,11 +338,7 @@ describe("US-3c.1 — lvis:plugins:config:secret:list-keys IPC handler", () => {
     );
   });
 
-  function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
-    const fn = ipcHandlers.get(channel);
-    if (!fn) throw new Error(`No handler: ${channel}`);
-    return fn(event, ...args);
-  }
+  const invoke = makeRegisteredHandlerInvoker(ipcHandlers);
 
   function trustedEvent() {
     return { senderFrame: { url: "file://" } };

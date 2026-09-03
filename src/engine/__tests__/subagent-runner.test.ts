@@ -63,6 +63,7 @@ import { A2A_ROLE_AGENT, A2ATaskState, type A2AMessage,
 import { A2ASubAgentMessageBus } from "../a2a-subagent-message-bus.js";
 import { SubAgentMessageMailbox } from "../subagent-message-mailbox.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { endTurnScript } from "./conversation-loop-test-helpers.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -1827,12 +1828,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
   });
 
   function makeCleanProvider(): ScriptedProvider {
-    return new ScriptedProvider([
-      [
-        { type: "text_delta", text: "child answer" },
-        { type: "message_complete", stopReason: "end_turn" },
-      ],
-    ]);
+    return new ScriptedProvider(endTurnScript("child answer"));
   }
 
   function spawnWith(

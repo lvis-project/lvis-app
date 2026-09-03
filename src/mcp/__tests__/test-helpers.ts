@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { StdioFrameDecoder } from "../stdio-framing.js";
 import { EventEmitter } from "node:events";
 import { McpGovernance } from "../mcp-governance.js";
 import type { McpGovernancePolicy } from "../types.js";
@@ -125,4 +126,27 @@ export class FakeChildProcess extends EventEmitter {
       }
     }
   }
+}
+
+/**
+ * The next framed message off `stream`, as a promise.
+ *
+ * The decoder is per-call and the listener detaches once a frame completes, so
+ * the caller reads one reply at a time in the order the server wrote them —
+ * which is what a request/response assertion over a real pipe needs.
+ */
+export function nextFramedMessage(
+  stream: PassThrough,
+): Promise<Record<string, unknown>> {
+  const decoder = new StdioFrameDecoder();
+  return new Promise((resolve) => {
+    const onData = (chunk: Buffer) => {
+      const messages = decoder.push(chunk);
+      if (messages.length > 0) {
+        stream.off("data", onData);
+        resolve(messages[0]);
+      }
+    };
+    stream.on("data", onData);
+  });
 }

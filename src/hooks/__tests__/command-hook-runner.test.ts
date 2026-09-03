@@ -11,26 +11,18 @@
  * absent so CI without python3/node still passes the rest of the suite.
  */
 import { describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import {
   runOneHookScript,
   type RunnableHook,
 } from "../script-hook-runner.js";
 import type { ScriptHookStdin } from "../script-hook-types.js";
+import { hasExecutable } from "./test-helpers.js";
 
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 
-function hasInterpreter(cmd: string): boolean {
-  try {
-    execFileSync(cmd, ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-const HAS_PYTHON = hasInterpreter("python3");
-const HAS_NODE = hasInterpreter("node");
+const HAS_PYTHON = hasExecutable("python3");
+const HAS_NODE = hasExecutable("node");
 
 function cmdHook(over: Partial<RunnableHook> & Pick<RunnableHook, "command">): RunnableHook {
   return {

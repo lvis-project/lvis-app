@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import { openInlineSettings } from './inline-settings.js';
+import { setWindowSize } from './seeded-electron.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TEST_IDS } from "../../../src/shared/test-ids.js";
@@ -10,14 +11,6 @@ import { TEST_IDS } from "../../../src/shared/test-ids.js";
 // driven by the PANEL width, so shrinking the app window flips it.
 
 const OUT = process.env.LVIS_SHOT_DIR ?? join(process.cwd(), 'test-results', 'settings-shots');
-
-async function setWindowSize(app: import('@playwright/test').ElectronApplication, w: number, h: number) {
-  await app.evaluate(({ BrowserWindow }, size) => {
-    const wins = BrowserWindow.getAllWindows().filter((x) => !x.isDestroyed() && x.isVisible());
-    const target = wins.sort((a, b) => b.getSize()[0] * b.getSize()[1] - a.getSize()[0] * a.getSize()[1])[0];
-    if (target) target.setContentSize(size.w, size.h);
-  }, { w, h });
-}
 
 async function expectSettingsBottomClearance(
   mainWindow: import('@playwright/test').Page,

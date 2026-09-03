@@ -13,18 +13,8 @@ import {
   findPluginDoctorMarketplaceItem,
   getPluginDoctorInstallKey,
 } from "../plugin-doctor-match.js";
-import type { MarketplaceItem, PluginCardSummary } from "../../types.js";
-
-function card(over: Partial<PluginCardSummary> & { id: string }): PluginCardSummary {
-  return {
-    name: over.id,
-    description: "",
-    sampleTools: [],
-    capabilities: [],
-    tools: [],
-    ...over,
-  };
-}
+import type { MarketplaceItem } from "../../types.js";
+import { pluginCardSummary as card } from "./test-helpers.js";
 
 function item(over: Partial<MarketplaceItem> & { id: string }): MarketplaceItem {
   return {

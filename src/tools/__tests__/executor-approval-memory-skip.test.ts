@@ -60,15 +60,8 @@ vi.mock("../../audit/sandbox-audit-sink.js", async () => {
 import { ToolExecutor } from "../executor.js";
 import { userPermissionContext } from "./tool-context-fixture.js";
 import { ToolRegistry } from "../registry.js";
-import { PermissionManager } from "../../permissions/permission-manager.js";
+import { permissionManagerReturning as pmReturning } from "./executor-reviewer-fixtures.js";
 import { tryUserApprovalMemorySkip } from "../pipeline/approval-memory-skip.js";
-
-/** A permission manager whose checkDetailed returns a fixed result. */
-function pmReturning(result: ReturnType<PermissionManager["checkDetailed"]>): PermissionManager {
-  const pm = new PermissionManager("/tmp/nonexistent-permissions-memory-skip.json");
-  pm.checkDetailed = () => result;
-  return pm;
-}
 
 describe("ToolExecutor — explicit-approval memory skips the foreground modal (Store B)", () => {
   let dir: string;

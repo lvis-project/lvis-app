@@ -34,3 +34,20 @@ export function makePermissionManager(
   });
   return permMgr;
 }
+
+/**
+ * A `PermissionManager` whose `checkDetailed` answers with `result` whatever
+ * it is asked.
+ *
+ * The suites that use it are asserting on what the executor does WITH a
+ * verdict, so the manager's own evaluation is not the subject; the settings
+ * path is deliberately one that does not exist, because a real one would make
+ * the fixed answer a lie about persisted rules.
+ */
+export function permissionManagerReturning(
+  result: ReturnType<PermissionManager["checkDetailed"]>,
+): PermissionManager {
+  const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+  permMgr.checkDetailed = () => result;
+  return permMgr;
+}

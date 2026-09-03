@@ -28,12 +28,8 @@ import { WorkBoardStore } from "../../main/work-board-store.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
 import type { SubAgentRunner } from "../../engine/subagent-runner.js";
-import type {
-  ApprovalGate,
-  ApprovalDecision,
-  ApprovalChoice,
-} from "../../permissions/approval-gate.js";
 import type { LoadedAgentProfile } from "../../main/agent-profile-store.js";
+import { scriptedApprovalGate as fakeGate } from "../../work-board/__tests__/board-test-fixtures.js";
 import type { WorkBoardRunEvent } from "../../shared/work-board-types.js";
 
 function tempBoard(): {
@@ -117,21 +113,6 @@ function fakeRunner(opts?: {
     },
   } as unknown as SubAgentRunner;
   return { runner, calls };
-}
-
-/** Fake gate returning a scripted choice; records the requests it received. */
-function fakeGate(choice: ApprovalChoice): {
-  gate: ApprovalGate;
-  requests: unknown[];
-} {
-  const requests: unknown[] = [];
-  const gate = {
-    async requestAndWait(req: unknown): Promise<ApprovalDecision> {
-      requests.push(req);
-      return { requestId: "fake", choice };
-    },
-  } as unknown as ApprovalGate;
-  return { gate, requests };
 }
 
 /** Fake profile resolver — returns a profile carrying the given model id. */
