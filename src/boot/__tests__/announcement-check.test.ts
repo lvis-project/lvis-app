@@ -29,6 +29,7 @@ function announcement(
     createdAt: "2026-06-12T00:00:00Z",
     startsAt: null,
     endsAt: null,
+    actions: [],
     ...patch,
   };
 }

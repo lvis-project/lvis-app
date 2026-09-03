@@ -118,6 +118,7 @@ export const MOCK_DEFAULT_SETTINGS = {
     installedLanguagePacks: [],
   },
   routine: {},
+  homeDocs: { keepLatest: false },
   privacy: { piiRedactEnabled: false },
   // Global shortcuts are off with no accelerator chosen — the persisted
   // default in `settings-defaults.ts`.
@@ -587,6 +588,26 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memoryUpdateUserPrefs: vi.fn(async () => undefined),
     memoryRefreshUserPrefs: vi.fn(async () => ({ ok: true, content: "# Refreshed Preferences" })),
     memoryRefreshLongTerm: vi.fn(async () => ({ ok: true, global: { status: "up-to-date", sourceCount: 0 } })),
+
+    homeDocsStatus: vi.fn(async () => ({
+      agentsDisplayPath: "~/.lvis/AGENTS.md",
+      customDisplayPath: "~/.lvis/agents.custom.md",
+      markers: [],
+      mergedContent: null,
+    })),
+    homeDocsReadMarker: vi.fn(async () => ({ ok: true, content: "", live: "" })),
+    homeDocsApplyPackaged: vi.fn(async () => ({ ok: true, movedToCustom: false })),
+    homeDocsKeepMine: vi.fn(async () => ({ ok: true })),
+    homeDocsGetCustom: vi.fn(async () => ""),
+    homeDocsUpdateCustom: vi.fn(async () => ({ ok: true })),
+    homeDocsMerge: vi.fn(async () => ({
+      ok: true,
+      content: "# Merged",
+      mergedAt: "2026-09-03T00:00:00.000Z",
+      sources: ["~/.lvis/AGENTS.md"],
+    })),
+    homeDocsApplyMerged: vi.fn(async () => ({ ok: true })),
+    homeDocsDiscardMerged: vi.fn(async () => ({ ok: true })),
 
     listMarketplacePlugins: vi.fn(async () => marketplace),
     pingMarketplace: vi.fn(async () => marketplacePing),

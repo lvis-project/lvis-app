@@ -545,6 +545,24 @@ export function buildInternalApiSurface() {
   memoryRefreshUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsRefresh),
   memoryRefreshLongTerm: async () => ipcRenderer.invoke(CHANNELS.memory.longTermRefresh),
 
+  // ─── ~/.lvis reference docs ──────────────────────
+  homeDocsStatus: async () => ipcRenderer.invoke(CHANNELS.homeDocs.upgradeMarkersList),
+  homeDocsReadMarker: async (markerPath: string) =>
+    ipcRenderer.invoke(CHANNELS.homeDocs.markerRead, markerPath),
+  homeDocsApplyPackaged: async (markerPath: string) =>
+    ipcRenderer.invoke(CHANNELS.homeDocs.packagedApply, markerPath),
+  homeDocsKeepMine: async (markerPath: string) =>
+    ipcRenderer.invoke(CHANNELS.homeDocs.markerKeepMine, markerPath),
+  homeDocsGetCustom: async () =>
+    ipcRenderer.invoke(CHANNELS.homeDocs.customGet) as Promise<string>,
+  homeDocsUpdateCustom: async (content: string) =>
+    ipcRenderer.invoke(CHANNELS.homeDocs.customUpdate, content),
+  homeDocsMerge: async (markerPath?: string) =>
+    ipcRenderer.invoke(CHANNELS.homeDocs.mergeRun, markerPath),
+  homeDocsApplyMerged: async (expectedContent: string) =>
+    ipcRenderer.invoke(CHANNELS.homeDocs.mergeApply, expectedContent),
+  homeDocsDiscardMerged: async () => ipcRenderer.invoke(CHANNELS.homeDocs.mergeDiscard),
+
   // ─── Plugins ─────────────────────────────────────
   listPersonaPromptSummaries: async () => ipcRenderer.invoke(CHANNELS.prompts.listSummaries),
   listPersonaPrompts: async () => ipcRenderer.invoke(CHANNELS.prompts.list),

@@ -1196,6 +1196,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       systemPromptBuilder: createSystemPromptBuilder({
         memoryManager: {
           getAgentsMd: () => "",
+          getAgentsCustomMd: () => "",
           getMemoryIndex: () => "",
           getUserPreferences: () => "",
           getMemoryContext: () => "",
@@ -1211,6 +1212,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       subAgentMemoryManager: {
         ...fakeSubAgentMemoryManager(),
         getAgentsMd: () => "",
+        getAgentsCustomMd: () => "",
         getMemoryIndex: () => "",
         getUserPreferences: () => "",
         getMemoryContext: () => "",

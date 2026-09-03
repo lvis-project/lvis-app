@@ -2667,6 +2667,7 @@ export class SubAgentRunner {
           // builder (which would reintroduce the cross-agent leak).
           memoryManager: {
             getAgentsMd: () => this.deps.subAgentMemoryManager.getAgentsMd?.() ?? "",
+            getAgentsCustomMd: () => this.deps.subAgentMemoryManager.getAgentsCustomMd?.() ?? "",
             getMemoryIndex: (options) => this.deps.subAgentMemoryManager.getMemoryIndex?.(options) ?? "",
             getPromptMemoryIndex: () => this.deps.subAgentMemoryManager.getPromptMemoryIndex?.() ?? "",
             getUserPreferences: () => this.deps.subAgentMemoryManager.getUserPreferences?.() ?? "",

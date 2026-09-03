@@ -144,6 +144,25 @@ export const CHANNELS = {
     userPrefsRefresh: "lvis:memory:user-prefs:refresh",
     longTermRefresh: "lvis:memory:long-term:refresh",
   },
+  /**
+   * The `~/.lvis` reference docs as a surface rather than a boot log line.
+   *
+   * Separate from `memory` because the subject is the FILES and their pending
+   * packaged updates, not the context the prompt reads: skills and prompts get
+   * upgrade markers too, and folding them into a channel named for agent
+   * context would make which doc owns a marker a matter of naming.
+   */
+  homeDocs: {
+    upgradeMarkersList: "lvis:home-docs:upgrade-markers:list",
+    markerRead: "lvis:home-docs:marker:read",
+    packagedApply: "lvis:home-docs:packaged:apply",
+    markerKeepMine: "lvis:home-docs:marker:keep-mine",
+    customGet: "lvis:home-docs:custom:get",
+    customUpdate: "lvis:home-docs:custom:update",
+    mergeRun: "lvis:home-docs:merge:run",
+    mergeApply: "lvis:home-docs:merge:apply",
+    mergeDiscard: "lvis:home-docs:merge:discard",
+  },
   starred: {
     list: "lvis:starred:list",
     add: "lvis:starred:add",

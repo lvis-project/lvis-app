@@ -617,6 +617,7 @@ describe("bootstrap() integration lock", () => {
         "a2aRemoteRuntime",
         "agentArtifactStore",
         "agentProfileStore",
+        "agentsDocMergeService",
         "approvalGate",
         "askUserQuestionGate",
         "auditLogger",

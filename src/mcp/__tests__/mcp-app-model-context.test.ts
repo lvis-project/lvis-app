@@ -187,6 +187,7 @@ describe("the model sees it on the NEXT turn — and only then", () => {
     return new SystemPromptBuilder({
       memoryManager: {
         getAgentsMd: () => "",
+        getAgentsCustomMd: () => "",
         getMemoryIndex: () => "",
         getUserPreferences: () => "",
         getMemoryContext: () => "",

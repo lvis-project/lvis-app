@@ -517,10 +517,85 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
         createdAt: "2026-06-12T00:00:00Z",
         startsAt: "2026-06-12T00:00:00Z",
         endsAt: null,
+        actions: [],
       },
     ]);
     const [url] = mockedFetchPublic.mock.calls[0];
     expect(url).toBe("https://marketplace.example.com/api/v1/announcements");
+  });
+
+  it("listAnnouncements() carries action buttons the running build can honour", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 1,
+          title: "OS tool sandbox",
+          body: "Shell tools can now run inside a sandbox.",
+          level: "info",
+          created_at: "2026-09-03T00:00:00Z",
+          actions: [
+            {
+              label: { ko: "샌드박스 설정 열기", en: "Open sandbox settings" },
+              target: { kind: "settings", path: "permissions" },
+              min_app_version: "0.9.0",
+            },
+            // Needs a build newer than the one configured below.
+            {
+              label: { ko: "미래 기능", en: "Future feature" },
+              target: { kind: "settings", path: "permissions" },
+              min_app_version: "9.9.9",
+            },
+            // A destination this app cannot reach.
+            {
+              label: { ko: "안내", en: "Guide" },
+              target: { kind: "url", url: "http://example.com/guide" },
+            },
+          ],
+        },
+      ]),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.9.1",
+    });
+    const announcements = await fetcher.listAnnouncements();
+
+    expect(announcements[0].actions).toEqual([
+      {
+        label: { ko: "샌드박스 설정 열기", en: "Open sandbox settings" },
+        target: { kind: "settings", settingsTab: "permissions" },
+      },
+    ]);
+  });
+
+  it("listAnnouncements() hides gated actions when no app version was configured", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 1,
+          title: "OS tool sandbox",
+          body: "Shell tools can now run inside a sandbox.",
+          level: "info",
+          created_at: "2026-09-03T00:00:00Z",
+          actions: [
+            {
+              label: { ko: "열기", en: "Open" },
+              target: { kind: "settings", path: "permissions" },
+              min_app_version: "0.0.1",
+            },
+          ],
+        },
+      ]),
+    );
+    // Fail closed: an unknown running version cannot prove it satisfies the
+    // minimum, so the button hides rather than pointing at a place that may not
+    // exist in this build.
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const announcements = await fetcher.listAnnouncements();
+
+    expect(announcements[0].actions).toEqual([]);
   });
 
   it("listAnnouncements() drops rows with no numeric id, missing level, or an invalid level", async () => {

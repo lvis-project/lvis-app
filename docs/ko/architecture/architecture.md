@@ -1456,6 +1456,8 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 ```
 ~/.lvis/
 ├── AGENTS.md            # 프로젝트·팀·조직/에이전트 컨텍스트 (관리자 배포 가능)
+├── agents.custom.md     # "항상 최신 내용 유지" 시 사용자가 직접 쓴 컨텍스트 (AGENTS.md 다음에 읽음)
+├── AGENTS.md.merged     # 모델 병합 결과 (검토 대기). 런타임은 이 파일을 읽지 않음
 ├── agents/              # 사용자 정의 sub-agent profile
 │   ├── reviewer.md      # flat profile
 │   └── explorer/AGENTS.md
@@ -1487,12 +1489,22 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 | 구분                    | 저장소    | 수명             | 제어 주체                |
 | ----------------------- | --------- | ---------------- | ------------------------ |
 | **AGENTS.md**           | 로컬 파일 | 영구 (수동 관리) | 관리자 + 사용자          |
+| **agents.custom.md**    | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
+| **AGENTS.md.merged**    | 로컬 파일 | 적용 또는 폐기까지 | 사용자 (설정에서 확인)   |
 | **user-preferences.md** | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
 | **memories/MEMORY.md**  | 로컬 파일 | 영구 (자동+수동) | 호스트 + 사용자          |
 | **memories/**           | 로컬 파일 | 영구 (수동 관리) | 사용자 ("기억해" 명령)   |
 | **agents/**             | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
 | **skills/**             | 로컬 파일 | 영구 (수동 관리) | 사용자                   |
 | **Session Context**     | In-memory | 현재 세션        | 자동 (대화 종료 시 소멸) |
+
+배포본 문서가 바뀌면 seeder 가 사용자 파일 옆에 `AGENTS.md.new` 업그레이드 안내를
+남긴다. 설정 > 역할의 AGENTS.md 섹션이 그 안내를 목록으로 보여 주고, 배포본 적용 /
+내 것 유지 / 모델 병합 중 하나를 고르게 한다. **항상 최신 내용 유지**를 켜면 배포본
+적용 시 사용자가 쓴 내용이 `agents.custom.md` 로 옮겨지고 `AGENTS.md` 는 배포본이
+된다. 시스템 프롬프트는 `AGENTS.md` 다음에 `agents.custom.md` 를 읽으므로, 두 내용이
+어긋날 때 사용자가 쓴 쪽이 뒤에 놓인다. 병합 결과는 항상 `AGENTS.md.merged` 에 먼저
+쓰고, 사용자가 확인한 뒤에만 대상 파일에 compare-and-swap 으로 적용한다.
 
 > **v2 대비 변경 이유**: v2의 4계층 기억(Session→Working→Episodic→Semantic)과 자동 승격·만료·연결 로직은 현 단계에서 과도한 복잡도를 유발한다. LVIS 는 사용자가 직접 확인할 수 있는 AGENTS.md / MEMORY.md 파일 기반으로 시작하고, 필요가 검증되면 점진적으로 확장한다.
 

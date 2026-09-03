@@ -51,7 +51,12 @@ import { app } from "electron";
 vi.mock("electron", () => ({ app: { isPackaged: false } }));
 
 import {
+  discardLvisHomeDocUpgradeMarker,
+  isShippedAgentsMdContent,
   listLvisHomeDocUpgradeMarkers,
+  readLvisHomeDocSource,
+  readLvisHomeDocUpgradeMarker,
+  retireAppliedLvisHomeDocUpgradeMarkers,
   seedLvisHomeDocs,
 } from "../seed-lvis-home-docs.js";
 import * as atomicFile from "../../lib/atomic-file.js";
@@ -471,5 +476,60 @@ describe("seedLvisHomeDocs — one offer per packaged version", () => {
     expect(seedAt("2026-01-03T00:00:00.000Z").upgraded).not.toContain(skill);
     expect(readdirSync(skillDir).sort()).toEqual(afterV3);
     expect(readFileSync(join(home, skill), "utf8")).toBe("user report\n");
+  });
+});
+
+describe("upgrade markers — reading, keeping, and retiring", () => {
+  it("reads a marker and the live doc it would replace", () => {
+    seedLvisHomeDocs();
+    writeFileSync(join(home, "AGENTS.md"), "mine\n");
+    writeFileSync(join(home, "AGENTS.md.new"), "AGENTS v2\n");
+
+    expect(readLvisHomeDocUpgradeMarker("AGENTS.md.new", home)).toBe("AGENTS v2\n");
+    expect(readLvisHomeDocSource("AGENTS.md.new", home)).toBe("mine\n");
+  });
+
+  it("refuses any path the listing does not name, traversal included", () => {
+    seedLvisHomeDocs();
+    writeFileSync(join(home, "secret.txt"), "private\n");
+
+    for (const path of ["secret.txt", "../secret.txt", "AGENTS.md", join("..", "..", "etc", "hosts")]) {
+      expect(readLvisHomeDocUpgradeMarker(path, home)).toBeNull();
+      expect(readLvisHomeDocSource(path, home)).toBeNull();
+      expect(discardLvisHomeDocUpgradeMarker(path, home)).toBe(false);
+    }
+    expect(existsSync(join(home, "secret.txt"))).toBe(true);
+  });
+
+  it("keeps a sibling offer when one marker is dismissed", () => {
+    seedLvisHomeDocs();
+    writeFileSync(join(home, "AGENTS.md.new"), "AGENTS v2\n");
+    writeFileSync(join(home, "AGENTS.md.new.2026-02-01"), "AGENTS v3\n");
+
+    expect(discardLvisHomeDocUpgradeMarker("AGENTS.md.new", home)).toBe(true);
+    expect(existsSync(join(home, "AGENTS.md.new"))).toBe(false);
+    expect(existsSync(join(home, "AGENTS.md.new.2026-02-01"))).toBe(true);
+  });
+
+  it("retires every marker carrying the applied bytes and no other", () => {
+    seedLvisHomeDocs();
+    writeFileSync(join(home, "AGENTS.md.new"), "AGENTS v2\n");
+    writeFileSync(join(home, "AGENTS.md.new.2026-01-01"), "AGENTS v2\n");
+    writeFileSync(join(home, "AGENTS.md.new.2026-02-01"), "AGENTS v3\n");
+
+    retireAppliedLvisHomeDocUpgradeMarkers("AGENTS.md.new", "AGENTS v2\n", home);
+
+    expect(existsSync(join(home, "AGENTS.md.new"))).toBe(false);
+    expect(existsSync(join(home, "AGENTS.md.new.2026-01-01"))).toBe(false);
+    expect(existsSync(join(home, "AGENTS.md.new.2026-02-01"))).toBe(true);
+  });
+
+  it("recognizes both allowlisted and currently packaged bytes as shipped", () => {
+    // "AGENTS v1" is the fixture's packaged copy AND its own allowlist entry.
+    expect(isShippedAgentsMdContent("AGENTS v1\n")).toBe(true);
+    writeRes("AGENTS.md", "AGENTS v2\n");
+    expect(isShippedAgentsMdContent("AGENTS v2\n")).toBe(true);
+    expect(isShippedAgentsMdContent("AGENTS v1\n")).toBe(true);
+    expect(isShippedAgentsMdContent("my own rules\n")).toBe(false);
   });
 });

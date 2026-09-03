@@ -10,7 +10,7 @@ describe("MarketplaceAnnouncementBanner", () => {
 
   it("renders nothing when there are no announcements", () => {
     const { container } = render(
-      <MarketplaceAnnouncementBanner announcements={[]} onDismiss={vi.fn()} />,
+      <MarketplaceAnnouncementBanner announcements={[]} onDismiss={vi.fn()} onAction={vi.fn()} />,
     );
     expect(container.firstChild).toBeNull();
   });
@@ -20,6 +20,7 @@ describe("MarketplaceAnnouncementBanner", () => {
       <MarketplaceAnnouncementBanner
         announcements={[announcement(1, "Scheduled maintenance", "warning")]}
         onDismiss={vi.fn()}
+        onAction={vi.fn()}
       />,
     );
     const banner = screen.getByTestId("marketplace-announcement-banner");
@@ -36,6 +37,7 @@ describe("MarketplaceAnnouncementBanner", () => {
       <MarketplaceAnnouncementBanner
         announcements={[announcement(1, "Outage", "critical")]}
         onDismiss={vi.fn()}
+        onAction={vi.fn()}
       />,
     );
     const banner = screen.getByTestId("marketplace-announcement-banner");
@@ -52,6 +54,7 @@ describe("MarketplaceAnnouncementBanner", () => {
           announcement(1, "Oldest", "info"),
         ]}
         onDismiss={vi.fn()}
+        onAction={vi.fn()}
       />,
     );
     const title = screen.getByTestId("marketplace-announcement-title");
@@ -66,6 +69,7 @@ describe("MarketplaceAnnouncementBanner", () => {
       <MarketplaceAnnouncementBanner
         announcements={[announcement(42, "Dismiss me", "info")]}
         onDismiss={onDismiss}
+        onAction={vi.fn()}
       />,
     );
     screen.getByTestId("marketplace-announcement-dismiss").click();
@@ -77,12 +81,95 @@ describe("MarketplaceAnnouncementBanner", () => {
       <MarketplaceAnnouncementBanner
         announcements={[announcement(1, "Title", "info", "a".repeat(400))]}
         onDismiss={vi.fn()}
+        onAction={vi.fn()}
       />,
     );
     const body = screen.getByTestId("marketplace-announcement-body");
     // jsdom has no layout → MarqueeText falls back to the static truncate path.
     expect(body).toHaveAttribute("data-marquee", "static");
     expect(body.className).toContain("truncate");
+  });
+
+  it("draws no action buttons when the announcement carries none", () => {
+    render(
+      <MarketplaceAnnouncementBanner
+        announcements={[announcement(1, "Plain notice", "info")]}
+        onDismiss={vi.fn()}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("marketplace-announcement-action-0")).toBeNull();
+  });
+
+  it("labels each action in the active language", () => {
+    render(
+      <MarketplaceAnnouncementBanner
+        announcements={[
+          announcement(1, "Sandbox", "info", "body text", [
+            {
+              label: { ko: "샌드박스 설정 열기", en: "Open sandbox settings" },
+              target: { kind: "settings", settingsTab: "permissions" },
+            },
+            {
+              label: { ko: "안내 문서", en: "Read the guide" },
+              target: { kind: "url", url: "https://example.com/guide" },
+            },
+          ]),
+        ]}
+        onDismiss={vi.fn()}
+        onAction={vi.fn()}
+      />,
+    );
+    // Korean runtime locale (test setup).
+    expect(screen.getByTestId("marketplace-announcement-action-0").textContent)
+      .toBe("샌드박스 설정 열기");
+    expect(screen.getByTestId("marketplace-announcement-action-1").textContent)
+      .toBe("안내 문서");
+  });
+
+  it("hands the target back on click without touching the dismiss path", () => {
+    const onAction = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <MarketplaceAnnouncementBanner
+        announcements={[
+          announcement(9, "Sandbox", "info", "body text", [
+            {
+              label: { ko: "열기", en: "Open" },
+              target: { kind: "settings", settingsTab: "permissions" },
+            },
+          ]),
+        ]}
+        onDismiss={onDismiss}
+        onAction={onAction}
+      />,
+    );
+    screen.getByTestId("marketplace-announcement-action-0").click();
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "settings",
+      settingsTab: "permissions",
+    });
+    // Following a button is not dismissing the notice.
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("draws the actions of the visible announcement, not of the ones behind it", () => {
+    render(
+      <MarketplaceAnnouncementBanner
+        announcements={[
+          announcement(3, "Newest", "info"),
+          announcement(2, "Older", "info", "body text", [
+            {
+              label: { ko: "숨은 버튼", en: "Hidden button" },
+              target: { kind: "url", url: "https://example.com/hidden" },
+            },
+          ]),
+        ]}
+        onDismiss={vi.fn()}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("marketplace-announcement-action-0")).toBeNull();
   });
 });
 
@@ -91,6 +178,7 @@ function announcement(
   title: string,
   level: MarketplaceAnnouncement["level"],
   body = "body text",
+  actions: MarketplaceAnnouncement["actions"] = [],
 ): MarketplaceAnnouncement {
   return {
     id,
@@ -100,5 +188,6 @@ function announcement(
     createdAt: "2026-06-12T00:00:00Z",
     startsAt: null,
     endsAt: null,
+    actions,
   };
 }

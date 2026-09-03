@@ -8,7 +8,11 @@ import { writeUtf8FileAtomicSync, isMissingPathError } from "../lib/atomic-file.
 import { isSessionTaskItem, type SessionTaskItem } from "../shared/session-tasks.js";
 import { isSessionGoal, type SessionGoal } from "../shared/session-goal.js";
 import { createLogger } from "../lib/logger.js";
-import { lvisHome } from "../shared/lvis-home.js";
+import {
+  AGENTS_CUSTOM_DOC_NAME,
+  AGENTS_DOC_NAME,
+  lvisHome,
+} from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 import { projectRootEquals, projectRootKey } from "../shared/project-identity.js";
 import { discoverProjectAgentsMd, type ProjectAgentsMd } from "./project-agents-md.js";
@@ -1255,6 +1259,7 @@ export class MemoryManager {
   }
 
   private agentsMd: string = "";
+  private agentsCustomMd: string = "";
   private memoryIndex: string = "";
   private userPreferences: string = "";
 
@@ -1324,7 +1329,8 @@ export class MemoryManager {
   }
 
   load(): void {
-    this.agentsMd = this.readFile("AGENTS.md");
+    this.agentsMd = this.readFile(AGENTS_DOC_NAME);
+    this.agentsCustomMd = this.readFile(AGENTS_CUSTOM_DOC_NAME);
     this.memoryIndex = this.readMemoryIndex();
     this.userPreferences = this.readFile("user-preferences.md");
   }
@@ -1333,7 +1339,10 @@ export class MemoryManager {
   startPersistentContextWatcher(): void {
     if (this.persistentContextWatchers.length > 0 || this.persistentContextPollTimer !== undefined) return;
     this.snapshotPersistentContextFiles();
-    this.watchDirectoryForPersistentContext(this.lvisDir, new Set(["AGENTS.md", "user-preferences.md"]));
+    this.watchDirectoryForPersistentContext(
+      this.lvisDir,
+      new Set([AGENTS_DOC_NAME, AGENTS_CUSTOM_DOC_NAME, "user-preferences.md"]),
+    );
     this.watchDirectoryForPersistentContext(this.memoryDir, new Set(["MEMORY.md"]));
     this.startPersistentContextPoller();
   }
@@ -1372,6 +1381,18 @@ export class MemoryManager {
 
   getAgentsMd(): string {
     return this.agentsMd;
+  }
+
+  /**
+   * The user's own agent context, or `""` when they have none.
+   *
+   * Kept separate from {@link getAgentsMd} rather than concatenated into it:
+   * the settings surface edits one of the two files and the merge job reads
+   * them as distinct inputs, so a single joined string would have to be split
+   * apart again by whoever needed either half.
+   */
+  getAgentsCustomMd(): string {
+    return this.agentsCustomMd;
   }
 
   /** Single-entry, stat-revalidated cache for the active project's AGENTS.md. */
@@ -1878,11 +1899,71 @@ export class MemoryManager {
 
   /** Update AGENTS.md. */
   async updateAgentsMd(content: string): Promise<void> {
-    const targetPath = join(this.lvisDir, "AGENTS.md");
+    const targetPath = join(this.lvisDir, AGENTS_DOC_NAME);
     await withFileLock(targetPath, async () => {
       writeFileSync(targetPath, content, "utf-8");
     });
     this.agentsMd = content;
+  }
+
+  /** Update agents.custom.md. */
+  async updateAgentsCustomMd(content: string): Promise<void> {
+    const targetPath = join(this.lvisDir, AGENTS_CUSTOM_DOC_NAME);
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, content, "utf-8");
+    });
+    this.agentsCustomMd = content;
+  }
+
+  /**
+   * AGENTS.md compare-and-set update, for the same reason
+   * {@link updateUserPreferencesIfUnchanged} has one: the model-assisted merge
+   * waits on a provider call, and a manual edit that lands during that wait
+   * must not be silently overwritten by the answer.
+   */
+  async updateAgentsMdIfUnchanged(expectedContent: string, nextContent: string): Promise<boolean> {
+    const didWrite = await this.replaceHomeDocIfUnchanged(
+      AGENTS_DOC_NAME,
+      expectedContent,
+      nextContent,
+    );
+    this.agentsMd = didWrite ? nextContent : this.readFile(AGENTS_DOC_NAME);
+    return didWrite;
+  }
+
+  /** agents.custom.md compare-and-set update — see {@link updateAgentsMdIfUnchanged}. */
+  async updateAgentsCustomMdIfUnchanged(
+    expectedContent: string,
+    nextContent: string,
+  ): Promise<boolean> {
+    const didWrite = await this.replaceHomeDocIfUnchanged(
+      AGENTS_CUSTOM_DOC_NAME,
+      expectedContent,
+      nextContent,
+    );
+    this.agentsCustomMd = didWrite ? nextContent : this.readFile(AGENTS_CUSTOM_DOC_NAME);
+    return didWrite;
+  }
+
+  /**
+   * The compare-and-set write both agent-context docs share. An absent file
+   * compares as `""`, which is what lets a first merge under keep-latest land
+   * `agents.custom.md` without a prior read seeing a file that is not there.
+   */
+  private async replaceHomeDocIfUnchanged(
+    name: string,
+    expectedContent: string,
+    nextContent: string,
+  ): Promise<boolean> {
+    const targetPath = join(this.lvisDir, name);
+    let didWrite = false;
+    await withFileLock(targetPath, async () => {
+      const current = readUtf8FileIfPresent(targetPath) ?? "";
+      if (current !== expectedContent) return;
+      writeFileSync(targetPath, nextContent, "utf-8");
+      didWrite = true;
+    });
+    return didWrite;
   }
 
   /** Update user-preferences.md. */
@@ -3223,7 +3304,8 @@ export class MemoryManager {
 
   private persistentContextFiles(): string[] {
     return [
-      join(this.lvisDir, "AGENTS.md"),
+      join(this.lvisDir, AGENTS_DOC_NAME),
+      join(this.lvisDir, AGENTS_CUSTOM_DOC_NAME),
       join(this.lvisDir, "user-preferences.md"),
       join(this.memoryDir, "MEMORY.md"),
     ];

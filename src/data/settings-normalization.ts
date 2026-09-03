@@ -86,6 +86,7 @@ import type {
   CodeThemePreference,
   DiagnosticsSettings,
   FeatureFlags,
+  HomeDocsSettings,
   LLMSettings,
   LLMSettingsPatch,
   MarketplaceSettings,
@@ -1272,6 +1273,21 @@ export function normalizeTelemetry(input: unknown): TelemetrySettings {
 }
 
 export const TELEMETRY_TEXT_KEYS = ["endpoint", "sentryDsn", "crashReportEndpoint"] as const;
+
+/**
+ * Coerce an on-disk `homeDocs` block to HomeDocsSettings.
+ *
+ * A hand-edited profile carrying a truthy string where the boolean belongs
+ * would otherwise switch on a mode that moves the user's AGENTS.md aside on
+ * the next packaged update.
+ */
+export function normalizeHomeDocs(input: unknown): HomeDocsSettings {
+  const result: HomeDocsSettings = { ...DEFAULT_SETTINGS.homeDocs };
+  if (!input || typeof input !== "object" || Array.isArray(input)) return result;
+  const obj = input as { keepLatest?: unknown };
+  acceptField(result, "keepLatest", obj.keepLatest, isBooleanValue, "homeDocs", STORED_FIELD);
+  return result;
+}
 
 /**
  * Assign one of the telemetry URL/DSN fields, with an explicit CLEAR arm.
