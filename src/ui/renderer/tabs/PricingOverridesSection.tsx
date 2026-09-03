@@ -136,6 +136,7 @@ export function PricingOverridesSection() {
 
   return (
     <SettingsSection
+      data-settings-section="llm-pricing-overrides"
       title={t("llmTab.pricingOverridesTitle")}
       description={t("llmTab.pricingOverridesDesc")}
     >

@@ -196,7 +196,9 @@ export function UsageDashboard({
     <div className="space-y-5" data-testid="usage-dashboard">
       {header}
       {workspaceStats}
-      <Card>
+      {/* The period picker heads the usage report, so it is where a link to
+          the report lands. */}
+      <Card data-settings-section="usage-summary" tabIndex={-1}>
         <CardHeader className="pb-1 pt-3 px-3 flex-row items-center justify-between">
           <CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.periodSelect")}</CardTitle>
           <div className="flex gap-1 flex-wrap">

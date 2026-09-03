@@ -11,7 +11,7 @@ import {
 } from "../components/chat-group-session-registry.js";
 import type { TranslateFn } from "../../../i18n/translate.js";
 import { errorMessage } from "../../../shared/error-message.js";
-import { normalizeSettingsTab, type SettingsTab } from "../../../shared/settings-tabs.js";
+import { parseSettingsPath, type SettingsPath } from "../../../shared/settings-tabs.js";
 import type { OnboardingProposalDisposition } from "../../../main/onboarding-proposal-store.js";
 
 type Api = ReturnType<typeof getApi>;
@@ -64,11 +64,11 @@ export function useRoutineOverlay({
   /** The tile a card with no origin conversation is pinned to on arrival. */
   focusedChatGroupId: string;
   /**
-   * Move the settings view onto a tab. A proposal's `settings` action names one
-   * — settings have no finer address than a tab — and the window owns
+   * Move the settings view onto a destination. A proposal's `settings` action
+   * names a tab and optionally a section within it, and the window owns
    * navigation, so it supplies the move.
    */
-  onNavigateToSettings: (tab: SettingsTab) => void;
+  onNavigateToSettings: (path: SettingsPath) => void;
 }): UseRoutineOverlayResult {
   // runningRoutines tracks in-flight LLM sessions.
   const [runningRoutines, setRunningRoutines] = useState<Set<string>>(new Set());
@@ -262,8 +262,9 @@ export function useRoutineOverlay({
 
   // The user's answer to an onboarding proposal. Accepting performs the action
   // the manifest declared — and only that: text into a composer, or the
-  // settings view onto a tab. Nothing here starts a turn, which is why a
-  // proposal never travels the `imported_trigger` path the insertion cards use.
+  // settings view onto the section that holds the option. Nothing here starts
+  // a turn, which is why a proposal never travels the `imported_trigger` path
+  // the insertion cards use.
   //
   // The answer is recorded whichever way it went, including "accepted": all
   // three are final for this launch, and two of them are final for good. The
@@ -287,7 +288,12 @@ export function useRoutineOverlay({
           const tile = registry.read(item.adoptedChatGroupId ?? chatGroupId);
           if (tile) tile.prefillComposer(action.prompt);
         } else if (action.kind === "settings") {
-          onNavigateToSettings(normalizeSettingsTab(action.path));
+          // Fail-closed rather than landing on the default tab: manifest
+          // validation already rejected a path this build cannot reach, so a
+          // null here means the declared destination is gone, and sending the
+          // user somewhere else would answer their "yes" with the wrong page.
+          const path = parseSettingsPath(action.path);
+          if (path) onNavigateToSettings(path);
         }
       }
 

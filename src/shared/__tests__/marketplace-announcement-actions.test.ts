@@ -57,6 +57,23 @@ describe("parseMarketplaceAnnouncementActions", () => {
     expect(parsed[0]?.target).toEqual({ kind: "settings", settingsTab: "remote-surfaces" });
   });
 
+  it("carries the section a two-level path names", () => {
+    const parsed = parseMarketplaceAnnouncementActions(
+      [settingsAction({ target: { kind: "settings", path: "permissions/permissions-os-sandbox" } })],
+      APP_VERSION,
+    );
+    expect(parsed[0]?.target).toEqual({
+      kind: "settings",
+      settingsTab: "permissions",
+      settingsSection: "permissions-os-sandbox",
+    });
+  });
+
+  it("leaves the section absent for a bare tab path", () => {
+    const parsed = parseMarketplaceAnnouncementActions([settingsAction()], APP_VERSION);
+    expect(parsed[0]?.target).not.toHaveProperty("settingsSection");
+  });
+
   it("keeps an https url as the sink normalized it", () => {
     const parsed = parseMarketplaceAnnouncementActions([urlAction()], APP_VERSION);
     expect(parsed[0]?.target).toEqual({ kind: "url", url: "https://example.com/guide" });
@@ -75,7 +92,12 @@ describe("parseMarketplaceAnnouncementActions", () => {
     ["an unknown target kind", settingsAction({ target: { kind: "restart", path: "permissions" } })],
     ["a missing target", settingsAction({ target: undefined })],
     ["a settings tab this build does not ship", settingsAction({ target: { kind: "settings", path: "sandbox" } })],
-    ["a section-bearing path", settingsAction({ target: { kind: "settings", path: "permissions/os-tool-sandbox" } })],
+    ["a section this tab does not anchor", settingsAction({ target: { kind: "settings", path: "permissions/llm-providers" } })],
+    ["a section under the wrong tab", settingsAction({ target: { kind: "settings", path: "llm/permissions-os-sandbox" } })],
+    ["an unknown section", settingsAction({ target: { kind: "settings", path: "permissions/turn-it-on" } })],
+    ["a three-segment path", settingsAction({ target: { kind: "settings", path: "permissions/permissions-os-sandbox/on" } })],
+    ["a trailing separator", settingsAction({ target: { kind: "settings", path: "permissions/" } })],
+    ["a leading separator", settingsAction({ target: { kind: "settings", path: "/permissions" } })],
     ["a non-string path", settingsAction({ target: { kind: "settings", path: 7 } })],
     ["a plain-http url", urlAction({ target: { kind: "url", url: "http://example.com/guide" } })],
     ["a script-scheme url", urlAction({ target: { kind: "url", url: "javascript:alert(1)" } })],
@@ -171,6 +193,22 @@ describe("isMarketplaceAnnouncementAction", () => {
         target: { kind: "settings", settingsTab: "permissions" },
       }),
     ).toBe(true);
+    expect(
+      isMarketplaceAnnouncementAction({
+        label: LABEL,
+        target: {
+          kind: "settings",
+          settingsTab: "permissions",
+          settingsSection: "permissions-os-sandbox",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isMarketplaceAnnouncementAction({
+        label: LABEL,
+        target: { kind: "settings", settingsTab: "permissions", settingsSection: "llm-thinking" },
+      }),
+    ).toBe(false);
     expect(
       isMarketplaceAnnouncementAction({
         label: LABEL,

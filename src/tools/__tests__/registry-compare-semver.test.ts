@@ -9,7 +9,7 @@
  * the final release.
  */
 import { describe, it, expect } from "vitest";
-import { compareSemver } from "../registry.js";
+import { compareSemver } from "../../shared/semver-compare.js";
 
 describe("compareSemver", () => {
   it("orders plain numeric cores", () => {

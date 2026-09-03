@@ -221,7 +221,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
 
   if (loading) {
     return (
-      <SettingsSection title={t("tailnetObserver.sectionTitle")}>
+      <SettingsSection data-settings-section="remote-tailnet-observer" title={t("tailnetObserver.sectionTitle")}>
         <p className="text-sm text-muted-foreground" data-testid="tailnet-observer-loading">
           {t("tailnetObserver.loading")}
         </p>
@@ -232,6 +232,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
   if (snapshot === null || draft === null) {
     return (
       <SettingsSection
+        data-settings-section="remote-tailnet-observer"
         title={t("tailnetObserver.sectionTitle")}
         actions={
           <Button
@@ -259,6 +260,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
 
   return (
     <SettingsSection
+      data-settings-section="remote-tailnet-observer"
       title={t("tailnetObserver.sectionTitle")}
       description={t("tailnetObserver.sectionDescription")}
       actions={

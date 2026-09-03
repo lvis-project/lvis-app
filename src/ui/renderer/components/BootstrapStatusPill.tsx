@@ -62,13 +62,17 @@ export function BootstrapStatusPill({
   }
 
   if (status.skippedReason) {
+    // Why the bootstrap was skipped lives in `title`, and hover text is not in
+    // the accessibility tree — so the accessible name carries it too, or a
+    // screen reader is told only that something can be dismissed.
+    const skippedTitle = t("bootstrapStatusPill.skipped", { skippedReason: status.skippedReason });
     return (
       <ToolbarStatusPill
         tone="warning"
         icon={Info}
         label={t("bootstrapStatusPill.pillSkipped")}
-        title={t("bootstrapStatusPill.skipped", { skippedReason: status.skippedReason })}
-        ariaLabel={t("bootstrapStatusPill.dismissNotification")}
+        title={skippedTitle}
+        ariaLabel={`${t("bootstrapStatusPill.dismissNotification")} ${skippedTitle}`}
         onClick={onDismiss}
         testId="bootstrap-status-pill"
       />

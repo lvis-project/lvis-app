@@ -57,6 +57,19 @@ describe("BootstrapStatusPill", () => {
     expect(label).toContain("tarball 404");
   });
 
+  it("announces why the bootstrap was skipped instead of leaving it in the hover text", () => {
+    renderPill({
+      phase: "complete",
+      installed: [],
+      failed: [],
+      skippedReason: "marketplace not configured",
+    });
+
+    const label = screen.getByTestId("bootstrap-status-pill").getAttribute("aria-label");
+    expect(label).toContain("알림 닫기");
+    expect(label).toContain("marketplace not configured");
+  });
+
   it("retries the bootstrap when the error pill is clicked", () => {
     const onRetry = vi.fn();
     renderPill({ phase: "error", message: "registry unreachable" }, { onRetry });

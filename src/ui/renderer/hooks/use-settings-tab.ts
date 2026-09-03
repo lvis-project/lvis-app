@@ -69,3 +69,70 @@ export function useSettingsTab(api: LvisApi): UseSettingsTabResult {
 
   return { settingsTab, setSettingsTab, restoresApplied };
 }
+
+/**
+ * How long the arrival ring stays on the section a deep link named.
+ *
+ * Long enough to be found by an eye that was reading a banner a moment ago,
+ * short enough that it cannot be mistaken for a selected state.
+ */
+const SETTINGS_SECTION_ARRIVAL_MS = 1500;
+
+/** The class `src/styles.css` draws the arrival ring with. */
+export const SETTINGS_SECTION_ARRIVAL_CLASS = "lvis-settings-section-arrival";
+
+/**
+ * Land on the section a settings deep link named, once.
+ *
+ * The tab is persisted state; the section deliberately is not. It answers "the
+ * user was just sent here", which is true for one arrival and false forever
+ * after — persisting it would re-scroll and re-ring the same block every time
+ * the panel opened, long after the notice that pointed at it was gone.
+ * `onApplied` is how the caller drops the one-shot.
+ *
+ * Two effects rather than one, because the two lifetimes differ: the lookup
+ * belongs to the target, the ring belongs to the node it was put on. Fused, the
+ * state update `onApplied` causes would tear the ring off in the tick it was
+ * added.
+ */
+export function useSettingsSectionArrival(
+  section: string | null,
+  onApplied: () => void,
+): void {
+  const [ringed, setRinged] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (section === null) return;
+    // A frame late: the tab body mounts in the same commit that set the
+    // target, so the anchor does not exist yet when this effect first runs.
+    const frame = requestAnimationFrame(() => {
+      const node = document.querySelector<HTMLElement>(
+        `[data-settings-section="${section}"]`,
+      );
+      if (node) {
+        const reducedMotion =
+          window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+        node.scrollIntoView({ block: "start", behavior: reducedMotion ? "auto" : "smooth" });
+        // The scroll already put the section where it belongs; focusing with
+        // `preventScroll` moves the keyboard caret there without a second jump.
+        node.focus({ preventScroll: true });
+        setRinged(node);
+      }
+      // Consumed either way. An anchor this build cannot find is still an
+      // arrival that happened — leaving the target set would retry it on every
+      // later render of the panel.
+      onApplied();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [section, onApplied]);
+
+  useEffect(() => {
+    if (ringed === null) return;
+    ringed.classList.add(SETTINGS_SECTION_ARRIVAL_CLASS);
+    const timer = setTimeout(() => setRinged(null), SETTINGS_SECTION_ARRIVAL_MS);
+    return () => {
+      clearTimeout(timer);
+      ringed.classList.remove(SETTINGS_SECTION_ARRIVAL_CLASS);
+    };
+  }, [ringed]);
+}

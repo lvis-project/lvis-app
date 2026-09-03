@@ -340,6 +340,16 @@
     transition-duration: var(--motion-fast);
     transition-timing-function: var(--motion-ease-out);
   }
+
+  /* Arrival ring for a settings deep link. Scrolling the section into view and
+     focusing it moves the page but does not say WHICH block was meant; the
+     ring says it, then drops off so it cannot be read as persistent state.
+     Reuses the spotlight tokens the tour already rings elements with. */
+  .lvis-settings-section-arrival {
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-spotlight);
+    transition: box-shadow var(--motion-base) var(--motion-ease-out);
+  }
 }
 
 /* Radix Dialog state-driven entry/exit — DialogContent fades + zoom-in on
@@ -372,6 +382,12 @@
   }
   .lvis-anim-hover {
     transition-duration: 0ms;
+  }
+  /* The ring still appears — it is the answer to "which section" — but it
+     appears at once, in the tighter no-bloom variant, and does not fade. */
+  .lvis-settings-section-arrival {
+    box-shadow: var(--shadow-spotlight-reduced);
+    transition: none;
   }
   /* Marquee never scrolls under reduced motion. MarqueeText also renders the
      static truncated variant in this case, so this is belt-and-suspenders. */

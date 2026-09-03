@@ -71,6 +71,12 @@ export interface ToolbarStatusPillProps {
   /** Hover text and tooltip body. The place the long form goes. */
   title: string;
   ariaLabel: string;
+  /**
+   * Rendered inside the pill after the label — a keyboard hint, a count. It is
+   * decoration on top of `label`, not a second label: `ariaLabel` already
+   * carries everything a reader needs, so the pill reads the same without it.
+   */
+  trailing?: React.ReactNode;
   /** Work is in flight: the icon spins and the cursor reads as progress. */
   busy?: boolean;
   onClick?: () => void;
@@ -89,6 +95,7 @@ export function ToolbarStatusPill({
   label,
   title,
   ariaLabel,
+  trailing,
   busy = false,
   onClick,
   disabled = false,
@@ -110,6 +117,7 @@ export function ToolbarStatusPill({
         >
           <Icon className={busy ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
           <span>{label}</span>
+          {trailing}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{title}</TooltipContent>

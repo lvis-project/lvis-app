@@ -657,7 +657,13 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
         title={t("pluginConfigTab.pageTitle")}
         description={t("pluginConfigTab.pageDescription")}
       />
-      <div className="flex flex-1 min-h-0 flex-col gap-3">
+      {/* The installed-plugin list and its detail card are one deep-link
+          anchor: every per-plugin switch lives inside the pair. */}
+      <div
+        className="flex flex-1 min-h-0 flex-col gap-3"
+        data-settings-section="plugin-config-installed"
+        tabIndex={-1}
+      >
       <PluginUninstallDialog
         target={uninstallTarget}
         working={saving}

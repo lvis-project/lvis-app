@@ -1,5 +1,10 @@
 import { SUPPORTED_LOCALES, type Locale } from "../i18n/locale.js";
-import { isSettingsTab, type SettingsTab } from "./settings-tabs.js";
+import {
+  isSettingsSection,
+  isSettingsTab,
+  parseSettingsPath,
+  type SettingsTab,
+} from "./settings-tabs.js";
 import { validateExternalUrl } from "./external-url.js";
 import { appVersionSatisfiesMin } from "./semver-compare.js";
 
@@ -30,12 +35,14 @@ const MARKETPLACE_ANNOUNCEMENT_MAX_ACTIONS = 3;
  * marketplace post into this machine's configuration. The user turns a feature
  * on themselves at the destination.
  *
- * `settingsTab` addresses a settings TAB, which is the deepest coordinate the
- * app's own location model carries (`ui/renderer/utils/view-location.ts`) —
- * see `parseMarketplaceAnnouncementActions` for why there is no section.
+ * `settingsTab` names the page and `settingsSection` the block within it. The
+ * section is optional because a notice about a whole page is a real thing to
+ * write; when it is present it is one of the anchors `SETTINGS_SECTIONS` lists
+ * for that tab, so the button lands on the control rather than on the page that
+ * happens to contain it.
  */
 export type MarketplaceAnnouncementActionTarget =
-  | { kind: "settings"; settingsTab: SettingsTab }
+  | { kind: "settings"; settingsTab: SettingsTab; settingsSection?: string }
   | { kind: "url"; url: string };
 
 /**
@@ -100,14 +107,16 @@ function parseActionTarget(
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
   if (raw.kind === "settings") {
-    // A settings destination is ONE tab id. The app addresses settings at tab
-    // granularity — `ViewLocation` carries `settingsTab` and nothing deeper, and
-    // the breadcrumb renders exactly `Settings › <tab>` — so a path naming a
-    // section would be a destination this app cannot reach. Unknown tab ids are
-    // dropped rather than resolved: `normalizeSettingsTab` answers "llm" for
-    // anything it does not recognize, which would silently point a button at
-    // the wrong page.
-    return isSettingsTab(raw.path) ? { kind: "settings", settingsTab: raw.path } : null;
+    // `<tab>` or `<tab>/<section>`, and nothing else. Both halves are checked
+    // against what this build actually ships, and an unrecognized one drops the
+    // whole action rather than resolving it: `normalizeSettingsTab` answers
+    // "llm" for anything it cannot place, which would point a button labelled
+    // for one destination at another.
+    const path = parseSettingsPath(raw.path);
+    if (path === null) return null;
+    return path.section === undefined
+      ? { kind: "settings", settingsTab: path.tab }
+      : { kind: "settings", settingsTab: path.tab, settingsSection: path.section };
   }
   if (raw.kind === "url") {
     // Same authority every external-navigation sink in the app uses: http(s)
@@ -177,7 +186,12 @@ export function isMarketplaceAnnouncementAction(
   const target = raw.target;
   if (!target || typeof target !== "object") return false;
   const rawTarget = target as Record<string, unknown>;
-  if (rawTarget.kind === "settings") return isSettingsTab(rawTarget.settingsTab);
+  if (rawTarget.kind === "settings") {
+    const tab = rawTarget.settingsTab;
+    if (!isSettingsTab(tab)) return false;
+    const section = rawTarget.settingsSection;
+    return section === undefined || isSettingsSection(tab, section);
+  }
   if (rawTarget.kind === "url") {
     const validation = validateExternalUrl(rawTarget.url);
     return validation.ok && new URL(validation.url).protocol === "https:";

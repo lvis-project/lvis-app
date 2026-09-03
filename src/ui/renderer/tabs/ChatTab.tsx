@@ -95,6 +95,7 @@ export function ChatTab({
       />
 
       <SettingsSection
+        data-settings-section="chat-optimization"
         title={t("chatTab.conversationOptimizationTitle")}
         description={t("chatTab.conversationOptimizationDescription")}
       >
@@ -116,6 +117,7 @@ export function ChatTab({
       </SettingsSection>
 
       <SettingsSection
+        data-settings-section="chat-stream-smoothing"
         title={t("chatTab.streamSmoothingTitle")}
         description={t("chatTab.streamSmoothingDescription")}
       >
@@ -139,6 +141,7 @@ export function ChatTab({
       </SettingsSection>
 
       <SettingsSection
+        data-settings-section="chat-experimental"
         title={t("chatTab.experimentalTitle")}
         description={t("chatTab.experimentalDescription")}
         badge={
@@ -262,6 +265,7 @@ export function ChatTab({
       </SettingsSection>
 
       <SettingsSection
+        data-settings-section="chat-privacy"
         title={t("chatTab.privacyTitle")}
         description={t("chatTab.privacyDescription")}
       >

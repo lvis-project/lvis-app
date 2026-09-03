@@ -424,6 +424,7 @@ function LanguageSection({
   ]);
   return (
     <SettingsSection
+      data-settings-section="appearance-language"
       title={t("settings.appearance.language.title")}
       description={t("settings.appearance.language.description")}
       actions={onOpenMarketplace ? (
@@ -557,6 +558,7 @@ export function AppearanceTab({ onOpenMarketplace }: { onOpenMarketplace?: (filt
 
       {/* ── 테마 선택 ─────────────────────────────────── */}
       <SettingsSection
+        data-settings-section="appearance-theme"
         title={t("appearanceTab.themeSectionTitle")}
         description={t("appearanceTab.themeSectionDescription")}
         actions={onOpenMarketplace ? (
@@ -621,6 +623,7 @@ export function AppearanceTab({ onOpenMarketplace }: { onOpenMarketplace?: (filt
 
       {/* ── 폰트 ────────────────────────────────────── */}
       <SettingsSection
+        data-settings-section="appearance-font"
         title={t("appearanceTab.fontSectionTitle")}
         description={t("appearanceTab.fontSectionDescription")}
         actions={

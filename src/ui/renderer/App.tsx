@@ -82,7 +82,7 @@ import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
-import { normalizeSettingsTab, type SettingsTab } from "../../shared/settings-tabs.js";
+import { normalizeSettingsTab, type SettingsPath } from "../../shared/settings-tabs.js";
 import type { OnboardingProposalDisposition } from "../../main/onboarding-proposal-store.js";
 import {
   BUILTIN_LABEL_KEYS,
@@ -644,10 +644,19 @@ export function App() {
     if (to.view === "settings") setSettingsTab(to.settingsTab ?? "llm");
     setActiveView(to.view);
   }, [setSettingsTab, setActiveView]);
+  // The section a deep link named, held only until the panel has landed on it.
+  // Kept OUT of `ViewLocation` deliberately: a location is a place the user can
+  // return to, and this is an event — recording it would replay the scroll and
+  // the arrival ring every time history walked back onto the settings entry.
+  const [settingsSectionTarget, setSettingsSectionTarget] = useState<string | null>(null);
+  const clearSettingsSectionTarget = useCallback(() => setSettingsSectionTarget(null), []);
   // Composed after `navigateToLocation` because an accepted onboarding proposal
-  // may name a settings tab, and the move is this window's to make.
-  const navigateToSettingsTab = useCallback(
-    (settingsTab: SettingsTab) => navigateToLocation({ view: "settings", settingsTab }),
+  // may name a settings destination, and the move is this window's to make.
+  const navigateToSettingsPath = useCallback(
+    (path: SettingsPath) => {
+      navigateToLocation({ view: "settings", settingsTab: path.tab });
+      setSettingsSectionTarget(path.section ?? null);
+    },
     [navigateToLocation],
   );
   const {
@@ -658,7 +667,7 @@ export function App() {
     handleProposalAnswer,
   } = useRoutineOverlay({
     api, t, locale, registry: chatGroupSessions, focusedChatGroupId: chatGroups.focusedId,
-    onNavigateToSettings: navigateToSettingsTab,
+    onNavigateToSettings: navigateToSettingsPath,
   });
 
   const viewHistory = useViewHistory(location, navigateToLocation, restoresApplied);
@@ -1308,12 +1317,12 @@ export function App() {
   const handleMarketplaceAnnouncementAction = useCallback(
     (target: MarketplaceAnnouncementActionTarget) => {
       if (target.kind === "settings") {
-        navigateToLocation({ view: "settings", settingsTab: target.settingsTab });
+        navigateToSettingsPath({ tab: target.settingsTab, section: target.settingsSection });
         return;
       }
       void api.openExternalUrl(target.url);
     },
-    [navigateToLocation, api],
+    [navigateToSettingsPath, api],
   );
 
 
@@ -1573,6 +1582,8 @@ export function App() {
              focused pane itself, that this means. */
           chatGroupId={paneId}
           initialTab={settingsTab}
+          sectionTarget={settingsSectionTarget}
+          onSectionApplied={clearSettingsSectionTarget}
           onSaved={handleInlineSettingsSaved}
           onTabChange={setSettingsTab}
           exactDenyDraft={exactDenyDraft ?? null}

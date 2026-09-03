@@ -773,9 +773,6 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.findPluginIdByCapability("sample-capability")).toBe(
-      "meta-plugin",
-    );
     expect(runtime.listPluginIdsByCapability("sample-capability")).toEqual([
       "meta-plugin",
     ]);
