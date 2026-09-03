@@ -2794,58 +2794,14 @@ export class MemoryManager implements PromptMemorySource {
   }
 
   /** List persisted sessions. */
+  /**
+   * Plain listing — the first page of {@link listSessionsPage} with no cursor.
+   * One body: every field a row carries is assembled in the page function, so
+   * a column added for pagination cannot go missing from the plain list.
+   */
   listSessions(input: number | ListSessionsOptions = Number.POSITIVE_INFINITY): SessionListEntry[] {
     const options: ListSessionsOptions = typeof input === "number" ? { limit: input } : input;
-    const limit = options.limit ?? Number.POSITIVE_INFINITY;
-    return readdirIfPresent(this.sessionsDir)
-      .filter((f) => f.endsWith(".jsonl"))
-      .flatMap((f) => {
-        const stat = statPathIfPresent(join(this.sessionsDir, f));
-        if (!stat) return [];
-        return {
-          id: f.replace(".jsonl", ""),
-          modifiedAt: stat.mtime,
-          size: stat.size,
-        };
-      })
-      .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime())
-      .map((session) => ({ ...session, metadata: this.loadSessionMetadata(session.id) }))
-      .filter((session) => matchesSessionScope(session.metadata, options))
-      .slice(0, Number.isFinite(limit) ? Math.max(0, limit) : undefined)
-      .map((session) => {
-        const metadata = session.metadata;
-        const sessionKind = metadata?.sessionKind ?? normalizeSessionKind(undefined);
-        const workBoardItemId = sessionKind === "subagent"
-          ? parseWorkBoardOriginSessionId(metadata?.originSessionId)
-          : null;
-        const summary = session.size > MAX_SESSION_FILE_BYTES
-          ? {
-              title: metadata?.routineTitle
-                ? t("be_memoryManager.sessionTitleWithRoutine", { routineTitle: metadata.routineTitle })
-                : t("be_memoryManager.sessionTitleShort", { id: session.id.slice(0, 8) }),
-              preview: t("be_memoryManager.sessionPreviewTooLarge"),
-            }
-          : this.readSessionSummary(session.id);
-        return {
-          id: session.id,
-          modifiedAt: session.modifiedAt,
-          sessionKind,
-          title: metadata?.title || summary.title || metadata?.routineTitle || t("be_memoryManager.sessionTitleShort", { id: session.id.slice(0, 8) }),
-          preview: summary.preview,
-          routineId: metadata?.routineId,
-          routineTitle: metadata?.routineTitle,
-          routineFiredAt: metadata?.routineFiredAt,
-          ...(metadata?.projectRoot ? { projectRoot: metadata.projectRoot } : {}),
-          ...(metadata?.projectName ? { projectName: metadata.projectName } : {}),
-          ...(workBoardItemId !== null ? { workBoardItemId } : {}),
-          // Branch provenance — already loaded from metadata, no extra disk IO
-          ...(metadata?.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
-          ...(metadata?.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: metadata.branchedFromCompactNum } : {}),
-          ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
-          ...(metadata?.archivedAt ? { archivedAt: metadata.archivedAt } : {}),
-          ...(metadata?.unreadSince ? { unreadSince: metadata.unreadSince } : {}),
-        };
-      });
+    return this.listSessionsPage({ ...options, limit: options.limit ?? Number.POSITIVE_INFINITY });
   }
 
   /**
