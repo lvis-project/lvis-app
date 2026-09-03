@@ -1,7 +1,10 @@
-// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/MarketplaceUpdateBanner.tsx. Do not edit by hand.
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/PluginUpdatesPill.tsx. Do not edit by hand.
 export const en = {
   "marketplaceUpdateBanner.summaryOne": "Plugin update available:",
   "marketplaceUpdateBanner.summaryMany": "{count} plugin updates available:",
+  "marketplaceUpdateBanner.pillLabelOne": "1 plugin update",
+  "marketplaceUpdateBanner.pillLabelMany": "{count} plugin updates",
+  "marketplaceUpdateBanner.pillAriaLabel": "Update available plugins",
   "marketplaceUpdateBanner.partialSummary": "— {succeeded} succeeded · {failed} failed ({names})",
   "marketplaceUpdateBanner.disclosureCancelled": "network access disclosure cancelled",
   "marketplaceUpdateBanner.updating": "Updating…",
@@ -14,6 +17,9 @@ export const en = {
 export const ko: Record<keyof typeof en, string> = {
   "marketplaceUpdateBanner.summaryOne": "플러그인 업데이트 가능:",
   "marketplaceUpdateBanner.summaryMany": "{count}개 플러그인 업데이트 가능:",
+  "marketplaceUpdateBanner.pillLabelOne": "플러그인 업데이트 1개",
+  "marketplaceUpdateBanner.pillLabelMany": "플러그인 업데이트 {count}개",
+  "marketplaceUpdateBanner.pillAriaLabel": "사용 가능한 플러그인 업데이트 설치",
   "marketplaceUpdateBanner.partialSummary": "— 성공 {succeeded} · 실패 {failed} ({names})",
   "marketplaceUpdateBanner.disclosureCancelled": "네트워크 접근 고지 취소됨",
   "marketplaceUpdateBanner.updating": "업데이트 중…",

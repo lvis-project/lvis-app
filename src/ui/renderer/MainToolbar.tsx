@@ -4,6 +4,9 @@ import { ViewPathBreadcrumb, type ViewPathNavProps } from "./components/ViewPath
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
 import { RemoteA2AActionButton } from "./components/RemoteA2AActionButton.js";
+import { ToolbarStatusPill } from "./components/ToolbarStatusPill.js";
+import { BootstrapStatusPill, type BootstrapStatusPillProps } from "./components/BootstrapStatusPill.js";
+import { PluginUpdatesPill, type PluginUpdatesPillProps } from "./components/PluginUpdatesPill.js";
 
 /**
  * Every interactive control in the toolbar lives inside the window-control
@@ -14,8 +17,8 @@ import { RemoteA2AActionButton } from "./components/RemoteA2AActionButton.js";
  * The search / star / export controls + the collapse toggle no longer live
  * here — they moved into the floating sidebar's CLUSTER STRIP next to the
  * traffic lights (see Sidebar.tsx). This band now hosts only the right-aligned
-   * controls: the app-update badge, the Dev badge, the Chat/Work mode toggle,
-   * and the right-side work-panel toggle.
+   * controls: the lifecycle status pills (app update, plugin updates,
+   * managed-plugin bootstrap), the Dev badge, and the Chat/Work mode toggle.
  */
 function NoDrag({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
@@ -75,6 +78,10 @@ export interface MainToolbarProps {
   onInstallAppUpdate?: () => void | Promise<void>;
   /** Hide the current available/downloaded app update until a newer version exists. */
   onSkipAppUpdate?: () => void | Promise<void>;
+  /** Plugin-update pill wiring. Omitted where no marketplace detector runs. */
+  pluginUpdates?: PluginUpdatesPillProps;
+  /** Managed-plugin bootstrap pill wiring. Omitted where no bootstrap runs. */
+  bootstrapStatus?: BootstrapStatusPillProps;
 }
 
 export function MainToolbar({
@@ -89,6 +96,8 @@ export function MainToolbar({
   onDownloadAppUpdate,
   onInstallAppUpdate,
   onSkipAppUpdate,
+  pluginUpdates,
+  bootstrapStatus,
 }: MainToolbarProps) {
   const { t } = useTranslation();
   // The toolbar content lives IN the window-control band (CustomTitleBar). The
@@ -118,11 +127,24 @@ export function MainToolbar({
         <RemoteA2AActionButton />
       </NoDrag>
 
-      {/* ── App update badge — permanent (NOT a toast) until acted on; clicking
-          maps to download (available) → install (downloaded). The download step
-          is the user's first explicit consent. Never download before the
-          user's explicit click. */}
-      <NoDrag>
+      {/* ── Lifecycle status pills, app-wide first then plugin-wide: app update,
+          plugin updates, managed-plugin bootstrap. Each is permanent (NOT a
+          toast) until acted on, and each renders nothing in its resting state,
+          so the band gains no weight on a launch where everything is current.
+
+          Plugin updates and bootstrap status used to float over the content as
+          banners in the top-right stack. They sit here because they say the
+          same kind of thing the app-update badge says — something about the
+          install, waiting on the user — and one row of pills costs the content
+          nothing.
+
+          A pill at rest renders nothing, and an empty `no-drag` span is still a
+          flex item that claims a gap — `empty:hidden` gives that width back to
+          the drag region instead of leaving three holes in the band.
+
+          The app-update download step is the user's first explicit consent.
+          Never download before the user's explicit click. */}
+      <NoDrag className="empty:hidden">
         <AppUpdateBadge
           state={appUpdateState}
           inFlight={appUpdateInFlight}
@@ -131,6 +153,18 @@ export function MainToolbar({
           onSkip={onSkipAppUpdate}
         />
       </NoDrag>
+
+      {pluginUpdates && (
+        <NoDrag className="empty:hidden">
+          <PluginUpdatesPill {...pluginUpdates} />
+        </NoDrag>
+      )}
+
+      {bootstrapStatus && (
+        <NoDrag className="empty:hidden">
+          <BootstrapStatusPill {...bootstrapStatus} />
+        </NoDrag>
+      )}
 
       {/* ── Dev badge — only visible in non-production (LVIS_DEV). Stays next to
           the mode toggle at the far-right end. */}
@@ -211,11 +245,11 @@ function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: App
 }
 
 /**
- * Update badge next to the Home button — three render branches:
+ * App-update pill — three render branches:
  *
- *   available   → solid info pill ("↓ v0.1.5"); click fires the download.
+ *   available   → info pill ("↓ v0.1.5"); click fires the download.
  *   downloading → muted pill with a spinner + percent; click is a no-op.
- *   downloaded  → solid success pill ("v0.1.5 적용"); click quits & installs.
+ *   downloaded  → success pill ("v0.1.5 적용"); click quits & installs.
  *
  * Nothing renders for `idle`, so the toolbar gains zero visual weight when
  * there's no update — important because most app launches are no-op
@@ -240,108 +274,60 @@ function AppUpdateBadge({
   const { t } = useTranslation();
   if (state.kind === "idle") return null;
 
+  const skipAction = onSkip
+    ? {
+        icon: X,
+        title: t("mainToolbar.skipUpdateTitle", { version: state.version }),
+        ariaLabel: t("mainToolbar.skipUpdateAriaLabel", { version: state.version }),
+        onClick: () => void onSkip(),
+        disabled: inFlight,
+        testId: "app-update-skip",
+      }
+    : undefined;
+
   if (state.kind === "available") {
     return (
-      <div className="flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-(--chrome-control-height) gap-1 px-2 text-[11px] font-medium text-info border border-info/(--opacity-medium) bg-info/(--opacity-subtle) hover:bg-info/(--opacity-light) disabled:opacity-60"
-              onClick={() => void onDownload?.()}
-              disabled={inFlight}
-              title={t("mainToolbar.updateAvailableTitle", { version: state.version })}
-              aria-label={t("mainToolbar.updateDownloadAriaLabel", { version: state.version })}
-              data-testid="app-update-badge-available"
-            >
-              <ArrowDownToLine className="h-3 w-3" />
-              <span>v{state.version}</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("mainToolbar.updateAvailableTitle", { version: state.version })}</TooltipContent>
-        </Tooltip>
-        <SkipUpdateButton version={state.version} disabled={inFlight} onSkip={onSkip} />
-      </div>
+      <ToolbarStatusPill
+        tone="info"
+        icon={ArrowDownToLine}
+        label={`v${state.version}`}
+        title={t("mainToolbar.updateAvailableTitle", { version: state.version })}
+        ariaLabel={t("mainToolbar.updateDownloadAriaLabel", { version: state.version })}
+        onClick={() => void onDownload?.()}
+        disabled={inFlight}
+        testId="app-update-badge-available"
+        secondaryAction={skipAction}
+      />
     );
   }
 
   if (state.kind === "downloading") {
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-(--chrome-control-height) gap-1 px-2 text-[11px] font-medium text-muted-foreground border border-border bg-muted/(--opacity-medium) cursor-progress"
-            disabled
-            title={t("mainToolbar.downloadingTitle", { version: state.version, percent: state.percent })}
-            aria-label={t("mainToolbar.downloadingAriaLabel", { percent: state.percent })}
-            data-testid="app-update-badge-downloading"
-          >
-            <RefreshCw className="h-3 w-3 animate-spin" />
-            <span>{state.percent}%</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("mainToolbar.downloadingTooltip", { version: state.version, percent: state.percent })}</TooltipContent>
-      </Tooltip>
+      <ToolbarStatusPill
+        tone="muted"
+        icon={RefreshCw}
+        busy
+        label={`${state.percent}%`}
+        title={t("mainToolbar.downloadingTitle", { version: state.version, percent: state.percent })}
+        ariaLabel={t("mainToolbar.downloadingAriaLabel", { percent: state.percent })}
+        disabled
+        testId="app-update-badge-downloading"
+      />
     );
   }
 
   // downloaded
   return (
-    <div className="flex items-center gap-1">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-(--chrome-control-height) gap-1 px-2 text-[11px] font-medium text-success border border-success/(--opacity-medium) bg-success/(--opacity-subtle) hover:bg-success/(--opacity-light) disabled:opacity-60"
-            onClick={() => void onInstall?.()}
-            disabled={inFlight}
-            title={t("mainToolbar.downloadedTitle", { version: state.version })}
-            aria-label={t("mainToolbar.updateInstallAriaLabel", { version: state.version })}
-            data-testid="app-update-badge-downloaded"
-          >
-            <Download className="h-3 w-3" />
-            <span>{t("mainToolbar.applyUpdate", { version: state.version })}</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("mainToolbar.downloadedTitle", { version: state.version })}</TooltipContent>
-      </Tooltip>
-      <SkipUpdateButton version={state.version} disabled={inFlight} onSkip={onSkip} />
-    </div>
-  );
-}
-
-function SkipUpdateButton({
-  version,
-  disabled,
-  onSkip,
-}: {
-  version: string;
-  disabled?: boolean;
-  onSkip?: () => void | Promise<void>;
-}) {
-  const { t } = useTranslation();
-  if (!onSkip) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-(--chrome-control-height) w-(--chrome-control-height) aspect-square text-muted-foreground hover:text-foreground disabled:opacity-60"
-          onClick={() => void onSkip()}
-          disabled={disabled}
-          title={t("mainToolbar.skipUpdateTitle", { version })}
-          aria-label={t("mainToolbar.skipUpdateAriaLabel", { version })}
-          data-testid="app-update-skip"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t("mainToolbar.skipUpdateTitle", { version })}</TooltipContent>
-    </Tooltip>
+    <ToolbarStatusPill
+      tone="success"
+      icon={Download}
+      label={t("mainToolbar.applyUpdate", { version: state.version })}
+      title={t("mainToolbar.downloadedTitle", { version: state.version })}
+      ariaLabel={t("mainToolbar.updateInstallAriaLabel", { version: state.version })}
+      onClick={() => void onInstall?.()}
+      disabled={inFlight}
+      testId="app-update-badge-downloaded"
+      secondaryAction={skipAction}
+    />
   );
 }

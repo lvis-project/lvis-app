@@ -2565,7 +2565,7 @@ describe("ChatView — userApprovalHit disclosure toast (#793 + cluster MAJOR-2/
   });
 });
 
-describe("ChatView — permission review suggestion toast", () => {
+describe("ChatView — reviewer suggestion", () => {
   type SuggestionCb = (payload: {
     reason: "allow-always" | "repeat-allow";
     allowCount: number;
@@ -2574,7 +2574,10 @@ describe("ChatView — permission review suggestion toast", () => {
     windowMs: number;
   }) => void;
 
-  it("renders the suggestion and switches through the existing permission APIs", async () => {
+  it("draws nothing until an approval card is up to carry it", async () => {
+    // The offer belongs where the user is already deciding, so it has no
+    // surface of its own in the window: with no card up it appears nowhere,
+    // and the hook goes on holding it for the next one.
     const { container, api } = await renderApp({ hasApiKey: true });
     const onSuggestionMock = api.permission.onReviewSuggestion as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => expect(onSuggestionMock).toHaveBeenCalled());
@@ -2590,53 +2593,7 @@ describe("ChatView — permission review suggestion toast", () => {
       });
     });
 
-    const toast = await waitFor(() => {
-      const el = container.querySelector('[data-testid="permission-review-suggestion-toast"]');
-      expect(el).not.toBeNull();
-      return el as HTMLElement;
-    });
-    expect(toast.textContent).toContain("LLM 권한 검증으로 전환");
-    expect(toast.textContent).toContain("5분 안에 3회 승인했습니다.");
-
-    const button = Array.from(toast.querySelectorAll("button")).find((el) =>
-      el.textContent?.includes("전환"),
-    ) as HTMLButtonElement | undefined;
-    expect(button).toBeDefined();
-    await act(async () => {
-      fireEvent.click(button!);
-    });
-
-    await waitFor(() => {
-      expect(api.permission.setMode).toHaveBeenCalledWith("auto");
-      expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
-      expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    });
-    expect(api.permission.reviewerDispatch).toHaveBeenNthCalledWith(1, "mode llm");
-    expect(api.permission.reviewerDispatch).toHaveBeenNthCalledWith(2, "interactive low");
-    const reviewerDispatchOrder =
-      (api.permission.reviewerDispatch as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder;
-    const setModeOrder =
-      (api.permission.setMode as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder;
-    expect(reviewerDispatchOrder[1]).toBeLessThan(setModeOrder[0]);
-  });
-
-  it("drops malformed permission review suggestion metrics", async () => {
-    const { container, api } = await renderApp({ hasApiKey: true });
-    const onSuggestionMock = api.permission.onReviewSuggestion as unknown as ReturnType<typeof vi.fn>;
-    await waitFor(() => expect(onSuggestionMock).toHaveBeenCalled());
-    const fire = onSuggestionMock.mock.calls[0]?.[0] as SuggestionCb;
-
-    await act(async () => {
-      fire({
-        reason: "repeat-allow",
-        allowCount: Number.NaN,
-        allowAlwaysCount: 0,
-        threshold: 3,
-        windowMs: 300000,
-      });
-    });
-
-    expect(container.querySelector('[data-testid="permission-review-suggestion-toast"]')).toBeNull();
+    expect(container.querySelector('[data-testid="reviewer-suggestion-band"]')).toBeNull();
   });
 });
 
