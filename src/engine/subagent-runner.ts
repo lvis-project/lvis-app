@@ -2659,22 +2659,12 @@ export class SubAgentRunner {
           memoryManager: this.deps.subAgentMemoryManager,
           toolRegistry: scopedRegistry,
         })
-      // Test/minimal hosts that do not implement the concrete builder must
-      // still fail closed: create a fresh minimal builder, never reuse parent.
+      // Hosts that do not implement the concrete builder must still fail
+      // closed: build a fresh one bound to the child's OWN memory store and
+      // scoped registry. Reusing the parent builder is what leaked the
+      // parent's project overlay into the child.
       : new SystemPromptBuilder({
-          // Minimal test/host doubles sometimes implement persistence only.
-          // Supply empty prompt readers rather than falling back to the parent
-          // builder (which would reintroduce the cross-agent leak).
-          memoryManager: {
-            getAgentsMd: () => this.deps.subAgentMemoryManager.getAgentsMd?.() ?? "",
-            getAgentsCustomMd: () => this.deps.subAgentMemoryManager.getAgentsCustomMd?.() ?? "",
-            getMemoryIndex: (options) => this.deps.subAgentMemoryManager.getMemoryIndex?.(options) ?? "",
-            getPromptMemoryIndex: () => this.deps.subAgentMemoryManager.getPromptMemoryIndex?.() ?? "",
-            getUserPreferences: () => this.deps.subAgentMemoryManager.getUserPreferences?.() ?? "",
-            getMemoryContext: (options) => this.deps.subAgentMemoryManager.getMemoryContext?.(options) ?? "",
-            getProjectAgentsMd: (projectRoot) => this.deps.subAgentMemoryManager.getProjectAgentsMd?.(projectRoot)
-              ?? { projectRoot, layers: [], totalBytes: 0 },
-          } as MemoryManager,
+          memoryManager: this.deps.subAgentMemoryManager,
           toolRegistry: scopedRegistry,
         });
 

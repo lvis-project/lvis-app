@@ -64,6 +64,8 @@ import { A2ASubAgentMessageBus } from "../a2a-subagent-message-bus.js";
 import { SubAgentMessageMailbox } from "../subagent-message-mailbox.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { endTurnScript } from "./conversation-loop-test-helpers.js";
+import type { PromptMemorySource } from "../../memory/memory-manager.js";
+import { makePromptMemorySource } from "../../prompts/__tests__/test-helpers.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -95,8 +97,11 @@ class ScriptedProvider implements LLMProvider {
  * A no-op saveSession is enough for the behavioral suites here; the
  * persistence-routing suite below uses a REAL MemoryManager on a temp home.
  */
-function fakeSubAgentMemoryManager() {
+function fakeSubAgentMemoryManager(memory: Partial<PromptMemorySource> = {}) {
   return {
+    // The child's system prompt is assembled from THIS store, so the double
+    // carries the real reader contract instead of empty stand-ins.
+    ...makePromptMemorySource(memory),
     saveSession: () => Promise.resolve(),
     // PR-B: spawn() persists resume metadata via saveSessionMetadata into the
     // isolated subagent store — the behavioral suites use a no-op here (the
@@ -1194,13 +1199,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
     const parentDeps = {
       ...buildLoopDeps(toolRegistry),
       systemPromptBuilder: createSystemPromptBuilder({
-        memoryManager: {
-          getAgentsMd: () => "",
-          getAgentsCustomMd: () => "",
-          getMemoryIndex: () => "",
-          getUserPreferences: () => "",
-          getMemoryContext: () => "",
-        } as never,
+        memoryManager: makePromptMemorySource(),
         toolRegistry,
         pluginRuntime: pluginCardRuntimeFixture(process.cwd()),
       }),
@@ -1209,14 +1208,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       parentDeps,
       toolRegistry,
       // The child builder reads THIS memory manager (createIsolated overrides it).
-      subAgentMemoryManager: {
-        ...fakeSubAgentMemoryManager(),
-        getAgentsMd: () => "",
-        getAgentsCustomMd: () => "",
-        getMemoryIndex: () => "",
-        getUserPreferences: () => "",
-        getMemoryContext: () => "",
-      } as never,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
     });
     const hasProviderSpy = vi
       .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
@@ -1387,6 +1379,65 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       expect(provider.observedToolNames[0]).toContain(toolName);
       // …but execution fails closed at the adapter — the runtime is never hit.
       expect(runtimeCall).not.toHaveBeenCalled();
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+});
+
+describe("SubAgentRunner — the child's agent context", () => {
+  it("composes the sub-agent store's agents.custom.md after its AGENTS.md", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new ScriptedProvider([[
+      { type: "text_delta", text: "done" },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]]);
+    // REAL boot factory + REAL builder: the composition under test is the
+    // production one, reached through the runner rather than re-implemented.
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      systemPromptBuilder: createSystemPromptBuilder({
+        memoryManager: makePromptMemorySource({
+          getAgentsMd: () => "PARENT packaged reference",
+          getAgentsCustomMd: () => "PARENT own rules",
+        }),
+        toolRegistry,
+        pluginRuntime: pluginCardRuntimeFixture(process.cwd()),
+      }),
+    } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["parentDeps"];
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager({
+        getAgentsMd: () => "CHILD packaged reference",
+        getAgentsCustomMd: () => "CHILD own rules",
+      }),
+    });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+
+    try {
+      await runner.spawn({ title: "child", instructions: "summarize", maxRounds: 1 });
+
+      const childPrompt = provider.observedSystemPrompts[0] ?? "";
+      expect(childPrompt).toContain("<lvis-agents-custom-context>");
+      expect(childPrompt).toContain("CHILD packaged reference");
+      // The user's own half is ordered last so it wins a conflict.
+      expect(childPrompt.indexOf("CHILD packaged reference"))
+        .toBeLessThan(childPrompt.indexOf("CHILD own rules"));
+      // Both halves come from the child's OWN store, never the parent's.
+      expect(childPrompt).not.toContain("PARENT packaged reference");
+      expect(childPrompt).not.toContain("PARENT own rules");
     } finally {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();

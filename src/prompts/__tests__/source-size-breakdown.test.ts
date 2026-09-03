@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SystemPromptBuilder } from "../system-prompt-builder.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
+import { makePromptMemorySource } from "./test-helpers.js";
 
 function makeToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
@@ -33,13 +34,11 @@ function makeToolRegistry(): ToolRegistry {
 
 function makeBuilderWithMemory(): SystemPromptBuilder {
   return new SystemPromptBuilder({
-    memoryManager: {
+    memoryManager: makePromptMemorySource({
       getAgentsMd: () => "# Agents\n\nProject conventions go here.",
-      getAgentsCustomMd: () => "",
-      getMemoryIndex: () => "# Memory Index\n\n- [A](./a.md)\n- [B](./b.md)",
-      getUserPreferences: () => "Prefers concise answers.",
-      getMemoryContext: () => "",
-    } as never,
+      getPromptMemoryIndex: () => "# Memory Index\n\n- [A](./a.md)\n- [B](./b.md)",
+      getPromptUserPreferences: () => "Prefers concise answers.",
+    }),
     toolRegistry: makeToolRegistry(),
   });
 }

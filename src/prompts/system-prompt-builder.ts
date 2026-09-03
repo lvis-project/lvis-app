@@ -2,7 +2,7 @@
 
 import { hostname, platform, userInfo } from "node:os";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
-import type { MemoryManager } from "../memory/memory-manager.js";
+import type { PromptMemorySource } from "../memory/memory-manager.js";
 import {
   MAX_SKILL_TRIGGERS,
   MAX_SKILL_TRIGGER_CHARS,
@@ -102,7 +102,7 @@ export interface SystemPromptBuildContext {
 }
 
 export interface SystemPromptBuilderDeps {
-  memoryManager: MemoryManager;
+  memoryManager: PromptMemorySource;
   toolRegistry: ToolRegistry;
   /**
    * request_plugin candidate catalog provider. Empty/undefined omits the section.
@@ -873,24 +873,7 @@ export class SystemPromptBuilder {
       name: "Memory & Knowledge",
       refresh: "on-change",
       build: (context) => {
-        const scopedMemoryManager = memoryManager as MemoryManager & {
-          getPromptUserPreferences?: () => string;
-          getPromptMemoryIndex?: () => string;
-          getPromptLongTermMemoryOverview?: (options?: {
-            projectRoot?: string;
-            projectName?: string;
-          }) => string;
-          selectRelevantMemories?: (query: string, options?: {
-            projectRoot?: string;
-            projectName?: string;
-            includeUnscoped?: boolean;
-            tokenBudget?: number;
-            maxEntries?: number;
-          }) => { context: string };
-        };
-        const prefs = typeof scopedMemoryManager.getPromptUserPreferences === "function"
-          ? scopedMemoryManager.getPromptUserPreferences()
-          : memoryManager.getUserPreferences();
+        const prefs = memoryManager.getPromptUserPreferences();
         const memoryScope = this.projectContext?.projectRoot
           ? {
               projectRoot: this.projectContext.projectRoot,
@@ -906,15 +889,9 @@ export class SystemPromptBuilder {
               projectName: this.projectContext.projectName,
             }
           : undefined;
-        const memoryIndex = typeof scopedMemoryManager.getPromptMemoryIndex === "function"
-          ? scopedMemoryManager.getPromptMemoryIndex()
-          : memoryManager.getMemoryIndex(memoryScope);
-        const longTermMemoryOverview = typeof scopedMemoryManager.getPromptLongTermMemoryOverview === "function"
-          ? scopedMemoryManager.getPromptLongTermMemoryOverview(longTermMemoryScope)
-          : "";
-        const notes = typeof scopedMemoryManager.selectRelevantMemories === "function"
-          ? scopedMemoryManager.selectRelevantMemories(context.memoryQuery ?? "", memoryScope).context
-          : memoryManager.getMemoryContext(memoryScope);
+        const memoryIndex = memoryManager.getPromptMemoryIndex();
+        const longTermMemoryOverview = memoryManager.getPromptLongTermMemoryOverview(longTermMemoryScope);
+        const notes = memoryManager.selectRelevantMemories(context.memoryQuery ?? "", memoryScope).context;
         const parts: string[] = [];
         if (prefs) {
           parts.push([
