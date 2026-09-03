@@ -369,6 +369,21 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       ...validHighlight,
       action: { kind: "settings" },
     }],
+    // Every path segment opens with a letter. The schema shapes the string
+    // before the host resolves it against the tabs and sections it ships, so a
+    // spelling no registry id could ever carry is refused one layer earlier.
+    ["settings action whose tab segment opens with a digit", {
+      ...validHighlight,
+      action: { kind: "settings", path: "2fa" },
+    }],
+    ["settings action whose section segment opens with a digit", {
+      ...validHighlight,
+      action: { kind: "settings", path: "llm/2fa" },
+    }],
+    ["settings action naming a bare separator", {
+      ...validHighlight,
+      action: { kind: "settings", path: "-" },
+    }],
     ["unknown action kind", { ...validHighlight, action: { kind: "run-tool" } }],
     ["action carrying an extra field", {
       ...validHighlight,

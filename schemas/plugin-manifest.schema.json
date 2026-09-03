@@ -1073,9 +1073,9 @@
               "const": "settings"
             },
             "path": {
-              "description": "A settings tab id, optionally followed by '/' and one section within that tab (\"permissions\", \"permissions/permissions-os-sandbox\"). The pattern only shapes the string; the host checks both halves against the tabs and sections its build actually ships and rejects the manifest when either is unknown.",
+              "description": "A settings tab id, optionally followed by '/' and one section within that tab (\"permissions\", \"permissions/permissions-os-sandbox\"). Each segment is lowercase kebab and opens with a letter. The pattern only shapes the string; the host checks both halves against the tabs and sections its build actually ships and rejects the manifest when either is unknown. Grammar SOT: SETTINGS_PATH_PATTERN in src/shared/settings-tabs.ts, which settings-tabs.test.ts pins this pattern to.",
               "type": "string",
-              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)?$",
+              "pattern": "^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)?$",
               "not": {
                 "pattern": "[\\r\\n]"
               },
