@@ -123,6 +123,7 @@ import {
   resetAsrtSandbox,
 } from "../../../permissions/asrt-sandbox.js";
 import { asrtCanInitialize } from "../../../permissions/__tests__/test-helpers.js";
+import { isPluginChildConfined } from "../../../permissions/sandbox-capability.js";
 import { connect } from "node:net";
 import { createServer } from "node:http";
 import { spawnConfinedPluginChild } from "../out-of-process-plugin.js";
@@ -1119,19 +1120,55 @@ describe("the host decides how far a plugin child reaches", () => {
   });
 });
 
-describe("a plugin that cannot be confined is not spawned", () => {
-  it("throws rather than producing an unconfined child when ASRT is inactive", async () => {
+describe("a plugin child is confined exactly as much as the host is", () => {
+  it("starts unwrapped, and unmarked, while the host is not sandboxed", async () => {
+    // The host runs without the OS sandbox on every platform by default, and
+    // its own tools run plain there. A plugin child follows the same setting:
+    // it is spawned as given, and because nothing wrapped it nothing marks it
+    // confined — so the permission reviewer, which reads that marker, grants
+    // it no sandbox-based relaxation. The old rule here was to throw instead,
+    // which on Windows and Linux meant no plugin could start at all.
     const fx = fixture!;
     expect(isAsrtSandboxActive()).toBe(false);
-    await expect(
-      spawnConfinedPluginChild({
-        pluginId: PLUGIN_ID,
-        socketDir: resolvePluginSocketDir(fx.pluginDataDir),
-        workerRunRoot: resolvePluginWorkerRunRoot(fx.pluginDataDir),
-        envelope: baseEnvelope(fx),
-        childEntryPath: writeProbeModule(fx),
-      }),
-    ).rejects.toThrow(/sandbox is not active/i);
+    const probePath = join(fx.root, "unsandboxed-start-probe.mjs");
+    writeFileSync(
+      probePath,
+      `process.stdout.write("PROBE:" + JSON.stringify({ started: true }) + "\\n");
+setTimeout(() => process.exit(0), 2000).unref?.();
+`,
+      "utf-8",
+    );
+    const child = await spawnConfinedPluginChild({
+      pluginId: PLUGIN_ID,
+      socketDir: resolvePluginSocketDir(fx.pluginDataDir),
+      workerRunRoot: resolvePluginWorkerRunRoot(fx.pluginDataDir),
+      envelope: baseEnvelope(fx),
+      childEntryPath: probePath,
+    });
+    try {
+      const report = await new Promise<{ started: boolean }>((resolve, reject) => {
+        let stdout = "";
+        const timer = setTimeout(
+          () => reject(new Error(`the probe never reported; stdout was: ${stdout}`)),
+          15_000,
+        );
+        child.link.input.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString("utf-8");
+          const line = stdout.split("\n").find((entry) => entry.startsWith("PROBE:"));
+          if (!line) return;
+          clearTimeout(timer);
+          resolve(JSON.parse(line.slice("PROBE:".length)));
+        });
+        child.link.input.on("end", () => {
+          clearTimeout(timer);
+          reject(new Error(`the probe exited without reporting; stdout was: ${stdout}`));
+        });
+      });
+      expect(report).toEqual({ started: true });
+      expect(isPluginChildConfined(PLUGIN_ID)).toBe(false);
+    } finally {
+      child.link.terminate("unsandboxed start probe finished");
+    }
   });
 
   it("throws rather than granting a root that is a dangling symlink", async () => {

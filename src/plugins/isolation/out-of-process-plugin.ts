@@ -6,15 +6,19 @@
  * boundary alone buys a great deal — no shared heap, no `electron`, one
  * structural chokepoint, a separate crash domain — and buys NO filesystem or
  * network confinement at all: a Node child still has `fs`, `net` and
- * `child_process` unless something wraps its argv. Shipping the boundary
- * without the wrap would advertise a protection that is not there, so the spawn
- * goes through `spawnConfinedChild` and nowhere else.
+ * `child_process` unless something wraps its argv. So the spawn goes through
+ * `spawnConfinedChild` and nowhere else, and that primitive is where the wrap
+ * is decided.
  *
- * THERE IS NO UNCONFINED PATH. `wrapWorkerCommand` throws when ASRT is not
- * active, and nothing here catches it: a plugin that cannot be confined fails
- * to load. That is the fail-closed rule, and it is enforced by the ABSENCE of a
- * branch rather than by one — there is no place to add "continue anyway"
- * without deleting a line rather than adding one.
+ * THE CHILD IS CONFINED EXACTLY AS MUCH AS THE HOST IS. One setting,
+ * `features.osToolSandbox`, says whether this host runs under the OS sandbox;
+ * its own tools, its workers and its plugin children all follow it. While it
+ * is off the child is spawned as given and nothing marks it confined, so the
+ * reviewer grants it no sandbox-based relaxation. While it is on, the wrap is
+ * mandatory and a plugin that cannot be wrapped does not load. The rule that
+ * used to live here — no unconfined path, ever — made a promise on Windows
+ * and Linux that the host itself had never made, and its cost was every
+ * plugin on those platforms failing to start with an internal error.
  *
  * WHAT THIS SEAM IS. The host's contract with a plugin is
  * `RuntimePluginFactory`, so that is what the isolated path produces: a factory
@@ -39,6 +43,7 @@ import {
 import { createSandboxProcessHome } from "../../permissions/sandbox-process-home.js";
 import {
   cleanupAsrtSandboxAfterCommand,
+  isAsrtSandboxActive,
   registerWorkerUnixSocketDir,
   unregisterWorkerUnixSocketDir,
 } from "../../permissions/asrt-sandbox.js";
@@ -918,8 +923,10 @@ export async function spawnConfinedPluginChild(
     // grants no reach beyond it, so making it conditional would buy nothing and
     // would make "the plugin binds and it fails" depend on a list someone has
     // to remember to update.
-    await registerWorkerUnixSocketDir(socketDir);
-    socketDirRegistered = true;
+    if (isAsrtSandboxActive()) {
+      await registerWorkerUnixSocketDir(socketDir);
+      socketDirRegistered = true;
+    }
     // The OTHER direction across the same boundary. `worker-spawn.ts` registers
     // one worker's leaf so that worker may BIND; this registers the plugin's
     // whole `run/` subtree so the child that asked for the worker may CONNECT.
@@ -934,8 +941,13 @@ export async function spawnConfinedPluginChild(
     // its PATH, and the filesystem jail is per-plugin — A's envelope names A's
     // directories and no others. The fs jail is the boundary; this list only
     // decides whether a Unix socket may be used at all.
-    await registerWorkerUnixSocketDir(workerRunRoot);
-    workerRunRootRegistered = true;
+    // Both registrations add to ASRT's SHARED allow-list, which exists only
+    // while the sandbox does — with it off there is nothing to add to, and the
+    // child is not wrapped, so nothing would read the entry.
+    if (isAsrtSandboxActive()) {
+      await registerWorkerUnixSocketDir(workerRunRoot);
+      workerRunRootRegistered = true;
+    }
     const child = await spawnConfinedChild({
       // `process.execPath` is the Electron binary — in production AND under
       // this repository's own test runner, which launches Vitest through that

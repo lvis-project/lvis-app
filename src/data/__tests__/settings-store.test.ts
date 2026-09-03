@@ -1004,39 +1004,35 @@ describe("SettingsService role presets", () => {
     expect(reloaded.get("features")?.a2aLoopbackServer).toBe(true);
   });
 
-  it("ships hostClassifiesRisk ON all-platform; osToolSandbox STAGED (darwin ON only)", () => {
+  it("ships hostClassifiesRisk ON and osToolSandbox OFF, on every platform", () => {
     // hostClassifiesRisk ships ON on EVERY platform (shadow-mode reconciliation
     // completed). It is safe to ship on non-sandbox / network-only platforms
     // because the foreground read-relaxation is coupled to the active sandbox
     // FILESYSTEM-CONTAINING the host — where it is not filesystem-contained it
     // falls back to the pre-exec ask.
     //
-    // osToolSandbox is STAGED: default ON on darwin (the live-verified-active
-    // platform) ONLY. win32 stays OFF (opt-in) — default-on win32 is deferred
-    // because Windows srt-win is only partially confined (no process isolation)
-    // and the shell-containment gate refuses bash/powershell under the active
-    // partial sandbox. linux stays OFF until the C/D-series QA is green. The
-    // default is computed from process.platform, so this assertion tracks the
-    // runner's platform deterministically.
+    // osToolSandbox ships OFF everywhere. One setting governs the host, its
+    // workers and its plugin children alike, so a platform-specific default
+    // here would be a platform-specific plugin-isolation policy — which is what
+    // the former darwin-only default was, and it left Windows and Linux with a
+    // plugin path that required a sandbox the host never asked for.
     const service = new SettingsService({ userDataPath });
     expect(service.get("features")?.hostClassifiesRisk ?? false).toBe(true);
-    expect(service.get("features")?.osToolSandbox ?? false).toBe(
-      process.platform === "darwin",
-    );
+    expect(service.get("features")?.osToolSandbox ?? false).toBe(false);
   });
 
-  // Platform-staged default TRUTH-TABLE — asserts the staged default EXPLICITLY
-  // per platform (true on darwin only, false on win32 + linux), not by mirroring
-  // the impl expression. The default is evaluated at module-load from
-  // `process.platform`, so each case stubs the platform and re-imports the
-  // store with `vi.resetModules()` to recompute DEFAULT_SETTINGS, then reads the
-  // default through a fresh SettingsService (empty userDataPath → defaults).
+  // Per-platform TRUTH-TABLE — asserts the default EXPLICITLY on each platform
+  // rather than by mirroring the impl expression, so a platform branch creeping
+  // back into settings-defaults fails here by name. The default is evaluated at
+  // module-load, so each case stubs `process.platform` and re-imports the store
+  // with `vi.resetModules()`, then reads the default through a fresh
+  // SettingsService (empty userDataPath → defaults).
   it.each([
-    ["darwin", true],
+    ["darwin", false],
     ["linux", false],
     ["win32", false],
   ] as const)(
-    "osToolSandbox default on %s = %s (explicit staged truth-table)",
+    "osToolSandbox default on %s = %s (one policy, no platform branch)",
     async (platform, expected) => {
       const original = process.platform;
       const dir = mkdtempSync(join(tmpdir(), "settings-store-truthtable-"));

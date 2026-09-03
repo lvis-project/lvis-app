@@ -17,7 +17,7 @@ import type {
 } from "../../shared/sandbox-capability-info.js";
 
 export interface SandboxGateInputs {
-  /** `features.osToolSandbox` — staged default value or Settings toggle. */
+  /** `features.osToolSandbox` — the Settings toggle; off by default everywhere. */
   settingOn: boolean;
   /** `LVIS_SANDBOX_ENABLED=1` — the deliberate, fail-closed env override. */
   explicitEnv: boolean;
