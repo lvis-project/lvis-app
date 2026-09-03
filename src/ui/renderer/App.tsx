@@ -8,8 +8,6 @@ import { OverlayContextProvider } from "./context/OverlayContext.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { Sidebar, isDarwinPlatform } from "./components/Sidebar.js";
-import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
-import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
 import { MarketplaceAnnouncementBanner } from "./components/MarketplaceAnnouncementBanner.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { DevComponentLabels } from "./components/DevComponentLabels.js";
@@ -1670,6 +1668,18 @@ export function App() {
                   onDownloadAppUpdate={appUpdate.download}
                   onInstallAppUpdate={appUpdate.install}
                   onSkipAppUpdate={appUpdate.skip}
+                  pluginUpdates={{
+                    updates: marketplaceUpdates,
+                    onDismiss: dismissMarketplaceUpdates,
+                    onSkip: skipMarketplaceUpdates,
+                    onResolved: resolveMarketplaceUpdates,
+                    onUpdate: installPlugin,
+                  }}
+                  bootstrapStatus={{
+                    status: bootstrapStatus,
+                    onDismiss: dismissBootstrapStatus,
+                    onRetry: () => void retryBootstrap(),
+                  }}
                 />
               </CustomTitleBar>
               {/* The floating-card Sidebar is anchored against the full-height shell
@@ -1741,22 +1751,21 @@ export function App() {
                   // surface neither changes width nor reflows.
                   style={sidebarCollapsed || sidebarOverlay ? undefined : { paddingLeft: `${sidebarWidth + SHELL_GUTTER}px` }}
                 >
-                  {/* Floating notification stack — update/announcement banners are an
-                      OVERLAY, not in-flow content. They float over the canvas anchored
-                      top-RIGHT so they never push the routed content or the composer
-                      down. The wrapper is pointer-events-none (clicks pass through the
-                      gaps); each banner card re-enables pointer-events so
-                      Update/dismiss still work. The left edge is inset past the
-                      sidebar — `--shell-collapsed-banner-inset` when collapsed, the
-                      live `sidebarWidth + CONTENT_TITLE_INSET` inline when expanded,
-                      each one gutter clear of <main>'s own leading padding — so a
-                      wide banner (max-w-md) in a
+                  {/* Floating notification stack — the announcement banner and the
+                      permission toasts are an OVERLAY, not in-flow content. They float
+                      over the canvas anchored top-RIGHT so they never push the routed
+                      content or the composer down. The wrapper is pointer-events-none
+                      (clicks pass through the gaps); each card re-enables
+                      pointer-events so its own controls still work. The left edge is
+                      inset past the sidebar — `--shell-collapsed-banner-inset` when
+                      collapsed, the live `sidebarWidth + CONTENT_TITLE_INSET` inline
+                      when expanded, each one gutter clear of <main>'s own leading
+                      padding — so a wide banner (max-w-md) in a
                       narrow window can never slide UNDER the floating sidebar card —
                       absolute positioning resolves against main's padding box, which
-                      starts at the window edge beneath the rail. Multiple DISTINCT
-                      banners (bootstrap / update / announcement) stack vertically; each
-                      component collapses its own N items into a single counted card, so
-                      the stack height stays bounded. */}
+                      starts at the window edge beneath the rail. Plugin updates and
+                      managed-plugin bootstrap used to stack here too; they are toolbar
+                      pills now, beside the app-update pill (see MainToolbar). */}
                   <div
                     className={`pointer-events-none absolute right-2 top-2 z-50 ml-auto flex max-w-md flex-col gap-2 transition-[left] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto [&>*]:m-0 ${
                       sidebarCollapsed ? "left-(--shell-collapsed-banner-inset)" : ""
@@ -1769,14 +1778,6 @@ export function App() {
                     // overlaying card is still a card a banner must not slide under.
                     style={sidebarCollapsed ? undefined : { left: `${sidebarWidth + CONTENT_TITLE_INSET}px` }}
                   >
-                    <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
-                    <MarketplaceUpdateBanner
-                      updates={marketplaceUpdates}
-                      onDismiss={dismissMarketplaceUpdates}
-                      onSkip={skipMarketplaceUpdates}
-                      onResolved={resolveMarketplaceUpdates}
-                      onUpdate={installPlugin}
-                    />
                     <MarketplaceAnnouncementBanner
                       announcements={marketplaceAnnouncements}
                       onDismiss={handleMarketplaceAnnouncementDismiss}

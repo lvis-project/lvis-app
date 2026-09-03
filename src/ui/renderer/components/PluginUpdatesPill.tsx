@@ -1,12 +1,9 @@
-// S8 — Non-blocking banner shown when plugin updates are available.
-
 import { useRef, useState } from "react";
-import { X } from "lucide-react";
-import { Button } from "../../../components/ui/button.js";
+import { AlertTriangle, Puzzle, RefreshCw, X } from "lucide-react";
 import type { PluginUpdateInfo } from "../hooks/use-marketplace-updates.js";
-import { MarqueeText } from "./MarqueeText.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
+import { ToolbarStatusPill } from "./ToolbarStatusPill.js";
 import type { MarketplaceItem, PluginMarketplaceInstallOptions } from "../types.js";
 import {
   buildNetworkAccessAcknowledgement,
@@ -14,16 +11,7 @@ import {
 } from "../../../shared/network-access.js";
 import { errorMessage } from "../../../shared/error-message.js";
 
-
-
-
-export function MarketplaceUpdateBanner({
-  updates,
-  onDismiss,
-  onSkip,
-  onUpdate,
-  onResolved,
-}: {
+export interface PluginUpdatesPillProps {
   updates: PluginUpdateInfo[];
   onDismiss: () => void;
   onSkip: () => void | Promise<void>;
@@ -39,7 +27,24 @@ export function MarketplaceUpdateBanner({
    * host-driven `marketplace:updates-available` re-broadcast remains the SOT.
    */
   onResolved?: (succeededPluginIds: string[]) => void;
-}) {
+}
+
+/**
+ * Toolbar pill for available plugin updates. Clicking runs the whole batch:
+ * each update that discloses network access opens the install dialog for that
+ * plugin's own consent first, so consent stays per plugin even though one
+ * click starts the batch.
+ *
+ * The full list and the failure breakdown live in the pill's hover text — the
+ * band has room for a count, and a count is what the user acts on.
+ */
+export function PluginUpdatesPill({
+  updates,
+  onDismiss,
+  onSkip,
+  onUpdate,
+  onResolved,
+}: PluginUpdatesPillProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [failureSummary, setFailureSummary] = useState<PartialFailureSummary | null>(null);
@@ -48,13 +53,20 @@ export function MarketplaceUpdateBanner({
 
   if (updates.length === 0) return null;
 
-  const updateLabels = updates.map((update) => formatUpdateLabel(update));
   const summary =
     updates.length === 1
       ? t("marketplaceUpdateBanner.summaryOne")
       : t("marketplaceUpdateBanner.summaryMany", { count: updates.length });
-  const details = updateLabels.join(", ");
-  const label = `${summary} ${details}`;
+  const details = updates.map((update) => formatUpdateLabel(update)).join(", ");
+  // The long form the band has no room for: either the full update list, or —
+  // after a partial failure — the counts plus each failure's own message.
+  const title = failureSummary
+    ? `${t("marketplaceUpdateBanner.partialSummary", {
+        succeeded: failureSummary.succeeded,
+        failed: failureSummary.failed,
+        names: failureSummary.failedNames.join(", "),
+      })} ${failureSummary.detail}`
+    : `${summary} ${details}`;
 
   const handleUpdate = async () => {
     setBusy(true);
@@ -84,7 +96,7 @@ export function MarketplaceUpdateBanner({
     }
     setBusy(false);
     if (failed.length === 0) {
-      // Whole batch succeeded — clear the banner. The host detector's next
+      // Whole batch succeeded — clear the pill. The host detector's next
       // `marketplace:updates-available` broadcast reconciles the SOT.
       onDismiss();
       return;
@@ -102,55 +114,33 @@ export function MarketplaceUpdateBanner({
 
   return (
     <>
-      <div
-        className="flex h-11 items-center justify-between gap-2 overflow-hidden bg-popover border border-info/(--opacity-medium) text-info text-sm px-4 py-1.5 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down"
-        data-testid="marketplace-update-banner"
-      >
-        <span className="min-w-0 flex-1" title={label}>
-          <span className="block truncate leading-4">{summary}</span>
-          <MarqueeText text={details} className="text-[11px] leading-3 text-info/(--opacity-emphatic)" />
-          {failureSummary ? (
-            <span
-              className="ml-2 text-destructive"
-              data-testid="marketplace-update-partial-failure"
-              title={failureSummary.detail}
-            >
-              {t("marketplaceUpdateBanner.partialSummary", {
-                succeeded: failureSummary.succeeded,
-                failed: failureSummary.failed,
-                names: failureSummary.failedNames.join(", "),
-              })}
-            </span>
-          ) : null}
-        </span>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => void handleUpdate()}
-            disabled={busy}
-            data-testid="marketplace-update-action"
-            className="h-7 text-[12px]"
-          >
-            {busy
-              ? t("marketplaceUpdateBanner.updating")
-              : failureSummary
-                ? t("marketplaceUpdateBanner.retryButton")
-                : t("marketplaceUpdateBanner.updateButton")}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void onSkip()}
-            disabled={busy}
-            aria-label={t("marketplaceUpdateBanner.skipAriaLabel")}
-            title={t("marketplaceUpdateBanner.skipTitle")}
-            className="text-info hover:text-info/(--opacity-intense) h-auto p-1"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
+      <ToolbarStatusPill
+        tone={busy ? "muted" : failureSummary ? "warning" : "info"}
+        icon={busy ? RefreshCw : failureSummary ? AlertTriangle : Puzzle}
+        busy={busy}
+        label={
+          busy
+            ? t("marketplaceUpdateBanner.updating")
+            : failureSummary
+              ? t("marketplaceUpdateBanner.retryButton")
+              : updates.length === 1
+                ? t("marketplaceUpdateBanner.pillLabelOne")
+                : t("marketplaceUpdateBanner.pillLabelMany", { count: updates.length })
+        }
+        title={title}
+        ariaLabel={t("marketplaceUpdateBanner.pillAriaLabel")}
+        onClick={() => void handleUpdate()}
+        disabled={busy}
+        testId="marketplace-update-action"
+        secondaryAction={{
+          icon: X,
+          title: t("marketplaceUpdateBanner.skipTitle"),
+          ariaLabel: t("marketplaceUpdateBanner.skipAriaLabel"),
+          onClick: () => void onSkip(),
+          disabled: busy,
+          testId: "marketplace-update-skip",
+        }}
+      />
       <PluginInstallDialog
         target={pendingDisclosureUpdate ? updateToDialogTarget(pendingDisclosureUpdate) : null}
         working={false}

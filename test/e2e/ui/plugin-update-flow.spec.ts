@@ -81,8 +81,8 @@ async function injectUpdatesAvailable(app: ElectronApplication, updates: StubUpd
   }, updates);
 }
 
-async function waitForBanner(page: Page): Promise<void> {
-  await page.locator('[data-testid="marketplace-update-banner"]').waitFor({ state: 'visible', timeout: 10_000 });
+async function waitForPill(page: Page): Promise<void> {
+  await page.locator('[data-testid="marketplace-update-action"]').waitFor({ state: 'visible', timeout: 10_000 });
 }
 
 // The partial-failure assertions read the Korean catalog (mirrors the renderer
@@ -93,28 +93,29 @@ test.use({ seedLocale: 'ko' });
 test.skip(!existsSync(MAIN_ENTRY), 'dist/src/main/main.js not built; run bun run build first');
 
 test.describe('plugin update round-trip (E5 #1502)', () => {
-  test('detect → banner → Update → install → banner clears on full success', async ({ app, mainWindow }) => {
+  test('detect → pill → Update → install → pill clears on full success', async ({ app, mainWindow }) => {
     await installStubInstallHandlers(app, []);
 
     const updates: StubUpdate[] = [
       { pluginId: 'meeting', pluginName: 'LVIS Meeting', installedVersion: '1.0.0', latestVersion: '9.9.9' },
     ];
     await injectUpdatesAvailable(app, updates);
-    await waitForBanner(mainWindow);
+    await waitForPill(mainWindow);
 
-    await expect(mainWindow.getByTestId('marketplace-update-banner')).toContainText('meeting');
+    // The band shows a count; the list of what is updating is the hover text.
+    await expect(mainWindow.getByTestId('marketplace-update-action')).toHaveAttribute('title', /meeting/);
 
     await mainWindow.getByTestId('marketplace-update-action').click();
 
-    // Whole batch succeeded → banner dismisses itself.
+    // Whole batch succeeded → the pill dismisses itself.
     await mainWindow
-      .locator('[data-testid="marketplace-update-banner"]')
+      .locator('[data-testid="marketplace-update-action"]')
       .waitFor({ state: 'detached', timeout: 15_000 });
 
     // Re-broadcasting an empty set (what the host detector does after the
-    // version rose) keeps the banner gone — no resurrection race.
+    // version rose) keeps the pill gone — no resurrection race.
     await injectUpdatesAvailable(app, []);
-    await expect(mainWindow.locator('[data-testid="marketplace-update-banner"]')).toHaveCount(0);
+    await expect(mainWindow.locator('[data-testid="marketplace-update-action"]')).toHaveCount(0);
   });
 
   test('partial failure keeps the failed row and reports success/failure counts', async ({ app, mainWindow }) => {
@@ -126,20 +127,19 @@ test.describe('plugin update round-trip (E5 #1502)', () => {
       { pluginId: 'local-indexer', pluginName: 'LVIS Indexer', installedVersion: '1.0.0', latestVersion: '9.9.9' },
     ];
     await injectUpdatesAvailable(app, updates);
-    await waitForBanner(mainWindow);
+    await waitForPill(mainWindow);
 
-    await mainWindow.getByTestId('marketplace-update-action').click();
+    const pill = mainWindow.getByTestId('marketplace-update-action');
+    await pill.click();
 
-    // Partial-failure summary renders "성공 1 · 실패 1 (…)".
-    const failure = mainWindow.getByTestId('marketplace-update-partial-failure');
-    await expect(failure).toBeVisible({ timeout: 15_000 });
-    await expect(failure).toContainText('성공 1');
-    await expect(failure).toContainText('실패 1');
-    await expect(failure).toContainText('local-indexer');
+    // Partial-failure summary is the pill's hover text: "성공 1 · 실패 1 (…)".
+    await expect(pill).toHaveAttribute('title', /성공 1/, { timeout: 15_000 });
+    await expect(pill).toHaveAttribute('title', /실패 1/);
+    await expect(pill).toHaveAttribute('title', /local-indexer/);
 
-    // The succeeded row (meeting) is pruned; the banner stays for retry.
-    await expect(mainWindow.getByTestId('marketplace-update-banner')).toBeVisible();
-    await expect(mainWindow.getByTestId('marketplace-update-banner')).not.toContainText('LVIS Meeting');
-    await expect(mainWindow.getByTestId('marketplace-update-action')).toContainText('재시도');
+    // The succeeded row (meeting) is pruned; the pill stays for retry.
+    await expect(pill).toBeVisible();
+    await expect(pill).not.toHaveAttribute('title', /LVIS Meeting/);
+    await expect(pill).toContainText('재시도');
   });
 });
