@@ -1,4 +1,5 @@
 import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-status-bar.js";
+import { Badge } from "../../../components/ui/badge.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { X } from "lucide-react";
 import { t } from "../../../i18n/runtime.js";
@@ -178,7 +179,12 @@ export function StatusBar(props: StatusBarProps) {
             />
           );
           const pendingBadge = pendingCount > 0 ? (
-            <span className="shrink-0 rounded-full border border-border bg-background/(--opacity-stronger) px-1.5 py-0.5 text-[11px] text-muted-foreground tabular-nums">+{pendingCount}</span>
+            <Badge
+              variant="outline"
+              className="shrink-0 border-border bg-background/(--opacity-stronger) px-1.5 text-[11px] font-normal text-muted-foreground tabular-nums"
+            >
+              +{pendingCount}
+            </Badge>
           ) : null;
           const dismissButton = dismissible ? (
             <button
