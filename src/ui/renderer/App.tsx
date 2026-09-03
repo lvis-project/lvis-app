@@ -76,6 +76,7 @@ import { useSearch } from "./hooks/use-search.js";
 import { useStarred } from "./hooks/use-starred.js";
 import { useMarketplaceUpdates } from "./hooks/use-marketplace-updates.js";
 import { useMarketplaceAnnouncements } from "./hooks/use-marketplace-announcements.js";
+import type { MarketplaceAnnouncementActionTarget } from "../../shared/marketplace-announcements.js";
 import { useBootstrapStatus } from "./hooks/use-bootstrap-status.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
@@ -1286,6 +1287,27 @@ export function App() {
     },
     [dismissMarketplaceAnnouncement],
   );
+  /**
+   * Follow an announcement's button.
+   *
+   * Navigation only, and deliberately exhaustive over the two target kinds:
+   * an in-app place goes through the same `navigateToLocation` the breadcrumb
+   * and the history use, and a web page goes through `openExternalUrl`, the
+   * renderer's one external-navigation sink. Nothing here writes settings —
+   * an announcement is content fetched from the marketplace, so a branch that
+   * did would be a path from a marketplace post into this machine's
+   * configuration. The user turns a feature on at the destination.
+   */
+  const handleMarketplaceAnnouncementAction = useCallback(
+    (target: MarketplaceAnnouncementActionTarget) => {
+      if (target.kind === "settings") {
+        navigateToLocation({ view: "settings", settingsTab: target.settingsTab });
+        return;
+      }
+      void api.openExternalUrl(target.url);
+    },
+    [navigateToLocation, api],
+  );
 
 
   /**
@@ -1781,6 +1803,7 @@ export function App() {
                     <MarketplaceAnnouncementBanner
                       announcements={marketplaceAnnouncements}
                       onDismiss={handleMarketplaceAnnouncementDismiss}
+                      onAction={handleMarketplaceAnnouncementAction}
                     />
                     {/* Verdict-tier tint surfaces the trust gradient:
                         low → --success (informational re-approval), medium →

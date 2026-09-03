@@ -91,6 +91,7 @@ describe("LocalCatalogMarketplaceFetcher — announcement fixture contract", () 
         createdAt: "2026-06-12T00:00:00.000Z",
         startsAt: null,
         endsAt: "2026-06-13T00:00:00.000Z",
+        actions: [],
       },
     ]);
 
@@ -105,8 +106,85 @@ describe("LocalCatalogMarketplaceFetcher — announcement fixture contract", () 
         createdAt: "2026-06-12T00:00:00.000Z",
         startsAt: null,
         endsAt: "2026-06-13T00:00:00.000Z",
+        actions: [],
       },
     ]);
+  });
+
+  it("returns action buttons declared in the local catalog", async () => {
+    await writeCatalog([
+      {
+        id: 8,
+        title: "OS tool sandbox",
+        body: "Shell tools can now run inside a sandbox.",
+        level: "info",
+        createdAt: "2026-09-03T00:00:00.000Z",
+        startsAt: null,
+        endsAt: null,
+        actions: [
+          {
+            label: { ko: "샌드박스 설정 열기", en: "Open sandbox settings" },
+            target: { kind: "settings", settingsTab: "permissions" },
+          },
+        ],
+      },
+    ]);
+
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
+    const [announcement] = await fetcher.listAnnouncements();
+
+    expect(announcement.actions).toEqual([
+      {
+        label: { ko: "샌드박스 설정 열기", en: "Open sandbox settings" },
+        target: { kind: "settings", settingsTab: "permissions" },
+      },
+    ]);
+  });
+
+  it("rejects an announcement fixture with no actions array", async () => {
+    await writeCatalog([
+      {
+        id: 9,
+        title: "Maintenance",
+        body: "Scheduled window",
+        level: "info",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        startsAt: null,
+        endsAt: null,
+      },
+    ]);
+
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
+
+    await expect(fetcher.listAnnouncements()).rejects.toThrow(
+      /Invalid marketplace catalog announcement at index 0/,
+    );
+  });
+
+  it("rejects an announcement fixture whose action names an unreachable place", async () => {
+    await writeCatalog([
+      {
+        id: 10,
+        title: "Maintenance",
+        body: "Scheduled window",
+        level: "info",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        startsAt: null,
+        endsAt: null,
+        actions: [
+          {
+            label: { ko: "열기", en: "Open" },
+            target: { kind: "settings", settingsTab: "sandbox" },
+          },
+        ],
+      },
+    ]);
+
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
+
+    await expect(fetcher.listAnnouncements()).rejects.toThrow(
+      /Invalid marketplace catalog announcement at index 0/,
+    );
   });
 
   it("rejects non-array announcement fixtures", async () => {
@@ -129,6 +207,9 @@ describe("LocalCatalogMarketplaceFetcher — announcement fixture contract", () 
         createdAt: "2026-06-12T00:00:00.000Z",
         startsAt: null,
         endsAt: null,
+        // Everything else is well formed, so the level is the only reason to
+        // reject and the assertion cannot pass for the wrong one.
+        actions: [],
       },
     ]);
 

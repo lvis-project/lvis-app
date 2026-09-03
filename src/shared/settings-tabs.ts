@@ -43,6 +43,18 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTab, string> = {
   about: "settingsContent.tabAbout",
 };
 
+/**
+ * Strict membership: is this the id of a tab this build actually ships?
+ *
+ * Separate from `normalizeSettingsTab`, which answers "llm" for anything it
+ * cannot place. That answer is right for a persisted tab id or a stale deep
+ * link — the panel has to open on something — and wrong for a caller deciding
+ * whether a destination exists at all, which needs to be able to say no.
+ */
+export function isSettingsTab(tab: unknown): tab is SettingsTab {
+  return typeof tab === "string" && (SETTINGS_TABS as readonly string[]).includes(tab);
+}
+
 export function normalizeSettingsTab(tab: unknown): SettingsTab {
   if (tab === "privacy") return "chat";
   // The plugin-perf tab was merged into plugin-config ("성능만 병합"); keep old
@@ -58,7 +70,5 @@ export function normalizeSettingsTab(tab: unknown): SettingsTab {
   // so its page became the Remote surfaces tab. Old persisted/deep-link ids
   // still resolve to the page that hosts the Tailnet section.
   if (tab === "tailnet-access") return "remote-surfaces";
-  return typeof tab === "string" && (SETTINGS_TABS as readonly string[]).includes(tab)
-    ? (tab as SettingsTab)
-    : "llm";
+  return isSettingsTab(tab) ? tab : "llm";
 }
