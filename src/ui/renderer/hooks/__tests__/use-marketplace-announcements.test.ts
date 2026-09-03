@@ -41,6 +41,7 @@ function announcement(id: number): MarketplaceAnnouncement {
     createdAt: "2026-06-12T00:00:00Z",
     startsAt: null,
     endsAt: null,
+    actions: [],
   };
 }
 

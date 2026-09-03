@@ -27,7 +27,10 @@ import {
 } from "./marketplace-installer.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
-import { isMarketplaceAnnouncementLevel } from "../shared/marketplace-announcements.js";
+import {
+  isMarketplaceAnnouncementLevel,
+  parseMarketplaceAnnouncementActions,
+} from "../shared/marketplace-announcements.js";
 import { isMarketplacePackageType } from "../shared/assistant-context.js";
 import { assetFromMarketplaceCatalogFields } from "../shared/marketplace-package-assets.js";
 import { mapNetworkAccessGrant } from "../shared/network-access.js";
@@ -187,6 +190,7 @@ interface ServerAnnouncementRow {
   startsAt?: unknown;
   ends_at?: unknown;
   endsAt?: unknown;
+  actions?: unknown;
 }
 
 export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp, MarketplaceArtifactLimitProvider {
@@ -589,6 +593,15 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       createdAt: createdAtRaw,
       startsAt: typeof startsAtRaw === "string" ? startsAtRaw : null,
       endsAt: typeof endsAtRaw === "string" ? endsAtRaw : null,
+      // Buttons this build can honour. An action naming a place this version
+      // does not have is dropped here rather than carried to the renderer, so
+      // the banner can only ever draw a control that leads somewhere. The empty
+      // string keeps the version gate fail-closed when no app version was
+      // configured on this fetcher.
+      actions: parseMarketplaceAnnouncementActions(
+        row.actions,
+        this.configuredAppVersion() ?? "",
+      ),
     };
   }
 
