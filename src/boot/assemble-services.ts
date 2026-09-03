@@ -94,7 +94,6 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     skillStore: ctx.skillStore,
     agentProfileStore: ctx.agentProfileStore,
     personaPromptStore: ctx.personaPromptStore,
-    knowledgeAvailable: ctx.knowledgeAvailable,
     starredStore: ctx.starredStore,
     feedbackStore: ctx.feedbackStore,
     notificationService: ctx.notificationService,

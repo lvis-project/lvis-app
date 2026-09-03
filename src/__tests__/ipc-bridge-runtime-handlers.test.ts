@@ -114,7 +114,6 @@ function makeServices(
     bashAstValidator: {} as any,
     auditService: {} as any,
     postTurnHookChain: {} as any,
-    knowledgeAvailable: false,
   };
 }
 

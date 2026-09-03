@@ -459,16 +459,6 @@
     },
     {
       "type": "exports",
-      "file": "src/main/hybrid-retriever.ts",
-      "name": "DEFAULT_CLOUD_TIMEOUT_MS"
-    },
-    {
-      "type": "exports",
-      "file": "src/main/hybrid-retriever.ts",
-      "name": "DEFAULT_OVERFETCH_MULTIPLIER"
-    },
-    {
-      "type": "exports",
       "file": "src/main/link-window-service.ts",
       "name": "buildPersistentBrowserUserAgent"
     },
@@ -2591,11 +2581,6 @@
       "type": "types",
       "file": "src/tools/file-read-core.ts",
       "name": "AssertReadableFailure"
-    },
-    {
-      "type": "types",
-      "file": "src/tools/knowledge-search.ts",
-      "name": "KnowledgeSearchResultItem"
     },
     {
       "type": "types",

@@ -320,7 +320,6 @@ function makeServicesForListSecretKeys(secretsMap: Record<string, string | null>
     bashAstValidator: {} as any,
     auditService: {} as any,
     postTurnHookChain: {} as any,
-    knowledgeAvailable: false,
   };
 }
 

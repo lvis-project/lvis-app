@@ -140,7 +140,6 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
     bashAstValidator: {} as any,
     auditService: {} as any,
     postTurnHookChain: {} as any,
-    knowledgeAvailable: false,
   };
 }
 

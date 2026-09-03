@@ -134,16 +134,20 @@ function makeTurnRecorder(
  * only `agent_spawn` stripped. Naming the read-only set explicitly (rather than
  * relying on a posture hint) keeps the no-mutation guarantee enforced at the
  * registry, not just suggested in the prompt.
+ *
+ * The `index_*` entries are the document-index plugin's own read-only tools.
+ * Naming them here grants nothing: a name the parent registry does not hold is
+ * simply not granted, so the list degrades to the builtins when that plugin is
+ * absent.
  */
 const PLAN_READONLY_TOOLS: readonly string[] = [
   "read_file",
   "list_files",
   "glob_files",
   "grep_files",
-  "knowledge_search",
-  "document_list",
-  "document_structure",
-  "document_page_content",
+  "index_search",
+  "index_documents",
+  "index_get_document",
   "web_search",
   "web_fetch",
 ];

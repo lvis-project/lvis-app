@@ -541,11 +541,10 @@ Layer B — 지능형 인덱싱 (local-indexer)
 |------------------------- |------------------------------------------------------------------------------------ |--------------------------------------------------------------------------------------------------------------------------------- |
 | **File Watcher** | chokidar (FSEvents / inotify / ReadDirectoryChanges) | 파일 변경 실시간 감지 → FolderAutoIndexer → IdleScheduler P0 enqueue |
 | **Document Parser** | PDF: `pymupdf4llm` · DOCX/PPTX/XLSX/HTML: Microsoft `markitdown` · TXT/MD: 직접 읽기 | 포맷별 텍스트 추출 + 마크다운 변환. `kiwipiepy` 기반 한국어 형태소 토큰화 보강 |
-| **PageIndex 트리 인덱서** | `pageindex==0.2.8` | TOC 트리 구조화. `search()` 메서드가 없으므로 LVIS가 `document_structure` / `document_page_content` 도구로 agentic 트리 탐색 수행 |
+| **PageIndex 트리 인덱서** | `pageindex==0.2.8` | TOC 트리 구조화. `search()` 메서드가 없으므로 플러그인이 `index_get_document` 도구로 트리와 페이지 본문을 노출해 agentic 탐색을 수행 |
 | **SQLite + FTS5** | SQLite FTS5 `unicode61` + `kiwipiepy` 사전 토큰화 (`content_ko`) | 한국어 BM25 (패턴 B): 형태소 추출 → 공백 결합 → FTS5 MATCH |
 | **Vector Store** | OpenAI `text-embedding-3-small` (1536 dim) + `lancedb` 로컬 ANN | 100 chunks / batch, 400 RPM throttle, 지수 백오프 |
-| **Hybrid Ranker** | `HybridRetriever` (TypeScript) — RRF `k=60`, `{bm25:0.5, vec:0.5, cloud:0.0}` | BM25 + vector + cloud adapter 결과를 가중 융합 |
-| **Cloud Adapter** | `DisabledCloudIndexAdapter` | Phase 1은 빈 결과 반환, Phase 2에서 enterprise Elasticsearch + Milvus/Qdrant 실연결 |
+| **Hybrid Ranker** | worker RRF `k=60`, `{bm25:1.5, vector:1.0}` | BM25 + vector 결과를 worker 안에서 가중 융합해 `index_search` 의 `hybrid` 모드로 반환 |
 | **Query Cache** | LRU Cache (in-memory, structure/content) | 재인덱싱 시 자동 무효화 |
 
 **PageIndex 활용 시 고려사항 (Phase 1):**
@@ -565,13 +564,12 @@ Phase 1에서 §4.4 Layer A·B 명세를 production 수준으로 끌어올리는
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Python 런타임 준비 경계** | 앱 installer 는 host-owned `uv` runtime asset 과 license 만 포함한다. `uv` materialize 와 Python interpreter/venv dependency sync 는 plugin manifest 의 host-managed Python 선언을 기준으로 plugin install/start 전 lazy 수행하며, venv 는 `~/.lvis/runtime/python-envs/<os-arch-py-lockHash>/venv` 로 공유한다 |
 | **Layer A 파서** | PDF는 `pymupdf4llm`, DOCX / PPTX / XLSX / HTML은 Microsoft `markitdown` 단일 API 사용 |
-| **PageIndex 통합** | `pageindex==0.2.8`은 검색 메서드가 없으므로 LVIS가 function calling으로 `document_structure` + `document_page_content`를 도구 노출해 agentic 탐색을 직접 구현 |
+| **PageIndex 통합** | `pageindex==0.2.8`은 검색 메서드가 없으므로 플러그인이 function calling 으로 트리와 페이지 본문을 도구 노출해 agentic 탐색을 직접 구현 |
 | **한국어 BM25** | `kiwipiepy 0.23.1` 형태소 추출 → `content_ko` 컬럼 → SQLite FTS5 `unicode61` 패턴으로 한국어 recall 보강 |
 | **벡터 검색** | OpenAI `text-embedding-3-small` → `lancedb` 로컬 ANN. 100 chunks / request, 400 RPM throttle, 지수 백오프 |
-| **Hybrid Ranker** | `lvis-app/src/main/hybrid-retriever.ts`가 worker BM25 / vector / cloud adapter 결과를 RRF(k=60)로 결합 |
+| **Hybrid Ranker** | `lvis-plugin-local-indexer/worker/local_indexer_search.py`가 BM25 / vector 결과를 RRF(k=60)로 결합 |
 | **Idle-aware 인덱싱** | `lvis-app/src/main/idle-scheduler.ts` 5-state 머신으로 유휴 시점에 우선순위 큐 처리 |
-| **Cloud 어댑터** | `lvis-app/src/main/cloud-index-adapter.ts`는 Phase 1에서 mock 인터페이스만 제공 |
-| **검색 도구** | builtin tool 4종 — `knowledge_search`, `document_list`, `document_structure`, `document_page_content` |
+| **검색 도구** | 플러그인 tool — `index_search`, `index_documents`, `index_get_document` |
 | **거버넌스 보강** | `lvis-app/src/tools/invocation-runner.ts` Step 2.5 Bash AST pre-validator, `lvis-app/src/main/audit-service.ts`, `lvis-app/src/hooks/post-turn-hook-chain.ts` 연계 |
 | **Out-of-Scope** | LightRAG knowledge graph, 로컬 임베딩, the LLM backend 기반 인덱싱, enterprise cloud index 실연결, PPTX / XLSX OCR은 후속 단계 |
 
@@ -618,9 +616,9 @@ Phase 1에서 §4.4 Layer A·B 명세를 production 수준으로 끌어올리는
 
 구현 위치: `lvis-plugin-local-indexer/worker/korean_tokenizer.py`
 
-#### 4.4.3 HybridRetriever — RRF `k=60`
+#### 4.4.3 Hybrid 검색 — RRF `k=60`
 
-TypeScript 구현은 `lvis-app/src/main/hybrid-retriever.ts`에 있다. Python worker의 `/search/bm25`, `/search/vector`와 `DisabledCloudIndexAdapter` 결과를 Reciprocal Rank Fusion으로 통합한다.
+구현은 `lvis-plugin-local-indexer/worker/local_indexer_search.py`에 있다. worker 가 자신의 BM25 결과와 vector 결과를 Reciprocal Rank Fusion 으로 통합해 `index_search` 의 `hybrid` 모드로 반환한다.
 
 **RRF 공식:**
 
@@ -632,15 +630,14 @@ score(d) = Σ_r weight_r × (1 / (k + rank_r + 1))
 - `rank_r` — 0-based rank (최상위 = 0)
 - `+1` — 0-based rank 보정
 
-**Phase 1 가중치:**
+**가중치:**
 
 | Retriever | Weight | 비고 |
-| ------------------ | ------ | ----------------------------------------------------------------- |
-| BM25 (FTS5) | 0.5 | Python worker `/search/bm25` |
-| Vector (`lancedb`) | 0.5 | Python worker `/search/vector` |
-| Cloud (Mock) | 0.0 | Phase 2에서 실연결 시 `{bm25:0.35, vec:0.35, cloud:0.3}` 재정규화 |
+| ------------------ | ------ | ------------------------------ |
+| BM25 (FTS5) | 1.5 | Python worker `/search/bm25` |
+| Vector (`lancedb`) | 1.0 | Python worker `/search/vector` |
 
-Phase 1.5에서 LightRAG를 도입하면 `{bm25:0.35, vec:0.35, lightrag:0.3}` 재조정 가능하다.
+`RetrieverConfig.rrf_weights` 로 호출자가 재정의할 수 있다.
 
 #### 4.4.4 IdleScheduler — 5-state 머신
 
@@ -674,29 +671,17 @@ RESUME_DELAY ──── 90s elapsed ──→ RUNNING
 | P3 | 배경 변경 감지 | 배경 |
 | P4 | orphan cleanup | batch |
 
-#### 4.4.5 LLM Agentic 검색 — function calling (depth ≤ 3)
+#### 4.4.5 LLM Agentic 검색 — 플러그인 소유 도구
 
-`pageindex==0.2.8`에 `search()` 메서드가 없으므로 LVIS는 4개 builtin 도구를 노출해 LLM이 트리를 직접 탐색하도록 한다. 현재 구현 도구 정의는 `lvis-app/src/tools/knowledge-search.ts`, depth cap enforcement는 `lvis-app/src/engine/turn/query-loop.ts`가 라운드별로 적용한다.
+`pageindex==0.2.8`에 `search()` 메서드가 없으므로 local-indexer 플러그인이 도구를 노출해 LLM이 트리를 직접 탐색하도록 한다. 도구 정의는 `lvis-plugin-local-indexer/src/hostPlugin.ts`에 있다.
 
 | Tool | 동작 |
-| ------------------------------------- | ------------------------------------------------------------ |
-| `knowledge_search(query, topK?)` | `HybridRetriever` 호출 → RRF top 결과 반환 |
-| `document_list()` | 인덱싱된 문서 목록 (`docId`, `docName`, `type`, `pageCount`) |
-| `document_structure(docId)` | PageIndex TOC 트리 (agentic 탐색용) |
-| `document_page_content(docId, pages)` | 특정 페이지 범위 본문 (`5`, `5-7`, `1,3,5-7`) |
+| --------------------------------------- | ------------------------------------------------------------ |
+| `index_search(query, mode?)` | `bm25` / `vector` / `hybrid` 모드로 색인 검색 |
+| `index_documents()` | 인덱싱된 문서 목록 (`docId`, `docName`, `type`, `pageCount`) |
+| `index_get_document(docId, pages?)` | TOC 트리 + 특정 페이지 범위 본문 |
 
-`KNOWLEDGE_DEPTH_CAP = 3` 규칙으로 한 턴 내 `knowledge_search` 도구 호출 횟수를 제한해 agentic 루프의 토큰 폭주를 방지한다.
-
-#### 4.4.6 CloudIndexAdapter — Mock 인터페이스 (Phase 1)
-
-`lvis-app/src/main/cloud-index-adapter.ts`는 Phase 1에서 항상 빈 결과를 반환하는 mock 구현만 제공한다. 따라서 HybridRetriever의 cloud weight는 `0.0`이며 현재 결과 순위에는 영향을 주지 않는다.
-
-**Phase 2 마이그레이션 경로:**
-
-1. `CloudIndexAdapter` 인터페이스를 구현하는 실제 클라이언트 작성
-2. enterprise Elasticsearch (BM25) + Milvus / Qdrant (벡터) 연결
-3. weights를 `{bm25:0.35, vec:0.35, cloud:0.3}`으로 재정규화
-4. `settings.indexing.cloudEnabled` feature flag로 제어
+**검색 소스는 호스트 도구 뒤에서 합쳐지지 않는다.** 도구 호출은 자신이 넘는 경계를 이름으로 밝혀야 하므로, 각 검색 소스는 그 데이터를 보유한 플러그인이 소유하는 별개의 사용자 가시 도구로 노출한다. 호스트가 여러 소스를 하나의 도구 뒤에서 융합하면 에이전트가 받은 결과가 어느 경계를 넘어온 것인지 사용자도 에이전트도 구분할 수 없다.
 
 ---
 
@@ -1248,7 +1233,7 @@ lvis-app/src/
 │   │            #  audit-entries, display-mask, rate-limiter,
 │   │            #  reviewer-dispatch, approval-memory-skip, risk-classification,
 │   │            #  audit-writer, invocation-context
-│   ├── knowledge-search.ts, bash.ts
+│   ├── bash.ts
 │   └── untrusted-banner.ts
 │
 ├── prompts/       # 시스템 프롬프트 조립
@@ -3123,7 +3108,7 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 | `tools[]._meta["lvisai/pathFields"]` | `string[]` | 파일 경로 입력 필드를 Host의 allowed-directory 검사로 연결한다.                                                                                                                                                                                                                                                                                                                   |
 | `tools[]._meta["lvisai/operationPolicy"]` | `PluginToolOperationPolicy`                     | operation별 최소 risk와 read/write 제약을 선언한다. 권한 확장이 아니라 제한만 가능하다.                                                                                                                                                                                                                                                                                           |
 | `skills`, `hooks`, `mcpServers`           | `Array<{ id, path }>`                           | 서명된 artifact 안의 plugin-owned contribution. Host가 상대 경로와 namespace를 검증하고 원자적 lifecycle로 투영한다. |
-| `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트), `host:overlay` (HostApi `triggerConversation` 게이트) 는 enforced. `ms-graph-consumer`, `background-watcher`, `worker-client` 는 advisory/self-identification label. |
+| `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트), `host:overlay` (HostApi `triggerConversation` 게이트) 는 enforced. `ms-graph-consumer`, `background-watcher` 는 advisory/self-identification label. |
 | `deployment` | `"managed" \| "user"` | managed 는 ed25519 서명 필수 (fail-closed); user 는 warn-on-missing. |
 | `startupTimeoutMs` | integer (1~60000) | `Promise.race` 기반 start() 하드 타임아웃. 초과 시 fail-soft drop. |
 | `eventSubscriptions` | `string[]` | 호스트 이벤트 구독 대상. `memory.private.*` / `settings.apiKey.*` / `audit.*` / `dlp.*` (`PLUGIN_PRIVATE_NAMESPACES`) 는 **거부**. public namespace (`meeting` / `calendar` / `email` / `index`) 는 허용, 그 외는 warn. (2026-05-11: `task` 는 host owner 폐기로 retire. 플러그인-소유 namespace 는 host 가 의도적으로 알지 않으므로 신규 추가 안 함 — open-source-readiness 룰.) |
@@ -3367,7 +3352,7 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
 
 **ms-graph 한정 escape hatch — `loginInExternalBrowser` 토글 (v0.1.29 +)**: 기본은 in-app `BrowserWindow` (PR #44, agent-hub mirror) 이지만, 사용자가 configSchema 로 `loginInExternalBrowser=true` 를 설정하면 `shell.openExternal` 로 시스템 기본 브라우저에 IdP 페이지를 띄우는 옛 흐름으로 전환할 수 있다 — corp-CA / WebView2 GPO / SSO 쿠키 격리 같은 환경 회귀의 안전망. MSAL loopback redirect 가 양쪽 모드에서 동일하게 동작하기 때문에 가능한 우연이며, **다른 OAuth 플러그인이 일반화하지 말 것** (Slack/Notion/Google 등은 redirect 메커니즘이 다를 수 있음). default off 라 §9.4a "agent-hub mirror" 정책은 그대로 유효.
 
-**Capability 네이밍**: `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index` 가 사용된다. HostApi overlay gate 는 reserved host namespace 인 `host:overlay` 를 사용한다.
+**Capability 네이밍**: `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `knowledge-index` 가 사용된다. HostApi overlay gate 는 reserved host namespace 인 `host:overlay` 를 사용한다.
 
 **Overlay Trigger — `host:overlay` capability:** plugin 이 신호 관찰 후 host overlay 에 plugin-authored prompt 를 staged 하도록 요청하는 surface. `hostApi.triggerConversation()` 호출 권한은 `host:overlay` 로만 부여한다. 일반 plugin 에 `host:overlay` 를 부여하지 말 것 — 사용자가 입력하지 않은 prompt 를 사용자에게 보여주고 확인 시 main chat 에 삽입할 수 있는 권한이므로. 안전 계약 / spec / gate 는 [`overlay-trigger.md`](../references/overlay-trigger.md) 참조.
 

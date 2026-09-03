@@ -60,14 +60,14 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
         groupId: "g1",
         toolUseId: "t1",
         displayOrder: 0,
-        name: "knowledge_search",
+        name: "index_search",
         input: { query: "hello" },
       });
     });
     // Single tool renders inline with display name (no group header).
     // Unknown plugin tool names are rendered generically.
     await waitFor(() => {
-      expect(container.textContent).toContain("knowledge search");
+      expect(container.textContent).toContain("index search");
     });
   });
 

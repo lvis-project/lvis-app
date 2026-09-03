@@ -49,7 +49,7 @@ function makeMultiGroup(overrides: Partial<ToolGroupEntry> = {}): ToolGroupEntry
     groupIds: ["grp-2"],
     status: "done",
     tools: [
-      { toolUseId: "tu-1", name: "knowledge_search", input: {}, result: "r1", status: "done", displayOrder: 0 },
+      { toolUseId: "tu-1", name: "index_search", input: {}, result: "r1", status: "done", displayOrder: 0 },
       { toolUseId: "tu-2", name: "read_file", input: {}, result: "r2", status: "done", displayOrder: 1 },
     ],
     ...overrides,
@@ -241,7 +241,7 @@ describe("ToolGroupCard", () => {
   it("multi-tool: shows '도구 사용 중' header when running", () => {
     const { container } = render(
       <ToolGroupCard group={makeMultiGroup({ status: "running", tools: [
-        { toolUseId: "tu-1", name: "knowledge_search", input: {}, status: "running", displayOrder: 0 },
+        { toolUseId: "tu-1", name: "index_search", input: {}, status: "running", displayOrder: 0 },
         { toolUseId: "tu-2", name: "read_file", input: {}, status: "running", displayOrder: 1 },
       ] })} />,
     );
@@ -251,7 +251,7 @@ describe("ToolGroupCard", () => {
   it("multi-tool running: does not auto-expand the first running tool", () => {
     const { container } = render(
       <ToolGroupCard group={makeMultiGroup({ status: "running", tools: [
-        { toolUseId: "tu-1", name: "knowledge_search", input: { query: "hidden live input" }, status: "running", displayOrder: 0 },
+        { toolUseId: "tu-1", name: "index_search", input: { query: "hidden live input" }, status: "running", displayOrder: 0 },
         { toolUseId: "tu-2", name: "read_file", input: {}, status: "running", displayOrder: 1 },
       ] })} />,
     );
@@ -260,20 +260,20 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("hidden live input");
 
     fireEvent.click(container.querySelector("button") as HTMLButtonElement);
-    expect(container.textContent).toContain("knowledge search");
+    expect(container.textContent).toContain("index search");
     expect(container.textContent).not.toContain("hidden live input");
   });
 
   it("multi-tool: shows tool display names in header", () => {
     const { container } = render(<ToolGroupCard group={makeMultiGroup()} />);
-    expect(container.textContent).toContain("knowledge search");
+    expect(container.textContent).toContain("index search");
   });
 
   it("multi-tool: expands tool list when clicked", () => {
     const { container } = render(<ToolGroupCard group={makeMultiGroup()} />);
     const headerBtn = container.querySelector("button") as HTMLButtonElement;
     fireEvent.click(headerBtn);
-    expect(container.textContent).toContain("knowledge search");
+    expect(container.textContent).toContain("index search");
     expect(container.textContent).not.toContain("r1");
   });
 
@@ -283,7 +283,7 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("r1");
 
     const buttons = Array.from(container.querySelectorAll("button"));
-    const firstToolButton = buttons.filter((button) => button.textContent?.includes("knowledge search")).at(-1) as HTMLButtonElement | undefined;
+    const firstToolButton = buttons.filter((button) => button.textContent?.includes("index search")).at(-1) as HTMLButtonElement | undefined;
     expect(firstToolButton).toBeTruthy();
     fireEvent.click(firstToolButton!);
     expect(container.textContent).toContain("r1");
@@ -291,7 +291,7 @@ describe("ToolGroupCard", () => {
 
   it("multi-tool error: shows 오류 있음 badge", () => {
     const group = makeMultiGroup({ status: "error", tools: [
-      { toolUseId: "tu-1", name: "knowledge_search", input: {}, result: "err", status: "error", displayOrder: 0 },
+      { toolUseId: "tu-1", name: "index_search", input: {}, result: "err", status: "error", displayOrder: 0 },
       { toolUseId: "tu-2", name: "read_file", input: {}, result: "ok", status: "done", displayOrder: 1 },
     ] });
     const { container } = render(<ToolGroupCard group={group} />);
@@ -378,7 +378,7 @@ describe("ToolGroupCard", () => {
     const group = makeMultiGroup({
       status: "done",
       tools: [
-        { toolUseId: "tu-1", name: "knowledge_search", input: {}, result: "r1", status: "done", displayOrder: 0, durationMs: 300 },
+        { toolUseId: "tu-1", name: "index_search", input: {}, result: "r1", status: "done", displayOrder: 0, durationMs: 300 },
         { toolUseId: "tu-2", name: "read_file", input: {}, result: "r2", status: "done", displayOrder: 1, durationMs: 1400 },
       ],
     });
@@ -765,7 +765,7 @@ describe("ToolGroupCard — failure badges", () => {
     const group = makeMultiGroup({
       status: "error",
       tools: [
-        { toolUseId: "tu-1", name: "knowledge_search", input: {}, result: "r1", status: "done", displayOrder: 0 },
+        { toolUseId: "tu-1", name: "index_search", input: {}, result: "r1", status: "done", displayOrder: 0 },
         { toolUseId: "tu-2", name: "read_file", input: {}, result: "boom", status: "error", displayOrder: 1 },
       ],
     });

@@ -762,7 +762,7 @@ describe("PluginRuntime.disable", () => {
             _meta: { ui: { visibility: ["model", "app"] } },
           },
         ],
-        capabilities: ["worker-client"],
+        capabilities: ["sample-capability"],
       })),
       "utf-8");
 
@@ -773,15 +773,15 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.findPluginIdByCapability("worker-client")).toBe(
+    expect(runtime.findPluginIdByCapability("sample-capability")).toBe(
       "meta-plugin",
     );
-    expect(runtime.listPluginIdsByCapability("worker-client")).toEqual([
+    expect(runtime.listPluginIdsByCapability("sample-capability")).toEqual([
       "meta-plugin",
     ]);
 
     const manifest = runtime.getPluginManifest("meta-plugin");
-    expect(manifest?.capabilities).toEqual(["worker-client"]);
+    expect(manifest?.capabilities).toEqual(["sample-capability"]);
   });
 
   describe("PluginHostApi cross-plugin isolation", () => {

@@ -72,9 +72,8 @@ describe("capabilities module namespace policy", () => {
     expect([...KNOWN_CAPABILITIES].sort()).toEqual(
       ["external-auth-consumer", "host:overlay"].sort(),
     );
-    // The 5 dead strings, the 4 event-source strings (now inferred from
-    // emittedEvents), and worker-client (a live free-form discovery key, not a
-    // host-enforced gate) are all gone from the enforced vocab.
+    // The 6 dead strings and the 4 event-source strings (now inferred from
+    // emittedEvents) are all gone from the enforced vocab.
     for (const removed of [
       "ms-graph-consumer",
       "background-watcher",
@@ -411,9 +410,9 @@ describe("capability emit gate", () => {
   });
 
   it("loads a plugin declaring legacy/unknown capability strings under the relaxed schema", async () => {
-    // worker-client is a live free-form host discovery key; mail-source and an
-    // arbitrary unknown string are harmless no-ops. All must VALIDATE + LOAD
-    // (free-form schema), not be rejected the way the old closed enum would.
+    // worker-client and mail-source are strings the host no longer reads, and
+    // the third is arbitrary. All must VALIDATE + LOAD (free-form schema), not
+    // be rejected the way the old closed enum would.
     await writePlugin("p-legacy", [], {
       capabilities: ["worker-client", "mail-source", "totally-legacy-cap"],
     });

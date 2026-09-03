@@ -163,7 +163,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(planCall.sourceTools).toBeDefined();
       expect(planCall.sourceTools!.length).toBeGreaterThan(0);
       expect(planCall.sourceTools).toContain("read_file");
-      expect(planCall.sourceTools).toContain("knowledge_search");
+      expect(planCall.sourceTools).toContain("index_search");
       // No write/mutation tools leak into the plan allowlist.
       for (const forbidden of [
         "write_file",

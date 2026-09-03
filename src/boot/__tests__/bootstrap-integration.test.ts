@@ -180,10 +180,7 @@ vi.mock("../tools.js", () => ({
   registerBuiltinTools: vi.fn(),
   registerRequestPluginMetaTool: vi.fn(),
   registerToolSearchMetaTool: vi.fn(),
-  wireKnowledgeAndIdleScheduler: vi.fn(async () => ({
-    idleScheduler: { stop: vi.fn() },
-    knowledgeAvailable: true,
-  })),
+  wireIdleScheduler: vi.fn(async () => ({ stop: vi.fn() })),
 }));
 
 vi.mock("../plugins.js", () => ({
@@ -637,7 +634,6 @@ describe("bootstrap() integration lock", () => {
         "getSubAgentRunner",
         "idleScheduler",
         "inputClassifier",
-        "knowledgeAvailable",
         "listPluginAuthPartitionsService",
         "mcpAppModelContext",
         "mcpArtifactStore",
@@ -804,7 +800,6 @@ describe("bootstrap() integration lock", () => {
     expect(typeof services.startWorkBoardDueSoon).toBe("function");
     expect(typeof services.registerPluginEventBridge).toBe("function");
     expect(typeof services.refreshPluginNotifications).toBe("function");
-    expect(services.knowledgeAvailable).toBe(true);
   });
 
   it("wires the core, conversation, and plugin-runtime seams into the graph", () => {

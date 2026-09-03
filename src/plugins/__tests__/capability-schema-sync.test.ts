@@ -58,9 +58,8 @@ describe("capability schema contract (free-form, not a closed enum)", () => {
     const items = await loadCapabilitiesItemsSchema();
     const re = new RegExp(items.pattern!);
     // Removed from the enforced vocab but still valid free-form declarations on
-    // already-installed manifests. worker-client is still a LIVE host discovery
-    // key (findPluginIdByCapability in boot/tools.ts); the rest are harmless
-    // no-ops. None may be rejected at schema validation.
+    // already-installed manifests, where the host reads none of them. None may
+    // be rejected at schema validation.
     for (const legacy of [
       "worker-client",
       "mail-source",

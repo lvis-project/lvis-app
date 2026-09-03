@@ -1,5 +1,5 @@
 /**
- * Producer-driven coverage for the skill_load approval wiring.
+ * Producer-driven coverage for `setupWorkflowStores` wiring.
  *
  * The gate that pops the first-use skill modal must be the SAME instance the
  * tool executor uses. This exercises the real producer — `setupWorkflowStores`
@@ -67,13 +67,11 @@ function makeCtx(): { ctx: BootContext; registry: InstanceType<typeof ToolRegist
     networkFetch: undefined,
     toolRegistry: registry,
     settingsService: { get: () => undefined, getAll: () => ({}) },
-    pluginRuntime: { findPluginIdByCapability: () => undefined },
-    auditService: { log: () => {} },
   } as unknown as BootContext;
   return { ctx, registry, probe };
 }
 
-describe("setupWorkflowStores — skill_load approval gate wiring", () => {
+describe("setupWorkflowStores — tool and idle-scheduler wiring", () => {
   it("registers skill_load and routes its first-use modal to ctx.approvalGate", async () => {
     const { ctx, registry, probe } = makeCtx();
 
@@ -90,6 +88,20 @@ describe("setupWorkflowStores — skill_load approval gate wiring", () => {
     expect(probe.requests).toHaveLength(1);
     expect(probe.requests[0]?.toolName).toBe("skill_load");
     expect(probe.requests[0]?.args).toEqual({ skillName: "demo" });
+    ctx.idleScheduler?.stop();
+  });
+
+  it("starts the idle scheduler with no plugin installed", async () => {
+    // The shared idle consumers — preference refresh and memory consolidation —
+    // each return early when the scheduler is absent, so an absent scheduler
+    // disables idle work outright instead of degrading it. Nothing a plugin
+    // supplies may stand between boot and this object.
+    const { ctx } = makeCtx();
+
+    await setupWorkflowStores(ctx, []);
+
+    expect(ctx.idleScheduler).toBeDefined();
+    ctx.idleScheduler?.stop();
   });
 
   it("blocks the skill body when the user denies at that same gate", async () => {
@@ -99,8 +111,6 @@ describe("setupWorkflowStores — skill_load approval gate wiring", () => {
       approvalGate: { requestAndWait: async () => ({ choice: "deny-once" }) },
       toolRegistry: registry,
       settingsService: { get: () => undefined, getAll: () => ({}) },
-      pluginRuntime: { findPluginIdByCapability: () => undefined },
-      auditService: { log: () => {} },
     } as unknown as BootContext;
 
     await setupWorkflowStores(ctx, []);
@@ -111,5 +121,6 @@ describe("setupWorkflowStores — skill_load approval gate wiring", () => {
     expect(result.isError).toBe(true);
     expect(result.output).toContain("user denied skill load");
     expect(result.output).not.toContain("demo body");
+    ctx.idleScheduler?.stop();
   });
 });

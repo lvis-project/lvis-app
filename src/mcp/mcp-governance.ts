@@ -284,15 +284,13 @@ export class McpGovernance {
         return { valid: false, reason: t("be_mcpGovernance.toolNameConflict", { namespacedName }), layer: 3 };
       }
 
-      // Block builtin/plugin tool shadowing.
+      // Block builtin tool shadowing. Plugin and already-registered tool names
+      // are covered by the `existingToolNames` check above, which reads the live
+      // registry rather than a list that has to be kept in step with it.
       const baseNames = [
         "agent_list",
         "agent_spawn",
         "ask_user_question",
-        "document_list",
-        "document_page_content",
-        "document_structure",
-        "knowledge_search",
         "render_html",
         "request_plugin",
         "routine_schedule",

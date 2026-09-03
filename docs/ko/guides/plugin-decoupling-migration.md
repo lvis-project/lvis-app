@@ -35,7 +35,6 @@
 - python path를 특정 plugin id가 아닌 `configOverrides["*"]`로 주입
 - ~~watcher 자동 시작을 `startupTools` 기반으로 실행~~ *(폐기 2026-05-14 — plugin `start()` lifecycle 안에서 자체 기동)*
 - 호스트 이벤트 수집을 `eventSubscriptions` 기반으로 등록
-- worker-client plugin 조회를 capability 기반으로 변경
 
 4. ipc-bridge.ts 전환
 - `lvis:index:*`, `lvis:meeting:*` 하드코딩 핸들러 제거
@@ -45,11 +44,11 @@
 
 1. capability taxonomy 표준화
 - 공통 capability 목록을 문서화하고 네이밍 규칙 고정
-- 예: `worker-client`, `background-watcher`, `calendar-source`, `mail-source`
+- 예: `background-watcher`, `calendar-source`, `mail-source`
 
 2. typed contracts 도입
 - capability별 반환 shape를 명시한 계약 타입 추가
-- 예: worker-client provider contract, scheduler-consumer contract
+- 예: scheduler-consumer contract
 
 3. 검증 강화
 - manifest lint 단계에서 capability/contract 필수 조합 검증

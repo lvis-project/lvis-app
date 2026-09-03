@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 192
+ * Fragments: 190
  */
 import { en as en_app } from "./app.js";
 import { en as en_appearanceTab } from "./appearanceTab.js";
@@ -36,8 +36,6 @@ import { en as en_be_dlp } from "./be_dlp.js";
 import { en as en_be_errorClassifier } from "./be_errorClassifier.js";
 import { en as en_be_executor } from "./be_executor.js";
 import { en as en_be_hookRunner } from "./be_hookRunner.js";
-import { en as en_be_knowledgeCap } from "./be_knowledgeCap.js";
-import { en as en_be_knowledgeSearch } from "./be_knowledgeSearch.js";
 import { en as en_be_main } from "./be_main.js";
 import { en as en_be_mcpClient } from "./be_mcpClient.js";
 import { en as en_be_mcpGovernance } from "./be_mcpGovernance.js";
@@ -230,8 +228,6 @@ export const generatedEn: Record<string, string> = {
   ...en_be_errorClassifier,
   ...en_be_executor,
   ...en_be_hookRunner,
-  ...en_be_knowledgeCap,
-  ...en_be_knowledgeSearch,
   ...en_be_main,
   ...en_be_mcpClient,
   ...en_be_mcpGovernance,
