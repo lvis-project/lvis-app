@@ -1194,7 +1194,7 @@ lvis-app/src/
 │   │                            #  ReasoningCard, ToolApprovalContent, ToolGroupCard,
 │   │                            #  UnifiedSearchPanel, Sparkline, UsageDashboard,
 │   │                            #  HtmlPreview, StarredView,
-│   │                            #  MarketplaceUpdateBanner; ChatSidePanel composition plus
+│   │                            #  PluginUpdatesPill; ChatSidePanel composition plus
 │   │                            #  chat-side-panel-{preview,layout,workspaces} focused units
 │   ├── dialogs/                 # PluginInstallDialog and explicit workflow dialogs,
 │   │                            #  PluginUninstallDialog, CommandPaletteDialog
