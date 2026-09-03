@@ -1379,21 +1379,6 @@
     },
     {
       "type": "types",
-      "file": "src/boot/bootstrap-status.ts",
-      "name": "BootstrapStatusComplete"
-    },
-    {
-      "type": "types",
-      "file": "src/boot/bootstrap-status.ts",
-      "name": "BootstrapStatusError"
-    },
-    {
-      "type": "types",
-      "file": "src/boot/bootstrap-status.ts",
-      "name": "BootstrapStatusStart"
-    },
-    {
-      "type": "types",
       "file": "src/boot/plugin-surface-permissions.ts",
       "name": "PluginSurfacePermissionBase"
     },

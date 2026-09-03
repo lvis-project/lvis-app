@@ -1172,6 +1172,14 @@ export class PluginMarketplaceService {
     updated: string[];
     removed: string[];
     failed: Array<{ id: string; error: string }>;
+    /**
+     * Present only when the whole pass was skipped rather than completed, and
+     * says why. Same meaning as `resolveManagedPluginBootstrap`'s `reason`:
+     * nothing was attempted, so an empty `installed`/`failed` is the absence of
+     * work rather than a clean run. Boot forwards it to the status surface,
+     * which would otherwise render silence for the case it exists to report.
+     */
+    skippedReason?: string;
   }> {
     if (
       options?.mode !== "pre-start-sync" &&
@@ -1221,10 +1229,12 @@ export class PluginMarketplaceService {
     try {
       plugins = await this.fetcher.listPlugins();
     } catch (err) {
-      log.warn(
-        `ensureManagedInstalled: catalog unreachable — skipping: ${(err as Error).message}`,
-      );
-      return result;
+      // The network boundary: an unreachable catalog is data about the outcome,
+      // not a default to paper over. Returning the bare empty result would tell
+      // boot the same story a clean no-op does.
+      const skippedReason = `catalog unreachable: ${(err as Error).message}`;
+      log.warn(`ensureManagedInstalled: skipping — ${skippedReason}`);
+      return { ...result, skippedReason };
     }
     const managed = plugins.filter((p) => normalizeInstallPolicy(p) === "admin");
     // Registry read errors must propagate. ENOENT is already

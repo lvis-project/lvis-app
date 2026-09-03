@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { BootstrapStatusPill } from "../BootstrapStatusPill.js";
-import type { BootstrapStatusEvent } from "../../hooks/use-bootstrap-status.js";
+import type { AppBootstrapStatus } from "../../../../shared/bootstrap-status.js";
 
 describe("BootstrapStatusPill", () => {
   afterEach(() => cleanup());
@@ -139,7 +139,7 @@ describe("BootstrapStatusPill", () => {
 });
 
 function renderPill(
-  status: BootstrapStatusEvent | null,
+  status: AppBootstrapStatus | null,
   handlers: { onDismiss?: () => void; onRetry?: () => void } = {},
 ) {
   return render(

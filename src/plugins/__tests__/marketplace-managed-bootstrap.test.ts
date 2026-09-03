@@ -529,6 +529,34 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.installed).toEqual([]);
   });
 
+  it("reports an unreachable catalog as a skip reason, not as a clean empty run", async () => {
+    // A skipped pass and a clean one both return empty lists, so without the
+    // reason boot cannot tell "nothing to do" from "nothing was attempted" —
+    // and the status surface renders silence for the case it exists to report.
+    await writeAdminCatalog("1.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      (service as unknown as { fetcher: MarketplaceFetcherSpyTarget }).fetcher,
+      "listPlugins",
+    ).mockRejectedValue(new Error("ENOTFOUND marketplace"));
+
+    const result = await service.ensureManagedInstalled(PRE_START_SYNC);
+
+    expect(result.skippedReason).toBe("catalog unreachable: ENOTFOUND marketplace");
+    expect(result.installed).toEqual([]);
+    expect(result.failed).toEqual([]);
+  });
+
+  it("leaves skippedReason absent when the pass actually ran", async () => {
+    await writeAdminCatalog("1.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    spyInstalledAtVersion(service, "1.0.0");
+
+    const result = await service.ensureManagedInstalled(PRE_START_SYNC);
+
+    expect(result.skippedReason).toBeUndefined();
+  });
+
   it("commits a pre-start managed artifact without publishing or starting a candidate", async () => {
     await writeAdminCatalog("2.0.0");
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
@@ -1361,6 +1389,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       const result = await service.ensureManagedInstalled(PRE_START_SYNC);
 
       expect(result.removed).toEqual([]);
+      expect(result.skippedReason).toBe("catalog unreachable: ENOTFOUND marketplace");
       // Not even probed: an unreachable catalog says nothing about any plugin.
       expect(detailSpy).not.toHaveBeenCalled();
       const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {

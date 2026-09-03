@@ -232,6 +232,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:away-authority:disarm",
         "lvis:away-authority:status",
         "lvis:bootstrap:retry",
+        "lvis:bootstrap:status:get",
         "lvis:chat:abort",
         "lvis:chat:branch-from-checkpoint",
         "lvis:chat:compact",

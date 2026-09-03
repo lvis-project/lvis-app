@@ -9,6 +9,7 @@ import type {
 } from "../../contract/app-contract.js";
 import type { ChatStreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
+import type { AppBootstrapStatus } from "../../shared/bootstrap-status.js";
 import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
@@ -1276,13 +1277,13 @@ export type LvisApi = {
   installAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
   /** Hide the current available/downloaded app update until a newer version appears. */
   skipAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
-  onBootstrapStatus: (
-    h: (status:
-      | { phase: "start" }
-      | { phase: "complete"; installed: string[]; failed: Array<{ id: string; error: string }>; skippedReason?: string }
-      | { phase: "error"; message: string }
-    ) => void,
-  ) => () => void;
+  onBootstrapStatus: (h: (status: AppBootstrapStatus) => void) => () => void;
+  /**
+   * Late-mount sync for `onBootstrapStatus`: on a cold boot the whole status
+   * sequence is emitted before this renderer exists, so the subscription alone
+   * never sees it. `null` when the host has reported nothing yet.
+   */
+  getBootstrapStatus: () => Promise<AppBootstrapStatus | null>;
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onPluginInstallResult: (h: (payload: PluginInstallResultPayload) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;

@@ -1,7 +1,7 @@
 /**
  * Plugins domain IPC handlers.
  * Covers: lvis:plugins:*, lvis:plugin:* (webview bridge), lvis:mcp:*,
- *         lvis:runtime:*, lvis:agents:*, lvis:skills:*, lvis:bootstrap:retry,
+ *         lvis:runtime:*, lvis:agents:*, lvis:skills:*, lvis:bootstrap:*,
  *         lvis:marketplace:ping, lvis:host:plugin-theme-notify,
  *         lvis:notification:clicked
  */
@@ -21,6 +21,7 @@ import { stripSecretFields } from "../../plugins/config-schema.js";
 import { shouldBlockPluginSecretRead, validateApiKeyLikeSecretValue } from "../../plugins/secret-shape.js";
 import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/config-change-bus.js";
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
+import { latestBootstrapStatus } from "../../boot/bootstrap-status.js";
 import { isDevModeUnlocked, isE2eTestRuntime } from "../../boot/dev-flags.js";
 import {
   IPC_NOTIFICATION_CLICKED,
@@ -452,6 +453,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         pluginRuntime.activatePreparedArtifact(prepared),
     });
     return { ok: true } as const;
+  });
+
+  // Late-mount sync for the bootstrap status event. On a cold boot the whole
+  // start → complete/error sequence is emitted while the window still shows
+  // the splash document, so the renderer pulls the recorded snapshot once it
+  // has a listener. `null` = this process reported nothing yet.
+  ipcMain.handle(CHANNELS.bootstrap.statusGet, (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.bootstrap.statusGet, e);
+      return null;
+    }
+    return latestBootstrapStatus();
   });
 
   ipcMain.handle(CHANNELS.plugins.install, async (e, pluginId: string, options?: unknown) => {
