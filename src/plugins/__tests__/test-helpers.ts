@@ -10,6 +10,8 @@ import { mkdtempSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import type { ValidateFunction } from "ajv";
+import { resolveAddFormats, resolveAjv } from "../config-schema.js";
 import type { PluginPaths } from "../plugin-paths.js";
 import { resolvePluginPaths } from "../plugin-paths.js";
 import { PLUGIN_DATA_DIR_NAME } from "../plugin-storage-layout.js";
@@ -330,6 +332,28 @@ export function permissiveManifestEnvelopeSchema(options: {
 }
 
 /**
+ * A factory for AJV validators over {@link permissiveManifestEnvelopeSchema}.
+ *
+ * Three manifest suites compiled their own — same `allErrors`, same formats,
+ * same envelope — differing only in the namespace fields each one is about,
+ * which stay with the caller. A factory rather than one compiled validator,
+ * because a validator carries the errors of its last `validate()` call and
+ * these suites read `.errors` per test.
+ */
+export function permissiveManifestValidatorFactory(
+  options: Parameters<typeof permissiveManifestEnvelopeSchema>[0] = {},
+): () => ValidateFunction {
+  const schema = permissiveManifestEnvelopeSchema(options);
+  const Ajv = resolveAjv();
+  const addFormats = resolveAddFormats();
+  return () => {
+    const ajv = new Ajv({ allErrors: true });
+    addFormats(ajv);
+    return ajv.compile(schema);
+  };
+}
+
+/**
  * The `properties` map of the LVIS namespace inside the host manifest schema.
  *
  * Every LVIS field sits under `extensions["xyz.lvisai"]` in an Agent Plugins
@@ -398,6 +422,53 @@ export function agentPluginsDocument(
   }
   top.extensions = { [LVIS_EXTENSION_NAMESPACE]: lvis };
   return top;
+}
+
+/**
+ * A writer for the `plugin.json` a manifest-validation suite parses.
+ *
+ * The five runtime manifest suites each wrote the same document: one
+ * {@link agentPluginsDocument} carrying a placeholder description, version and
+ * entry plus a single nominal tool, with only the plugin's identity and the
+ * field under test differing. That envelope is the shared artifact — a manifest
+ * the real validator accepts once the field under test is removed — so a suite
+ * that restates it can also drift from it, and a manifest rejected for the
+ * wrong reason reads exactly like the rejection the suite is asserting.
+ *
+ * The identity binds once per suite; `extra` is what the individual call is
+ * about. `directory` is read per call rather than captured, because the scratch
+ * directory is per-test state and stays the suite's to create and remove — one
+ * of these suites writes a second manifest of its own into the same directory.
+ */
+export function pluginManifestWriter(
+  identity: { readonly id: string; readonly name: string },
+  directory: () => string,
+): (extra?: Record<string, unknown>) => Promise<string> {
+  return async (extra = {}) => {
+    const path = join(directory(), "plugin.json");
+    await writeFile(
+      path,
+      JSON.stringify(
+        agentPluginsDocument({
+          id: identity.id,
+          name: identity.name,
+          description: "x",
+          version: "1.0.0",
+          entry: "dist/p.js",
+          tools: [
+            {
+              name: "t_one",
+              description: "t_one tool",
+              inputSchema: { type: "object", properties: {} },
+              _meta: { ui: { visibility: ["model", "app"] } },
+            },
+          ],
+          ...extra,
+        }),
+      ),
+    );
+    return path;
+  };
 }
 
 export async function writeTestPlugin(

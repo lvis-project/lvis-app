@@ -6,15 +6,12 @@
  * with the test-only `online: false` flag so the suite never touches the
  * public CDN.
  */
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { WhitelistCache, whitelistRegistry } from "../whitelist-registry.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
-import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
+import { useTempDirs } from "../../../__tests__/test-helpers.js";
+import { signedDocumentFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -63,23 +60,10 @@ function makeSigned(opts: {
   expiresAt: string;
   manifestSha?: string;
 }): SignedDoc {
-  const doc = buildWhitelist(opts);
-  const body = JSON.stringify(doc);
-  return { body, signature: signEnvelopeFixture(body, testPrivateKey, testKeyId), doc };
+  return signedDocumentFixture(buildWhitelist(opts), testPrivateKey, testKeyId);
 }
 
-const tempRoots: string[] = [];
-function freshUserData(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-whitelist-test-"));
-  tempRoots.push(dir);
-  return dir;
-}
-
-afterAll(async () => {
-  for (const root of tempRoots) {
-    await cleanupTmpDir(root);
-  }
-});
+const freshUserData = useTempDirs("lvis-whitelist-test-");
 
 // ---------------------------------------------------------------------
 // Suite — inject a fresh keypair per run via the registry's

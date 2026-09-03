@@ -3,17 +3,16 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempPaths } from "../../__tests__/test-helpers.js";
 import lockfile from "proper-lockfile";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RATIONALE_CONTROL_CONTRACT_VERSION } from "../../tools/pipeline/rationale-control.js";
 import type { InvocationAuditRecord } from "../../tools/pipeline/rationale-ticket-lifecycle.js";
 import type { RationaleUiAuditProjection } from "../../tools/pipeline/rationale-resume-contract.js";
@@ -26,13 +25,7 @@ import {
 
 const NOW = 1_900_000_000_000;
 const SECRET = "rationale-audit-test-secret-that-is-at-least-32-characters";
-const roots: string[] = [];
-
-function createAuditDir(): string {
-  const root = mkdtempSync(join(tmpdir(), "lvis-rationale-audit-"));
-  roots.push(root);
-  return join(root, "nested-audit");
-}
+const createAuditDir = useTempPaths("lvis-rationale-audit-", "nested-audit");
 
 function ticketEvent(at = NOW): RationaleTicketStoreAuditEvent {
   return {
@@ -113,12 +106,6 @@ function uiProjection(): RationaleUiAuditProjection {
     autoApproved: false,
   };
 }
-
-afterEach(async () => {
-  for (const root of roots.splice(0)) {
-    await cleanupTmpDir(root);
-  }
-});
 
 describe("DurableRationaleAuditAdapter", () => {
   it("stays dormant until first use and continues a verified chain after restart", () => {

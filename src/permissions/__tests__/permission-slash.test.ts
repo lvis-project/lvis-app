@@ -21,10 +21,7 @@ const SETTINGS_PATH = "/nonexistent/settings.json";
 
 const resources = new PermissionTestResources();
 
-function tmpSettingsPath(): string {
-  const dir = resources.makeTmpDir("lvis-perm-slash-");
-  return join(dir, "settings.json");
-}
+const tmpSettingsPath = resources.tmpFilePaths("lvis-perm-slash-", "settings.json");
 
 afterEach(async () => {
   await resources.cleanup();

@@ -6,15 +6,13 @@
  * compatibility gate fail-closed silently).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Ajv from "ajv";
-import addFormats from "ajv-formats";
 import { parsePluginJson } from "../manifest-validation.js";
 import {
-  agentPluginsDocument,
-  permissiveManifestEnvelopeSchema,
+  permissiveManifestValidatorFactory,
+  pluginManifestWriter,
 } from "../../__tests__/test-helpers.js";
 
 describe("manifest requires.minAppVersion validator", () => {
@@ -28,36 +26,19 @@ describe("manifest requires.minAppVersion validator", () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
-  function makeValidator() {
-    const ajv = new Ajv({ allErrors: true });
-    addFormats(ajv);
-    return ajv.compile(
-      permissiveManifestEnvelopeSchema({
-        namespaceProperties: {
-          entry: { type: "string" },
-          tools: { type: "array" },
-          requires: { type: "object" },
-        },
-        namespaceRequired: ["entry", "tools"],
-      }),
-    );
-  }
+  const makeValidator = permissiveManifestValidatorFactory({
+    namespaceProperties: {
+      entry: { type: "string" },
+      tools: { type: "array" },
+      requires: { type: "object" },
+    },
+    namespaceRequired: ["entry", "tools"],
+  });
 
-  async function writeManifest(extra: Record<string, unknown>): Promise<string> {
-    const path = join(workDir, "plugin.json");
-    await writeFile(
-      path,
-      JSON.stringify(agentPluginsDocument({
-        id: "min-app-version-test",
-        name: "Min App Version Test",
-        description: "x",
-        version: "1.0.0",
-        entry: "dist/p.js",
-        tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-        ...extra,
-      })));
-    return path;
-  }
+  const writeManifest = pluginManifestWriter(
+    { id: "min-app-version-test", name: "Min App Version Test" },
+    () => workDir,
+  );
 
   it("accepts a manifest with no requires (backward-compat)", async () => {
     const path = await writeManifest({});

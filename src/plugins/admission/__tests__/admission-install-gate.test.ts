@@ -14,14 +14,12 @@
  * here asserts the shipped default with no override at all, so both behaviours
  * are covered by execution rather than by assumption.
  */
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createHash, generateKeyPairSync, sign as edSign, type KeyObject } from "node:crypto";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { resolve } from "node:path";
+import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 import { PluginNotAdmittedError } from "../../../shared/plugin-install-result.js";
 import type { MarketplaceFetcher } from "../../marketplace-fetcher.js";
@@ -54,12 +52,7 @@ let baseUrl: string;
 let routes: Map<string, { status: number; body: string }>;
 let downloadCalls: string[];
 
-const tempRoots: string[] = [];
-function freshDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  tempRoots.push(dir);
-  return dir;
-}
+const freshDir = useTempDirs("lvis-admission-install-");
 
 function catalogBody(opts: {
   issuedAtMs?: number;
@@ -185,10 +178,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await new Promise<void>((r) => server.close(() => r()));
-});
-
-afterAll(async () => {
-  for (const root of tempRoots) await cleanupTmpDir(root);
 });
 
 describe("install path — admits", () => {

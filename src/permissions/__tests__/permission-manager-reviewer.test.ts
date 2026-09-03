@@ -3,7 +3,6 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
   isReviewerAutoDecisionOutcome,
   PermissionManager,
@@ -32,10 +31,7 @@ import { PermissionTestResources } from "./test-resources.js";
 
 const resources = new PermissionTestResources();
 
-function tmpFile(name: string): string {
-  const dir = resources.makeTmpDir("lvis-pm-reviewer-");
-  return join(dir, name);
-}
+const tmpFile = resources.tmpFileFactory("lvis-pm-reviewer-");
 
 afterEach(async () => {
   await resources.cleanup();

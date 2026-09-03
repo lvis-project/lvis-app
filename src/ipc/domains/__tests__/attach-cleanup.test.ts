@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { existsSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { invokeAppIpcHandler } from "./test-helpers.js";
+import { invokeAppIpcHandler, makeAppIpcFrameInvoker } from "./test-helpers.js";
 import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const { handlers, showOpenDialogMock } = vi.hoisted(() => ({
@@ -28,15 +28,7 @@ import { registerAttachHandlers } from "../attach.js";
 
 const PNG_BASE64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
 const invoke = (channel: string, ...args: unknown[]) => invokeAppIpcHandler(handlers, channel, ...args);
-function invokeWithSenderFrame(
-  channel: string,
-  url: string,
-  ...args: unknown[]
-): Promise<unknown> {
-  const handler = handlers.get(channel);
-  if (!handler) throw new Error(`No handler registered for: ${channel}`);
-  return Promise.resolve(handler({ senderFrame: { url } } as never, ...args));
-}
+const invokeWithSenderFrame = makeAppIpcFrameInvoker(handlers);
 
 const savedPaths = new Set<string>();
 const savedTempDirs = new Set<string>();

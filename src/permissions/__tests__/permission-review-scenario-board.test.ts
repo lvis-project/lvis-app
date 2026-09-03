@@ -29,10 +29,7 @@ import { PermissionTestResources } from "./test-resources.js";
 const BOARD_PATH = resolve(process.cwd(), "docs/design/permission-review-scenario-board-v2.html");
 const resources = new PermissionTestResources();
 
-function tmpFile(name: string): string {
-  const dir = resources.makeTmpDir("lvis-permission-scenarios-");
-  return join(dir, name);
-}
+const tmpFile = resources.tmpFileFactory("lvis-permission-scenarios-");
 
 afterEach(async () => {
   await resources.cleanup();

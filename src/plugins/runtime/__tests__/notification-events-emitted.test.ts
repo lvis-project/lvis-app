@@ -9,11 +9,11 @@
  * The logger routes warn -> console.warn, so we spy on console.warn.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
-import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
+import { pluginManifestWriter } from "../../__tests__/test-helpers.js";
 
 describe("manifest notificationEvents — self-emitted events do not warn", () => {
   let workDir: string;
@@ -27,21 +27,10 @@ describe("manifest notificationEvents — self-emitted events do not warn", () =
     await rm(workDir, { recursive: true, force: true });
   });
 
-  async function writeManifest(extra: Record<string, unknown>): Promise<string> {
-    const path = join(workDir, "plugin.json");
-    await writeFile(
-      path,
-      JSON.stringify(agentPluginsDocument({
-        id: "notif-test",
-        name: "Notif Test",
-        description: "x",
-        version: "1.0.0",
-        entry: "dist/p.js",
-        tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-        ...extra,
-      })));
-    return path;
-  }
+  const writeManifest = pluginManifestWriter(
+    { id: "notif-test", name: "Notif Test" },
+    () => workDir,
+  );
 
   function notifWarned(eventName: string): boolean {
     return warnSpy.mock.calls.some((args) =>

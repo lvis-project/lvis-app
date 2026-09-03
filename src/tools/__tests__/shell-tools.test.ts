@@ -16,6 +16,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../__tests__/test-helpers.js";
 import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 import { __resetManagedChildProcessesForTest } from "../../main/managed-child-processes.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
@@ -659,25 +660,15 @@ describe("powershell binShell resolution", () => {
   const ORIGINAL_PLATFORM = process.platform;
   const ORIGINAL_PATH = process.env["PATH"];
   const ORIGINAL_PATHEXT = process.env["PATHEXT"];
-  const testDirs = new Set<string>();
+  const createTestDir = useTempDirs("lvis-pwsh-");
 
-  function createTestDir(prefix: string): string {
-    const dir = mkdtempSync(join(tmpdir(), prefix));
-    testDirs.add(dir);
-    return dir;
-  }
-
-  afterEach(async () => {
+  afterEach(() => {
     setProcessPlatform(ORIGINAL_PLATFORM);
     if (ORIGINAL_PATH === undefined) delete process.env["PATH"];
     else process.env["PATH"] = ORIGINAL_PATH;
     if (ORIGINAL_PATHEXT === undefined) delete process.env["PATHEXT"];
     else process.env["PATHEXT"] = ORIGINAL_PATHEXT;
     vi.restoreAllMocks();
-    for (const dir of testDirs) {
-      await cleanupTmpDir(dir);
-    }
-    testDirs.clear();
   });
 
   describe("binShellForExecutable", () => {

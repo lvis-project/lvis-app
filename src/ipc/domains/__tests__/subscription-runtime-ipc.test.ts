@@ -5,6 +5,7 @@ import type {
 } from "../../../shared/subscription-runtime.js";
 import { MAX_COMPOSER_ATTACHMENT_COUNT, MAX_COMPOSER_IMAGE_BYTES } from "../../../shared/composer-image-input.js";
 import { SETTINGS } from "../../../shared/ipc-channels.js";
+import { deferred } from "../../../__tests__/test-helpers.js";
 import { makeAppIpcInvoker } from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -204,14 +205,6 @@ function makeStatefulSelectionDeps(initialLlm: TestLlm) {
     return snapshot();
   });
   return { deps, currentLlm: () => llm, applyLlmPatch };
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
 }
 
 beforeEach(() => {

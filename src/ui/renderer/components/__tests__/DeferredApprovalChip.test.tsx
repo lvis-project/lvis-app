@@ -4,23 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { DeferredApprovalChip } from "../DeferredApprovalChip.js";
 import type { DeferredQueueEntry } from "../../types.js";
-
-function makeEntry(overrides: Partial<DeferredQueueEntry> = {}): DeferredQueueEntry {
-  return {
-    id: "id-1",
-    ts: "2026-05-13T13:00:00.000Z",
-    toolName: "fs_write",
-    source: "builtin",
-    category: "write",
-    inputSummary: '{"path":"<redacted>"}',
-    verdict: { level: "high", reason: "write outside allowed dirs" },
-    // Approval is only offered for entries that can grant something, so the
-    // shared fixture carries the out-of-allowed-dir lane's directory grant.
-    grant: { kind: "directory", path: "/srv/app/data" },
-    status: "pending",
-    ...overrides,
-  };
-}
+import { makeDeferredQueueEntry } from "../../../../../test/renderer/helpers.js";
 
 function installApi(pending: DeferredQueueEntry[]) {
   const deferredList = vi.fn(async () => ({
@@ -49,7 +33,7 @@ beforeEach(() => {
 
 describe("DeferredApprovalChip", () => {
   it("renders nothing when draft text has no intent", async () => {
-    installApi([makeEntry()]);
+    installApi([makeDeferredQueueEntry()]);
     let container: HTMLElement;
     await act(async () => {
       const r = render(<DeferredApprovalChip draftText="random question about something" />);
@@ -69,7 +53,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("renders nothing when multiple entries pend (ambiguous target)", async () => {
-    installApi([makeEntry({ id: "a" }), makeEntry({ id: "b", toolName: "bash" })]);
+    installApi([makeDeferredQueueEntry({ id: "a" }), makeDeferredQueueEntry({ id: "b", toolName: "bash" })]);
     let container: HTMLElement;
     await act(async () => {
       const r = render(<DeferredApprovalChip draftText="허용" />);
@@ -79,7 +63,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("renders chip + approve button for an approve intent against a single pending entry", async () => {
-    installApi([makeEntry({ toolName: "bash" })]);
+    installApi([makeDeferredQueueEntry({ toolName: "bash" })]);
     await act(async () => {
       render(<DeferredApprovalChip draftText="OK 허용해줘" />);
     });
@@ -93,7 +77,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("dispatches deferredResolve with approvalSource='natural-language' on click", async () => {
-    const api = installApi([makeEntry({ id: "queue-42", toolName: "bash" })]);
+    const api = installApi([makeDeferredQueueEntry({ id: "queue-42", toolName: "bash" })]);
     await act(async () => {
       render(<DeferredApprovalChip draftText="허용해 주세요" />);
     });
@@ -114,7 +98,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("lets the user dismiss the current natural-language suggestion without resolving it", async () => {
-    const api = installApi([makeEntry({ id: "queue-dismiss", toolName: "bash" })]);
+    const api = installApi([makeDeferredQueueEntry({ id: "queue-dismiss", toolName: "bash" })]);
     const { rerender } = render(<DeferredApprovalChip draftText="허용해 주세요" />);
 
     expect(await screen.findByTestId("deferred-approval-chip")).toBeTruthy();
@@ -132,7 +116,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("dispatches rejected when the intent is reject", async () => {
-    const api = installApi([makeEntry({ id: "queue-99" })]);
+    const api = installApi([makeDeferredQueueEntry({ id: "queue-99" })]);
     await act(async () => {
       render(<DeferredApprovalChip draftText="취소해줘" />);
     });
@@ -145,7 +129,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("does NOT auto-resolve when the negation modifies the approve verb (#690 safety)", async () => {
-    const api = installApi([makeEntry()]);
+    const api = installApi([makeDeferredQueueEntry()]);
     await act(async () => {
       render(<DeferredApprovalChip draftText="허용 안 함" />);
     });
@@ -184,8 +168,8 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("re-fetches pending queue at click time and aborts when the entry was swapped (round-1 security MAJOR-1)", async () => {
-    const initial = [makeEntry({ id: "queue-1", toolName: "bash" })];
-    const afterSwap = [makeEntry({ id: "queue-2", toolName: "shell" })];
+    const initial = [makeDeferredQueueEntry({ id: "queue-1", toolName: "bash" })];
+    const afterSwap = [makeDeferredQueueEntry({ id: "queue-2", toolName: "shell" })];
     let callCount = 0;
     const deferredList = vi.fn(async () => {
       callCount += 1;
@@ -211,7 +195,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("surfaces the entry source label so plugin-deferred entries are distinguishable (round-1 architect MAJOR-2)", async () => {
-    installApi([makeEntry({ source: "plugin", toolName: "work_assistant_email_scan" })]);
+    installApi([makeDeferredQueueEntry({ source: "plugin", toolName: "work_assistant_email_scan" })]);
     await act(async () => {
       render(<DeferredApprovalChip draftText="허용해 주세요" />);
     });
@@ -231,7 +215,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("surfaces the resolve error inline when the IPC call fails", async () => {
-    const pending = [makeEntry()];
+    const pending = [makeDeferredQueueEntry()];
     const deferredList = vi.fn(async () => ({ ok: true as const, pending, total: 1 }));
     const deferredResolve = vi.fn(async () => ({ ok: false as const, error: "not-found" }));
     const onDeferredPending = vi.fn(() => () => undefined);
@@ -253,7 +237,7 @@ describe("DeferredApprovalChip", () => {
 });
 
 describe("DeferredApprovalChip — what the approval grants", () => {
-  async function renderChip(draftText: string, entry = makeEntry()) {
+  async function renderChip(draftText: string, entry = makeDeferredQueueEntry()) {
     const api = installApi([entry]);
     let container!: HTMLElement;
     await act(async () => {
@@ -311,13 +295,13 @@ describe("DeferredApprovalChip — what the approval grants", () => {
   });
 
   it("offers nothing when the entry has no grant to give", async () => {
-    const { container } = await renderChip("허용", makeEntry({ grant: undefined }));
+    const { container } = await renderChip("허용", makeDeferredQueueEntry({ grant: undefined }));
     expect(container.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
   });
 
   it("still offers rejection for an entry with no grant", async () => {
     // A rejection grants nothing, so the absence of a grant does not block it.
-    const { container } = await renderChip("거부", makeEntry({ grant: undefined }));
+    const { container } = await renderChip("거부", makeDeferredQueueEntry({ grant: undefined }));
     expect(container.querySelector('[data-testid="deferred-approval-chip"]')).not.toBeNull();
   });
 });

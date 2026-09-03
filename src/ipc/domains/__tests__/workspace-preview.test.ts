@@ -4,6 +4,7 @@ import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 import { PLUGIN_SHELL_FRAME_URL } from "../../../__tests__/test-helpers.js";
+import { makeAppIpcFrameInvoker } from "./test-helpers.js";
 
 const {
   handlers,
@@ -86,11 +87,7 @@ const deps = {
   },
 } as never;
 
-function invoke(channel: string, url: string, ...args: unknown[]): Promise<unknown> {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`no handler for ${channel}`);
-  return Promise.resolve(fn({ senderFrame: { url } } as never, ...args));
-}
+const invoke = makeAppIpcFrameInvoker(handlers);
 
 const OK_FRAME = "file:///app/index.html";
 const EVIL_FRAME = "https://evil.example.com/x";

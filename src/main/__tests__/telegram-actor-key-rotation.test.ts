@@ -14,10 +14,9 @@
  * namespace, the real paired runtime — because the defect lived exactly in the
  * seam between them.
  */
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   SafeStorageSecretStore,
   type SafeStorageLike,
@@ -36,7 +35,7 @@ import {
   telegramConversationDigest,
 } from "../telegram-platform-runtime.js";
 import { namespaceAt } from "./telegram-connection-namespace.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../__tests__/test-helpers.js";
 
 const OWNER_ID = "776655443322";
 const BOT_FINGERPRINT = "a".repeat(64);
@@ -44,18 +43,7 @@ const CONVERSATION_ID = "sentinel-conversation-shared-by-the-owner";
 const FILE_NAME = "connection.json";
 const CODE_DIGEST = "c".repeat(64);
 
-let directories: string[] = [];
-
-afterEach(async () => {
-  for (const directory of directories) await cleanupTmpDir(directory);
-  directories = [];
-});
-
-function tempDirectory(prefix: string): string {
-  const directory = mkdtempSync(join(tmpdir(), prefix));
-  directories.push(directory);
-  return directory;
-}
+const tempDirectory = useTempDirs("lvis-telegram-rotation-");
 
 /**
  * The real encrypted store, plus the one failure a memory-backed double cannot

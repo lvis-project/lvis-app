@@ -179,7 +179,7 @@ jobs:
       # `check:gate-core` is the one inventory of the gates both CI and the
       # pre-push hook (scripts/hooks/run-local-checks.mjs) run: the Knip
       # baseline, the duplicate-helper scan, the sunset ledger, the
-      # single-source shape ledger. The two callers
+      # single-source shape ledger, and the ASRT capability claims. The two callers
       # used to list them separately and had drifted. The gates below it are
       # CI-only on purpose — the Knip self-test, the screenshot-provenance
       # gate and its self-test cost more than a pre-push budget allows — and

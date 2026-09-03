@@ -1,25 +1,31 @@
-// #885 (b4) — shared reviewer-wired fixture. Extracted so the identical
-// `makePermissionManager` wiring lives in ONE place (check:test-duplicates
-// forbids byte-identical helper bodies across test files). Consumed by
-// executor-reviewer-explicit-retry.test.ts and executor-mcp-plugin-parity.test.ts.
+// The one reviewer-wired `PermissionManager` the executor suites build. Every
+// copy of this wiring named the same three files under `dir` and differed only
+// in the execution mode and the verdict the classifier returns, so both are
+// parameters and the rest is not.
 import { join } from "node:path";
 import { vi } from "vitest";
 
+import type { ExecutionMode } from "../../shared/permission-mode.js";
 import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
 import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 
 /**
- * A `PermissionManager` in `default` mode with low-tier interactive auto-approve
- * and a reviewer wired to the given `classify` spy (real VerdictCache +
- * DeferredQueue backed by files under `dir`).
+ * A `PermissionManager` with low-tier interactive auto-approve and a reviewer
+ * wired to the given `classify` spy (real VerdictCache + DeferredQueue backed
+ * by files under `dir`).
+ *
+ * `mode` is `default` for the suites that drive an approval prompt, and `auto`
+ * for the foreground-rationale suites, where the reviewer — not the prompt —
+ * is the thing under test.
  */
 export function makePermissionManager(
   dir: string,
   classifySpy: ReturnType<typeof vi.fn>,
+  mode: ExecutionMode = "default",
 ): PermissionManager {
   const permMgr = new PermissionManager(join(dir, "permissions.json"));
-  permMgr.setMode("default");
+  permMgr.setMode(mode);
   permMgr.setInteractiveAutoApprove("low");
   permMgr.setReviewer({
     classifier: { classify: classifySpy },

@@ -12,18 +12,16 @@
  * expired, genuinely truncated, genuinely signed by a key the build does not
  * trust — and the registry is then asked what it decides.
  */
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { admissionRegistry } from "../admission-registry.js";
 import type { AdmissionEntry } from "../admission-schema.js";
 import { SignedDocumentCache } from "../../signed-doc-cache.js";
-import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 const ANCHOR_KEY_ID = "admission-v1";
@@ -104,12 +102,7 @@ function source() {
   };
 }
 
-const tempRoots: string[] = [];
-function freshUserData(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-admission-test-"));
-  tempRoots.push(dir);
-  return dir;
-}
+const freshUserData = useTempDirs("lvis-admission-test-");
 
 beforeEach(async () => {
   admissionRegistry.resetForTesting();
@@ -133,10 +126,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-});
-
-afterAll(async () => {
-  for (const root of tempRoots) await cleanupTmpDir(root);
 });
 
 async function initAgainstServer(opts: { now?: number; online?: boolean } = {}) {

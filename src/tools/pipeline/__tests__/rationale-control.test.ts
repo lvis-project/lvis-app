@@ -21,6 +21,7 @@ import {
   type ActionIdentity,
   type RationaleEligibilityProvenance,
 } from "../rationale-control.js";
+import { createTestRequestAnchor } from "./rationale-fixtures.js";
 
 const eligiblePermission: PermissionCheckResult = {
   decision: "ask",
@@ -39,17 +40,14 @@ const eligibilityContext = {
 } as const;
 
 
-function createAnchor() {
-  const anchor = createRequestAnchor({
-    sessionId: "session-1",
-    turnId: "turn-1",
-    inputMessageId: "message-1",
-    inputOrigin: "user-keyboard",
-    rawIntent: "프로젝트의 빌드 산출물을 정리해줘",
-  });
-  if (!anchor) throw new Error("expected a valid anchor");
-  return anchor;
-}
+const CONTROL_ANCHOR = {
+  sessionId: "session-1",
+  turnId: "turn-1",
+  inputMessageId: "message-1",
+  rawIntent: "프로젝트의 빌드 산출물을 정리해줘",
+} as const;
+
+const createAnchor = () => createTestRequestAnchor(CONTROL_ANCHOR);
 
 function createAction(
   anchorId: string,

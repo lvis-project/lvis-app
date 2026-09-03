@@ -9,8 +9,10 @@ import { SETTINGS_TABS } from "../../src/shared/settings-tabs.js";
 import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
 import type { ToolActivityState } from "../../src/ui/renderer/components/ToolActivity.js";
 import { ApprovalSurfaceClaims, type ApprovalSurfaceContextValue } from "../../src/ui/renderer/hooks/use-approval.js";
+import type { DeferredQueueEntry } from "../../src/ui/renderer/types.js";
 import { expect, vi } from "vitest";
 export { relativeLuminance } from "../contrast-helpers.js";
+export { deferred } from "../../src/__tests__/test-helpers.js";
 
 /**
  * An approval surface with nothing pending, for components that draw their
@@ -178,12 +180,28 @@ export async function focusTile(tile: RenderedTile): Promise<void> {
   });
 }
 
-export function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
+/**
+ * A deferred permission-queue entry as the renderer receives it, in the
+ * out-of-allowed-dir write lane both queue surfaces draw. Approval is only
+ * offered for an entry that records something to grant, so the fixture carries
+ * that lane's directory grant; a suite exercising a non-grantable entry passes
+ * `{ grant: undefined }`.
+ */
+export function makeDeferredQueueEntry(
+  overrides: Partial<DeferredQueueEntry> = {},
+): DeferredQueueEntry {
+  return {
+    id: "id-1",
+    ts: "2026-05-09T13:00:00.000Z",
+    toolName: "fs_write",
+    source: "builtin",
+    category: "write",
+    inputSummary: '{"path":"<redacted>"}',
+    verdict: { level: "high", reason: "write outside allowed dirs" },
+    grant: { kind: "directory", path: "/srv/app/data" },
+    status: "pending",
+    ...overrides,
+  };
 }
 
 /**

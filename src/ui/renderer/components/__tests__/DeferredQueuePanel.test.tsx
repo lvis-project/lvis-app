@@ -4,24 +4,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { DeferredQueuePanel } from "../permissions/DeferredQueuePanel.js";
 import type { DeferredQueueEntry } from "../../types.js";
+import { makeDeferredQueueEntry } from "../../../../../test/renderer/helpers.js";
 
 type DeferredEntry = DeferredQueueEntry;
 
-function makeEntry(overrides: Partial<DeferredEntry> = {}): DeferredEntry {
-  return {
-    id: "id-1",
-    ts: "2026-05-09T13:00:00.000Z",
-    toolName: "fs_write",
-    source: "builtin",
-    category: "write",
-    inputSummary: '{"path":"<redacted>"}',
-    verdict: { level: "high", reason: "write outside allowed dirs" },
-    // Approval is only offered when the entry records something to grant.
-    grant: { kind: "directory", path: "/srv/app/data" },
-    status: "pending",
-    ...overrides,
-  };
-}
 
 function installApi(opts: {
   entries: DeferredEntry[];
@@ -95,7 +81,7 @@ describe("DeferredQueuePanel", () => {
   });
 
   it("renders pending entries on mount", async () => {
-    installApi({ entries: [makeEntry()] });
+    installApi({ entries: [makeDeferredQueueEntry()] });
     await act(async () => {
       render(<DeferredQueuePanel />);
     });
@@ -108,7 +94,7 @@ describe("DeferredQueuePanel", () => {
 
   it("renders captured evaluation context for deferred headless actions", async () => {
     installApi({
-      entries: [makeEntry({
+      entries: [makeDeferredQueueEntry({
         category: "shell",
         inputSummary: '{"command":"./update-all.sh"}',
         evaluationContext: {
@@ -139,7 +125,7 @@ describe("DeferredQueuePanel", () => {
   it.each([
     [
       "read",
-      makeEntry({
+      makeDeferredQueueEntry({
         category: "read",
         inputSummary: '{"path":"/workspace/a.txt","scope":"workspace"}',
       }),
@@ -147,7 +133,7 @@ describe("DeferredQueuePanel", () => {
     ],
     [
       "write",
-      makeEntry({
+      makeDeferredQueueEntry({
         category: "write",
         inputSummary: '{"path":"/workspace/a.txt","operation":"append"}',
       }),
@@ -155,7 +141,7 @@ describe("DeferredQueuePanel", () => {
     ],
     [
       "network",
-      makeEntry({
+      makeDeferredQueueEntry({
         category: "network",
         inputSummary: '{"endpoint":"https://graph.microsoft.com/v1.0/me","method":"GET","scope":"User.Read"}',
       }),
@@ -163,7 +149,7 @@ describe("DeferredQueuePanel", () => {
     ],
     [
       "shell",
-      makeEntry({
+      makeDeferredQueueEntry({
         category: "shell",
         inputSummary: '{"command":"./update-all.sh --no-prompt","cwd":"/workspace"}',
       }),
@@ -181,7 +167,7 @@ describe("DeferredQueuePanel", () => {
 
   it("resolve('approved') invokes IPC then refreshes", async () => {
     const api = installApi({
-      entries: [makeEntry({ id: "abc-123" })],
+      entries: [makeDeferredQueueEntry({ id: "abc-123" })],
     });
     await act(async () => {
       render(<DeferredQueuePanel />);
@@ -197,7 +183,7 @@ describe("DeferredQueuePanel", () => {
 
   it("resolve('rejected') uses 거부 button", async () => {
     const api = installApi({
-      entries: [makeEntry({ id: "xyz-789" })],
+      entries: [makeDeferredQueueEntry({ id: "xyz-789" })],
     });
     await act(async () => {
       render(<DeferredQueuePanel />);
@@ -210,7 +196,7 @@ describe("DeferredQueuePanel", () => {
   });
 
   it("subscribes to deferred-pending event", async () => {
-    const api = installApi({ entries: [makeEntry()] });
+    const api = installApi({ entries: [makeDeferredQueueEntry()] });
     await act(async () => {
       render(<DeferredQueuePanel />);
     });
@@ -220,8 +206,8 @@ describe("DeferredQueuePanel", () => {
   it("renders one active card for multiple pending entries", async () => {
     installApi({
       entries: [
-        makeEntry({ id: "a" }),
-        makeEntry({ id: "b", toolName: "shell_run", category: "shell" }),
+        makeDeferredQueueEntry({ id: "a" }),
+        makeDeferredQueueEntry({ id: "b", toolName: "shell_run", category: "shell" }),
       ],
     });
     await act(async () => {
@@ -235,7 +221,7 @@ describe("DeferredQueuePanel", () => {
 
   it("surfaces deferredResolve rejection and still refreshes", async () => {
     const api = installApi({
-      entries: [makeEntry({ id: "err-1" })],
+      entries: [makeDeferredQueueEntry({ id: "err-1" })],
       resolveRejects: new Error("resolve failed"),
     });
     await act(async () => {

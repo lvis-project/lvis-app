@@ -6,7 +6,6 @@ import {
   ApprovalGate,
   approvalAnswererAuditToken,
   consumeHostApprovedOneShotExecutionBinding,
-  IPC_APPROVAL_REQUEST,
   IPC_APPROVAL_SETTLED,
   isHostApprovalRejectedDecision,
   isHostApprovalTimeoutDecision,
@@ -38,6 +37,7 @@ import {
   makeTestPolicy,
   auditRowStartingWith,
 } from "./test-helpers.js";
+import { sentApprovalCards } from "../../__tests__/test-helpers.js";
 
 // ─── Mock WebContents ─────────────────────────────────
 
@@ -115,24 +115,11 @@ function lastSentNonceHmac(wc: ReturnType<typeof makeMockWebContents>): {
   nonce: string;
   hmac: string;
 } {
-  const cards = sentApprovalRequests(wc);
+  const cards = sentApprovalCards<ApprovalRequest>(wc);
   const last = cards[cards.length - 1]!;
   return { nonce: last.nonce as string, hmac: last.hmac as string };
 }
 
-/**
- * The cards the gate sent, in order. Selected by channel: the same
- * webContents also carries settlement announcements, and an index into the
- * raw call log would read one of those as a card.
- */
-function sentApprovalRequests(
-  wc: ReturnType<typeof makeMockWebContents>,
-): ApprovalRequest[] {
-  return wc.send.mock.calls
-    .map((call) => call as unknown as [string, ApprovalRequest])
-    .filter(([channel]) => channel === IPC_APPROVAL_REQUEST)
-    .map(([, payload]) => payload);
-}
 
 /** The request ids the gate announced as no longer answerable, in order. */
 function announcedSettledIds(
@@ -747,7 +734,7 @@ describe("ApprovalGate", () => {
     // 첫 번째 request — strict
     const req1 = makeRequest({ id: "req-before" });
     gate.requestAndWait(req1);
-    expect(sentApprovalRequests(wc)[0]!.requireExplicit).toBe(true);
+    expect(sentApprovalCards<ApprovalRequest>(wc)[0]!.requireExplicit).toBe(true);
     gate.resolve(req1.id, { requestId: req1.id, choice: "deny-once" });
 
     // policy 교체
@@ -757,7 +744,7 @@ describe("ApprovalGate", () => {
     // 두 번째 request — lenient
     const req2 = makeRequest({ id: "req-after" });
     gate.requestAndWait(req2);
-    expect(sentApprovalRequests(wc)[1]!.requireExplicit).toBe(false);
+    expect(sentApprovalCards<ApprovalRequest>(wc)[1]!.requireExplicit).toBe(false);
     gate.resolve(req2.id, { requestId: req2.id, choice: "allow-once" });
   });
 
@@ -2892,7 +2879,7 @@ describe("ApprovalGate", () => {
       const { wc, gate } = makeAuditingGate();
       const turn = new AbortController();
       const parked = gate.requestAndWait(makeAbortableRequest(turn.signal));
-      expect(sentApprovalRequests(wc).map((req) => req.id)).toEqual(["abort-1"]);
+      expect(sentApprovalCards<ApprovalRequest>(wc).map((req) => req.id)).toEqual(["abort-1"]);
       expect(announcedSettledIds(wc)).toEqual([]);
 
       turn.abort(new Error("tile closed"));

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ensureLvisHomePrivate, lvisHome, win32SystemBinary } from "../lvis-home.js";
-import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { useTempPaths } from "../../__tests__/test-helpers.js";
 
 const originalLvisHome = process.env.LVIS_HOME;
 
@@ -41,17 +41,7 @@ describe("win32SystemBinary", () => {
 });
 
 describe("ensureLvisHomePrivate", () => {
-  const created: string[] = [];
-
-  function home(): string {
-    const dir = mkdtempSync(join(tmpdir(), "lvis-home-privacy-"));
-    created.push(dir);
-    return join(dir, ".lvis");
-  }
-
-  afterEach(async () => {
-    for (const dir of created.splice(0)) await cleanupTmpDir(dir);
-  });
+  const home = useTempPaths("lvis-home-privacy-", ".lvis");
 
   it("creates the home directory with owner-only POSIX permissions", () => {
     const dir = home();

@@ -9,16 +9,15 @@ import { HookRunner } from "../../hooks/hook-runner.js";
 import type { ScriptHookManager } from "../../hooks/script-hook-manager.js";
 import type { ApprovalGate } from "../../permissions/approval-gate.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
-import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
-import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
+import { makePermissionManager } from "./executor-reviewer-fixtures.js";
 import { createDynamicTool } from "../base.js";
 import {
   RATIONALE_UNKNOWN_SCOPE_SENTINEL,
   InMemoryHostAnchorRoundCasStore,
   createActionIdentity,
   createRationaleRequiredControl,
-  createRequestAnchor,
 } from "../pipeline/rationale-control.js";
+import { createTestRequestAnchor } from "../pipeline/__tests__/rationale-fixtures.js";
 import { createRationaleExecutorControlOutcome } from "../pipeline/rationale-pr1-contract.js";
 import { createSealedRationaleResumeRequest } from "../pipeline/rationale-resume-contract.js";
 import type {
@@ -51,20 +50,13 @@ const permissionContext = {
   userIntent: "Perform the requested operation.",
 };
 
-function requestAnchor() {
-  const anchor = createRequestAnchor({
+function hostRuntime(): RationaleHostRuntime {
+  const anchor = createTestRequestAnchor({
     sessionId: "ef975fd1-380d-4acf-8e50-7f1535885ebc",
     turnId: "turn-rationale-resume",
     inputMessageId: "message-rationale-resume",
-    inputOrigin: "user-keyboard",
     rawIntent: "Perform the requested write operation.",
   });
-  if (!anchor) throw new Error("test request anchor was not created");
-  return anchor;
-}
-
-function hostRuntime(): RationaleHostRuntime {
-  const anchor = requestAnchor();
   const anchorCas = new InMemoryHostAnchorRoundCasStore();
   return {
     requestAnchor: anchor,
@@ -141,22 +133,12 @@ function hostRuntime(): RationaleHostRuntime {
   };
 }
 
-function reviewerManager(directory: string): PermissionManager {
-  const manager = new PermissionManager(join(directory, "permissions.json"));
-  manager.setMode("auto");
-  manager.setInteractiveAutoApprove("low");
-  manager.setReviewer({
-    classifier: {
-      classify: vi.fn(() => ({
-        level: "medium" as const,
-        reason: "requires rationale",
-      })),
-    },
-    cache: new VerdictCache(join(directory, "reviewer-cache.jsonl")),
-    deferredQueue: new DeferredQueue(join(directory, "deferred-queue.jsonl")),
-  });
-  return manager;
-}
+const reviewerManager = (directory: string): PermissionManager =>
+  makePermissionManager(
+    directory,
+    vi.fn(() => ({ level: "medium" as const, reason: "requires rationale" })),
+    "auto",
+  );
 
 function createScriptHooks(order: string[]): ScriptHookManager {
   const allow = () => ({
