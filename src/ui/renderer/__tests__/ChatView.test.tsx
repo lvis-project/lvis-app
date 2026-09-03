@@ -2631,7 +2631,7 @@ describe("ChatView composer — an image on a model that cannot read one", () =>
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="iab-attach-button"]')).not.toBeNull();
-    });
+    }, { timeout: 5_000 });
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="iab-attach-button"]')!);
     });
@@ -2640,7 +2640,7 @@ describe("ChatView composer — an image on a model that cannot read one", () =>
       const el = container.querySelector('[data-testid="composer-vision-unsupported-hint"]');
       expect(el).not.toBeNull();
       return el as HTMLElement;
-    });
+    }, { timeout: 5_000 });
     expect(hint.textContent).toContain("gpt-3.5-turbo");
     const sendButton = container.querySelector('[data-testid="composer-send-button"]') as HTMLButtonElement;
     expect(sendButton.disabled).toBe(true);

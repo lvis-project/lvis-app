@@ -29,7 +29,6 @@ import type { DenyRule } from "./types.js";
 import { compareSemver } from "../shared/semver-compare.js";
 import { createLogger } from "../lib/logger.js";
 
-export { compareSemver };
 const log = createLogger("tool-registry");
 
 /**

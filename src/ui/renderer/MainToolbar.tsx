@@ -1,7 +1,6 @@
 import { ArrowDownToLine, Download, RefreshCw, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { ViewPathBreadcrumb, type ViewPathNavProps } from "./components/ViewPathNav.js";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
 import { RemoteA2AActionButton } from "./components/RemoteA2AActionButton.js";
 import { ToolbarStatusPill } from "./components/ToolbarStatusPill.js";
@@ -170,24 +169,18 @@ export function MainToolbar({
           the mode toggle at the far-right end. */}
       {isDevMode() && onOpenDevTools !== undefined && (
         <NoDrag className="hidden sm:inline-flex">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-(--chrome-control-height) gap-1 px-2 text-[10.5px] font-mono text-warning"
-                onClick={onOpenDevTools}
-                title={t("mainToolbar.devToolsTitle")}
-                aria-label={t("mainToolbar.devToolsTitle")}
-                data-testid="dev-tools-toggle"
-              >
-                <Wrench className="h-3 w-3" />
-                <span>Dev</span>
-                <kbd className="rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) px-1 text-[9.5px]">⇧⌘D</kbd>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("mainToolbar.devToolsTooltip")}</TooltipContent>
-          </Tooltip>
+          <ToolbarStatusPill
+            tone="warning"
+            icon={Wrench}
+            label="Dev"
+            title={t("mainToolbar.devToolsTooltip")}
+            ariaLabel={t("mainToolbar.devToolsTitle")}
+            trailing={
+              <kbd className="rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) px-1 text-[9.5px]">⇧⌘D</kbd>
+            }
+            onClick={onOpenDevTools}
+            testId="dev-tools-toggle"
+          />
         </NoDrag>
       )}
 

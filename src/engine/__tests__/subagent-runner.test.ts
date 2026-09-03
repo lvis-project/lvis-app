@@ -148,6 +148,14 @@ function buildLoopDeps(toolRegistry: ToolRegistry) {
       setToolScope: () => undefined,
       setOriginSource: () => undefined,
       setActiveSessionId: () => undefined,
+      // The runner never shares the parent builder with a child, so the double
+      // hands back a separate one of the same shape.
+      createIsolated: () => ({
+        build: () => "system",
+        setToolScope: () => undefined,
+        setOriginSource: () => undefined,
+        setActiveSessionId: () => undefined,
+      }),
     },
     inputClassifier,
     routeEngine,
