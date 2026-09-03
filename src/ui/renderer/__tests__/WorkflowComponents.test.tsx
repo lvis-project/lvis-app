@@ -155,9 +155,9 @@ describe("AskUserQuestionCard — single question", () => {
     expect(altBadges[0]?.closest("button")?.textContent).toContain("C");
   });
 
-  it("does not render a manual input for legacy free-text metadata", async () => {
+  it("renders the free-text field with its placeholder when the question asks for one", async () => {
     const api = fakeApi();
-    const { queryByTestId, queryByPlaceholderText } = render(
+    const { getByTestId, getByPlaceholderText } = render(
       <AskUserQuestionCard
         api={api}
         request={{
@@ -169,15 +169,14 @@ describe("AskUserQuestionCard — single question", () => {
               choices: ["A", "B"],
               allowFreeText: true,
               placeholder: "다른 방향을 한 줄로",
-            } as never,
+            },
           ],
           createdAt: 0,
         }}
         onResolved={vi.fn()}
       />,
     );
-    expect(queryByTestId("ask-freetext-input")).toBeNull();
-    expect(queryByPlaceholderText("다른 방향을 한 줄로")).toBeNull();
+    expect(getByPlaceholderText("다른 방향을 한 줄로")).toBe(getByTestId("ask-freetext-input"));
   });
 
   it("dismiss surfaces dismissed:true with no answers", async () => {

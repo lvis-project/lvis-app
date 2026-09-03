@@ -46,7 +46,7 @@ async function ensureQuestionOverlayVisible(
 }
 
 test.describe('ask_user_question overlay layout', () => {
-  test('choice list follows the question and no manual input is rendered', async ({ app, mainWindow }) => {
+  test('choice list follows the question and a choice-only question draws no input', async ({ app, mainWindow }) => {
     const visible = await ensureQuestionOverlayVisible(app, mainWindow, 'e2e-question-order', {
       question: '기간과 언어를 선택하세요.',
       choices: ['최근 24시간 / 한국어', '최근 7일 / 한국어', '최근 30일 / 영어(글로벌)'],

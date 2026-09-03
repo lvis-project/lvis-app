@@ -34,6 +34,7 @@ import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
+import type { AgentsDocMergeService } from "../memory/agents-doc-merge-service.js";
 import type { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../memory/memory-consolidation-service.js";
 import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
 import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
@@ -201,6 +202,8 @@ export interface AppServices {
   skillArtifactStore?: import("../plugins/plugin-artifact-store.js").PluginArtifactStore;
   idleScheduler?: IdleSchedulerService;
   preferenceRefreshService?: PreferenceRefreshService;
+  /** Reviewer-backed merge of the packaged agent context with the user's own. */
+  agentsDocMergeService?: AgentsDocMergeService;
   memoryConsolidationService?: MemoryConsolidationService;
   memoryMaintenanceCoordinator?: MemoryMaintenanceCoordinator;
   bashAstValidator: BashAstValidator;

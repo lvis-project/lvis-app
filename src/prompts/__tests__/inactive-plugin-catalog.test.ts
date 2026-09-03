@@ -24,6 +24,7 @@ function makeBuilder(cards: Array<{
   return new SystemPromptBuilder({
     memoryManager: {
       getAgentsMd: () => "",
+      getAgentsCustomMd: () => "",
       getMemoryIndex: () => "",
       getUserPreferences: () => "",
       getMemoryContext: () => "",

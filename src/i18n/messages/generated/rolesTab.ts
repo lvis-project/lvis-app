@@ -21,6 +21,29 @@ export const en = {
   "rolesTab.savingLabel": "Saving...",
   "rolesTab.saveAgentsButton": "Save AGENTS.md",
 
+  // Agents section — packaged updates and the keep-latest split
+  "rolesTab.keepLatestLabel": "Always keep the latest",
+  "rolesTab.keepLatestHint":
+    "AGENTS.md stays on the shipped version, your own content moves to agents.custom.md, and every turn reads it after AGENTS.md.",
+  "rolesTab.packagedBadge": "Shipped",
+  "rolesTab.upgradeMarkersTitle": "{count} update(s) waiting",
+  "rolesTab.markerReadOnlyNote": "Review this file directly.",
+  "rolesTab.viewDiffButton": "View difference",
+  "rolesTab.applyPackagedButton": "Apply shipped version",
+  "rolesTab.keepMineButton": "Keep mine",
+  "rolesTab.mergeButton": "Refresh",
+  "rolesTab.mergingLabel": "Merging...",
+  "rolesTab.mergedTitle": "Merged result — review before applying",
+  "rolesTab.applyMergedButton": "Apply",
+  "rolesTab.discardMergedButton": "Discard",
+  "rolesTab.statusPackagedApplied": "Applied the shipped version.",
+  "rolesTab.statusPackagedAppliedWithCustom":
+    "Applied the shipped version. Your own content moved to agents.custom.md.",
+  "rolesTab.statusKeptMine": "Kept your version and dismissed the update.",
+  "rolesTab.statusMerged": "Merge ready. Review it before applying.",
+  "rolesTab.statusMergedApplied": "Applied the merged document.",
+  "rolesTab.statusMergedDiscarded": "Discarded the merged document.",
+
   // Memory section
   "rolesTab.quickMemoryPlaceholder": "Urgent memory (approx. 500 characters)",
   "rolesTab.referenceLinkPlaceholder": "Reference links",
@@ -92,6 +115,29 @@ export const ko: Record<keyof typeof en, string> = {
   // Agents section
   "rolesTab.savingLabel": "저장 중...",
   "rolesTab.saveAgentsButton": "AGENTS.md 저장",
+
+  // Agents section — packaged updates and the keep-latest split
+  "rolesTab.keepLatestLabel": "항상 최신 내용 유지",
+  "rolesTab.keepLatestHint":
+    "AGENTS.md 는 배포본을 유지하고, 사용자가 쓴 내용은 agents.custom.md 로 옮겨집니다. 매 턴 AGENTS.md 다음에 이 파일을 읽습니다.",
+  "rolesTab.packagedBadge": "배포본",
+  "rolesTab.upgradeMarkersTitle": "업그레이드 안내 {count}건",
+  "rolesTab.markerReadOnlyNote": "이 파일은 직접 열어 확인하세요.",
+  "rolesTab.viewDiffButton": "차이 보기",
+  "rolesTab.applyPackagedButton": "배포본 적용",
+  "rolesTab.keepMineButton": "내 것 유지",
+  "rolesTab.mergeButton": "갱신하기",
+  "rolesTab.mergingLabel": "병합 중...",
+  "rolesTab.mergedTitle": "병합 결과 — 적용 전에 확인하세요",
+  "rolesTab.applyMergedButton": "적용",
+  "rolesTab.discardMergedButton": "버리기",
+  "rolesTab.statusPackagedApplied": "배포본을 적용했습니다.",
+  "rolesTab.statusPackagedAppliedWithCustom":
+    "배포본을 적용했습니다. 사용자가 쓴 내용은 agents.custom.md 로 옮겼습니다.",
+  "rolesTab.statusKeptMine": "기존 내용을 유지하고 안내를 지웠습니다.",
+  "rolesTab.statusMerged": "병합 결과가 준비됐습니다. 확인 후 적용하세요.",
+  "rolesTab.statusMergedApplied": "병합한 문서를 적용했습니다.",
+  "rolesTab.statusMergedDiscarded": "병합한 문서를 버렸습니다.",
 
   // Memory section
   "rolesTab.quickMemoryPlaceholder": "긴급 기억 (500자 내외)",

@@ -1130,11 +1130,11 @@ function askUserAnswerEntryFromTool(
         typeof record.choice === "string" && record.choice.trim().length > 0
           ? [record.choice.trim()]
           : selectedChoices;
-      const legacyFreeText =
+      const freeText =
         typeof record.freeText === "string" && record.freeText.trim().length > 0
-          ? [record.freeText.trim()]
-          : [];
-      const value = [...primaryChoices, ...legacyFreeText].join(", ");
+          ? record.freeText.trim()
+          : undefined;
+      const value = formatAskUserAnswer(primaryChoices, freeText);
       if (!value) return null;
       return {
         label: answerLabel(questions[index], index),
@@ -1149,6 +1149,26 @@ function askUserAnswerEntryFromTool(
     sourceToolUseId: tool.toolUseId,
     rows,
   };
+}
+
+/**
+ * Render one `ask_user_question` answer as a single line, for the transcript
+ * recap row and the card's confirm-step review.
+ *
+ * Each half is labelled because a picked label and a typed sentence are
+ * different kinds of thing: joining them into one comma list reads as a longer
+ * selection and loses which part the user wrote. Returns `""` when the answer
+ * carries neither, so the caller can drop the row.
+ */
+export function formatAskUserAnswer(choices: string[], freeText?: string): string {
+  const parts: string[] = [];
+  if (choices.length > 0) {
+    parts.push(`${t("askUserQuestionCard.answerChoicePrefix")}: ${choices.join(", ")}`);
+  }
+  if (freeText && freeText.trim().length > 0) {
+    parts.push(`${t("askUserQuestionCard.answerFreeTextPrefix")}: ${freeText.trim()}`);
+  }
+  return parts.join(" / ");
 }
 
 function extractAskQuestions(input: ToolEntryItem["input"]): Array<{ question?: string; summaryHint?: string }> {

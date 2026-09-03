@@ -316,12 +316,15 @@ describe("chat-stream-state", () => {
           {
             question: "몇 개로 정리할까요?",
             summaryHint: "개수",
+            choices: [],
+            allowFreeText: true,
           },
           {
             question: "관심 분야는요?",
             summaryHint: "분야",
             choices: ["AI", "보안", "UX"],
             allowMultiple: true,
+            allowFreeText: true,
           },
         ],
       },
@@ -344,10 +347,12 @@ describe("chat-stream-state", () => {
     expect(entries[2]).toMatchObject({
       kind: "ask_user_answer",
       sourceToolUseId: "ask-1",
+      // Each half is labelled: a picked chip and a typed sentence read as
+      // different kinds of answer rather than one longer selection.
       rows: [
-        { label: "범위", value: "IT/경제" },
-        { label: "개수", value: "10개" },
-        { label: "분야", value: "AI, UX, 기타 도구" },
+        { label: "범위", value: "선택: IT/경제" },
+        { label: "개수", value: "입력: 10개" },
+        { label: "분야", value: "선택: AI, UX / 입력: 기타 도구" },
       ],
     });
   });

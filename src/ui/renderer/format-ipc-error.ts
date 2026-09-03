@@ -129,6 +129,21 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "subscription-logout-not-supported": "formatIpcError.subscriptionLogoutNotSupported",
   "subscription-provider-not-supported": "formatIpcError.subscriptionProviderNotSupported",
 
+  // ── ~/.lvis reference docs (home-docs.ts) ──
+  // A marker path is a handle the surface received from the host and handed
+  // straight back, so a rejected one means the offer was answered elsewhere —
+  // not that the user typed something wrong. Both codes therefore say the same
+  // thing to the reader.
+  "unknown-upgrade-marker": "formatIpcError.unknownUpgradeMarker",
+  "invalid-marker-path": "formatIpcError.unknownUpgradeMarker",
+  "unsupported-upgrade-target": "formatIpcError.unsupportedUpgradeTarget",
+  "home-doc-apply-failed": "formatIpcError.homeDocApplyFailed",
+  "nothing-to-merge": "formatIpcError.nothingToMerge",
+  "no-merge-artifact": "formatIpcError.noMergeArtifact",
+  "agents-doc-changed": "formatIpcError.agentsDocChanged",
+  "agents-doc-merge-unavailable": "formatIpcError.agentsDocMergeUnavailable",
+  "agents-doc-merge-failed": "formatIpcError.agentsDocMergeFailed",
+
   // ── Preview / workspace file-read (preview.ts, workspace.ts) ──
   "not-a-file": "formatIpcError.notAFile",
   "not-a-dir": "formatIpcError.notADirectory",

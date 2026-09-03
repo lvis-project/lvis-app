@@ -33,6 +33,7 @@ export function makeConversationLoopMemoryManager(
   return {
     listSessions: () => Object.keys(sessions).map((id) => ({ id, modifiedAt: new Date() })),
     getAgentsMd: () => "",
+    getAgentsCustomMd: () => "",
     getMemoryIndex: () => "",
     getUserPreferences: () => "",
     loadSession: (id: string) => sessions[id] ?? null,
