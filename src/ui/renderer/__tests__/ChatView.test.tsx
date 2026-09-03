@@ -2629,11 +2629,18 @@ describe("ChatView composer — an image on a model that cannot read one", () =>
       openExternal: vi.fn(async () => ({ ok: true })),
     };
 
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="iab-attach-button"]')).not.toBeNull();
+    // The attach button mounts before the composer's inputs are ready (settings
+    // load, subscription-runtime probe) and is natively disabled until then; a
+    // click on the disabled button is dropped, so wait for the enabled state,
+    // not merely for the element.
+    const attachButton = await waitFor(() => {
+      const el = container.querySelector('[data-testid="iab-attach-button"]') as HTMLButtonElement | null;
+      expect(el).not.toBeNull();
+      expect(el!.disabled).toBe(false);
+      return el!;
     }, { timeout: 5_000 });
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="iab-attach-button"]')!);
+      fireEvent.click(attachButton);
     });
 
     const hint = await waitFor(() => {
