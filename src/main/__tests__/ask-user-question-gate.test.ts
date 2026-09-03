@@ -13,6 +13,7 @@ import {
   AskUserQuestionGate,
   IPC_ASK_USER_QUESTION_TIMEOUT,
 } from "../ask-user-question-gate.js";
+import { MAX_FREE_TEXT_LENGTH } from "../../shared/ask-user-question-limits.js";
 import { makeMockWebContents } from "../../__tests__/test-helpers.js";
 
 /** Convenience — most tests only care about the wait/abort/timeout shape. */
@@ -319,9 +320,11 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     );
     const requestId = (reqCall![1] as { id: string }).id;
 
+    // Neither question asked for a typed answer, so text is not an answer
+    // channel the renderer may open on its own.
     expect(gate.resolve({
       requestId,
-      answers: [{ freeText: "수기 응답" }, { choices: ["AI"] }] as never,
+      answers: [{ freeText: "수기 응답" }, { choices: ["AI"] }],
     })).toBe(false);
     expect(gate.resolve({
       requestId,
@@ -342,5 +345,95 @@ describe("AskUserQuestionGate — multi-question contract", () => {
       answers: [{ choice: "부산" }, { choices: ["AI", "UX"] }],
     });
     expect(gate.pendingCount).toBe(0);
+  });
+
+  it("carries allowFreeText and its placeholder into the renderer request", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+
+    const slot = gate.ask({
+      sessionId: "session-1",
+      questions: [
+        { question: "몇 개?", choices: [], allowFreeText: true, placeholder: "숫자" },
+        // A placeholder without the field it belongs to has nothing to sit in.
+        { question: "언제?", choices: ["오늘"], placeholder: "무시됨" },
+      ],
+    });
+
+    const reqCall = wc.send.mock.calls.find(
+      (c) => c[0] === "lvis:ask-user-question:request",
+    );
+    expect(reqCall![1]).toMatchObject({
+      questions: [
+        { choices: [], allowFreeText: true, placeholder: "숫자" },
+        { choices: ["오늘"] },
+      ],
+    });
+    const second = (reqCall![1] as { questions: Array<Record<string, unknown>> }).questions[1];
+    expect(second.allowFreeText).toBeUndefined();
+    expect(second.placeholder).toBeUndefined();
+
+    gate.disposeAll();
+    await slot;
+  });
+
+  it("rejects a question that offers neither choices nor a typed answer", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+
+    await expect(
+      gate.ask({ sessionId: "session-1", questions: [{ question: "Pick", choices: [] }] }),
+    ).resolves.toMatchObject({ dismissed: true });
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("admits a typed answer only where the question asked for one, trimmed and capped", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+
+    const slot = gate.ask({
+      sessionId: "session-1",
+      questions: [
+        { question: "몇 개?", choices: [], allowFreeText: true },
+        { question: "분야?", choices: ["AI", "UX"], allowMultiple: true, allowFreeText: true },
+      ],
+    });
+    const reqCall = wc.send.mock.calls.find(
+      (c) => c[0] === "lvis:ask-user-question:request",
+    );
+    const requestId = (reqCall![1] as { id: string }).id;
+
+    // Blank once trimmed is no answer at all.
+    expect(gate.resolve({
+      requestId,
+      answers: [{ freeText: "   " }, { choices: ["AI"] }],
+    })).toBe(false);
+    // Past the cap the text stops being an answer and becomes a payload.
+    expect(gate.resolve({
+      requestId,
+      answers: [{ freeText: "x".repeat(MAX_FREE_TEXT_LENGTH + 1) }, { choices: ["AI"] }],
+    })).toBe(false);
+    // The first question has no chips, so an empty multi-select with no text
+    // leaves it unanswered.
+    expect(gate.resolve({
+      requestId,
+      answers: [{ freeText: "10" }, {}],
+    })).toBe(false);
+    expect(gate.pendingCount).toBe(1);
+
+    expect(gate.resolve({
+      requestId,
+      answers: [
+        { freeText: "  10  " },
+        { choices: ["UX", "AI"], freeText: "직접 만든 도구" },
+      ],
+    })).toBe(true);
+    await expect(slot).resolves.toEqual({
+      requestId,
+      answers: [
+        { freeText: "10" },
+        { choices: ["AI", "UX"], freeText: "직접 만든 도구" },
+      ],
+    });
   });
 });

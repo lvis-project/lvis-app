@@ -4,6 +4,7 @@
 
 import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
+import { MAX_PLACEHOLDER_LENGTH } from "../shared/ask-user-question-limits.js";
 import {
   MAX_QUESTIONS_PER_CARD,
   type AskUserQuestionGate,
@@ -13,6 +14,32 @@ import {
 export interface AskUserQuestionToolDeps {
   getGate: () => AskUserQuestionGate | undefined;
 }
+
+/**
+ * Choice labels that name the input instead of an answer. Models reach for
+ * these whenever the real answer cannot be enumerated, and the card then draws
+ * a button reading "type here" that nobody can type into — the user's only way
+ * out is to pick a label that means nothing. Such a label is dropped and the
+ * question gets `allowFreeText` instead, which is the field it was asking for.
+ *
+ * The set stays this small on purpose: every entry names the act of entering
+ * text, so none of them can be an answer a user meant to pick. Matched after
+ * trimming and lower-casing.
+ */
+export const FREE_TEXT_STAND_IN_LABELS: readonly string[] = [
+  "입력",
+  "직접 입력",
+  "직접입력",
+  "기타",
+  "other",
+  "type…",
+  "type...",
+  "custom",
+];
+
+const FREE_TEXT_STAND_IN_SET = new Set(
+  FREE_TEXT_STAND_IN_LABELS.map((label) => label.toLowerCase()),
+);
 
 export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
   return createDynamicTool({
@@ -41,7 +68,6 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               choices: {
                 type: "array",
                 items: { type: "string", minLength: 1, maxLength: 20 },
-                minItems: 1,
                 maxItems: 3,
                 uniqueItems: true,
                 description: t("be_askUserQuestion.choicesDesc"),
@@ -61,6 +87,15 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               allowMultiple: {
                 type: "boolean",
                 description: t("be_askUserQuestion.allowMultipleDesc"),
+              },
+              allowFreeText: {
+                type: "boolean",
+                description: t("be_askUserQuestion.allowFreeTextDesc"),
+              },
+              placeholder: {
+                type: "string",
+                maxLength: MAX_PLACEHOLDER_LENGTH,
+                description: t("be_askUserQuestion.placeholderDesc"),
               },
               summaryHint: {
                 type: "string",
@@ -123,16 +158,15 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             isError: true,
           };
         }
-        if (!Array.isArray(q.choices) || q.choices.length === 0) {
+        if (!Array.isArray(q.choices)) {
           return {
             output: JSON.stringify({
-              error: "each question must provide at least one non-empty choice",
+              error: "each question must provide a choices array",
             }),
             isError: true,
           };
         }
         if (
-          q.choices.length > 3 ||
           q.choices.some(
             (choice) =>
               typeof choice !== "string" ||
@@ -142,12 +176,38 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
         ) {
           return {
             output: JSON.stringify({
-              error: "each question must provide 1 to 3 non-empty choices of at most 20 characters",
+              error: "each choice must be a non-empty string of at most 20 characters",
             }),
             isError: true,
           };
         }
-        const filteredChoices = (q.choices as string[]).map((choice) => choice.trim());
+        // Coerce a stand-in label into the field it was standing in for, then
+        // carry the surviving choices with their original positions so the
+        // recommend/alt badges still point at the chips the model meant.
+        const keptChoices = (q.choices as string[])
+          .map((choice, index) => ({ label: choice.trim(), index }))
+          .filter((entry) => !FREE_TEXT_STAND_IN_SET.has(entry.label.toLowerCase()));
+        const allowFreeText = q.allowFreeText === true || keptChoices.length !== q.choices.length;
+        const filteredChoices = keptChoices.map((entry) => entry.label);
+        const positionAfterCoercion = new Map(
+          keptChoices.map((entry, position) => [entry.index, position]),
+        );
+        if (filteredChoices.length > 3) {
+          return {
+            output: JSON.stringify({
+              error: "each question must provide at most 3 choices",
+            }),
+            isError: true,
+          };
+        }
+        if (filteredChoices.length === 0 && !allowFreeText) {
+          return {
+            output: JSON.stringify({
+              error: "each question must offer an answer — provide choices[] or set allowFreeText:true",
+            }),
+            isError: true,
+          };
+        }
         if (new Set(filteredChoices).size !== filteredChoices.length) {
           return {
             output: JSON.stringify({
@@ -161,26 +221,30 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
         // 추가 dedup 불필요.
         const recIdxRaw = q.recommendedIndex;
         const recommendedIndex =
-          typeof recIdxRaw === "number" &&
-          Number.isInteger(recIdxRaw) &&
-          recIdxRaw >= 0 &&
-          filteredChoices &&
-          recIdxRaw < filteredChoices.length
-            ? recIdxRaw
+          typeof recIdxRaw === "number" && Number.isInteger(recIdxRaw)
+            ? positionAfterCoercion.get(recIdxRaw)
             : undefined;
         // altIndices: dedupe, drop the recommend slot, keep in-range only.
         const altIndices = (() => {
-          if (!Array.isArray(q.altIndices) || !filteredChoices) return undefined;
+          if (!Array.isArray(q.altIndices)) return undefined;
           const seen = new Set<number>();
           for (const v of q.altIndices) {
             if (typeof v !== "number") continue;
             if (!Number.isInteger(v)) continue;
-            if (v < 0 || v >= filteredChoices.length) continue;
-            if (v === recommendedIndex) continue;
-            seen.add(v);
+            const position = positionAfterCoercion.get(v);
+            if (position === undefined) continue;
+            if (position === recommendedIndex) continue;
+            seen.add(position);
           }
           return seen.size > 0 ? [...seen] : undefined;
         })();
+        const placeholderRaw = typeof q.placeholder === "string" ? q.placeholder.trim() : "";
+        const placeholder =
+          allowFreeText &&
+          placeholderRaw.length > 0 &&
+          placeholderRaw.length <= MAX_PLACEHOLDER_LENGTH
+            ? placeholderRaw
+            : undefined;
         const summaryHint =
           typeof q.summaryHint === "string" && q.summaryHint.trim().length > 0
             ? q.summaryHint.trim()
@@ -189,17 +253,15 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
         // the field has no surface to apply to. Emit `true` only when on so
         // the absence is a clean undefined for downstream equality checks.
         const allowMultiple =
-          q.allowMultiple === true &&
-          filteredChoices !== undefined &&
-          filteredChoices.length > 0
-            ? true
-            : undefined;
+          q.allowMultiple === true && filteredChoices.length > 0 ? true : undefined;
         questions.push({
           question,
           choices: filteredChoices,
           recommendedIndex,
           altIndices,
           allowMultiple,
+          allowFreeText: allowFreeText ? true : undefined,
+          placeholder,
           summaryHint,
         });
       }
