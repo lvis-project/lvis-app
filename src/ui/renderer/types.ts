@@ -409,6 +409,9 @@ export type AskUserQuestionRequest = {
     recommendedIndex?: number;
     altIndices?: number[];
     allowMultiple?: boolean;
+    /** Draws a free-text field as the last answer row. */
+    allowFreeText?: boolean;
+    placeholder?: string;
     summaryHint?: string;
   }>;
   createdAt: number;
@@ -420,6 +423,8 @@ export type AskUserQuestionResponse = {
     choice?: string;
     /** Multi-select selections (only set when the question allowMultiple). */
     choices?: string[];
+    /** Typed answer (only set when the question allowFreeText). */
+    freeText?: string;
   }>;
   dismissed?: boolean;
 };

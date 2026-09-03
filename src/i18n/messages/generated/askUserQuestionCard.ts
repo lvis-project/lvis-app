@@ -14,6 +14,9 @@ export const en = {
   "askUserQuestionCard.badgeRecommend": "Recommended",
   "askUserQuestionCard.badgeAlt": "Alternative",
   "askUserQuestionCard.confirmReviewInstruction": "Review all your answers, then press Send. Click an item or use ←/→ to navigate between questions.",
+  "askUserQuestionCard.freeTextPlaceholder": "Type your answer",
+  "askUserQuestionCard.answerChoicePrefix": "Selected",
+  "askUserQuestionCard.answerFreeTextPrefix": "Typed",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "askUserQuestionCard.noAnswer": "(미응답)",
@@ -30,4 +33,7 @@ export const ko: Record<keyof typeof en, string> = {
   "askUserQuestionCard.badgeRecommend": "추천",
   "askUserQuestionCard.badgeAlt": "대안",
   "askUserQuestionCard.confirmReviewInstruction": "모든 답변을 확인한 뒤 보내기를 누르세요. 항목 클릭 또는 ←/→로 질문을 이동할 수 있습니다.",
+  "askUserQuestionCard.freeTextPlaceholder": "답변을 입력하세요",
+  "askUserQuestionCard.answerChoicePrefix": "선택",
+  "askUserQuestionCard.answerFreeTextPrefix": "입력",
 };

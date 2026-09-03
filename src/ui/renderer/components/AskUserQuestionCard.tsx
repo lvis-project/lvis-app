@@ -5,6 +5,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { Textarea } from "../../../components/ui/textarea.js";
+import { formatAskUserAnswer } from "../../../lib/chat-stream-state.js";
+import { MAX_FREE_TEXT_LENGTH } from "../../../shared/ask-user-question-limits.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
 import { focusIsFreeFor } from "./permissions/ApprovalDock.js";
@@ -25,6 +28,13 @@ export interface AskUserQuestionItem {
    */
   altIndices?: number[];
   allowMultiple?: boolean;
+  /**
+   * Renders a free-text field as the last answer row. A typed answer exists
+   * only where the tool asked for one; it is never a choice label.
+   */
+  allowFreeText?: boolean;
+  /** Placeholder for that field. Falls back to a generic prompt when absent. */
+  placeholder?: string;
   /**
    * Short row label used by the confirm-step review. Korean ≤ 10 chars
    * by prompt contract. Falls back to a truncated `question` when absent.
@@ -54,6 +64,8 @@ interface DraftAnswer {
    * UI sets one path or the other based on `item.allowMultiple`.
    */
   choiceIndices?: number[];
+  /** What the user typed into the free-text field, when the question has one. */
+  freeText?: string;
 }
 
 export interface AskUserQuestionCardProps {
@@ -68,7 +80,14 @@ function isAnswerComplete(item: AskUserQuestionItem, draft: DraftAnswer): boolea
     return true;
   }
   if (draft.choice && draft.choice.length > 0) return true;
+  if (item.allowFreeText && draft.freeText && draft.freeText.trim().length > 0) return true;
   return false;
+}
+
+function draftFreeText(item: AskUserQuestionItem, draft: DraftAnswer): string | undefined {
+  if (!item.allowFreeText) return undefined;
+  const typed = draft.freeText?.trim();
+  return typed && typed.length > 0 ? typed : undefined;
 }
 
 function selectedChoicesForMulti(item: AskUserQuestionItem, draft: DraftAnswer): string[] {
@@ -80,12 +99,14 @@ function selectedChoicesForMulti(item: AskUserQuestionItem, draft: DraftAnswer):
 }
 
 function describeAnswer(item: AskUserQuestionItem, draft: DraftAnswer): string {
-  if (item.allowMultiple) {
-    const picks = selectedChoicesForMulti(item, draft);
-    return picks.length > 0 ? picks.join(", ") : t("askUserQuestionCard.noAnswer");
-  }
-  if (draft.choice) return draft.choice;
-  return t("askUserQuestionCard.noAnswer");
+  const picks = item.allowMultiple
+    ? selectedChoicesForMulti(item, draft)
+    : draft.choice
+      ? [draft.choice]
+      : [];
+  // Same renderer as the transcript recap row, so the confirm page and the
+  // bubble that survives a reload cannot describe one answer two ways.
+  return formatAskUserAnswer(picks, draftFreeText(item, draft)) || t("askUserQuestionCard.noAnswer");
 }
 
 function choicesOf(item: AskUserQuestionItem): string[] {
@@ -201,14 +222,17 @@ export function AskUserQuestionCard({
     void respondAndClose({
       answers: drafts.map((d, i) => {
         const item = request.questions[i];
+        const freeText = draftFreeText(item, d);
         if (item.allowMultiple) {
           const picks = selectedChoicesForMulti(item, d);
           return {
             choices: picks.length > 0 ? picks : undefined,
+            freeText,
           };
         }
         return {
           choice: d.choice,
+          freeText,
         };
       }),
     });
@@ -239,6 +263,15 @@ export function AskUserQuestionCard({
     setStep((s) => Math.max(s - 1, 0));
     return true;
   };
+
+  // Validates against the *current* draft at call time rather than at render
+  // time, so free-text Enter fires after the keystroke that completed the
+  // draft rather than one keystroke behind it.
+  const handleSubmit = useCallback(() => {
+    if (currentItem && isAnswerComplete(currentItem, currentDraft)) {
+      goNext();
+    }
+  }, [currentItem, currentDraft, goNext]);
 
   const stepLabel = onConfirmStep
     ? t("askUserQuestionCard.reviewStep")
@@ -300,7 +333,7 @@ export function AskUserQuestionCard({
         <KeyboardHint
           hasAnswerNavigation={Boolean(
             currentItem &&
-              choicesOf(currentItem).length > 1,
+              choicesOf(currentItem).length + (currentItem.allowFreeText ? 1 : 0) > 1,
           )}
           isMulti={isMulti}
           onConfirmStep={onConfirmStep}
@@ -326,6 +359,9 @@ export function AskUserQuestionCard({
                   : [...prev, choiceIndex];
                 setAnswer(step, {
                   choiceIndices: nextIndices,
+                  // Multi-select is additive: a typed answer sits beside the
+                  // picked chips rather than replacing them.
+                  freeText: currentDraft.freeText,
                 });
                 return { kind: "incomplete" };
               }
@@ -346,6 +382,17 @@ export function AskUserQuestionCard({
               }
               return { kind: "incomplete" };
             }}
+            onFreeText={(freeText) => {
+              // Multi-select keeps the picked chips. Single-select overwrites:
+              // the question has one answer, so typing means the user is
+              // changing it away from the chip they had picked.
+              if (currentItem.allowMultiple) {
+                setAnswer(step, { choiceIndices: currentDraft.choiceIndices, freeText });
+              } else {
+                setAnswer(step, { freeText });
+              }
+            }}
+            onSubmit={handleSubmit}
             onAdvance={goNext}
           />
         ) : (
@@ -405,9 +452,10 @@ export function AskUserQuestionCard({
             )}
             {!isMulti &&
               currentItem &&
-              currentItem.allowMultiple && (
+              (currentItem.allowFreeText || currentItem.allowMultiple) && (
                 // Single-question card surfaces 보내기 whenever click-to-submit
-                // is suppressed: multi-select needs an explicit confirm.
+                // cannot carry the answer: multi-select needs an explicit
+                // confirm, and a typed answer has no chip to click.
                 // Single-select chip-only cards keep the click-to-submit shortcut.
                 <Button
                   size="sm"
@@ -536,7 +584,7 @@ export type ChoiceResult =
  * Imperative handle exposed to the parent card so it can delegate card-level
  * ArrowUp/Down keypresses into the QuestionForm's roving-tabIndex navigation.
  *
- * `focusFirstAnswer()` — focus the first choice when a page mounts.
+ * `focusFirstAnswer()` — focus answer index 0 when a page mounts.
  * `arrowNav(delta)` — delta: +1 (ArrowDown) or -1 (ArrowUp). Returns true
  * when there are answers to navigate (i.e. the event was handled).
  */
@@ -551,6 +599,12 @@ interface QuestionFormProps {
   disabled: boolean;
   /** Returns a ChoiceResult signalling what the keyboard handler should do next. */
   onChoose: (choice: string, choiceIndex: number) => ChoiceResult;
+  onFreeText: (text: string) => void;
+  /**
+   * Called on free-text Enter. The draft is already current because the
+   * textarea's onChange fires before its onKeyDown.
+   */
+  onSubmit: () => void;
   /**
    * Called by the keyboard choice handler when onChoose returns { kind: "advance" }.
    * Advances directly (goNext) without re-checking draft — the synchronous
@@ -565,12 +619,18 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
   draft,
   disabled,
   onChoose,
+  onFreeText,
+  onSubmit,
   onAdvance,
 }, ref) {
+  const { t } = useTranslation();
   const choices = choicesOf(item);
   const recommend = recommendIndex(item);
   const alts = altIndices(item);
-  const answerCount = choices.length;
+  // The free-text field is the last answer row, so it takes the slot after the
+  // chips in the same roving-tabIndex sequence the arrow keys walk.
+  const freeTextIndex = item.allowFreeText ? choices.length : -1;
+  const answerCount = choices.length + (item.allowFreeText ? 1 : 0);
   // Roving tabIndex: track which choice button has the "tab stop".
   // -1 is a sentinel meaning "focus is on the card container, no choice focused yet".
   // The render uses (focusedIdx < 0 && i === 0) as the fallback tab-stop so index 0
@@ -587,15 +647,20 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
     return draft.choiceIndex ?? (recommendIndex(item) ?? -1);
   });
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const focusAnswerAt = useCallback(
     (nextIndex: number) => {
       if (answerCount <= 0) return;
       const next = (nextIndex + answerCount) % answerCount;
       setFocusedIdx(next);
+      if (next === freeTextIndex) {
+        inputRef.current?.focus();
+        return;
+      }
       buttonRefs.current[next]?.focus();
     },
-    [answerCount],
+    [answerCount, freeTextIndex],
   );
 
   // Expose arrowNav to the parent Card so card-level ArrowUp/Down events
@@ -631,12 +696,14 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
     setFocusedIdx(answerCount > 0 ? 0 : -1);
   }, [answerCount, item]);
 
-  // Sync focused idx when the draft's selected choice changes externally.
+  // Sync focused idx when the draft's selected answer changes externally.
   useEffect(() => {
     if (typeof draft.choiceIndex === "number") {
       setFocusedIdx(draft.choiceIndex);
+    } else if (item.allowFreeText && draft.freeText) {
+      setFocusedIdx(freeTextIndex);
     }
-  }, [draft.choiceIndex]);
+  }, [draft.choiceIndex, draft.freeText, freeTextIndex, item.allowFreeText]);
 
   const handleChoiceKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
@@ -724,6 +791,44 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
             );
           })}
         </div>
+      )}
+      {item.allowFreeText && (
+        <Textarea
+          ref={inputRef}
+          rows={2}
+          // The gate refuses a longer answer, and a refusal the card cannot
+          // explain reads as a send button that does nothing.
+          maxLength={MAX_FREE_TEXT_LENGTH}
+          value={draft.freeText ?? ""}
+          onChange={(e) => onFreeText(e.target.value)}
+          onKeyDown={(e) => {
+            if (isComposingKeyEvent(e)) return;
+            if (e.key === "ArrowDown" && answerCount > 1) {
+              e.preventDefault();
+              e.stopPropagation();
+              focusAnswerAt(freeTextIndex + 1);
+              return;
+            }
+            if (e.key === "ArrowUp" && answerCount > 1) {
+              e.preventDefault();
+              e.stopPropagation();
+              focusAnswerAt(freeTextIndex - 1);
+              return;
+            }
+            // Enter sends, Shift+Enter keeps the newline — the same split the
+            // composer uses, so a multi-line answer stays possible.
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              onSubmit();
+            }
+          }}
+          onFocus={() => setFocusedIdx(freeTextIndex)}
+          placeholder={item.placeholder ?? t("askUserQuestionCard.freeTextPlaceholder")}
+          className="min-h-[3.5rem] text-[12px]"
+          disabled={disabled}
+          data-testid="ask-freetext-input"
+        />
       )}
     </>
   );

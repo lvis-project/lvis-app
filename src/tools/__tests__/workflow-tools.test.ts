@@ -20,7 +20,10 @@ const REPO_ROOT = resolvePath(
 );
 const BUILTIN_SKILLS_DIR = resolvePath(REPO_ROOT, "resources/skills");
 import type { ToolExecutionContext } from "../base.js";
-import { createAskUserQuestionTool } from "../ask-user-question.js";
+import {
+  createAskUserQuestionTool,
+  FREE_TEXT_STAND_IN_LABELS,
+} from "../ask-user-question.js";
 import { createRoutineScheduleTool } from "../routine-schedule.js";
 import { createSessionTasksTool } from "../session-tasks.js";
 import { createSessionGoalTool } from "../session-goal.js";
@@ -108,18 +111,127 @@ describe("ask_user_question tool", () => {
     expect(r.isError).toBe(true);
   });
 
-  it("rejects a question without non-empty choices", async () => {
+  it("rejects a question that offers no way to answer", async () => {
     const tool = createAskUserQuestionTool({
       getGate: () => ({
         ask: () => Promise.resolve({ requestId: "r", answers: [] }),
       }) as never,
     });
-    const r = await tool.execute(
-      { questions: [{ question: "Pick" }] },
+    const missing = await tool.execute({ questions: [{ question: "Pick" }] }, ctx());
+    expect(missing.isError).toBe(true);
+    expect(missing.output).toContain("choices array");
+
+    const empty = await tool.execute(
+      { questions: [{ question: "Pick", choices: [] }] },
       ctx(),
     );
-    expect(r.isError).toBe(true);
-    expect(r.output).toContain("at least one non-empty choice");
+    expect(empty.isError).toBe(true);
+    expect(empty.output).toContain("allowFreeText");
+  });
+
+  it("accepts a typed-only question — no choices, allowFreeText", async () => {
+    const ask = vi.fn().mockResolvedValue({ requestId: "r", answers: [{ freeText: "3" }] });
+    const tool = createAskUserQuestionTool({ getGate: () => ({ ask }) as never });
+
+    const r = await tool.execute(
+      {
+        questions: [
+          {
+            question: "How many?",
+            choices: [],
+            allowFreeText: true,
+            placeholder: "a number",
+          },
+        ],
+      },
+      ctx(),
+    );
+
+    expect(r.isError).toBe(false);
+    expect(JSON.parse(r.output).answers).toEqual([{ freeText: "3" }]);
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questions: [
+          expect.objectContaining({
+            choices: [],
+            allowFreeText: true,
+            placeholder: "a number",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("coerces a stand-in choice label into allowFreeText and keeps badge indices aligned", async () => {
+    const ask = vi.fn().mockResolvedValue({ requestId: "r", answers: [] });
+    const tool = createAskUserQuestionTool({ getGate: () => ({ ask }) as never });
+
+    await tool.execute(
+      {
+        questions: [
+          {
+            question: "언제 할까요?",
+            // The model puts a typed answer in the one place the schema gives
+            // it, and the label then renders as a button nobody can type into.
+            choices: ["오늘", "입력", "내일"],
+            recommendedIndex: 2,
+            altIndices: [0],
+          },
+        ],
+      },
+      ctx(),
+    );
+
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questions: [
+          expect.objectContaining({
+            choices: ["오늘", "내일"],
+            allowFreeText: true,
+            // "내일" moved from slot 2 to slot 1 when the stand-in was dropped.
+            recommendedIndex: 1,
+            altIndices: [0],
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("coerces every stand-in label, matched after trimming and case folding", async () => {
+    const ask = vi.fn().mockResolvedValue({ requestId: "r", answers: [] });
+    const tool = createAskUserQuestionTool({ getGate: () => ({ ask }) as never });
+
+    for (const label of FREE_TEXT_STAND_IN_LABELS) {
+      ask.mockClear();
+      const r = await tool.execute(
+        {
+          questions: [
+            { question: "Pick", choices: ["실제 선택지", ` ${label.toUpperCase()} `] },
+          ],
+        },
+        ctx(),
+      );
+      expect(r.isError, `label ${label}`).toBe(false);
+      const forwarded = ask.mock.calls[0][0].questions[0];
+      expect(forwarded.choices, `label ${label}`).toEqual(["실제 선택지"]);
+      expect(forwarded.allowFreeText, `label ${label}`).toBe(true);
+    }
+  });
+
+  it("drops a placeholder on a question that asks for no typed answer", async () => {
+    const ask = vi.fn().mockResolvedValue({ requestId: "r", answers: [] });
+    const tool = createAskUserQuestionTool({ getGate: () => ({ ask }) as never });
+
+    await tool.execute(
+      {
+        questions: [{ question: "Pick", choices: ["A", "B"], placeholder: "type here" }],
+      },
+      ctx(),
+    );
+
+    const forwarded = ask.mock.calls[0][0].questions[0];
+    expect(forwarded.allowFreeText).toBeUndefined();
+    expect(forwarded.placeholder).toBeUndefined();
   });
 
   it("rejects duplicate, oversized, and overlong choices before opening the gate", async () => {

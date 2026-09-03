@@ -13,6 +13,10 @@ import { randomUUID } from "node:crypto";
 import type { WebContents } from "electron";
 import type { NotificationService } from "./notification-service.js";
 import { createLogger } from "../lib/logger.js";
+import {
+  MAX_FREE_TEXT_LENGTH,
+  MAX_PLACEHOLDER_LENGTH,
+} from "../shared/ask-user-question-limits.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("lvis");
 
@@ -23,13 +27,25 @@ const log = createLogger("lvis");
  */
 export interface AskUserQuestionItem {
   question: string;
-  /** One to 3 visible choices, each ≤ 20 Korean chars. */
+  /**
+   * Up to 3 visible choices, each ≤ 20 Korean chars. Empty only when
+   * `allowFreeText` is set — every question must offer at least one way to
+   * answer, and a free-text field is one.
+   */
   choices: string[];
   /** Index of the model's top recommendation in `choices` (0 or 1 across the array). */
   recommendedIndex?: number;
   /** Indices in `choices` of secondary recommendations (disjoint with recommendedIndex). */
   altIndices?: number[];
   allowMultiple?: boolean;
+  /**
+   * Render a free-text field as the last answer row. This is the only way a
+   * typed answer exists: a choice label is a button, so a model that wants
+   * typing has to ask for the field rather than name it in `choices`.
+   */
+  allowFreeText?: boolean;
+  /** Placeholder for the free-text field (≤ 40 chars). Only read when `allowFreeText`. */
+  placeholder?: string;
   /** Confirm-step row label override (≤ 10 Korean chars). Falls back to a truncated question. */
   summaryHint?: string;
 }
@@ -58,6 +74,13 @@ export interface AskUserQuestionAnswer {
    * empty array is normalized to undefined upstream.
    */
   choices?: string[];
+  /**
+   * What the user typed, present only for a question that declared
+   * `allowFreeText`. Kept in its own field rather than folded into
+   * `choice`/`choices` so the reader of the result can always tell a label
+   * the model itself wrote from text the user typed.
+   */
+  freeText?: string;
 }
 
 export interface AskUserQuestionResponse {
@@ -94,9 +117,11 @@ function normalizeQuestion(value: unknown): AskUserQuestionItem | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const question = value as Record<string, unknown>;
   if (typeof question.question !== "string" || question.question.trim().length === 0) return null;
-  if (!Array.isArray(question.choices) || question.choices.length === 0 || question.choices.length > 3) {
-    return null;
-  }
+  const allowFreeText = question.allowFreeText === true;
+  if (!Array.isArray(question.choices) || question.choices.length > 3) return null;
+  // A question with neither chips nor a typed field renders with no answer at
+  // all, leaving the user only the skip button.
+  if (question.choices.length === 0 && !allowFreeText) return null;
   if (
     question.choices.some(
       (choice) =>
@@ -126,12 +151,20 @@ function normalizeQuestion(value: unknown): AskUserQuestionItem | null {
       ).map(Number))]
     : undefined;
 
+  const placeholder =
+    typeof question.placeholder === "string" ? question.placeholder.trim() : "";
+
   return {
     question: question.question.trim(),
     choices,
     recommendedIndex,
     altIndices: altIndices && altIndices.length > 0 ? altIndices : undefined,
     allowMultiple: question.allowMultiple === true ? true : undefined,
+    allowFreeText: allowFreeText ? true : undefined,
+    placeholder:
+      allowFreeText && placeholder.length > 0 && placeholder.length <= MAX_PLACEHOLDER_LENGTH
+        ? placeholder
+        : undefined,
     summaryHint:
       typeof question.summaryHint === "string" && question.summaryHint.trim().length > 0
         ? question.summaryHint.trim()
@@ -155,19 +188,40 @@ function normalizeResponse(
     const answer = response.answers[index];
     if (!answer || typeof answer !== "object" || Array.isArray(answer)) return null;
 
+    // Typed text is bound to the request the same way a label is: it is
+    // admissible only where the question asked for the field, so a renderer
+    // cannot invent an answer channel the model never opened.
+    let freeText: string | undefined;
+    if (answer.freeText !== undefined) {
+      if (question.allowFreeText !== true) return null;
+      if (typeof answer.freeText !== "string") return null;
+      const typed = answer.freeText.trim();
+      if (typed.length === 0 || typed.length > MAX_FREE_TEXT_LENGTH) return null;
+      freeText = typed;
+    }
+    const typedPart = freeText !== undefined ? { freeText } : {};
+
     if (question.allowMultiple) {
-      if (!Array.isArray(answer.choices) || answer.choices.length === 0) return null;
-      if (answer.choices.some((choice) => typeof choice !== "string" || !question.choices.includes(choice))) {
+      if (answer.choices !== undefined && !Array.isArray(answer.choices)) return null;
+      const picked = answer.choices ?? [];
+      if (picked.some((choice) => typeof choice !== "string" || !question.choices.includes(choice))) {
         return null;
       }
-      const selected = new Set(answer.choices);
-      if (selected.size !== answer.choices.length) return null;
-      answers.push({ choices: question.choices.filter((choice) => selected.has(choice)) });
+      const selected = new Set(picked);
+      if (selected.size !== picked.length) return null;
+      if (selected.size === 0 && freeText === undefined) return null;
+      const chosen = question.choices.filter((choice) => selected.has(choice));
+      answers.push({ ...(chosen.length > 0 ? { choices: chosen } : {}), ...typedPart });
       continue;
     }
 
-    if (typeof answer.choice !== "string" || !question.choices.includes(answer.choice)) return null;
-    answers.push({ choice: answer.choice });
+    if (answer.choice !== undefined) {
+      if (typeof answer.choice !== "string" || !question.choices.includes(answer.choice)) return null;
+      answers.push({ choice: answer.choice, ...typedPart });
+      continue;
+    }
+    if (freeText === undefined) return null;
+    answers.push(typedPart);
   }
 
   return { requestId: request.id, answers };

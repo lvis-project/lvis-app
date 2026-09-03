@@ -378,7 +378,7 @@ describe("historyToEntries", () => {
     expect(entries[2]).toMatchObject({
       kind: "ask_user_answer",
       sourceToolUseId: "ask-1",
-      rows: [{ label: "범위", value: "IT/경제" }],
+      rows: [{ label: "범위", value: "선택: IT/경제" }],
     });
   });
 
