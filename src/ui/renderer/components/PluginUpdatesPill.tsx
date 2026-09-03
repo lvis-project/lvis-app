@@ -67,6 +67,13 @@ export function PluginUpdatesPill({
         names: failureSummary.failedNames.join(", "),
       })} ${failureSummary.detail}`
     : `${summary} ${details}`;
+  // A failure the pill reports only in its hover text is a failure a screen
+  // reader never announces: the accessible name is the whole of what that
+  // reader gets. The update list is different — the count in the label already
+  // says what there is to act on — so only the failure joins the name.
+  const pillAriaLabel = failureSummary
+    ? `${t("marketplaceUpdateBanner.pillAriaLabel")} ${title}`
+    : t("marketplaceUpdateBanner.pillAriaLabel");
 
   const handleUpdate = async () => {
     setBusy(true);
@@ -128,7 +135,7 @@ export function PluginUpdatesPill({
                 : t("marketplaceUpdateBanner.pillLabelMany", { count: updates.length })
         }
         title={title}
-        ariaLabel={t("marketplaceUpdateBanner.pillAriaLabel")}
+        ariaLabel={pillAriaLabel}
         onClick={() => void handleUpdate()}
         disabled={busy}
         testId="marketplace-update-action"

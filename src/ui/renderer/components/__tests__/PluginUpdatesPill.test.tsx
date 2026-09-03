@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { PluginUpdatesPill } from "../PluginUpdatesPill.js";
 import type { PluginUpdatesPillProps } from "../PluginUpdatesPill.js";
@@ -123,6 +123,46 @@ describe("PluginUpdatesPill", () => {
     expect(onResolved).toHaveBeenCalledWith(["meeting"]);
     expect(onDismiss).not.toHaveBeenCalled();
     expect(pill.textContent).toContain("재시도");
+    // Hover text is not in the accessibility tree, so the failure has to be in
+    // the accessible name as well or a screen reader never hears about it.
+    const label = pill.getAttribute("aria-label");
+    expect(label).toContain("사용 가능한 플러그인 업데이트 설치");
+    expect(label).toContain("실패 1");
+    expect(label).toContain("LVIS Calendar (calendar)");
+    expect(label).toContain("download failed");
+  });
+
+  it("leaves the accessible name alone while there is nothing but updates to report", () => {
+    renderPill({ updates: [update("meeting", "LVIS Meeting", "2.0.0")] });
+
+    expect(screen.getByTestId("marketplace-update-action").getAttribute("aria-label")).toBe(
+      "사용 가능한 플러그인 업데이트 설치",
+    );
+  });
+
+  it("keeps the busy pill's tooltip reachable and its click inert", async () => {
+    let releaseUpdate: () => void = () => {};
+    const onUpdate = vi.fn(() => new Promise<void>((resolve) => {
+      releaseUpdate = resolve;
+    }));
+    renderPill({ updates: [update("meeting", "LVIS Meeting", "2.0.0")], onUpdate });
+
+    const pill = screen.getByTestId("marketplace-update-action");
+    pill.click();
+    await vi.waitFor(() => expect(pill.textContent).toContain("업데이트 중"));
+
+    // Not natively disabled: that would take the pointer events and the tab
+    // stop the tooltip needs. Clicking is inert all the same.
+    expect((pill as HTMLButtonElement).disabled).toBe(false);
+    expect(pill.getAttribute("aria-disabled")).toBe("true");
+    pill.click();
+    expect(onUpdate).toHaveBeenCalledOnce();
+
+    fireEvent.focus(pill);
+    expect(screen.getByRole("tooltip").textContent).toContain("LVIS Meeting (meeting) → 2.0.0");
+
+    releaseUpdate();
+    await vi.waitFor(() => expect(pill.getAttribute("aria-disabled")).toBe("false"));
   });
 
   it("uses the close control as a skip-until-next-version action", () => {

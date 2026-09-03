@@ -97,7 +97,13 @@ export function BootstrapStatusPill({
   return null;
 }
 
-/** The pill both failure states share: retry on the pill, dismiss beside it. */
+/**
+ * The pill both failure states share: retry on the pill, dismiss beside it.
+ *
+ * Which plugin failed and why is in `title`, and hover text is not in the
+ * accessibility tree — so the accessible name carries it too, or a screen
+ * reader is told only that something can be retried.
+ */
 function FailurePill({
   label,
   title,
@@ -116,7 +122,7 @@ function FailurePill({
       icon={AlertTriangle}
       label={label}
       title={title}
-      ariaLabel={t("bootstrapStatusBanner.pillRetryAriaLabel")}
+      ariaLabel={`${t("bootstrapStatusBanner.pillRetryAriaLabel")} ${title}`}
       onClick={onRetry}
       testId="bootstrap-status-pill"
       secondaryAction={{
