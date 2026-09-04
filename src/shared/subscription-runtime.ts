@@ -304,33 +304,6 @@ export const DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES: SubscriptionRuntimeCapab
   subagent: false,
 });
 
-/**
- * The API-key path's capability projection, in the same shape the subscription
- * runtimes report so one checklist can describe every connection.
- *
- * These are not vendor claims. On the API path LVIS runs its own engine, so
- * tools, MCP, routines, subagents, compaction, plugins, and project access are
- * host features that hold for any vendor; attachment ingress is likewise
- * unconditional there (see `SubscriptionRuntimeUiPolicy`: "API-key providers
- * keep their established policy"). `imageAttachmentLimits` stays null because
- * the native-image budget is a subscription-transport concept — the API path
- * sends attachments through the normal composer pipeline instead.
- */
-export const API_PATH_RUNTIME_CAPABILITIES: SubscriptionRuntimeCapabilities = Object.freeze({
-  chat: true,
-  images: true,
-  imageAttachmentLimits: null,
-  files: true,
-  tools: true,
-  projectAccess: true,
-  plugins: true,
-  mcp: true,
-  generateText: true,
-  compaction: true,
-  routine: true,
-  subagent: true,
-});
-
 export const SUBSCRIPTION_RUNTIME_DESCRIPTORS: readonly SubscriptionRuntimeDescriptor[] = [
   {
     id: "codex",

@@ -1,17 +1,7 @@
-import type { ReactNode } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
-import { Badge } from "../../../components/ui/badge.js";
+import { Loader2 } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../../components/ui/select.js";
 import { useTranslation } from "../../../i18n/react.js";
 import {
-  DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
   type SubscriptionConnectionState,
   type SubscriptionLoginMethod,
   type SubscriptionRuntimeCapabilities,
@@ -29,18 +19,6 @@ type SubscriptionProviderId = SubscriptionRuntimeId;
 
 type SubscriptionProviderRuntimeState = SubscriptionRuntimeState | "checking";
 
-/**
- * Width bound for the subscription model popup, above `sm`.
- *
- * Anchoring and the trigger-matched width are `SelectContent`'s own defaults
- * now. This overrides only the upper half of the trigger's `w-full sm:w-80`
- * rule: from `sm` up the trigger is a fixed 20rem control with room beside it,
- * so the popup keeps its natural width for long model ids rather than being
- * squeezed to 20rem, bounded by the space Radix reports.
- */
-const MODEL_POPUP_LAYOUT =
-  "sm:w-auto sm:max-w-(--radix-select-content-available-width)";
-
 export type SubscriptionBusyAction =
   | "refresh"
   | "configure-runtime"
@@ -51,7 +29,6 @@ export type SubscriptionBusyAction =
   | "open-login-browser"
   | "cancel-login"
   | "logout"
-  | "select-model"
   | "load-models"
   | "use-for-chat";
 
@@ -66,7 +43,7 @@ export interface SubscriptionProviderModel {
   isDefault?: boolean;
 }
 
-export type SubscriptionProviderCapabilities = SubscriptionRuntimeCapabilities;
+type SubscriptionProviderCapabilities = SubscriptionRuntimeCapabilities;
 
 interface SubscriptionProviderDescriptor {
   id: SubscriptionProviderId;
@@ -78,8 +55,6 @@ interface SubscriptionProviderDescriptor {
   /** Whether the provider requires an official local runtime selection. */
   supportsRuntimeSelection?: boolean;
   supportsLogout?: boolean;
-  /** A provider can use a server default, require a selected model, or expose none. */
-  modelSelection?: "none" | "optional" | "required";
 }
 
 export interface SubscriptionProviderStatus {
@@ -90,9 +65,10 @@ export interface SubscriptionProviderStatus {
   pendingLoginMethod?: SubscriptionLoginMethod | null;
   /** Main opens the verified address itself; the renderer never receives it. */
   canOpenLoginBrowser?: boolean;
+  /** Offered in the settings page's one model chooser, never on this card. */
   models?: readonly SubscriptionProviderModel[];
-  selectedModelId?: string | null;
-  /** Missing capability projections are rendered as unknown, never enabled. */
+  /** Whether chat is host-verified. Only `chat` is read; the rest of the
+   *  projection describes the LVIS agent harness, not this provider. */
   capabilities?: Partial<SubscriptionProviderCapabilities>;
   errorCode?: SubscriptionProviderErrorCode | null;
 }
@@ -123,8 +99,7 @@ interface SubscriptionProviderActions {
   openLoginBrowser?: (providerId: SubscriptionProviderId) => void | Promise<void>;
   cancelLogin?: (providerId: SubscriptionProviderId) => void | Promise<void>;
   logout?: (providerId: SubscriptionProviderId) => void | Promise<void>;
-  loadModels?: (providerId: SubscriptionProviderId) => void | Promise<void>;
-  selectModel?: (providerId: SubscriptionProviderId, modelId: string) => void | Promise<void>;
+  /** Adopts a subscription-backed model chosen in the settings page's chooser. */
   useForChat?: (providerId: SubscriptionProviderId, modelId: string | null) => void | Promise<void>;
   /** Explicitly return chat to the separately configured API-key provider. */
   useApiForChat?: () => void | Promise<void>;
@@ -144,67 +119,6 @@ export interface SubscriptionProvidersSectionProps {
   actions: SubscriptionProviderActions;
   /** Use a stable custom anchor only when the embedding settings page needs one. */
   sectionId?: string;
-}
-
-const DEFAULT_CAPABILITIES = DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES;
-
-type BooleanCapabilityKey = Exclude<keyof SubscriptionProviderCapabilities, "imageAttachmentLimits">;
-
-const CAPABILITY_ROWS: readonly {
-  readonly key: BooleanCapabilityKey;
-  readonly labelKey: string;
-}[] = [
-  { key: "chat", labelKey: "subscriptionProvidersSection.capabilityChat" },
-  { key: "images", labelKey: "subscriptionProvidersSection.capabilityImages" },
-  { key: "files", labelKey: "subscriptionProvidersSection.capabilityFiles" },
-  { key: "tools", labelKey: "subscriptionProvidersSection.capabilityTools" },
-  { key: "projectAccess", labelKey: "subscriptionProvidersSection.capabilityProject" },
-  { key: "plugins", labelKey: "subscriptionProvidersSection.capabilityPlugins" },
-  { key: "mcp", labelKey: "subscriptionProvidersSection.capabilityMcp" },
-  { key: "generateText", labelKey: "subscriptionProvidersSection.capabilityGenerateText" },
-  { key: "compaction", labelKey: "subscriptionProvidersSection.capabilityCompaction" },
-  { key: "routine", labelKey: "subscriptionProvidersSection.capabilityRoutine" },
-  { key: "subagent", labelKey: "subscriptionProvidersSection.capabilitySubagent" },
-];
-
-/**
- * One checklist for every connection. Subscription runtimes report verified
- * capabilities per provider; the API path reports the host-engine projection
- * (`API_PATH_RUNTIME_CAPABILITIES`). Both render through this so the two never
- * describe the same feature with different words.
- *
- * `known` carries the distinction the labels depend on: a capability the
- * runtime has not answered for is "unknown", not "unavailable".
- */
-export function ProviderCapabilityGrid({
-  capabilities,
-  known,
-  testIdPrefix,
-}: {
-  capabilities: SubscriptionProviderCapabilities;
-  known: (key: BooleanCapabilityKey) => boolean;
-  testIdPrefix: string;
-}) {
-  const { t } = useTranslation();
-  const label = (available: boolean, isKnown: boolean): string => {
-    if (!isKnown) return t("subscriptionProvidersSection.capabilityUnknown");
-    return t(available
-      ? "subscriptionProvidersSection.capabilityAvailable"
-      : "subscriptionProvidersSection.capabilityUnavailable");
-  };
-  return (
-    <dl
-      className="grid gap-2 rounded-md border bg-muted/(--opacity-muted) px-3 py-2 text-xs sm:grid-cols-2 lg:grid-cols-3"
-      data-testid={`${testIdPrefix}:capabilities`}
-    >
-      {CAPABILITY_ROWS.map(({ key, labelKey }) => (
-        <div className="space-y-0.5" key={key} data-testid={`${testIdPrefix}:capability:${key}`}>
-          <dt className="font-medium text-foreground">{t(labelKey)}</dt>
-          <dd className="text-muted-foreground">{label(capabilities[key], known(key))}</dd>
-        </div>
-      ))}
-    </dl>
-  );
 }
 
 export const ERROR_MESSAGE_KEYS: Record<SubscriptionProviderErrorCode, string> = {
@@ -228,58 +142,26 @@ function isSafeDeviceCode(value: string | null | undefined): value is string {
 }
 
 /**
- * A renderer-only common surface for subscription-backed providers.
+ * The sign-in half of one provider row, for the row's expanded body.
  *
- * The parent owns state refresh and all IPC calls. That keeps main-process
+ * The settings page draws every provider — subscription-backed, API-key-backed,
+ * or both — with ONE row renderer, so the header, the state word, the sub-line
+ * and the refresh live there. What stays here is the part that is specific to a
+ * subscription runtime and has no API-key counterpart: choosing and verifying
+ * the official local runtime, signing in, the one-time device code, and signing
+ * out. Splitting it this way is what stops a provider having two headers, two
+ * state words and two refresh buttons.
+ *
+ * The parent owns state refresh and all IPC calls, which keeps main-process
  * validation, browser launching, cancellation, and secret handling on the
- * privileged side while giving Codex and ACP-backed providers one consistent
- * login/model/chat-selection experience.
+ * privileged side.
  */
-
-/**
- * One provider's row.
- *
- * Extracted so the settings page can lay subscription providers and API-key
- * providers out in ONE list. Two row renderers would drift, and a user cannot
- * be expected to learn that "connected" means one thing on the left of a page
- * and another on the right.
- *
- * `leading` is where the embedding list contributes what it knows and this
- * component cannot — the API-key half of a provider that has both.
- */
-export function SubscriptionProviderRow({
+export function SubscriptionAuthControls({
   provider,
-  activeSelection,
-  chatSelectionBusy = false,
   actions,
-  label,
-  leading,
-  subline,
-  authAction,
-  trailing,
-  routeName,
 }: {
   provider: SubscriptionProviderView;
-  /** The name the embedding list uses — the company, not the runtime. */
-  label?: string;
-  activeSelection: SubscriptionChatSelection | null;
-  chatSelectionBusy?: boolean;
   actions: SubscriptionProviderActions;
-  /** Contributed beside the provider name — the API-key half of this provider. */
-  leading?: ReactNode;
-  /** Contributed under the provider name — what the API half reaches and what
-   *  its last model-list handshake did. */
-  subline?: ReactNode;
-  /** Contributed among the sign-in buttons — the API-key route is one of the
-   *  ways in, so it belongs with the others rather than beside the name. */
-  authAction?: ReactNode;
-  /** Contributed at the end of the row — the API-key credential form. */
-  trailing?: ReactNode;
-  /** Names the route this row's connection state is about. Given when the
-   *  provider is reachable a second way as well, so "connected" here and
-   *  "not set" on the API-key chip beside it read as two routes, not as one
-   *  row contradicting itself. */
-  routeName?: string;
 }) {
   const { t } = useTranslation();
   const invoke = (operation: (() => void | Promise<void>) | undefined) => {
@@ -292,97 +174,23 @@ export function SubscriptionProviderRow({
       // Synchronous callback failures follow the same safe parent-state path.
     }
   };
-  const statusLabel = (status: SubscriptionProviderStatus | null | undefined): string => {
-    if (!status || status.runtime === "checking" || status.connection === "unknown") {
-      return t("subscriptionProvidersSection.statusChecking");
-    }
-    if (status.runtime === "not-configured") return t("subscriptionProvidersSection.statusRuntimeNotConfigured");
-    if (status.runtime === "unverified") return t("subscriptionProvidersSection.statusRuntimeUnverified");
-    if (status.runtime === "unavailable") return t("subscriptionProvidersSection.statusRuntimeUnavailable");
-    if (status.connection === "pending") {
-      return status.pendingLoginMethod === "device-code"
-        ? t("subscriptionProvidersSection.statusDeviceCodePending")
-        : t("subscriptionProvidersSection.statusBrowserPending");
-    }
-    if (status.connection === "connected") return t("subscriptionProvidersSection.statusConnected");
-    if (status.connection === "signed-out") return t("subscriptionProvidersSection.statusSignedOut");
-    return t("subscriptionProvidersSection.statusReady");
-  };
   const { descriptor, status } = provider;
   const runtime = status?.runtime ?? "checking";
   const connection = status?.connection ?? "unknown";
-  const capabilities = { ...DEFAULT_CAPABILITIES, ...status?.capabilities };
-  const models = status?.models ?? [];
-  const selectedModelId = status?.selectedModelId
-    ?? (activeSelection?.providerId === descriptor.id ? activeSelection.modelId : null);
-  const activeForChat = activeSelection?.providerId === descriptor.id;
-  const chatReady = connection === "connected" && capabilities.chat === true;
+  const chatReady = connection === "connected" && status?.capabilities?.chat === true;
   const pending = connection === "pending";
   const connected = connection === "connected";
-  const runtimeUnavailable = runtime === "unavailable";
   const hasRuntimeSelection = runtime !== "not-configured" && runtime !== "checking";
   const needsRuntimeSelection = runtime === "not-configured";
   const needsVerification = runtime === "unverified" || (runtime === "ready" && connected && !chatReady);
   const isBusy = provider.busyAction !== null && provider.busyAction !== undefined;
-  const isRefreshing = provider.refreshPending === true;
-  const disabled = provider.disabled === true || isBusy || isRefreshing;
-  const requiresModel = descriptor.modelSelection === "required";
-  const canUseForChat = chatReady && (!requiresModel || selectedModelId !== null);
+  const disabled = provider.disabled === true || isBusy || provider.refreshPending === true;
   const safeDeviceCode = isSafeDeviceCode(status?.pendingDeviceCode)
     ? status.pendingDeviceCode
     : null;
 
   return (
-    <div
-      className="space-y-3 rounded-md border bg-card p-3"
-      data-provider-row={descriptor.id}
-      data-testid={`subscription-provider:${descriptor.id}`}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2" aria-live="polite">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{label ?? descriptor.label}</span>
-            {leading}
-            <Badge
-              variant={connected ? "default" : "secondary"}
-              className={runtimeUnavailable ? "bg-destructive text-destructive-foreground" : undefined}
-              data-testid={`subscription-provider:${descriptor.id}:connection`}
-            >
-              {routeName
-                ? t("subscriptionProvidersSection.routeStatus", { route: routeName, status: statusLabel(status) })
-                : statusLabel(status)}
-            </Badge>
-            {activeForChat ? (
-              <Badge
-                variant={chatReady ? "default" : "outline"}
-                data-testid={`subscription-provider:${descriptor.id}:active-selection`}
-              >
-                {chatReady
-                  ? t("subscriptionProvidersSection.usedForChat")
-                  : t("subscriptionProvidersSection.selectedForChat")}
-              </Badge>
-            ) : null}
-          </div>
-          {descriptor.description ? (
-            <p className="text-xs text-muted-foreground">{descriptor.description}</p>
-          ) : null}
-          {subline}
-        </div>
-        {actions.refreshStatus ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => invoke(() => actions.refreshStatus?.(descriptor.id))}
-            disabled={disabled}
-            aria-label={t("subscriptionProvidersSection.refreshStatus", { provider: descriptor.label })}
-            data-testid={`subscription-provider:${descriptor.id}:refresh`}
-          >
-            {isRefreshing ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-          </Button>
-        ) : null}
-      </div>
-
+    <div className="space-y-3" data-testid={`subscription-provider:${descriptor.id}`}>
       {status?.errorCode ? (
         <p
           role="alert"
@@ -408,66 +216,6 @@ export function SubscriptionProviderRow({
               <p>{t("subscriptionProvidersSection.deviceCodeHint")}</p>
             </div>
           ) : null}
-        </div>
-      ) : null}
-
-      <ProviderCapabilityGrid
-        capabilities={capabilities}
-        known={(key) => status?.capabilities?.[key] !== undefined}
-        testIdPrefix={`subscription-provider:${descriptor.id}`}
-      />
-
-      {connected && descriptor.modelSelection !== "none" ? (
-        <div className="space-y-1">
-          <p className="text-xs font-medium">{t("subscriptionProvidersSection.modelLabel")}</p>
-          {actions.loadModels ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => invoke(() => actions.loadModels?.(descriptor.id))}
-              disabled={disabled}
-              data-testid={`subscription-provider:${descriptor.id}:load-models`}
-            >
-              {provider.busyAction === "load-models" ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-              {provider.busyAction === "load-models"
-                ? t("subscriptionProvidersSection.loadingModels")
-                : t("subscriptionProvidersSection.loadModels")}
-            </Button>
-          ) : null}
-          {models.length > 0 ? (
-            <Select
-              value={selectedModelId ?? undefined}
-              onValueChange={(modelId) => invoke(() => actions.selectModel?.(descriptor.id, modelId))}
-              disabled={disabled || !actions.selectModel}
-            >
-              <SelectTrigger
-                className="w-full sm:w-80"
-                aria-label={t("subscriptionProvidersSection.modelSelect", { provider: descriptor.label })}
-                data-testid={`subscription-provider:${descriptor.id}:model-select`}
-              >
-                <SelectValue placeholder={t("subscriptionProvidersSection.modelPlaceholder")} />
-              </SelectTrigger>
-              <SelectContent className={MODEL_POPUP_LAYOUT}>
-                {models.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 truncate">{model.label}</span>
-                      {model.isDefault ? (
-                        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
-                          {t("subscriptionProvidersSection.defaultModel")}
-                        </Badge>
-                      ) : null}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <p className="text-xs text-muted-foreground" data-testid={`subscription-provider:${descriptor.id}:no-models`}>
-              {t("subscriptionProvidersSection.noModels")}
-            </p>
-          )}
         </div>
       ) : null}
 
@@ -584,26 +332,6 @@ export function SubscriptionProviderRow({
           </Button>
         )) : null}
 
-        {authAction}
-
-        {connected && actions.useForChat ? (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => invoke(() => actions.useForChat?.(descriptor.id, selectedModelId))}
-            disabled={disabled || chatSelectionBusy || !canUseForChat}
-            title={requiresModel && !selectedModelId ? t("subscriptionProvidersSection.selectModelBeforeChat") : undefined}
-            data-testid={`subscription-provider:${descriptor.id}:use-for-chat`}
-          >
-            {provider.busyAction === "use-for-chat" ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-            {provider.busyAction === "use-for-chat"
-              ? t("subscriptionProvidersSection.usingForChat")
-              : activeForChat
-                ? t("subscriptionProvidersSection.usedForChat")
-                : t("subscriptionProvidersSection.useForChat")}
-          </Button>
-        ) : null}
-
         {connected && descriptor.supportsLogout && actions.logout ? (
           <Button
             type="button"
@@ -620,13 +348,6 @@ export function SubscriptionProviderRow({
           </Button>
         ) : null}
       </div>
-
-      {activeForChat && !chatReady ? (
-        <p className="text-xs text-muted-foreground" data-testid={`subscription-provider:${descriptor.id}:active-selection-not-ready`}>
-          {t("subscriptionProvidersSection.activeSelectionNotReady")}
-        </p>
-      ) : null}
-      {trailing}
     </div>
   );
 }

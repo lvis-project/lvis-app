@@ -45,8 +45,10 @@ export interface SettingsOrchestrationState {
   // LLM
   /** The provider chat runs on — `llm.provider`. Moved only by an explicit pick. */
   vendor: string;
-  providerCredentialDraft: ProviderCredentialDraft | null;
-  setProviderCredentialDraft: (next: ProviderCredentialDraft | null) => void;
+  /** One draft per expanded provider row: rows expand independently, so a
+   *  half-typed key on one must survive the user opening another. */
+  providerCredentialDrafts: readonly ProviderCredentialDraft[];
+  setProviderCredentialDrafts: (next: readonly ProviderCredentialDraft[]) => void;
   saveProviderCredential: (input: ProviderCredentialSave) => Promise<boolean>;
   model: string;
   setModel: (v: string) => void;
@@ -144,8 +146,8 @@ export function useSettingsOrchestration(
   // the correct persisted value. The `settingsLoaded` guard prevents any
   // save from firing before hydration completes.
   const [vendor, setVendor] = useState<LLMVendor | "">("");
-  const [providerCredentialDraft, setProviderCredentialDraft] =
-    useState<ProviderCredentialDraft | null>(null);
+  const [providerCredentialDrafts, setProviderCredentialDrafts] =
+    useState<readonly ProviderCredentialDraft[]>([]);
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [autoCompact, setAutoCompact] = useState(true);
@@ -704,7 +706,7 @@ export function useSettingsOrchestration(
     clearLastSaveError,
     hydrateLlmFromSettings,
     vendor,
-    providerCredentialDraft, setProviderCredentialDraft,
+    providerCredentialDrafts, setProviderCredentialDrafts,
     saveProviderCredential,
     selectApiVendorModel,
     model, setModel,

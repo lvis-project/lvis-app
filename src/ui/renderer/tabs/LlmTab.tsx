@@ -15,7 +15,7 @@ import {
 import { Slider } from "../../../components/ui/slider.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import { ChevronDown, ChevronRight, ChevronUp, Loader2, Pin, Plus, RefreshCw, Store } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Pin, Plus, RefreshCw, Store } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,25 +59,24 @@ import {
   type MarketplaceProviderModelDiscoveryPolicy,
 } from "../../../shared/marketplace-package-assets.js";
 import { isIpcErrorResult, type LvisApi } from "../types.js";
+import { ConnectionRow, type ConnectionRowState } from "../components/ConnectionRow.js";
 import { SettingsHelpPopover, SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { PricingOverridesSection } from "./PricingOverridesSection.js";
 import { useTranslation, type I18nContextValue } from "../../../i18n/react.js";
 import {
-  API_PATH_RUNTIME_CAPABILITIES,
-  DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
   SUBSCRIPTION_RUNTIME_API_COUNTERPART,
   type SubscriptionRuntimeId,
 } from "../../../shared/subscription-runtime.js";
 import { useSubscriptionProviders } from "./SubscriptionProvidersController.js";
 import {
   ERROR_MESSAGE_KEYS,
-  ProviderCapabilityGrid,
-  SubscriptionProviderRow,
+  SubscriptionAuthControls,
   type SubscriptionProviderView,
 } from "./SubscriptionProvidersSection.js";
 import { TEST_IDS } from "../../../shared/test-ids.js";
 import { formatTokensExact } from "../../../lib/cost-format.js";
 import { errorMessage } from "../../../shared/error-message.js";
+import { supportsVision } from "../../../engine/llm/vendor-capabilities.js";
 
 export interface FallbackEntry {
   provider: LLMVendor;
@@ -257,7 +256,9 @@ function sameSettingsValue(a: unknown, b: unknown): boolean {
 
 /** The credential form's element id. One form is open at a time, so the button
  *  that reveals it can name it in `aria-controls`. */
-const CREDENTIAL_FORM_ID = "llm-provider-credential-form";
+
+/** A stable empty list, so an absent drafts prop is not a new identity a render. */
+const NO_CREDENTIAL_DRAFTS: readonly ProviderCredentialDraft[] = [];
 
 /**
  * Catalog-specific bounds for the provider/model popups.
@@ -460,9 +461,11 @@ export interface LlmTabProps {
   /** Whether the ACTIVE provider has a stored key. Rows read their own. */
   hasKey: boolean;
   setHasKey: (v: boolean) => void;
-  /** The card being edited, and what has been typed into it. */
-  providerCredentialDraft?: ProviderCredentialDraft | null;
-  onProviderCredentialDraftChange?: (next: ProviderCredentialDraft | null) => void;
+  /** Every card being edited, and what has been typed into each. One entry per
+   *  row: rows expand independently, so a half-typed key on one must survive
+   *  the user opening another. */
+  providerCredentialDrafts?: readonly ProviderCredentialDraft[];
+  onProviderCredentialDraftsChange?: (next: readonly ProviderCredentialDraft[]) => void;
   /** Commits one card: that row's vendor block and that row's secret only. */
   onSaveProviderCredential?: (input: ProviderCredentialSave) => Promise<boolean>;
   marketplaceProviderPresetId?: string;
@@ -512,12 +515,16 @@ export interface LlmTabProps {
  */
 function SectionSaveBar({
   onSave,
+  onCancel,
   saving,
   settingsLoaded,
   dirty = true,
   testId,
 }: {
   onSave: () => void;
+  /** Given where the bar closes something — a provider row — so the user can
+   *  put the row away without committing what they typed into it. */
+  onCancel?: () => void;
   saving: boolean;
   settingsLoaded: boolean;
   /** Omitted where the section has no dirty signal to offer, in which case
@@ -527,7 +534,18 @@ function SectionSaveBar({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex justify-end border-t border-border/(--opacity-medium) pt-2">
+    <div className="flex justify-end gap-2 border-t border-border/(--opacity-medium) pt-2">
+      {onCancel && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onCancel}
+          disabled={saving}
+          data-testid={`${testId}-cancel`}
+        >
+          {t("llmTab.cancel")}
+        </Button>
+      )}
       <Button
         size="sm"
         onClick={onSave}
@@ -759,15 +777,27 @@ function modelEntryPricingLabel(entry: LlmModelListEntry | undefined): string | 
  * carries the signal; the sentence rides on the row's `title`, where it is one
  * hover away instead of one line tall on every row.
  */
+function modelEntryDoesReasoning(entry: LlmModelListEntry | undefined): boolean {
+  if (!entry) return false;
+  if (entry.pricing?.internalReasoning !== undefined) return true;
+  return (entry.supportedParameters ?? []).some((parameter) =>
+    parameter === "reasoning" || parameter === "include_reasoning");
+}
+
 function ModelSelectItemContent({
   option,
   entry,
   provider,
+  vision,
   factsOverride,
   tone,
 }: {
   option: string;
   entry?: LlmModelListEntry;
+  /** Whether images may be attached to a turn on THIS model, when the route
+   *  serving it has answered. Undefined draws nothing: the badge is a positive
+   *  claim, and a route that has not answered has not made one. */
+  vision?: boolean;
   /** Leading column: who serves this model. The caller decides whether the
    *  catalogue entry may name it — see `UnifiedModelOption.vendorLabel` — and
    *  the fallback chain lists a vendor's own models without one. */
@@ -819,6 +849,24 @@ function ModelSelectItemContent({
           {t("llmTab.modelLocalBadge")}
         </Badge>
       )}
+      {vision === true && (
+        <Badge
+          variant="outline"
+          className="h-4 shrink-0 px-1 text-[9px] uppercase"
+          data-testid={`llm-tab:model-vision:${option}`}
+        >
+          {t("llmTab.modelVisionBadge")}
+        </Badge>
+      )}
+      {modelEntryDoesReasoning(entry) && (
+        <Badge
+          variant="outline"
+          className="h-4 shrink-0 px-1 text-[9px] uppercase"
+          data-testid={`llm-tab:model-reasoning:${option}`}
+        >
+          {t("llmTab.modelReasoningBadge")}
+        </Badge>
+      )}
       {facts.length > 0 && (
         <span
           className={`shrink-0 text-[10px] ${tone === "destructive" ? "text-destructive" : "text-muted-foreground"}`}
@@ -857,6 +905,9 @@ interface UnifiedModelOption {
   vendorLabel: string;
   modelId: string;
   entry?: LlmModelListEntry;
+  /** Whether images may be attached on this model, per the route that serves
+   *  it — the same gate the composer and the send path use. */
+  vision?: boolean;
   /** Subscription-side facts, where there is no catalogue entry to read them from. */
   facts?: string;
   /** The provider exposes no model choice — this row IS the provider. */
@@ -940,6 +991,7 @@ function UnifiedModelSelect({
   onTogglePin,
   placeholder,
   popupClassName,
+  disabled = false,
 }: {
   options: readonly UnifiedModelOption[];
   value: string;
@@ -948,6 +1000,8 @@ function UnifiedModelSelect({
   onTogglePin: (modelId: string) => void;
   placeholder: string;
   popupClassName: string;
+  /** A chat-runtime switch is already in flight; a second pick would race it. */
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const pinnedSet = new Set(pinned);
@@ -1001,6 +1055,7 @@ function UnifiedModelSelect({
              the trigger has no label of its own, so dropping it here would
              leave the closed control showing a bare model id. */
           provider={option.vendorLabel}
+          {...(option.vision === true ? { vision: true } : {})}
           {...(option.facts ? { factsOverride: option.facts } : {})}
           {...(option.unlisted ? { tone: "destructive" as const } : {})}
         />
@@ -1009,7 +1064,7 @@ function UnifiedModelSelect({
   };
 
   return (
-    <Select value={value} onValueChange={onValueChange}>
+    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
       <SelectTrigger id="model-select" className="w-full" data-testid={TEST_IDS.llmModelSelect}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
@@ -1127,8 +1182,8 @@ export function LlmTab(props: LlmTabProps) {
     baseUrl,
     hasKey,
     setHasKey,
-    providerCredentialDraft = null,
-    onProviderCredentialDraftChange,
+    providerCredentialDrafts = NO_CREDENTIAL_DRAFTS,
+    onProviderCredentialDraftsChange,
     onSaveProviderCredential,
     marketplaceProviderPresetId = "",
     marketplaceProviderPresets = [],
@@ -1380,21 +1435,6 @@ export function LlmTab(props: LlmTabProps) {
     activeModelListBaseUrl,
     activeModelListCredentialScope,
   );
-  const activeModelList = modelLists[activeModelListKey];
-  const activeShouldSyncModelList = shouldSyncModelList(
-    vendor,
-    activeModelListBaseUrl,
-    activeModelDiscoveryPolicy,
-  );
-  const activeSyncedModelOptions = modelDiscoveryPolicyUsesSeededOptions(activeModelDiscoveryPolicy)
-    ? undefined
-    : optionsFromModelListState(activeModelList);
-  // Only a synced catalogue can disqualify the saved model; a seeded vendor's
-  // curated line is not the server's word on what it serves.
-  const unlistedModel = unlistedSavedModel(
-    activeModelValue,
-    activeSyncedModelOptions,
-  );
   // Subscription providers live beside the API vendor in ONE chooser, so this
   // tab owns both halves of the state rather than handing one down.
   const subscription = useSubscriptionProviders(api);
@@ -1420,7 +1460,14 @@ export function LlmTab(props: LlmTabProps) {
    * renders the form hung under whichever row the OLD vendor still matched —
    * a person clicking one provider saw a form appear under another.
    */
-  const [openRowId, setOpenRowId] = useState<string | null>(null);
+  /**
+   * Which rows are expanded. Several at once: comparing two providers, or
+   * setting one up while reading another's endpoint, is a normal thing to do,
+   * and a list that closes one row to open another makes it impossible.
+   */
+  const [openRowIds, setOpenRowIds] = useState<readonly string[]>([]);
+  /** Rows whose last save was refused, so the row says so instead of closing. */
+  const [saveFailedRowIds, setSaveFailedRowIds] = useState<readonly string[]>([]);
   const [addedRowIds, setAddedRowIds] = useState<readonly string[]>([]);
   /** The row a click just revealed, until it has been scrolled to and focused. */
   const [rowToReveal, setRowToReveal] = useState<string | null>(null);
@@ -1562,8 +1609,8 @@ export function LlmTab(props: LlmTabProps) {
   );
 
   /** The id this row's secret is stored under. */
-  const rowCredentialId = (row: ProviderConnection): string =>
-    row.presetId ? marketplaceProviderPresetSecretId(row.presetId) : row.apiVendorId!;
+  const rowCredentialId = useCallback((row: ProviderConnection): string =>
+    row.presetId ? marketplaceProviderPresetSecretId(row.presetId) : row.apiVendorId!, []);
 
   /** Whether this row's credential form has to ask for a key at all. */
   const rowRequiresApiKey = useCallback((row: ProviderConnection): boolean => {
@@ -1695,37 +1742,57 @@ export function LlmTab(props: LlmTabProps) {
     [configuredApiRoutes],
   );
 
+  /** This row's draft, or undefined when the row is holding nothing. */
+  const draftForRow = useCallback(
+    (rowId: string): ProviderCredentialDraft | undefined =>
+      providerCredentialDrafts.find((draft) => draft.rowId === rowId),
+    [providerCredentialDrafts],
+  );
+
+  /** Replace one row's draft, leaving every other row's alone. */
+  const putDraft = useCallback((draft: ProviderCredentialDraft) => {
+    onProviderCredentialDraftsChange?.([
+      ...providerCredentialDrafts.filter((entry) => entry.rowId !== draft.rowId),
+      draft,
+    ]);
+  }, [onProviderCredentialDraftsChange, providerCredentialDrafts]);
+
+  const dropDraft = useCallback((rowId: string) => {
+    if (!providerCredentialDrafts.some((entry) => entry.rowId === rowId)) return;
+    onProviderCredentialDraftsChange?.(
+      providerCredentialDrafts.filter((entry) => entry.rowId !== rowId),
+    );
+  }, [onProviderCredentialDraftsChange, providerCredentialDrafts]);
+
   /** The provider option a draft's fields describe — preset first, else vendor. */
-  const draftProviderOption = useMemo<ProviderOption | VendorOption | null>(() => {
-    if (!providerCredentialDraft) return null;
-    const preset = providerCredentialDraft.presetId
-      ? installedPresetById.get(providerCredentialDraft.presetId)
-      : undefined;
-    return preset
-      ? providerOptionFromPreset(preset)
-      : getVendorInfo(providerCredentialDraft.vendorId);
-  }, [installedPresetById, providerCredentialDraft]);
+  const draftProviderOption = useCallback(
+    (draft: ProviderCredentialDraft): ProviderOption | VendorOption => {
+      const preset = draft.presetId ? installedPresetById.get(draft.presetId) : undefined;
+      return preset ? providerOptionFromPreset(preset) : getVendorInfo(draft.vendorId);
+    },
+    [installedPresetById],
+  );
 
   /**
-   * Whether the open card still holds something the store has not been told.
+   * Whether a row still holds something the store has not been told.
    *
    * Read off the DRAFT's own vendor, not the active one: the card being edited
    * and the provider chat runs on are different questions, and comparing one
    * row's typed endpoint against another row's saved block reported both a
    * dirty card that was clean and a clean card that was dirty.
    */
-  const credentialDirty = useMemo(() => {
-    const draft = providerCredentialDraft;
-    if (!draft || !draftProviderOption) return false;
+  const rowCredentialDirty = useCallback((rowId: string): boolean => {
+    const draft = draftForRow(rowId);
+    if (!draft) return false;
     if (draft.keyInput.trim()) return true;
     const saved = savedVendorBlocks[draft.vendorId];
     if (draft.vendorId === "vertex-ai") {
       return draft.vertexProject.trim() !== (saved?.vertexProject ?? "").trim()
         || draft.vertexLocation.trim() !== (saved?.vertexLocation ?? "").trim();
     }
-    return endpointIsUserSupplied(draft.vendorId, draftProviderOption, Boolean(draft.presetId))
+    return endpointIsUserSupplied(draft.vendorId, draftProviderOption(draft), Boolean(draft.presetId))
       && draft.baseUrl.trim() !== (saved?.baseUrl ?? "").trim();
-  }, [draftProviderOption, providerCredentialDraft, savedVendorBlocks]);
+  }, [draftForRow, draftProviderOption, savedVendorBlocks]);
 
   /** The row the ACTIVE API provider is drawn on. */
   const activeApiRowId = marketplaceProviderPresetId
@@ -1733,17 +1800,21 @@ export function LlmTab(props: LlmTabProps) {
     : vendor;
 
   // Rows that must stay on screen although nothing is connected on them yet:
-  // the ones the user added, plus whichever card holds uncommitted input.
-  // That draft lives in the parent and outlives this component, so the row that
-  // owns it is DERIVED from the draft — otherwise a tab switch takes the card
-  // away while the half-typed key it belongs to is still there.
-  const draftRowId = credentialDirty ? providerCredentialDraft?.rowId ?? null : null;
-  const pinnedRowIds = useMemo<readonly string[]>(
-    () => (draftRowId && !addedRowIds.includes(draftRowId)
-      ? [...addedRowIds, draftRowId]
-      : addedRowIds),
-    [addedRowIds, draftRowId],
-  );
+  // the ones the user added, plus every card holding uncommitted input.
+  // Those drafts live in the parent and outlive this component, so the rows
+  // that own them are DERIVED from the drafts — otherwise a tab switch takes a
+  // card away while the half-typed key it belongs to is still there.
+  const dirtyRowKey = providerCredentialDrafts
+    .map((draft) => draft.rowId)
+    .filter((rowId) => rowCredentialDirty(rowId))
+    .join("\n");
+  const pinnedRowIds = useMemo<readonly string[]>(() => {
+    const rows = [...addedRowIds];
+    for (const rowId of dirtyRowKey ? dirtyRowKey.split("\n") : []) {
+      if (!rows.includes(rowId)) rows.push(rowId);
+    }
+    return rows;
+  }, [addedRowIds, dirtyRowKey]);
 
 
   const connections = useMemo<ProviderConnection[]>(() => {
@@ -1837,6 +1908,56 @@ export function LlmTab(props: LlmTabProps) {
     }
     return rows;
   }, [connections, pinnedRowIds]);
+
+  /**
+   * A row's last catalogue handshake — the ONE read of that fact.
+   *
+   * Everything that says anything about model sync goes through here, keyed by
+   * the row the handshake belongs to. It used to be two reads: the chooser's
+   * status line looked the state up under a key it built itself from the live
+   * form fields, while a card looked it up under the key its route was bound
+   * to. Two constructions of "the same" key are two keys the moment the form
+   * and the stored route disagree about an endpoint — and then one OpenAI row
+   * said the sync had failed while the line above it said four models had
+   * landed, at the same instant, about the same provider. One read, one verdict.
+   *
+   * A row with no API route has no handshake to report, and one whose route is
+   * not configured yet has not made one — neither is a failure.
+   */
+  const rowModelListState = useCallback(
+    (row: ProviderConnection | undefined): ModelListState | undefined =>
+      row?.apiVendorId && row.modelListKey && row.apiConfigured
+        ? modelLists[row.modelListKey]
+        : undefined,
+    [modelLists],
+  );
+
+  /**
+   * The row that serves what the chooser currently has selected.
+   *
+   * The status line under the chooser is about the selection, so it has to
+   * follow it: a subscription-backed pick is served by the subscription row,
+   * and the API vendor's last handshake is then a fact about a route that is
+   * not answering anything.
+   */
+  const activeRuntime = subscription.activeRuntime;
+  const activeSyncRow = useMemo<ProviderConnection | undefined>(
+    () => activeRuntime.kind === "subscription"
+      ? connections.find((row) => row.id === activeRuntime.provider)
+      : connections.find((row) => row.apiVendorId && rowCredentialId(row) === activeApiRowId),
+    [activeApiRowId, activeRuntime, connections, rowCredentialId],
+  );
+  const activeModelList = rowModelListState(activeSyncRow);
+  const activeSyncedModelOptions = modelDiscoveryPolicyUsesSeededOptions(activeModelDiscoveryPolicy)
+    ? undefined
+    : optionsFromModelListState(activeModelList);
+  // Only a synced catalogue can disqualify the saved model; a seeded vendor's
+  // curated line is not the server's word on what it serves.
+  const unlistedModel = unlistedSavedModel(
+    activeModelValue,
+    activeSyncedModelOptions,
+  );
+
   // The launch refresh (see `modelListRefreshedThisLaunch`). An effect runs
   // after the commit, and this one additionally waits for the first settings
   // apply — so every card and the chooser have already painted from the
@@ -2003,6 +2124,11 @@ export function LlmTab(props: LlmTabProps) {
       // rows take the card title instead. A real vendor's catalogue keeps its
       // sub-vendor, which is the whole point of an aggregator's list.
       const catalogueNamesItsModels = row.apiVendorId !== "openai-compatible" && !row.presetId;
+      // The SAME predicate the composer and the send path use to decide whether
+      // an image may ride along. Reading the catalogue's own modality list
+      // instead would let a badge promise vision on a model the send path then
+      // refuses.
+      const visionVendor = isLLMVendor(row.apiVendorId) ? row.apiVendorId : null;
       for (const modelId of rowModelIds(row)) {
         // Keyed by the ROW, not the vendor: two marketplace presets are two
         // providers reached through one vendor, and a pick has to say which.
@@ -2019,6 +2145,7 @@ export function LlmTab(props: LlmTabProps) {
             : row.label,
           modelId,
           ...(entry ? { entry } : {}),
+          ...(visionVendor && supportsVision(visionVendor, modelId) ? { vision: true } : {}),
           ...(isActiveRow && modelId === unlistedModel
             ? { unlisted: true, facts: t("llmTab.modelUnlisted") }
             : {}),
@@ -2052,6 +2179,10 @@ export function LlmTab(props: LlmTabProps) {
           providerLabel: view.descriptor.label,
           vendorLabel: view.descriptor.label,
           modelId: model.label || model.id,
+          // A subscription runtime answers the image question itself — the
+          // model-name predicate is explicitly bypassed on this route — so the
+          // badge follows the host-verified projection or is not drawn.
+          ...(view.status.capabilities?.images === true ? { vision: true } : {}),
         });
       }
     }
@@ -2113,6 +2244,19 @@ export function LlmTab(props: LlmTabProps) {
     subscription.activeRuntime.kind, subscription.props.actions,
   ]);
 
+  /**
+   * Put one row away: it closes, and whatever was typed into it goes with it.
+   *
+   * Cancelling is a decision — "not this" — so it must not leave the draft
+   * behind to reappear the next time the row opens, and it must not leave the
+   * row pinned to the list by an edit the user just abandoned.
+   */
+  const closeRow = useCallback((rowId: string) => {
+    setOpenRowIds((current) => current.filter((id) => id !== rowId));
+    setSaveFailedRowIds((current) => current.filter((id) => id !== rowId));
+    dropDraft(rowId);
+  }, [dropDraft]);
+
   const revealRow = useCallback((rowId: string) => {
     setAddedRowIds((current) => current.includes(rowId) ? current : [...current, rowId]);
     setRowToReveal(rowId);
@@ -2136,11 +2280,12 @@ export function LlmTab(props: LlmTabProps) {
     vendorId: string;
     presetId: string;
   }) => {
-    setOpenRowId(target.rowId);
-    if (providerCredentialDraft?.rowId === target.rowId) return;
+    setOpenRowIds((current) =>
+      current.includes(target.rowId) ? current : [...current, target.rowId]);
+    if (draftForRow(target.rowId)) return;
     const preset = target.presetId ? installedPresetById.get(target.presetId) : undefined;
     const saved = savedVendorBlocks[target.vendorId];
-    onProviderCredentialDraftChange?.({
+    putDraft({
       rowId: target.rowId,
       vendorId: target.vendorId,
       presetId: target.presetId,
@@ -2152,8 +2297,7 @@ export function LlmTab(props: LlmTabProps) {
       vertexLocation: saved?.vertexLocation ?? "",
     });
   }, [
-    installedPresetById, onProviderCredentialDraftChange, providerCredentialDraft,
-    savedVendorBlocks,
+    draftForRow, installedPresetById, putDraft, savedVendorBlocks,
   ]);
 
   /** What `openRowCredentialForm` has to be handed to open this row. */
@@ -2165,8 +2309,8 @@ export function LlmTab(props: LlmTabProps) {
 
   /** Whether this row is showing its credential form. */
   const rowFormOpen = useCallback(
-    (row: ProviderConnection): boolean => openRowId === row.id,
-    [openRowId],
+    (row: ProviderConnection): boolean => openRowIds.includes(row.id),
+    [openRowIds],
   );
 
   /** Which row is actually showing a form right now — the signal the reveal
@@ -2179,23 +2323,26 @@ export function LlmTab(props: LlmTabProps) {
   useEffect(() => {
     if (!rowToReveal) return;
     const node = connectionsRef.current?.querySelector<HTMLElement>(
-      `[data-provider-row="${rowToReveal}"]`,
+      `[data-testid="llm-tab:connection:${rowToReveal}"]`,
     );
     if (!node) return;
     // A row added from the menu can be on screen a render before its form is —
     // the draft it needs is the parent's to hold. Consuming the reveal on the
     // bare row would put the caret on the disclosure button and leave nothing
     // to move when the endpoint field finally lands, so wait for the form the
-    // reveal was actually asking for.
-    const form = node.querySelector<HTMLElement>(`#${CREDENTIAL_FORM_ID}`);
-    if (openRowId === rowToReveal && !form) return;
+    // reveal was actually asking for. Only a row with an API route ever grows
+    // one: waiting on a form a subscription-only row will never have would
+    // strand the reveal, and the row it named would never be scrolled to.
+    const expectsForm = visibleRows.some((row) => row.id === rowToReveal && row.apiVendorId);
+    const form = node.querySelector<HTMLElement>('[data-testid="llm-tab:manual-section"]');
+    if (expectsForm && openRowIds.includes(rowToReveal) && !form) return;
     setRowToReveal(null);
     node.scrollIntoView?.({ block: "nearest" });
     const focusTarget = node.querySelector<HTMLElement>('[data-testid="llm-base-url-input"]')
       ?? node.querySelector<HTMLElement>('[data-testid="llm-api-key-input"]')
       ?? node.querySelector<HTMLElement>("button");
     focusTarget?.focus();
-  }, [openFormRowId, openRowId, rowToReveal, visibleRowKey]);
+  }, [openFormRowId, openRowIds, rowToReveal, visibleRowKey, visibleRows]);
 
   /**
    * Persist ONE card. Only what this row owns is written: its secret, and the
@@ -2204,8 +2351,9 @@ export function LlmTab(props: LlmTabProps) {
    * overwrite an address that belongs to the generic provider's card.
    */
   const saveRowCredential = async (row: ProviderConnection) => {
-    const draft = providerCredentialDraft;
-    if (!draft || draft.rowId !== row.id || !onSaveProviderCredential) return;
+    const draft = draftForRow(row.id);
+    if (!draft || !onSaveProviderCredential) return;
+    setSaveFailedRowIds((current) => current.filter((rowId) => rowId !== row.id));
     const preset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
     const rowInfo = preset ? providerOptionFromPreset(preset) : getVendorInfo(draft.vendorId);
     const vendorBlock = draft.vendorId === "vertex-ai"
@@ -2222,7 +2370,13 @@ export function LlmTab(props: LlmTabProps) {
       apiKey: draft.keyInput,
       ...(vendorBlock ? { vendorBlock } : {}),
     });
-    if (!saved) return;
+    if (!saved) {
+      // The row stays open on what failed to commit: closing it would take the
+      // fields the user still has to correct away with it.
+      setSaveFailedRowIds((current) =>
+        current.includes(row.id) ? current : [...current, row.id]);
+      return;
+    }
     setCredentialSavedRowId(row.id);
     // Storing a key is not a settings write on every path, so re-ask the
     // credential store directly rather than waiting on a broadcast that a
@@ -2239,10 +2393,11 @@ export function LlmTab(props: LlmTabProps) {
         llmModelListCacheKey(draft.vendorId, draft.baseUrl.trim(), row.presetId ?? ""),
       );
     }
-    // The card stays open on what it just committed, minus the key it no
-    // longer holds. Dropping the draft here would collapse the form under a
-    // header still drawn as expanded.
-    onProviderCredentialDraftChange?.({ ...draft, keyInput: "" });
+    // A committed card has nothing left to say, so it closes and gives its
+    // room back to the list. The draft goes with it — what it held is now what
+    // the store holds.
+    dropDraft(row.id);
+    setOpenRowIds((current) => current.filter((rowId) => rowId !== row.id));
   };
 
   /**
@@ -2253,8 +2408,8 @@ export function LlmTab(props: LlmTabProps) {
    * form for one card is the same form whichever provider chat is running on.
    */
   const credentialFormFor = (row: ProviderConnection) => {
-    const draft = providerCredentialDraft;
-    if (!draft || draft.rowId !== row.id) return null;
+    const draft = draftForRow(row.id);
+    if (!draft) return null;
     const rowPreset = row.presetId ? installedPresetById.get(row.presetId) : undefined;
     const rowVendorId = draft.vendorId;
     const rowInfo = rowPreset ? providerOptionFromPreset(rowPreset) : getVendorInfo(rowVendorId);
@@ -2262,13 +2417,9 @@ export function LlmTab(props: LlmTabProps) {
     const rowHasKey = credentialedProviderIds.has(rowCredentialId(row));
     const rowNeedsApiKey = rowRequiresApiKey(row);
     const patchDraft = (next: Partial<ProviderCredentialDraft>) =>
-      onProviderCredentialDraftChange?.({ ...draft, ...next });
+      putDraft({ ...draft, ...next });
     return (
-      <div
-        className="space-y-3"
-        id={CREDENTIAL_FORM_ID}
-        data-testid="llm-tab:manual-section"
-      >
+      <div className="space-y-3" data-testid="llm-tab:manual-section">
         {rowVendorId !== "vertex-ai" && endpointIsUserSupplied(rowVendorId, rowInfo, rowEndpointLocked) && (
           <div className="space-y-2">
             <Label className="text-sm font-medium">
@@ -2376,7 +2527,8 @@ export function LlmTab(props: LlmTabProps) {
             onSave={() => void saveRowCredential(row)}
             saving={saving}
             settingsLoaded={settingsLoaded}
-            dirty={credentialDirty}
+            dirty={rowCredentialDirty(row.id)}
+            onCancel={() => closeRow(row.id)}
             testId="llm-tab:save-providers"
           />
         )}
@@ -2443,202 +2595,197 @@ export function LlmTab(props: LlmTabProps) {
     );
   };
 
-  const modeBadge = (row: ProviderConnection) => {
+  /**
+   * What the row has to say whether or not it is open.
+   *
+   * Both of these answer "why can I not use this provider yet" — a question
+   * someone has while the row is folded, so they sit outside the disclosure.
+   * Returning null when neither speaks keeps the shared row from drawing an
+   * empty band under the head.
+   */
+  const rowNote = (row: ProviderConnection) => {
+    const blocked = chatAvailabilityNote(row);
+    const guidance = pickModelGuidance(row);
+    if (!blocked && !guidance) return null;
+    return <>{blocked}{guidance}</>;
+  };
+
+  /**
+   * The ways in to this provider, named — and which one is live.
+   *
+   * A provider a user recognises as one company is one row, so the row has to
+   * say how it is reached. A filled badge is the route chat is actually running
+   * on; an outlined one is a route that is configured and idle.
+   */
+  const routeBadges = (row: ProviderConnection) => {
     const active = activeMode(row);
-    if (!active) return null;
-    return (
-      <Badge variant="default" className="h-5 px-2 text-[10px]" data-testid={`llm-tab:connection-mode:${row.id}`}>
-        {active === "subscription" ? t("llmTab.modeSubscription") : t("llmTab.modeApiKey")}
+    const badge = (mode: "subscription" | "api", label: string) => (
+      <Badge
+        key={mode}
+        variant={active === mode ? "default" : "outline"}
+        className="h-5 shrink-0 px-2 text-[10px]"
+        data-testid={`llm-tab:connection-route:${row.id}:${mode}`}
+        data-active={active === mode ? "true" : "false"}
+      >
+        {label}
       </Badge>
     );
-  };
-
-  /**
-   * The row's state, as one dot and one word — per ROUTE.
-   *
-   * Every row carries it, including the ones that are merely connected — a row
-   * that only speaks up when it is the active one leaves the rest of the list
-   * saying nothing about itself, which is the state this list exists to show.
-   *
-   * A subscription row already says how its sign-in stands, in the runtime's
-   * own badge. So on that row this chip speaks for the API-key route alone,
-   * and names it — "connected" beside "not set" is two routes' states, and
-   * without the names it read as one row contradicting itself. A subscription
-   * row with no API counterpart has one route, and its badge covers it.
-   */
-  const statusChip = (row: ProviderConnection) => {
-    const hasSubscriptionRoute = row.subscription !== undefined;
-    if (hasSubscriptionRoute && !row.apiVendorId) return null;
-    const mode = activeMode(row);
-    const live = hasSubscriptionRoute ? mode === "api" : mode !== null;
-    const connected = hasSubscriptionRoute ? row.apiConfigured : row.connected;
-    const state = live
-      ? t("subscriptionProvidersSection.apiChatActive")
-      : connected
-        ? t("subscriptionProvidersSection.statusConnected")
-        : hasSubscriptionRoute
-          ? t("llmTab.apiKeyNotSet")
-          : t("subscriptionProvidersSection.statusSignedOut");
-    const label = hasSubscriptionRoute
-      ? t("subscriptionProvidersSection.routeStatus", { route: t("llmTab.modeApiKey"), status: state })
-      : state;
-    const tone = live
-      ? "bg-primary"
-      : connected
-        ? "bg-success"
-        : "bg-muted-foreground/(--opacity-half)";
     return (
-      <span
-        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
-        data-testid={`llm-tab:connection-status:${row.id}`}
-      >
-        <span className={`size-1.5 shrink-0 rounded-full ${tone}`} aria-hidden={true} />
-        {label}
-      </span>
+      <>
+        {row.subscription ? badge("subscription", t("llmTab.modeSubscription")) : null}
+        {row.apiVendorId ? badge("api", t("llmTab.modeApiKey")) : null}
+      </>
     );
   };
 
   /**
-   * What this connection is, in the row itself: the endpoint it reaches and how
-   * much of a catalogue came back. Without it the row is a bare name, and the
-   * user cannot tell two OpenAI-compatible endpoints apart.
+   * What a subscription row is waiting on, in the row's own words.
+   *
+   * The five-word column is deliberately coarse — it says whether the provider
+   * is usable, not which handshake is missing — so the specific answer moves
+   * down to the sub-line, where it has room to be a sentence.
+   */
+  const runtimeSentence = (row: ProviderConnection): string | null => {
+    const status = row.subscription?.status;
+    if (!row.subscription || !status) return null;
+    if (status.runtime === "unavailable") return t("subscriptionProvidersSection.statusRuntimeUnavailable");
+    if (status.runtime === "not-configured") return t("subscriptionProvidersSection.statusRuntimeNotConfigured");
+    if (status.runtime === "unverified") return t("subscriptionProvidersSection.statusRuntimeUnverified");
+    if (status.connection === "pending") {
+      return status.pendingLoginMethod === "device-code"
+        ? t("subscriptionProvidersSection.statusDeviceCodePending")
+        : t("subscriptionProvidersSection.statusBrowserPending");
+    }
+    return null;
+  };
+
+  /**
+   * The row's state, as ONE of the five words every connection row is worded in.
+   *
+   * One row, one state. The provider used to be drawn twice — a subscription
+   * card and an API-key card for the same company — and each computed its own
+   * verdict, so the screen could show "connected" and "sync failed" side by
+   * side about one account and be telling the truth twice. What a person wants
+   * from this word is whether the provider is usable right now; which of its
+   * routes needs attention is what the sub-line and the opened body are for.
+   *
+   * "Being used for chat right now" is deliberately NOT a sixth word: the
+   * filled route badge beside the name already says which route is live, and a
+   * word answering a different question from the words above and below it is
+   * how a column stops being readable straight down.
+   */
+  const providerRowState = (row: ProviderConnection): ConnectionRowState | null => {
+    const status = row.subscription?.status;
+    // No word at all while the surface that owns the real state is still
+    // answering — guessing "signed out" during the check is how a row lies.
+    if (row.subscription && (!status || status.runtime === "checking" || status.connection === "unknown")) {
+      return null;
+    }
+    if (status?.runtime === "unavailable") return "attention";
+    if (status?.runtime === "not-configured" || status?.runtime === "unverified") return "needs-setup";
+    if (status?.connection === "pending") return "pending";
+    if (status?.connection === "connected" || row.apiConfigured) {
+      // A stored credential whose endpoint would not hand over a catalogue is
+      // "on, but not well" — exactly the fifth word. Saying "connected" over a
+      // line that says the sync failed is the contradiction this row exists to
+      // end, and the sync fact still gets stated once, on the line.
+      return rowModelListState(row)?.status === "error" ? "attention" : "connected";
+    }
+    return "needs-setup";
+  };
+
+  /** How many models this row contributes to the one chooser. */
+  const rowOfferedModelCount = (row: ProviderConnection): number => {
+    const apiId = row.apiVendorId ? apiProviderId(rowCredentialId(row)) : null;
+    return unifiedOptions.filter((option) =>
+      option.providerId === row.id || (apiId !== null && option.providerId === apiId)).length;
+  };
+
+  /**
+   * What this connection is, on one line: what it is waiting on, the endpoint
+   * it reaches, and how much of a catalogue came back — or, where there is no
+   * endpoint to name, how many models it is offering.
+   *
+   * It reads the handshake through `rowModelListState`, the same read the
+   * chooser's status line makes, so the row and the line cannot report
+   * different outcomes for one provider. `data-provider-sync-status` rides on
+   * this node because this IS the tab's only reading of that outcome; a second
+   * node carrying it would be a second place for the answer to differ.
+   *
+   * Rendered inside the shared row's endpoint slot, so the mono type, the
+   * truncation and the position are the ones every connection row in Settings
+   * already uses; only the tone and the title are this line's own.
    */
   const connectionSubline = (row: ProviderConnection) => {
-    if (!row.apiVendorId || !row.modelListKey) return null;
-    // A subscription row borrows its API counterpart's cache key, so anything
-    // filed under that key — a leftover entry from a previous session above
-    // all — would paint a signed-in runtime's card with a handshake it never
-    // made. The line belongs to the API path, so it appears only where that
-    // path is actually configured.
-    if (!row.apiConfigured) return null;
-    const state = modelLists[row.modelListKey];
-    if (!state) return null;
-    const endpoint = state.endpoint ?? row.modelListKey.split("\n")[1] ?? "";
-    const syncLabel = modelSyncLabel(t, state);
-    const parts = [endpoint, syncLabel].filter(Boolean);
+    const state = rowModelListState(row);
+    const parts: string[] = [];
+    const waiting = runtimeSentence(row);
+    if (waiting) parts.push(waiting);
+    if (state && row.modelListKey) {
+      const endpoint = state.endpoint ?? row.modelListKey.split("\n")[1] ?? "";
+      if (endpoint) parts.push(endpoint);
+      parts.push(modelSyncLabel(t, state));
+    } else {
+      const count = rowOfferedModelCount(row);
+      if (count > 0) parts.push(t("llmTab.connectionModelCount", { count }));
+    }
     if (parts.length === 0) return null;
-    return (
-      <p
-        className={`truncate text-[11px] ${state.status === "error" ? "text-destructive" : "text-muted-foreground"}`}
-        title={parts.join(" · ")}
-        data-provider-sync-status={state.status}
-        data-testid={`llm-tab:connection-subline:${row.id}`}
-      >
-        {parts.join(" · ")}
-      </p>
-    );
-  };
-
-  /**
-   * The handshake's outcome at a glance, beside the name — one dot and one
-   * word, the same shape as the status chip, so no dot on the card head ever
-   * stands without the word that says what it means.
-   *
-   * It reads the same `modelLists` entry the subline reads, so the chip and the
-   * sentence can never disagree. A row with no API path has no handshake to
-   * report, and one still loading or waiting on a key has not had one yet —
-   * neither is a failure, so both stay muted rather than red.
-   */
-  const modelSyncDot = (row: ProviderConnection) => {
-    const state = row.apiVendorId && row.modelListKey && row.apiConfigured
-      ? modelLists[row.modelListKey]
-      : undefined;
-    const syncState = state?.status === "ready"
-      ? "synced"
-      : state?.status === "error"
-        ? "failed"
-        : "unknown";
-    const tone = {
-      synced: "bg-success",
-      failed: "bg-destructive",
-      unknown: "bg-muted-foreground/(--opacity-half)",
-    }[syncState];
-    const word = {
-      synced: t("llmTab.modelSyncChipSynced"),
-      failed: t("llmTab.modelSyncChipFailed"),
-      unknown: t("llmTab.modelSyncChipUnknown"),
-    }[syncState];
-    const sentence = {
-      synced: t("llmTab.modelSyncDotSynced"),
-      failed: t("llmTab.modelSyncDotFailed"),
-      unknown: t("llmTab.modelSyncDotUnknown"),
-    }[syncState];
+    const text = parts.join(" · ");
     return (
       <span
-        title={sentence}
-        className={`inline-flex items-center gap-1.5 text-[11px] ${syncState === "failed" ? "text-destructive" : "text-muted-foreground"}`}
-        data-state={syncState}
-        data-testid="llm-provider-sync-dot"
+        className={state?.status === "error" ? "text-destructive" : undefined}
+        title={text}
+        data-provider-sync-status={state?.status ?? "none"}
+        data-testid={`llm-tab:connection-subline:${row.id}`}
       >
-        <span className={`size-1.5 shrink-0 rounded-full ${tone}`} aria-hidden={true} />
-        {word}
+        {text}
       </span>
     );
   };
 
-  /**
-   * The API-key route, as a third way in beside the sign-in buttons.
-   *
-   * It sits with them because it IS one of them — the same decision, taken the
-   * same way — and the key field itself stays folded away until this is pressed,
-   * so a provider a user signs in to never shows a key box it does not need.
-   */
-  const apiKeyChip = (row: ProviderConnection) => {
-    if (!row.apiVendorId) return null;
-    const isOpen = rowFormOpen(row);
-    return (
-      <Button
-        type="button"
-        size="sm"
-        variant={isOpen ? "secondary" : "outline"}
-        aria-expanded={isOpen}
-        {...(isOpen ? { "aria-controls": CREDENTIAL_FORM_ID } : {})}
-        onClick={() => {
-          if (isOpen) {
-            setOpenRowId(null);
-            return;
-          }
-          openRowCredentialForm(rowFormTarget(row));
-          // Revealing a form and leaving the caret outside it makes the button
-          // look like it did nothing; the reveal effect moves focus in.
-          setRowToReveal(row.id);
-        }}
-        data-testid={`llm-tab:connection-api-key:${row.id}`}
-      >
-        {t("llmTab.authApiKey")}
-      </Button>
-    );
-  };
+  /** Whether any row in the list has something to refresh at all. */
+  const listHasRefresh = visibleRows.some((row) =>
+    Boolean(rowModelListRequest(row)) || Boolean(row.subscription && subscription.props.actions.refreshStatus));
 
   /**
-   * This card's own refresh.
+   * ONE refresh per row, for the whole row.
    *
-   * Every card whose catalogue is fetchable gets one, because the launch
-   * refresh is the only automatic one there is — when a provider ships a model
-   * mid-session, this is how the user picks it up without restarting. A card
-   * with no catalogue route (Azure AI Foundry, Claude, Gemini: their lists are
-   * curated here) has nothing to refresh and shows no control.
+   * "Refresh this provider" was never two decisions, but the provider used to
+   * be two cards, so it grew two identical icons — one re-reading a sign-in,
+   * one re-asking an endpoint for its catalogue. This does whichever halves the
+   * row actually has. The launch refresh is the only automatic one there is, so
+   * a row whose provider ships a model mid-session still needs this; a row with
+   * neither route to refresh (Azure AI Foundry, Claude, Gemini: their lists are
+   * curated here) shows no control at all.
    */
   const rowRefreshControl = (row: ProviderConnection) => {
     const request = rowModelListRequest(row);
-    if (!request) return null;
-    const loading = row.modelListKey
-      ? modelLists[row.modelListKey]?.status === "loading"
-      : false;
+    const refreshStatus = row.subscription ? subscription.props.actions.refreshStatus : undefined;
+    if (!request && !refreshStatus) {
+      // The chevron is a column, and a column that moves row to row is the
+      // "nothing lines up" complaint. A row with nothing to refresh still owes
+      // the list the width the refreshable rows take — but only while the list
+      // actually has one, so a list of curated providers keeps its edge tight.
+      return listHasRefresh
+        ? <span className="h-7 w-7 shrink-0" aria-hidden={true} />
+        : null;
+    }
+    const loading = (row.modelListKey ? modelLists[row.modelListKey]?.status === "loading" : false)
+      || row.subscription?.refreshPending === true;
     return (
       <Button
         type="button"
         size="sm"
         variant="ghost"
         className="h-7 w-7 shrink-0 p-0"
-        aria-label={t("llmTab.modelSync")}
-        title={t("llmTab.modelSync")}
+        aria-label={t("llmTab.connectionRefresh", { provider: row.label })}
+        title={t("llmTab.connectionRefresh", { provider: row.label })}
         data-testid={`llm-tab:connection-refresh:${row.id}`}
         disabled={loading}
-        onClick={() => void requestModelList(request.vendorId, {
-          ...request.options,
-          force: true,
-        })}
+        onClick={() => {
+          if (request) void requestModelList(request.vendorId, { ...request.options, force: true });
+          void refreshStatus?.(row.id as SubscriptionRuntimeId);
+        }}
       >
         {loading
           ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
@@ -2656,7 +2803,7 @@ export function LlmTab(props: LlmTabProps) {
    * brings Save back.
    */
   const unsavedBadge = (row: ProviderConnection) => {
-    if (!credentialDirty || providerCredentialDraft?.rowId !== row.id) return null;
+    if (!rowCredentialDirty(row.id)) return null;
     if (rowFormOpen(row)) return null;
     return (
       <Badge
@@ -2688,52 +2835,23 @@ export function LlmTab(props: LlmTabProps) {
           {t("llmTab.connectionsEmpty")}
         </p>
       ) : null}
-      {visibleRows.map((row) => row.subscription ? (
-        <SubscriptionProviderRow
-          key={row.id}
-          provider={row.subscription}
-          label={row.label}
-          {...(row.apiVendorId ? { routeName: t("llmTab.modeSubscription") } : {})}
-          activeSelection={subscription.props.activeSelection}
-          chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
-          actions={subscription.props.actions}
-          leading={<>{modelSyncDot(row)}{statusChip(row)}{modeBadge(row)}{unsavedBadge(row)}</>}
-          subline={<>{connectionSubline(row)}{chatAvailabilityNote(row)}{pickModelGuidance(row)}</>}
-          authAction={<>{apiKeyChip(row)}{rowRefreshControl(row)}</>}
-          {...(rowFormOpen(row) ? { trailing: credentialFormFor(row) } : {})}
-        />
-      ) : (
-        <div
-          key={row.id}
-          className="space-y-3 rounded-md border bg-card p-3"
-          data-provider-row={row.id}
-          data-testid={`llm-tab:connection:${row.id}`}
-        >
-          {/* The whole head is the disclosure: the row IS the provider, so
-              managing it should not require finding a particular control on it.
-              The refresh sits BESIDE it, never inside — a button nested in a
-              button is not a control the browser can give anyone. */}
-          <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              className="flex w-full min-w-0 items-center gap-2 text-left"
-              aria-expanded={rowFormOpen(row)}
-              {...(rowFormOpen(row) ? { "aria-controls": CREDENTIAL_FORM_ID } : {})}
-              onClick={() => {
-                if (rowFormOpen(row)) {
-                  setOpenRowId(null);
-                  return;
-                }
-                openRowCredentialForm(rowFormTarget(row));
-                setRowToReveal(row.id);
-              }}
-              data-testid={`llm-tab:connection-toggle:${row.id}`}
-            >
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="truncate text-sm font-medium">{row.label}</span>
-                  {modelSyncDot(row)}
-                  {modeBadge(row)}
+      {/* ONE row renderer for every provider, however it is reached — and the
+          SAME renderer the remote connections list uses, so a reader scanning
+          either list is reading one visual language. Two renderers meant two
+          headers, two state words and two refresh buttons for one company, and
+          two independent computations of the same facts, which is how the
+          screen came to contradict itself. */}
+      {visibleRows.length > 0 ? (
+        <div className="overflow-hidden rounded-md border border-border" data-testid="llm-tab:connections-list">
+          {visibleRows.map((row, index) => (
+            <ConnectionRow
+              key={row.id}
+              label={row.label}
+              state={providerRowState(row)}
+              endpoint={connectionSubline(row)}
+              badges={(
+                <>
+                  {routeBadges(row)}
                   {unsavedBadge(row)}
                   {row.apiVendorId && marketplaceVendorIds.has(row.apiVendorId) ? (
                     <span
@@ -2743,24 +2861,47 @@ export function LlmTab(props: LlmTabProps) {
                       {t("llmTab.marketplaceInstalledBadge")}
                     </span>
                   ) : null}
-                </span>
-                {connectionSubline(row)}
-              </span>
-              {statusChip(row)}
-              <ChevronRight
-                className={`size-4 shrink-0 text-muted-foreground transition-transform ${
-                  rowFormOpen(row) ? "rotate-90" : ""
-                }`}
-                aria-hidden={true}
-              />
-            </button>
-            {rowRefreshControl(row)}
-          </div>
-          {chatAvailabilityNote(row)}
-          {pickModelGuidance(row)}
-          {rowFormOpen(row) ? credentialFormFor(row) : null}
+                </>
+              )}
+              note={rowNote(row)}
+              action={rowRefreshControl(row)}
+              expanded={rowFormOpen(row)}
+              onToggle={() => {
+                if (rowFormOpen(row)) {
+                  closeRow(row.id);
+                  return;
+                }
+                if (row.apiVendorId) openRowCredentialForm(rowFormTarget(row));
+                else setOpenRowIds((current) => [...current, row.id]);
+                setRowToReveal(row.id);
+              }}
+              separated={index > 0}
+              testId={`llm-tab:connection:${row.id}`}
+            >
+              <div className="space-y-3">
+                {/* Signing in, choosing the official runtime, and signing out are
+                    the half of this row that has no API-key counterpart. */}
+                {row.subscription ? (
+                  <SubscriptionAuthControls
+                    provider={row.subscription}
+                    actions={subscription.props.actions}
+                  />
+                ) : null}
+                {saveFailedRowIds.includes(row.id) ? (
+                  <p
+                    role="alert"
+                    className="rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive"
+                    data-testid={`llm-tab:connection-save-failed:${row.id}`}
+                  >
+                    {t("llmTab.connectionSaveFailed")}
+                  </p>
+                ) : null}
+                {credentialFormFor(row)}
+              </div>
+            </ConnectionRow>
+          ))}
         </div>
-      ))}
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -2875,32 +3016,6 @@ export function LlmTab(props: LlmTabProps) {
                     <TooltipContent>{t("llmTab.moreModelsInMarketplace")}</TooltipContent>
                   </Tooltip>
                 )}
-                {activeShouldSyncModelList && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 w-7 p-0"
-                      aria-label={t("llmTab.modelSync")}
-                      data-testid="llm-tab:model-sync"
-                      disabled={activeModelList?.status === "loading"}
-                      onClick={() => void requestModelList(vendor, {
-                        baseUrl: activeModelListBaseUrl,
-                        credentialScope: activeModelListCredentialScope,
-                        ...(activeModelDiscoveryPolicy ? { modelDiscoveryPolicy: activeModelDiscoveryPolicy } : {}),
-                        force: true,
-                      })}
-                    >
-                      {activeModelList?.status === "loading"
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
-                        : <RefreshCw className="h-3.5 w-3.5" aria-hidden={true} />}
-                    </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("llmTab.modelSync")}</TooltipContent>
-                  </Tooltip>
-                )}
               </div>
             </div>
             {/* ONE chooser across every connected provider. Picking a model
@@ -2914,6 +3029,7 @@ export function LlmTab(props: LlmTabProps) {
               onTogglePin={handleTogglePin}
               placeholder={vendorInfo.defaultModel}
               popupClassName={SELECT_POPUP_LAYOUT}
+              disabled={subscription.props.chatSelectionBusy ?? false}
             />
             {unlistedModel && subscription.activeRuntime.kind === "api" && (
               <p
@@ -2924,28 +3040,7 @@ export function LlmTab(props: LlmTabProps) {
                 {t("llmTab.modelUnlistedWarning", { model: unlistedModel })}
               </p>
             )}
-            {activeModelList && (
-              <p
-                className="text-[11px] text-muted-foreground"
-                data-provider-sync-status={activeModelList.status}
-                data-testid="llm-tab:model-sync-status"
-              >
-                {activeModelList.status === "ready" && activeModelList.persistError
-                  ? t("llmTab.modelSyncCacheSaveFailed")
-                  : modelSyncLabel(t, activeModelList)}
-              </p>
-            )}
           </div>
-          {/* The same checklist the subscription runtimes answer. A vendor
-              that is not configured yet has answered nothing, so its row
-              reads unknown rather than claiming the host's features. */}
-          <ProviderCapabilityGrid
-            capabilities={apiPathConfigured
-              ? API_PATH_RUNTIME_CAPABILITIES
-              : DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES}
-            known={() => apiPathConfigured}
-            testIdPrefix="llm-tab:api-provider"
-          />
           {connectionsList}
         </div>
       </SettingsSection>

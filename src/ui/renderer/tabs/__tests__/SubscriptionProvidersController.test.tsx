@@ -9,7 +9,7 @@ import type {
 } from "../../../../shared/subscription-runtime.js";
 import type { AppSettings, LvisApi } from "../../types.js";
 import { useSubscriptionProviders } from "../SubscriptionProvidersController.js";
-import { SubscriptionProviderRow } from "../SubscriptionProvidersSection.js";
+import { SubscriptionAuthControls } from "../SubscriptionProvidersSection.js";
 
 /**
  * What the settings tab does with the hook, in one place.
@@ -40,13 +40,37 @@ function SubscriptionProvidersController({ api }: { api: LvisApi }) {
         <p data-testid="subscription-providers:api-chat-error">{props.apiChatError}</p>
       ) : null}
       {props.providers.map((provider) => (
-        <SubscriptionProviderRow
-          key={provider.descriptor.id}
-          provider={provider}
-          activeSelection={props.activeSelection}
-          chatSelectionBusy={props.chatSelectionBusy ?? false}
-          actions={props.actions}
-        />
+        <div key={provider.descriptor.id}>
+          <SubscriptionAuthControls provider={provider} actions={props.actions} />
+          {/* The connection word is the settings row's to draw; what the tests
+              need from the controller is the projection behind it. */}
+          <span data-testid={`subscription-state:${provider.descriptor.id}`}>
+            {provider.status?.connection ?? "unknown"}
+          </span>
+          {/* The provider card carries no model list and no "use for chat"
+              button any more: both live in the settings page's one chooser.
+              These stand in for that chooser so the tests keep exercising the
+              controller rather than a particular control. */}
+          <button
+            type="button"
+            data-testid={`subscription-chooser:${provider.descriptor.id}:provider-default`}
+            disabled={props.chatSelectionBusy}
+            onClick={() => void props.actions.useForChat?.(provider.descriptor.id, null)}
+          >
+            use provider default
+          </button>
+          {(provider.status?.models ?? []).map((model) => (
+            <button
+              key={model.id}
+              type="button"
+              data-testid={`subscription-chooser:${provider.descriptor.id}:${model.id}`}
+              disabled={props.chatSelectionBusy}
+              onClick={() => void props.actions.useForChat?.(provider.descriptor.id, model.id)}
+            >
+              {model.label}
+            </button>
+          ))}
+        </div>
       ))}
     </div>
   );
@@ -159,13 +183,12 @@ describe("SubscriptionProvidersController", () => {
       expect(subscriptionRuntimeStatus).toHaveBeenCalledWith("grok-build");
     });
 
-    fireEvent.click(await screen.findByTestId("subscription-provider:codex:load-models"));
+    // Asked for on its own, as soon as the provider reports itself connected:
+    // the chooser cannot offer what nothing fetched, and there is no longer a
+    // button on the card to fetch it with.
+    fireEvent.click(await screen.findByTestId("subscription-chooser:codex:gpt-5.6-codex"));
     await waitFor(() => {
       expect(subscriptionListModels).toHaveBeenCalledWith("codex");
-    });
-
-    fireEvent.click(screen.getByTestId("subscription-provider:codex:use-for-chat"));
-    await waitFor(() => {
       expect(subscriptionUseForChat).toHaveBeenCalledWith("codex", "gpt-5.6-codex");
       expect(subscriptionRuntimeStatus.mock.calls.filter(([provider]) => provider === "codex")).toHaveLength(2);
     });
@@ -203,14 +226,14 @@ describe("SubscriptionProvidersController", () => {
     act(() => emitStatusUpdated?.({ provider: "codex", revision: 1 }));
     await waitFor(() => expect(subscriptionRuntimeStatus).toHaveBeenCalledTimes(4));
     await waitFor(() => {
-      expect(screen.getByTestId("subscription-provider:codex:connection")).toHaveTextContent("Connected");
+      expect(screen.getByTestId("subscription-state:codex")).toHaveTextContent("connected");
     });
 
     await act(async () => {
       staleCodexStatus.resolve({ ok: true, status: signedOutStatus("codex") });
       await staleCodexStatus.promise;
     });
-    expect(screen.getByTestId("subscription-provider:codex:connection")).toHaveTextContent("Connected");
+    expect(screen.getByTestId("subscription-state:codex")).toHaveTextContent("connected");
   });
 
   it("does not let a status event clear an in-flight login action", async () => {
@@ -300,7 +323,7 @@ describe("SubscriptionProvidersController", () => {
     });
     expect(screen.queryByTestId("subscription-providers:api-chat-error")).toBeNull();
 
-    const kimiUseForChat = await screen.findByTestId("subscription-provider:kimi-code:use-for-chat");
+    const kimiUseForChat = await screen.findByTestId("subscription-chooser:kimi-code:provider-default");
     await waitFor(() => expect(kimiUseForChat).not.toBeDisabled());
     fireEvent.click(kimiUseForChat);
     await waitFor(() => {
@@ -311,7 +334,7 @@ describe("SubscriptionProvidersController", () => {
     // while the first selection is still awaiting main-process completion.
     await waitFor(() => {
       expect(screen.getByTestId("subscription-providers:use-api-for-chat")).toBeDisabled();
-      expect(screen.getByTestId("subscription-provider:codex:use-for-chat")).toBeDisabled();
+      expect(screen.getByTestId("subscription-chooser:codex:provider-default")).toBeDisabled();
     });
 
     await act(async () => {
@@ -323,55 +346,41 @@ describe("SubscriptionProvidersController", () => {
     });
   });
 
-  it("preserves an inactive provider model draft across an unrelated settings broadcast", async () => {
-    let emitSettings: ((settings: AppSettings) => void) | undefined;
+  it("offers a connected provider's catalogue without anyone pressing anything", async () => {
+    const subscriptionListModels = vi.fn(async (provider: SubscriptionRuntimeId) => ({
+      ok: true as const,
+      status: connectedStatus(provider),
+      models: provider === "codex"
+        ? [
+          { id: "gpt-5.6-codex", displayName: "GPT-5.6 Codex", isDefault: true },
+          { id: "gpt-5.4-mini", displayName: "GPT-5.4 mini", isDefault: false },
+        ]
+        : [],
+    }));
     const subscriptionUseForChat = vi.fn(async (provider: SubscriptionRuntimeId) => ({
       ok: true as const,
       status: connectedStatus(provider),
     }));
     const api = {
       getSettings: vi.fn(async () => ({ llm: { activeChatRuntime: { kind: "api" as const } } })),
-      onSettingsUpdated: vi.fn((handler: (settings: AppSettings) => void) => {
-        emitSettings = handler;
-        return () => {};
-      }),
+      onSettingsUpdated: vi.fn(() => () => {}),
       onSubscriptionRuntimeStatusUpdated: vi.fn(() => () => {}),
       subscriptionRuntimeStatus: vi.fn(async (provider: SubscriptionRuntimeId) => ({
         ok: true as const,
         status: connectedStatus(provider),
       })),
-      subscriptionListModels: vi.fn(async (provider: SubscriptionRuntimeId) => ({
-        ok: true as const,
-        status: connectedStatus(provider),
-        models: provider === "codex"
-          ? [
-            { id: "gpt-5.6-codex", displayName: "GPT-5.6 Codex", isDefault: true },
-            { id: "gpt-5.4-mini", displayName: "GPT-5.4 mini", isDefault: false },
-          ]
-          : [],
-      })),
+      subscriptionListModels,
       subscriptionUseForChat,
     } as unknown as LvisApi;
 
     render(<SubscriptionProvidersController api={api} />);
-    fireEvent.click(await screen.findByTestId("subscription-provider:codex:load-models"));
-    const modelSelect = await screen.findByTestId("subscription-provider:codex:model-select");
-    await waitFor(() => expect(modelSelect).toHaveTextContent("GPT-5.6 Codex"));
 
-    fireEvent.click(modelSelect);
-    fireEvent.click(await screen.findByRole("option", { name: "GPT-5.4 mini" }));
-    await waitFor(() => expect(modelSelect).toHaveTextContent("GPT-5.4 mini"));
-
-    // This update is unrelated to Codex model selection, so it must not
-    // discard the user's unsaved model choice before Use for Chat is pressed.
-    act(() => {
-      emitSettings?.({ llm: { activeChatRuntime: { kind: "api" } } } as AppSettings);
-    });
-    expect(modelSelect).toHaveTextContent("GPT-5.4 mini");
-
-    fireEvent.click(screen.getByTestId("subscription-provider:codex:use-for-chat"));
+    fireEvent.click(await screen.findByTestId("subscription-chooser:codex:gpt-5.4-mini"));
     await waitFor(() => {
       expect(subscriptionUseForChat).toHaveBeenCalledWith("codex", "gpt-5.4-mini");
     });
+    // One ask per connection, not one per render.
+    expect(subscriptionListModels.mock.calls.filter(([provider]) => provider === "codex"))
+      .toHaveLength(1);
   });
 });

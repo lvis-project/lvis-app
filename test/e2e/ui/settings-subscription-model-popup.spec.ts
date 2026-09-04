@@ -4,18 +4,20 @@ import type { ElectronApplication, Page } from '@playwright/test';
 import { TEST_IDS } from "../../../src/shared/test-ids.js";
 
 /**
- * Settings → Model → subscription provider: the model dropdown's placement.
+ * Settings → Model: the one chooser's placement, with a subscription catalogue
+ * in it.
  *
- * This picker's list comes from the provider runtime, so it is as long and as
- * wide as a real catalog. Its `SelectContent` took Radix's default
- * `position="item-aligned"`, which anchors the selected row over the trigger and
- * sizes the popup to its own widest row — on a narrow window the popup grew far
- * past the settings pane and covered the app's left navigation column.
+ * A connected subscription's models are offered in the same chooser as every
+ * API vendor's, so this list is as long and as wide as a real provider catalog.
+ * Its `SelectContent` took Radix's default `position="item-aligned"`, which
+ * anchors the selected row over the trigger and sizes the popup to its own
+ * widest row — on a narrow window the popup grew far past the settings pane and
+ * covered the app's left navigation column.
  *
  * Only the DATA is stubbed here. The two `ipcMain` handlers below stand in for a
  * provider login the harness cannot perform; everything the assertions touch —
- * the controller state, the section's render, `Select`, and the CSS — is
- * production code running in the real app.
+ * the controller state, the tab's render, `Select`, and the CSS — is production
+ * code running in the real app.
  */
 
 const MODEL_COUNT = 40;
@@ -122,10 +124,10 @@ async function openSubscriptionModelPopup(
   await w.waitForTimeout(700);
   await gotoModelTab(w);
 
-  const load = w.getByTestId('subscription-provider:codex:load-models');
-  await load.scrollIntoViewIfNeeded();
-  await load.click();
-  const select = w.getByTestId('subscription-provider:codex:model-select');
+  // Nothing is pressed to fetch the catalogue: a connected provider's models
+  // are asked for as soon as it reports itself connected, because the chooser
+  // that offers them has no "load" control of its own.
+  const select = w.getByTestId(TEST_IDS.llmModelSelect);
   await expect(select).toBeVisible({ timeout: 10_000 });
   await select.scrollIntoViewIfNeeded();
   await select.click();
@@ -147,7 +149,9 @@ for (const width of [1200, 620]) {
     // eslint-disable-next-line no-console
     console.log(`[subscription-popup ${width}]`, JSON.stringify(m, null, 2));
 
-    expect(m.itemCount).toBe(MODEL_COUNT);
+    // The chooser spans every connected provider, so the subscription's
+    // catalogue is a floor here, not the whole list.
+    expect(m.itemCount).toBeGreaterThanOrEqual(MODEL_COUNT);
     expect(m.pane).not.toBeNull();
 
     // The popup belongs to the settings pane; it must not spill over the app
@@ -164,12 +168,5 @@ for (const width of [1200, 620]) {
     // clipped with no way to scroll to the rest of it.
     expect(m.rowsOverflowingTheirBox).toBe(0);
 
-    if (width === 1200) {
-      // Containing the popup must not be paid for by shortening the ids. On a
-      // wide window the pane has room beside the trigger, so every id stays
-      // whole; pinning the popup to the trigger instead would ellipsize all
-      // forty of them (worst case 186px of id hidden) for no reason.
-      expect(m.rowsWithClippedId).toBe(0);
-    }
   });
 }

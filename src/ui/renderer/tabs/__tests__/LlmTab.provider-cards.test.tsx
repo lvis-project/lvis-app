@@ -62,7 +62,6 @@ function codexView(
       description: "",
       loginMethods: ["browser", "device-code"],
       supportsLogout: true,
-      modelSelection: "none",
     },
     status: {
       runtime: "ready",
@@ -265,7 +264,9 @@ function TabHarness({
   props: TabProps;
   hooks: TabHooks;
 }) {
-  const [draft, setDraft] = useState<ProviderCredentialDraft | null>(props.draft ?? null);
+  const [drafts, setDrafts] = useState<readonly ProviderCredentialDraft[]>(
+    props.draft ? [props.draft] : [],
+  );
   return (
     <TooltipProvider>
       <LlmTab
@@ -276,8 +277,8 @@ function TabHarness({
         baseUrl={props.baseUrl ?? ""}
         hasKey={props.hasKey ?? true}
         setHasKey={vi.fn()}
-        providerCredentialDraft={draft}
-        onProviderCredentialDraftChange={setDraft}
+        providerCredentialDrafts={drafts}
+        onProviderCredentialDraftsChange={setDrafts}
         onSaveProviderCredential={hooks.onSaveProviderCredential}
         onSelectMarketplaceProviderPreset={hooks.onSelectMarketplaceProviderPreset}
         onClearMarketplaceProviderPreset={hooks.onClearMarketplaceProviderPreset}
@@ -373,8 +374,8 @@ function pickChooserOption(modelId: string) {
 
 function rowOrder(): (string | null)[] {
   return Array.from(
-    screen.getByTestId("llm-tab:connections").querySelectorAll("[data-provider-row]"),
-  ).map((node) => node.getAttribute("data-provider-row"));
+    screen.getByTestId("llm-tab:connections").querySelectorAll("[data-connection-row]"),
+  ).map((node) => node.getAttribute("data-connection-row")?.replace("llm-tab:connection:", "") ?? null);
 }
 
 beforeEach(() => {
@@ -394,7 +395,7 @@ describe("LlmTab provider cards", () => {
 
     expect(screen.queryByTestId("llm-tab:save-providers")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai:toggle"));
 
     const card = screen.getByTestId("llm-tab:connection:openai");
     expect(card).toContainElement(screen.getByTestId("llm-tab:save-providers"));
@@ -405,28 +406,30 @@ describe("LlmTab provider cards", () => {
     await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }));
 
     expect(screen.queryByTestId("llm-api-key-input")).not.toBeInTheDocument();
+    // The sign-in buttons are the row's too, and stay folded away with the rest.
+    expect(screen.queryByTestId("subscription-provider:codex:login-browser")).not.toBeInTheDocument();
 
-    const useApiKey = screen.getByTestId("llm-tab:connection-api-key:codex");
-    // The third way in sits with the other two, not beside the provider name.
-    const loginBrowser = screen.getByTestId("subscription-provider:codex:login-browser");
-    expect(useApiKey.parentElement).toBe(loginBrowser.parentElement);
-
-    fireEvent.click(useApiKey);
+    const toggle = screen.getByTestId("llm-tab:connection:codex:toggle");
+    fireEvent.click(toggle);
     const form = screen.getByTestId("llm-tab:manual-section");
+    const body = screen.getByTestId("llm-tab:connection:codex:detail");
+    // ONE row, so opening it shows both ways in to this provider at once.
     expect(screen.getByTestId("llm-api-key-input")).toBeInTheDocument();
-    expect(useApiKey).toHaveAttribute("aria-controls", form.id);
-    expect(useApiKey).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("subscription-provider:codex:login-browser")).toBeInTheDocument();
+    expect(body).toContainElement(form);
+    expect(toggle).toHaveAttribute("aria-controls", body.id);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("llm-tab:api-key-status")).toHaveTextContent(/설정됨|Configured|Set/);
   });
 
   it("asks for no endpoint where the endpoint is fixed", async () => {
     const { unmount } = await renderTab(makeApi());
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai:toggle"));
     expect(screen.queryByTestId("llm-base-url-input")).not.toBeInTheDocument();
     unmount();
 
     await renderTab(makeApi(), { vendor: "openrouter", model: "openai/gpt-5.4" });
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openrouter"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openrouter:toggle"));
     expect(screen.queryByTestId("llm-base-url-input")).not.toBeInTheDocument();
   });
 
@@ -436,7 +439,7 @@ describe("LlmTab provider cards", () => {
       baseUrl: "http://localhost:8001/v1",
       model: "local-model",
     });
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
     expect(screen.getByTestId("llm-base-url-input")).toBeInTheDocument();
   });
 
@@ -445,7 +448,7 @@ describe("LlmTab provider cards", () => {
       getSettings: settingsWithVendorBlocks({ ollama: { baseUrl: "http://127.0.0.1:11434/v1" } }),
     });
     await renderTab(api, { vendor: "ollama", model: "llama3" });
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:ollama"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:ollama:toggle"));
     expect(screen.getByTestId("llm-base-url-input")).toHaveValue("http://127.0.0.1:11434/v1");
   });
 
@@ -484,9 +487,11 @@ describe("LlmTab provider cards leave the chat route alone", () => {
     expect(api.updateSettings).not.toHaveBeenCalledWith(
       expect.objectContaining({ llm: expect.objectContaining({ provider: expect.anything() }) }),
     );
-    // The badge is still on the provider chat is actually using.
-    expect(screen.getByTestId("llm-tab:connection-mode:openai")).toBeInTheDocument();
-    expect(screen.queryByTestId("llm-tab:connection-mode:claude")).toBeNull();
+    // The live-route badge is still on the provider chat is actually using.
+    expect(screen.getByTestId("llm-tab:connection-route:openai:api"))
+      .toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("llm-tab:connection-route:claude:api"))
+      .toHaveAttribute("data-active", "false");
   });
 
   it("offers no way to choose a provider on the card itself", async () => {
@@ -520,11 +525,49 @@ describe("LlmTab provider cards leave the chat route alone", () => {
     // A fixed-endpoint vendor owns no persisted field here, so no block is
     // written — and saving a credential is not choosing who answers.
     expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
-    expect(screen.getByTestId("llm-tab:connection-mode:openai")).toBeInTheDocument();
-    // The card stays open on what it committed, with the key field emptied.
-    await waitFor(() => expect(screen.getByTestId("llm-api-key-input")).toHaveValue(""));
-    expect(screen.getByTestId("llm-tab:connection:claude"))
-      .toContainElement(screen.getByTestId("llm-tab:manual-section"));
+    expect(screen.getByTestId("llm-tab:connection-route:openai:api"))
+      .toHaveAttribute("data-active", "true");
+    // A committed card closes and gives its room back to the list.
+    await waitFor(() => expect(screen.queryByTestId("llm-api-key-input")).toBeNull());
+    expect(screen.getByTestId("llm-tab:connection:claude:toggle"))
+      .toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps a refused save open on its row, with the fields still in it", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    const { hooks } = await renderTab(api, { vendor: "openai", model: "" });
+    hooks.onSaveProviderCredential.mockResolvedValue(false);
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
+    fireEvent.change(screen.getByTestId("llm-api-key-input"), { target: { value: "sk-ant-new" } });
+    await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("llm-tab:save-providers"));
+
+    // Closing on a refusal would take away the very fields that have to be
+    // corrected, and say nothing about why.
+    await screen.findByTestId("llm-tab:connection-save-failed:claude");
+    expect(screen.getByTestId("llm-api-key-input")).toHaveValue("sk-ant-new");
+    expect(screen.getByTestId("llm-tab:connection:claude:toggle"))
+      .toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("puts a cancelled row away along with what was typed into it", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    await renderTab(api, { vendor: "openai", model: "" });
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
+    fireEvent.change(screen.getByTestId("llm-api-key-input"), { target: { value: "sk-ant-new" } });
+
+    fireEvent.click(screen.getByTestId("llm-tab:save-providers-cancel"));
+
+    expect(screen.getByTestId("llm-tab:connection:claude:toggle"))
+      .toHaveAttribute("aria-expanded", "false");
+    // Cancelling is a decision: reopening the row must not bring the abandoned
+    // key back with it.
+    fireEvent.click(screen.getByTestId("llm-tab:connection:claude:toggle"));
+    expect(screen.getByTestId("llm-api-key-input")).toHaveValue("");
   });
 
   it("edits each row's own endpoint while a third provider is the active one", async () => {
@@ -547,13 +590,19 @@ describe("LlmTab provider cards leave the chat route alone", () => {
     await renderTab(api, { vendor: "openai", model: "" });
 
     await screen.findByTestId("llm-tab:connection:openai-compatible");
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
-    expect(screen.getByTestId("llm-base-url-input")).toHaveValue(generic);
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
+    const generalRow = screen.getByTestId("llm-tab:connection:openai-compatible");
+    expect(within(generalRow).getByTestId("llm-base-url-input")).toHaveValue(generic);
 
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:ollama"));
-    expect(screen.getByTestId("llm-base-url-input")).toHaveValue(selfHosted);
+    // Opening a second row leaves the first open: comparing two providers is a
+    // normal thing to do, and each keeps its own fields.
+    fireEvent.click(screen.getByTestId("llm-tab:connection:ollama:toggle"));
+    const ollamaRow = screen.getByTestId("llm-tab:connection:ollama");
+    expect(within(ollamaRow).getByTestId("llm-base-url-input")).toHaveValue(selfHosted);
+    expect(within(generalRow).getByTestId("llm-base-url-input")).toHaveValue(generic);
     // Neither card is the one chat is on, and neither claims to be.
-    expect(screen.getByTestId("llm-tab:connection-mode:openai")).toBeInTheDocument();
+    expect(screen.getByTestId("llm-tab:connection-route:openai:api"))
+      .toHaveAttribute("data-active", "true");
   });
 
   it("offers no chat switch on a signed-out subscription runtime", async () => {
@@ -570,13 +619,14 @@ describe("LlmTab provider cards leave the chat route alone", () => {
     await renderTab(api, { vendor: "openai", model: "" });
 
     await screen.findByTestId("llm-tab:connection:claude");
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:claude:toggle"));
 
-    // Opening a card is reading, not choosing: the badge stays where the route
-    // is, and the card that is merely open says nothing about it.
-    expect(screen.getByTestId("llm-tab:connection-status:openai"))
-      .toHaveTextContent(/API|사용/);
-    expect(screen.queryByTestId("llm-tab:connection-mode:claude")).toBeNull();
+    // Opening a card is reading, not choosing: the live-route badge stays where
+    // the route is, and the card that is merely open says nothing about it.
+    expect(screen.getByTestId("llm-tab:connection-route:openai:api"))
+      .toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("llm-tab:connection-route:claude:api"))
+      .toHaveAttribute("data-active", "false");
   });
 
   it("keeps the card on screen after its only credential is deleted", async () => {
@@ -586,7 +636,7 @@ describe("LlmTab provider cards leave the chat route alone", () => {
     await renderTab(api, { vendor: "openai", model: "" });
 
     await screen.findByTestId("llm-tab:connection:claude");
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:claude:toggle"));
     api.hasApiKey = vi.fn(async () => false);
     fireEvent.click(screen.getByText(/^(삭제|Delete|Remove)$/));
 
@@ -661,6 +711,77 @@ describe("LlmTab model chooser is the whole switch", () => {
     await waitFor(() => expect(useForChat).toHaveBeenCalledWith("codex", "codex-mini"));
   });
 
+  /**
+   * The subscription half of the merge, at the level the runtime cannot be
+   * reached.
+   *
+   * An isolated home has no signed-in account, so the live path cannot be
+   * exercised — but the claim the merge makes is structural and holds without
+   * one: a provider is ONE row and states ONE verdict, whether its models come
+   * from a signed-in runtime or from an endpoint's catalogue. Both shapes are
+   * on screen together here, so "the same" is asserted rather than assumed.
+   */
+  it("gives a subscription-fed row the same shape and the same one verdict as an API-key row", async () => {
+    const api = genericRowApi(vi.fn().mockResolvedValue({
+      ok: true,
+      vendor: "openai-compatible",
+      endpoint: `${CUSTOM_ENDPOINT}/models`,
+      models: ["qwen-self-hosted"],
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+    } satisfies LlmModelListResult));
+    // Connected runtime, models from the runtime, and no OpenAI key at all —
+    // so this row has no endpoint handshake of any kind behind it.
+    installSubscription(
+      [codexView({
+        status: {
+          runtime: "ready",
+          connection: "connected",
+          models: [{ id: "codex-mini", label: "codex-mini" }],
+        },
+      })],
+      { refreshStatus: vi.fn(), useForChat: vi.fn(), useApiForChat: vi.fn() },
+    );
+    await renderTab(api, {
+      vendor: "openai-compatible",
+      baseUrl: CUSTOM_ENDPOINT,
+      model: "",
+    });
+
+    await waitFor(() => expect(rowOrder()).toEqual(["codex", "openai-compatible"]));
+
+    // One verdict per row, never more — the invariant a live subscription would
+    // have to satisfy too, and the one the two surfaces used to break.
+    await waitFor(() => {
+      const verdicts = [...document.querySelectorAll("[data-provider-sync-status]")];
+      expect(verdicts).toHaveLength(rowOrder().length);
+    });
+
+    for (const rowId of ["codex", "openai-compatible"]) {
+      const row = screen.getByTestId(`llm-tab:connection:${rowId}`);
+      expect(row.querySelectorAll("[data-provider-sync-status]")).toHaveLength(1);
+      expect(row.querySelectorAll("[data-testid^='llm-tab:connection-refresh:']")).toHaveLength(1);
+      expect(row.querySelectorAll("[data-testid^='llm-tab:connection:'][data-testid$=':state']")).toHaveLength(1);
+      expect(row.querySelectorAll("[data-testid*=':capability']")).toHaveLength(0);
+      expect(row.querySelectorAll("[data-testid$=':load-models']")).toHaveLength(0);
+      expect(row.querySelectorAll("[data-testid$=':use-for-chat']")).toHaveLength(0);
+    }
+
+    // A runtime-fed row has no endpoint to have synced, so it claims no sync
+    // outcome and names what it is offering instead...
+    const runtimeRow = screen.getByTestId("llm-tab:connection-subline:codex");
+    expect(runtimeRow).toHaveAttribute("data-provider-sync-status", "none");
+    expect(runtimeRow).toHaveTextContent("1");
+    // ...while the endpoint-fed row reports its handshake on the same line.
+    const endpointRow = screen.getByTestId("llm-tab:connection-subline:openai-compatible");
+    expect(endpointRow).toHaveAttribute("data-provider-sync-status", "ready");
+    expect(endpointRow).toHaveTextContent(`${CUSTOM_ENDPOINT}/models`);
+
+    // And both providers' models are choosable from the one list.
+    const ids = await chooserModelIds();
+    expect(ids).toContain("codex-mini");
+    expect(ids).toContain("qwen-self-hosted");
+  });
+
   it("names a self-hosted row by its card title, not by what its catalogue calls itself", async () => {
     // An OpenAI-compatible server answers `/models` with `owned_by: "openai"`
     // for everything it serves. That is the endpoint's word for its own
@@ -677,7 +798,7 @@ describe("LlmTab model chooser is the whole switch", () => {
     } satisfies LlmModelListResult));
     await renderTab(api, { vendor: "openai-compatible", model: "qwen-self-hosted" });
 
-    const card = await screen.findByTestId("llm-tab:connection-toggle:openai-compatible");
+    const card = await screen.findByTestId("llm-tab:connection:openai-compatible:toggle");
     const cardTitle = card.querySelector(".font-medium")?.textContent ?? "";
     expect(cardTitle).not.toBe("");
     expect(await chooserModelIds()).toContain("qwen-self-hosted");
@@ -767,45 +888,149 @@ describe("LlmTab model chooser is the whole switch", () => {
   });
 });
 
+/** The shared row's "connected" word, as both locales say it. */
+const CONNECTED = /연결됨|Connected/;
+
 describe("LlmTab names each route's state on a row that has two", () => {
   const SIGNED_IN = { runtime: "ready", connection: "connected", models: [] } as const;
   const SUBSCRIPTION = /구독|Subscription/;
   const API_KEY = /API/;
-  const CONNECTED = /연결됨|Connected/;
-  const SIGNED_OUT = /로그아웃됨|Signed out/;
+  const SIGNED_OUT = /설정 필요|Setup needed/;
   const NOT_SET = /미설정|Not set/;
 
-  it("says the API key is not set beside a signed-in subscription, not that the row is signed out", async () => {
+  it("says one thing about a provider reached two ways", async () => {
     // The row is one provider reached two ways. Its sign-in is healthy and it
-    // holds no key; "connected" and "signed out" side by side described those
-    // two routes without saying so, and read as a contradiction.
-    installSubscription([codexView({ status: SIGNED_IN })]);
+    // holds no key; the row used to be drawn twice, and "connected" and "signed
+    // out" side by side described those two routes without saying so — which
+    // read as one row contradicting itself.
+    installSubscription([codexView({ status: SIGNED_IN })], { refreshStatus: vi.fn() });
     await renderTab(makeApi(), { vendor: "claude", model: "claude-sonnet-4-6" });
 
-    const card = await screen.findByTestId("subscription-provider:codex");
-    const signIn = within(card).getByTestId("subscription-provider:codex:connection");
-    expect(signIn).toHaveTextContent(SUBSCRIPTION);
-    expect(signIn).toHaveTextContent(CONNECTED);
-    const apiRoute = within(card).getByTestId("llm-tab:connection-status:codex");
-    expect(apiRoute).toHaveTextContent(API_KEY);
-    expect(apiRoute).toHaveTextContent(NOT_SET);
+    const card = await screen.findByTestId("llm-tab:connection:codex");
+    // ONE state word for the row, and it is the usable one: this provider can
+    // answer a turn, through the route the badges name.
+    const state = within(card).getByTestId("llm-tab:connection:codex:state");
+    expect(state).toHaveTextContent(CONNECTED);
     expect(within(card).queryByText(SIGNED_OUT)).toBeNull();
+    expect(within(card).queryByText(NOT_SET)).toBeNull();
+    expect(within(card).getByTestId("llm-tab:connection-route:codex:subscription"))
+      .toHaveTextContent(SUBSCRIPTION);
+    expect(within(card).getByTestId("llm-tab:connection-route:codex:api"))
+      .toHaveTextContent(API_KEY);
+    // ...and exactly one of each control the two cards used to duplicate.
+    expect(card.querySelectorAll("[data-testid^='llm-tab:connection-refresh:']")).toHaveLength(1);
+    expect(card.querySelectorAll("[data-testid^='llm-tab:connection:'][data-testid$=':state']")).toHaveLength(1);
   });
 
-  it("says the API key is connected beside a signed-out subscription", async () => {
+  it("holds the chevron column steady across rows that have no refresh", async () => {
+    // "Nothing lines up" was half the complaint. The chevron is a column, so a
+    // row with nothing to refresh still owes the list the width the refreshable
+    // rows take — otherwise the disclosure arrow moves as the eye goes down.
     installSubscription([codexView()]);
-    await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), {
+    const api = genericRowApi(vi.fn().mockResolvedValue(FETCH_FAILED));
+    await renderTab(api, { vendor: "openai-compatible", baseUrl: CUSTOM_ENDPOINT, model: "" });
+
+    openMenu(screen.getByTestId("llm-tab:add-provider"));
+    fireEvent.click(await screen.findByTestId("llm-tab:add-provider-item:claude"));
+
+    // Claude's list is curated here, so it has no endpoint to re-ask...
+    const curated = screen.getByTestId("llm-tab:connection:claude");
+    expect(curated.querySelectorAll('[data-testid^="llm-tab:connection-refresh:"]')).toHaveLength(0);
+    // ...and the row still reserves the column the refreshable rows use.
+    const heads = [...document.querySelectorAll('[data-connection-row^="llm-tab:connection:"]')]
+      .map((row) => row.firstElementChild!.childElementCount);
+    expect(new Set(heads).size).toBe(1);
+  });
+
+  it("does not call a provider connected over a line saying the sync failed", async () => {
+    // The complaint this row was built for: one provider stating a healthy
+    // verdict and a failed one at the same instant. Merging the surfaces gave
+    // the sync fact one home; the word above it still has to agree with that
+    // home, and "on, but not well" is already in the five-word vocabulary, so
+    // no sixth word is invented to say it.
+    installSubscription([]);
+    const api = genericRowApi(vi.fn().mockResolvedValue(FETCH_FAILED));
+    await renderTab(api, { vendor: "openai-compatible", baseUrl: CUSTOM_ENDPOINT, model: "" });
+
+    const card = await screen.findByTestId("llm-tab:connection:openai-compatible");
+    await waitFor(() => expect(
+      within(card).getByTestId("llm-tab:connection-subline:openai-compatible"),
+    ).toHaveAttribute("data-provider-sync-status", "error"));
+    const state = within(card).getByTestId("llm-tab:connection:openai-compatible:state");
+    expect(state).toHaveAttribute("data-state", "attention");
+    expect(state).not.toHaveTextContent(CONNECTED);
+    // Still exactly one statement of the outcome in the whole tab.
+    expect(document.querySelectorAll("[data-provider-sync-status]")).toHaveLength(1);
+  });
+
+  it("keeps a row down to the shared five words and says the rest on its line", async () => {
+    // A runtime the user has not chosen yet is not a sixth state word. The
+    // column has to stay readable straight down against the remote connections
+    // list beside it, so the row is worded "setup needed" like any other
+    // half-configured connection, and WHICH setup is missing goes to the
+    // sub-line, where it has room to be a sentence.
+    installSubscription([codexView({
+      status: { runtime: "not-configured", connection: "connected", models: [] },
+    })]);
+    await renderTab(makeApi(), { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    const card = await screen.findByTestId("llm-tab:connection:codex");
+    const state = within(card).getByTestId("llm-tab:connection:codex:state");
+    expect(state).toHaveTextContent(SIGNED_OUT);
+    expect(state).toHaveAttribute("data-state", "needs-setup");
+    // The specific answer is on the line, not in a word of its own.
+    expect(within(card).getByTestId("llm-tab:connection-subline:codex").textContent?.trim())
+      .not.toBe("");
+    expect(card.querySelectorAll("[data-testid$=':state']")).toHaveLength(1);
+  });
+
+  it("says why a provider is missing from the picker without being opened", async () => {
+    // "Why is this one not in the chooser" is a question someone has while the
+    // row is folded, so answering it inside the body would put the answer
+    // exactly where it cannot be read.
+    installSubscription([]);
+    const api = genericRowApi(
+      vi.fn(() => new Promise<LlmModelListResult>(() => {})),
+      CUSTOM_ENDPOINT,
+      { hasApiKey: storedKeysFor("claude", "openai-compatible") },
+    );
+    await renderTab(api, { vendor: "claude", model: "claude-sonnet-4-6" });
+
+    const card = await screen.findByTestId("llm-tab:connection:openai-compatible");
+    const note = await within(card).findByTestId("llm-tab:connection-blocked:openai-compatible");
+    // The row is folded — it has no body at all — and the answer is still there.
+    expect(card.querySelector('[data-testid="llm-tab:connection:openai-compatible:detail"]')).toBeNull();
+    expect(within(card).getByTestId("llm-tab:connection:openai-compatible:note"))
+      .toContainElement(note);
+  });
+
+  it("still offers the sign-in a usable provider has not taken", async () => {
+    installSubscription([codexView()]);
+    await renderTab(makeApi({
+      hasApiKey: storedKeysFor("openai"),
+      // The key has to actually reach something: a stored key over a dead
+      // endpoint is "needs attention", and this test is about the healthy case.
+      listLlmModels: vi.fn().mockResolvedValue({
+        ok: true,
+        vendor: "openai",
+        endpoint: "https://api.openai.com/v1/models",
+        models: ["gpt-5"],
+        fetchedAt: "2026-01-01T00:00:00.000Z",
+      } satisfies LlmModelListResult),
+    }), {
       vendor: "claude",
       model: "claude-sonnet-4-6",
     });
 
-    const card = await screen.findByTestId("subscription-provider:codex");
-    await waitFor(() => expect(within(card).getByTestId("llm-tab:connection-status:codex"))
+    const card = await screen.findByTestId("llm-tab:connection:codex");
+    // A stored key that reaches its endpoint makes the provider usable, so
+    // that is what the row says.
+    await waitFor(() => expect(within(card).getByTestId("llm-tab:connection:codex:state"))
       .toHaveTextContent(CONNECTED));
-    expect(within(card).getByTestId("llm-tab:connection-status:codex")).toHaveTextContent(API_KEY);
-    const signIn = within(card).getByTestId("subscription-provider:codex:connection");
-    expect(signIn).toHaveTextContent(SUBSCRIPTION);
-    expect(signIn).toHaveTextContent(SIGNED_OUT);
+    // Which route is still unused is a question the expanded row answers, in
+    // the only place that can do anything about it.
+    fireEvent.click(within(card).getByTestId("llm-tab:connection:codex:toggle"));
+    expect(within(card).getByTestId("subscription-provider:codex:login-browser")).toBeInTheDocument();
   });
 });
 
@@ -841,7 +1066,7 @@ describe("LlmTab preset and generic custom provider are separate rows", () => {
     await renderTab(bothRows(), activePreset);
 
     await screen.findByTestId("llm-tab:connection:openai-compatible");
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
 
     const field = screen.getByTestId("llm-base-url-input");
     expect(field).toHaveValue(GENERIC_ENDPOINT);
@@ -868,9 +1093,10 @@ describe("LlmTab preset and generic custom provider are separate rows", () => {
 
     // The parent moves the active route; the badge follows it, not the form.
     await rerender(activePreset);
-    expect(screen.getByTestId("llm-tab:connection-mode:marketplace-provider:acme-gw"))
-      .toBeInTheDocument();
-    expect(screen.queryByTestId("llm-tab:connection-mode:openai-compatible")).toBeNull();
+    expect(screen.getByTestId("llm-tab:connection-route:marketplace-provider:acme-gw:api"))
+      .toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("llm-tab:connection-route:openai-compatible:api"))
+      .toHaveAttribute("data-active", "false");
   });
 
   it("drops the preset when the generic row's own model is picked, endpoint intact", async () => {
@@ -891,8 +1117,9 @@ describe("LlmTab preset and generic custom provider are separate rows", () => {
       marketplaceProviderPresetId: "",
       model: "local-model",
     });
-    expect(screen.getByTestId("llm-tab:connection-mode:openai-compatible")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    expect(screen.getByTestId("llm-tab:connection-route:openai-compatible:api"))
+      .toHaveAttribute("data-active", "true");
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
     // The endpoint the user saved is still the generic row's own.
     expect(screen.getByTestId("llm-base-url-input")).toHaveValue(GENERIC_ENDPOINT);
   });
@@ -1112,7 +1339,10 @@ describe("LlmTab asks only the rows that have a catalogue to give", () => {
     });
 
     expect(rowOrder()).toEqual(["codex"]);
-    expect(screen.queryByTestId("llm-tab:connection-subline:codex")).toBeNull();
+    // The row's line reports no sync outcome at all for a route it has not
+    // configured; it names what the signed-in runtime offers instead.
+    expect(screen.getByTestId("llm-tab:connection-subline:codex"))
+      .toHaveAttribute("data-provider-sync-status", "none");
   });
 
   it("asks nothing of a vendor whose model list is curated here", async () => {
@@ -1632,7 +1862,7 @@ describe("LlmTab model lists are cached, not re-fetched", () => {
       models: ["works-now"],
       fetchedAt: "2026-03-03T00:00:00.000Z",
     };
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
     fireEvent.change(screen.getByTestId("llm-api-key-input"), { target: { value: "sk-fixed" } });
     await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled());
     fireEvent.click(screen.getByTestId("llm-tab:save-providers"));
@@ -1784,7 +2014,7 @@ describe("LlmTab unsaved provider input", () => {
       makeApi({ getSettings: settingsWithVendorBlocks({ "openai-compatible": saved }) }),
       { vendor: "openai-compatible", model: "local-model" },
     );
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
     // Opened on the stored endpoint, so there is nothing to commit yet.
     await waitFor(() => expect(screen.getByTestId("llm-tab:save-providers")).toBeDisabled());
 
@@ -1808,7 +2038,7 @@ describe("LlmTab unsaved provider input", () => {
     // Collapsed, but not silent about what it is holding.
     expect(screen.getByTestId("llm-tab:connection-unsaved:claude")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:claude"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:claude:toggle"));
     expect(screen.getByTestId("llm-tab:save-providers")).toBeEnabled();
     expect(screen.queryByTestId("llm-tab:connection-unsaved:claude")).toBeNull();
   });
@@ -1837,7 +2067,7 @@ describe("LlmTab OpenAI model catalogue", () => {
     });
     expect(screen.getByTestId("llm-tab:connection-subline:openai"))
       .toHaveTextContent("https://api.openai.com/v1/models");
-    expect(screen.getByTestId("llm-tab:model-sync-status")).toHaveTextContent("1");
+    expect(screen.getByTestId("llm-tab:connection-subline:openai")).toHaveTextContent("1");
 
     openMenu(screen.getByTestId(TEST_IDS.llmModelSelect));
     await screen.findByText("gpt-from-endpoint");
@@ -1854,17 +2084,11 @@ describe("LlmTab OpenAI model catalogue", () => {
       expect(screen.getByTestId("llm-tab:connection-subline:openai"))
         .toHaveAttribute("data-provider-sync-status", "error");
     });
-    expect(screen.getByTestId("llm-tab:model-sync-status")).not.toHaveTextContent(/\d+/);
+    // A failed handshake reads as a failure, never as a short catalogue.
+    expect(screen.getByTestId("llm-tab:connection-subline:openai")).not.toHaveTextContent(/\d+/);
   });
 
-  /** The dot on the card head that carries the same outcome as the sentence. */
-  function syncDotIn(rowId: string): HTMLElement {
-    const card = screen.getByTestId("llm-tab:connections").querySelector<HTMLElement>(`[data-provider-row="${rowId}"]`);
-    if (!card) throw new Error(`no provider card for ${rowId}`);
-    return within(card).getByTestId("llm-provider-sync-dot");
-  }
-
-  it("marks the card head with a synced dot once the endpoint has answered", async () => {
+  it("names the endpoint and its catalogue on the row once the endpoint has answered", async () => {
     const api = makeApi({
       hasApiKey: storedKeysFor("openai"),
       listLlmModels: vi.fn().mockResolvedValue({
@@ -1877,31 +2101,28 @@ describe("LlmTab OpenAI model catalogue", () => {
     });
     await renderTab(api, { model: "" });
 
-    await waitFor(() => expect(syncDotIn("openai")).toHaveAttribute("data-state", "synced"));
-    const dot = syncDotIn("openai");
-    // A dot never stands alone on the card head: the word beside it says what it means,
-    // and the full sentence rides on the title.
-    expect(dot).toHaveTextContent(/^(Synced|동기화됨)$/);
-    expect(dot).toHaveAttribute("title", expect.stringMatching(/Model list synced|모델 목록 동기화됨/));
-    // The sentence stays; the dot is a summary of it, not a replacement.
-    expect(screen.getByTestId("llm-tab:connection-subline:openai"))
-      .toHaveAttribute("data-provider-sync-status", "ready");
+    // ONE telling of the handshake per row: the sub-line names the endpoint it
+    // reached and what came back. The head used to carry a dot saying the same
+    // thing a second time, computed separately.
+    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-subline:openai"))
+      .toHaveAttribute("data-provider-sync-status", "ready"));
+    const subline = screen.getByTestId("llm-tab:connection-subline:openai");
+    expect(subline).toHaveTextContent("https://api.openai.com/v1/models");
+    expect(subline.textContent).toMatch(/1 models synced|모델 1개 동기화됨/);
   });
 
-  it("marks the card head with a failed dot when the handshake failed", async () => {
+  it("says on the row when the handshake failed", async () => {
     await renderTab(makeApi({ hasApiKey: storedKeysFor("openai") }), { model: "" });
 
-    await waitFor(() => expect(syncDotIn("openai")).toHaveAttribute("data-state", "failed"));
-    expect(syncDotIn("openai")).toHaveTextContent(/^(Sync failed|동기화 실패)$/);
-    expect(syncDotIn("openai"))
-      .toHaveAttribute("title", expect.stringMatching(/Model list sync failed|모델 목록 동기화 실패/));
-    expect(screen.getByTestId("llm-tab:connection-subline:openai"))
-      .toHaveAttribute("data-provider-sync-status", "error");
+    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-subline:openai"))
+      .toHaveAttribute("data-provider-sync-status", "error"));
+    expect(screen.getByTestId("llm-tab:connection-subline:openai").textContent)
+      .toMatch(/could not be synced|동기화하지 못했습니다/);
   });
 
-  it("keeps the dot muted while no handshake has been made", async () => {
-    // No key is stored, so nothing was asked — an unknown, never a failure,
-    // on a card whose signed-in runtime is otherwise healthy.
+  it("says nothing anywhere while no handshake has been made", async () => {
+    // No key is stored, so nothing was asked. An unasked question has no
+    // answer to report — not on the card, and not under the chooser either.
     const api = makeApi();
     installSubscription([codexView({
       status: { runtime: "ready", connection: "connected", models: [] },
@@ -1911,10 +2132,44 @@ describe("LlmTab OpenAI model catalogue", () => {
     await waitFor(() => expect(api.hasApiKey).toHaveBeenCalledWith("openai"));
     expect(api.listLlmModels).not.toHaveBeenCalled();
     expect(rowOrder()).toEqual(["codex"]);
-    const dot = syncDotIn("codex");
-    expect(dot).toHaveAttribute("data-state", "unknown");
-    expect(dot).toHaveTextContent(/^(Not synced|미동기화)$/);
-    expect(dot).toHaveAttribute("title", expect.stringMatching(/Model list not synced|모델 목록 미동기화/));
+    expect(screen.getByTestId("llm-tab:connection-subline:codex"))
+      .toHaveAttribute("data-provider-sync-status", "none");
+  });
+
+  /**
+   * The contradiction this consolidation exists to make impossible.
+   *
+   * OpenAI used to be drawn twice — a provider row and a subscription card —
+   * and each looked the handshake up under a key it built for itself. A
+   * signed-in OpenAI card read "sync failed" while the row read "4 models
+   * synced", at one instant, about one account. One row now, and one read
+   * behind it, so there is nowhere for a second answer to live.
+   */
+  it("gives one vendor one row and one sync verdict, wherever it is reached", async () => {
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    installSubscription([codexView({
+      status: { runtime: "ready", connection: "connected", models: [] },
+    })]);
+    await renderTab(api, { vendor: "openai", model: "", hasKey: true });
+
+    // Reached by subscription AND by API key, and still ONE row.
+    expect(rowOrder()).toEqual(["codex"]);
+    const card = screen.getByTestId("llm-tab:connection:codex");
+    expect(within(card).getByTestId("llm-tab:connection-route:codex:subscription")).toBeInTheDocument();
+    expect(within(card).getByTestId("llm-tab:connection-route:codex:api")).toBeInTheDocument();
+
+    // ...and one place in the whole tab where a sync verdict is stated.
+    await waitFor(() => expect(screen.getByTestId("llm-tab:connection-subline:codex"))
+      .toHaveAttribute("data-provider-sync-status", "error"));
+    const verdicts = [...document.querySelectorAll("[data-provider-sync-status]")]
+      .map((node) => node.getAttribute("data-provider-sync-status"));
+    expect(verdicts).toEqual(["error"]);
+    // One refresh, one state word, no capability checklist, no model controls.
+    expect(document.querySelectorAll("[data-testid^='llm-tab:connection-refresh:']")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-testid^='llm-tab:connection:'][data-testid$=':state']")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-testid*=':capability']")).toHaveLength(0);
+    expect(document.querySelectorAll("[data-testid$=':load-models']")).toHaveLength(0);
+    expect(document.querySelectorAll("[data-testid$=':use-for-chat']")).toHaveLength(0);
   });
 
   it("distinguishes a failure that left a catalogue standing from one that did not", async () => {
@@ -1931,7 +2186,7 @@ describe("LlmTab OpenAI model catalogue", () => {
     });
     await renderTab(api, { model: "" });
 
-    const status = await screen.findByTestId("llm-tab:model-sync-status");
+    const status = await screen.findByTestId("llm-tab:connection-subline:openai");
     await waitFor(() => {
       expect(status).toHaveAttribute("data-provider-sync-status", "error");
     });
@@ -1953,7 +2208,10 @@ describe("LlmTab OpenAI model catalogue", () => {
     // Nothing is stored, so this card has no API path — and no sync line for
     // one. The runtime it does have is signed in and healthy, so the card says
     // nothing is missing either.
-    expect(screen.queryByTestId("llm-tab:connection-subline:codex")).toBeNull();
+    // Nothing was asked, so the row's line reports no handshake — it names what
+    // the provider is offering instead, and claims no sync outcome at all.
+    expect(screen.getByTestId("llm-tab:connection-subline:codex"))
+      .toHaveAttribute("data-provider-sync-status", "none");
     expect(screen.queryByTestId("llm-tab:connection-blocked:codex")).toBeNull();
     // And no second, API-side OpenAI row conjured out of the attempt.
     expect(rowOrder()).toEqual(["codex"]);
@@ -1968,7 +2226,7 @@ describe("LlmTab OpenAI model catalogue", () => {
       expect(screen.getByTestId("llm-tab:connection-subline:codex"))
         .toHaveAttribute("data-provider-sync-status", "error");
     });
-    fireEvent.click(screen.getByTestId("llm-tab:connection-api-key:codex"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:codex:toggle"));
     expect(screen.getByTestId("llm-tab:api-key-status")).toHaveTextContent(/설정됨|Configured|Set/);
     expect(screen.getByTestId("llm-api-key-input")).toBeInTheDocument();
     expect(screen.getByTestId("llm-tab:manual-section")).toHaveTextContent(/삭제|Delete|Remove/);
@@ -2002,16 +2260,18 @@ describe("LlmTab OpenAI model catalogue", () => {
     await waitFor(() =>
       expect(screen.getByTestId("llm-tab:connection:openai-compatible")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
     const card = screen.getByTestId("llm-tab:connection:openai-compatible");
     expect(card).toContainElement(screen.getByTestId("llm-tab:manual-section"));
     // Row X's field, while the active provider is still Y.
     expect(screen.getByTestId("llm-base-url-input")).toHaveValue(CUSTOM_ENDPOINT);
     expect(hooks.selectApiVendorModel).not.toHaveBeenCalled();
     expect(hooks.onImmediateChange).not.toHaveBeenCalled();
-    // And the badge stays where chat actually is.
-    expect(screen.getByTestId("llm-tab:connection-mode:codex")).toBeInTheDocument();
-    expect(screen.queryByTestId("llm-tab:connection-mode:openai-compatible")).toBeNull();
+    // And the live-route badge stays where chat actually is.
+    expect(screen.getByTestId("llm-tab:connection-route:codex:api"))
+      .toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("llm-tab:connection-route:openai-compatible:api"))
+      .toHaveAttribute("data-active", "false");
   });
 
   it("locks the endpoint on a preset row and not on the generic one beside it", async () => {
@@ -2027,7 +2287,7 @@ describe("LlmTab OpenAI model catalogue", () => {
     });
 
     // The generic row: no preset, so no lock — the field is offered.
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
     expect(screen.getByTestId("llm-base-url-input")).toHaveValue(CUSTOM_ENDPOINT);
   });
 
@@ -2043,7 +2303,7 @@ describe("LlmTab OpenAI model catalogue", () => {
       model: "local-model",
       marketplaceProviderPresets: [preset("acme-gw", "Acme Gateway", "https://acme.example/v1")],
     });
-    fireEvent.click(screen.getByTestId("llm-tab:connection-toggle:openai-compatible"));
+    fireEvent.click(screen.getByTestId("llm-tab:connection:openai-compatible:toggle"));
     expect(screen.getByTestId("llm-base-url-input")).toBeInTheDocument();
 
     const handler = api.onSettingsUpdated.mock.calls.at(-1)?.[0] as ((s: unknown) => void) | undefined;

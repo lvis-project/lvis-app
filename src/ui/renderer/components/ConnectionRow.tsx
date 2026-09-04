@@ -79,8 +79,24 @@ export interface ConnectionRowProps {
    * The address that makes the row concrete: an origin, a bot handle, a
    * loopback host. Omitted when the connection genuinely has none, rather than
    * filled with a placeholder.
+   *
+   * A node rather than a string where the line has to carry more than an
+   * address — the model providers put the endpoint AND the outcome of its last
+   * catalogue handshake here, on one node, because that is the only reading of
+   * that outcome in the tab and a second one is how two surfaces start
+   * disagreeing. A plain string still gets the truncation `title` for free; a
+   * node owns its own title and tone.
    */
-  endpoint?: string | null;
+  endpoint?: ReactNode;
+  /**
+   * Contributed under the head and OUTSIDE the disclosure — what the row has
+   * to say whether or not it is open.
+   *
+   * "Why is this provider missing from the model picker" is a question someone
+   * has while the row is folded, so answering it in the body would put the
+   * answer exactly where it cannot be read.
+   */
+  note?: ReactNode;
   /** Contributed beside the name — what only the embedding list knows. */
   badges?: ReactNode;
   /** Contributed at the row's right edge, outside the disclosure button. */
@@ -102,6 +118,7 @@ export function ConnectionRow({
   label,
   state,
   endpoint = null,
+  note,
   badges,
   action,
   expanded,
@@ -146,10 +163,10 @@ export function ConnectionRow({
               )}
               {badges}
             </span>
-            {endpoint === null || endpoint === "" ? null : (
+            {endpoint === null || endpoint === undefined || endpoint === "" ? null : (
               <span
                 className="block truncate font-mono text-[11px] text-muted-foreground"
-                title={endpoint}
+                {...(typeof endpoint === "string" ? { title: endpoint } : {})}
                 data-testid={`${testId}:endpoint`}
               >
                 {endpoint}
@@ -166,6 +183,10 @@ export function ConnectionRow({
         </button>
         {action}
       </div>
+
+      {note === null || note === undefined ? null : (
+        <div className="px-3 pb-2" data-testid={`${testId}:note`}>{note}</div>
+      )}
 
       {expanded ? (
         <div
