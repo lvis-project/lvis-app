@@ -41,7 +41,12 @@ const question = (id: string, sessionId: string) => ({
 describe("gates reach the user when the route leaves the chat surface", () => {
   it("an approval card is drawn in the routed pane while Settings is open, and over the composer when home returns", async () => {
     const pendingSend = deferred<{ ok: true }>();
-    const { container, api, emitApproval, emitViewActivate } = await renderApp({ hasApiKey: true });
+    // The conversation is listed so the sidebar has a row to carry the dot;
+    // without one, "no dot" would pass for the wrong reason.
+    const { container, api, emitApproval, emitViewActivate } = await renderApp({
+      hasApiKey: true,
+      sessions: [{ id: MOCK_DEFAULT_SESSION_ID, title: "설정 중 승인", modifiedAt: new Date(2, 0, 1).toISOString() }],
+    });
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
     await submitChatMessage(container, "turn in flight");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
@@ -60,8 +65,9 @@ describe("gates reach the user when the route leaves the chat surface", () => {
     expect(count(container, "approval-dock")).toBe(1);
     // Nothing of the window's own draws it — there is no window band.
     expect(container.querySelector('[data-testid="window-approval-scope"]')).toBeNull();
-    // A card the user can see gets no dot.
-    expect(container.querySelector(`[data-testid="sidebar-pending-answer-${MOCK_DEFAULT_SESSION_ID}"]`)).toBeNull();
+    // The conversation is interrupted, seen or not: its row carries the dot.
+    expect(container.querySelector(`[data-testid="sidebar-session-${MOCK_DEFAULT_SESSION_ID}"]`)).not.toBeNull();
+    await waitFor(() => expect(container.querySelector(`[data-testid="sidebar-pending-answer-${MOCK_DEFAULT_SESSION_ID}"]`)).not.toBeNull());
 
     await act(async () => { emitViewActivate("home"); });
     await waitFor(() => expect(chatSurface(container).getAttribute("data-visible")).toBe("true"));

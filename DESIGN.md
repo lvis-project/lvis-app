@@ -260,11 +260,12 @@ to another pane, and the window draws none of them. When that surface is not on 
 pane the tree hides behind a maximized neighbour, a side chat whose panel is closed or whose
 tab is not in front, a conversation no pane holds — the card stays parked in it, and the way
 to it is marked with the **pending-answer dot**: one token (`--warning`), one size, one
-label ("답변 대기 중"), on the sidebar row of the conversation (a side chat's row and its parent's
-both), on the maximize control of the pane covering a hidden one, on the work-panel toggle and
-the side-chat tab. A card the user can already see gets no dot. One selector (`pendingAnswers`
-in `chat-group-session-registry.ts`) decides every dot, so the sidebar and a pane header
-cannot disagree about who is waiting.
+label ("답변 대기 중"). The sidebar row of the interrupted conversation (a side chat's row and
+its parent's both) carries it whenever a turn is parked, whether or not the card is on screen:
+the row says "interrupted here". The maximize control of the pane covering a hidden one, the
+work-panel toggle and the side-chat tab carry it only while the card is behind them. One
+selector (`pendingAnswers` in `chat-group-session-registry.ts`) decides every dot, so the
+sidebar and a pane header cannot disagree about who is waiting.
 
 The one request with no conversation to belong to — a host or plugin ask that names no
 session — is not in this frame: no turn is parked on it and no composer waits. It is an
@@ -338,10 +339,11 @@ not be drawn with the same value.
     approvals and questions, over the composer or over the view the pane is routed to —
     drawn only by the surface holding that conversation (see Workbench model, "One frame
     for what must be settled before the next input").
-  - Pending-answer dot (`PendingAnswerDot`): the one mark for "a card you cannot see from
-    here is waiting for your answer" — `--warning` fill, a ring of the surface colour, one
-    aria-label — on sidebar rows, the maximize control, the work-panel toggle, the side-chat
-    tab and the Plugins row. One selector feeds every instance.
+  - Pending-answer dot (`PendingAnswerDot`): the one mark for "a card is waiting for your
+    answer" — `--warning` fill, a ring of the surface colour, one aria-label — on the
+    sidebar row of every interrupted conversation, and on the maximize control, the
+    work-panel toggle, the side-chat tab and the Plugins row while the card is behind them.
+    One selector feeds every instance.
   - Command picker: search and 1st/2nd-depth command navigation.
   - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
   - SettingsSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.

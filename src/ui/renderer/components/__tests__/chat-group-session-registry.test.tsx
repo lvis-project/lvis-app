@@ -368,19 +368,21 @@ describe("pendingAnswers", () => {
   ];
   const empty = { approvals: [], deferredSessionIds: [], overlayCards: [], sessions };
 
-  it("marks nothing for a card the user can already see", () => {
-    // Over a drawn pane's composer or in its settle slot — no dot anywhere.
+  it("marks the row, and no control, for a card drawn where the user is", () => {
+    // Over a drawn pane's composer: the conversation is interrupted, so its
+    // row says so — but nothing is hidden, so no control carries a dot.
     const tiles = [tile("main", "s-main", { askQuestions: [question("q1", "s-main")] })];
     const result = pendingAnswers({ ...empty, tiles, approvals: [approval("a1", { sessionId: "s-main" })] });
-    expect(result.sessionIds.size).toBe(0);
+    expect([...result.sessionIds]).toEqual(["s-main"]);
     expect(result.hiddenPaneIds.size).toBe(0);
+    expect(result.sideChatSessionIds.size).toBe(0);
     expect(result.unattributed).toEqual([]);
   });
 
-  it("marks a routed pane's conversation nowhere — its routed frame draws the card", () => {
+  it("marks a routed pane's conversation on its row only — its routed frame draws the card", () => {
     const tiles = [tile("main", "s-main", { hidden: true, askQuestions: [question("q1", "s-main")] })];
     const result = pendingAnswers({ ...empty, tiles, approvals: [approval("a1", { sessionId: "s-main" })] });
-    expect(result.sessionIds.size).toBe(0);
+    expect([...result.sessionIds]).toEqual(["s-main"]);
     expect(result.hiddenPaneIds.size).toBe(0);
   });
 
@@ -427,11 +429,19 @@ describe("pendingAnswers", () => {
     expect(result.hiddenPaneIds.size).toBe(0);
   });
 
-  it("marks nothing for a side chat the user is looking at", () => {
+  it("marks the rows but not the toggle or tab for a side chat the user is looking at", () => {
     const tiles = [tile("main", "s-main", { sideChat: { sessionId: "s-side", askQuestions: [question("q1", "s-side")], shown: true } })];
     const result = pendingAnswers({ ...empty, tiles, approvals: [approval("a1", { sessionId: "s-side" })] });
-    expect(result.sessionIds.size).toBe(0);
+    expect([...result.sessionIds].sort()).toEqual(["s-main", "s-side"]);
     expect(result.sideChatSessionIds.size).toBe(0);
+    expect(result.hiddenPaneIds.size).toBe(0);
+  });
+
+  it("marks no row for an overlay card its drawn pane shows — no turn is parked on it", () => {
+    const tiles = [tile("main", "s-main")];
+    const result = pendingAnswers({ ...empty, tiles, overlayCards: [{ originSessionId: "s-main" }] });
+    expect(result.sessionIds.size).toBe(0);
+    expect(result.hiddenPaneIds.size).toBe(0);
   });
 
   it("takes a side chat's parent from the list when its own tile has moved on", () => {

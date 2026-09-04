@@ -503,8 +503,8 @@ export function App() {
   // drawn THERE, in that surface, whether or not the user is looking at it.
   // The window draws none of them. What it does draw, in the focused pane's
   // lane, is the one request that has no conversation to belong to: a host or
-  // plugin ask. Everything else the user cannot see from where they are
-  // becomes a yellow dot on the row or control that leads to it.
+  // plugin ask. Every parked request is a yellow dot on its conversation's
+  // sidebar row, and on the control leading to it while it is off screen.
   //
   // One selector answers both — which rows and controls carry the dot, and
   // which requests the lane draws — so the sidebar, the pane headers and the

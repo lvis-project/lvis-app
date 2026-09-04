@@ -3,9 +3,9 @@ import { useTranslation } from "../../../i18n/react.js";
 /**
  * The one attention token for "open this and there is a card you must answer".
  *
- * It sits on a sidebar row, a pane header control, a work-panel tab — every
- * surface that stands between the user and a parked approval, question or
- * deferred ask they cannot see from where they are. One meaning, one drawing:
+ * It sits on the sidebar row of a conversation parked on an approval, question
+ * or deferred ask, seen or not, and on the pane header control or work-panel
+ * tab that stands between the user and one they cannot see. One drawing:
  * a dot in the warning tone, ringed in the surface it sits on so it reads over
  * an icon as well as over text. Which surfaces carry it is decided once, by
  * `pendingAnswers`; this component only draws the verdict.

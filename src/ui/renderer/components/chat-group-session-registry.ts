@@ -346,7 +346,10 @@ export interface PendingAnswerInput {
 
 /** Every place the attention dot goes, and the requests the focused pane's lane draws. */
 export interface PendingAnswers {
-  /** Sidebar rows to mark: sessions with a card the user cannot see from where they are. */
+  /**
+   * Sidebar rows to mark: every conversation whose turn is parked on a card,
+   * seen or not, plus one whose overlay card has no visible pane to be in.
+   */
   sessionIds: ReadonlySet<string>;
   /** Panes the tree hides while holding a parked card — the restore control's dot. */
   hiddenPaneIds: ReadonlySet<string>;
@@ -357,19 +360,20 @@ export interface PendingAnswers {
 }
 
 /**
- * "There is a card here you must answer, and you cannot see it from where you
- * are" — decided ONCE for every surface that shows the attention dot, so the
- * sidebar, a pane header and a panel tab can never disagree about which
- * cards are parked.
+ * "This conversation is stopped on a card you must answer" — decided ONCE for
+ * every surface that shows the attention dot, so the sidebar, a pane header
+ * and a panel tab can never disagree about who is waiting.
  *
  * A parked card is one of: an approval request in the window's queue, an
  * `ask_user_question` a tile or side chat holds, a deferred approval the
  * reviewer set aside, or an overlay card whose origin conversation is not
- * open. Each is mapped to the surface that draws it, and the dot goes
- * wherever that surface is NOT on screen: a tile the tree hides, a side chat
- * whose panel is closed or whose tab is not the active one, a conversation no
- * pane holds at all. A card the user can already see — over a drawn pane's
- * composer, in its settle slot, in the focused pane's lane — gets no dot.
+ * open. The sidebar row of the conversation it stops is marked whether or not
+ * the card is on screen: the row says "interrupted here", and a card the user
+ * is looking at is still an interruption. The controls that lead to a surface
+ * — the maximize control over a pane the tree hides, the work-panel toggle and
+ * the side-chat tab — are marked only while that surface is off screen, since
+ * their dot means "the card is behind this". An overlay card stops no turn, so
+ * its row is marked only when the card has no visible pane to be in.
  *
  * A request that names no conversation, or a session no surface holds and no
  * row lists, is drawn as an answer-shaped card in the focused pane's lane
@@ -386,34 +390,34 @@ export function pendingAnswers(input: PendingAnswerInput): PendingAnswers {
   // A side chat's row nests under its parent's, and a card parked in a side
   // chat is news about the parent conversation too. The list knows the
   // parent when the side chat has a file; before that, the tile holding the
-  // side chat is the only parent there is.
-  const markSideChat = (sessionId: string, tile: TileSession | undefined) => {
+  // side chat is the only parent there is. The rows are marked whether or not
+  // the side chat is on screen; the toggle and the tab only when it is not.
+  const markSideChat = (sessionId: string, tile: TileSession | undefined, drawn: boolean) => {
     sessionIds.add(sessionId);
-    sideChatSessionIds.add(sessionId);
     const parent = listed.get(sessionId)?.originSessionId ?? tile?.sessionId;
     if (parent) sessionIds.add(parent);
+    if (drawn) return;
+    sideChatSessionIds.add(sessionId);
     if (tile?.paneHidden) hiddenPaneIds.add(tile.chatGroupId);
   };
 
-  // One session, one verdict. `drawn` says the user can see the card now.
+  // One session, one verdict: its row is marked because its turn is parked;
+  // the control leading to its surface only when that surface is off screen.
   const park = (sessionId: string): void => {
     const sideChatTile = tileWithSideChat(input.tiles, sessionId);
     if (sideChatTile !== undefined) {
-      const drawn = sideChatTile.sideChat!.shown && !sideChatTile.paneHidden;
-      if (!drawn) markSideChat(sessionId, sideChatTile);
+      markSideChat(sessionId, sideChatTile, sideChatTile.sideChat!.shown && !sideChatTile.paneHidden);
       return;
     }
     const owner = tileOwningSession(input.tiles, sessionId);
     if (owner !== undefined) {
-      if (owner.paneHidden) {
-        sessionIds.add(owner.sessionId);
-        hiddenPaneIds.add(owner.chatGroupId);
-      }
+      sessionIds.add(owner.sessionId);
+      if (owner.paneHidden) hiddenPaneIds.add(owner.chatGroupId);
       return;
     }
     const row = listed.get(sessionId);
     if (row === undefined) return;
-    if (row.family === "side-chat") markSideChat(sessionId, undefined);
+    if (row.family === "side-chat") markSideChat(sessionId, undefined, false);
     else sessionIds.add(sessionId);
   };
 
@@ -431,23 +435,24 @@ export function pendingAnswers(input: PendingAnswerInput): PendingAnswers {
 
   for (const tile of input.tiles) {
     // A question a tile holds is drawn by that tile — its own conversation's,
-    // a child's, or one it adopted from a session nobody holds. The dot goes
-    // on the row the user would open to see it: the tile's conversation for
+    // a child's, or one it adopted from a session nobody holds. The row marked
+    // is the one the user would open to see it: the tile's conversation for
     // its own and its children's, the asking session's row for an adopted one.
     for (const question of tile.askQuestions) {
-      if (!tile.paneHidden) continue;
-      hiddenPaneIds.add(tile.chatGroupId);
       const own = sessionOwnedBy(tile.sessionId, tile.childSessionIds, question.sessionId);
       sessionIds.add(own ? tile.sessionId : question.sessionId);
+      if (tile.paneHidden) hiddenPaneIds.add(tile.chatGroupId);
     }
     const sideChat = tile.sideChat;
-    if (sideChat !== null && sideChat.askQuestions.length > 0 && (!sideChat.shown || tile.paneHidden)) {
-      markSideChat(sideChat.sessionId, tile);
+    if (sideChat !== null && sideChat.askQuestions.length > 0) {
+      markSideChat(sideChat.sessionId, tile, sideChat.shown && !tile.paneHidden);
     }
   }
 
   for (const sessionId of input.deferredSessionIds) park(sessionId);
 
+  // An overlay card parks no turn: its row is marked only when the card has
+  // nowhere visible to be — its conversation is in a hidden pane, or in none.
   for (const card of input.overlayCards) {
     if (card.originSessionId === undefined) continue;
     const holder = tileHoldingSession(input.tiles, card.originSessionId);

@@ -424,9 +424,11 @@ overlay card does; it inerts nothing, and the sidebar's Plugins row carries the
 dot while it waits.
 
 **The dot.** One meaning, one drawing: `PendingAnswerDot`, a `--warning` fill
-with a ring of the surface colour, labelled "답변 대기 중". It says "a card you
-must answer is waiting where you are not looking", and nothing else — never
-for a card the user can already see. Every place it appears is decided by ONE
+with a ring of the surface colour, labelled "답변 대기 중". On a sidebar row it
+says "this conversation is interrupted on a card you must answer", whether or
+not that card is on screen; on the maximize control, the work-panel toggle
+and the side-chat tab it says "the card is behind this", so those carry it only
+while the card is off screen. Every place it appears is decided by ONE
 selector, `pendingAnswers` in `chat-group-session-registry.ts`, from the
 window's approval queue, every tile's questions and side chat, the reviewer's
 deferred entries and the overlay queue: the sidebar rows, the maximize

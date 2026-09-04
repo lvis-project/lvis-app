@@ -1029,8 +1029,8 @@ function SessionRow({
   /** Marked unread — drawn as a dot plus a heavier title. */
   unread?: boolean;
   /**
-   * This conversation's turn is parked on a request the user cannot see from
-   * where they are — the yellow dot says "come here, something is waiting".
+   * This conversation's turn is parked on a request, on screen or not — the
+   * yellow dot says "interrupted here, something is waiting for an answer".
    */
   pendingAnswer?: boolean;
   /** A turn is running here — the kind glyph gives way to a pulsing dot. */
