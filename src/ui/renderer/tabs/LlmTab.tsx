@@ -2659,6 +2659,13 @@ export function LlmTab(props: LlmTabProps) {
     return null;
   };
 
+  /** How many models this row contributes to the one chooser. */
+  const rowOfferedModelCount = (row: ProviderConnection): number => {
+    const apiId = row.apiVendorId ? apiProviderId(rowCredentialId(row)) : null;
+    return unifiedOptions.filter((option) =>
+      option.providerId === row.id || (apiId !== null && option.providerId === apiId)).length;
+  };
+
   /**
    * The row's state, as ONE of the five words every connection row is worded in.
    *
@@ -2685,20 +2692,19 @@ export function LlmTab(props: LlmTabProps) {
     if (status?.runtime === "not-configured" || status?.runtime === "unverified") return "needs-setup";
     if (status?.connection === "pending") return "pending";
     if (status?.connection === "connected" || row.apiConfigured) {
-      // A stored credential whose endpoint would not hand over a catalogue is
-      // "on, but not well" — exactly the fifth word. Saying "connected" over a
-      // line that says the sync failed is the contradiction this row exists to
-      // end, and the sync fact still gets stated once, on the line.
-      return rowModelListState(row)?.status === "error" ? "attention" : "connected";
+      // A failed catalogue fetch is the fifth word only when it left the row
+      // with NOTHING to offer. A provider whose models are already in the
+      // chooser is usable right now, and one of its two routes failing does
+      // not change that — wording it "needs checking" sends a person to repair
+      // a provider that is working. Where the row offers nothing, the stored
+      // credential really is "on, but not well", which is what that word is
+      // for. Either way the failed route is named on the sub-line, in its own
+      // tone, with the row shut — so "connected" here hides nothing.
+      return rowModelListState(row)?.status === "error" && rowOfferedModelCount(row) === 0
+        ? "attention"
+        : "connected";
     }
     return "needs-setup";
-  };
-
-  /** How many models this row contributes to the one chooser. */
-  const rowOfferedModelCount = (row: ProviderConnection): number => {
-    const apiId = row.apiVendorId ? apiProviderId(rowCredentialId(row)) : null;
-    return unifiedOptions.filter((option) =>
-      option.providerId === row.id || (apiId !== null && option.providerId === apiId)).length;
   };
 
   /**
