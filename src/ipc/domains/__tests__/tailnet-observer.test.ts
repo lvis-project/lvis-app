@@ -59,6 +59,7 @@ async function setup(overrides: {
   snapshot?: () => Promise<unknown>;
   apply?: (config: unknown) => Promise<void>;
   configureServe?: () => Promise<unknown>;
+  guidedSetup?: () => Promise<unknown>;
 } = {}) {
   handlers.clear();
   vi.clearAllMocks();
@@ -68,6 +69,16 @@ async function setup(overrides: {
     configureServe: vi.fn(
       overrides.configureServe
         ?? (async () => ({ ok: true as const, url: "https://desk.example-tailnet.ts.net/" })),
+    ),
+    guidedSetup: vi.fn(
+      overrides.guidedSetup
+        ?? (async () => ({
+          ok: true as const,
+          snapshot: snapshotFixture(),
+          webOrigin: "https://desk.example-tailnet.ts.net",
+          port: 46_173,
+          serve: "configured" as const,
+        })),
     ),
   };
   const { registerTailnetObserverHandlers } = await import("../tailnet-observer.js");
@@ -240,6 +251,77 @@ describe("Tailnet observer configuration IPC boundary", () => {
       await expect(
         invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.configureServe, { intent }),
       ).resolves.toEqual({ ok: false, error: "tailnet-observer-write-failed", output: null });
+    });
+  });
+  describe("guided setup", () => {
+    it("gates the whole operation on a live keyboard intent and a host frame", async () => {
+      const service = await setup();
+
+      const handler = handlers.get(CHANNELS.tailnetObserver.guidedSetup)!;
+      await expect(Promise.resolve(handler(
+        { senderFrame: { url: "file:///app/plugin-ui-shell.html" } } as never,
+        { intent },
+      ))).resolves.toEqual({ ok: false, error: "unauthorized-frame" });
+
+      await expect(invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, {}))
+        .resolves.toEqual({ ok: false, error: "user-keyboard-required" });
+
+      expect(service.guidedSetup).not.toHaveBeenCalled();
+    });
+
+    it("is unavailable before it evaluates any payload", async () => {
+      await setupDisabled();
+
+      await expect(invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, { intent }))
+        .resolves.toEqual({ ok: false, error: "tailnet-observer-unavailable" });
+    });
+
+    it("takes nothing from the payload — the host decides every value", async () => {
+      const service = await setup();
+
+      await invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, {
+        intent,
+        port: 22,
+        config: { ...CONFIG, controllerEnabled: true },
+      });
+
+      expect(service.guidedSetup).toHaveBeenCalledWith();
+    });
+
+    it("returns the chosen port, the address and the Serve outcome", async () => {
+      await setup();
+
+      await expect(
+        invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, { intent }),
+      ).resolves.toEqual({
+        ok: true,
+        snapshot: snapshotFixture(),
+        webOrigin: "https://desk.example-tailnet.ts.net",
+        port: 46_173,
+        serve: "configured",
+      });
+    });
+
+    it("passes the host's own refusal code through", async () => {
+      await setup({
+        guidedSetup: async () => ({ ok: false as const, error: "tailnet-guided-setup-not-ready" }),
+      });
+
+      await expect(
+        invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, { intent }),
+      ).resolves.toEqual({ ok: false, error: "tailnet-guided-setup-not-ready" });
+    });
+
+    it("never lets a thrown message out as an error code", async () => {
+      await setup({
+        guidedSetup: async () => {
+          throw new Error("EACCES: permission denied, open '/home/example/.lvis/tailnet/observer.json'");
+        },
+      });
+
+      await expect(
+        invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, { intent }),
+      ).resolves.toEqual({ ok: false, error: "tailnet-observer-write-failed" });
     });
   });
 });

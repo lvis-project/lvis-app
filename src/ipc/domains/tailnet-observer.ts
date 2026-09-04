@@ -98,4 +98,22 @@ export function registerTailnetObserverHandlers(deps: IpcDeps): void {
       return { ...rejection(err), output: null };
     }
   });
+
+  // One press stands in for a whole `apply` plus the Serve run, so it is gated
+  // like both. Nothing about the configuration comes from the payload: the host
+  // reads the environment and chooses the port itself, which is why this route
+  // can exist without widening what a renderer is allowed to propose.
+  ipcMain.handle(CHANNELS.tailnetObserver.guidedSetup, async (event, payload: unknown) => {
+    if (!validateHostRendererSender(event)) {
+      auditUnauthorized(deps.auditLogger, CHANNELS.tailnetObserver.guidedSetup, event);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!service) return DISABLED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
+    try {
+      return await service.guidedSetup();
+    } catch (err) {
+      return rejection(err);
+    }
+  });
 }

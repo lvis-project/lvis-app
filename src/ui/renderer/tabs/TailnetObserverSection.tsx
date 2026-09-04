@@ -29,6 +29,15 @@ import type { LvisApi } from "../types.js";
 
 export interface TailnetObserverSectionProps {
   api: Pick<LvisApi, "tailnetObserver">;
+  /**
+   * Called after a save or a Serve run changed host state.
+   *
+   * The wizard that hosts this form reads its own snapshot to decide whether
+   * setup is finished, and the host has no change event for the observer, so a
+   * form that succeeded silently would leave the wizard reporting the state
+   * from before the save.
+   */
+  onHostStateChanged?: () => void;
 }
 
 /** What a save writes when the owner asks to start over from a damaged file. */
@@ -53,7 +62,7 @@ const RESET_CONFIG: TailnetObserverConfigView = Object.freeze({
  * host can produce has a sentence here — a start failure landing on "could not
  * be saved" was itself one of the dead ends.
  */
-function errorText(code: string, t: (key: string) => string): string {
+export function tailnetObserverErrorText(code: string, t: (key: string) => string): string {
   switch (code) {
     case "tailnet-observer-authorization-missing-or-invalid":
       return t("tailnetObserver.errorAuthorization");
@@ -93,6 +102,10 @@ function errorText(code: string, t: (key: string) => string): string {
       return t("tailnetObserver.environmentCliNotFound");
     case "tailnet-serve-command-failed":
       return t("tailnetObserver.errorServeCommandFailed");
+    case "tailnet-guided-setup-not-ready":
+      return t("tailnetSetup.errorNotReady");
+    case "tailnet-guided-setup-port-unavailable":
+      return t("tailnetSetup.errorPortUnavailable");
     case "user-keyboard-required":
       return t("tailnetObserver.errorKeyboardIntent");
     case "tailnet-observer-unavailable":
@@ -103,7 +116,7 @@ function errorText(code: string, t: (key: string) => string): string {
 }
 
 /** The one sentence this desktop's Tailscale state deserves. */
-function environmentText(
+export function tailnetEnvironmentText(
   environment: TailnetObserverSnapshot["environment"],
   t: (key: string, vars?: Record<string, string>) => string,
 ): string {
@@ -134,7 +147,7 @@ function sourceLabel(
     : null;
 }
 
-export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
+export function TailnetObserverSection({ api, onHostStateChanged }: TailnetObserverSectionProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TailnetObserverSnapshot | null>(null);
   const [draft, setDraft] = useState<TailnetObserverConfigView | null>(null);
@@ -170,7 +183,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
       setFeedback(null);
     } else {
       setSnapshot(null);
-      setFeedback({ tone: "error", text: errorText(result.error, t) });
+      setFeedback({ tone: "error", text: tailnetObserverErrorText(result.error, t) });
     }
     setLoading(false);
   }, [api, t]);
@@ -188,12 +201,13 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
       // After the refresh, not before: a successful snapshot clears feedback,
       // so setting it first left a save that applied with nothing said about it.
       await refresh();
+      onHostStateChanged?.();
       setFeedback({ tone: "success", text: t("tailnetObserver.saved") });
     } else {
-      setFeedback({ tone: "error", text: errorText(result.error, t) });
+      setFeedback({ tone: "error", text: tailnetObserverErrorText(result.error, t) });
     }
     setBusy(false);
-  }, [api, busy, refresh, t]);
+  }, [api, busy, onHostStateChanged, refresh, t]);
 
   const configureServe = useCallback(async () => {
     const bridge = api.tailnetObserver as typeof api.tailnetObserver | undefined;
@@ -205,15 +219,16 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
     if (result.ok) {
       setServeUrl(result.url);
       await refresh();
+      onHostStateChanged?.();
       setFeedback({ tone: "success", text: t("tailnetObserver.serveConfigured") });
     } else {
       // Tailscale's own sentence, not a paraphrase of it: the certificate case
       // needs a tailnet administrator, and only Tailscale says so.
       setServeOutput(result.output);
-      setFeedback({ tone: "error", text: errorText(result.error, t) });
+      setFeedback({ tone: "error", text: tailnetObserverErrorText(result.error, t) });
     }
     setBusy(false);
-  }, [api, busy, refresh, t]);
+  }, [api, busy, onHostStateChanged, refresh, t]);
 
   const patch = useCallback((change: Partial<TailnetObserverConfigView>) => {
     setDraft((current) => (current === null ? current : { ...current, ...change }));
@@ -221,7 +236,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
 
   if (loading) {
     return (
-      <SettingsSection data-settings-section="remote-tailnet-observer" title={t("tailnetObserver.sectionTitle")}>
+      <SettingsSection title={t("tailnetObserver.sectionTitle")}>
         <p className="text-sm text-muted-foreground" data-testid="tailnet-observer-loading">
           {t("tailnetObserver.loading")}
         </p>
@@ -232,7 +247,6 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
   if (snapshot === null || draft === null) {
     return (
       <SettingsSection
-        data-settings-section="remote-tailnet-observer"
         title={t("tailnetObserver.sectionTitle")}
         actions={
           <Button
@@ -260,7 +274,6 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
 
   return (
     <SettingsSection
-      data-settings-section="remote-tailnet-observer"
       title={t("tailnetObserver.sectionTitle")}
       description={t("tailnetObserver.sectionDescription")}
       actions={
@@ -281,7 +294,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
         className="rounded-md border border-border bg-card/(--opacity-half) px-3 py-2 text-xs text-muted-foreground"
         data-testid="tailnet-observer-environment"
       >
-        {environmentText(environment, t)}
+        {tailnetEnvironmentText(environment, t)}
         {/* A personal tailnet is named after its owner's login, so appending it
             unconditionally prints the same address twice. */}
         {environment.tailnetName === null || environment.tailnetName === environment.login
@@ -312,7 +325,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
           className="mt-2 rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2"
           data-testid="tailnet-observer-config-file-error"
         >
-          <p className="text-xs text-destructive">{errorText(snapshot.configFileError, t)}</p>
+          <p className="text-xs text-destructive">{tailnetObserverErrorText(snapshot.configFileError, t)}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">
             {t("tailnetObserver.configFileRecovery")}
           </p>
@@ -331,7 +344,7 @@ export function TailnetObserverSection({ api }: TailnetObserverSectionProps) {
 
       {snapshot.lastStartError !== null ? (
         <p className="mt-2 text-xs text-destructive" data-testid="tailnet-observer-start-error">
-          {errorText(snapshot.lastStartError, t)}
+          {tailnetObserverErrorText(snapshot.lastStartError, t)}
         </p>
       ) : null}
 

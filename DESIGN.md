@@ -347,6 +347,12 @@ not be drawn with the same value.
   - Command picker: search and 1st/2nd-depth command navigation.
   - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
   - SettingsSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.
+  - In-flow setup stepper: a multi-step setup that draws each step in the settings body, in
+    the section it belongs to — an `n / total` line, one step's content, Back/Next — never in
+    a dialog, popover or sheet. Setup is settings content, and a window-modal step would
+    freeze the rest of the page for a decision about one section. A finished setup collapses
+    to a status card of one fact per line, with re-run and reveal-the-full-form actions;
+    the detailed form stays reachable only through that reveal.
 - Variants and states:
   - Hover: subtle semantic surface tint, never layout shift. A ROW highlight and an inline
     BUTTON highlight inside that row are different signals and must not share one value.

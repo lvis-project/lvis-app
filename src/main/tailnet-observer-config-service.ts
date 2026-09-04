@@ -8,6 +8,7 @@
  * protecting.
  */
 import {
+  chooseObserverPort,
   configureTailscaleServe,
   DEFAULT_TAILNET_OBSERVER_PORT,
   getTailnetObserverRuntimeState,
@@ -24,6 +25,7 @@ import {
 } from "./tailnet-surface-server.js";
 import {
   DEFAULT_TAILNET_OBSERVER_VIEW_PORT,
+  type TailnetGuidedSetupResult,
   type TailnetObserverConfigView,
   type TailnetObserverSnapshot,
   type TailnetServeResult,
@@ -35,6 +37,14 @@ export interface TailnetObserverConfigService {
   apply(config: TailnetObserverConfigView): Promise<void>;
   /** Run the Serve command the owner has just been shown and approved. */
   configureServe(): Promise<TailnetServeResult>;
+  /**
+   * Decide and start the whole recommended configuration in one operation.
+   *
+   * Everything the manual form asks for has one defensible answer for a
+   * first-time owner, and the two that could differ per machine — the port and
+   * the web origin — are things the host can read rather than ask about.
+   */
+  guidedSetup(): Promise<TailnetGuidedSetupResult>;
 }
 
 export interface TailnetObserverConfigServiceOptions {
@@ -54,6 +64,8 @@ export interface TailnetObserverConfigServiceOptions {
   readonly restartListener?: () => Promise<unknown>;
   /** @internal deterministic injection for tests. */
   readonly runServe?: typeof configureTailscaleServe;
+  /** @internal deterministic injection for tests. */
+  readonly choosePort?: typeof chooseObserverPort;
 }
 
 /**
@@ -152,6 +164,45 @@ function serveFailure(error: string, output: string | null): TailnetServeResult 
   return Object.freeze({ ok: false as const, error, output });
 }
 
+function guidedFailure(error: string): TailnetGuidedSetupResult {
+  return Object.freeze({ ok: false as const, error });
+}
+
+/**
+ * The kebab-case code behind a rejected write or restart.
+ *
+ * The resolver refuses a configuration by throwing a named code, and every one
+ * of them already has a sentence on the surface that asked. Anything else is a
+ * host fault the owner cannot classify, and gets the generic code rather than
+ * an error message repeated verbatim.
+ */
+function guidedErrorCode(err: unknown): string {
+  const code = err instanceof Error ? err.message : "";
+  return /^[a-z0-9-]+$/.test(code) ? code : "tailnet-observer-write-failed";
+}
+
+/**
+ * What guided setup writes.
+ *
+ * The identity boundary because the pairing code is what turns an identity into
+ * a share and an app capability needs a tailnet administrator; paired sharing
+ * and the web surface because they are what the owner came here for; the
+ * controller off because accepting remote commands is a separate decision the
+ * owner has not been asked to make. `webOrigin` is ignored downstream — it is
+ * derived from MagicDNS — and is present only to satisfy the complete view.
+ */
+function recommendedConfig(port: number): TailnetObserverConfigView {
+  return Object.freeze({
+    enabled: true,
+    authorization: { kind: "tailnet-identity" as const },
+    port,
+    controllerEnabled: false,
+    pairedSharingEnabled: true,
+    webEnabled: true,
+    webOrigin: "",
+  });
+}
+
 export function createTailnetObserverConfigService(
   options: TailnetObserverConfigServiceOptions,
 ): TailnetObserverConfigService {
@@ -162,8 +213,9 @@ export function createTailnetObserverConfigService(
   const probeEnvironment = options.probeEnvironment ?? (() => probeTailscaleEnvironment());
   const restartListener = options.restartListener ?? restartTailnetObserverServer;
   const runServe = options.runServe ?? configureTailscaleServe;
+  const choosePort = options.choosePort ?? chooseObserverPort;
 
-  return Object.freeze({
+  const service: TailnetObserverConfigService = Object.freeze({
     async snapshot(): Promise<TailnetObserverSnapshot> {
       // A damaged file is reported, not thrown. Throwing left the section with
       // a Refresh button and no draft, so the one action that would have fixed
@@ -225,5 +277,64 @@ export function createTailnetObserverConfigService(
       }
       return Object.freeze({ ok: true as const, url: "https://" + environment.dnsName + "/" });
     },
+
+    async guidedSetup(): Promise<TailnetGuidedSetupResult> {
+      const environment = await probeEnvironment();
+      // Only `ready` can be set up. Every other state needs an action outside
+      // this app — install, sign in, start the daemon — and the surface that
+      // asked for this already knows the sentence for each one.
+      if (environment.state !== "ready") {
+        return guidedFailure("tailnet-guided-setup-not-ready");
+      }
+
+      // A damaged file is not a reason to refuse: this writes a whole
+      // configuration over it, which is the same recovery the manual form
+      // offers, so there is nothing in the old bytes worth failing for.
+      let file: TailnetObserverConfigFile | null = null;
+      try {
+        file = await readConfigFile();
+      } catch {
+        file = null;
+      }
+
+      const preferred = file?.port ?? DEFAULT_TAILNET_OBSERVER_PORT;
+      // A port this process is already listening on is not a conflict — the
+      // restart below releases it — and probing it would move a working setup
+      // to a new port every time the owner pressed the button.
+      const port = runtimeState().listeningPort === preferred
+        ? preferred
+        : await choosePort(preferred);
+      if (port === null) return guidedFailure("tailnet-guided-setup-port-unavailable");
+
+      try {
+        await writeConfigFile(
+          proposalToFile(recommendedConfig(port), tailnetWebOriginFor(environment.dnsName)),
+        );
+        await restartListener();
+      } catch (err) {
+        return guidedFailure(guidedErrorCode(err));
+      }
+
+      // Serve already pointing at this exact port is the finished state, not a
+      // reason to run a command: re-running it is harmless but asks Tailscale
+      // for a certificate the owner may not be able to obtain.
+      let serve: "configured" | "already-configured" = "already-configured";
+      if (!(environment.serveConfigured && environment.serveTargetPort === port)) {
+        const outcome = await service.configureServe();
+        if (!outcome.ok) return guidedFailure(outcome.error);
+        serve = "configured";
+      }
+
+      const snapshot = await service.snapshot();
+      return Object.freeze({
+        ok: true as const,
+        snapshot,
+        webOrigin: snapshot.derivedWebOrigin,
+        port,
+        serve,
+      });
+    },
   });
+
+  return service;
 }

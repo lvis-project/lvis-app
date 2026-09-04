@@ -148,6 +148,43 @@ descriptive, and every mutation still crosses the §2.2 approval gate.
   diagnostics, never a partially-applied config; the resolver keeps throwing
   rather than guessing.
 
+### 2.6 Guided setup
+
+The form above is complete and, for a first-time owner, over-asked: six of its
+seven questions have exactly one defensible answer, and the two values that
+genuinely differ per machine — the loopback port and the web origin — are
+things the host can read rather than ask about. `guidedSetup` is that whole
+configuration as one host-side operation, reached from the setup flow in the
+`remote-tailnet-observer` position.
+
+**What the host decides.** The authorization boundary is `tailnet-identity`
+(the pairing code is what turns an identity into a share; an app capability
+needs a tailnet administrator, so it cannot be a default). Paired sharing and
+the web surface are ON because they are what the owner came for; the controller
+stays OFF because accepting remote commands is a separate decision nobody was
+asked to make. The web origin is derived from MagicDNS exactly as `apply`
+derives it. Serve runs unless the probe already reports it forwarding to this
+same port.
+
+**What stays manual.** Everything, on request: choosing "manual" keeps the full
+form, and a configured desktop can still reveal it from the status card. An app
+capability, a hand-picked port, and the controller are only reachable there.
+
+**The port rule.** Preference order is the port already in the file, then
+`DEFAULT_TAILNET_OBSERVER_PORT`, then whatever the OS hands out for
+`127.0.0.1:0`. The listener binds one fixed port with no fallback, so an
+occupied port is otherwise a start failure with nothing on screen that would
+fix it. The chosen port is persisted: a port re-rolled at each launch would
+move the target out from under Tailscale Serve every restart. A port this
+process is already listening on is kept without probing, because the restart
+releases it. If nothing binds, guided setup refuses with
+`tailnet-guided-setup-port-unavailable` rather than writing a configuration
+that cannot come up.
+
+**Gate.** The channel is `apply` plus `configureServe` in one press, so it
+carries exactly their gate — host-renderer sender plus a fresh local keyboard
+intent — and takes nothing from the payload.
+
 ## 3. Migration and validation
 
 Phase A ships the file + resolver layering + diagnostics with env fully
