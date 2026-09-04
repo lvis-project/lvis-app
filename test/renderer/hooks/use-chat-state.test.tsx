@@ -26,13 +26,13 @@ import type { ChatEntry } from "../../../src/lib/chat-stream-state.js";
 describe("useChatState", () => {
   it("subscribes to onChatStream on mount", () => {
     const { api } = makeMockLvisApi();
-    renderHook(() => useChatState(api as unknown as LvisApi));
+    renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
     expect(api.onChatStream).toHaveBeenCalledTimes(1);
   });
 
   it("updates entries when a text_delta event is emitted", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       emitChatStream({ type: "text_delta", text: "hello world" });
@@ -48,7 +48,7 @@ describe("useChatState", () => {
 
   it("keeps the permission review verdict once the matching tool runs", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       result.current.appendUserEntry("자동 승인 확인");
@@ -102,7 +102,7 @@ describe("useChatState", () => {
 
   it("keeps the verdict through a local error and drops it only with a new chat", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       result.current.appendUserEntry("초기 요청");
@@ -155,7 +155,7 @@ describe("useChatState", () => {
 
   it("keeps the verdict across an initial-session race and rewinds it with the transcript", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       result.current.appendUserEntry("세션 교체 전 요청");
@@ -234,7 +234,7 @@ describe("useChatState", () => {
 
   it("keeps overlay-import responses in the normal assistant stream", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       result.current.insertImportedTriggerEntry({
@@ -271,7 +271,7 @@ describe("useChatState", () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const listener = vi.fn();
     window.addEventListener("lvis:permissions:mode-changed", listener);
-    renderHook(() => useChatState(api as unknown as LvisApi));
+    renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       emitChatStream({ type: "permission_mode_changed", mode: "allow" });
@@ -286,7 +286,7 @@ describe("useChatState", () => {
 
   it("splices marker-only assistant rounds when no tool/checkpoint sibling exists (#619)", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       emitChatStream({ type: "text_delta", text: "<title>제목</title>[checkpoint]" });
@@ -306,7 +306,7 @@ describe("useChatState", () => {
 
   it("splices marker-only done events when no tool/checkpoint sibling exists (#619)", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       emitChatStream({ type: "text_delta", text: "<title>제목</title>[checkpoint]" });
@@ -321,7 +321,7 @@ describe("useChatState", () => {
 
   it("preserves checkpoint summary from compact_notice events", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       emitChatStream({
@@ -350,7 +350,7 @@ describe("useChatState", () => {
   it("does not log to console when VITE_DEBUG_STREAM is unset (Fix 3)", () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-    renderHook(() => useChatState(api as unknown as LvisApi));
+    renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
     act(() => {
       emitChatStream({ type: "text_delta", text: "x" });
     });
@@ -363,7 +363,7 @@ describe("useChatState", () => {
     const { api } = makeMockLvisApi();
     const unsubscribe = vi.fn();
     api.onChatStream.mockImplementationOnce(() => unsubscribe);
-    const { unmount } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { unmount } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     unmount();
 
@@ -373,7 +373,7 @@ describe("useChatState", () => {
   it("does not warn about setState after unmount (aliveRef)", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { unmount } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { unmount } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     unmount();
     // Emit after unmount — aliveRef should swallow it with no setState.
@@ -395,7 +395,7 @@ describe("useChatState", () => {
     // user bubble + injectHint="queue" 배지. mid-turn brake-point 의 큐 인입은
     // 사용자 입력 누적의 자동 발화이므로 user kind 가 mental model 정합.
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       emitChatStream({ type: "text_delta", text: "hello", streamId: 1 });
@@ -420,7 +420,7 @@ describe("useChatState", () => {
     // transcript names, otherwise the actions that address a row work on a
     // queued message only after a restart.
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       emitChatStream({
@@ -453,7 +453,7 @@ describe("useChatState", () => {
 
   it("guidance_injected with empty text is a no-op (defense-in-depth)", () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
 
     act(() => {
       emitChatStream({ type: "guidance_injected", text: "", streamId: 1 });
@@ -464,7 +464,7 @@ describe("useChatState", () => {
 
   it("rerender does not create an extra subscription on the same instance", () => {
     const { api } = makeMockLvisApi();
-    const { rerender } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { rerender } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
     rerender();
     rerender();
     // Same api reference → effect deps unchanged → subscription stays the same one.
@@ -1079,7 +1079,7 @@ describe("useStarred (toggle semantics)", () => {
 describe("useChatState — a turn interrupted by the next send", () => {
   const mount = () => {
     const { api, emitChatStream } = makeMockLvisApi();
-    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
     return { result, dispatch: (ev: Parameters<typeof emitChatStream>[0]) => act(() => emitChatStream(ev)) };
   };
 

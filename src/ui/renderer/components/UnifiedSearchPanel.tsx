@@ -209,7 +209,7 @@ export function UnifiedSearchPanel({
 
   return (
     <div
-      className={`absolute left-1/2 top-3 z-[70] w-[min(48rem,calc(100%-1.5rem))] -translate-x-1/2 rounded-md border bg-card/(--opacity-solid) p-3 shadow-2xl backdrop-blur ${
+      className={`absolute left-1/2 top-3 z-50 w-[min(48rem,calc(100%-1.5rem))] -translate-x-1/2 rounded-md border bg-card/(--opacity-solid) p-3 shadow-2xl backdrop-blur ${
         open ? "" : "py-1.5"
       }`}
       data-testid="unified-search-panel"

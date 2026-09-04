@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { approvalQueueReducer } from "../../../lib/approval-queue-reducer.js";
 import type { UserApprovalVerdict } from "../../../shared/permissions-events.js";

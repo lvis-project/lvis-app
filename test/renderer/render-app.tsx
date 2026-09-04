@@ -38,6 +38,7 @@ export type RenderAppReturn = {
   /** Which groups' loops were released — see `makeMockLvisApi`. */
   releasedGroupIds: () => string[];
   emitChatStream: (ev: unknown) => void;
+  emitChatFallback: ReturnType<typeof makeMockLvisApi>["emitChatFallback"];
   emitAgentSpawnEvent: ReturnType<typeof makeMockLvisApi>["emitAgentSpawnEvent"];
   emitSkillLoaded: ReturnType<typeof makeMockLvisApi>["emitSkillLoaded"];
   emitSessionTasksChanged: ReturnType<typeof makeMockLvisApi>["emitSessionTasksChanged"];
@@ -75,6 +76,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     api,
     releasedGroupIds,
     emitChatStream,
+    emitChatFallback,
     emitAgentSpawnEvent,
     emitSkillLoaded,
     emitSessionTasksChanged,
@@ -106,6 +108,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     api,
     releasedGroupIds,
     emitChatStream,
+    emitChatFallback,
     emitAgentSpawnEvent,
     emitSkillLoaded,
     emitSessionTasksChanged,

@@ -200,6 +200,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   /** Which groups' loops were released — one spy per group, see the body. */
   releasedGroupIds: () => string[];
   emitChatStream: (ev: ChatStreamEvent) => void;
+  /** `lvis:chat:fallback` addressed to one tile, as preload's per-group filter delivers it. */
+  emitChatFallback: (chatGroupId: string, payload: { from: string; to: string }) => void;
   emitAgentSpawnEvent: (event: AgentSpawnEvent) => void;
   /** `lvis:skill-load:event` — window-wide, stamped with the turn's session. */
   emitSkillLoaded: (event: { name: string; description: string; sessionId: string }) => void;
@@ -238,7 +240,19 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const chatGroupApis = new Map<string, {
     chatGetHistory: ReturnType<typeof vi.fn>;
     chatGroupRelease: ReturnType<typeof vi.fn>;
+    onChatFallback: ReturnType<typeof vi.fn>;
   }>();
+  // The provider-fallback frame is labelled with its chat group in preload
+  // and filtered per tile; the mock keeps one handler set per group so a test
+  // can address the frame to ONE tile, as main does.
+  const chatFallbackHandlers = new Map<string, Set<(payload: { from: string; to: string }) => void>>();
+  const subscribeChatFallback = (chatGroupId: string) =>
+    vi.fn((handler: (payload: { from: string; to: string }) => void) => {
+      const handlers = chatFallbackHandlers.get(chatGroupId) ?? new Set();
+      chatFallbackHandlers.set(chatGroupId, handlers);
+      handlers.add(handler);
+      return () => handlers.delete(handler);
+    });
   // The primary group is not reached through `chatGroup()` — `chatGroupApi`
   // hands it the window api itself — so its release is the top-level member,
   // exactly as in `LvisApi`.
@@ -459,6 +473,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       const made = {
         chatGetHistory: vi.fn(async () => ({ ...(await history), sessionId: `session-${chatGroupId}` })),
         chatGroupRelease: vi.fn(async () => ({ ok: true, released: true })),
+        onChatFallback: subscribeChatFallback(chatGroupId),
       };
       chatGroupApis.set(chatGroupId, made);
       return made;
@@ -590,7 +605,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       skillLoadedHandlers.add(handler);
       return () => skillLoadedHandlers.delete(handler);
     }),
-    onChatFallback: vi.fn((_h: (payload: { from: string; to: string }) => void) => () => {}),
+    onChatFallback: subscribeChatFallback(MAIN_CHAT_GROUP_ID),
     onNotificationToast: vi.fn((handler: (payload: unknown) => void) => {
       notificationToastHandlers.add(handler);
       return () => notificationToastHandlers.delete(handler);
@@ -868,6 +883,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
         .map(([chatGroupId]) => chatGroupId),
     ],
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
+    emitChatFallback: (chatGroupId, payload) =>
+      chatFallbackHandlers.get(chatGroupId)?.forEach((h) => h(payload)),
     emitAgentSpawnEvent: (event) => agentSpawnEventHandlers.forEach((h) => h(event)),
     emitSkillLoaded: (event) => skillLoadedHandlers.forEach((h) => h(event)),
     emitSessionTasksChanged: (payload) => sessionTasksHandlers.forEach((h) => h(payload)),

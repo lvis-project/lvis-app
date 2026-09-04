@@ -95,10 +95,23 @@ function resolveToastTtlMs(message: string, requestedTtlMs: number): number {
   return Math.max(requestedTtlMs, Math.min(TOAST_MARQUEE_MAX_TTL_MS, scrollTtlMs));
 }
 
-export function useStatusBar(opts: UseStatusBarOptions) {
+/**
+ * One notice queue with no producers of its own — the state a `StatusBar`
+ * draws, for whichever surface owns it.
+ *
+ * A notice is about ONE conversation (an attachment the composer refused, a
+ * provider swap mid-turn, a pre-turn compaction) or about the WINDOW (a host
+ * notification, a plugin install). The two are drawn in different places — the
+ * tile's composer dock and the window's notice strip — so each surface holds a
+ * queue of its own; a queue shared through the window would draw one tile's
+ * notice in every tile at once. `useStatusBar` below is the window's queue with
+ * the window-scoped producers attached; a tile takes this bare queue and pushes
+ * its own conversation's notices into it.
+ */
+export function useStatusNotices(opts: { defaultToastTtlMs?: number } = {}) {
   // LONG_TOAST_TTL_MS (5 s) gives comfortable reading time for a Korean
   // phrase; callers that need a shorter or longer window pass defaultToastTtlMs.
-  const { api, defaultToastTtlMs = LONG_TOAST_TTL_MS } = opts;
+  const { defaultToastTtlMs = LONG_TOAST_TTL_MS } = opts;
   const [persistent, setPersistent] = useState<PersistentItem[]>([]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -185,16 +198,6 @@ export function useStatusBar(opts: UseStatusBarOptions) {
     setPersistent((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
-  // ── Producers (each in its own file under status-bar/)
-  // The window status bar is NOTIFICATIONS-ONLY: it surfaces transient toasts
-  // (notifications + install/lifecycle progress). The persistent model /
-  // permission / active-state cells moved into the unified InputActionBar
-  // status sub-row (see useInputStatusRow). `upsertPersistent` /
-  // `removePersistent` remain for the transient pre-turn auto-compact
-  // indicator (App.tsx), which is operational state, not a model cell.
-  useStatusBarNotifications({ api, pushToast });
-  useStatusBarInstall({ api, pushToast, upsertToast });
-
   return {
     persistent,
     toasts,
@@ -203,8 +206,31 @@ export function useStatusBar(opts: UseStatusBarOptions) {
     /** Number of queued toasts waiting behind the visible one. */
     pendingCount: Math.max(0, toasts.length - 1),
     pushToast,
+    upsertToast,
     removeToast,
     upsertPersistent,
     removePersistent,
   };
+}
+
+/**
+ * The WINDOW's notice queue: `useStatusNotices` with the producers that report
+ * on the window attached. Subscribed once, drawn once, in the window's notice
+ * strip — never inside a tile, where a second tile would draw it again.
+ */
+export function useStatusBar(opts: UseStatusBarOptions) {
+  const { api, defaultToastTtlMs } = opts;
+  const notices = useStatusNotices({ defaultToastTtlMs });
+
+  // ── Producers (each in its own file under status-bar/)
+  // The window status bar is NOTIFICATIONS-ONLY: it surfaces transient toasts
+  // (notifications + install/lifecycle progress). The persistent model /
+  // permission / active-state cells moved into the unified InputActionBar
+  // status sub-row (see useInputStatusRow). `upsertPersistent` /
+  // `removePersistent` serve a tile's own queue (the pre-turn auto-compact
+  // indicator), which is operational state, not a model cell.
+  useStatusBarNotifications({ api, pushToast: notices.pushToast });
+  useStatusBarInstall({ api, pushToast: notices.pushToast, upsertToast: notices.upsertToast });
+
+  return notices;
 }

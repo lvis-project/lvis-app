@@ -64,7 +64,6 @@ const handleFor = (streaming: boolean, entries: readonly ChatEntry[] = NO_ENTRIE
   currentSessionId: "",
   currentSessionProject: NO_PROJECT,
   loadSession: async () => false,
-  fallbackToast: null,
   prefillComposer: () => {},
   appendSystemEntry: () => {},
   startNewChat: async () => {},
@@ -208,10 +207,7 @@ describe("tile sessions — every tile at once", () => {
 
 describe("tileHoldingSession", () => {
   it("names the tile already holding a conversation, and nothing when none does", () => {
-    const tiles = [
-      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
-      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, paneHidden: false, askQuestions: [] },
-    ];
+    const tiles = [tile("main", "s-1"), tile("group-2", "s-2", { streaming: true })];
     expect(tileHoldingSession(tiles, "s-2")?.chatGroupId).toBe("group-2");
     expect(tileHoldingSession(tiles, "s-9")).toBeUndefined();
   });

@@ -28,6 +28,7 @@ import {
 import { MOCK_DEFAULT_SESSION_ID, MOCK_SIDE_CHAT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../src/contract/app-contract.js";
 import { BLOCKING_SURFACE_SELECTOR, TEST_IDS, chatSidePanelLauncherTestId, testIdSelector } from "../../src/shared/test-ids.js";
+import type { MarketplaceAnnouncement } from "../../src/shared/marketplace-announcements.js";
 import { CHAT_SESSION_DRAG_TYPE } from "../../src/ui/renderer/components/pane-drop.js";
 
 /** The permission namespace's subscriptions, as the mock records them. */
@@ -883,7 +884,8 @@ describe("a turn parked on an approval, with two tiles", () => {
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="side-chat-new"]')!);
     });
-    await waitFor(() => expect(api.sideChat!.new).toHaveBeenCalled());
+    const sideChatNew = (api.sideChat as unknown as { new: ReturnType<typeof vi.fn> }).new;
+    await waitFor(() => expect(sideChatNew).toHaveBeenCalled());
 
     // The side loop's turn parks: the card is the side chat's, over its composer.
     await act(async () => {
@@ -1711,5 +1713,76 @@ describe("opening a conversation while another is mid-turn", () => {
       for (const gate of pending) gate.resolve({ ok: true });
       await Promise.resolve();
     });
+  });
+});
+
+describe("notices with two tiles", () => {
+  const toasts = (root: ParentNode) => root.querySelectorAll('[data-testid="status-toast-message"]');
+  const strip = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-testid="window-notice-strip"]')!;
+
+  it("draws a window notice once, in the window strip, and in no composer dock", async () => {
+    const { container, emitNotificationToast } = await renderApp({ hasApiKey: true });
+    await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitNotificationToast({ kind: "ask-user", title: "질문", body: "창 전체에 한 번", contextRef: { questionId: "q-1" } });
+    });
+
+    // A host notification is the window's news. Two tiles, one toast — and
+    // that one in the strip, not above either composer.
+    await waitFor(() => expect(toasts(container)).toHaveLength(1));
+    expect(toasts(strip(container))).toHaveLength(1);
+    expect(container.querySelectorAll('[data-testid="composer-toast-dock"]')).toHaveLength(0);
+  });
+
+  it("draws a provider fallback in the tile whose turn swapped, focused or not", async () => {
+    const { container, emitChatFallback } = await renderApp({ hasApiKey: true });
+    // Focus follows a split, so the FIRST tile is the one not focused.
+    const [first, second] = await splitIntoTwoTiles(container);
+
+    await act(async () => {
+      emitChatFallback(first!.chatGroupId, { from: "primary-provider", to: "standby-provider" });
+    });
+
+    await waitFor(() => expect(toasts(first!.element)).toHaveLength(1));
+    expect(toasts(second!.element)).toHaveLength(0);
+    expect(toasts(strip(container))).toHaveLength(0);
+    expect(toasts(container)).toHaveLength(1);
+
+    // The notice takes a row of its own above the selector/runtime strip: an
+    // unpositioned sibling BEFORE the wrapper that holds the project selector,
+    // so it pushes that strip down instead of painting over it.
+    const toastRow = first!.element.querySelector<HTMLElement>('[data-testid="composer-toast-dock"]')!;
+    const selectorSlot = first!.element.querySelector<HTMLElement>('[data-testid="composer-project-selector-slot"]')!;
+    expect(selectorSlot).not.toBeNull();
+    expect(toastRow.className).not.toMatch(/\b(absolute|fixed)\b/);
+    expect(toastRow.contains(selectorSlot)).toBe(false);
+    expect(toastRow.nextElementSibling?.contains(selectorSlot)).toBe(true);
+    expect(toastRow.parentElement!.className).toMatch(/\bflex-col\b/);
+  });
+
+  it("keeps the window strip in flow above the panes, never floating over a pane's lane", async () => {
+    const { container, api } = await renderApp({ hasApiKey: true });
+    await splitIntoTwoTiles(container);
+    const listener = api.onMarketplaceAnnouncements.mock.calls[0]?.[0] as
+      | ((items: MarketplaceAnnouncement[]) => void)
+      | undefined;
+    expect(listener).toBeDefined();
+    await act(async () => {
+      listener!([{
+        id: 1, title: "Announcement", body: "Shown to the window", level: "info",
+        createdAt: "2026-09-03T00:00:00Z", startsAt: null, endsAt: null, actions: [],
+      }]);
+    });
+
+    const notices = strip(container);
+    await waitFor(() => expect(notices.querySelector('[data-testid="marketplace-announcement-banner"]')).not.toBeNull());
+    // In flow: an unpositioned flex sibling of the route canvas, before it, so
+    // its height comes out of the canvas instead of covering the top-right
+    // corner every pane keeps for its own floating lane.
+    expect(notices.className).not.toMatch(/\b(absolute|fixed)\b/);
+    const canvas = container.querySelector<HTMLElement>(`[data-testid="${TEST_IDS.routeCanvas}"]`)!;
+    expect(notices.parentElement).toBe(canvas.parentElement);
+    expect(notices.compareDocumentPosition(canvas) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 });

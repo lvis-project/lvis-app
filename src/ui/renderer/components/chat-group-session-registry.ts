@@ -113,8 +113,6 @@ export interface ChatGroupSessionHandle {
   currentSessionProject: SessionProjectSummary;
   /** Load a session into this tile, refusing mid-turn. */
   loadSession: (sessionId: string) => Promise<boolean>;
-  /** The provider-fallback banner App renders above the content area. */
-  fallbackToast: string | null;
   /** Put text in this tile's composer without sending it. */
   prefillComposer: (text: string) => void;
   /** Write a system row into this tile's transcript. */
@@ -158,7 +156,6 @@ const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
   paneHidden: false,
   currentSessionProject: {},
   loadSession: async () => false,
-  fallbackToast: null,
   prefillComposer: () => {},
   appendSystemEntry: () => {},
   startNewChat: async () => {},
@@ -287,7 +284,7 @@ export function overlayCardTile(
  * tile that spawned it as a sub-agent. Drawn or not: a tile the tree hides
  * still holds its conversation and its children.
  */
-export function tileOwningSession(
+function tileOwningSession(
   tiles: readonly TileSession[],
   sessionId: string,
 ): TileSession | undefined {
@@ -295,7 +292,7 @@ export function tileOwningSession(
 }
 
 /** The tile whose side chat runs `sessionId`, if any side chat does. */
-export function tileWithSideChat(
+function tileWithSideChat(
   tiles: readonly TileSession[],
   sessionId: string,
 ): TileSession | undefined {
@@ -504,7 +501,6 @@ export class ChatGroupSessionRegistry {
       && previous.childSessionIds === handle.childSessionIds
       && previous.sideChat === handle.sideChat
       && previous.currentSessionProject === handle.currentSessionProject
-      && previous.fallbackToast === handle.fallbackToast
       && this.snapshots.has(chatGroupId);
     if (unchanged) return;
 
@@ -613,7 +609,6 @@ export class ChatGroupSessionRegistry {
       paneHidden: handle.paneHidden,
       currentSessionProject: handle.currentSessionProject,
       loadSession: async (sessionId: string) => await live()?.loadSession(sessionId) ?? false,
-      fallbackToast: handle.fallbackToast,
       prefillComposer: (text: string) => live()?.prefillComposer(text),
       appendSystemEntry: (message: string) => live()?.appendSystemEntry(message),
       startNewChat: async (project?: { projectRoot?: string; projectName?: string }) => {

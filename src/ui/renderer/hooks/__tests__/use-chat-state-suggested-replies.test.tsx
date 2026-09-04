@@ -26,7 +26,7 @@ import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 function setup() {
   const { api } = makeMockLvisApi();
-  const chat = renderHook(() => useChatState(api as unknown as LvisApi));
+  const chat = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
   const replies = renderHook(() => useSuggestedReplies());
   act(() => {
     pushSuggestedReply("다음 작업 진행");

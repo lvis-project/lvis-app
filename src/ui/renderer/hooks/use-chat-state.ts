@@ -21,7 +21,6 @@ import { detectFromStream } from "../../../lib/stream-markers.js";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import { isMissingStagedEnvelopeErrorMessage } from "../../../shared/staged-origins.js";
 import type { LvisApi } from "../types.js";
-import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { resetSuggestedReplies } from "./use-suggested-replies.js";
 import { errorMessage } from "../../../shared/error-message.js";
 
@@ -63,7 +62,16 @@ function restoreStagedEnvelopeFailureEntries(previous: ChatEntry[], current: Cha
  * applyLoadedSession / truncateToEntry) instead of raw `setEntries` so that
  * App-level orchestration cannot mutate entry shape directly.
  */
-export function useChatState(api: LvisApi) {
+export function useChatState(
+  api: LvisApi,
+  /**
+   * Where a provider swap mid-turn is announced. The frame is THIS
+   * conversation's — preload labels it with the chat group and filters it per
+   * tile — so the notice goes to the tile's own queue. A window banner would
+   * name the focused tile's swap whichever tile actually swapped.
+   */
+  onProviderFallback: (message: string) => void,
+) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [streaming, setStreaming] = useState(false);
   /** True while a pre-turn auto-compact is running. */
@@ -537,21 +545,11 @@ export function useChatState(api: LvisApi) {
     [],
   );
 
-  // Fallback toast — shown briefly when the LLM provider auto-switches.
-  const [fallbackToast, setFallbackToast] = useState<string | null>(null);
-  const fallbackToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const unsub = api.onChatFallback(({ from, to }) => {
-      if (!aliveRef.current) return;
-      if (fallbackToastTimerRef.current) clearTimeout(fallbackToastTimerRef.current);
-      setFallbackToast(t("useChatState.fallbackToast", { from, to }));
-      fallbackToastTimerRef.current = setTimeout(() => setFallbackToast(null), DEFAULT_TOAST_TTL_MS);
-    });
-    return () => {
-      unsub();
-      if (fallbackToastTimerRef.current) clearTimeout(fallbackToastTimerRef.current);
-    };
-  }, [api]);
+  // Provider fallback — announced when the LLM provider auto-switches.
+  useEffect(() => api.onChatFallback(({ from, to }) => {
+    if (!aliveRef.current) return;
+    onProviderFallback(t("useChatState.fallbackToast", { from, to }));
+  }), [api, onProviderFallback]);
 
   const beginStreamingRequest = useCallback(() => {
     const requestId = ++streamingRequestRef.current;
@@ -851,7 +849,6 @@ export function useChatState(api: LvisApi) {
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,
-    fallbackToast,
     handleEditSave,
     handleRetryEffort,
     handleContinueFromLastUser,
