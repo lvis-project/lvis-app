@@ -209,6 +209,7 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
           baseUrl: config.baseUrl,
           providerMetadata: config.providerMetadata,
           llmFetch: deps.llmFetch,
+          networkFetch: deps.networkFetch,
         });
         return createProvider({
           ...config,

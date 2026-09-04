@@ -99,6 +99,13 @@ function genericUpgradeRequiredMessage(): string {
 
 export interface CloudMarketplaceConfig {
   baseUrl: string;
+  /**
+   * The transport every request this fetcher makes runs on — Chromium's stack,
+   * which follows the machine's proxy configuration and reads its trust store.
+   * Part of the config rather than an import because this module is loaded by
+   * tests, and `electron` is not available to them.
+   */
+  networkFetch: typeof fetch;
   apiKey?: string;
   /**
    * Running LVIS app version. When present, catalog reads ask the marketplace
@@ -505,6 +512,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     try {
       const privateNetworkScope = this.privateNetworkScopeFor(base);
       const res = await fetchPublicHttpResponse(url, {
+        fetchImpl: this.config.networkFetch,
         method,
         headers,
         timeoutMs,

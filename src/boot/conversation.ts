@@ -246,6 +246,8 @@ export interface ConversationDeps {
   rewireReviewerAgent?: () => void;
   /** Main-process fetch implementation for SDK-backed LLM calls. */
   llmFetch?: typeof fetch;
+  /** The host's outbound transport for guard-routed provider calls. */
+  networkFetch: typeof fetch;
   /** Main-owned factory for a subscription-authenticated LLM provider. */
   subscriptionProviderFactory?: (
     selection: SubscriptionChatRuntimeSelection,
@@ -284,6 +286,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "pluginOperationGrants"
   | "pluginOperationIdentityProvider"
   | "llmFetch"
+  | "networkFetch"
   | "auditLogger"
   | "isDefaultProjectRoot"
   | "getDefaultProject"
@@ -356,6 +359,7 @@ export function createRoutineConversationLoop(
     pluginOperationIdentityProvider: deps.pluginOperationIdentityProvider,
     auditLogger: deps.auditLogger,
     llmFetch: deps.llmFetch,
+    networkFetch: deps.networkFetch,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
     authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
@@ -410,6 +414,7 @@ export type SideChatConversationLoopDeps = Pick<
   | "pluginOperationGrants"
   | "pluginOperationIdentityProvider"
   | "llmFetch"
+  | "networkFetch"
   | "rationaleCoordinatorFactory"
   | "closeRationaleSession"
   | "auditLogger"
@@ -474,6 +479,7 @@ export function createSideChatConversationLoop(
       ? { closeRationaleSession: deps.closeRationaleSession }
       : {}),
     llmFetch: deps.llmFetch,
+    networkFetch: deps.networkFetch,
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
@@ -529,6 +535,7 @@ export function createConversationLoop(deps: ConversationDeps,
     auditLogger: deps.auditLogger,
     rewireReviewerAgent: deps.rewireReviewerAgent,
     llmFetch: deps.llmFetch,
+    networkFetch: deps.networkFetch,
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
     sessionHeldElsewhere: deps.sessionHeldElsewhere,
   });

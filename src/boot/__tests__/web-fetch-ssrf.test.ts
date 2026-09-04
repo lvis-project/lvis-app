@@ -3,6 +3,7 @@ import { registerBuiltinTools } from "../tools.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { registerStandardCategories } from "../../permissions/category-registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 /**
  * web_fetch must route through NetworkGuard.fetchPublicHttpResponse so
@@ -12,7 +13,11 @@ import { PermissionManager } from "../../permissions/permission-manager.js";
  * reserved ranges — no live network required.
  */
 describe("web_fetch SSRF guard", () => {
-  function makeWebFetchTool(workflowDeps?: Parameters<typeof registerBuiltinTools>[2]) {
+  function makeWebFetchTool(
+    workflowDeps: Parameters<typeof registerBuiltinTools>[2] = {
+      networkFetch: unusedNetworkFetch,
+    },
+  ) {
     const registry = new ToolRegistry();
     const settingsStub = {
       get: () => ({ provider: "duckduckgo" }),

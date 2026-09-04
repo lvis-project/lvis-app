@@ -41,6 +41,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     permissionManager,
     settingsService,
     llmFetch,
+    singleHopNetworkFetch,
     getMainWindow,
     bootAuditLogger,
     subscriptionProviderFactory,
@@ -111,6 +112,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
       baseUrl: effectiveBaseUrl,
       providerMetadata: marketplaceProviderPreset,
       llmFetch,
+      networkFetch: singleHopNetworkFetch,
     });
     return createProvider({
       vendor: llmVendor,

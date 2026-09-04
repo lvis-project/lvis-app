@@ -328,15 +328,29 @@ describe("ensurePublicHttpUrl — syntactic rejects", () => {
   });
 });
 
+/**
+ * The ambient `fetch`, as these tests require it to be: unreachable.
+ *
+ * The guard takes its transport as a required argument and must never touch
+ * the global. Stubbing the global with the SAME mock the test injects would
+ * hide a regression back to the ambient stack — the call counts would match
+ * either way. A throwing stub makes that regression fail instead of pass.
+ */
+const ambientFetchIsOffLimits = (() => {
+  throw new Error("network-guard reached the ambient fetch; it must use fetchImpl");
+}) as unknown as typeof fetch;
+
 describe("fetchPublicHttpResponse (mocked fetch)", () => {
   it("returns a successful response after validating the host", async () => {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const fetchMock = vi.fn(async () =>
       new Response("ok", { status: 200 }),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", ambientFetchIsOffLimits);
 
-    const resp = await fetchPublicHttpResponse("https://example.com/");
+    const resp = await fetchPublicHttpResponse("https://example.com/", {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
     expect(resp.status).toBe(200);
     expect(await resp.text()).toBe("ok");
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -368,9 +382,11 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
         }),
       )
       .mockResolvedValueOnce(new Response("final", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", ambientFetchIsOffLimits);
 
-    const resp = await fetchPublicHttpResponse("https://start.example.com/");
+    const resp = await fetchPublicHttpResponse("https://start.example.com/", {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
     expect(resp.status).toBe(200);
     expect(await resp.text()).toBe("final");
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -452,10 +468,12 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
         headers: { location: "http://10.0.0.1/internal" },
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", ambientFetchIsOffLimits);
 
     await expect(
-      fetchPublicHttpResponse("https://start.example.com/"),
+      fetchPublicHttpResponse("https://start.example.com/", {
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      }),
     ).rejects.toThrowError(/non-public/);
     // fetch ran exactly once (the first hop); the second hop was blocked
     // by ensurePublicHttpUrl before any network call.
@@ -473,9 +491,10 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
         }),
       )
       .mockResolvedValueOnce(new Response("private", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", ambientFetchIsOffLimits);
 
     const resp = await fetchPublicHttpResponse("https://start.example.com/", {
+      fetchImpl: fetchMock as unknown as typeof fetch,
       allowPrivateNetworks: true,
     });
     expect(resp.status).toBe(200);
@@ -491,10 +510,11 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
         headers: { location: "http://10.0.0.1/internal" },
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", ambientFetchIsOffLimits);
 
     await expect(
       fetchPublicHttpResponse("https://start.example.com/", {
+        fetchImpl: fetchMock as unknown as typeof fetch,
         allowPrivateNetworks: (url) => url.hostname === "start.example.com",
       }),
     ).rejects.toThrowError(/non-public/);
@@ -509,10 +529,11 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
         headers: { location: "http://127.0.0.1/internal" },
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", ambientFetchIsOffLimits);
 
     await expect(
       fetchPublicHttpResponse("https://start.example.com/", {
+        fetchImpl: fetchMock as unknown as typeof fetch,
         allowLoopback: (url) => url.hostname === "start.example.com",
       }),
     ).rejects.toThrowError(/non-public/);
@@ -527,10 +548,11 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
         headers: { location: new URL("/next", url).toString() },
       });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", ambientFetchIsOffLimits);
 
     await expect(
       fetchPublicHttpResponse("https://loop.example.com/start", {
+        fetchImpl: fetchMock as unknown as typeof fetch,
         maxRedirects: 2,
       }),
     ).rejects.toThrowError(/too many redirects/);

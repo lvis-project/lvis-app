@@ -7,6 +7,7 @@ import {
 } from "../model-list.js";
 import { NetworkGuardError } from "../../../core/network-guard.js";
 import { marketplaceProviderPresetSecretKey } from "../../../shared/marketplace-package-assets.js";
+import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 
 function makeSettingsService(overrides: {
   provider?: string;
@@ -747,6 +748,7 @@ describe("LLM model list sync", () => {
       settingsService as never,
       { vendor: "openai-compatible", credentialScope: "local-router" },
       {
+        fetchImpl: unusedNetworkFetch,
         ensurePublicUrl: ensurePublicUrl as never,
         fetchPublicHttpResponseImpl,
       },

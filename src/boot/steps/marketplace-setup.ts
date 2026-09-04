@@ -44,6 +44,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   if (marketplaceSettings.cloudBaseUrl) {
     marketplaceFetcher = new CloudMarketplaceFetcher({
       baseUrl: marketplaceSettings.cloudBaseUrl,
+      networkFetch: ctx.singleHopNetworkFetch,
       appVersion: getLvisAppVersion(),
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
       allowPrivateNetwork: marketplaceSettings.cloudAllowPrivateNetwork,

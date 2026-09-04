@@ -4,6 +4,7 @@ import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 import { ToolRegistry } from "../../tools/registry.js";
 
 describe("ConversationLoop LLM fetch wiring", () => {
@@ -355,6 +356,9 @@ async function collectStream(iterable: AsyncIterable<unknown>,
       routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      // The guarded provider fetch runs on the transport the host wires; the
+      // assertions below are about WHAT the guard is handed, so it must be here.
+      networkFetch: unusedNetworkFetch,
     } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     const providerConfig = createProvider.mock.calls[0]?.[0];

@@ -413,7 +413,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           }
         } else {
           const { fetchPublicHttpResponse } = await import("../../core/network-guard.js");
-          res = await fetchPublicHttpResponse(url, { timeoutMs: MARKETPLACE_PING_TIMEOUT_MS });
+          res = await fetchPublicHttpResponse(url, {
+            timeoutMs: MARKETPLACE_PING_TIMEOUT_MS,
+            fetchImpl: deps.singleHopNetworkFetch,
+          });
         }
         const result = { configured: true, online: res.ok } as const;
         marketplacePingCache = { key, result, timestampMs: Date.now() };

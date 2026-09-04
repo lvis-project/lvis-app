@@ -7,6 +7,7 @@ import {
   isGuardedInsecureCredentialedModelProviderFetch,
 } from "../marketplace-provider-fetch.js";
 import { TOOL_TIMEOUT_POLICY } from "../../../shared/tool-timeout-policy.js";
+import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 
 describe("guarded model-provider fetch", () => {
   it("rejects a public cross-origin request before it can forward credentials", async () => {
@@ -26,7 +27,7 @@ describe("guarded model-provider fetch", () => {
 
   it("permits credentialed HTTP only for the self-hosted guarded fetch", () => {
     const baseUrl = "http://10.0.0.8:30000/v1";
-    const selfHostedFetch = createGuardedModelProviderFetch(baseUrl);
+    const selfHostedFetch = createGuardedModelProviderFetch(baseUrl, unusedNetworkFetch);
     const marketplaceFetch = createGuardedMarketplaceProviderFetch(baseUrl, {
       providerId: "private-marketplace",
       label: "Private marketplace provider",
@@ -34,7 +35,7 @@ describe("guarded model-provider fetch", () => {
       defaultModel: "private/model",
       modelOptions: ["private/model"],
       requiresApiKey: true,
-    });
+    }, unusedNetworkFetch);
 
     expect(isGuardedInsecureCredentialedModelProviderFetch(baseUrl, selfHostedFetch)).toBe(true);
     expect(isGuardedInsecureCredentialedModelProviderFetch(baseUrl, marketplaceFetch)).toBe(false);

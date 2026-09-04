@@ -21,6 +21,7 @@ import {
 } from "../adapter.js";
 import { MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT } from "../../output-token-limit.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../../tools/registry.js";
+import { unusedNetworkFetch } from "../../../../__tests__/support/network-fetch-stubs.js";
 
 
 describe("VercelUnifiedProvider openai — reasoning_effort mapping", () => {
@@ -1124,6 +1125,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     const { createGuardedModelProviderFetch } = await import("../../marketplace-provider-fetch.js");
     const trustedFetch = createGuardedModelProviderFetch(
       "http://10.232.178.100:30000/v1",
+      unusedNetworkFetch,
     );
     const { VercelUnifiedProvider } = await import("../adapter.js");
     const provider = new VercelUnifiedProvider(

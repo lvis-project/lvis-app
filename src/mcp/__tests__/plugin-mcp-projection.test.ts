@@ -22,6 +22,7 @@ vi.mock("../mcp-client.js", () => ({
 import { McpManager } from "../mcp-manager.js";
 import { McpGovernance } from "../mcp-governance.js";
 import { PluginMcpTrustStore, preparePluginMcpGeneration } from "../plugin-mcp-projection.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 function generation(version = "1.0.0", generationId = "g1", fingerprint = "a".repeat(64)): ActivePluginGeneration {
   return {
@@ -93,6 +94,7 @@ function manager(): McpManager {
       applyToolNamespace: (_serverId: string, toolName: string) => toolName,
     } as never,
     new ToolRegistry(),
+    unusedNetworkFetch,
     configPath,
   );
 }

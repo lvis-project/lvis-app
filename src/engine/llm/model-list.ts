@@ -44,7 +44,13 @@ const GITHUB_MODELS_CATALOG_ENDPOINT = "https://models.github.ai/catalog/models"
 const GITHUB_MODELS_API_VERSION = "2026-03-10";
 
 export type LlmModelListFetchOptions = {
-  fetchImpl?: typeof fetch;
+  /**
+   * The transport the catalogue request runs on. REQUIRED: this module cannot
+   * import Electron (every test that loads the engine would break), so the
+   * caller that owns the main process owes it the stack that reads the
+   * machine's proxy configuration and trust store.
+   */
+  fetchImpl: typeof fetch;
   fetchPublicHttpResponseImpl?: typeof fetchPublicHttpResponse;
   timeoutMs?: number;
   maxResponseBytes?: number;
@@ -580,7 +586,7 @@ async function readResponseTextLimited(
 export async function listLlmModelsFromSettings(
   settingsService: SettingsService,
   request: LlmModelListRequest,
-  options: LlmModelListFetchOptions = {},
+  options: LlmModelListFetchOptions,
 ): Promise<LlmModelListResult> {
   if (!isLLMVendor(request.vendor)) {
     return {

@@ -45,6 +45,7 @@ vi.mock("../../tools/registry.js", () => ({
 
 import { McpManager } from "../mcp-manager.js";
 import type { McpServerConfig } from "../types.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 // Unique random temp dir (mkdtempSync) — not a predictable tmpdir()+pid path, so
 // no symlink/race on a shared temp dir (CodeQL js/insecure-temporary-file).
@@ -57,6 +58,7 @@ async function makeManager(onServerDisconnected: (id: string) => void) {
   return new McpManager(
     new (McpGovernance as new () => InstanceType<typeof McpGovernance>)(),
     new (ToolRegistry as new () => InstanceType<typeof ToolRegistry>)(),
+    unusedNetworkFetch,
     testConfigPath,
     undefined,
     { log: vi.fn() } as never,

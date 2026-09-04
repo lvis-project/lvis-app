@@ -99,7 +99,7 @@ function requestInitFromFetchInput(
 
 export function createGuardedModelProviderFetch(
   baseUrl: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch,
 ): typeof fetch {
   return createOriginLockedProviderFetch(
     baseUrl,
@@ -171,7 +171,7 @@ export function isGuardedInsecureCredentialedModelProviderFetch(
 export function createGuardedMarketplaceProviderFetch(
   baseUrl: string,
   preset: MarketplaceInstalledProviderPreset,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch,
 ): typeof fetch {
   return createOriginLockedProviderFetch(
     baseUrl,
@@ -207,15 +207,28 @@ export function selectProviderRuntimeFetch(args: {
   vendor: LLMVendor;
   baseUrl: string | undefined;
   providerMetadata: MarketplaceInstalledProviderPreset | undefined;
+  /**
+   * The Azure Foundry private-endpoint transport. Scoped: it REFUSES every
+   * host that is not Azure Foundry (`safe-llm-fetch.ts`), so it is the
+   * transport for that one vendor and cannot stand in for the others.
+   */
   llmFetch: typeof fetch | undefined;
+  /**
+   * The host's general outbound transport — Chromium's stack, which follows
+   * the machine's proxy configuration and reads its trust store. The guarded
+   * branches below run on it. Required: with an ambient default here, a
+   * self-hosted endpoint would silently go direct on a machine configured
+   * otherwise, which is the defect this whole seam exists to prevent.
+   */
+  networkFetch: typeof fetch;
 }): typeof fetch | undefined {
-  const { vendor, baseUrl, providerMetadata, llmFetch } = args;
+  const { vendor, baseUrl, providerMetadata, llmFetch, networkFetch } = args;
   const isSelfHostedDirect =
     isSelfHostedTrustedNetworkVendor(vendor) && !providerMetadata && Boolean(baseUrl?.trim());
   return providerMetadata && baseUrl
-    ? createGuardedMarketplaceProviderFetch(baseUrl, providerMetadata)
+    ? createGuardedMarketplaceProviderFetch(baseUrl, providerMetadata, networkFetch)
     : isSelfHostedDirect && baseUrl
-      ? createGuardedModelProviderFetch(baseUrl)
+      ? createGuardedModelProviderFetch(baseUrl, networkFetch)
       : vendor === "azure-foundry"
         ? llmFetch
         : undefined;

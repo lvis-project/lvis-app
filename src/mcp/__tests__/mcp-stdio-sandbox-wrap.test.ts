@@ -75,6 +75,7 @@ vi.mock("../../permissions/asrt-sandbox.js", async () => {
 
 // Module imports must come AFTER the mocks above.
 import { McpClient } from "../mcp-client.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 // Resolves to the mock export above (which delegates to the REAL impl via
 // vi.importActual), so the assertion checks the genuine deny-list.
 import {
@@ -171,7 +172,7 @@ describe("StdioTransport ASRT wrap — gate OFF (default)", () => {
       // Host would set this at connect time, but the gate is OFF so it is ignored.
       sandboxRoot: join(lvisHome(), "mcp", "fs", "sandbox"),
     };
-    const client = new McpClient(config, gov, new ToolRegistry());
+    const client = new McpClient(config, gov, new ToolRegistry(), unusedNetworkFetch);
 
     await client.connect();
 
@@ -216,7 +217,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       args: ["--root", "/tmp"],
       sandboxRoot,
     };
-    const client = new McpClient(config, gov, new ToolRegistry());
+    const client = new McpClient(config, gov, new ToolRegistry(), unusedNetworkFetch);
 
     await client.connect();
 
@@ -292,7 +293,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       transport: "stdio",
       command: "lvis-mcp-nojail",
     };
-    const client = new McpClient(config, gov, new ToolRegistry());
+    const client = new McpClient(config, gov, new ToolRegistry(), unusedNetworkFetch);
 
     await client.connect();
 
@@ -344,7 +345,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       apiKeyEnv: "MCP_API_KEY",
       sandboxRoot,
     };
-    const client = new McpClient(config, gov, new ToolRegistry());
+    const client = new McpClient(config, gov, new ToolRegistry(), unusedNetworkFetch);
 
     await client.connect();
 
@@ -386,7 +387,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       command: "lvis-mcp-crash",
       sandboxRoot,
     };
-    const client = new McpClient(config, gov, new ToolRegistry());
+    const client = new McpClient(config, gov, new ToolRegistry(), unusedNetworkFetch);
     await client.connect();
 
     // Server is wrapped while running.
@@ -445,6 +446,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
         stdioApproval("stubborn-cleanup", "lvis-mcp-stubborn"),
       ])),
       new ToolRegistry(),
+      unusedNetworkFetch,
     );
     await client.connect();
 
@@ -477,6 +479,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       },
       governanceWithPolicy(buildPolicy([stdioApproval("live-error", "lvis-mcp-live-error")])),
       new ToolRegistry(),
+      unusedNetworkFetch,
     );
     await client.connect();
 
@@ -514,12 +517,12 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       sandboxRoot: join(lvisHome(), "mcp", "overlap", "sandbox"),
     };
     const governance = governanceWithPolicy(buildPolicy([stdioApproval("overlap", "lvis-mcp-overlap")]));
-    const oldClient = new McpClient(config, governance, new ToolRegistry());
+    const oldClient = new McpClient(config, governance, new ToolRegistry(), unusedNetworkFetch);
     await oldClient.connect();
     await oldClient.disconnect();
     expect(isMcpServerWrapped("overlap")).toBe(true);
 
-    const replacement = new McpClient(config, governance, new ToolRegistry());
+    const replacement = new McpClient(config, governance, new ToolRegistry(), unusedNetworkFetch);
     await replacement.connect();
     oldChild.exitCode = 0;
     oldChild.emit("exit", 0, "SIGKILL");
@@ -548,6 +551,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       },
       gov,
       new ToolRegistry(),
+      unusedNetworkFetch,
     );
 
     await expect(client.connect()).rejects.toThrow(/allowRead\/allowWrite grants per exec/i);
@@ -585,6 +589,7 @@ describe("resolveReviewerSandboxCapability — wrapped MCP worker (no-leak)", ()
       { id: "fs", transport: "stdio", command: "lvis-mcp-fs", sandboxRoot },
       gov,
       new ToolRegistry(),
+      unusedNetworkFetch,
     );
     await client.connect();
 

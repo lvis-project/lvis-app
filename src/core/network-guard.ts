@@ -64,7 +64,19 @@ export interface NetworkGuardOptions {
 }
 
 type NetworkGuardFetchInit = RequestInit & NetworkGuardOptions & {
-  fetchImpl?: typeof fetch;
+  /**
+   * The transport this request runs on. REQUIRED, and deliberately without a
+   * default.
+   *
+   * It used to default to the ambient `fetch`, which is Node's — a stack that
+   * reads neither the machine's proxy configuration nor its trust store. A
+   * caller that passed the guard but forgot the transport therefore went out
+   * direct, on a path the user never chose, and said nothing about it. The
+   * guard is the one place every caller here already passes through, so the
+   * requirement lives here: forgetting the transport is now a compile error
+   * rather than a silent route change.
+   */
+  fetchImpl: typeof fetch;
   maxRedirects?: number;
   timeoutMs?: number;
 };
@@ -232,13 +244,13 @@ export async function resolvesToPrivateNetworkOnly(host: string): Promise<boolea
  */
 export async function fetchPublicHttpResponse(
   rawUrl: string,
-  init: NetworkGuardFetchInit = {},
+  init: NetworkGuardFetchInit,
 ): Promise<Response> {
   const {
     allowPrivateNetworks = false,
     allowLoopback = false,
     allowCarrierGradeNat = false,
-    fetchImpl = fetch,
+    fetchImpl,
     maxRedirects = 5,
     timeoutMs = TOOL_TIMEOUT_POLICY.networkFetchDefaultMs,
     signal: externalSignal,
