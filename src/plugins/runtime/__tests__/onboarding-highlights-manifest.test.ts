@@ -112,6 +112,11 @@ describe("manifest onboarding.highlights cross-field checks", () => {
     ["a section nothing anchors", "permissions/turn-it-on"],
     ["a third path segment", "permissions/permissions-os-sandbox/on"],
     ["a trailing separator", "permissions/"],
+    // The real schema shapes these out first; the registry check is what
+    // still refuses them when a permissive envelope lets the string through,
+    // which is the case a plugin shipped against a stale SDK schema is in.
+    ["a tab segment opening with a digit", "2fa"],
+    ["a section segment opening with a digit", "llm/2fa"],
   ])("rejects a settings action naming %s", async (_case, path) => {
     // Rejected at LOAD, not at accept: a card whose destination does not exist
     // would still render, still be answered "yes", and then do nothing.

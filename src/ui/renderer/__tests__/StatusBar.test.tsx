@@ -93,6 +93,25 @@ describe("StatusBar", () => {
     expect(screen.getByText("+2")).toBeInTheDocument();
   });
 
+  it("draws the pending count as the shared badge, keeping its own size and tone", () => {
+    // The chip is the shared `Badge`, so the pill shape and border come from
+    // one place; what the status bar overrides is the type scale and the muted
+    // tone this row reads in. Merging failures here are silent — the badge's
+    // own `text-xs` / `font-semibold` / `text-foreground` surviving the merge
+    // is a heavier, brighter chip that still passes every other assertion.
+    render(<StatusBar persistent={[]} visibleToast={toast()} pendingCount={2} />);
+    const badge = screen.getByText("+2");
+    expect(badge.className).toContain("rounded-full");
+    expect(badge.className).toContain("text-[11px]");
+    expect(badge.className).toContain("text-muted-foreground");
+    expect(badge.className).toContain("font-normal");
+    expect(badge.className).toContain("tabular-nums");
+    expect(badge.className).not.toContain("text-xs");
+    expect(badge.className).not.toContain("font-semibold");
+    expect(badge.className).not.toContain("text-foreground");
+    expect(badge.className).not.toContain("px-2.5");
+  });
+
   it("invokes onToastClick when a notification toast is clicked (#260 M2)", () => {
     const onToastClick = vi.fn();
     const notif: ToastItem = toast({

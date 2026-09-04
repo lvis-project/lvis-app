@@ -16,6 +16,7 @@ import {
 let frames: FrameRequestCallback[] = [];
 let scrolled: ScrollIntoViewOptions[] = [];
 let reducedMotion = false;
+let motionListeners: (() => void)[] = [];
 
 function anchor(section: string): HTMLElement {
   const node = document.createElement("div");
@@ -47,11 +48,22 @@ beforeEach(() => {
     return frames.length;
   });
   vi.stubGlobal("cancelAnimationFrame", () => undefined);
+  motionListeners = [];
+  // The hook reads the preference through `usePrefersReducedMotion`, which
+  // subscribes, so this stub has to be a working `EventTarget` and not just a
+  // `matches` snapshot — and the listeners are kept so a test can flip the OS
+  // setting the way the OS does.
   window.matchMedia = ((query: string) => ({
-    matches: query.includes("prefers-reduced-motion") && reducedMotion,
+    get matches() {
+      return query.includes("prefers-reduced-motion") && reducedMotion;
+    },
     media: query,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
+    addEventListener: (_type: string, listener: () => void) => {
+      motionListeners.push(listener);
+    },
+    removeEventListener: (_type: string, listener: () => void) => {
+      motionListeners = motionListeners.filter((entry) => entry !== listener);
+    },
   })) as unknown as typeof window.matchMedia;
 });
 
@@ -106,6 +118,27 @@ describe("useSettingsSectionArrival", () => {
     // The stylesheet turns the transition off for this class; the hook's own
     // share is the scroll, which must not animate either.
     expect(scrolled).toEqual([{ block: "start", behavior: "auto" }]);
+  });
+
+  it("does not arrive a second time when the OS motion setting flips", () => {
+    // The preference is subscribed, so it can change while the panel is open.
+    // Arrival is an event, not a state: re-running it would scroll and re-ring
+    // a section the reader had already moved past.
+    anchor("permissions-os-sandbox");
+    const onApplied = vi.fn();
+    renderHook(() => useSettingsSectionArrival("permissions-os-sandbox", onApplied));
+
+    flushFrame();
+    expect(scrolled).toEqual([{ block: "start", behavior: "smooth" }]);
+
+    reducedMotion = true;
+    act(() => {
+      for (const listener of motionListeners) listener();
+    });
+    flushFrame();
+
+    expect(scrolled).toHaveLength(1);
+    expect(onApplied).toHaveBeenCalledTimes(1);
   });
 
   it("consumes the target even when the tab anchors nothing by that name", () => {

@@ -131,6 +131,24 @@ export interface SettingsPath {
 }
 
 /**
+ * The shape a settings path may take, anchored: `"<tab>"` or
+ * `"<tab>/<section>"`, each segment lowercase kebab and opening with a letter.
+ *
+ * A string rather than a `RegExp`, because the other half of this rule is a
+ * JSON `pattern` in `schemas/plugin-manifest.schema.json` and a JSON file
+ * cannot import a value. That schema is the shape check a manifest meets
+ * before `parseSettingsPath` ever sees the string; this module is the registry
+ * the parse then resolves against. Two readings of one grammar, and the copy
+ * that drifts is the one nobody runs: an id the schema would reject is an id
+ * no manifest can name, so the destination becomes unreachable rather than
+ * wrong, which is invisible until a plugin author hits it.
+ *
+ * `settings-tabs.test.ts` pins the schema's pattern to this source and asserts
+ * every registered tab and section satisfies it, in that one place.
+ */
+export const SETTINGS_PATH_PATTERN = "^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)?$";
+
+/**
  * Parse `"<tab>"` or `"<tab>/<section>"` into a destination this build can
  * reach, or `null`.
  *
