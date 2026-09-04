@@ -64,7 +64,7 @@ function observerSnapshot() {
   };
 }
 
-function makeApi(options: { observer?: boolean } = {}) {
+function makeApi(options: { observerUnavailable?: boolean } = {}) {
   const snapshot = vi.fn(async () => ({ ok: true as const, snapshot: SAFE_SNAPSHOT }));
   const createInvitation = vi.fn(async () => ({
     ok: true as const,
@@ -76,25 +76,27 @@ function makeApi(options: { observer?: boolean } = {}) {
   }));
   const createCurrentConversationShare = vi.fn(async () => ({ ok: true as const }));
   const api = {
-    ...(options.observer === true
-      ? {
-          tailnetObserver: {
-            snapshot: vi.fn(async () => ({ ok: true as const, snapshot: observerSnapshot() })),
-            apply: vi.fn(async () => ({ ok: true as const })),
-            configureServe: vi.fn(async () => ({
-              ok: true as const,
-              url: "https://" + OBSERVER_DNS_NAME + "/",
-            })),
-            guidedSetup: vi.fn(async () => ({
-              ok: true as const,
-              snapshot: observerSnapshot(),
-              webOrigin: "https://" + OBSERVER_DNS_NAME,
-              port: 46_173,
-              serve: "configured" as const,
-            })),
-          },
-        }
-      : {}),
+    // The bridge is always there — the preload exposes it unconditionally. What
+    // varies is whether the host can answer, which is what the reader sees.
+    tailnetObserver: {
+      snapshot: vi.fn(async () =>
+        options.observerUnavailable === true
+          ? { ok: false as const, error: "tailnet-observer-unavailable" as const }
+          : { ok: true as const, snapshot: observerSnapshot() },
+      ),
+      apply: vi.fn(async () => ({ ok: true as const })),
+      configureServe: vi.fn(async () => ({
+        ok: true as const,
+        url: "https://" + OBSERVER_DNS_NAME + "/",
+      })),
+      guidedSetup: vi.fn(async () => ({
+        ok: true as const,
+        snapshot: observerSnapshot(),
+        webOrigin: "https://" + OBSERVER_DNS_NAME,
+        port: 46_173,
+        serve: "configured" as const,
+      })),
+    },
     tailnetSharing: {
       snapshot,
       createInvitation,
@@ -125,15 +127,15 @@ describe("TailnetAccessContent", () => {
   // reachable only through it, so a deep link to the section has to land on the
   // thing a reader can actually act on.
   it("puts the guided setup surface at the observer anchor", async () => {
-    const { api } = makeApi();
+    const { api } = makeApi({ observerUnavailable: true });
     const { container } = render(<TailnetAccessContent api={api} />);
 
     await screen.findByTestId("tailnet-access-create-invitation");
     const anchor = container.querySelector("[data-settings-section='remote-tailnet-observer']");
     expect(anchor).not.toBeNull();
-    // This fixture carries no observer bridge, which is exactly the older-preload
-    // case: the surface degrades to a sentence rather than taking the tab down.
-    expect(screen.getByTestId("tailnet-setup-error")).toBeInTheDocument();
+    // The host could not answer for the observer. The section says so in one
+    // sentence at the anchor rather than taking the tab down with it.
+    expect(await screen.findByTestId("tailnet-setup-error")).toBeInTheDocument();
     expect(container.querySelectorAll("[data-settings-section='remote-tailnet-observer']"))
       .toHaveLength(1);
   });
@@ -142,7 +144,7 @@ describe("TailnetAccessContent", () => {
   // that does it already has a home below. Focus moves there rather than a
   // second minting control appearing inside the flow.
   it("moves the reader to the invitation control when setup asks for a code", async () => {
-    const { api } = makeApi({ observer: true });
+    const { api } = makeApi();
     render(<TailnetAccessContent api={api} />);
 
     const create = await screen.findByTestId("tailnet-access-create-invitation");

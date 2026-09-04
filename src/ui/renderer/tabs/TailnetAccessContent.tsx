@@ -17,7 +17,7 @@ import {
   type TailnetSharingSnapshot,
 } from "../../../shared/tailnet-sharing.js";
 import { SettingsSection, type SettingsSectionFeedback } from "../components/PageShell.js";
-import { TailnetSetupWizard } from "./TailnetSetupWizard.js";
+import { TailnetSetupCard } from "./TailnetSetupCard.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
 import type { LvisApi } from "../types.js";
 import { useCopyFlash } from "../hooks/use-copy-flash.js";
@@ -224,7 +224,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
       {/* Outside the loading and disabled gates below on purpose: this is the
           control that makes sharing available, so hiding it whenever sharing
           is unavailable is exactly the dead end it exists to remove. */}
-      <TailnetSetupWizard api={api} onCreateInvitation={focusInvitationControl} />
+      <TailnetSetupCard api={api} onCreateInvitation={focusInvitationControl} />
 
       {feedback ? (
         <p

@@ -30,7 +30,7 @@ import {
 } from "./TailnetObserverSection.js";
 import type { LvisApi } from "../types.js";
 
-export interface TailnetSetupWizardProps {
+export interface TailnetSetupCardProps {
   api: Pick<LvisApi, "tailnetObserver">;
   /**
    * Move the reader to the invitation control in the surrounding tab.
@@ -81,7 +81,7 @@ function isConfigured(snapshot: TailnetObserverSnapshot | null): boolean {
   return snapshot !== null && snapshot.effective.enabled && snapshot.listeningPort !== null;
 }
 
-export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWizardProps) {
+export function TailnetSetupCard({ api, onCreateInvitation }: TailnetSetupCardProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TailnetObserverSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,16 +104,7 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
   const settledRef = useRef(false);
 
   const readSnapshot = useCallback(async (): Promise<TailnetObserverSnapshot | null> => {
-    // An older preload beside a newer renderer degrades to "unavailable" rather
-    // than throwing: this is the only place the observer can be turned on, so a
-    // throw here would take down the surface it exists to provide.
-    const bridge = api.tailnetObserver as typeof api.tailnetObserver | undefined;
-    if (bridge === undefined) {
-      setUnavailable(true);
-      setLoading(false);
-      return null;
-    }
-    const result = await bridge.snapshot();
+    const result = await api.tailnetObserver.snapshot();
     if (result.ok) {
       setSnapshot(result.snapshot);
       setUnavailable(false);
@@ -142,20 +133,19 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
   // "ready" read at mount the thing guided setup ran on; re-probing inside the
   // press is what removes both.
   const connect = useCallback(async () => {
-    const bridge = api.tailnetObserver as typeof api.tailnetObserver | undefined;
     if (busy) return;
     setBusy(true);
     setError(null);
     setErrorOutput(null);
     const probed = await readSnapshot();
-    if (bridge === undefined || probed === null || probed.environment.state !== "ready") {
+    if (probed === null || probed.environment.state !== "ready") {
       // The re-read already put the sentence that says why on screen, and it
       // says which way Tailscale is unusable — an error code on top of it would
       // only repeat that in worse words.
       setBusy(false);
       return;
     }
-    const result = await bridge.guidedSetup();
+    const result = await api.tailnetObserver.guidedSetup();
     if (result.ok) {
       setSnapshot(result.snapshot);
       setChosenPort(result.port);

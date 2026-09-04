@@ -163,18 +163,7 @@ export function TailnetObserverSection({ api, onHostStateChanged }: TailnetObser
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    // A host without this namespace — an older preload next to a newer renderer
-    // — degrades to "unavailable" rather than throwing: this section mounts in
-    // the tab that is the only place the observer can be turned on, so a throw
-    // here would take down the surface it exists to provide.
-    const bridge = api.tailnetObserver as typeof api.tailnetObserver | undefined;
-    if (bridge === undefined) {
-      setSnapshot(null);
-      setFeedback({ tone: "error", text: t("tailnetObserver.errorUnavailable") });
-      setLoading(false);
-      return;
-    }
-    const result = await bridge.snapshot();
+    const result = await api.tailnetObserver.snapshot();
     if (result.ok) {
       setSnapshot(result.snapshot);
       setDraft(result.snapshot.saved);
@@ -193,10 +182,9 @@ export function TailnetObserverSection({ api, onHostStateChanged }: TailnetObser
   }, [refresh]);
 
   const save = useCallback(async (config: TailnetObserverConfigView) => {
-    const bridge = api.tailnetObserver as typeof api.tailnetObserver | undefined;
-    if (busy || bridge === undefined) return;
+    if (busy) return;
     setBusy(true);
-    const result = await bridge.apply(config);
+    const result = await api.tailnetObserver.apply(config);
     if (result.ok) {
       // After the refresh, not before: a successful snapshot clears feedback,
       // so setting it first left a save that applied with nothing said about it.
@@ -210,12 +198,11 @@ export function TailnetObserverSection({ api, onHostStateChanged }: TailnetObser
   }, [api, busy, onHostStateChanged, refresh, t]);
 
   const configureServe = useCallback(async () => {
-    const bridge = api.tailnetObserver as typeof api.tailnetObserver | undefined;
-    if (busy || bridge === undefined) return;
+    if (busy) return;
     setBusy(true);
     setServeUrl(null);
     setServeOutput(null);
-    const result = await bridge.configureServe();
+    const result = await api.tailnetObserver.configureServe();
     if (result.ok) {
       setServeUrl(result.url);
       await refresh();

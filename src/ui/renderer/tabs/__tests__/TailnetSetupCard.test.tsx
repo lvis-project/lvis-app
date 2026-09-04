@@ -9,7 +9,7 @@ import type {
   TailscaleEnvironmentView,
 } from "../../../../shared/tailnet-observer-config.js";
 import type { LvisApi } from "../../types.js";
-import { TailnetSetupWizard } from "../TailnetSetupWizard.js";
+import { TailnetSetupCard } from "../TailnetSetupCard.js";
 
 const DNS_NAME = "desk.example-tailnet.ts.net";
 const WEB_ORIGIN = "https://" + DNS_NAME;
@@ -119,14 +119,14 @@ afterEach(() => {
   setLocale(localeBeforeTest);
 });
 
-describe("TailnetSetupWizard", () => {
+describe("TailnetSetupCard", () => {
   describe("when Tailscale is ready and nothing is set up yet", () => {
     // Every value guided setup writes is one the host decides for itself, so
     // there is nothing to ask: the section reads as a provider row does — a
     // state, the probe's facts, one button.
     it("collapses to a card that states the connection is ready", async () => {
       const { api } = makeApi();
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       const card = await screen.findByTestId("tailnet-setup-ready");
       expect(screen.getByTestId("tailnet-setup-ready-state")).toHaveTextContent("Ready to connect");
@@ -139,7 +139,7 @@ describe("TailnetSetupWizard", () => {
 
     it("offers no step counter, because there are no steps left to count", async () => {
       const { api } = makeApi();
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       await screen.findByTestId("tailnet-setup-ready");
       expect(screen.queryByTestId("tailnet-setup-step-indicator")).toBeNull();
@@ -149,7 +149,7 @@ describe("TailnetSetupWizard", () => {
 
     it("runs the whole setup from the connect press and ends on the address", async () => {
       const { api, guidedSetup } = makeApi();
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -176,7 +176,7 @@ describe("TailnetSetupWizard", () => {
           serve: "configured" as const,
         };
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -191,7 +191,7 @@ describe("TailnetSetupWizard", () => {
     // must not be what guided setup runs on.
     it("re-reads the environment before it runs anything", async () => {
       const { api, snapshot, guidedSetup } = makeApi();
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -202,7 +202,7 @@ describe("TailnetSetupWizard", () => {
     it("hands the invitation code back to the control that already mints one", async () => {
       const onCreateInvitation = vi.fn();
       const { api } = makeApi();
-      render(<TailnetSetupWizard api={api} onCreateInvitation={onCreateInvitation} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={onCreateInvitation} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
       fireEvent.click(await screen.findByTestId("tailnet-setup-create-invitation"));
@@ -212,7 +212,7 @@ describe("TailnetSetupWizard", () => {
 
     it("returns to the status card once the finished panel is closed", async () => {
       const { api } = makeApi({ snapshots: [snapshotOf(), configuredSnapshot()] });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
       fireEvent.click(await screen.findByTestId("tailnet-setup-close"));
@@ -227,7 +227,7 @@ describe("TailnetSetupWizard", () => {
         snapshots: [snapshotOf(), snapshotOf({ environment: { ...READY_ENVIRONMENT, state: "stopped" } })],
         guidedSetup: { ok: false, error: "tailnet-guided-setup-not-ready", output: null },
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -240,7 +240,7 @@ describe("TailnetSetupWizard", () => {
       const { api } = makeApi({
         guidedSetup: { ok: false, error: "tailnet-guided-setup-port-unavailable", output: null },
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -262,7 +262,7 @@ describe("TailnetSetupWizard", () => {
           output: "HTTPS is not enabled on this tailnet",
         },
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -278,7 +278,7 @@ describe("TailnetSetupWizard", () => {
       const { api } = makeApi({
         guidedSetup: { ok: false, error: "tailnet-web-origin-underivable", output: null },
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -298,7 +298,7 @@ describe("TailnetSetupWizard", () => {
       const { api } = makeApi({
         snapshot: snapshotOf({ environment: { ...READY_ENVIRONMENT, state } }),
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       expect(await screen.findByTestId("tailnet-setup-environment")).toHaveTextContent(sentence);
       expect(screen.queryByTestId("tailnet-setup-ready")).toBeNull();
@@ -311,7 +311,7 @@ describe("TailnetSetupWizard", () => {
           environment: { ...READY_ENVIRONMENT, state: "cli-failed", detail: "socket: permission denied" },
         }),
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       expect(await screen.findByTestId("tailnet-setup-environment-detail")).toHaveTextContent(
         "socket: permission denied",
@@ -322,7 +322,7 @@ describe("TailnetSetupWizard", () => {
       const { api, snapshot, guidedSetup } = makeApi({
         snapshot: snapshotOf({ environment: { ...READY_ENVIRONMENT, state: "stopped" } }),
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -339,7 +339,7 @@ describe("TailnetSetupWizard", () => {
           snapshotOf(),
         ],
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
@@ -353,7 +353,7 @@ describe("TailnetSetupWizard", () => {
   it("carries no re-check affordance anywhere in the section", async () => {
     const { api } = makeApi();
     const { container } = render(
-      <TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />,
+      <TailnetSetupCard api={api} onCreateInvitation={() => undefined} />,
     );
 
     await screen.findByTestId("tailnet-setup-ready");
@@ -364,7 +364,7 @@ describe("TailnetSetupWizard", () => {
   describe("the manual branch", () => {
     it("reveals the full listener form inline, without calling guided setup", async () => {
       const { api, guidedSetup } = makeApi();
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       const toggle = await screen.findByTestId("tailnet-setup-manual-toggle");
       expect(screen.queryByTestId("tailnet-setup-manual-form")).toBeNull();
@@ -379,7 +379,7 @@ describe("TailnetSetupWizard", () => {
 
     it("collapses to the status card once the listener the form asked for is up", async () => {
       const { api } = makeApi({ snapshots: [snapshotOf(), configuredSnapshot()] });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-manual-toggle"));
       fireEvent.click(await screen.findByTestId("tailnet-observer-apply"));
@@ -391,7 +391,7 @@ describe("TailnetSetupWizard", () => {
   describe("once setup is finished", () => {
     it("shows the facts as a status card instead of the setup card", async () => {
       const { api } = makeApi({ snapshot: configuredSnapshot() });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       const status = await screen.findByTestId("tailnet-setup-status");
       expect(status).toHaveTextContent("Tailscale is running as owner@example.com");
@@ -405,7 +405,7 @@ describe("TailnetSetupWizard", () => {
 
     it("says a port nobody named was chosen for them", async () => {
       const { api } = makeApi({ snapshot: configuredSnapshot() });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       expect(await screen.findByTestId("tailnet-setup-status-port")).toHaveTextContent(
         "46173 (chosen automatically)",
@@ -419,7 +419,7 @@ describe("TailnetSetupWizard", () => {
           listeningPort: 46_500,
         }),
       });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       const port = await screen.findByTestId("tailnet-setup-status-port");
       expect(port).toHaveTextContent("46500");
@@ -428,7 +428,7 @@ describe("TailnetSetupWizard", () => {
 
     it("re-runs the same one-press setup from the status card", async () => {
       const { api, guidedSetup } = makeApi({ snapshot: configuredSnapshot() });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       fireEvent.click(await screen.findByTestId("tailnet-setup-reconfigure"));
 
@@ -438,7 +438,7 @@ describe("TailnetSetupWizard", () => {
 
     it("keeps the full form behind an explicit request for it", async () => {
       const { api } = makeApi({ snapshot: configuredSnapshot() });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
 
       const toggle = await screen.findByTestId("tailnet-setup-manual-toggle");
       expect(screen.queryByTestId("tailnet-observer-apply")).toBeNull();
@@ -457,7 +457,7 @@ describe("TailnetSetupWizard", () => {
   it("draws every state in the settings flow, never in an overlay", async () => {
     const { api } = makeApi();
     const { container } = render(
-      <TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />,
+      <TailnetSetupCard api={api} onCreateInvitation={() => undefined} />,
     );
 
     const ready = await screen.findByTestId("tailnet-setup-ready");
