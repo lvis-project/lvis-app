@@ -68,7 +68,7 @@ function dispatchEvent(streamHandler: { current: StreamHandler | null }, ev: Cha
 describe("useChatState — compact lifecycle scenarios", () => {
   it("S1: compact_started flips isCompacting on (StatusBar hint visible)", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     expect(result.current.isCompacting).toBe(false);
 
@@ -84,7 +84,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S2: compact_notice with estimatedAfter writes accurate post-compact context_usage", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     dispatchEvent(streamHandler, {
@@ -115,7 +115,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S3: compact_notice without estimatedAfter writes checkpoint only", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     // Seed a prior turn_summary; without estimatedAfter, compact_notice must
     // not synthesize a replacement usage estimate.
@@ -150,7 +150,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S4 (M2): compact_notice without estimatedAfter AND freed === 0 → checkpoint only, NO synthetic context_usage", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     act(() => {
       result.current.applyLoadedSession([
@@ -185,7 +185,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S5 (M4): applyLoadedSession during mid-compact clears stale isCompacting", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     expect(result.current.isCompacting).toBe(true);
@@ -203,7 +203,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     // a different streaming context — same stale-indicator race as
     // session switch.
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     act(() => {
       result.current.applyLoadedSession([
@@ -224,7 +224,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S6 (M4): clearForNewChat during mid-compact clears stale isCompacting", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     expect(result.current.isCompacting).toBe(true);
@@ -239,7 +239,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S7: done event clears isCompacting defensively", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     dispatchEvent(streamHandler, { type: "done" } as ChatStreamEvent);
@@ -249,7 +249,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S8: error event clears isCompacting defensively", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     dispatchEvent(streamHandler, { type: "error", error: "boom" } as ChatStreamEvent);
@@ -259,7 +259,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S9: error event propagates systemNotice for live/reload alert parity", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, {
       type: "error",
@@ -277,7 +277,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S9b: turn_summary requires the token fields and preserves cache breakdown", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, {
       type: "turn_summary",
@@ -318,7 +318,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S9c: turn_summary copies only validated subscription telemetry", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, {
       type: "turn_summary",
@@ -372,7 +372,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
       removedMessageCount: 0,
       summary: "LLM provider 미구성 — 압축 실행 불가.",
     }));
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, { type: "compact_started" } as ChatStreamEvent);
     await act(async () => {
@@ -389,7 +389,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S11: only the exact /compact command is intercepted", async () => {
     const { api } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     await act(async () => {
       const handled = await result.current.handleCompactCommand("/compactfoo");
@@ -403,7 +403,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S12 (#916): compact_started with triggerSource=force-recover exposes compactTriggerSource", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     expect(result.current.compactTriggerSource).toBeNull();
 
@@ -420,7 +420,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S12b: compact_started with triggerSource=rate-limit exposes compactTriggerSource", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, {
       type: "compact_started",
@@ -435,7 +435,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S13 (#916): compact_notice clears compactTriggerSource", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, {
       type: "compact_started",
@@ -458,7 +458,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S14 (#916): done event clears compactTriggerSource defensively", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, {
       type: "compact_started",
@@ -474,7 +474,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S14b: error event clears compactTriggerSource defensively", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, {
       type: "compact_started",
@@ -495,7 +495,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S15 (#917): recovery_exhausted event sets isRecoveryExhausted", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     expect(result.current.isRecoveryExhausted).toBe(false);
 
@@ -506,7 +506,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S16 (#917): clearForNewChat resets isRecoveryExhausted", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, { type: "recovery_exhausted" } as ChatStreamEvent);
     expect(result.current.isRecoveryExhausted).toBe(true);
@@ -520,7 +520,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
   it("S17 (#917): clearForNewChat also resets compactTriggerSource", () => {
     const { api, streamHandler } = makeCapturedApi();
-    const { result } = renderHook(() => useChatState(api));
+    const { result } = renderHook(() => useChatState(api, () => {}));
 
     dispatchEvent(streamHandler, {
       type: "compact_started",

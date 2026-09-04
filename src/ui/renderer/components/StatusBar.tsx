@@ -38,6 +38,13 @@ export interface StatusBarProps {
    */
   onToastClick?: (toast: ToastItem) => void;
   onToastDismiss?: (toast: ToastItem) => void;
+  /**
+   * True when a composer card sits over the toast's bottom edge — the tile's
+   * dock draws the toast tucked under the card, so it gets a tall bottom
+   * padding and square bottom corners. The window's notice strip has nothing
+   * below it and draws a plain band.
+   */
+  tucked?: boolean;
 }
 
 const SEVERITY_DOT: Record<StatusBarSeverity, string> = {
@@ -62,7 +69,7 @@ const TOAST_TONE: Record<StatusBarSeverity, string> = {
 };
 
 export function StatusBar(props: StatusBarProps) {
-  const { persistent, visibleToast, pendingCount = 0, onToastClick, onToastDismiss } = props;
+  const { persistent, visibleToast, pendingCount = 0, onToastClick, onToastDismiss, tucked = false } = props;
 
   // Render nothing when there is no persistent indicator and no toast, so the
   // composer dock does not reserve empty vertical space.
@@ -170,8 +177,9 @@ export function StatusBar(props: StatusBarProps) {
           const toast = visibleToast;
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
           const dismissible = typeof onToastDismiss === "function";
+          const shape = tucked ? "rounded-t-xl rounded-b-md pb-6 pt-2.5" : "rounded-md py-2";
           const baseClass =
-            `flex min-w-0 w-full items-start gap-2 overflow-hidden rounded-t-xl rounded-b-md border px-3 pb-6 pt-2.5 text-[13px] lvis-anim-slide-up ${TOAST_TONE[toast.severity]}`;
+            `flex min-w-0 w-full items-start gap-2 overflow-hidden border px-3 text-[13px] lvis-anim-slide-up ${shape} ${TOAST_TONE[toast.severity]}`;
           const dot = (
             <span
               className={`mt-1 h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}

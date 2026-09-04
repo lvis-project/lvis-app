@@ -1711,20 +1711,24 @@ export function PermissionsTab({
           data-settings-section="permissions-audit-log"
           title={t("permissionsTab.auditLogTitle")}
           description={t("permissionsTab.auditLogDescription")}
-          actions={
+          actions={auditOpen ? undefined : (
             <Button size="sm" variant="outline" className="h-8 px-3 text-[12px]" onClick={() => setAuditOpen(true)}>
               {t("permissionsTab.auditLogOpenButton")}
             </Button>
-          }
+          )}
         >
           <p className="text-[11px] text-muted-foreground">{t("permissionsTab.auditLogHelp")}</p>
+          {/* The log opens INSIDE this section, so it takes the pane's own
+              width and pushes the sections below it down. A panel fixed to the
+              window edge would cover the tiles beside this one and the title
+              bar, and its 480px would not fit a tile at the width floor. */}
+          <AuditPanel open={auditOpen} onClose={() => setAuditOpen(false)} />
         </SettingsSection>
 
           </>
         )}
 
       </div>
-      <AuditPanel open={auditOpen} onClose={() => setAuditOpen(false)} />
     </div>
   );
 }

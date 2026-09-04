@@ -406,7 +406,7 @@ export function ChatComposerDock({
               className="absolute inset-x-3 top-0 z-0 min-w-0"
               data-testid="composer-toast-dock"
             >
-              <StatusBar {...statusBar} />
+              <StatusBar {...statusBar} tucked />
             </div>
           ) : null}
           {/* Empty-state project selector — attached directly above the
@@ -600,10 +600,11 @@ export function ChatComposerDock({
 
 /**
  * The dock strip for a turn parked on an approval. It sits in the tile whose
- * conversation asked — the approval card itself is shown once for the window,
- * so without this a second tile shows a turn that has simply stopped moving,
- * and a queue that never drains. Same band grammar as the queue strip below it
- * (dashed = not committed yet), in the hue the approval chips already use.
+ * conversation asked, beside the queue it explains: the approval card is drawn
+ * in that tile's own overlay lane, away from the composer, so the dock alone
+ * would show a turn that has simply stopped moving and a queue that never
+ * drains. Same band grammar as the queue strip below it (dashed = not
+ * committed yet), in the hue the approval chips already use.
  */
 function ApprovalWaitingBand({ pendingApprovals }: { pendingApprovals: readonly ApprovalRequest[] }) {
   const { t } = useTranslation();

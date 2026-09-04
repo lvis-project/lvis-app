@@ -66,6 +66,19 @@ describe("AuditPanel", () => {
     expect(container.querySelector('[data-testid="audit-panel"]')).toBeNull();
   });
 
+  it("is a region of the pane that holds Settings, not a panel fixed to the window edge", async () => {
+    const fetcher = makeFetcher({ entries: [makeEntry()] });
+    await act(async () => {
+      render(<AuditPanel open onClose={() => {}} fetcher={fetcher} />);
+    });
+    const panel = screen.getByTestId("audit-panel");
+    // Fixed to the window it covered the tiles beside the Settings pane and
+    // the title bar, at a width that does not fit a tile at the floor.
+    expect(panel.className).not.toMatch(/\b(fixed|absolute)\b/);
+    expect(panel.className).toContain("w-full");
+    expect(panel.className).not.toMatch(/\bw-\[\d+px\]/);
+  });
+
   it("renders panel + fetches entries on mount", async () => {
     const fetcher = makeFetcher({ entries: [makeEntry({ tool: "fs_write" })] });
     await act(async () => {

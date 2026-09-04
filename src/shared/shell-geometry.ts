@@ -160,8 +160,8 @@ export const CONTENT_TITLE_INSET = SHELL_GUTTER * 2;
  * What `<main>` reserves on its leading edge while the sidebar is a collapsed
  * icon rail — in px, like everything else on the lights' line. Mirrored in CSS
  * as `--shell-collapsed-rail-reserve` (a pair `check-shell-geometry-tokens.mjs`
- * holds together): the content surface pads by the token and the banner stack
- * insets past it.
+ * holds together): the content surface pads by the token, and everything in
+ * flow inside it — the window's notice strip included — starts past it.
  *
  * The number is pinned by the traffic lights, not by the rail. On darwin the
  * band's content can start no further left than `BAND_LEAD_PAD_DARWIN`, and

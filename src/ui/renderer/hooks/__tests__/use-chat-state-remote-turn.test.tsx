@@ -17,7 +17,7 @@ import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 function setup() {
   const { api, emitChatStream } = makeMockLvisApi();
-  const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+  const { result } = renderHook(() => useChatState(api as unknown as LvisApi, () => {}));
   const dispatch = (ev: ChatStreamEvent) => act(() => emitChatStream(ev));
   return { result, dispatch };
 }

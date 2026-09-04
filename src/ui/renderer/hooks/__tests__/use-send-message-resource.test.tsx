@@ -178,7 +178,7 @@ function setup(options?: {
 
   let chat: ReturnType<typeof useChatState> | null = null;
   const { result } = renderHook(() => {
-    const chatState = useChatState(api);
+    const chatState = useChatState(api, () => {});
     chat = chatState;
     return useSendMessage(options?.realChatState
       ? {

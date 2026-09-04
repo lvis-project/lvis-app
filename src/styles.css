@@ -1852,15 +1852,12 @@
      * same number for the band's arithmetic; `check-shell-geometry-tokens.mjs`
      * holds the two equal.
      *
-     * The rail card's width and the floating banner stack's inset are derived
-     * from the reserve rather than declared beside it. The rail is the reserve
-     * minus its own card inset and one gutter of air before the content, so it
-     * cannot grow into the content at a larger type scale; the banner starts
-     * one gutter past the reserve — the same gutter the expanded layout leaves
-     * past `<main>`'s leading padding. */
+     * The rail card's width is derived from the reserve rather than declared
+     * beside it: the reserve minus its own card inset and one gutter of air
+     * before the content, so it cannot grow into the content at a larger type
+     * scale. */
     --shell-collapsed-rail-reserve: 64px;
     --shell-collapsed-rail-width: calc(var(--shell-collapsed-rail-reserve) - var(--shell-card-inset) - var(--chrome-gap));
-    --shell-collapsed-banner-inset: calc(var(--shell-collapsed-rail-reserve) + var(--chrome-gap));
   }
   /* Content measures — how wide a column of prose gets to be, and how tall the
    * panels that hold a scrolling body are. rem, unlike the shell geometry
