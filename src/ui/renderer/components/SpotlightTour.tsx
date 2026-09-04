@@ -695,10 +695,22 @@ export function SpotlightTour({
               width: ringTarget.size.width + RING_INSET_PX * 2,
               height: ringTarget.size.height + RING_INSET_PX * 2,
             }}
-            // A decorative layer takes no focus and dismisses nothing: Escape
-            // and outside clicks belong to the tour's own handlers and to the
-            // backdrop, so this layer declines all four rather than competing
-            // for them.
+            // A press on the lit anchor hands it the focus rather than
+            // dismissing the tour. The ring covers the anchor exactly and the
+            // popper keeps it there, so this is the anchor's own hit area
+            // without the tour computing a rectangle for it. Focus is all that
+            // is forwarded: firing the control underneath — the model picker,
+            // the settings entry — would be a side effect of reading the tour,
+            // and step 1 needs nothing but the caret in the box.
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              ringTarget.el.focus();
+            }}
+            // The layer takes no focus of its own and dismisses nothing:
+            // Escape and presses outside the anchor belong to the tour's own
+            // handlers and to the backdrop, so it declines all four rather
+            // than competing for them.
             onOpenAutoFocus={(e) => e.preventDefault()}
             onCloseAutoFocus={(e) => e.preventDefault()}
             onEscapeKeyDown={(e) => e.preventDefault()}

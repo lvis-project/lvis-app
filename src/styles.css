@@ -388,13 +388,26 @@
 
    Unlayered so the popover's own utility classes cannot outrank it. On the
    body the z-index is real, and puts the ring over the tour's `z-50` backdrop.
-   Pointer-transparent because a step may ask the user to type into the very
-   control it rings, and because a click that misses the control should still
-   reach the backdrop and dismiss the tour. */
+
+   The ring takes the pointer over the area it covers, which is the anchor and
+   nothing more — a shadow is not hit-tested, so the dim it casts over the rest
+   of the window stays the backdrop's to catch, and a press that misses the
+   anchor still dismisses the tour. Over the anchor the press must not dismiss:
+   the anchor is the one lit thing on a dimmed window with a ring drawn round
+   it, which reads as an invitation to press it, and step 1 asks the reader to
+   type there. The component's handler turns that press into focus.
+
+   The cost is that the anchor no longer sees the pointer, so its own hover
+   tint and tooltip stay off while the tour rings it — acceptable, because the
+   ring and the hole already say which control the step is about, which is what
+   a hover tint is for. The cursor is the ring's own, not a copy of the
+   anchor's: over every anchor the press does the same one thing, and saying
+   "pressable" beats the plain arrow a decorative box would otherwise show. */
 .lvis-tour-ring {
   position: relative;
   z-index: 51;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   border-radius: var(--radius-md);
   box-shadow:
     var(--shadow-spotlight),

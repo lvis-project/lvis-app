@@ -641,6 +641,7 @@ describe("SpotlightTour anchoring", () => {
  */
 describe("SpotlightTour ring", () => {
   const mounted: HTMLElement[] = [];
+  let clicks = 0;
 
   function mountAnchor(
     name: string,
@@ -651,6 +652,7 @@ describe("SpotlightTour ring", () => {
     if (opts.display) el.style.display = opts.display;
     if (opts.visibility) el.style.visibility = opts.visibility;
     stubRect(el, opts.width ?? ANCHOR_WIDTH, opts.height ?? ANCHOR_HEIGHT);
+    el.addEventListener("click", () => { clicks += 1; });
     document.body.appendChild(el);
     mounted.push(el);
     return el;
@@ -674,6 +676,7 @@ describe("SpotlightTour ring", () => {
 
   afterEach(() => {
     for (const el of mounted.splice(0)) el.remove();
+    clicks = 0;
   });
 
   it("renders a ring for an anchored step, sized from the anchor's own box", async () => {
@@ -808,6 +811,43 @@ describe("SpotlightTour ring", () => {
     // positions, so these two numbers are what decide which layer wins.
     expect(ruleBody(styles, ".lvis-tour-ring")).toContain("z-index: 51");
     expect(ruleBody(styles, ".lvis-tour-card")).toContain("z-index: 52");
+  });
+
+  // The ring covers the lit anchor, so it is what a press over the anchor
+  // lands on. It must hand that press to the anchor as focus and keep the tour
+  // open — the backdrop's dismiss stays for presses that miss.
+  it("hands a press on the anchor to the anchor as focus, without dismissing", async () => {
+    const anchor = mountAnchor("a");
+    const { findByTestId, queryByTestId } = renderTour();
+    const ring = await findByTestId("spotlight-tour:ring");
+    expect(document.activeElement).not.toBe(anchor);
+    act(() => {
+      fireEvent.pointerDown(ring);
+    });
+    expect(document.activeElement).toBe(anchor);
+    expect(queryByTestId("spotlight-tour:card")).not.toBeNull();
+    // It never fires the control it covers — a tour must not press the button
+    // it is explaining.
+    expect(clicks).toBe(0);
+  });
+
+  it("still dismisses on a press that misses the anchor", async () => {
+    mountAnchor("a");
+    const { findByTestId, queryByTestId } = renderTour();
+    const backdrop = await findByTestId("spotlight-tour:backdrop");
+    act(() => {
+      backdrop.click();
+    });
+    await waitFor(() => {
+      expect(queryByTestId("spotlight-tour:card")).toBeNull();
+    });
+    expect(queryByTestId("spotlight-tour:ring")).toBeNull();
+  });
+
+  it("takes the pointer only over the anchor, leaving the dim to the backdrop", () => {
+    // A shadow is not hit-tested, so the ring's own box — the anchor plus its
+    // inset — is the whole of its hit area, however far the dim reaches.
+    expect(ruleBody(readStyles(), ".lvis-tour-ring")).toContain("pointer-events: auto");
   });
 
   it("anchors to the visible match when an earlier one is display:none", async () => {

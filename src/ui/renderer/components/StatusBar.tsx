@@ -113,9 +113,6 @@ export function StatusBar(props: StatusBarProps) {
       {persistent.length > 0 ? (
         <div className="flex min-w-0 items-center truncate">
           {persistent.map((item, idx) => {
-            const previous = idx > 0 ? persistent[idx - 1] : undefined;
-            const joinWithPrevious =
-              previous?.id === "health:services" && item.id === "vendor:llm";
             const inner = item.dot === true ? (
               <>
                 {item.a11yLabel !== undefined && (
@@ -169,9 +166,9 @@ export function StatusBar(props: StatusBarProps) {
             return (
               <span
                 key={item.id}
-                className={`flex min-w-0 items-center truncate ${joinWithPrevious ? "ml-1.5" : ""}`}
+                className="flex min-w-0 items-center truncate"
               >
-                {idx > 0 && !joinWithPrevious && (
+                {idx > 0 && (
                   <span className="px-2 opacity-30" aria-hidden="true">|</span>
                 )}
                 {item.tooltip !== undefined && item.tooltip.length > 0 ? (
