@@ -113,9 +113,6 @@ export function StatusBar(props: StatusBarProps) {
       {persistent.length > 0 ? (
         <div className="flex min-w-0 items-center truncate">
           {persistent.map((item, idx) => {
-            const previous = idx > 0 ? persistent[idx - 1] : undefined;
-            const joinWithPrevious =
-              previous?.id === "health:services" && item.id === "vendor:llm";
             const inner = item.dot === true ? (
               <>
                 {item.a11yLabel !== undefined && (
@@ -149,18 +146,11 @@ export function StatusBar(props: StatusBarProps) {
                 )}
               </>
             );
-            // First-boot tour — the vendor/model cell is the final
-            // SpotlightTour anchor (step 7). Tagging it here keeps the
-            // anchor close to the rendered DOM rather than requiring a
-            // separate wrapper component.
-            const tourAnchor =
-              item.id === "vendor:llm" ? "status-bar-vendor" : undefined;
             const trigger = item.onClick !== undefined ? (
               <button
                 type="button"
                 onClick={item.onClick}
                 title={item.tooltip}
-                data-tour-anchor={tourAnchor}
                 className="flex items-center gap-1 truncate cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {inner}
@@ -169,7 +159,6 @@ export function StatusBar(props: StatusBarProps) {
               <span
                 className="flex items-center gap-1 truncate"
                 title={item.tooltip}
-                data-tour-anchor={tourAnchor}
               >
                 {inner}
               </span>
@@ -177,9 +166,9 @@ export function StatusBar(props: StatusBarProps) {
             return (
               <span
                 key={item.id}
-                className={`flex min-w-0 items-center truncate ${joinWithPrevious ? "ml-1.5" : ""}`}
+                className="flex min-w-0 items-center truncate"
               >
-                {idx > 0 && !joinWithPrevious && (
+                {idx > 0 && (
                   <span className="px-2 opacity-30" aria-hidden="true">|</span>
                 )}
                 {item.tooltip !== undefined && item.tooltip.length > 0 ? (

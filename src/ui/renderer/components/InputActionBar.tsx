@@ -685,6 +685,9 @@ function ModelQuickPicker({
         <button
           type="button"
           data-testid="iab-status-model"
+          // SpotlightTour anchor. Step 6 of `first-boot-essentials` points at
+          // the model in use, and this button is the control that changes it.
+          data-tour-anchor="model-picker"
           // The visible text is the model alone, so the vendor would be lost to
           // anyone who cannot hover for the tooltip. The accessible name carries
           // the whole route; it still contains the visible text, so name-in-label
