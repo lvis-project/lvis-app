@@ -1648,6 +1648,17 @@ describe("notices with two tiles", () => {
     expect(toasts(second!.element)).toHaveLength(0);
     expect(toasts(strip(container))).toHaveLength(0);
     expect(toasts(container)).toHaveLength(1);
+
+    // The notice takes a row of its own above the selector/runtime strip: an
+    // unpositioned sibling BEFORE the wrapper that holds the project selector,
+    // so it pushes that strip down instead of painting over it.
+    const toastRow = first!.element.querySelector<HTMLElement>('[data-testid="composer-toast-dock"]')!;
+    const selectorSlot = first!.element.querySelector<HTMLElement>('[data-testid="composer-project-selector-slot"]')!;
+    expect(selectorSlot).not.toBeNull();
+    expect(toastRow.className).not.toMatch(/\b(absolute|fixed)\b/);
+    expect(toastRow.contains(selectorSlot)).toBe(false);
+    expect(toastRow.nextElementSibling?.contains(selectorSlot)).toBe(true);
+    expect(toastRow.parentElement!.className).toMatch(/\bflex-col\b/);
   });
 
   it("keeps the window strip in flow above the panes, never floating over a pane's lane", async () => {
