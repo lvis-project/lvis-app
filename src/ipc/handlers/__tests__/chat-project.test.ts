@@ -398,7 +398,7 @@ describe("handleChatSessions federated families", () => {
     expect(sessions.find((s) => s.id === "side-1")).toMatchObject({
       family: "side-chat",
       title: "환경 변수 확인",
-      parentSessionId: "session-main",
+      originSessionId: "session-main",
     });
   });
 

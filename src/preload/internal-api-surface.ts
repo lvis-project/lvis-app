@@ -362,14 +362,14 @@ export function buildInternalApiSurface() {
     },
   },
   // ─── Side chat (workspace rail) ──────────────────────
-  // A second, independently-streaming chat session. send/new/load/list/abort
-  // are invokes; onStream/onFallback subscribe to the DEDICATED
+  // A second, independently-streaming chat session. send/new/load/abort are
+  // invokes; onStream/onFallback subscribe to the DEDICATED
   // CHANNELS.sidechat.{stream,fallback} events (NOT chat.stream) and return an
   // unsubscribe fn (the onChatStream pattern). All channels are INTERNAL — an
   // external origin can never reach them (fail-closed isPublicChannel).
   sideChat: {
-    send: async (input: string, attachments?: unknown[], parentSessionId?: string) =>
-      ipcRenderer.invoke(CHANNELS.sidechat.send, { input, attachments, parentSessionId }) as Promise<
+    send: async (input: string, attachments?: unknown[], originSessionId?: string) =>
+      ipcRenderer.invoke(CHANNELS.sidechat.send, { input, attachments, originSessionId }) as Promise<
         | { ok: true; result: TurnResult }
         | { ok: false; error: string }
       >,
@@ -383,11 +383,6 @@ export function buildInternalApiSurface() {
         | { ok: true; sessionId: string; messages: SerializedHistoryMessage[] }
         | { ok: false; error: string; messages: SerializedHistoryMessage[] }
       >,
-    list: async () =>
-      ipcRenderer.invoke(CHANNELS.sidechat.list) as Promise<{
-        current: string | null;
-        sessions: Array<{ id: string; modifiedAt: string; title: string }>;
-      }>,
     abort: async () =>
       ipcRenderer.invoke(CHANNELS.sidechat.abort) as Promise<
         { ok: true } | { ok: false; error: string }
@@ -1248,10 +1243,11 @@ export function buildInternalApiSurface() {
     ipcRenderer.on(ROUTINES.failed, listener);
     return () => ipcRenderer.removeListener(ROUTINES.failed, listener);
   },
-  // Routine session history — unified conversation sessions scoped by routineId
+  // Routine session history — the same conversation rows the sidebar lists,
+  // scoped by routineId, plus the opening snippet the panel shows.
   listRoutineSessions: async (routineId: string, limit?: number) =>
     ipcRenderer.invoke(ROUTINES.listSessions, routineId, limit) as Promise<
-      Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>
+      import("../shared/session-lookup.js").RoutineRunRow[]
     >,
 
   // ─── Work Board ──────────────────────────────────

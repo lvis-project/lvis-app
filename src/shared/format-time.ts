@@ -14,6 +14,8 @@
  * was not theirs anywhere in the transcript.
  */
 
+import type { TranslateFn } from "../i18n/translate.js";
+
 /**
  * Clock time for a chat entry: `13:26`, in the host's zone and locale.
  *
@@ -78,6 +80,26 @@ export function formatRelativeTime(value: number | string, labels: RelativeTimeL
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return labels.hoursAgo(hours);
   return labels.daysAgo(Math.floor(hours / 24));
+}
+
+/**
+ * The time label a CONVERSATION row shows, wherever it is drawn.
+ *
+ * The sidebar's list and the routine panel's run list are the same sessions
+ * seen twice. They formatted that instant two ways — "3m ago" in one place and
+ * `Jan 2, 2026, 1:26 PM` in the other — so the same run read as two different
+ * events depending on which surface the user was looking at. One row, one
+ * label. The keys live in the `sidebar` namespace because that is the surface
+ * that named them; `t` is passed in so this module keeps no i18n dependency of
+ * its own.
+ */
+export function formatRelativeSessionTime(value: number | string, t: TranslateFn): string {
+  return formatRelativeTime(value, {
+    justNow: () => t("sidebar.justNow"),
+    minutesAgo: (count) => t("sidebar.minutesAgo", { count }),
+    hoursAgo: (count) => t("sidebar.hoursAgo", { count }),
+    daysAgo: (count) => t("sidebar.daysAgo", { count }),
+  });
 }
 
 /** The host's IANA time zone, the zone every label above renders in. */

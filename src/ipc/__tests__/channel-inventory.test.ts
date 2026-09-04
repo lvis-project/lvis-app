@@ -453,7 +453,6 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:settings:update",
         "lvis:shell:open-external",
         "lvis:sidechat:abort",
-        "lvis:sidechat:list",
         "lvis:sidechat:load",
         "lvis:sidechat:new",
         "lvis:sidechat:send",

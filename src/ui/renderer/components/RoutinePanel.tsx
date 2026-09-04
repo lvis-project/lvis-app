@@ -26,7 +26,25 @@ import type { LvisApi, PluginCardSummary } from "../types.js";
 import type { AddRoutineInput, RoutineRecord, RoutineExecution, RepeatKind, RoutineSchedule } from "../../../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../../../shared/routines-types.js";
 import { isValidCronExpression } from "../../../routines/cron-evaluator.js";
-import { formatMediumDateTime } from "../../../shared/format-time.js";
+import { formatMediumDateTime, formatRelativeSessionTime } from "../../../shared/format-time.js";
+import type { RoutineRunRow } from "../../../shared/session-lookup.js";
+
+/**
+ * A run row as this panel holds it: the shared conversation row, with the
+ * routine's own title resolved. The panel fetches runs one routine at a time,
+ * so the routine naming each row is known before the row is built.
+ */
+type RoutineRunListRow = RoutineRunRow & { routineTitle: string };
+
+/**
+ * When a run happened. `routineFiredAt` is what the scheduler wrote at fire
+ * time; a session persisted before that field existed answers with its last
+ * write instead of dropping out of the list. The label and the sort read the
+ * same instant so a row never sorts by one time and reads as another.
+ */
+function runInstant(row: RoutineRunRow): string {
+  return row.routineFiredAt ?? row.modifiedAt;
+}
 import { errorMessage } from "../../../shared/error-message.js";
 import { usePaneActions } from "./PaneFrame.js";
 
@@ -134,19 +152,24 @@ function RoutineRow({ routine, onDismiss, onRemove, onTriggerNow, recentlyFired 
   );
 }
 
-function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListItem; onOpen: (sessionId: string) => void }) {
+/**
+ * One run of a routine. The row is the sidebar's row — same fields, same time
+ * label — because it is the same session; only the opening snippet is drawn
+ * here, where there is room for it.
+ */
+function RoutineSessionRow({ session, onOpen }: { session: RoutineRunListRow; onOpen: (sessionId: string) => void }) {
   return (
     <button
       type="button"
       className="w-full rounded-lg border bg-background px-3 py-2 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       data-testid="routine-session-row"
-      onClick={() => onOpen(session.sessionId)}
+      onClick={() => onOpen(session.id)}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="line-clamp-1 text-sm font-semibold leading-snug text-foreground">{session.routineTitle}</div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
-            {formatSessionTime(session.firedAt)}
+            {formatRelativeSessionTime(runInstant(session), t)}
           </div>
           {session.preview && (
             <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
@@ -158,17 +181,6 @@ function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListIte
       </div>
     </button>
   );
-}
-
-/**
- * `firedAt` is read back off disk, so an unparseable value is possible and
- * shows raw rather than as "Invalid Date". The formatting itself is the
- * shared one — this wrapper owns only that fallback.
- */
-function formatSessionTime(firedAt: string): string {
-  const parsed = new Date(firedAt);
-  if (Number.isNaN(parsed.getTime())) return firedAt;
-  return formatMediumDateTime(parsed.getTime());
 }
 
 // ─── Add Routine Modal ────────────────────────────────────────────────────────
@@ -628,7 +640,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
 
 export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
-  const [routineSessions, setRoutineSessions] = useState<RoutineSessionListItem[]>([]);
+  const [routineSessions, setRoutineSessions] = useState<RoutineRunListRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [recentlyFired, setRecentlyFired] = useState<string[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -646,20 +658,17 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
             .filter((routine) => routine.execution === "llm-session")
             .map(async (routine) => {
               const records = await api.listRoutineSessions(routine.id, 10);
+              // The panel groups runs BY routine, so every row it holds is
+              // named by the routine record it was fetched for rather than by
+              // whatever title the session happened to persist.
               const routineTitle =
                 routine.title ?? routine.notificationTitle ?? routine.prePrompt?.slice(0, 30) ?? routine.id.slice(0, 8);
-              return records.map((record) => ({
-                routineId: record.routineId,
-                routineTitle,
-                firedAt: record.firedAt,
-                sessionId: record.sessionId,
-                preview: record.preview,
-              }));
+              return records.map((record) => ({ ...record, routineTitle }));
             }),
         )
       )
         .flat()
-        .sort((a, b) => b.firedAt.localeCompare(a.firedAt))
+        .sort((a, b) => runInstant(b).localeCompare(runInstant(a)))
         .slice(0, 30);
       if (!mountedRef.current) return;
       setRoutines(list);
@@ -796,7 +805,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
                   <div className="space-y-2">
                     {routineSessions.map((session) => (
                       <RoutineSessionRow
-                        key={`${session.routineId}:${session.firedAt}:${session.sessionId}`}
+                        key={session.id}
                         session={session}
                         onOpen={(sessionId) => onOpenSession?.(sessionId)}
                       />
@@ -821,11 +830,4 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
       )}
     </>
   );
-}
-interface RoutineSessionListItem {
-  routineId: string;
-  routineTitle: string;
-  firedAt: string;
-  sessionId: string;
-  preview: string;
 }

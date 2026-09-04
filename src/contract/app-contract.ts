@@ -688,7 +688,6 @@ export const CHANNELS = {
     send: "lvis:sidechat:send", // invoke renderer→main → TurnResult | { ok:false }
     new: "lvis:sidechat:new", // invoke → { ok, sessionId }
     load: "lvis:sidechat:load", // invoke (sessionId) → { ok, messages }
-    list: "lvis:sidechat:list", // invoke → session list (side-chat store)
     abort: "lvis:sidechat:abort", // invoke → { ok }
     stream: "lvis:sidechat:stream", // event main→renderer ({ streamId, ...frame })
     fallback: "lvis:sidechat:fallback", // event main→renderer (provider fallback)

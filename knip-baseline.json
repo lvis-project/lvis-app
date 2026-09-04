@@ -369,11 +369,6 @@
     },
     {
       "type": "exports",
-      "file": "src/ipc/handlers/chat.ts",
-      "name": "SESSION_KIND_VALUES"
-    },
-    {
-      "type": "exports",
       "file": "src/ipc/index.ts",
       "name": "auditUnauthorized"
     },
@@ -2661,11 +2656,6 @@
       "type": "types",
       "file": "src/ui/renderer/hooks/use-add-project-folder.ts",
       "name": "PendingRootWarning"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/hooks/use-side-chat.ts",
-      "name": "SideChatSessionSummary"
     },
     {
       "type": "types",

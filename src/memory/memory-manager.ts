@@ -16,6 +16,7 @@ import {
 import { t } from "../i18n/index.js";
 import { projectRootEquals, projectRootKey } from "../shared/project-identity.js";
 import { parseWorkBoardOriginSessionId } from "../shared/work-board-types.js";
+import type { SessionFamily, SessionKind, SessionListRow } from "../shared/session-lookup.js";
 import { discoverProjectAgentsMd, type ProjectAgentsMd } from "./project-agents-md.js";
 import { maskSensitiveData } from "../shared/dlp.js";
 import { estimateTokens } from "../shared/token-estimate.js";
@@ -266,8 +267,6 @@ export interface ToolResultArtifact {
   createdAt: string;
 }
 
-export type SessionKind = "main" | "routine" | "subagent";
-
 /**
  * Which of the three session stores a listing was read from.
  *
@@ -280,13 +279,12 @@ export type SessionKind = "main" | "routine" | "subagent";
 export type SessionNamespace = "main" | "side-chat" | "subagent";
 
 /**
- * The conversation family one sidebar row belongs to — what glyph it draws,
- * what its click opens, and whether it offers the main store's row actions.
- *
- * `main` and `routine` are the two kinds the main store holds; `work-board` is
- * an item's run and `side-chat` a rail conversation, each in its own store.
+ * The list contract lives in `shared/session-lookup.ts` — the neutral module
+ * main, the preload bridge and the renderer all import. Re-exported here
+ * because the classifier and the row assembly below are what stamp it, so the
+ * main-process callers read the union from the module that produces it.
  */
-export type SessionFamily = "main" | "routine" | "work-board" | "side-chat";
+export type { SessionFamily, SessionKind, SessionListRow };
 
 /**
  * The ONE classifier: which family a listed session belongs to, or `null` when
@@ -309,6 +307,55 @@ export function sessionFamilyOf(
   if (session.sessionKind === "main") return "main";
   if (session.sessionKind === "routine") return "routine";
   return null;
+}
+
+/**
+ * The ONE assembly: a stored session entry as the row every conversation
+ * surface reads. `null` when {@link sessionFamilyOf} says the entry is not a
+ * conversation the list shows.
+ *
+ * The sidebar's list and the routine panel's run list are the same sessions
+ * seen through two IPC channels. Assembling the row twice let them disagree on
+ * what a row is called and which of its fields exist, so both channels build it
+ * here.
+ *
+ * `parentSessionId` is NOT carried: it is checkpoint/fork provenance, an
+ * answer to "which conversation was this branched out of", and the wire's
+ * `originSessionId` answers "which conversation is this a side chat of". A row
+ * that forwarded both under one name would let a surface group forks under a
+ * parent as though they were side chats.
+ */
+export function toSessionListRow(
+  namespace: SessionNamespace,
+  session: SessionListEntry,
+): SessionListRow | null {
+  const family = sessionFamilyOf(namespace, session);
+  if (family === null) return null;
+  return {
+    id: session.id,
+    modifiedAt: session.modifiedAt.toISOString(),
+    title: session.title,
+    sessionKind: session.sessionKind,
+    family,
+    ...(session.workBoardItemId !== undefined ? { workBoardItemId: session.workBoardItemId } : {}),
+    // Only a side chat is drawn under another conversation, so only a side
+    // chat's origin is a grouping key any surface reads. A sub-agent child's
+    // origin is its spawning parent and never leaves the panel that owns it.
+    ...(family === "side-chat" && session.originSessionId
+      ? { originSessionId: session.originSessionId }
+      : {}),
+    ...(session.routineId ? { routineId: session.routineId } : {}),
+    ...(session.routineTitle ? { routineTitle: session.routineTitle } : {}),
+    ...(session.routineFiredAt ? { routineFiredAt: session.routineFiredAt } : {}),
+    ...(session.projectRoot ? { projectRoot: session.projectRoot } : {}),
+    ...(session.projectName ? { projectName: session.projectName } : {}),
+    ...(session.branchedFromCompactNum !== undefined
+      ? { branchedFromCompactNum: session.branchedFromCompactNum }
+      : {}),
+    ...(session.branchedAt ? { branchedAt: session.branchedAt } : {}),
+    ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
+    ...(session.unreadSince ? { unreadSince: session.unreadSince } : {}),
+  };
 }
 
 /**
@@ -2313,7 +2360,8 @@ export class MemoryManager implements PromptMemorySource {
   /**
    * Save a per-checkpoint pre-compact snapshot before compaction overwrites the main JSONL.
    * Stored at `{sessionsDir}/.checkpoints/{sessionId}/{compactNum}.jsonl` so that
-   * listSessions/listSessionsPage (which only scan sessionsDir root) never pick them up.
+   * {@link listSessionsPage} — the one scanner every listing funnels through,
+   * and it reads only the sessionsDir root — never picks them up.
    * branchFromCheckpoint() loads from here instead of the mutable main session file.
    */
   async saveCheckpointSnapshot(sessionId: string, compactNum: number, messages: unknown[]): Promise<void> {

@@ -6,7 +6,7 @@
  * checkpoint/compact/fork/star machinery). Side chat is a compact second session
  * in the workspace rail, so this hook keeps ONLY what a minimal transcript needs:
  * a local `entries: ChatEntry[]` list, a `send`, `newSession`, `loadSession`,
- * `listSessions`, `isStreaming`, and `abort`.
+ * `isStreaming`, and `abort`.
  *
  * INPUT PARITY: `send` follows the main composer's rule for a send that lands
  * while a turn is running — a user gesture interrupts (abort, then send); the
@@ -58,12 +58,6 @@ import type { TurnSummary } from "../components/TranscriptRenderer.js";
 import type { LvisApi } from "../types.js";
 import { errorMessage } from "../../../shared/error-message.js";
 
-export interface SideChatSessionSummary {
-  id: string;
-  modifiedAt: string;
-  title: string;
-}
-
 interface SideChatSendOptions {
   /** Vision / resource parts composed from the composer's attachments. */
   attachments?: UserContentPart[];
@@ -81,7 +75,7 @@ interface SideChatSendOptions {
    * records it once, on the turn that first gives the side chat a file, and the
    * sidebar lists the row under that conversation.
    */
-  parentSessionId?: string;
+  originSessionId?: string;
 }
 
 export interface UseSideChat {
@@ -92,7 +86,6 @@ export interface UseSideChat {
   send: (text: string, opts?: SideChatSendOptions) => Promise<void>;
   newSession: () => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
-  listSessions: () => Promise<{ current: string | null; sessions: SideChatSessionSummary[] }>;
   abort: () => Promise<void>;
   /**
    * Stale-frame verdict for one side-chat stream frame, shared with every other
@@ -367,7 +360,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
       // from the stream). A rejected/failed result surfaces as an error entry so
       // the transcript never hangs on a permanent spinner.
       try {
-        const result = await api.sideChat.send(trimmed, opts?.attachments, opts?.parentSessionId);
+        const result = await api.sideChat.send(trimmed, opts?.attachments, opts?.originSessionId);
         if (!result.ok) {
           // Localized, not the raw code: this hook used to put the kebab-case string
           // straight in the transcript, so a Korean user tripping a bound read
@@ -443,11 +436,6 @@ export function useSideChat(api: LvisApi): UseSideChat {
     [api, resetStreamState, setStreaming],
   );
 
-  const listSessions = useCallback(async () => {
-    if (!api.sideChat) return { current: null, sessions: [] as SideChatSessionSummary[] };
-    return api.sideChat.list();
-  }, [api]);
-
   // Per-turn provider-usage lookup keyed by turn-start index — same derivation
   // as ChatView so the shared TranscriptRenderer's WorkGroup step-count /
   // TurnActionBar cost badge show the SIDE loop's own token/cost totals.
@@ -485,7 +473,6 @@ export function useSideChat(api: LvisApi): UseSideChat {
     send,
     newSession,
     loadSession,
-    listSessions,
     abort,
     isCurrentTurnEvent,
   };

@@ -14,6 +14,8 @@ import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } fro
 import type { IpcDeps } from "../types.js";
 import type { RoutineExecution, RoutineFiredPayload, RoutineSchedule } from "../../shared/routines-types.js";
 import { ROUTINES } from "../../shared/ipc-channels.js";
+import { toSessionListRow } from "../../memory/memory-manager.js";
+import type { RoutineRunRow } from "../../shared/session-lookup.js";
 
 export function registerRoutineHandlers(deps: IpcDeps): void {
   const { routinesStore, routinesScheduler, memoryManager, auditLogger } = deps;
@@ -141,17 +143,26 @@ export function registerRoutineHandlers(deps: IpcDeps): void {
     },
   );
 
+  /**
+   * A routine's runs, as the SAME row the sidebar lists them with.
+   *
+   * The panel and the sidebar show one set of sessions. This handler used to
+   * answer with a shape of its own (`{ routineId, firedAt, sessionId, title,
+   * preview }`), so the panel named the same session differently and formatted
+   * its time differently from the row beside it in the sidebar. It now returns
+   * {@link RoutineRunRow} — the conversation row plus the opening snippet only
+   * this panel has room for — assembled by the one `toSessionListRow`.
+   */
   ipcMain.handle(ROUTINES.listSessions, async (e, routineId: string, limit?: number) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES.listSessions, e);
       return UNAUTHORIZED_FRAME;
     }
-    return memoryManager.listSessionsByRoutine(routineId, limit ?? 10).map((session) => ({
-      routineId: session.routineId ?? routineId,
-      firedAt: session.routineFiredAt ?? session.modifiedAt.toISOString(),
-      sessionId: session.id,
-      title: session.title,
-      preview: session.preview,
-    }));
+    return memoryManager
+      .listSessionsByRoutine(routineId, limit ?? 10)
+      .flatMap((session): RoutineRunRow[] => {
+        const row = toSessionListRow("main", session);
+        return row === null ? [] : [{ ...row, preview: session.preview }];
+      });
   });
 }

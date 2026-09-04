@@ -13,6 +13,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager, sessionFamilyOf } from "../memory-manager.js";
+import {
+  isSessionFamily,
+  SESSION_FAMILIES,
+  type SessionFamily,
+} from "../../shared/session-lookup.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   parseWorkBoardOriginSessionId,
@@ -117,6 +122,36 @@ describe("sessionFamilyOf", () => {
 
   it("has no family for a kind the main store should not be holding", () => {
     expect(sessionFamilyOf("main", { sessionKind: "subagent" })).toBeNull();
+  });
+});
+
+describe("the family value set", () => {
+  it("names every member of the union, once", () => {
+    expect([...SESSION_FAMILIES].sort()).toEqual(["main", "routine", "side-chat", "work-board"]);
+    expect(new Set(SESSION_FAMILIES).size).toBe(SESSION_FAMILIES.length);
+  });
+
+  it("admits only a family this host has", () => {
+    expect(SESSION_FAMILIES.every(isSessionFamily)).toBe(true);
+    // A newer renderer naming a family this host does not have is dropped, not
+    // refused — the request stays answerable.
+    expect(isSessionFamily("subagent")).toBe(false);
+    expect(isSessionFamily(undefined)).toBe(false);
+    expect(isSessionFamily("toString")).toBe(false);
+  });
+
+  it("cannot be built from a short table", () => {
+    // The guarantee an array-built `Set<SessionFamily>` did not give: a member
+    // added to the union and forgotten in the value set is a COMPILE error
+    // here, not a family the request validator silently drops. Delete a key
+    // below and this line stops erroring, which fails the gate.
+    // @ts-expect-error - "side-chat" is missing
+    const incomplete: Readonly<Record<SessionFamily, true>> = {
+      "main": true,
+      "routine": true,
+      "work-board": true,
+    };
+    expect(Object.keys(incomplete)).toHaveLength(3);
   });
 });
 

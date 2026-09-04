@@ -3,6 +3,7 @@ import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { StarredView } from "../StarredView.js";
+import { sessionRow } from "../../../../../test/renderer/mock-lvis-api.js";
 
 /**
  * The view buckets by the HOST's civil day. Derived here from `Date`'s local
@@ -27,23 +28,19 @@ describe("StarredView", () => {
         api={api}
         starred={[]}
         sessions={[
-          {
+          sessionRow({
             id: "scoped",
             modifiedAt: now,
             title: "범위 지정 대화",
-            sessionKind: "main",
-            family: "main",
             projectRoot: "c:/work/team-a/shared/",
             projectName: "shared",
-          },
-          {
+          }),
+          sessionRow({
             id: "general",
             modifiedAt: now,
             title: "일반 대화",
-            sessionKind: "main",
-            family: "main",
             projectName: "stale-general",
-          },
+          }),
         ]}
         workspaceProjects={[
           { projectRoot: "C:\\workspace", projectName: "workspace", isDefault: true },
@@ -87,14 +84,12 @@ describe("StarredView", () => {
           text: "핵심 결정",
           starredAt: now,
         }]}
-        sessions={[{
+        sessions={[sessionRow({
           id: "sess-ai",
           modifiedAt: now,
           title: "프로젝트 인사이트",
-          sessionKind: "main",
-          family: "main",
           projectName: "workspace",
-        }]}
+        })]}
         currentSessionId="sess-ai"
         refreshStarred={vi.fn()}
         onJumpToSession={vi.fn()}
@@ -415,8 +410,8 @@ describe("StarredView", () => {
         api={api}
         starred={[]}
         sessions={[
-          { id: "broken", modifiedAt: "not-a-timestamp", title: "깨진 대화", sessionKind: "main", family: "main" },
-          { id: "fine", modifiedAt: new Date().toISOString(), title: "정상 대화", sessionKind: "main", family: "main" },
+          sessionRow({ id: "broken", modifiedAt: "not-a-timestamp", title: "깨진 대화" }),
+          sessionRow({ id: "fine", modifiedAt: new Date().toISOString(), title: "정상 대화" }),
         ]}
         workspaceProjects={[]}
         currentSessionId=""
