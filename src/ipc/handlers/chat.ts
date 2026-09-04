@@ -31,6 +31,7 @@ import { wrapChildReportForParentJudgment } from "../../engine/a2a-subagent-mess
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
 import {
   isSessionFamily,
+  isSessionListKindFilter,
   SESSION_LIST_MAX_LIMIT,
   type SessionFamily,
   type SessionListRow,
@@ -55,8 +56,6 @@ import {
 } from "./chat-stream.js";
 
 const log = createLogger("chat");
-
-export const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routine", "all"]);
 
 const ACKNOWLEDGING_STOP_REASON = "end_turn";
 
@@ -648,9 +647,7 @@ export async function handleChatSessions(
   const beforeId = isValidSessionId(opts?.beforeId)
     ? opts.beforeId
     : undefined;
-  const kind = SESSION_KIND_VALUES.has(opts?.kind as SessionKind | "all")
-    ? opts?.kind as SessionKind | "all"
-    : "main";
+  const kind = isSessionListKindFilter(opts?.kind) ? opts.kind : "main";
   const families = requestedSessionFamilies(opts?.families);
   const routineId = typeof opts?.routineId === "string" ? opts.routineId : undefined;
   const requestedProjectRoot = normalizeProjectString(opts?.projectRoot, MAX_PROJECT_ROOT_CHARS);

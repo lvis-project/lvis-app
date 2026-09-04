@@ -6,7 +6,6 @@
  *   `lvis:sidechat:send`  invoke  renderer→main → TurnResult | { ok:false, error }
  *   `lvis:sidechat:new`   invoke  → { ok, sessionId }
  *   `lvis:sidechat:load`  invoke  (sessionId) → { ok, sessionId, messages }
- *   `lvis:sidechat:list`  invoke  → { current, sessions }
  *   `lvis:sidechat:abort` invoke  → { ok }
  *   `lvis:sidechat:stream`   event  main→renderer  { streamId, ...frame }
  *   `lvis:sidechat:fallback` event  main→renderer  { from, to }
@@ -69,10 +68,6 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
       if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.load, e); return UNAUTHORIZED_FRAME; }
       return { ok: false as const, error: "side-chat-unavailable", messages: [] };
     });
-    ipcMain.handle(CHANNELS.sidechat.list, (e) => {
-      if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.list, e); return UNAUTHORIZED_FRAME; }
-      return { current: null, sessions: [] };
-    });
     ipcMain.handle(CHANNELS.sidechat.abort, (e) => {
       if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.abort, e); return UNAUTHORIZED_FRAME; }
       return unavailable();
@@ -109,7 +104,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(CHANNELS.sidechat.send, async (e, payload: unknown) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.send, e); return UNAUTHORIZED_FRAME; }
-    const p = (payload ?? {}) as { input?: unknown; attachments?: unknown; parentSessionId?: unknown };
+    const p = (payload ?? {}) as { input?: unknown; attachments?: unknown; originSessionId?: unknown };
     if (typeof p.input !== "string") {
       return { ok: false as const, error: "invalid-input" };
     }
@@ -177,7 +172,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
       await recordSideChatOrigin(
         deps.sideChatMemoryManager,
         turnSideChatSessionId,
-        p.parentSessionId,
+        p.originSessionId,
       );
     });
     activeSideStreamTurn = turnPromise;
@@ -218,25 +213,6 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle(CHANNELS.sidechat.list, (e) => {
-    if (!validateHostRendererSender(e)) {
-      auditUnauthorized(auditLogger, CHANNELS.sidechat.list, e);
-      // Fail closed: an unauthorized frame gets NO data — not even the real
-      // current session id (info disclosure). Same empty shape as the
-      // loop-absent branch above.
-      return { current: null, sessions: [] };
-    }
-    // The side-chat MemoryManager's session store is isolated to
-    // `~/.lvis/side-chat/` — listSessions here never returns a main-chat
-    // session (and the main `chat.sessions` never returns a side-chat one).
-    const sessions = loop.listSessions().map((s) => ({
-      id: s.id,
-      modifiedAt: s.modifiedAt.toISOString(),
-      title: s.title,
-    }));
-    return { current: loop.getSessionId(), sessions };
-  });
-
   ipcMain.handle(CHANNELS.sidechat.abort, async (e) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.abort, e); return UNAUTHORIZED_FRAME; }
     await abortActiveSideTurn();
@@ -251,8 +227,9 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
  * app knew that relation: the rail's loop is window-wide and its store is
  * isolated, so the link has to be written down when it is still observable. The
  * renderer supplies the conversation its tile was holding when the turn was
- * sent; the host validates the SHAPE and stores it as the session's origin, the
- * same field a sub-agent child records its spawning parent in.
+ * sent; the host validates the SHAPE and stores it under the name it already
+ * has — `originSessionId`, the field a sub-agent child records its spawning
+ * parent in and the one the list row carries.
  *
  * Existence is deliberately not checked. A conversation that has not taken a
  * turn yet has no file, and a side chat started beside it belongs to it all the
@@ -266,15 +243,15 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
 async function recordSideChatOrigin(
   sideChatMemoryManager: IpcDeps["sideChatMemoryManager"],
   sideChatSessionId: string,
-  parentSessionId: unknown,
+  originSessionId: unknown,
 ): Promise<void> {
-  if (!sideChatMemoryManager || !isValidSessionId(parentSessionId)) return;
+  if (!sideChatMemoryManager || !isValidSessionId(originSessionId)) return;
   try {
     const current = sideChatMemoryManager.loadSessionMetadata(sideChatSessionId);
     if (current?.originSessionId !== undefined) return;
     await sideChatMemoryManager.saveSessionMetadata(sideChatSessionId, {
       ...(current ?? {}),
-      originSessionId: parentSessionId,
+      originSessionId,
     });
   } catch (err) {
     // A side chat that cannot record its parent is still a side chat: it lists

@@ -12,7 +12,7 @@ import type { ChatEntry, ChatStreamEvent } from "../../src/lib/chat-stream-state
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../../src/shared/subagent-events.js";
 import type { SubscriptionRuntimeStatusUpdatedEvent } from "../../src/shared/subscription-runtime.js";
 import type { SessionSummary } from "../../src/ui/renderer/hooks/use-sessions.js";
-import type { SessionFamily } from "../../src/shared/session-lookup.js";
+import type { SessionFamily, SessionListKindFilter } from "../../src/shared/session-lookup.js";
 
 export type MockLvisApi = Record<string, Mock>;
 
@@ -475,7 +475,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
-    chatSessions: vi.fn(async (opts?: { kind?: "main" | "routine" | "all"; families?: SessionFamily[]; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => {
+    chatSessions: vi.fn(async (opts?: { kind?: SessionListKindFilter; families?: SessionFamily[]; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
       const afterTime = opts?.after ? Date.parse(opts.after) : Number.NaN;
       const filtered = sessions.filter((session) => {

@@ -188,7 +188,6 @@ const HOST_ONLY_CHANNELS: ReadonlyArray<readonly [string, string, unknown[]]> = 
   ["plugins", CHANNELS.host.pluginThemeNotify, [{}]],
   // Side chat runs arbitrary tools on a second loop.
   ["sidechat", CHANNELS.sidechat.send, [{ input: "x" }]],
-  ["sidechat", CHANNELS.sidechat.list, []],
   // Routines and the session tasks list.
   ["routines", ROUTINES.list, []],
   ["session-tasks", CHANNELS.sessionTasks.list, []],

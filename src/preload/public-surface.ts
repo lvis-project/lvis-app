@@ -15,7 +15,7 @@ import type {
   UserKeyboardIntentSnapshot,
 } from "../shared/chat-origin.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
-import type { SessionFamily, SessionListRow } from "../shared/session-lookup.js";
+import type { SessionFamily, SessionListKindFilter, SessionListRow } from "../shared/session-lookup.js";
 import type { ChatStreamEvent } from "../lib/chat-stream-state.js";
 // Type-only: this builder implements part of the renderer-declared surface.
 import type { LvisApi } from "../ui/renderer/types.js";
@@ -90,7 +90,7 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
   chatNew: async (opts?: { projectRoot?: string; projectName?: string }) => ipcRenderer.invoke(CHANNELS.chat.new, opts, chatGroupId),
   // The row shape is the shared list contract, not a copy of it: the bridge
   // forwards what main assembled, so re-spelling it here could only drift.
-  chatSessions: async (opts?: { kind?: "main" | "routine" | "all"; families?: SessionFamily[]; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
+  chatSessions: async (opts?: { kind?: SessionListKindFilter; families?: SessionFamily[]; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) =>
     ipcRenderer.invoke(CHANNELS.chat.sessions, opts) as Promise<{
       current: string;
       sessions: SessionListRow[];

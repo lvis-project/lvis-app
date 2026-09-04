@@ -10,7 +10,7 @@ import type {
 import type { ChatStreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import type { AppBootstrapStatus } from "../../shared/bootstrap-status.js";
-import type { RoutineRunRow, SessionFamily, SessionListRow } from "../../shared/session-lookup.js";
+import type { RoutineRunRow, SessionFamily, SessionListKindFilter, SessionListRow } from "../../shared/session-lookup.js";
 import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
@@ -639,7 +639,7 @@ export type LvisApi = {
       input: string,
       attachments?: unknown[],
       /** The conversation this side chat belongs to — recorded at its first turn. */
-      parentSessionId?: string,
+      originSessionId?: string,
     ) => Promise<
       | { ok: true; result: unknown }
       | { ok: false; error: string }
@@ -649,10 +649,6 @@ export type LvisApi = {
       | { ok: true; sessionId: string; messages: SerializedHistoryMessage[] }
       | { ok: false; error: string; messages: SerializedHistoryMessage[] }
     >;
-    list: () => Promise<{
-      current: string | null;
-      sessions: Array<{ id: string; modifiedAt: string; title: string }>;
-    }>;
     abort: () => Promise<{ ok: true } | { ok: false; error: string }>;
     onStream: (handler: (event: ChatStreamEvent) => void) => () => void;
     onFallback: (handler: (payload: { from: string; to: string }) => void) => () => void;
@@ -784,7 +780,7 @@ export type LvisApi = {
   chatNew: (opts?: { projectRoot?: string; projectName?: string }) => Promise<
     { ok: true } | { ok: false; error: string }
   >;
-  chatSessions: (opts?: { kind?: "main" | "routine" | "all"; families?: SessionFamily[]; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: SessionListRow[] }>;
+  chatSessions: (opts?: { kind?: SessionListKindFilter; families?: SessionFamily[]; routineId?: string; projectRoot?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: SessionListRow[] }>;
   onChatStream: (h: (e: ChatStreamEvent) => void) => () => void;
   /**
    * One tiled chat group's view of the per-conversation channels.

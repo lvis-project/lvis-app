@@ -41,6 +41,34 @@ export const SESSION_LIST_MAX_LIMIT = 100;
 export type SessionKind = "main" | "routine" | "subagent";
 
 /**
+ * The `kind` filter `lvis:chat:sessions` accepts: a kind the MAIN store holds,
+ * or every one of them.
+ *
+ * Derived from {@link SessionKind} rather than re-spelled, but narrower than
+ * it on purpose — `subagent` sessions live in their own store and the main
+ * store's listing has none to return, so admitting the word would let a caller
+ * ask a question this channel answers by silently falling back to `main`.
+ * Sub-agent runs reach the list as the `work-board` FAMILY instead.
+ */
+export type SessionListKindFilter = Exclude<SessionKind, "subagent"> | "all";
+
+/**
+ * The filter values the handler honours, table-keyed for the same reason
+ * {@link SESSION_FAMILIES} is: a member added to the union and forgotten here
+ * is a compile error, not a request the validator quietly rewrites.
+ */
+const SESSION_LIST_KIND_FILTER_TABLE: Readonly<Record<SessionListKindFilter, true>> = Object.freeze({
+  "main": true,
+  "routine": true,
+  "all": true,
+});
+
+/** Whether a value crossing the preload boundary names a filter this host has. */
+export function isSessionListKindFilter(value: unknown): value is SessionListKindFilter {
+  return typeof value === "string" && Object.hasOwn(SESSION_LIST_KIND_FILTER_TABLE, value);
+}
+
+/**
  * The conversation family one list row belongs to — what glyph it draws, what
  * its click opens, and whether it offers the main store's row actions.
  *
