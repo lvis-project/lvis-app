@@ -166,12 +166,52 @@ export type TailnetServeResult =
       readonly output: string | null;
     };
 
+/** Whether guided setup had to run Serve, or found it already pointing here. */
+type TailnetGuidedServeOutcome = "configured" | "already-configured";
+
+/**
+ * The outcome of the one-press setup the host decides for itself.
+ *
+ * The manual form asks seven questions, and six of them have exactly one answer
+ * a first-time owner can give: the port only has to be free, the boundary is
+ * the identity one the pairing code already backs, and the web origin is
+ * derived rather than typed. This is that whole configuration as a single
+ * operation, so the only thing left on screen is the address to open.
+ *
+ * The port is reported because it is the one value the host may have had to
+ * choose differently from the default, and the snapshot comes back so the
+ * caller does not have to re-read what it just caused.
+ */
+export type TailnetGuidedSetupResult =
+  | {
+      readonly ok: true;
+      readonly snapshot: TailnetObserverSnapshot;
+      readonly webOrigin: string | null;
+      readonly port: number;
+      readonly serve: TailnetGuidedServeOutcome;
+    }
+  | {
+      readonly ok: false;
+      readonly error: TailnetObserverErrorCode;
+      /**
+       * What Tailscale printed, when the step that failed was the Serve run.
+       *
+       * The sentence for a failed Serve says its output is below, and the
+       * certificate case in particular needs Tailscale's own words rather than
+       * a classification of them — dropping it here would leave a promise on
+       * screen with nothing under it.
+       */
+      readonly output: string | null;
+    };
+
 /** The private `window.lvisApi.tailnetObserver` namespace. */
 export interface TailnetObserverConfigApi {
   snapshot(): Promise<TailnetObserverSnapshotResult>;
   apply(config: TailnetObserverConfigView): Promise<TailnetObserverMutationResult>;
   /** Put the running listener behind Tailscale Serve, after the owner approved the command. */
   configureServe(): Promise<TailnetServeResult>;
+  /** Choose, persist, and start the whole recommended configuration in one press. */
+  guidedSetup(): Promise<TailnetGuidedSetupResult>;
 }
 
 export const DEFAULT_TAILNET_OBSERVER_VIEW_PORT = 46_173;
@@ -365,6 +405,31 @@ export function parseTailnetObserverMutationResult(
   if (value.ok === true) return Object.freeze({ ok: true as const });
   if (value.ok === false && typeof value.error === "string") {
     return Object.freeze({ ok: false as const, error: value.error });
+  }
+  return null;
+}
+
+export function parseTailnetGuidedSetupResult(
+  value: unknown,
+): TailnetGuidedSetupResult | null {
+  if (!isRecord(value)) return null;
+  if (value.ok === true) {
+    const snapshot = parseTailnetObserverSnapshot(value.snapshot);
+    const { webOrigin, port, serve } = value;
+    if (
+      snapshot === null
+      || !isOptionalText(webOrigin)
+      || !isOptionalPort(port)
+      || port === null
+      || (serve !== "configured" && serve !== "already-configured")
+    ) {
+      return null;
+    }
+    return Object.freeze({ ok: true as const, snapshot, webOrigin, port, serve });
+  }
+  const output = value.output === undefined ? null : value.output;
+  if (value.ok === false && typeof value.error === "string" && isOptionalText(output)) {
+    return Object.freeze({ ok: false as const, error: value.error, output });
   }
   return null;
 }

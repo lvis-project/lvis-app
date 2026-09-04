@@ -8,9 +8,11 @@
 import { ipcRenderer } from "electron";
 import { CHANNELS } from "../contract/app-contract.js";
 import {
+  parseTailnetGuidedSetupResult,
   parseTailnetObserverMutationResult,
   parseTailnetObserverSnapshotResult,
   parseTailnetServeResult,
+  type TailnetGuidedSetupResult,
   type TailnetObserverConfigApi,
   type TailnetObserverConfigView,
   type TailnetObserverMutationResult,
@@ -28,6 +30,10 @@ function unavailableMutation(): TailnetObserverMutationResult {
 }
 
 function unavailableServe(): TailnetServeResult {
+  return Object.freeze({ ok: false, error: "tailnet-observer-unavailable", output: null });
+}
+
+function unavailableGuidedSetup(): TailnetGuidedSetupResult {
   return Object.freeze({ ok: false, error: "tailnet-observer-unavailable", output: null });
 }
 
@@ -66,6 +72,18 @@ export function buildTailnetObserverApiSurface(): TailnetObserverConfigApi {
         ) ?? unavailableServe();
       } catch {
         return unavailableServe();
+      }
+    },
+
+    async guidedSetup(): Promise<TailnetGuidedSetupResult> {
+      try {
+        return parseTailnetGuidedSetupResult(
+          await ipcRenderer.invoke(CHANNELS.tailnetObserver.guidedSetup, {
+            intent: ipcUserKeyboardIntent(),
+          }),
+        ) ?? unavailableGuidedSetup();
+      } catch {
+        return unavailableGuidedSetup();
       }
     },
   });

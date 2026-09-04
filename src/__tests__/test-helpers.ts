@@ -1,4 +1,5 @@
 import { afterAll, vi } from "vitest";
+import { createServer as createNetServer } from "node:net";
 import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -415,4 +416,26 @@ export function makeSessionGoalStore(now?: () => string): {
     store: now ? new SessionGoalStore(persistence, now) : new SessionGoalStore(persistence),
     disk,
   };
+}
+
+/**
+ * Hold a real loopback port for the duration of one test.
+ *
+ * Two suites arrange the same precondition — "this port is taken" — and a
+ * second copy of the arrangement is a second definition of what "taken" means.
+ * A port the machine running the suite already uses satisfies the precondition
+ * on its own, so that case releases nothing rather than failing the test for
+ * the very condition it is arranging.
+ */
+export async function occupyLoopbackPort(port: number): Promise<() => Promise<void>> {
+  const held = createNetServer();
+  const bound = await new Promise<boolean>((resolve, reject) => {
+    held.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") resolve(false);
+      else reject(err);
+    });
+    held.listen({ host: "127.0.0.1", port, exclusive: true }, () => resolve(true));
+  });
+  if (!bound) return async () => undefined;
+  return () => new Promise<void>((resolve) => held.close(() => resolve()));
 }

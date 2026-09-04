@@ -1,3 +1,4 @@
+import { occupyLoopbackPort as occupy } from "../../__tests__/test-helpers.js";
 import { describe, expect, it, vi } from "vitest";
 import { createTailnetObserverConfigService } from "../tailnet-observer-config-service.js";
 import type {
@@ -49,6 +50,7 @@ function service(options: {
   environment?: TailscaleEnvironment;
   restartListener?: () => Promise<unknown>;
   runServe?: (input: { cliPath: string; port: number }) => Promise<TailscaleServeOutcome>;
+  choosePort?: (preferred: number | null) => Promise<number | null>;
 } = {}) {
   return createTailnetObserverConfigService({
     pairedSharingBootstrapFailed: () => options.pairedSharingBootstrapFailed === true,
@@ -66,8 +68,10 @@ function service(options: {
     probeEnvironment: async () => options.environment ?? readyEnvironment(),
     restartListener: options.restartListener ?? (async () => undefined),
     ...(options.runServe === undefined ? {} : { runServe: options.runServe as never }),
+    ...(options.choosePort === undefined ? {} : { choosePort: options.choosePort }),
   });
 }
+
 
 const OFF_VIEW: TailnetObserverConfigView = Object.freeze({
   enabled: false,
@@ -315,6 +319,197 @@ describe("Tailnet observer configuration service", () => {
         error: "tailnet-serve-command-failed",
         output: "HTTPS is not enabled on this tailnet",
       });
+    });
+  });
+  describe("guided setup", () => {
+    it("refuses every environment state but ready, and writes nothing", async () => {
+      const writeConfigFile = vi.fn(async () => undefined);
+      const result = await service({
+        writeConfigFile,
+        environment: readyEnvironment({ state: "logged-out" }),
+      }).guidedSetup();
+
+      expect(result).toEqual({ ok: false, error: "tailnet-guided-setup-not-ready", output: null });
+      expect(writeConfigFile).not.toHaveBeenCalled();
+    });
+
+    it("writes the recommended configuration and restarts before running Serve", async () => {
+      const order: string[] = [];
+      const writeConfigFile = vi.fn(async () => { order.push("write"); });
+      const runServe = vi.fn(async () => { order.push("serve"); return { ok: true as const }; });
+      const result = await service({
+        writeConfigFile,
+        restartListener: async () => { order.push("restart"); },
+        runServe,
+        listeningPort: 46_173,
+        choosePort: async () => 46_173,
+      }).guidedSetup();
+
+      expect(order).toEqual(["write", "restart", "serve"]);
+      expect(writeConfigFile).toHaveBeenCalledWith({
+        enabled: true,
+        authorization: TAILNET_IDENTITY,
+        pairedSharingEnabled: true,
+        webEnabled: true,
+        webOrigin: WEB_ORIGIN,
+      });
+      expect(result).toEqual(expect.objectContaining({
+        ok: true,
+        port: 46_173,
+        serve: "configured",
+        webOrigin: WEB_ORIGIN,
+      }));
+    });
+
+    it("keeps a saved port this process is already listening on without probing", async () => {
+      const choosePort = vi.fn(async () => 47_100);
+      const writeConfigFile = vi.fn(async () => undefined);
+      const result = await service({
+        file: { port: 46_500 },
+        listeningPort: 46_500,
+        writeConfigFile,
+        runServe: async () => ({ ok: true as const }),
+        choosePort,
+      }).guidedSetup();
+
+      expect(choosePort).not.toHaveBeenCalled();
+      expect(writeConfigFile).toHaveBeenCalledWith(expect.objectContaining({ port: 46_500 }));
+      expect(result).toEqual(expect.objectContaining({ ok: true, port: 46_500 }));
+    });
+
+    it("prefers the saved port over the default when nothing holds it", async () => {
+      const choosePort = vi.fn(async (preferred: number | null) => preferred);
+      const writeConfigFile = vi.fn(async () => undefined);
+      await service({
+        file: { port: 46_500 },
+        listeningPort: 46_500,
+        writeConfigFile,
+        runServe: async () => ({ ok: true as const }),
+        readConfigFile: async () => ({ port: 46_500 }),
+        choosePort,
+      }).guidedSetup();
+
+      expect(writeConfigFile).toHaveBeenCalledWith(expect.objectContaining({ port: 46_500 }));
+    });
+
+    // The real chooser against a real socket: the default port is what a first
+    // run asks for, and a machine already using it must still end up with a
+    // listener rather than with a start failure nobody can act on.
+    it("persists an OS-assigned port when the default one is taken", async () => {
+      const release = await occupy(46_173);
+      try {
+        const writes: TailnetObserverConfigFile[] = [];
+        const result = await service({
+          writeConfigFile: async (file) => { writes.push(file); },
+          listeningPort: 46_800,
+          runServe: async () => ({ ok: true as const }),
+        }).guidedSetup();
+
+        expect(result.ok).toBe(true);
+        expect(writes[0]?.port).toBeTypeOf("number");
+        expect(writes[0]?.port).not.toBe(46_173);
+      } finally {
+        await release();
+      }
+    });
+
+    it("reports that no port could be opened rather than writing a dead configuration", async () => {
+      const writeConfigFile = vi.fn(async () => undefined);
+      const result = await service({
+        writeConfigFile,
+        choosePort: async () => null,
+      }).guidedSetup();
+
+      expect(result).toEqual({ ok: false, error: "tailnet-guided-setup-port-unavailable", output: null });
+      expect(writeConfigFile).not.toHaveBeenCalled();
+    });
+
+    it("leaves Serve alone when it already forwards to this exact port", async () => {
+      const runServe = vi.fn(async () => ({ ok: true as const }));
+      const result = await service({
+        listeningPort: 46_173,
+        choosePort: async () => 46_173,
+        environment: readyEnvironment({ serveConfigured: true, serveTargetPort: 46_173 }),
+        runServe,
+      }).guidedSetup();
+
+      expect(runServe).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ ok: true, serve: "already-configured" }));
+    });
+
+    it("re-runs Serve when it forwards somewhere else", async () => {
+      const runServe = vi.fn(async () => ({ ok: true as const }));
+      const result = await service({
+        listeningPort: 46_173,
+        choosePort: async () => 46_173,
+        environment: readyEnvironment({ serveConfigured: true, serveTargetPort: 45_000 }),
+        runServe,
+      }).guidedSetup();
+
+      expect(runServe).toHaveBeenCalledWith({ cliPath: "tailscale", port: 46_173 });
+      expect(result).toEqual(expect.objectContaining({ ok: true, serve: "configured" }));
+    });
+
+    it("hands back the resolver's own code when the restart refuses", async () => {
+      const result = await service({
+        choosePort: async () => 46_173,
+        restartListener: async () => {
+          throw new Error("tailnet-paired-sharing-runtime-unavailable");
+        },
+      }).guidedSetup();
+
+      expect(result).toEqual({
+        ok: false,
+        error: "tailnet-paired-sharing-runtime-unavailable",
+        output: null,
+      });
+    });
+
+    it("does not echo a failure that is not one of its own codes", async () => {
+      const result = await service({
+        choosePort: async () => 46_173,
+        writeConfigFile: async () => {
+          throw new Error("EACCES: permission denied, open '/home/example/tailnet/observer.json'");
+        },
+      }).guidedSetup();
+
+      expect(result).toEqual({ ok: false, error: "tailnet-observer-write-failed", output: null });
+    });
+
+    it("reports a Serve failure instead of claiming the setup finished", async () => {
+      const result = await service({
+        listeningPort: 46_173,
+        choosePort: async () => 46_173,
+        runServe: async () => ({
+          ok: false as const,
+          reason: "command-failed" as const,
+          output: "HTTPS is not enabled on this tailnet",
+        }),
+      }).guidedSetup();
+
+      // Tailscale's own sentence survives: the message for this code says its
+      // output is below, and the certificate case cannot be acted on without it.
+      expect(result).toEqual({
+        ok: false,
+        error: "tailnet-serve-command-failed",
+        output: "HTTPS is not enabled on this tailnet",
+      });
+    });
+
+    it("writes over a damaged file rather than refusing to set up", async () => {
+      const writeConfigFile = vi.fn(async () => undefined);
+      const result = await service({
+        readConfigFile: async () => {
+          throw new Error("tailnet-observer-config-file-invalid");
+        },
+        writeConfigFile,
+        listeningPort: 46_173,
+        choosePort: async () => 46_173,
+        runServe: async () => ({ ok: true as const }),
+      }).guidedSetup();
+
+      expect(result.ok).toBe(true);
+      expect(writeConfigFile).toHaveBeenCalled();
     });
   });
 });

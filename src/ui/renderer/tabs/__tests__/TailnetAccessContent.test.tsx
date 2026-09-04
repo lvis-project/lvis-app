@@ -20,7 +20,51 @@ const SAFE_SNAPSHOT: TailnetSharingSnapshot = {
   shares: [],
 };
 
-function makeApi() {
+const OBSERVER_OFF = {
+  enabled: false,
+  authorization: { kind: "tailnet-identity" as const },
+  port: 46_173,
+  controllerEnabled: false,
+  pairedSharingEnabled: false,
+  webEnabled: false,
+  webOrigin: "",
+};
+
+const OBSERVER_DNS_NAME = "desk.example-tailnet.ts.net";
+
+/** A never-configured observer on a signed-in node — the setup flow's entry state. */
+function observerSnapshot() {
+  return {
+    saved: OBSERVER_OFF,
+    effective: OBSERVER_OFF,
+    provenance: {
+      enabled: "unset" as const,
+      authorization: "unset" as const,
+      port: "unset" as const,
+      controllerEnabled: "unset" as const,
+      pairedSharingEnabled: "unset" as const,
+      webEnabled: "unset" as const,
+      webOrigin: "unset" as const,
+    },
+    listeningPort: null,
+    lastStartError: null,
+    pairedSharingBootstrapFailed: false,
+    environment: {
+      state: "ready" as const,
+      login: "owner@example.com",
+      dnsName: OBSERVER_DNS_NAME,
+      tailnetName: "example-tailnet.ts.net",
+      serveConfigured: false,
+      serveTargetPort: null,
+      detail: null,
+    },
+    derivedWebOrigin: "https://" + OBSERVER_DNS_NAME,
+    serveCommand: null,
+    configFileError: null,
+  };
+}
+
+function makeApi(options: { observerUnavailable?: boolean } = {}) {
   const snapshot = vi.fn(async () => ({ ok: true as const, snapshot: SAFE_SNAPSHOT }));
   const createInvitation = vi.fn(async () => ({
     ok: true as const,
@@ -32,6 +76,27 @@ function makeApi() {
   }));
   const createCurrentConversationShare = vi.fn(async () => ({ ok: true as const }));
   const api = {
+    // The bridge is always there — the preload exposes it unconditionally. What
+    // varies is whether the host can answer, which is what the reader sees.
+    tailnetObserver: {
+      snapshot: vi.fn(async () =>
+        options.observerUnavailable === true
+          ? { ok: false as const, error: "tailnet-observer-unavailable" as const }
+          : { ok: true as const, snapshot: observerSnapshot() },
+      ),
+      apply: vi.fn(async () => ({ ok: true as const })),
+      configureServe: vi.fn(async () => ({
+        ok: true as const,
+        url: "https://" + OBSERVER_DNS_NAME + "/",
+      })),
+      guidedSetup: vi.fn(async () => ({
+        ok: true as const,
+        snapshot: observerSnapshot(),
+        webOrigin: "https://" + OBSERVER_DNS_NAME,
+        port: 46_173,
+        serve: "configured" as const,
+      })),
+    },
     tailnetSharing: {
       snapshot,
       createInvitation,
@@ -58,6 +123,39 @@ afterEach(() => {
 });
 
 describe("TailnetAccessContent", () => {
+  // The setup flow owns the observer anchor now: the full listener form is
+  // reachable only through it, so a deep link to the section has to land on the
+  // thing a reader can actually act on.
+  it("puts the guided setup surface at the observer anchor", async () => {
+    const { api } = makeApi({ observerUnavailable: true });
+    const { container } = render(<TailnetAccessContent api={api} />);
+
+    await screen.findByTestId("tailnet-access-create-invitation");
+    const anchor = container.querySelector("[data-settings-section='remote-tailnet-observer']");
+    expect(anchor).not.toBeNull();
+    // The host could not answer for the observer. The section says so in one
+    // sentence at the anchor rather than taking the tab down with it.
+    expect(await screen.findByTestId("tailnet-setup-error")).toBeInTheDocument();
+    expect(container.querySelectorAll("[data-settings-section='remote-tailnet-observer']"))
+      .toHaveLength(1);
+  });
+
+  // The finished panel ends with "now let someone in", and the one-use code
+  // that does it already has a home below. Focus moves there rather than a
+  // second minting control appearing inside the flow.
+  it("moves the reader to the invitation control when setup asks for a code", async () => {
+    const { api } = makeApi();
+    render(<TailnetAccessContent api={api} />);
+
+    const create = await screen.findByTestId("tailnet-access-create-invitation");
+    create.scrollIntoView = vi.fn();
+
+    fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+    fireEvent.click(await screen.findByTestId("tailnet-setup-create-invitation"));
+
+    expect(create).toHaveFocus();
+  });
+
   it("shows a raw invitation code only after the local owner creates it", async () => {
     const { api, createInvitation } = makeApi();
     render(<TailnetAccessContent api={api} />);

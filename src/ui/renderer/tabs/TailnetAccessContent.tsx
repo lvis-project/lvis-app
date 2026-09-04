@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import {
@@ -17,7 +17,7 @@ import {
   type TailnetSharingSnapshot,
 } from "../../../shared/tailnet-sharing.js";
 import { SettingsSection, type SettingsSectionFeedback } from "../components/PageShell.js";
-import { TailnetObserverSection } from "./TailnetObserverSection.js";
+import { TailnetSetupCard } from "./TailnetSetupCard.js";
 import { formatMediumDateTime } from "../../../shared/format-time.js";
 import type { LvisApi } from "../types.js";
 import { useCopyFlash } from "../hooks/use-copy-flash.js";
@@ -93,6 +93,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
    */
   const [controlShareToConfirm, setControlShareToConfirm] = useState<string | null>(null);
   const { copied, copy: copyToClipboard, reset: resetCopied } = useCopyFlash();
+  const invitationButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -174,6 +175,20 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
     if (issuedInvitation) copyToClipboard(issuedInvitation.code);
   }, [copyToClipboard, issuedInvitation]);
 
+  /**
+   * Hand the reader to the invitation control rather than draw a second one.
+   *
+   * Setup finishes with "now let someone in", and the one-use code that does
+   * that already has a home below. Minting it from two places would put the
+   * same secret on screen twice, so the last wizard step moves focus here.
+   */
+  const focusInvitationControl = useCallback(() => {
+    const button = invitationButtonRef.current;
+    if (button === null) return;
+    button.scrollIntoView({ block: "center" });
+    button.focus();
+  }, []);
+
   const createShare = useCallback((pairingId: string) => {
     if (sharePermission === "control") {
       setControlShareToConfirm(pairingId);
@@ -209,7 +224,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
       {/* Outside the loading and disabled gates below on purpose: this is the
           control that makes sharing available, so hiding it whenever sharing
           is unavailable is exactly the dead end it exists to remove. */}
-      <TailnetObserverSection api={api} />
+      <TailnetSetupCard api={api} onCreateInvitation={focusInvitationControl} />
 
       {feedback ? (
         <p
@@ -264,6 +279,7 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
                 </NativeSelect>
               </label>
               <Button
+                ref={invitationButtonRef}
                 size="sm"
                 disabled={busy !== null}
                 onClick={() => void createInvitation()}
