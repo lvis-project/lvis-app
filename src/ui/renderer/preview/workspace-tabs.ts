@@ -111,6 +111,8 @@ export interface WorkspaceTabsStore {
    */
   pruneContentTabs: (isResolvable: (targetId: string) => boolean) => void;
   closeTab: (id: string) => void;
+  /** Close the launcher container tab of this kind, if one is open. */
+  closeContainerTab: (kind: WorkspaceTabKind) => void;
   /** Set (or clear, with `null`) the manually-typed address for a browser tab. */
   setBrowserTabUrl: (tabId: string, url: string | null) => void;
 }
@@ -143,6 +145,21 @@ interface WorkspaceState {
 }
 
 const EMPTY_STATE: WorkspaceState = { tabs: [], activeTabId: null, browserUrlByTab: {} };
+
+function withTabClosed(prev: WorkspaceState, id: string): WorkspaceState {
+  const closingIndex = prev.tabs.findIndex((tab) => tab.id === id);
+  if (closingIndex < 0) return prev;
+  const tabs = prev.tabs.filter((tab) => tab.id !== id);
+  let activeTabId = prev.activeTabId;
+  if (activeTabId === id) {
+    // Fall back to the tab before the closed one; empties → null (launcher).
+    const fallback = tabs[Math.max(0, closingIndex - 1)] ?? tabs[0] ?? null;
+    activeTabId = fallback ? fallback.id : null;
+  }
+  const browserUrlByTab = { ...prev.browserUrlByTab };
+  delete browserUrlByTab[id];
+  return { tabs, activeTabId, browserUrlByTab };
+}
 
 export function useWorkspaceTabs(): WorkspaceTabsStore {
   const [state, setState] = useState<WorkspaceState>(EMPTY_STATE);
@@ -268,19 +285,13 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
   }, []);
 
   const closeTab = useCallback((id: string) => {
+    setState((prev) => withTabClosed(prev, id));
+  }, []);
+
+  const closeContainerTab = useCallback((kind: WorkspaceTabKind) => {
     setState((prev) => {
-      const closingIndex = prev.tabs.findIndex((tab) => tab.id === id);
-      if (closingIndex < 0) return prev;
-      const tabs = prev.tabs.filter((tab) => tab.id !== id);
-      let activeTabId = prev.activeTabId;
-      if (activeTabId === id) {
-        // Fall back to the tab before the closed one; empties → null (launcher).
-        const fallback = tabs[Math.max(0, closingIndex - 1)] ?? tabs[0] ?? null;
-        activeTabId = fallback ? fallback.id : null;
-      }
-      const browserUrlByTab = { ...prev.browserUrlByTab };
-      delete browserUrlByTab[id];
-      return { tabs, activeTabId, browserUrlByTab };
+      const container = prev.tabs.find((tab) => tab.kind === kind && tab.content === null);
+      return container ? withTabClosed(prev, container.id) : prev;
     });
   }, []);
 
@@ -309,6 +320,7 @@ export function useWorkspaceTabs(): WorkspaceTabsStore {
       promoteToPinned,
       pruneContentTabs,
       closeTab,
+      closeContainerTab,
       setBrowserTabUrl,
     }),
     [state, setActiveTabId, addTab, ensureContainerTab, openInEphemeral, openPinned, promoteToPinned, pruneContentTabs, closeTab, setBrowserTabUrl],

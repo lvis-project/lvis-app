@@ -8,6 +8,12 @@ export interface SubAgentSpawn {
   spawnId: string;
   title: string;
   status: SubAgentRunStatus;
+  /**
+   * Rebuilt from the session's files when the conversation was opened, not
+   * reported by a turn running now. A restored row is history the panel can
+   * show on request; only a live spawn is an event worth opening the panel for.
+   */
+  restored?: true;
   /** Typed terminate-and-resume state preserved from the agent_spawn done event. */
   suspension?: SubAgentSuspension;
   /** The prompt sent to the sub-agent, rendered as a user bubble in the viewer. */
