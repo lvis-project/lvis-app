@@ -164,8 +164,8 @@ function serveFailure(error: string, output: string | null): TailnetServeResult 
   return Object.freeze({ ok: false as const, error, output });
 }
 
-function guidedFailure(error: string): TailnetGuidedSetupResult {
-  return Object.freeze({ ok: false as const, error });
+function guidedFailure(error: string, output: string | null = null): TailnetGuidedSetupResult {
+  return Object.freeze({ ok: false as const, error, output });
 }
 
 /**
@@ -321,7 +321,7 @@ export function createTailnetObserverConfigService(
       let serve: "configured" | "already-configured" = "already-configured";
       if (!(environment.serveConfigured && environment.serveTargetPort === port)) {
         const outcome = await service.configureServe();
-        if (!outcome.ok) return guidedFailure(outcome.error);
+        if (!outcome.ok) return guidedFailure(outcome.error, outcome.output);
         serve = "configured";
       }
 

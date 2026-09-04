@@ -66,6 +66,10 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Tailscale's own words for a failed Serve. The sentence for that code says
+  // its output is below, so losing it leaves a promise with nothing under it —
+  // and the certificate case is the one nobody can act on without it.
+  const [errorOutput, setErrorOutput] = useState<string | null>(null);
   const [stage, setStage] = useState<WizardStage>("environment");
   const [method, setMethod] = useState<SetupMethod>("auto");
   const [showWizard, setShowWizard] = useState(false);
@@ -129,6 +133,7 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
 
   const goPrev = useCallback(() => {
     setError(null);
+    setErrorOutput(null);
     if (stage === "mode") setStage("environment");
     if (stage === "apply" || stage === "manual") setStage("mode");
   }, [stage]);
@@ -136,6 +141,7 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
   const recheck = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setErrorOutput(null);
     await readSnapshot();
     setBusy(false);
   }, [readSnapshot]);
@@ -145,6 +151,7 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
     if (busy || bridge === undefined) return;
     setBusy(true);
     setError(null);
+    setErrorOutput(null);
     const result = await bridge.guidedSetup();
     if (result.ok) {
       setSnapshot(result.snapshot);
@@ -155,6 +162,7 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
       setShowWizard(true);
     } else {
       setError(result.error);
+      setErrorOutput(result.output);
       // Tailscale stopped being usable between the check and the press, so the
       // step that reports that is the one to stand on — not this one, which has
       // nothing left to offer.
@@ -178,6 +186,7 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
     setShowWizard(false);
     setShowManualForm(false);
     setError(null);
+    setErrorOutput(null);
     setStage("environment");
     setMethod("auto");
     void readSnapshot();
@@ -408,6 +417,15 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
             </p>
           )}
 
+          {errorOutput === null || stage === "environment" ? null : (
+            <pre
+              className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive"
+              data-testid="tailnet-setup-error-output"
+            >
+              {errorOutput}
+            </pre>
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
             {stageIndex === 0 || stage === "done" ? null : (
               <Button
@@ -491,6 +509,14 @@ export function TailnetSetupWizard({ api, onCreateInvitation }: TailnetSetupWiza
             <p className="text-sm text-destructive" data-testid="tailnet-setup-error">
               {tailnetObserverErrorText(error, t)}
             </p>
+          )}
+          {errorOutput === null ? null : (
+            <pre
+              className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive"
+              data-testid="tailnet-setup-error-output"
+            >
+              {errorOutput}
+            </pre>
           )}
           {showManualForm ? (
             <div data-testid="tailnet-setup-manual-form">

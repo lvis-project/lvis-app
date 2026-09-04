@@ -302,14 +302,22 @@ describe("Tailnet observer configuration IPC boundary", () => {
       });
     });
 
-    it("passes the host's own refusal code through", async () => {
+    it("passes the host's own refusal code and Tailscale's output through", async () => {
       await setup({
-        guidedSetup: async () => ({ ok: false as const, error: "tailnet-guided-setup-not-ready" }),
+        guidedSetup: async () => ({
+          ok: false as const,
+          error: "tailnet-serve-command-failed",
+          output: "HTTPS is not enabled on this tailnet",
+        }),
       });
 
       await expect(
         invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, { intent }),
-      ).resolves.toEqual({ ok: false, error: "tailnet-guided-setup-not-ready" });
+      ).resolves.toEqual({
+        ok: false,
+        error: "tailnet-serve-command-failed",
+        output: "HTTPS is not enabled on this tailnet",
+      });
     });
 
     it("never lets a thrown message out as an error code", async () => {
@@ -321,7 +329,7 @@ describe("Tailnet observer configuration IPC boundary", () => {
 
       await expect(
         invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, { intent }),
-      ).resolves.toEqual({ ok: false, error: "tailnet-observer-write-failed" });
+      ).resolves.toEqual({ ok: false, error: "tailnet-observer-write-failed", output: null });
     });
   });
 });

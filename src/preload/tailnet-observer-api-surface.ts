@@ -34,7 +34,7 @@ function unavailableServe(): TailnetServeResult {
 }
 
 function unavailableGuidedSetup(): TailnetGuidedSetupResult {
-  return Object.freeze({ ok: false, error: "tailnet-observer-unavailable" });
+  return Object.freeze({ ok: false, error: "tailnet-observer-unavailable", output: null });
 }
 
 /** Build the private `window.lvisApi.tailnetObserver` namespace. */

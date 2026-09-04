@@ -348,7 +348,7 @@ describe("Tailnet observer configuration service", () => {
         environment: readyEnvironment({ state: "logged-out" }),
       }).guidedSetup();
 
-      expect(result).toEqual({ ok: false, error: "tailnet-guided-setup-not-ready" });
+      expect(result).toEqual({ ok: false, error: "tailnet-guided-setup-not-ready", output: null });
       expect(writeConfigFile).not.toHaveBeenCalled();
     });
 
@@ -439,7 +439,7 @@ describe("Tailnet observer configuration service", () => {
         choosePort: async () => null,
       }).guidedSetup();
 
-      expect(result).toEqual({ ok: false, error: "tailnet-guided-setup-port-unavailable" });
+      expect(result).toEqual({ ok: false, error: "tailnet-guided-setup-port-unavailable", output: null });
       expect(writeConfigFile).not.toHaveBeenCalled();
     });
 
@@ -480,6 +480,7 @@ describe("Tailnet observer configuration service", () => {
       expect(result).toEqual({
         ok: false,
         error: "tailnet-paired-sharing-runtime-unavailable",
+        output: null,
       });
     });
 
@@ -491,7 +492,7 @@ describe("Tailnet observer configuration service", () => {
         },
       }).guidedSetup();
 
-      expect(result).toEqual({ ok: false, error: "tailnet-observer-write-failed" });
+      expect(result).toEqual({ ok: false, error: "tailnet-observer-write-failed", output: null });
     });
 
     it("reports a Serve failure instead of claiming the setup finished", async () => {
@@ -505,7 +506,13 @@ describe("Tailnet observer configuration service", () => {
         }),
       }).guidedSetup();
 
-      expect(result).toEqual({ ok: false, error: "tailnet-serve-command-failed" });
+      // Tailscale's own sentence survives: the message for this code says its
+      // output is below, and the certificate case cannot be acted on without it.
+      expect(result).toEqual({
+        ok: false,
+        error: "tailnet-serve-command-failed",
+        output: "HTTPS is not enabled on this tailnet",
+      });
     });
 
     it("writes over a damaged file rather than refusing to set up", async () => {

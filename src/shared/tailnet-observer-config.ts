@@ -190,7 +190,19 @@ export type TailnetGuidedSetupResult =
       readonly port: number;
       readonly serve: TailnetGuidedServeOutcome;
     }
-  | { readonly ok: false; readonly error: TailnetObserverErrorCode };
+  | {
+      readonly ok: false;
+      readonly error: TailnetObserverErrorCode;
+      /**
+       * What Tailscale printed, when the step that failed was the Serve run.
+       *
+       * The sentence for a failed Serve says its output is below, and the
+       * certificate case in particular needs Tailscale's own words rather than
+       * a classification of them — dropping it here would leave a promise on
+       * screen with nothing under it.
+       */
+      readonly output: string | null;
+    };
 
 /** The private `window.lvisApi.tailnetObserver` namespace. */
 export interface TailnetObserverConfigApi {
@@ -415,8 +427,9 @@ export function parseTailnetGuidedSetupResult(
     }
     return Object.freeze({ ok: true as const, snapshot, webOrigin, port, serve });
   }
-  if (value.ok === false && typeof value.error === "string") {
-    return Object.freeze({ ok: false as const, error: value.error });
+  const output = value.output === undefined ? null : value.output;
+  if (value.ok === false && typeof value.error === "string" && isOptionalText(output)) {
+    return Object.freeze({ ok: false as const, error: value.error, output });
   }
   return null;
 }

@@ -207,7 +207,7 @@ describe("TailnetSetupWizard", () => {
 
   it("goes back to the environment step when Tailscale stopped being usable", async () => {
     const { api } = makeApi({
-      guidedSetup: { ok: false, error: "tailnet-guided-setup-not-ready" },
+      guidedSetup: { ok: false, error: "tailnet-guided-setup-not-ready", output: null },
     });
     render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
@@ -220,7 +220,7 @@ describe("TailnetSetupWizard", () => {
 
   it("offers the manual form rather than a dead end when no port can be opened", async () => {
     const { api } = makeApi({
-      guidedSetup: { ok: false, error: "tailnet-guided-setup-port-unavailable" },
+      guidedSetup: { ok: false, error: "tailnet-guided-setup-port-unavailable", output: null },
     });
     render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
@@ -235,9 +235,34 @@ describe("TailnetSetupWizard", () => {
     expect(await screen.findByTestId("tailnet-observer-apply")).toBeInTheDocument();
   });
 
+  // The sentence for a failed Serve says its output is below. Dropping what
+  // Tailscale printed leaves that promise with nothing under it, and the
+  // certificate case is the one nobody can act on without those words.
+  it("shows what Tailscale printed when the Serve step failed", async () => {
+    const { api } = makeApi({
+      guidedSetup: {
+        ok: false,
+        error: "tailnet-serve-command-failed",
+        output: "HTTPS is not enabled on this tailnet",
+      },
+    });
+    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
+    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
+    fireEvent.click(await screen.findByTestId("tailnet-setup-apply"));
+
+    expect(await screen.findByTestId("tailnet-setup-error")).toHaveTextContent(
+      "did not complete the Serve command",
+    );
+    expect(screen.getByTestId("tailnet-setup-error-output")).toHaveTextContent(
+      "HTTPS is not enabled on this tailnet",
+    );
+  });
+
   it("renders the host's own sentence for any other refusal", async () => {
     const { api } = makeApi({
-      guidedSetup: { ok: false, error: "tailnet-web-origin-underivable" },
+      guidedSetup: { ok: false, error: "tailnet-web-origin-underivable", output: null },
     });
     render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 

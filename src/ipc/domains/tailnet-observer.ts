@@ -113,7 +113,7 @@ export function registerTailnetObserverHandlers(deps: IpcDeps): void {
     try {
       return await service.guidedSetup();
     } catch (err) {
-      return rejection(err);
+      return { ...rejection(err), output: null };
     }
   });
 }
