@@ -368,6 +368,59 @@
   }
 }
 
+/* Spotlight ring for the onboarding tour — a layer of its own, portaled onto
+   the body and placed against the live anchor by the same popper that places
+   the step card. The ring cannot live on the anchor: a `box-shadow` is painted
+   outside the border box, and every ancestor of a composer or toolbar anchor
+   clips (`overflow: hidden` from the input bar out through the pane to the
+   route canvas), so the ring would be cut away the moment it was drawn. Nor
+   could it be lifted over the backdrop from there — the route canvas is
+   `isolation: isolate`, so a `z-index` on the anchor is trapped inside that
+   stacking context and can never rise above a `z-50` layer outside it.
+
+   The last shadow layer is the dim itself: an outer shadow is never painted
+   under its own element, so a spread wide enough to cover the window leaves
+   exactly this box clear. That is the hole — the anchor stays at full strength
+   with the hole's rounded corners coming free from the radius above, and the
+   backdrop stops painting the same tone while an anchor exists so the two
+   cannot double up. A step with no anchor has no ring, and there the backdrop
+   carries the dim on its own.
+
+   Unlayered so the popover's own utility classes cannot outrank it. On the
+   body the z-index is real, and puts the ring over the tour's `z-50` backdrop.
+
+   The ring takes the pointer over the area it covers, which is the anchor and
+   nothing more — a shadow is not hit-tested, so the dim it casts over the rest
+   of the window stays the backdrop's to catch, and a press that misses the
+   anchor still dismisses the tour. Over the anchor the press must not dismiss:
+   the anchor is the one lit thing on a dimmed window with a ring drawn round
+   it, which reads as an invitation to press it, and step 1 asks the reader to
+   type there. The component's handler turns that press into focus.
+
+   The cost is that the anchor no longer sees the pointer, so its own hover
+   tint and tooltip stay off while the tour rings it — acceptable, because the
+   ring and the hole already say which control the step is about, which is what
+   a hover tint is for. The cursor is the ring's own, not a copy of the
+   anchor's: over every anchor the press does the same one thing, and saying
+   "pressable" beats the plain arrow a decorative box would otherwise show. */
+.lvis-tour-ring {
+  position: relative;
+  z-index: 51;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  box-shadow:
+    var(--shadow-spotlight),
+    0 0 0 100vmax hsl(var(--overlay) / var(--opacity-emphatic));
+}
+
+/* The step card sits one step above the ring, because the ring's outermost
+   shadow layer is the window-wide dim: at the ring's own level the card would
+   be dimmed by the very layer that is meant to isolate the anchor. */
+.lvis-tour-card {
+  z-index: 52;
+}
+
 /* Radix Dialog state-driven entry/exit — DialogContent fades + zoom-in on
    open, fades + zoom-out on close. The DialogOverlay (theme backdrop) fades
    independently so the backdrop blur appears before the card content lands. */
@@ -404,6 +457,13 @@
   .lvis-settings-section-arrival {
     box-shadow: var(--shadow-spotlight-reduced);
     transition: none;
+  }
+  /* Same for the tour's ring: it still marks the element the step is about,
+     in the tighter no-bloom variant. The dim layer is not motion, so it stays. */
+  .lvis-tour-ring {
+    box-shadow:
+      var(--shadow-spotlight-reduced),
+      0 0 0 100vmax hsl(var(--overlay) / var(--opacity-emphatic));
   }
   /* Marquee never scrolls under reduced motion. MarqueeText also renders the
      static truncated variant in this case, so this is belt-and-suspenders. */
