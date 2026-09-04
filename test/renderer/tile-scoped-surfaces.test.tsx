@@ -916,11 +916,21 @@ describe("a turn parked on an approval, with two tiles", () => {
     });
     expect(container.querySelector('[data-testid="pane-panel-toggle-pending-answer"]')).not.toBeNull();
 
-    // The panel closed: the toggle is the way back, and it says so too.
+    // The panel closed: the toggle is the way back, and it says so too. Past
+    // the close transition as well — the settled-closed panel used to unmount,
+    // taking the side chat's claim and its parked question with it.
     await act(async () => { fireEvent.click(toggle()); });
+    // Longer than the panel's close transition (ChatView's
+    // SIDE_PANEL_LAYOUT_TRANSITION_MS), after which the panel settles closed.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(container.querySelector('[data-testid="side-chat-view"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="chat-side-panel-motion"]')).toHaveStyle({ display: "none" });
     await waitFor(() => {
       expect(container.querySelector('[data-testid="pane-panel-toggle-pending-answer"]')).not.toBeNull();
     });
+    expect(dock(container)).toHaveLength(1);
     // No composer in the tile is covered by a card that is not its own.
     const tileComposer = container.querySelector<HTMLElement>('[data-testid="chat-main-column"] [data-composer-placement]')!;
     expect(tileComposer).not.toHaveAttribute("inert");
@@ -935,6 +945,57 @@ describe("a turn parked on an approval, with two tiles", () => {
       expect(container.querySelector('[data-testid="pane-panel-toggle-pending-answer"]')).toBeNull();
     });
     expect(container.querySelector('[data-testid="chat-side-panel-tab-side-chat-pending-answer"]')).toBeNull();
+  });
+
+  it("opening a side chat from its sidebar row does not pin the panel to that tab afterwards", async () => {
+    const parent = { id: MOCK_DEFAULT_SESSION_ID, title: "부모 대화", modifiedAt: new Date(2, 0, 2).toISOString() };
+    const { container, api } = await renderApp({
+      hasApiKey: true,
+      sideChat: true,
+      sessions: [
+        parent,
+        { ...parent, id: MOCK_SIDE_CHAT_SESSION_ID, title: "사이드 챗", family: "side-chat", originSessionId: MOCK_DEFAULT_SESSION_ID },
+      ],
+    });
+    const sidebarToggle = container.querySelector<HTMLButtonElement>('[data-testid="sidebar-collapse-toggle"]');
+    if (sidebarToggle && sidebarToggle.getAttribute("aria-pressed") !== "true") {
+      await act(async () => { fireEvent.click(sidebarToggle); });
+    }
+    const row = await waitFor(() => {
+      const found = container.querySelector<HTMLElement>(`[data-testid="sidebar-session-${MOCK_SIDE_CHAT_SESSION_ID}"]`);
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    await act(async () => { fireEvent.click(row); });
+    const sideChatLoad = (api.sideChat as unknown as { load: ReturnType<typeof vi.fn> }).load;
+    await waitFor(() => expect(sideChatLoad).toHaveBeenCalledWith(MOCK_SIDE_CHAT_SESSION_ID));
+    const tab = (kind: string) => container.querySelector<HTMLElement>(`[data-testid="chat-side-panel-tab-${kind}"]`);
+    await waitFor(() => expect(tab("side-chat")?.getAttribute("aria-selected")).toBe("true"));
+
+    // The request opened the tab once. Moving to another tab is the user's
+    // call and must hold — the request is not re-applied on the next render.
+    const add = container.querySelector<HTMLElement>('[data-testid="chat-side-panel-add-tab"]')!;
+    await act(async () => {
+      fireEvent.pointerDown(add, { button: 0 });
+      fireEvent.click(add);
+    });
+    const menuBrowser = await waitFor(() => {
+      const item = document.querySelector<HTMLElement>(`[data-testid="${chatSidePanelLauncherTestId("menu-browser")}"]`);
+      expect(item).not.toBeNull();
+      return item!;
+    });
+    await act(async () => { fireEvent.click(menuBrowser); });
+    await waitFor(() => expect(tab("browser")?.getAttribute("aria-selected")).toBe("true"));
+    await act(async () => { fireEvent.click(tab("side-chat")!); });
+    await waitFor(() => expect(tab("side-chat")?.getAttribute("aria-selected")).toBe("true"));
+    await act(async () => { fireEvent.click(tab("browser")!); });
+    await waitFor(() => expect(tab("browser")?.getAttribute("aria-selected")).toBe("true"));
+    expect(tab("side-chat")?.getAttribute("aria-selected")).toBe("false");
+
+    // Closing the panel holds too.
+    const toggle = container.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.panePanelToggle))!;
+    await act(async () => { fireEvent.click(toggle); });
+    await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("false"));
   });
 
   it("takes the lane card down when the host retires the request", async () => {
