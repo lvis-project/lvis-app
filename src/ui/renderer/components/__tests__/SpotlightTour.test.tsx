@@ -378,6 +378,21 @@ describe("SpotlightTour", () => {
 const ANCHOR_WIDTH = 240;
 const ANCHOR_HEIGHT = 32;
 
+/** `src/styles.css` — the tour's ring, its dim, and the card's z all live there. */
+function readStyles(): string {
+  return readFileSync(
+    resolve(fileURLToPath(import.meta.url), "../../../../../styles.css"),
+    "utf8",
+  );
+}
+
+/** The declarations of the first top-level rule with this exact selector. */
+function ruleBody(styles: string, selector: string): string {
+  const at = styles.indexOf(`\n${selector} {`);
+  if (at === -1) throw new Error(`no rule for ${selector}`);
+  return styles.slice(at, styles.indexOf("}", at));
+}
+
 function stubRect(el: HTMLElement, width: number, height: number): void {
   el.getBoundingClientRect = () =>
     ({
@@ -745,12 +760,54 @@ describe("SpotlightTour ring", () => {
     expect(anchor.style.pointerEvents).toBe("");
     // The stylesheet is the other half of that claim: a rule keyed on the mark
     // used to disable the very control a step asks the user to type into.
-    const styles = readFileSync(
-      resolve(fileURLToPath(import.meta.url), "../../../../../styles.css"),
-      "utf8",
-    );
+    const styles = readStyles();
     expect(styles).not.toContain("[data-tour-highlight");
     expect(styles).toContain(".lvis-tour-ring");
+  });
+
+  // The dim has one owner at a time. With an anchor the ring paints it, in the
+  // outermost layer of its own shadow, which leaves a hole exactly over the
+  // anchor; the backdrop must go clear or the two would stack and dim the
+  // anchor back down. With no anchor there is no ring, and the backdrop is the
+  // only thing left that can carry it.
+  it("hands the dim to the ring when a step has an anchor", async () => {
+    mountAnchor("a");
+    const { findByTestId } = renderTour();
+    await findByTestId("spotlight-tour:ring");
+    const backdrop = await findByTestId("spotlight-tour:backdrop");
+    expect(backdrop.getAttribute("data-dimming")).toBe("false");
+    expect(backdrop.style.background).toBe("transparent");
+    const styles = readStyles();
+    const ringRule = ruleBody(styles, ".lvis-tour-ring");
+    expect(ringRule).toContain("100vmax hsl(var(--overlay) / var(--opacity-emphatic))");
+    // The dim reaches past the ring's own shadows, so it has to be the last
+    // layer or it would paint over them.
+    expect(ringRule.indexOf("--shadow-spotlight")).toBeLessThan(
+      ringRule.indexOf("100vmax"),
+    );
+  });
+
+  it("keeps the dim on the backdrop when a step has no anchor", async () => {
+    // Nothing mounted, so the fixture's selector misses.
+    const { findByTestId, queryByTestId } = renderTour();
+    const backdrop = await findByTestId("spotlight-tour:backdrop");
+    expect(queryByTestId("spotlight-tour:ring")).toBeNull();
+    expect(backdrop.getAttribute("data-dimming")).toBe("true");
+    expect(backdrop.style.background).toBe(
+      "hsl(var(--overlay) / var(--opacity-emphatic))",
+    );
+  });
+
+  it("keeps the card above the ring, so the ring's dim cannot fall over it", async () => {
+    mountAnchor("a");
+    const { findByTestId } = renderTour();
+    const card = await findByTestId("spotlight-tour:card");
+    expect(card.className).toContain("lvis-tour-card");
+    const styles = readStyles();
+    // The popper copies its content's computed z-index onto the wrapper it
+    // positions, so these two numbers are what decide which layer wins.
+    expect(ruleBody(styles, ".lvis-tour-ring")).toContain("z-index: 51");
+    expect(ruleBody(styles, ".lvis-tour-card")).toContain("z-index: 52");
   });
 
   it("anchors to the visible match when an earlier one is display:none", async () => {

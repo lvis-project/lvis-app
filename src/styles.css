@@ -378,18 +378,34 @@
    `isolation: isolate`, so a `z-index` on the anchor is trapped inside that
    stacking context and can never rise above a `z-50` layer outside it.
 
+   The last shadow layer is the dim itself: an outer shadow is never painted
+   under its own element, so a spread wide enough to cover the window leaves
+   exactly this box clear. That is the hole — the anchor stays at full strength
+   with the hole's rounded corners coming free from the radius above, and the
+   backdrop stops painting the same tone while an anchor exists so the two
+   cannot double up. A step with no anchor has no ring, and there the backdrop
+   carries the dim on its own.
+
    Unlayered so the popover's own utility classes cannot outrank it. On the
-   body the z-index is real, and puts the ring over the tour's `z-50` backdrop
-   so the anchor reads at full strength instead of being dimmed with the rest
-   of the window. Pointer-transparent because a step may ask the user to type
-   into the very control it rings, and because a click that misses the control
-   should still reach the backdrop and dismiss the tour. */
+   body the z-index is real, and puts the ring over the tour's `z-50` backdrop.
+   Pointer-transparent because a step may ask the user to type into the very
+   control it rings, and because a click that misses the control should still
+   reach the backdrop and dismiss the tour. */
 .lvis-tour-ring {
   position: relative;
   z-index: 51;
   pointer-events: none;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-spotlight);
+  box-shadow:
+    var(--shadow-spotlight),
+    0 0 0 100vmax hsl(var(--overlay) / var(--opacity-emphatic));
+}
+
+/* The step card sits one step above the ring, because the ring's outermost
+   shadow layer is the window-wide dim: at the ring's own level the card would
+   be dimmed by the very layer that is meant to isolate the anchor. */
+.lvis-tour-card {
+  z-index: 52;
 }
 
 /* Radix Dialog state-driven entry/exit — DialogContent fades + zoom-in on
@@ -430,9 +446,11 @@
     transition: none;
   }
   /* Same for the tour's ring: it still marks the element the step is about,
-     in the tighter no-bloom variant. */
+     in the tighter no-bloom variant. The dim layer is not motion, so it stays. */
   .lvis-tour-ring {
-    box-shadow: var(--shadow-spotlight-reduced);
+    box-shadow:
+      var(--shadow-spotlight-reduced),
+      0 0 0 100vmax hsl(var(--overlay) / var(--opacity-emphatic));
   }
   /* Marquee never scrolls under reduced motion. MarqueeText also renders the
      static truncated variant in this case, so this is belt-and-suspenders. */

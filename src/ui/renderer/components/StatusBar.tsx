@@ -149,18 +149,11 @@ export function StatusBar(props: StatusBarProps) {
                 )}
               </>
             );
-            // First-boot tour — the vendor/model cell is the final
-            // SpotlightTour anchor (step 7). Tagging it here keeps the
-            // anchor close to the rendered DOM rather than requiring a
-            // separate wrapper component.
-            const tourAnchor =
-              item.id === "vendor:llm" ? "status-bar-vendor" : undefined;
             const trigger = item.onClick !== undefined ? (
               <button
                 type="button"
                 onClick={item.onClick}
                 title={item.tooltip}
-                data-tour-anchor={tourAnchor}
                 className="flex items-center gap-1 truncate cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {inner}
@@ -169,7 +162,6 @@ export function StatusBar(props: StatusBarProps) {
               <span
                 className="flex items-center gap-1 truncate"
                 title={item.tooltip}
-                data-tour-anchor={tourAnchor}
               >
                 {inner}
               </span>

@@ -18,10 +18,9 @@ import { render, fireEvent } from "@testing-library/react";
 import { useEffect, useRef, useState } from "react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Composer, type ComposerHandle } from "../Composer.js";
-import { InputActionBar } from "../InputActionBar.js";
+import { InputActionBar, ComposerStatusRow } from "../InputActionBar.js";
 import { SlashPicker } from "../SlashPicker.js";
 import { Sidebar } from "../Sidebar.js";
-import { StatusBar } from "../StatusBar.js";
 import type { Attachment } from "../../types/attachments.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
 import {
@@ -160,17 +159,12 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
         <Sidebar {...sidebarProps} />
         <ComposerHarness />
         <InputActionBar {...inputActionBarProps} />
-        <StatusBar
-          persistent={[
-            {
-              id: "vendor:llm",
-              severity: "info",
-              label: "✦",
-              value: "Claude · sonnet-4",
-              onClick: vi.fn(),
-            },
-          ]}
-          visibleToast={null}
+        <ComposerStatusRow
+          statusRow={{ vendorModel: "OpenAI · gpt-5.4", permissionMode: "auto", pendingApprovals: 0 }}
+          ringSlot={null}
+          onOpenModelSettings={vi.fn()}
+          enableThinkingChat={false}
+          onToggleThinking={vi.fn()}
         />
       </TooltipProvider>,
     );
@@ -189,6 +183,13 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
         `step '${step.title}' selector ${step.anchorSelector} must match a live DOM node`,
       ).not.toBeNull();
     }
+    // Step 6 in particular: it named a status-bar cell that nothing produces,
+    // so it resolved to nothing and the step ran anchorless. Pin it to the
+    // control it is about — the model cell in the composer's status row, which
+    // is also the button that opens the model picker.
+    const modelCell = document.querySelector(scenario!.steps[5].anchorSelector);
+    expect(modelCell).not.toBeNull();
+    expect(modelCell!.getAttribute("data-testid")).toBe("iab-status-model");
     // Sanity: every anchor the Z chain references must appear in the
     // scenario. The set guarantees a refactor that drops a step still
     // surfaces here.
@@ -200,7 +201,11 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     ).toBe(true);
     expect(anchors.has('[data-tour-anchor="chat-history"]')).toBe(true);
     expect(anchors.has('[data-tour-anchor="settings-entry"]')).toBe(true);
-    expect(anchors.has('[data-tour-anchor="status-bar-vendor"]')).toBe(true);
+    // Step 6 points at the model cell in the composer's status row. It used to
+    // name a status-bar cell keyed on the item id `vendor:llm`, which no
+    // producer emits any more, so the step had no anchor at all.
+    expect(anchors.has('[data-tour-anchor="model-picker"]')).toBe(true);
+    expect(anchors.has('[data-tour-anchor="status-bar-vendor"]')).toBe(false);
     // The plugin-entry anchor was intentionally removed by #1311 — plugins are
     // reached via the command palette (covered by the command-palette-toggle
     // step above), so the first-boot tour no longer references it.

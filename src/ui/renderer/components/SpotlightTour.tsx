@@ -457,6 +457,15 @@ export function SpotlightTour({
   const total = scenario.steps.length;
   const isLast = stepIndex >= total - 1;
 
+  // The ring both rings the anchor and carries the dim, so one value answers
+  // for both: until there is a node AND a measurement there is no hole, and the
+  // backdrop has to keep painting the dim or the window would flash undimmed
+  // for the frame between resolving the anchor and measuring it.
+  const ringTarget =
+    anchorEl !== null && anchorSize !== null
+      ? { el: anchorEl, size: anchorSize }
+      : null;
+
   const titleId = `lvis-tour-title-${scenario.id}-${stepIndex}`;
   const bodyId = `lvis-tour-body-${scenario.id}-${stepIndex}`;
 
@@ -625,9 +634,13 @@ export function SpotlightTour({
       data-scenario-id={scenario.id}
       data-reduce-motion={reduceMotion ? "true" : "false"}
     >
-      {/* Backdrop — clicking it dismisses the tour. The dimmed layer matches
-          the mockup; the ring and the card are portaled onto the body, above
-          this band, so the anchor reads at full strength through it.
+      {/* Backdrop — what catches the dismiss click, over the whole window.
+
+          It paints the dim only when the step has no anchor. With an anchor the
+          ring carries the dim in its own outermost shadow layer, which leaves a
+          hole exactly over the anchor; painting the same tone here as well would
+          double it and dim the anchor back down. The element stays either way,
+          because it is the click target and the ring is pointer-transparent.
 
           The layers sit in the shared `z-50` floating band, ordered by
           mount order like every other overlay there: the tour mounts after the
@@ -635,16 +648,19 @@ export function SpotlightTour({
           during the tour mounts after the tour and stays reachable above it. */}
       <div
         data-testid="spotlight-tour:backdrop"
+        data-dimming={ringTarget ? "false" : "true"}
         onClick={() => closeAfterDismissal(scenario.id)}
         className="z-50"
         style={{
           position: "fixed",
           inset: 0,
           // Matches the shared Dialog overlay ladder (bundle --overlay tone).
-          background: "hsl(var(--overlay) / var(--opacity-emphatic))",
+          background: ringTarget
+            ? "transparent"
+            : "hsl(var(--overlay) / var(--opacity-emphatic))",
         }}
       />
-      {anchorEl && anchorSize ? (
+      {ringTarget ? (
         /* The ring. It is its own portaled layer rather than a box-shadow on
            the anchor because the anchor cannot carry one: every ancestor from
            the composer's input bar out to the route canvas is `overflow:
@@ -659,7 +675,7 @@ export function SpotlightTour({
            top edge on the anchor's, `align="start"` its left edge, and
            collisions stay off so nothing nudges the ring off its target. */
         <Popover open>
-          <PopoverAnchor virtualRef={{ current: anchorEl }} />
+          <PopoverAnchor virtualRef={{ current: ringTarget.el }} />
           <PopoverContent
             data-testid="spotlight-tour:ring"
             // Decorative: it is the mark made visible, and the marked element
@@ -673,11 +689,11 @@ export function SpotlightTour({
             side="bottom"
             align="start"
             avoidCollisions={false}
-            sideOffset={-(anchorSize.height + RING_INSET_PX)}
+            sideOffset={-(ringTarget.size.height + RING_INSET_PX)}
             alignOffset={-RING_INSET_PX}
             style={{
-              width: anchorSize.width + RING_INSET_PX * 2,
-              height: anchorSize.height + RING_INSET_PX * 2,
+              width: ringTarget.size.width + RING_INSET_PX * 2,
+              height: ringTarget.size.height + RING_INSET_PX * 2,
             }}
             // A decorative layer takes no focus and dismisses nothing: Escape
             // and outside clicks belong to the tour's own handlers and to the
@@ -706,7 +722,7 @@ export function SpotlightTour({
             // tour card doesn't pop into place. The shared `lvis-anim-slide-up`
             // utility collapses to opacity-only fade under
             // prefers-reduced-motion (styles.css §290).
-            className="lvis-anim-slide-up w-auto max-w-[480px]"
+            className="lvis-tour-card lvis-anim-slide-up w-auto max-w-[480px]"
             // Step transitions inside the same scenario also benefit from a
             // light re-mount fade — keying the card on the step index gives
             // React a unique key so the animation re-runs on advance.

@@ -54,8 +54,8 @@ export interface TourScenario {
  *
  * The tour walks the user through the host UI so they land with a full
  * mental model: the composer, the input action bar, the command palette,
- * recent chat history, the Settings/menu entry, and the vendor/model
- * status-bar indicator. Plugins no longer have a dedicated step — the
+ * recent chat history, the Settings/menu entry, and the model cell in the
+ * composer's status row. Plugins no longer have a dedicated step — the
  * input-area relayout folded plugin views into the command palette
  * (SlashPicker), so the palette step (anchor `command-palette-toggle`)
  * already covers how the user reaches plugins. Each anchor is pinned to a
@@ -105,7 +105,7 @@ function buildFirstBootEssentials(): TourScenario {
         completionTrigger: { kind: "manual" },
       },
       {
-        anchorSelector: '[data-tour-anchor="status-bar-vendor"]',
+        anchorSelector: '[data-tour-anchor="model-picker"]',
         title: t("defaultTourScenarios.firstBootStep6Title"),
         body: t("defaultTourScenarios.firstBootStep6Body"),
         completionTrigger: { kind: "manual" },
