@@ -41,7 +41,15 @@ export type BootstrapPhase =
   | "ready"
   | "error";
 
-export interface BootstrapStatus {
+/**
+ * Progress of the Python runtime's own install — uv, the interpreter, the
+ * dependency set. Named for the runtime it describes because the app has a
+ * second, unrelated bootstrap: `AppBootstrapStatus`
+ * (`src/shared/bootstrap-status.ts`) reports managed marketplace install to the
+ * renderer. Two types called `BootstrapStatus` meant a reader had to open the
+ * import to learn which bootstrap a status belonged to.
+ */
+export interface PythonRuntimeBootstrapStatus {
   phase: BootstrapPhase;
   msg: string;
   pct: number;
@@ -101,7 +109,7 @@ export interface PythonRuntimeBootstrapperOptions {
   /** Force uv pip sync even when a ready sentinel exists. */
   forceSetup?: boolean;
   /** Optional observer for status surfaces that need scoped progress. */
-  onStatus?: (status: BootstrapStatus) => void;
+  onStatus?: (status: PythonRuntimeBootstrapStatus) => void;
 }
 
 export function buildPipSyncArgs(
@@ -183,7 +191,7 @@ export class PythonRuntimeBootstrapper {
   async ensureReadyForPluginManifest(
     manifestPath: string,
     mainWindow: BrowserWindow,
-    onStatus?: (status: BootstrapStatus) => void,
+    onStatus?: (status: PythonRuntimeBootstrapStatus) => void,
   ): Promise<RuntimeResult | null> {
     const lockFileName = this.options.lockFileName ?? LOCK_FILE_RESOURCE_NAME;
     const candidates = await this.lockCandidatesFromManifest(manifestPath, lockFileName);
@@ -620,7 +628,7 @@ export class PythonRuntimeBootstrapper {
 
   // ─── private: IPC 상태 발행 ───────────────────────
 
-  private sendStatus(status: BootstrapStatus): void {
+  private sendStatus(status: PythonRuntimeBootstrapStatus): void {
     try {
       this.options.onStatus?.(status);
     } catch (err) {

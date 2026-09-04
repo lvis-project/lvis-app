@@ -11,8 +11,43 @@ import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js
 import type { ChatEntry, ChatStreamEvent } from "../../src/lib/chat-stream-state.js";
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../../src/shared/subagent-events.js";
 import type { SubscriptionRuntimeStatusUpdatedEvent } from "../../src/shared/subscription-runtime.js";
+import type { SessionSummary } from "../../src/ui/renderer/hooks/use-sessions.js";
+import type { SessionFamily, SessionListKindFilter } from "../../src/shared/session-lookup.js";
 
 export type MockLvisApi = Record<string, Mock>;
+
+/**
+ * A seeded conversation row: the REAL {@link SessionSummary} with everything
+ * the mock can derive made optional. Re-declaring the row here let a fixture
+ * describe a shape production never produces — the copy was missing
+ * `projectRoot`, `projectName`, `archivedAt`, `unreadSince` and
+ * `branchedFromCompactNum`, so a test could not seed the fields the sidebar
+ * groups and badges by.
+ */
+export type SessionSeed = Partial<SessionSummary> & Pick<SessionSummary, "id" | "modifiedAt">;
+
+/**
+ * One conversation row with the defaults main would have stamped.
+ *
+ * The suites that render lists (sidebar, starred, insights) each wrote the same
+ * literal out per row; this is that literal, once. `family` follows from the
+ * other fields when a fixture does not name one, so a test written before
+ * families still describes the row it meant.
+ */
+export function sessionRow(seed: SessionSeed): SessionSummary {
+  const sessionKind = seed.sessionKind ?? "main";
+  return {
+    ...seed,
+    id: seed.id,
+    modifiedAt: seed.modifiedAt,
+    title: seed.title ?? `세션 ${seed.id.slice(0, 8)}`,
+    sessionKind,
+    family: seed.family
+      ?? (seed.workBoardItemId !== undefined
+        ? "work-board"
+        : sessionKind === "routine" ? "routine" : "main"),
+  };
+}
 
 /**
  * Persisted default of `permissions.reviewer.parentAdjudication`. The
@@ -67,18 +102,7 @@ type ApiOverrides = {
   /** Hosts the telemetry endpoint may point at (see main/telemetry). */
   telemetryAllowedHosts?: readonly string[];
   personaPrompts?: unknown[];
-  sessions?: Array<{
-    id: string;
-    modifiedAt: string;
-    title?: string;
-    sessionKind?: "main" | "routine" | "subagent";
-    family?: "main" | "routine" | "work-board" | "side-chat";
-    routineId?: string;
-    routineTitle?: string;
-    routineFiredAt?: string;
-    workBoardItemId?: number;
-    parentSessionId?: string;
-  }>;
+  sessions?: readonly SessionSeed[];
   currentSession?: string;
   starred?: unknown[];
   history?: ({ sessionId: string } & HistoryMock) | Promise<{ sessionId: string } & HistoryMock>;
@@ -194,21 +218,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 } {
   let settings = overrides.settings ?? MOCK_DEFAULT_SETTINGS;
   let personaPrompts = overrides.personaPrompts ?? [];
-  const sessions = (overrides.sessions ?? []).map((session) => {
-    const sessionKind = session.sessionKind ?? "main";
-    return {
-      ...session,
-      title: session.title ?? `세션 ${session.id.slice(0, 8)}`,
-      sessionKind,
-      // The handler stamps the family; a fixture that names one keeps it, and
-      // one that does not gets the family its other fields already imply, so a
-      // test written before families still describes the row it meant.
-      family: session.family
-        ?? (session.workBoardItemId !== undefined
-          ? "work-board" as const
-          : sessionKind === "routine" ? "routine" as const : "main" as const),
-    };
-  });
+  const sessions = (overrides.sessions ?? []).map(sessionRow);
   const currentSession = overrides.currentSession ?? MOCK_DEFAULT_SESSION_ID;
   let sentTurnCount = 0;
   const starred = overrides.starred ?? [];
@@ -465,7 +475,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
-    chatSessions: vi.fn(async (opts?: { kind?: "main" | "routine" | "all"; families?: Array<"main" | "routine" | "work-board" | "side-chat">; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => {
+    chatSessions: vi.fn(async (opts?: { kind?: SessionListKindFilter; families?: SessionFamily[]; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
       const afterTime = opts?.after ? Date.parse(opts.after) : Number.NaN;
       const filtered = sessions.filter((session) => {

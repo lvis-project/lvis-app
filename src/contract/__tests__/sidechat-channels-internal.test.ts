@@ -25,7 +25,6 @@ describe("sidechat channels are internal (fail-closed)", () => {
       send: "lvis:sidechat:send",
       new: "lvis:sidechat:new",
       load: "lvis:sidechat:load",
-      list: "lvis:sidechat:list",
       abort: "lvis:sidechat:abort",
       stream: "lvis:sidechat:stream",
       fallback: "lvis:sidechat:fallback",

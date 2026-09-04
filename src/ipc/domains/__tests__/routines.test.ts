@@ -17,7 +17,7 @@ vi.mock("../../../lib/logger.js", () => ({
 }));
 
 function makeDeps(
-  sessions: Array<{ id: string; routineFiredAt?: string; title?: string; preview: string }>,
+  sessions: Array<{ id: string; modifiedAt?: Date; sessionKind?: string; routineId?: string; routineTitle?: string; routineFiredAt?: string; title?: string; preview: string }>,
   lastRoutineSessionId?: string,
 ) {
   return {
@@ -43,7 +43,15 @@ function makeDeps(
     sessionTasksStore: null,
     conversationLoop: { getSessionId: vi.fn(() => "main-session") },
     memoryManager: {
-      listSessionsByRoutine: vi.fn(() => sessions),
+      // The handler now assembles the shared conversation row, which reads
+      // the fields a stored entry always has — a bare `{id, preview}` stub is
+      // a shape the store never returns.
+      listSessionsByRoutine: vi.fn(() => sessions.map((session) => ({
+        modifiedAt: new Date("2026-05-16T12:00:00.000Z"),
+        sessionKind: "routine",
+        title: "",
+        ...session,
+      }))),
       deleteSession: vi.fn(async () => undefined),
     },
     auditLogger: { log: vi.fn() },
@@ -52,7 +60,7 @@ function makeDeps(
 }
 
 async function setup(
-  sessions: Array<{ id: string; routineFiredAt?: string; title?: string; preview: string }>,
+  sessions: Array<{ id: string; modifiedAt?: Date; sessionKind?: string; routineId?: string; routineTitle?: string; routineFiredAt?: string; title?: string; preview: string }>,
   lastRoutineSessionId?: string,
 ) {
   handlers.clear();
@@ -121,6 +129,8 @@ describe("routine pending results", () => {
     await setup([
       {
         id: "routine-session-1",
+        routineId: "routine-a",
+        routineTitle: "Routine A",
         routineFiredAt: "2026-05-16T12:00:00.000Z",
         title: "뉴스 요약",
         preview: "뉴스 요약 완료",
@@ -129,12 +139,18 @@ describe("routine pending results", () => {
 
     const results = await invoke(ROUTINES.listSessions, "routine-a", 10);
 
+    // The row the sidebar lists this run with, plus the panel's snippet — the
+    // handler no longer answers in a shape only the panel understands.
     expect(results).toEqual([
       {
-        routineId: "routine-a",
-        firedAt: "2026-05-16T12:00:00.000Z",
-        sessionId: "routine-session-1",
+        id: "routine-session-1",
+        modifiedAt: "2026-05-16T12:00:00.000Z",
         title: "뉴스 요약",
+        sessionKind: "routine",
+        family: "routine",
+        routineId: "routine-a",
+        routineTitle: "Routine A",
+        routineFiredAt: "2026-05-16T12:00:00.000Z",
         preview: "뉴스 요약 완료",
       },
     ]);

@@ -347,12 +347,17 @@ describe("RoutinePanel", () => {
   });
 
   it("renders past LLM routine sessions beside the routine list", async () => {
+    // The row main assembles for this run — the same one the sidebar lists.
     const listRoutineSessions = vi.fn(async () => [
       {
-        routineId: "r-llm",
-        firedAt: "2026-05-11T04:00:00.003Z",
-        sessionId: "session-routine-1",
+        id: "session-routine-1",
+        modifiedAt: "2026-05-11T04:00:00.003Z",
         title: "뉴스 요약",
+        sessionKind: "routine" as const,
+        family: "routine" as const,
+        routineId: "r-llm",
+        routineTitle: "뉴스 요약",
+        routineFiredAt: "2026-05-11T04:00:00.003Z",
         preview: "뉴스 요약 완료",
       },
     ]);

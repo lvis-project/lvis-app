@@ -19,6 +19,12 @@
  * `SESSION_LIST_MAX_LIMIT` is also the clamp the `lvis:chat:sessions` handler
  * applies (`src/ipc/handlers/chat.ts`), imported from here so the renderer can
  * never ask for a page size the handler silently trims.
+ *
+ * The `lvis:chat:sessions` REQUEST contract grew a reply contract for the same
+ * reason: {@link SessionFamily} and {@link SessionListRow} describe one row of
+ * the conversation list, and main, the preload bridge and the renderer each
+ * used to spell them out again. `shared/` is the neutral zone all three can
+ * import from without forming a cross-boundary dependency.
  */
 
 /**
@@ -26,6 +32,129 @@
  * so asking for more is indistinguishable from asking for exactly this.
  */
 export const SESSION_LIST_MAX_LIMIT = 100;
+
+/**
+ * How a session was started: a user's chat, a routine's run, or a sub-agent
+ * child. Persisted in every session's metadata, so it is on the wire and in
+ * the renderer as well as in the store — one spelling for all three.
+ */
+export type SessionKind = "main" | "routine" | "subagent";
+
+/**
+ * The `kind` filter `lvis:chat:sessions` accepts: a kind the MAIN store holds,
+ * or every one of them.
+ *
+ * Derived from {@link SessionKind} rather than re-spelled, but narrower than
+ * it on purpose — `subagent` sessions live in their own store and the main
+ * store's listing has none to return, so admitting the word would let a caller
+ * ask a question this channel answers by silently falling back to `main`.
+ * Sub-agent runs reach the list as the `work-board` FAMILY instead.
+ */
+export type SessionListKindFilter = Exclude<SessionKind, "subagent"> | "all";
+
+/**
+ * The filter values the handler honours, table-keyed for the same reason
+ * {@link SESSION_FAMILIES} is: a member added to the union and forgotten here
+ * is a compile error, not a request the validator quietly rewrites.
+ */
+const SESSION_LIST_KIND_FILTER_TABLE: Readonly<Record<SessionListKindFilter, true>> = Object.freeze({
+  "main": true,
+  "routine": true,
+  "all": true,
+});
+
+/** Whether a value crossing the preload boundary names a filter this host has. */
+export function isSessionListKindFilter(value: unknown): value is SessionListKindFilter {
+  return typeof value === "string" && Object.hasOwn(SESSION_LIST_KIND_FILTER_TABLE, value);
+}
+
+/**
+ * The conversation family one list row belongs to — what glyph it draws, what
+ * its click opens, and whether it offers the main store's row actions.
+ *
+ * `main` and `routine` are the two kinds the main store holds; `work-board` is
+ * an item's run and `side-chat` a rail conversation, each in its own store.
+ */
+export type SessionFamily = "main" | "routine" | "work-board" | "side-chat";
+
+/**
+ * Every family, as a table keyed by the union so the compiler — not a reviewer
+ * — checks that the runtime value set is complete. A `Set<SessionFamily>` built
+ * from an array accepts a short array: adding a member to the union then leaves
+ * the request validator silently dropping it, which is exactly how the sidebar
+ * would lose a family nobody noticed was missing.
+ */
+const SESSION_FAMILY_TABLE: Readonly<Record<SessionFamily, true>> = Object.freeze({
+  "main": true,
+  "routine": true,
+  "work-board": true,
+  "side-chat": true,
+});
+
+/** Every family, in the order a caller that wants all of them should ask. */
+export const SESSION_FAMILIES: readonly SessionFamily[] = Object.freeze(
+  Object.keys(SESSION_FAMILY_TABLE) as SessionFamily[],
+);
+
+/**
+ * Whether a value crossing the preload boundary names a family this host has.
+ * Renderer-supplied arrays are untrusted input, so callers narrow with this
+ * rather than casting.
+ */
+export function isSessionFamily(value: unknown): value is SessionFamily {
+  return typeof value === "string" && Object.hasOwn(SESSION_FAMILY_TABLE, value);
+}
+
+/**
+ * One row of the conversation list, whatever store it came from.
+ *
+ * `family` is the discriminant every consumer switches on: the sidebar picks a
+ * glyph, a label and a click path from it, and never re-derives any of that
+ * from an id. Main stamps it once, at row assembly.
+ *
+ * `originSessionId` is the conversation a row was started from — the side
+ * chat's parent. It is deliberately NOT the checkpoint/fork provenance that
+ * `SessionListEntry.parentSessionId` records: those are two different
+ * relations, and spelling them with one name is how a fork ended up looking
+ * like a side chat's parent to anything reading the wire.
+ */
+export interface SessionListRow {
+  id: string;
+  modifiedAt: string;
+  title: string;
+  sessionKind: SessionKind;
+  family: SessionFamily;
+  /** Present on a work-board run row — the item it opens. */
+  workBoardItemId?: number;
+  /**
+   * Present on a side-chat row — the conversation it belongs to, so the
+   * sidebar can draw it under that conversation instead of beside it.
+   */
+  originSessionId?: string;
+  routineId?: string;
+  routineTitle?: string;
+  routineFiredAt?: string;
+  projectRoot?: string;
+  projectName?: string;
+  /** Compact sequence number this session was forked from. Only on true forks. */
+  branchedFromCompactNum?: number;
+  /** ISO timestamp when this session was branched. Only on true forks. */
+  branchedAt?: string;
+  /** ISO time the user archived this conversation. Absent = not archived. */
+  archivedAt?: string;
+  /** ISO time the user marked it unread. Absent = read. */
+  unreadSince?: string;
+}
+
+/**
+ * A routine's run rows: the same conversation row the sidebar draws, plus the
+ * opening snippet the routine panel shows under it. The panel and the sidebar
+ * list the same sessions, so they read the same row — the snippet is the one
+ * field only the panel has room for.
+ */
+export interface RoutineRunRow extends SessionListRow {
+  preview: string;
+}
 
 /**
  * The query `/load` must use when resolving a partial id through the

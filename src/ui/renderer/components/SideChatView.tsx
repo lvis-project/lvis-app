@@ -225,17 +225,17 @@ function SideChatSession({
   // the host writes that down on the turn that first gives this side chat a
   // file — so it rides along on every send rather than on a separate call the
   // panel would have to know when to make.
-  const parentSessionId = chatContext?.currentSessionId;
+  const originSessionId = chatContext?.currentSessionId;
   const handleAsk = useCallback(
     (
       text: string,
       _intent?: UserKeyboardIntentSnapshot,
       opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
     ) => {
-      const parent = parentSessionId ? { parentSessionId } : {};
+      const origin = originSessionId ? { originSessionId } : {};
       const settle = (turn: Promise<void>) => turn.finally(() => void onSessionsChanged?.());
       if (opts?.inputOrigin === "queue-auto") {
-        return settle(send(text, { injectHint: opts.injectHint, inputOrigin: "queue-auto", ...parent }));
+        return settle(send(text, { injectHint: opts.injectHint, inputOrigin: "queue-auto", ...origin }));
       }
       const composed = composeOutgoing({ raw: text, activePreset: null, attachments });
       setDraft("");
@@ -243,10 +243,10 @@ function SideChatSession({
       return settle(send(composed.text, {
         attachments: composed.attachments,
         ...(opts?.injectHint ? { injectHint: opts.injectHint } : {}),
-        ...parent,
+        ...origin,
       }));
     },
-    [send, attachments, parentSessionId, onSessionsChanged],
+    [send, attachments, originSessionId, onSessionsChanged],
   );
 
   // A stored side chat the sidebar asked this panel to show. Keyed on the

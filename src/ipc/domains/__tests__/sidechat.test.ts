@@ -266,16 +266,6 @@ describe("side-chat IPC domain", () => {
     await sendPromise;
   });
 
-  it("list fails closed on an unauthorized frame (no session-id disclosure)", async () => {
-    const side = makeSideLoop();
-    register(side, makeMainLoop());
-    const handler = handlers.get(CHANNELS.sidechat.list)!;
-    const result = await handler(ev("https://evil.example.com"));
-    // No real current-session id — same empty shape as the loop-absent branch.
-    expect(result).toEqual({ current: null, sessions: [] });
-    expect(side.getSessionId).not.toHaveBeenCalled();
-  });
-
   it("rejects an unauthorized frame on send", async () => {
     const side = makeSideLoop();
     register(side, makeMainLoop());
@@ -364,7 +354,7 @@ describe("side-chat parentage", () => {
     register(makeSideLoop(), makeMainLoop(), false, store);
     const handler = handlers.get(CHANNELS.sidechat.send)!;
 
-    await handler(ev("file:///index.html"), { input: "hello", parentSessionId: PARENT });
+    await handler(ev("file:///index.html"), { input: "hello", originSessionId: PARENT });
 
     expect(store.saveSessionMetadata).toHaveBeenCalledWith(
       "34fd6270-309d-4e47-878b-75c0742a6ac2",
@@ -377,7 +367,7 @@ describe("side-chat parentage", () => {
     register(makeSideLoop(), makeMainLoop(), false, store);
     const handler = handlers.get(CHANNELS.sidechat.send)!;
 
-    await handler(ev("file:///index.html"), { input: "hello", parentSessionId: PARENT });
+    await handler(ev("file:///index.html"), { input: "hello", originSessionId: PARENT });
 
     expect(store.saveSessionMetadata).not.toHaveBeenCalled();
   });
@@ -390,7 +380,7 @@ describe("side-chat parentage", () => {
 
     const result = await handler(ev("file:///index.html"), {
       input: "hello",
-      parentSessionId: "../../etc/passwd",
+      originSessionId: "../../etc/passwd",
     });
 
     expect(result).toMatchObject({ ok: true });
