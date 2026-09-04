@@ -1,8 +1,10 @@
 /**
  * AuditPanel.
  *
- * Side panel surfacing the discriminated-union audit log + the HMAC
- * chain integrity verdict. Driven by:
+ * The audit log + the HMAC chain integrity verdict, drawn inline in the
+ * Permissions tab's Audit Log section. It is a region of the pane that holds
+ * Settings — the width is the pane's, and the entry list scrolls inside a
+ * bounded height so the section below stays reachable. Driven by:
  *   - `window.lvis.permission.auditShow(N)` — recent entries.
  *   - `window.lvis.permission.auditVerify()` — chain check.
  *
@@ -159,8 +161,8 @@ export function AuditPanel({
   const integrityStatus = computeIntegrityStatus(verify);
 
   return (
-    <aside
-      className="fixed right-0 top-0 z-50 flex h-full w-[480px] flex-col border-l bg-background shadow-xl"
+    <section
+      className="mt-2 flex w-full min-w-0 flex-col border-t"
       data-testid="audit-panel"
       aria-label={t("auditPanel.panelAriaLabel")}
     >
@@ -262,7 +264,7 @@ export function AuditPanel({
       )}
 
       {/* Entry list */}
-      <ol className="flex-1 overflow-y-auto" data-testid="audit-entry-list">
+      <ol className="max-h-[28rem] overflow-y-auto" data-testid="audit-entry-list">
         {filtered.length === 0 && (
           <li className="px-3 py-6 text-center text-xs text-muted-foreground">
             {t("auditPanel.emptyState")}
@@ -305,7 +307,7 @@ export function AuditPanel({
           );
         })}
       </ol>
-    </aside>
+    </section>
   );
 }
 

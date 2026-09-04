@@ -40,7 +40,6 @@ const handleFor = (streaming: boolean, entries: readonly ChatEntry[] = NO_ENTRIE
   currentSessionId: "",
   currentSessionProject: NO_PROJECT,
   loadSession: async () => false,
-  fallbackToast: null,
   prefillComposer: () => {},
   appendSystemEntry: () => {},
   startNewChat: async () => {},

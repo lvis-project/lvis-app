@@ -392,7 +392,22 @@ export function ChatComposerDock({
           heldByApproval={pendingApprovals.length > 0}
         />
       </div>
-      <div className={`${dockColumnClass} overflow-x-hidden pb-1`}>
+      <div className={`${dockColumnClass} flex flex-col overflow-x-hidden pb-1`}>
+        {/* This conversation's notices — an attachment the composer refused,
+            a provider swap mid-turn, a pre-turn compaction — take a row of
+            their own, IN FLOW, above the selector/runtime strip and the
+            composer card, at the composer's width. A notice that overlaid the
+            strip painted over the project selector and the runtime pill and
+            was clipped by them; in flow it pushes them down instead, the same
+            rule the window's notice strip follows. */}
+        {statusBar && (statusBar.visibleToast !== null || statusBar.persistent.length > 0) ? (
+          <div
+            className="mx-3 mb-2 min-w-0"
+            data-testid="composer-toast-dock"
+          >
+            <StatusBar {...statusBar} />
+          </div>
+        ) : null}
         {/* ONE input box: textarea + the single InputActionBar (action row).
             The session line — model / permission / active / ring — is drawn
             UNDER the box by ComposerStatusRow, not inside it: what is inside
@@ -401,17 +416,9 @@ export function ChatComposerDock({
             `lvis-surface-raised` paints the edge as an inset hairline so
             the dock's overflow handling cannot clip the composer edge. */}
         <div className="relative mx-3 mb-2 pt-9">
-          {statusBar && (statusBar.visibleToast !== null || statusBar.persistent.length > 0) ? (
-            <div
-              className="absolute inset-x-3 top-0 z-0 min-w-0"
-              data-testid="composer-toast-dock"
-            >
-              <StatusBar {...statusBar} />
-            </div>
-          ) : null}
           {/* Empty-state project selector — attached directly above the
-              composer card, in the same reserved toast-zone the StatusBar
-              uses. Rendered for the centered (empty-conversation) layout AND
+              composer card, in the reserved strip it shares with the no-key
+              chip. Rendered for the centered (empty-conversation) layout AND
               for one descent cycle after it ends (`showProjectSelectorSlot`
               lingers per the effect above), so the dropdown's own
               forceMount+data-state close transition (see
@@ -600,10 +607,11 @@ export function ChatComposerDock({
 
 /**
  * The dock strip for a turn parked on an approval. It sits in the tile whose
- * conversation asked — the approval card itself is shown once for the window,
- * so without this a second tile shows a turn that has simply stopped moving,
- * and a queue that never drains. Same band grammar as the queue strip below it
- * (dashed = not committed yet), in the hue the approval chips already use.
+ * conversation asked, beside the queue it explains: the approval card is drawn
+ * in that tile's own overlay lane, away from the composer, so the dock alone
+ * would show a turn that has simply stopped moving and a queue that never
+ * drains. Same band grammar as the queue strip below it (dashed = not
+ * committed yet), in the hue the approval chips already use.
  */
 function ApprovalWaitingBand({ pendingApprovals }: { pendingApprovals: readonly ApprovalRequest[] }) {
   const { t } = useTranslation();

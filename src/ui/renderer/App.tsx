@@ -9,6 +9,7 @@ import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { Sidebar, isDarwinPlatform } from "./components/Sidebar.js";
 import { MarketplaceAnnouncementBanner } from "./components/MarketplaceAnnouncementBanner.js";
+import { StatusBar } from "./components/StatusBar.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { DevComponentLabels } from "./components/DevComponentLabels.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
@@ -145,8 +146,6 @@ export function App() {
     pendingCount: statusPendingCount,
     pushToast: statusPushToast,
     removeToast: statusRemoveToast,
-    upsertPersistent: statusUpsertPersistent,
-    removePersistent: statusRemovePersistent,
   } = useStatusBar({ api });
 
   // Issue #260 — when a notification toast is clicked, dispatch the click via
@@ -247,7 +246,7 @@ export function App() {
   const chatGroupCanvasRef = useRef<HTMLDivElement>(null);
   const focusedSession = useChatGroupSession(chatGroupSessions, chatGroups.focusedId);
   const tileSessions = useTileSessions(chatGroupSessions);
-  const { entries, streaming, currentSessionId, currentSessionProject, fallbackToast } = focusedSession;
+  const { entries, streaming, currentSessionId, currentSessionProject } = focusedSession;
 
   // Search is window chrome (the panel is an overlay over everything), reading
   // the focused tile's transcript — the one actually on screen.
@@ -1419,14 +1418,6 @@ export function App() {
     isSessionStarred: (sessionId: string) => Boolean(isSessionStarred(sessionId)),
     handleToggleSessionStar,
     starredIsEntry, starredToggle,
-    statusBar: {
-      persistent: statusPersistent,
-      visibleToast: statusVisibleToast,
-      pendingCount: statusPendingCount,
-      onToastClick: handleStatusToastClick,
-      onToastDismiss: (toast) => statusRemoveToast(toast.id),
-    },
-    statusPushToast, statusUpsertPersistent, statusRemovePersistent,
     search: {
       searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
       searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
@@ -1454,8 +1445,6 @@ export function App() {
     enableThinkingChat, toggleThinking, refreshSessions, focusChatGroup, sessions,
     sideChatOpenRequest,
     isSessionStarred, handleToggleSessionStar, starredIsEntry, starredToggle,
-    statusPersistent, statusVisibleToast, statusPendingCount, handleStatusToastClick,
-    statusRemoveToast, statusPushToast, statusUpsertPersistent, statusRemovePersistent,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx,
     searchHighlight, searchChangeQuery, searchToggleCase, searchNext, searchPrev,
     searchCloseOverlay, searchToggleOverlay,
@@ -1889,32 +1878,26 @@ export function App() {
                   // surface neither changes width nor reflows.
                   style={sidebarCollapsed || sidebarOverlay ? undefined : { paddingLeft: `${sidebarWidth + SHELL_GUTTER}px` }}
                 >
-                  {/* Floating notification stack — the announcement banner and the
-                      permission toasts are an OVERLAY, not in-flow content. They float
-                      over the canvas anchored top-RIGHT so they never push the routed
-                      content or the composer down. The wrapper is pointer-events-none
-                      (clicks pass through the gaps); each card re-enables
-                      pointer-events so its own controls still work. The left edge is
-                      inset past the sidebar — `--shell-collapsed-banner-inset` when
-                      collapsed, the live `sidebarWidth + CONTENT_TITLE_INSET` inline
-                      when expanded, each one gutter clear of <main>'s own leading
-                      padding — so a wide banner (max-w-md) in a
-                      narrow window can never slide UNDER the floating sidebar card —
-                      absolute positioning resolves against main's padding box, which
-                      starts at the window edge beneath the rail. Plugin updates and
-                      managed-plugin bootstrap used to stack here too; they are toolbar
-                      pills now, beside the app-update pill (see MainToolbar). */}
+                  {/* The window's notice strip — the announcement banner, the
+                      permission-memory toast and the window status toasts
+                      (host notifications, installs, the app update). Each is
+                      about the WINDOW, so it is subscribed once and drawn once,
+                      here, IN FLOW: a flex sibling above the route canvas that
+                      takes its height from the canvas. It used to float over
+                      the canvas's top-right corner — the corner every pane
+                      keeps for its own floating lane — so a tall stack covered
+                      the rightmost tile's cards, and a tile's own dock drew the
+                      window toasts once per tile. Nothing here is positioned,
+                      so nothing here needs a sidebar inset: <main>'s leading
+                      padding keeps in-flow content clear of the rail, and an
+                      overlaying sidebar card covers this strip exactly as it
+                      covers the tile below it. `empty:hidden` gives the strip
+                      no height while every child renders null. Plugin updates
+                      and managed-plugin bootstrap are toolbar pills, beside the
+                      app-update pill (see MainToolbar). */}
                   <div
-                    className={`pointer-events-none absolute right-2 top-2 z-50 ml-auto flex max-w-md flex-col gap-2 transition-[left] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto [&>*]:m-0 ${
-                      sidebarCollapsed ? "left-(--shell-collapsed-banner-inset)" : ""
-                    }`}
-                    // Expanded: inset the banner stack past the resized sidebar card so a
-                    // wide banner can never slide under the floating rail. Tracks
-                    // sidebarWidth by the same CONTENT_TITLE_INSET a view's own title
-                    // starts at, so the stack lines up with the content it floats over.
-                    // Deliberately keyed on `sidebarCollapsed`, not the overlay: an
-                    // overlaying card is still a card a banner must not slide under.
-                    style={sidebarCollapsed ? undefined : { left: `${sidebarWidth + CONTENT_TITLE_INSET}px` }}
+                    className="flex shrink-0 flex-col gap-2 px-(--chrome-gap) pt-2 empty:hidden [&>*]:m-0"
+                    data-testid="window-notice-strip"
                   >
                     <MarketplaceAnnouncementBanner
                       announcements={marketplaceAnnouncements}
@@ -1949,12 +1932,14 @@ export function App() {
                         </div>
                       );
                     })()}
+                    <StatusBar
+                      persistent={statusPersistent}
+                      visibleToast={statusVisibleToast}
+                      pendingCount={statusPendingCount}
+                      onToastClick={handleStatusToastClick}
+                      onToastDismiss={(toast) => statusRemoveToast(toast.id)}
+                    />
                   </div>
-                  {fallbackToast && (
-                    <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
-                      {fallbackToast}
-                    </div>
-                  )}
                   <DevToolsPanel
                     api={api}
                     open={devToolsOpen}
@@ -2042,14 +2027,17 @@ export function App() {
                           frames of a turn still in flight — and take the
                           composer draft and scroll position with it.
 
-                          `data-visible` answers "is a conversation on screen",
-                          which is what the window-level approval band asks
-                          before it draws a card no pane could: with one pane it
-                          is the old `activeView === "home"`, and with several it
-                          is true while any of them still draws its
-                          conversation. `contents` keeps the wrapper out of the
-                          layout entirely, so the flex chain reads exactly as it
-                          does when this is the only child. */}
+                          `data-visible` answers "is a conversation on screen":
+                          with one pane it is the old `activeView === "home"`,
+                          and with several it is true while any of them still
+                          draws its conversation. Nothing in the window reads
+                          it — the approval band decides from the tiles' claims
+                          — it is the observable the route tests assert against
+                          when they check that a gate still reaches the user
+                          after the route has left the chat surface. `contents`
+                          keeps the wrapper out of the layout entirely, so the
+                          flex chain reads exactly as it does when this is the
+                          only child. */}
                       <div
                         data-testid="chat-surface"
                         data-visible={chatGroups.groups.some((group) => !group.hidden

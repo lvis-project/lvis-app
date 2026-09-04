@@ -475,23 +475,29 @@ export function SpotlightTour({
     >
       {/* Backdrop — clicking it dismisses the tour. The 78% black layer
           matches the mockup; pointer-events stay on so anchor clicks are
-          intentionally blocked while the tour is active. */}
+          intentionally blocked while the tour is active.
+
+          The three layers sit in the shared `z-50` floating band, ordered by
+          mount order like every other overlay there: the tour mounts after the
+          whole shell, so it covers the shell, and a dialog portal that opens
+          during the tour mounts after the tour and stays reachable above it. */}
       <div
         data-testid="spotlight-tour:backdrop"
         onClick={() => closeAfterDismissal(scenario.id)}
+        className="z-50"
         style={{
           position: "fixed",
           inset: 0,
           // Matches the shared Dialog overlay ladder (bundle --overlay tone).
           background: "hsl(var(--overlay) / var(--opacity-emphatic))",
-          zIndex: 9000,
         }}
       />
       {ring ? (
         <div
           data-testid="spotlight-tour:ring"
           aria-hidden="true"
-          style={{ ...ring, zIndex: 9001 }}
+          className="z-50"
+          style={ring}
         />
       ) : null}
       <div
@@ -506,14 +512,13 @@ export function SpotlightTour({
         // tour card doesn't pop into place. The shared `lvis-anim-slide-up`
         // utility collapses to opacity-only fade under
         // prefers-reduced-motion (styles.css §290).
-        className="lvis-anim-slide-up"
+        className="lvis-anim-slide-up z-50"
         // Step transitions inside the same scenario also benefit from a
         // light re-mount fade — keying the card on the step index gives
         // React a unique key so the animation re-runs on advance.
         key={`${scenario.id}-${stepIndex}`}
         style={{
           ...card,
-          zIndex: 9002,
           background: "hsl(var(--popover))",
           color: "hsl(var(--popover-foreground))",
           border: "1px solid hsl(var(--primary) / var(--opacity-half))",

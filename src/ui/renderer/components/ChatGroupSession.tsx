@@ -21,7 +21,8 @@ import { useCostEstimate } from "../hooks/use-cost-estimate.js";
 import { useCurrentSession } from "../hooks/use-sessions.js";
 import { MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 import { useSendMessage, type HandleAskRefFn } from "../hooks/use-send-message.js";
-import type { useStatusBar } from "../hooks/use-status-bar.js";
+import { useStatusNotices } from "../hooks/use-status-bar.js";
+import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { useWorkflowTools } from "../hooks/use-workflow-tools.js";
 import { buildChatGroupActions } from "./PaneFrame.js";
 import { composeOutgoing as composeOutgoingUtil, type ComposedOutgoing } from "../utils/compose.js";
@@ -96,14 +97,6 @@ export interface ChatGroupEnvironment {
     entries: ChatEntry[],
     sessionId: string,
   ) => void;
-
-  // the window's status surface. Toasts about a project error or an update are
-  // the WINDOW's news, not one conversation's, so the bar is shared and the
-  // tile only pushes to it.
-  statusBar: React.ComponentProps<typeof ChatView>["statusBar"];
-  statusPushToast: ReturnType<typeof useStatusBar>["pushToast"];
-  statusUpsertPersistent: ReturnType<typeof useStatusBar>["upsertPersistent"];
-  statusRemovePersistent: ReturnType<typeof useStatusBar>["removePersistent"];
 
   // search lives in the window because the panel does; it reads the FOCUSED
   // tile's transcript, which is the one on screen.
@@ -255,6 +248,23 @@ export function ChatGroupSession({
     ownedChildSessionIdsRef.current = ownedChildSessionIds;
   }, [ownedChildSessionIds]);
 
+  // This tile's own notice queue, drawn in its composer dock. Everything
+  // pushed here is about THIS conversation — an attachment the composer
+  // refused, a provider swap mid-turn, a pre-turn compaction — so it is held
+  // by the tile and can never appear in the tile beside it. The window's news
+  // (host notifications, installs, updates) has the window's own queue and
+  // strip; see `useStatusBar`.
+  const {
+    persistent: tileNoticePersistent, visibleToast: tileNoticeVisible, pendingCount: tileNoticePending,
+    pushToast: pushTileNotice, upsertToast: upsertTileNotice, removeToast: removeTileNotice,
+    upsertPersistent: upsertTilePersistent, removePersistent: removeTilePersistent,
+  } = useStatusNotices();
+  const announceProviderFallback = useCallback((message: string) => {
+    // One stable id: a second swap in the same turn replaces the notice
+    // instead of queueing behind the first.
+    upsertTileNotice("provider-fallback", { severity: "warning", message, ttlMs: DEFAULT_TOAST_TTL_MS });
+  }, [upsertTileNotice]);
+
   const {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted,
     beginStreamingRequest, finishStreamingRequest, markLastAssistantInterrupted, unmarkLastAssistantInterrupted,
@@ -263,8 +273,18 @@ export function ChatGroupSession({
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, dropUserEntry, appendSystemEntry,
     applyInitialSession, applyLoadedSession, truncateToEntry,
-    insertImportedTriggerEntry, fallbackToast,
-  } = useChatState(api);
+    insertImportedTriggerEntry,
+  } = useChatState(api, announceProviderFallback);
+
+  // What this tile's composer dock draws above the composer, built once per
+  // change of the queue so the memoized view below is not re-rendered by a
+  // fresh object every turn of this component.
+  const tileStatusBar = useMemo(() => ({
+    persistent: tileNoticePersistent,
+    visibleToast: tileNoticeVisible,
+    pendingCount: tileNoticePending,
+    onToastDismiss: (toast: { id: string }) => removeTileNotice(toast.id),
+  }), [tileNoticePersistent, tileNoticeVisible, tileNoticePending, removeTileNotice]);
 
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -376,8 +396,8 @@ export function ChatGroupSession({
 
   useChatStatusIndicators({
     t, isCompacting, compactTriggerSource, isRecoveryExhausted,
-    statusUpsertPersistent: env.statusUpsertPersistent,
-    statusRemovePersistent: env.statusRemovePersistent,
+    statusUpsertPersistent: upsertTilePersistent,
+    statusRemovePersistent: removeTilePersistent,
   });
 
   // ── conversation actions ───────────────────────────────────────────────────
@@ -509,8 +529,8 @@ export function ChatGroupSession({
   );
 
   const handleAttachmentWarning = useCallback((message: string) => {
-    env.statusPushToast({ severity: "warning", message, ttlMs: 8000 });
-  }, [env]);
+    pushTileNotice({ severity: "warning", message, ttlMs: 8000 });
+  }, [pushTileNotice]);
 
   // ── MCP prompts ────────────────────────────────────────────────────────────
   // Arguments are collected by HOST chrome (McpPromptArgsDialog) — the renderer
@@ -529,7 +549,7 @@ export function ChatGroupSession({
         // prompt-failed. Collapsing them into one string is what makes "it just
         // doesn't work" undiagnosable — `formatIpcError` already owns the wording
         // for each code, and falls back to the generic line for an unknown one.
-        env.statusPushToast({
+        pushTileNotice({
           severity: "error",
           message: formatIpcError(error, undefined, {
             fallbackContext: t("app.mcpPromptFailed", { name: label }),
@@ -549,7 +569,7 @@ export function ChatGroupSession({
         // The host clipped what the server returned. Saying so is the difference
         // between a prompt that looks complete and one the user knows is partial.
         if (outcome.truncated || (outcome.omittedBlocks ?? 0) > 0) {
-          env.statusPushToast({
+          pushTileNotice({
             severity: "warning",
             message: t("app.mcpPromptClipped", { name: label }),
             ttlMs: 8000,
@@ -560,7 +580,7 @@ export function ChatGroupSession({
         fail();
       }
     },
-    [handleAskRef, env, t],
+    [handleAskRef, pushTileNotice, t],
   );
 
   const handleRunMcpPrompt = useCallback((prompt: McpPromptEntry) => {
@@ -676,7 +696,6 @@ export function ChatGroupSession({
     currentSessionId,
     currentSessionProject,
     loadSession: async (sessionId: string) => (await handleLoadSessionAndRefresh(sessionId)) !== false,
-    fallbackToast,
     prefillComposer: setQuestion,
     appendSystemEntry,
     startNewChat,
@@ -791,7 +810,7 @@ export function ChatGroupSession({
         commandActions={env.commandActions}
         slashPickerOpen={env.slashPickerOpen}
         onSlashPickerOpenChange={env.onSlashPickerOpenChange}
-        statusBar={env.statusBar}
+        statusBar={tileStatusBar}
         onAttachmentWarning={handleAttachmentWarning}
         sidePanelOpen={panelOpen}
         onSidePanelOpenChange={onSidePanelOpenChange}

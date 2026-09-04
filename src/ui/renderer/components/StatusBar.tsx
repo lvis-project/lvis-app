@@ -171,7 +171,7 @@ export function StatusBar(props: StatusBarProps) {
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
           const dismissible = typeof onToastDismiss === "function";
           const baseClass =
-            `flex min-w-0 w-full items-start gap-2 overflow-hidden rounded-t-xl rounded-b-md border px-3 pb-6 pt-2.5 text-[13px] lvis-anim-slide-up ${TOAST_TONE[toast.severity]}`;
+            `flex min-w-0 w-full items-start gap-2 overflow-hidden rounded-md border px-3 py-2 text-[13px] lvis-anim-slide-up ${TOAST_TONE[toast.severity]}`;
           const dot = (
             <span
               className={`mt-1 h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
