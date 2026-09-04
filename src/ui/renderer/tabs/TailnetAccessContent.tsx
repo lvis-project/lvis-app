@@ -24,6 +24,14 @@ import { useCopyFlash } from "../hooks/use-copy-flash.js";
 
 export interface TailnetAccessContentProps {
   api: LvisApi;
+  /**
+   * The owner closed the setup flow after it finished.
+   *
+   * Reported so an embedding surface can fold this away once the connection is
+   * made. A failed connect does not report — the sentence saying why is drawn
+   * inside the card, and hiding the card would hide it.
+   */
+  onCompleted?: () => void;
 }
 
 function durationLabel(
@@ -71,7 +79,7 @@ function errorText(error: TailnetSharingErrorCode, t: (key: string) => string): 
  * choose a fixed-duration preset and opaque pairing id only; main resolves the
  * current conversation and inserts fresh keyboard intent at the preload edge.
  */
-export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
+export function TailnetAccessContent({ api, onCompleted }: TailnetAccessContentProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TailnetSharingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -224,7 +232,11 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
       {/* Outside the loading and disabled gates below on purpose: this is the
           control that makes sharing available, so hiding it whenever sharing
           is unavailable is exactly the dead end it exists to remove. */}
-      <TailnetSetupCard api={api} onCreateInvitation={focusInvitationControl} />
+      <TailnetSetupCard
+        api={api}
+        onCreateInvitation={focusInvitationControl}
+        {...(onCompleted ? { onSetupClosed: onCompleted } : {})}
+      />
 
       {feedback ? (
         <p

@@ -676,7 +676,10 @@ export function SettingsContent({
               onDiscardExactDeny={onDiscardExactDeny}
             />
           </TabsContent>
-          <TabsContent value="remote-surfaces" className={tabContentCls}><RemoteSurfacesTab api={api} chatGroupId={chatGroupId} /></TabsContent>
+          {/* The only tab that needs the raw target: its sections live inside
+              collapsed rows, so it has to open the right one before arrival
+              goes looking for the anchor. */}
+          <TabsContent value="remote-surfaces" className={tabContentCls}><RemoteSurfacesTab api={api} chatGroupId={chatGroupId} sectionTarget={sectionTarget} /></TabsContent>
           <TabsContent value="roles" className={tabContentCls}><RolesTab api={api} /></TabsContent>
           <TabsContent value="usage" className={tabContentCls}>
             <UsageDashboard

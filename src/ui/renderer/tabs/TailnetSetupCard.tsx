@@ -40,6 +40,14 @@ export interface TailnetSetupCardProps {
    * here would put the same one-use secret in two places.
    */
   onCreateInvitation: () => void;
+  /**
+   * The owner pressed 닫기 on the finished setup flow.
+   *
+   * A notification, not a control: the card decides what closing does, and this
+   * only lets a surrounding surface — a settings row that opened onto this —
+   * know the flow reached its end rather than was abandoned mid-connect.
+   */
+  onSetupClosed?: () => void;
 }
 
 /**
@@ -81,7 +89,7 @@ function isConfigured(snapshot: TailnetObserverSnapshot | null): boolean {
   return snapshot !== null && snapshot.effective.enabled && snapshot.listeningPort !== null;
 }
 
-export function TailnetSetupCard({ api, onCreateInvitation }: TailnetSetupCardProps) {
+export function TailnetSetupCard({ api, onCreateInvitation, onSetupClosed }: TailnetSetupCardProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TailnetObserverSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -196,7 +204,8 @@ export function TailnetSetupCard({ api, onCreateInvitation }: TailnetSetupCardPr
     setError(null);
     setErrorOutput(null);
     void readSnapshot();
-  }, [readSnapshot]);
+    onSetupClosed?.();
+  }, [onSetupClosed, readSnapshot]);
 
   if (loading) {
     return (
