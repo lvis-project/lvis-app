@@ -70,6 +70,19 @@ describe("useWorkspaceTabs", () => {
     expect(result.current.activeTabId).toBe(firstId);
   });
 
+  it("closeContainerTab closes the launcher tab of that kind and leaves content tabs alone", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.addTab("terminal"));
+    act(() => result.current.ensureContainerTab("subagent")); // active
+    act(() => result.current.closeContainerTab("subagent"));
+    expect(result.current.tabs.map((tab) => tab.kind)).toEqual(["terminal"]);
+    expect(result.current.activeTabId).toBe(result.current.tabs[0]!.id);
+    // Nothing of the kind open: the state is untouched (same reference).
+    const before = result.current.tabs;
+    act(() => result.current.closeContainerTab("subagent"));
+    expect(result.current.tabs).toBe(before);
+  });
+
   it("closing the last tab empties the workspace (no never-empty guard) and clears the active tab", () => {
     const { result } = renderHook(() => useWorkspaceTabs());
     act(() => result.current.addTab("file-browser"));

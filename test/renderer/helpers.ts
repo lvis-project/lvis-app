@@ -229,6 +229,22 @@ export function clearQueueStoreHandle(): void {
  * they ignore unrelated tablists elsewhere in the app shell (the sidebar's
  * Chats/Projects control is also `role="tab"`).
  */
+/**
+ * End a CSS animation on `element` the way the browser would.
+ *
+ * jsdom has no `AnimationEvent`, and React picks the event name it listens to
+ * from what the DOM offers: with `AnimationEvent` absent and `WebkitAnimation`
+ * present on a style declaration, `onAnimationEnd` is bound to
+ * `webkitAnimationEnd`, so `fireEvent.animationEnd` (type `animationend`)
+ * never reaches the handler. Dispatching both names covers either mapping.
+ */
+export function endAnimation(element: Element): void {
+  act(() => {
+    element.dispatchEvent(new Event("webkitAnimationEnd", { bubbles: true }));
+    element.dispatchEvent(new Event("animationend", { bubbles: true }));
+  });
+}
+
 export function settingsTabTrigger(container: HTMLElement, value: string): HTMLElement {
   const el = container.querySelector<HTMLElement>(`[role="tab"][id$="-trigger-${value}"]`);
   if (!el) throw new Error(`no settings tab trigger for "${value}"`);

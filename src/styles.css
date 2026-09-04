@@ -255,6 +255,20 @@
   from { opacity: 0; transform: scale(0.96); }
   to   { opacity: 1; transform: scale(1); }
 }
+/* In-flow notices (the status bar above a composer, the window's notice
+   strip). The surface fades and slides in and out, and because it takes
+   height from what is below it, that height goes with it — a grid row from
+   0fr to 1fr, which animates without knowing the content's size. The element
+   applying `-out` stays mounted until `animationend`. Reduced motion needs no
+   separate rule: the motion tokens collapse to 1ms. */
+@keyframes lvis-notice-in {
+  from { grid-template-rows: 0fr; opacity: 0; transform: translateY(-4px); }
+  to   { grid-template-rows: 1fr; opacity: 1; transform: translateY(0); }
+}
+@keyframes lvis-notice-out {
+  from { grid-template-rows: 1fr; opacity: 1; transform: translateY(0); }
+  to   { grid-template-rows: 0fr; opacity: 0; transform: translateY(-4px); }
+}
 
 /* ─── lvis-marquee — overflow-only horizontal scroll for long banner text ───
    Applied by MarqueeText only when the content is wider than its container.
@@ -277,6 +291,8 @@
   .lvis-anim-slide-down  { animation: lvis-slide-down var(--motion-base) var(--motion-ease-out) both; }
   .lvis-anim-slide-up    { animation: lvis-slide-up var(--motion-base) var(--motion-ease-out) both; }
   .lvis-anim-zoom-in     { animation: lvis-zoom-in var(--motion-base) var(--motion-ease-out) both; }
+  .lvis-anim-notice-in   { display: grid; animation: lvis-notice-in var(--motion-base) var(--motion-ease-out) both; }
+  .lvis-anim-notice-out  { display: grid; animation: lvis-notice-out var(--motion-base) var(--motion-ease-out) both; }
 
   .lvis-surface-hairline { box-shadow: var(--surface-hairline); }
   .lvis-surface-raised   { box-shadow: var(--elevation-raised); }
