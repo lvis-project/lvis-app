@@ -252,6 +252,10 @@ export const CHANNELS = {
     // the exact command. Executing a binary for someone is a capability of its
     // own, so it is gated like `apply` and never inferred from a snapshot read.
     configureServe: "lvis:tailnet-observer:configure-serve",
+    // Writes the whole recommended configuration and runs Serve in one step.
+    // It is `apply` plus `configureServe` with the host choosing the answers,
+    // so it carries exactly their gate — never a weaker one for being one press.
+    guidedSetup: "lvis:tailnet-observer:guided-setup",
   },
   // Local-owner-only Telegram private-DM connection administration. These are
   // INTERNAL for the same reasons as tailnetSharing, and additionally because

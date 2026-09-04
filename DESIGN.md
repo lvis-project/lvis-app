@@ -351,6 +351,20 @@ not be drawn with the same value.
   - Command picker: search and 1st/2nd-depth command navigation.
   - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
   - SettingsSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.
+  - In-flow connection card: a setup whose every value the host decides for itself is drawn
+    as one collapsed card in the settings body, in the section it belongs to — a state label,
+    the facts the probe reported, one primary button that connects, and a quiet reveal of the
+    detailed form beside it. No stepper and no step counter: a flow with one answerable
+    question is one card, not a sequence. That one button also carries the check: pressing it
+    re-probes the environment, shows a spinner and its in-progress label for as long as the
+    call is in flight, and either goes on to connect or leaves the sentence saying why it
+    could not — there is no separate re-check control, because nothing should ask a reader to
+    verify a state they cannot change from here. When the environment is not connectable the
+    card is replaced by that sentence and the same button, never a dead end.
+    Setup is settings content and never opens a dialog, popover or sheet — a
+    window-modal step would freeze the rest of the page for a decision about one section. A
+    finished setup collapses to a status card of one fact per line, with re-run and
+    reveal-the-full-form actions; the detailed form stays reachable only through that reveal.
 - Variants and states:
   - Hover: subtle semantic surface tint, never layout shift. A ROW highlight and an inline
     BUTTON highlight inside that row are different signals and must not share one value.

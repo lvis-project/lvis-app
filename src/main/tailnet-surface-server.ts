@@ -11,6 +11,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { createServer as createPortProbe } from "node:net";
 import { join } from "node:path";
 import { platform as hostPlatform } from "node:process";
 import { promisify } from "node:util";
@@ -447,6 +448,55 @@ export function getTailnetObserverRuntimeState(): TailnetObserverRuntimeState {
     lastStartError,
   });
 }
+
+/**
+ * Bind a loopback port once and report which one was actually taken.
+ *
+ * `0` asks the OS for a free one; any other number asks whether that exact one
+ * is available. `null` means the bind was refused — the same refusal the
+ * listener itself would hit, learned before a configuration is written rather
+ * than after the listener has already failed to come up.
+ */
+function probeLoopbackBind(port: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    const probe = createPortProbe();
+    probe.once("error", () => resolve(null));
+    probe.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
+      const address = probe.address();
+      const bound = typeof address === "object" && address !== null ? address.port : null;
+      probe.close(() => resolve(bound));
+    });
+  });
+}
+
+/**
+ * The loopback port the observer should be configured for.
+ *
+ * The listener binds one fixed port and has no fallback, so an occupied port is
+ * a start failure with nothing on screen that would fix it. Preference order is
+ * the port already chosen, then the shared default, then whatever the OS hands
+ * out — and the caller persists the answer, because a port re-rolled at every
+ * launch would move the target out from under Tailscale Serve each restart.
+ *
+ * A port free at probe time can be taken before the listener binds it. Holding
+ * the probe socket open until then would occupy the very port being reserved,
+ * so the race stays, and its outcome is the ordinary start error rather than a
+ * silent second choice.
+ */
+export async function chooseObserverPort(preferred: number | null): Promise<number | null> {
+  const candidates = preferred === null || preferred === DEFAULT_TAILNET_OBSERVER_PORT
+    ? [DEFAULT_TAILNET_OBSERVER_PORT]
+    : [preferred, DEFAULT_TAILNET_OBSERVER_PORT];
+  for (const candidate of candidates) {
+    // The bound port, not the candidate: they are the same for a fixed number,
+    // and reporting what was actually bound is what makes the `0` case mean
+    // "whatever the OS handed out" rather than the literal zero.
+    const bound = await probeLoopbackBind(candidate);
+    if (bound !== null) return bound;
+  }
+  return await probeLoopbackBind(0);
+}
+
 function dependencies(
   overrides: Partial<TailnetObserverServerDependencies> | undefined,
 ): TailnetObserverServerDependencies {

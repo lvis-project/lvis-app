@@ -1,7 +1,10 @@
+import { createServer } from "node:net";
+import { occupyLoopbackPort as occupy } from "../../__tests__/test-helpers.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
 import type { TailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runtime.js";
 import {
+  chooseObserverPort,
   configureTailscaleServe,
   DEFAULT_TAILNET_OBSERVER_PORT,
   getTailnetObserverRuntimeState,
@@ -793,5 +796,73 @@ describe("Tailnet observer restart", () => {
     expect(getTailnetObserverRuntimeState().lastStartError)
       .toBe("tailnet-observer-authorization-missing-or-invalid");
     expect(getTailnetObserverRuntimeState().listeningPort).toBeNull();
+  });
+});
+
+describe("choosing a loopback port for the observer", () => {
+  /** A port nothing holds right now, learned from the OS rather than guessed. */
+  async function freePort(): Promise<number> {
+    const probe = createServer();
+    const port = await new Promise<number>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen({ host: "127.0.0.1", port: 0, exclusive: true }, () => {
+        const address = probe.address();
+        if (typeof address === "object" && address !== null) resolve(address.port);
+        else reject(new Error("no-address"));
+      });
+    });
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    return port;
+  }
+
+  it("keeps a preferred port that is free", async () => {
+    const free = await freePort();
+
+    expect(await chooseObserverPort(free)).toBe(free);
+  });
+
+  it("asks for the shared default when nothing is preferred", async () => {
+    const release = await occupy(DEFAULT_TAILNET_OBSERVER_PORT);
+    try {
+      // Occupied here, so the answer is a different port — which is itself the
+      // evidence the default is what was asked for first.
+      const chosen = await chooseObserverPort(null);
+      expect(chosen).not.toBeNull();
+      expect(chosen).not.toBe(DEFAULT_TAILNET_OBSERVER_PORT);
+    } finally {
+      await release();
+    }
+  });
+
+  it("falls from an occupied preference to the default", async () => {
+    const taken = await freePort();
+    const releasePreferred = await occupy(taken);
+    try {
+      const chosen = await chooseObserverPort(taken);
+      // The default may itself be busy on the machine running this; what must
+      // never happen is silently handing back the port that is already held.
+      expect(chosen).not.toBe(taken);
+      expect(chosen).not.toBeNull();
+    } finally {
+      await releasePreferred();
+    }
+  });
+
+  it("hands out an OS-assigned port when preference and default are both taken", async () => {
+    const taken = await freePort();
+    const releasePreferred = await occupy(taken);
+    const releaseDefault = await occupy(DEFAULT_TAILNET_OBSERVER_PORT);
+    try {
+      const chosen = await chooseObserverPort(taken);
+      expect(chosen).not.toBeNull();
+      expect(chosen).not.toBe(taken);
+      expect(chosen).not.toBe(DEFAULT_TAILNET_OBSERVER_PORT);
+      // Usable, not merely a number: the whole point is that the listener can
+      // bind what this returned.
+      expect(await chooseObserverPort(chosen)).toBe(chosen);
+    } finally {
+      await releaseDefault();
+      await releasePreferred();
+    }
   });
 });
