@@ -22,6 +22,7 @@ import {
 import {
   startTailnetSurfaceServer,
   isTailnetWebOrigin,
+  type TailnetPairingDeviceStatus,
   type TailnetSurfaceServer,
 } from "../api/tailnet-surface-server.js";
 import {
@@ -43,6 +44,7 @@ import {
 } from "./tailnet-paired-sharing-runtime.js";
 import {
   isTailnetShareActorId,
+  type TailnetOwnerPairingSummary,
   type TailnetPairingShareStore,
   type TailnetShareActorId,
 } from "./tailnet-pairing-share-store.js";
@@ -614,8 +616,7 @@ async function applyOwnDeviceAdmission(input: {
 }
 
 /**
- * Pair a device that is signed in to this desktop's own Tailscale account,
- * without a code.
+ * What this desktop holds for one device, pairing its own without a code.
  *
  * Serve fills the login header from the tailnet, and the probe says which login
  * this desktop itself is signed in as. When they are the same account, carrying
@@ -625,49 +626,68 @@ async function applyOwnDeviceAdmission(input: {
  * Whether the approval click is skipped too is the owner's separate, off-by-
  * default choice, read here rather than captured at boot so the control takes
  * effect without restarting the listener out from under a live remote.
+ *
+ * Every path ends at the same read of the store, so the state the page is given
+ * is the state the store is actually in — including for a device that is not
+ * this desktop's own. That is what a code-redeemed pairing needs: it is already
+ * recorded, and reporting it is what stops the page asking for a second code.
  */
-async function claimOwnTailnetDevice(input: {
+async function resolveTailnetDeviceStatus(input: {
   readonly store: TailnetPairingShareStore;
   readonly namespace: FeatureNamespaceHandle;
   readonly audit: TailnetOwnDeviceAdmissionAudit;
   readonly probeEnvironment: () => Promise<TailscaleEnvironment>;
   readonly login: string;
   readonly actorId: TailnetShareActorId;
-}): Promise<boolean> {
+}): Promise<TailnetPairingDeviceStatus> {
   const environment = await input.probeEnvironment();
   // Neither login is logged or echoed; this comparison is all they are read for.
   // A probe that could not read one leaves `login` null, which matches nothing,
-  // and the remote is asked for a code — the correct answer, not a fallback:
-  // without the probe nothing has established whose device this is.
-  if (environment.login !== input.login) return false;
+  // and nothing is claimed for the requester — the correct answer, not a
+  // fallback: without the probe nothing has established whose device this is.
+  if (environment.login !== input.login) {
+    return pairingDeviceStatus(input.store.currentPairing(input.actorId), false);
+  }
   // A pairing this actor already has is the answer; minting a second invitation
   // on every five-second reload would spend the invitation budget and then be
   // refused by `claimInvitation` for being already paired.
   const existing = input.store.currentPairing(input.actorId);
-  let pairingId = existing?.id ?? null;
-  if (pairingId === null) {
+  if (existing === null) {
     const invitation = await input.store.createInvitation();
-    const claim = await input.store.claimInvitation(invitation.code, input.actorId);
-    if (claim === null) return false;
-    pairingId = claim.pairingId;
+    if (await input.store.claimInvitation(invitation.code, input.actorId) === null) {
+      return pairingDeviceStatus(null, true);
+    }
   }
   const admitted = await readOwnDeviceAdmission(input.namespace);
+  // Admission on, and pointed at somebody: the request has already proved the
+  // caller is this desktop's current login, so an admission recorded against a
+  // different account is one made before the desktop changed accounts. Moving
+  // it takes the old account's grant back rather than leaving an automatic
+  // grant behind for an account that is no longer this desktop's.
+  //
   // Off, or pointed at nobody: the pairing stays `pending` and the desktop
   // still has to activate it, which is the behaviour with no setting at all.
-  if (admitted === null) return true;
-  // The request has already proved the caller is this desktop's current login,
-  // so an admission recorded against a different account is one made before the
-  // desktop changed accounts. Move it, which takes the old account's grant back
-  // rather than leaving an automatic grant behind for an account that is no
-  // longer this desktop's.
-  await applyOwnDeviceAdmission({
-    store: input.store,
-    namespace: input.namespace,
-    audit: input.audit,
-    previousActorId: admitted,
-    nextActorId: input.actorId,
+  if (admitted !== null) {
+    await applyOwnDeviceAdmission({
+      store: input.store,
+      namespace: input.namespace,
+      audit: input.audit,
+      previousActorId: admitted,
+      nextActorId: input.actorId,
+    });
+  }
+  return pairingDeviceStatus(input.store.currentPairing(input.actorId), true);
+}
+
+/** Project the store's pairing summary onto the listener's device vocabulary. */
+function pairingDeviceStatus(
+  pairing: TailnetOwnerPairingSummary | null,
+  ownDevice: boolean,
+): TailnetPairingDeviceStatus {
+  return Object.freeze({
+    pairing: pairing === null ? "none" as const : pairing.state,
+    ownDevice,
   });
-  return true;
 }
 
 /**
@@ -780,7 +800,7 @@ async function startForBoot(
       : {
           pairing: {
             claimInvitation: pairedSharingRuntime.store.claimInvitation.bind(pairedSharingRuntime.store),
-            claimOwnDevice: (login: string, actorId: TailnetShareActorId) => claimOwnTailnetDevice({
+            deviceStatus: (login: string, actorId: TailnetShareActorId) => resolveTailnetDeviceStatus({
               store: pairedSharingRuntime.store,
               namespace: resolved.openTailnetNamespace(),
               audit: ownDeviceAdmissionAudit(options.auditLogger),

@@ -101,18 +101,34 @@ export interface TailnetPairingOptions {
     actorId: TailnetShareActorId,
   ): Promise<{ readonly expiresAt: number } | null>;
   /**
-   * Pair the desktop's own identity without a code. False when `login` is not
-   * the tailnet login this desktop is signed in as — the comparison belongs on
-   * the main side, which is where the environment probe lives.
+   * What the desktop holds for the identity behind this request, pairing its
+   * own device without a code along the way.
    *
-   * Only the answer crosses this boundary. The pending pairing's deadline stays
-   * where it is enforced: the browser is told to wait for the desktop, and the
+   * A boolean was not enough to say the true thing on the page. "Paired" and
+   * "approved" are different states, and so are "no pairing yet" and "paired,
+   * with nothing shared to it" — a page that cannot tell them apart tells a
+   * device that was let straight in that it is waiting to be let in, and asks a
+   * device that already redeemed a code to redeem another one.
+   *
+   * Only the state crosses this boundary. The pending pairing's deadline stays
+   * where it is enforced: the browser is told what it is waiting for, and the
    * desktop is where the approval and the expiry both live.
    */
-  claimOwnDevice?(
+  deviceStatus?(
     login: string,
     actorId: TailnetShareActorId,
-  ): Promise<boolean>;
+  ): Promise<TailnetPairingDeviceStatus>;
+}
+
+/** The desktop's answer about one device, in the pairing store's own words. */
+export interface TailnetPairingDeviceStatus {
+  readonly pairing: "none" | "pending" | "active";
+  /**
+   * Whether the host recognised this request as the desktop's own Tailscale
+   * account. Presentation only: it decides whether the page explains why no
+   * code was asked for, never what the device may reach.
+   */
+  readonly ownDevice: boolean;
 }
 /**
  * Same-origin browser adapter. It is intentionally opt-in and requires the
@@ -892,18 +908,20 @@ async function routeTailnetWebDocument(
 }
 
 /**
- * Serve the invitation-code page to a browser that has no share yet.
+ * Serve the pairing page to a browser that has no share yet.
  *
  * Reaching this listener at all already proves a Tailscale identity; what is
  * missing is the pairing that turns that identity into a share. The page is
  * given its own share-less cookie and CSRF secret so the redemption POST can
  * carry the same same-origin proof every other web route requires.
  *
- * The owner's own device is the exception: the tailnet already proved it is
- * this desktop's login, so it is paired here and shown the waiting state
- * instead of being asked to carry a code between two of its owner's screens.
- * Only the transcription goes away — the pairing is `pending` either way and
- * the desktop still has to approve it.
+ * Which of its three states it opens in is the desktop's answer, not a guess:
+ * no pairing asks for a code, a pending one waits for the approval, and an
+ * approved one waits for a conversation to be shared to it. The owner's own
+ * device is paired here rather than asked to carry a 56-character code between
+ * two of its owner's screens, and — when the owner has turned own-device
+ * admission on — arrives already approved, which is the state this page has to
+ * be able to say out loud.
  */
 async function sendTailnetWebPairingDocument(
   req: IncomingMessage,
@@ -917,7 +935,7 @@ async function sendTailnetWebPairingDocument(
     sendTailnetWebJson(res, web, 403, { ok: false, error: "pairing-share-required" });
     return;
   }
-  const ownDevicePaired = await claimOwnTailnetDevice(req, options);
+  const device = await resolveTailnetDeviceStatus(req, options);
   const previousCookie = readTailnetWebCookie(req.headers);
   if (previousCookie !== undefined) web.sessions.revoke(previousCookie);
   let entry;
@@ -938,34 +956,45 @@ async function sendTailnetWebPairingDocument(
     entry,
     (nonce) => renderTailnetWebPairingDocument(
       nonce,
-      ownDevicePaired ? { kind: "awaiting-approval" } : { kind: "code-entry", csrfToken },
+      device.pairing === "none"
+        ? { kind: "code-entry", csrfToken }
+        : {
+            kind: "awaiting",
+            waitingFor: device.pairing === "pending" ? "approval" : "share",
+            ownDevice: device.ownDevice,
+          },
     ),
   );
 }
 
 /**
- * Pair the requesting identity when it is this desktop's own tailnet login.
+ * Ask the desktop what it holds for the identity behind this request.
  *
  * The role check is the one the code path uses, so a capability-mode tailnet
- * still states who may ask to pair at all. A host that cannot read its own
- * Tailscale login, or a store that cannot record the pairing, answers no and
- * the browser gets the ordinary code form: that is the correct outcome, not a
- * fallback — nothing about this identity has been established.
+ * still states who may ask to pair at all. An identity this listener cannot
+ * establish, or a desktop that cannot answer, reads as `none` and gets the
+ * ordinary code form: that is the correct outcome, not a fallback — nothing
+ * about this identity has been established, so there is nothing to report.
  */
-async function claimOwnTailnetDevice(
+const UNPAIRED_DEVICE: TailnetPairingDeviceStatus = Object.freeze({
+  pairing: "none" as const,
+  ownDevice: false,
+});
+
+async function resolveTailnetDeviceStatus(
   req: IncomingMessage,
   options: TailnetSurfaceServerOptions,
-): Promise<boolean> {
-  const claimOwnDevice = options.pairing?.claimOwnDevice;
-  if (claimOwnDevice === undefined) return false;
+): Promise<TailnetPairingDeviceStatus> {
+  const deviceStatus = options.pairing?.deviceStatus;
+  if (deviceStatus === undefined) return UNPAIRED_DEVICE;
   const login = authorizedTailnetLogin(req.headers, options.authorization, "pairing");
-  if (login === undefined) return false;
+  if (login === undefined) return UNPAIRED_DEVICE;
   const actorId = options.pairedSharing?.actorIdFor(login);
-  if (actorId === null || actorId === undefined) return false;
+  if (actorId === null || actorId === undefined) return UNPAIRED_DEVICE;
   try {
-    return await claimOwnDevice(login, actorId);
+    return await deviceStatus(login, actorId);
   } catch {
-    return false;
+    return UNPAIRED_DEVICE;
   }
 }
 
@@ -1457,18 +1486,32 @@ function clearTailnetWebCookie(): string {
   return WEB_COOKIE_NAME + "=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0";
 }
 /**
- * The two states the pairing page can be served in.
+ * The states the pairing page can be served in.
  *
- * `awaiting-approval` is not a second page: it is the state the code-entry page
- * already moves itself into once a claim is accepted, rendered up front for a
- * device that never had to type a code.
+ * `awaiting` is not a second page: it is the state the code-entry page already
+ * moves itself into once a claim is accepted, rendered up front for a device
+ * that never had to type a code. What it is waiting for is the part that has to
+ * be said accurately — a device the desktop has already approved is not waiting
+ * for an approval, and saying so is the page contradicting the control that let
+ * it in.
  */
 type TailnetWebPairingState =
   | { readonly kind: "code-entry"; readonly csrfToken: string }
-  | { readonly kind: "awaiting-approval" };
+  | {
+      readonly kind: "awaiting";
+      readonly waitingFor: "approval" | "share";
+      readonly ownDevice: boolean;
+    };
 
-/** Said by both states, so the rendered page and the claimed page cannot drift. */
-const WEB_PAIRING_AWAITING_TEXT = "데스크톱에서 승인을 기다리는 중…";
+/**
+ * Said by the rendered page and by the page a claim has just moved, so the two
+ * cannot become two accounts of the same moment. The claim POST answers 202 for
+ * a pairing that is `pending`, which is why that path names the approval text
+ * directly; the reload is what moves the page on once the approval happens,
+ * rather than leaving the sentence to go stale on screen.
+ */
+const WEB_PAIRING_AWAITING_APPROVAL_TEXT = "데스크톱에서 승인을 기다리는 중…";
+const WEB_PAIRING_AWAITING_SHARE_TEXT = "데스크톱에서 대화를 공유하기를 기다리는 중…";
 const WEB_PAIRING_RELOAD_MS = 5_000;
 
 function renderTailnetWebPairingDocument(nonce: string, state: TailnetWebPairingState): string {
@@ -1483,8 +1526,12 @@ function renderTailnetWebPairingDocument(nonce: string, state: TailnetWebPairing
       "<p id=\"status\" class=\"muted\" aria-live=\"polite\"></p>",
     ]
     : [
-      "<p class=\"muted\">이 기기는 이 데스크톱과 같은 Tailscale 계정으로 확인되었습니다. 초대 코드는 필요하지 않습니다.</p>",
-      "<p id=\"status\" class=\"muted\" aria-live=\"polite\">" + WEB_PAIRING_AWAITING_TEXT + "</p>",
+      "<p class=\"muted\">" + (state.ownDevice
+        ? "이 기기는 이 데스크톱과 같은 Tailscale 계정으로 확인되었습니다. 초대 코드는 필요하지 않습니다."
+        : "이 기기는 이 데스크톱에 연결되어 있습니다.") + "</p>",
+      "<p id=\"status\" class=\"muted\" aria-live=\"polite\">" + (state.waitingFor === "approval"
+        ? WEB_PAIRING_AWAITING_APPROVAL_TEXT
+        : WEB_PAIRING_AWAITING_SHARE_TEXT) + "</p>",
     ];
   const script = state.kind === "code-entry"
     ? renderTailnetWebPairingClaimScript(state.csrfToken)
@@ -1556,7 +1603,7 @@ function renderTailnetWebPairingClaimScript(csrfToken: string): readonly string[
     "      return;",
     "    }",
     "    if (response.status === 202) {",
-    "      status.textContent = \"" + WEB_PAIRING_AWAITING_TEXT + "\";",
+    "      status.textContent = \"" + WEB_PAIRING_AWAITING_APPROVAL_TEXT + "\";",
     "      form.hidden = true;",
     "      window.setTimeout(() => window.location.reload(), " + WEB_PAIRING_RELOAD_MS + ");",
     "      return;",

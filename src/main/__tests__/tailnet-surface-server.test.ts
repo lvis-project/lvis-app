@@ -6,6 +6,7 @@ import type { TailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runt
 import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
 import type { TailnetShareActorId } from "../tailnet-pairing-share-store.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
+import type { TailnetPairingDeviceStatus } from "../../api/tailnet-surface-server.js";
 import {
   chooseObserverPort,
   configureTailscaleServe,
@@ -285,16 +286,17 @@ describe("Tailnet observer lifecycle", () => {
       tailnetPairedSharingRuntime: pairedRuntime,
     })).resolves.toEqual({ port: DEFAULT_TAILNET_OBSERVER_PORT });
 
-    const claimOwnDevice = (f.startServer.mock.calls[0]?.[0] as {
+    const deviceStatus = (f.startServer.mock.calls[0]?.[0] as {
       pairing?: {
-        claimOwnDevice?: (login: string, actorId: `tailnet:${string}`) => Promise<unknown>;
+        deviceStatus?: (login: string, actorId: `tailnet:${string}`) => Promise<unknown>;
       };
-    }).pairing?.claimOwnDevice;
-    expect(claimOwnDevice).toBeTypeOf("function");
+    }).pairing?.deviceStatus;
+    expect(deviceStatus).toBeTypeOf("function");
 
     // The owner's own device pairs, but through the ordinary invitation: the
     // pairing is pending and the desktop still has to activate it.
-    await expect(claimOwnDevice?.(OWNER_LOGIN, ACTOR)).resolves.toBe(true);
+    await expect(deviceStatus?.(OWNER_LOGIN, ACTOR))
+      .resolves.toEqual({ pairing: "pending", ownDevice: true });
     expect(createInvitation).toHaveBeenCalledOnce();
     // The deadline stays on this side: what crossed the boundary is only that a
     // pairing exists, and it is `pending` — the desktop still has to activate it.
@@ -302,11 +304,13 @@ describe("Tailnet observer lifecycle", () => {
 
     // The waiting page reloads on a timer; re-entry must not spend a second
     // invitation on a claim that the existing pairing would refuse.
-    await expect(claimOwnDevice?.(OWNER_LOGIN, ACTOR)).resolves.toBe(true);
+    await expect(deviceStatus?.(OWNER_LOGIN, ACTOR))
+      .resolves.toEqual({ pairing: "pending", ownDevice: true });
     expect(createInvitation).toHaveBeenCalledOnce();
 
     // Another account on the same tailnet is not this desktop's device.
-    await expect(claimOwnDevice?.("guest@example.test", ACTOR)).resolves.toBe(false);
+    await expect(deviceStatus?.("guest@example.test", ACTOR))
+      .resolves.toEqual({ pairing: "pending", ownDevice: false });
     expect(createInvitation).toHaveBeenCalledOnce();
   });
 
@@ -335,15 +339,15 @@ describe("Tailnet observer lifecycle", () => {
       tailnetPairedSharingRuntime: pairedRuntime,
     });
 
-    const claimOwnDevice = (f.startServer.mock.calls[0]?.[0] as {
+    const deviceStatus = (f.startServer.mock.calls[0]?.[0] as {
       pairing?: {
-        claimOwnDevice?: (login: string, actorId: `tailnet:${string}`) => Promise<unknown>;
+        deviceStatus?: (login: string, actorId: `tailnet:${string}`) => Promise<unknown>;
       };
-    }).pairing?.claimOwnDevice;
-    await expect(claimOwnDevice?.(
+    }).pairing?.deviceStatus;
+    await expect(deviceStatus?.(
       "owner@example.test",
       ("tailnet:" + "b".repeat(64)) as `tailnet:${string}`,
-    )).resolves.toBe(false);
+    )).resolves.toEqual({ pairing: "none", ownDevice: false });
     expect(createInvitation).not.toHaveBeenCalled();
   });
 
@@ -973,7 +977,7 @@ function fakeAuditLogger() {
   };
 }
 
-async function claimOwnDeviceFor(input: {
+async function deviceStatusFor(input: {
   namespace: FeatureNamespaceHandle;
   runtime: TailnetPairedSharingRuntime;
   probeLogin: string | null;
@@ -994,13 +998,13 @@ async function claimOwnDeviceFor(input: {
     },
     tailnetPairedSharingRuntime: input.runtime,
   });
-  const claimOwnDevice = (f.startServer.mock.calls[0]?.[0] as {
+  const deviceStatus = (f.startServer.mock.calls[0]?.[0] as {
     pairing?: {
-      claimOwnDevice?: (login: string, actorId: TailnetShareActorId) => Promise<boolean>;
+      deviceStatus?: (login: string, actorId: TailnetShareActorId) => Promise<TailnetPairingDeviceStatus>;
     };
-  }).pairing?.claimOwnDevice;
-  if (claimOwnDevice === undefined) throw new Error("claimOwnDevice-missing");
-  return claimOwnDevice;
+  }).pairing?.deviceStatus;
+  if (deviceStatus === undefined) throw new Error("device-status-missing");
+  return deviceStatus;
 }
 
 describe("own-device admission", () => {
@@ -1010,14 +1014,17 @@ describe("own-device admission", () => {
     });
     const store = fakeStore();
     const audit = fakeAuditLogger();
-    const claimOwnDevice = await claimOwnDeviceFor({
+    const deviceStatus = await deviceStatusFor({
       namespace,
       runtime: fakeRuntime(store),
       probeLogin: OWNER_LOGIN,
       auditLogger: audit.logger,
     });
 
-    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    // `active`, not just "paired": the page is what turns this into the sentence
+    // the device reads, and an admitted device is not waiting for an approval.
+    await expect(deviceStatus(OWNER_LOGIN, OWN_ACTOR))
+      .resolves.toEqual({ pairing: "active", ownDevice: true });
     expect(store.pairings).toEqual([
       expect.objectContaining({ actorId: OWN_ACTOR, state: "active" }),
     ]);
@@ -1028,7 +1035,8 @@ describe("own-device admission", () => {
 
     // The waiting page reloads on a timer. A pairing that is already active is
     // not a second grant, so it is neither re-activated nor audited again.
-    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    await expect(deviceStatus(OWNER_LOGIN, OWN_ACTOR))
+      .resolves.toEqual({ pairing: "active", ownDevice: true });
     expect(audit.entries).toHaveLength(1);
   });
 
@@ -1036,14 +1044,15 @@ describe("own-device admission", () => {
     const namespace = memoryNamespace();
     const store = fakeStore();
     const audit = fakeAuditLogger();
-    const claimOwnDevice = await claimOwnDeviceFor({
+    const deviceStatus = await deviceStatusFor({
       namespace,
       runtime: fakeRuntime(store),
       probeLogin: OWNER_LOGIN,
       auditLogger: audit.logger,
     });
 
-    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    await expect(deviceStatus(OWNER_LOGIN, OWN_ACTOR))
+      .resolves.toEqual({ pairing: "pending", ownDevice: true });
     expect(store.pairings).toEqual([
       expect.objectContaining({ actorId: OWN_ACTOR, state: "pending" }),
     ]);
@@ -1056,16 +1065,40 @@ describe("own-device admission", () => {
       [ADMISSION_FILE]: { version: 1, admittedActorId: OWN_ACTOR },
     });
     const store = fakeStore();
-    const claimOwnDevice = await claimOwnDeviceFor({
+    const deviceStatus = await deviceStatusFor({
       namespace,
       runtime: fakeRuntime(store),
       probeLogin: OWNER_LOGIN,
     });
 
-    await expect(claimOwnDevice("guest@example.test", OTHER_ACTOR)).resolves.toBe(false);
+    await expect(deviceStatus("guest@example.test", OTHER_ACTOR))
+      .resolves.toEqual({ pairing: "none", ownDevice: false });
     expect(store.createInvitation).not.toHaveBeenCalled();
     expect(store.activatePairing).not.toHaveBeenCalled();
     expect(store.pairings).toEqual([]);
+  });
+
+  it("reports what a code-redeemed device already has instead of claiming nothing", async () => {
+    // Not this desktop's own account, so nothing is claimed for it — but its
+    // pairing exists, and reporting it is what stops the page asking for a
+    // second code five seconds after the first one was accepted.
+    const namespace = memoryNamespace();
+    const store = fakeStore([{ id: PENDING_ID, actorId: OTHER_ACTOR, state: "pending" }]);
+    const deviceStatus = await deviceStatusFor({
+      namespace,
+      runtime: fakeRuntime(store, { [OWNER_LOGIN]: OWN_ACTOR, "guest@example.test": OTHER_ACTOR }),
+      probeLogin: OWNER_LOGIN,
+    });
+
+    await expect(deviceStatus("guest@example.test", OTHER_ACTOR))
+      .resolves.toEqual({ pairing: "pending", ownDevice: false });
+
+    // And once the owner approves it by hand, the same read says the approval
+    // is done and a conversation share is what is missing.
+    await store.activatePairing(PENDING_ID);
+    await expect(deviceStatus("guest@example.test", OTHER_ACTOR))
+      .resolves.toEqual({ pairing: "active", ownDevice: false });
+    expect(store.createInvitation).not.toHaveBeenCalled();
   });
 
   it("approves a device already waiting when the owner turns it on", async () => {
@@ -1121,12 +1154,13 @@ describe("own-device admission", () => {
       .toMatchObject({ action: "revoked", pairingId: PENDING_ID });
 
     // Off means off: the next request from that same device waits for approval.
-    const claimOwnDevice = await claimOwnDeviceFor({
+    const deviceStatus = await deviceStatusFor({
       namespace,
       runtime: fakeRuntime(store),
       probeLogin: OWNER_LOGIN,
     });
-    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    await expect(deviceStatus(OWNER_LOGIN, OWN_ACTOR))
+      .resolves.toEqual({ pairing: "pending", ownDevice: true });
     expect(store.pairings.at(-1)).toMatchObject({ state: "pending" });
   });
 
@@ -1136,14 +1170,15 @@ describe("own-device admission", () => {
     });
     const store = fakeStore([{ id: PENDING_ID, actorId: OTHER_ACTOR, state: "active" }]);
     const audit = fakeAuditLogger();
-    const claimOwnDevice = await claimOwnDeviceFor({
+    const deviceStatus = await deviceStatusFor({
       namespace,
       runtime: fakeRuntime(store),
       probeLogin: OWNER_LOGIN,
       auditLogger: audit.logger,
     });
 
-    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    await expect(deviceStatus(OWNER_LOGIN, OWN_ACTOR))
+      .resolves.toEqual({ pairing: "active", ownDevice: true });
     expect(store.pairings[0]).toMatchObject({ actorId: OTHER_ACTOR, state: "revoked" });
     expect(store.pairings[1]).toMatchObject({ actorId: OWN_ACTOR, state: "active" });
     expect(await namespace.readJson(ADMISSION_FILE, null))
@@ -1157,12 +1192,13 @@ describe("own-device admission", () => {
     expect(await isTailnetOwnDeviceAdmissionEnabled(namespace)).toBe(false);
 
     const store = fakeStore();
-    const claimOwnDevice = await claimOwnDeviceFor({
+    const deviceStatus = await deviceStatusFor({
       namespace,
       runtime: fakeRuntime(store),
       probeLogin: OWNER_LOGIN,
     });
-    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    await expect(deviceStatus(OWNER_LOGIN, OWN_ACTOR))
+      .resolves.toEqual({ pairing: "pending", ownDevice: true });
     expect(store.activatePairing).not.toHaveBeenCalled();
   });
 
