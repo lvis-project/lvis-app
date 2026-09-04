@@ -13,6 +13,7 @@ import { act, createEvent, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp, startInChatMode } from "./render-app.js";
 import {
   approvalRequest,
+  clickSidebarNavRow,
   collectTiles,
   focusTile,
   forceOverflowingSummaries,
@@ -406,6 +407,106 @@ describe("overlay cards whose origin conversation leaves the screen", () => {
     });
     const other = tiles.find((tile) => tile.chatGroupId !== second!.chatGroupId)!;
     expect(other.element.textContent).not.toContain("reconcile the ledger");
+  });
+});
+
+describe("overlay cards in a pane routed off its conversation", () => {
+  /** A plugin's staged prompt: no origin conversation, so it is pinned to the focused pane. */
+  const pluginCard = (id: string, summary: string) => ({
+    id,
+    source: { kind: "plugin", pluginId: "mail-assistant", eventId: id },
+    title: "mail-action",
+    summary,
+    running: false,
+    pendingPrompt: `<plugin-message source="plugin:mail-assistant">\n${summary}\n</plugin-message>`,
+    createdAt: new Date().toISOString(),
+  });
+  const routedShell = (container: HTMLElement, view: string) =>
+    container.querySelector<HTMLElement>(`[data-testid="main-pane-shell"][data-view="${view}"]`);
+  const regions = (root: ParentNode) => root.querySelectorAll('[data-testid="overlay-card-region"]');
+  /** The lane the region floats in must be the FRAME's body, under its header band. */
+  const expectInFrameLane = (frame: HTMLElement, region: HTMLElement) => {
+    const lane = region.closest<HTMLElement>('[data-testid="floating-right-lane"]');
+    expect(lane).not.toBeNull();
+    expect(frame.querySelector("[data-body-inset]")!.contains(lane)).toBe(true);
+    expect(frame.querySelector('[data-testid="pane-header"]')!.contains(lane)).toBe(false);
+  };
+
+  it("draws a card with no origin in the frame of the pane it arrived over while that pane shows the work board — not in the window band", async () => {
+    const { container, emitOverlayShow } = await renderApp({ hasApiKey: true });
+    await clickSidebarNavRow("features", "toolbar-work-board");
+    const shell = await waitFor(() => {
+      const routed = routedShell(container, "work-board");
+      expect(routed).not.toBeNull();
+      return routed!;
+    });
+    const cell = container.querySelector<HTMLElement>(`[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`)!;
+    expect(cell.contains(shell)).toBe(true);
+    // The pane is drawn; only its conversation is behind the view.
+    expect(cell.getAttribute("data-hidden")).toBeNull();
+
+    await act(async () => {
+      emitOverlayShow(pluginCard("plugin:mail:e1", "메일에 답장할까요?"));
+    });
+
+    const region = await waitFor(() => {
+      const drawn = container.querySelector<HTMLElement>('[data-testid="overlay-card-region"]');
+      expect(drawn).not.toBeNull();
+      return drawn!;
+    });
+    expect(regions(container)).toHaveLength(1);
+    expect(shell.contains(region)).toBe(true);
+    expect(region.getAttribute("data-overlay-surface")).toBe(MAIN_CHAT_GROUP_ID);
+    expect(region.textContent).toContain("메일에 답장할까요?");
+    const frame = shell.querySelector<HTMLElement>('[data-testid="pane"]')!;
+    expectInFrameLane(frame, region);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
+
+    // Closing the view hands the pane back to its conversation, and the card
+    // comes with it — still drawn once, in the conversation frame's lane.
+    await act(async () => {
+      fireEvent.click(frame.querySelector('[data-testid="pane-close"]')!);
+    });
+    await waitFor(() => expect(routedShell(container, "work-board")).toBeNull());
+    const homeRegion = await waitFor(() => {
+      const drawn = cell.querySelector<HTMLElement>('[data-testid="overlay-card-region"]');
+      expect(drawn).not.toBeNull();
+      return drawn!;
+    });
+    expect(regions(container)).toHaveLength(1);
+    expect(homeRegion.getAttribute("data-overlay-surface")).toBe(MAIN_CHAT_GROUP_ID);
+    expectInFrameLane(cell.querySelector<HTMLElement>('[data-testid="pane"]')!, homeRegion);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
+  });
+
+  it("with two panes, pins the card to the focused pane at arrival — routed or not — and leaves it there when focus moves", async () => {
+    const { container, emitOverlayShow } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+    // Focus follows the split, so the sidebar routes the SECOND pane.
+    await clickSidebarNavRow("features", "toolbar-work-board");
+    const shell = await waitFor(() => {
+      const routed = routedShell(container, "work-board");
+      expect(routed).not.toBeNull();
+      return routed!;
+    });
+    expect(second!.element.contains(shell)).toBe(true);
+    expect(primary!.element.contains(shell)).toBe(false);
+
+    await act(async () => {
+      emitOverlayShow(pluginCard("plugin:mail:e2", "두 번째 판에 도착한 카드"));
+    });
+    await waitFor(() => expect(regions(second!.element)).toHaveLength(1));
+    expect(shell.contains(second!.element.querySelector('[data-testid="overlay-card-region"]'))).toBe(true);
+    expect(regions(primary!.element)).toHaveLength(0);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
+
+    // Focus moving to the conversation pane does not carry the card with it.
+    await focusTile(primary!);
+    await waitFor(() => expect(primary!.element.querySelector('[data-testid="pane"]')?.getAttribute("data-focused")).toBe("true"));
+    expect(regions(second!.element)).toHaveLength(1);
+    expect(regions(primary!.element)).toHaveLength(0);
+    expect(regions(container)).toHaveLength(1);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
   });
 });
 

@@ -395,6 +395,12 @@ budget. Anything the window has to show has the same problem and takes the same
 answer — a second float, anchored top-right, would land on the rightmost tile's
 own lane and take clicks meant for it.
 
+Overlay cards are the same rule read from the pane's side: the floating right
+lane is the PANE FRAME's, so a card pinned to a pane stays in it whatever the
+pane shows — its conversation, Settings, the work board, a plugin view. Only a
+pane the tree is not drawing hands its cards to the band. See "Overlay cards:
+the pane's, or the window's" below.
+
 Because a band takes its height out of the grid, its cap comes from the grid's
 own arithmetic rather than from a share of the viewport: the shortest tile must
 still clear `PANE_MIN_HEIGHT` plus the cell inset and the tile row's
@@ -482,23 +488,35 @@ permission-review suggestion report on the window's permission settings, not on
 a conversation. They are subscribed once at App level and rendered once — per
 tile they would raise the same toast in every open conversation at once.
 
-**Overlay cards: owned, or the window's.** An `OverlayItem` carries the
+**Overlay cards: the pane's, or the window's.** An `OverlayItem` carries the
 conversation it came from when main knew one. A card with an origin renders in
 the tile holding that conversation and its primary action continues THAT
 conversation, resolved from the origin at click time rather than from the
-surface that drew the card.
+surface that drew the card. A card with no origin — a routine fire, a plugin
+event — is pinned to the focused pane once, when it arrives
+(`adoptedChatGroupId`), and confirming it starts the turn in that pane; reading
+focus at paint time instead would slide the card between tiles while the user
+reads it.
 
-A card with no origin — a routine fire, a plugin event — and a card whose origin
-conversation has left the screen are drawn once in the window's own band, above
-the approval dock and inside the same height budget. This is stated, not fallen
-back to, and it is literally the same home the window's approval dock gives an
-unclaimed request. The alternative, drawing it in whichever tile
-is focused, says the card belongs to that conversation when it does not, and
-makes the card jump between tiles as focus moves. The window's region has no
-conversation of its own, so its action names the focused one explicitly
-(`actionChatGroupId`) — the same rule an unowned question already follows. An
-orphaned card keeps its dismiss and loses its action: running it in a
-conversation it was never staged for is the mismatch main refuses on the way in.
+The lane a card floats in is the PANE FRAME's, not the conversation's
+(`PaneFrame`'s `lane`, rendered as `FloatingRightLane` at the top-right of the
+frame body). A pinned card therefore stays in its pane whatever the pane shows —
+its conversation, Settings, the work board, a plugin view. The routing asks
+whether the pane is DRAWN (`paneHidden`, the tree's answer), not whether its
+conversation is visible (`hidden`, the tree's or the route's): a routed pane
+hides its composer, so approvals and questions still fall to the window band,
+but an overlay card is not the composer's and does not.
+
+The window's own band keeps only what no drawn pane can hold: a card whose
+origin conversation has left the screen, a pin whose pane has closed or been
+maximized away, and a card that arrived with no pane open at all. It is drawn
+once there, above the approval dock and inside the same height budget — the
+same home the window's approval dock gives an unclaimed request. The window's
+region has no conversation of its own, so its action names the focused one
+explicitly (`actionChatGroupId`) — the same rule an unowned question already
+follows. An orphaned card keeps its dismiss and loses its action: running it in
+a conversation it was never staged for is the mismatch main refuses on the way
+in.
 
 **The dock's activity line.** The floating dock holds ONE activity line while
 the window can hold four conversations, so `DockActivity` names the conversation

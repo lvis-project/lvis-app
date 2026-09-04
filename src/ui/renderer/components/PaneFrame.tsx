@@ -29,6 +29,7 @@ import {
   dropTargetAt,
   type DropTarget,
 } from "./pane-drop.js";
+import { FloatingRightLane } from "./FloatingRightLane.js";
 import { AXIS_OF,
   closeLeaf,
   countLeaves,
@@ -204,6 +205,18 @@ interface PaneFrameProps {
    * body, as tall as the tile. The conversation's work panel portals into it.
    */
   asideSlot?: boolean;
+  /**
+   * What floats at the top-right of the body: the overlay cards pinned to
+   * this pane.
+   *
+   * The lane is the FRAME's, not the conversation's, because a card pinned to
+   * a pane must stay visible whatever the pane draws — a conversation,
+   * Settings, a plugin view. Anchored inside the conversation, it went behind
+   * `display:none` the moment a view covered that conversation, and the card
+   * fell out to the window band, off the pane it was pinned to. The frame
+   * renders the `FloatingRightLane` itself so the anchor lives in one place.
+   */
+  lane?: ReactNode;
   children: ReactNode;
 }
 
@@ -291,6 +304,7 @@ export function PaneFrame({
   onToggleMaximize,
   bodyInset = "none",
   asideSlot: publishAsideSlot = false,
+  lane,
   children,
 }: PaneFrameProps) {
   const { t } = useTranslation();
@@ -552,12 +566,15 @@ export function PaneFrame({
       <PanePanelSlotContext.Provider value={publishAsideSlot ? panelSlots : null}>
         <PaneBodyActionsContext.Provider value={setBodyActions}>
           <div
+            // `relative`: the lane is anchored to the BODY, so a card floats
+            // over what the pane holds and never over its header band.
             className={bodyInset === "page"
-              ? "flex min-h-0 min-w-0 flex-1 flex-col p-4"
-              : "flex min-h-0 min-w-0 flex-1 flex-col"}
+              ? "relative flex min-h-0 min-w-0 flex-1 flex-col p-4"
+              : "relative flex min-h-0 min-w-0 flex-1 flex-col"}
             data-body-inset={bodyInset}
           >
             {children}
+            {lane !== undefined ? <FloatingRightLane>{lane}</FloatingRightLane> : null}
           </div>
         </PaneBodyActionsContext.Provider>
       </PanePanelSlotContext.Provider>

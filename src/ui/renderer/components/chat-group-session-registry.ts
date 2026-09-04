@@ -75,6 +75,12 @@ export interface ChatGroupSessionHandle {
    * screen, so it must not CLAIM anything the user has to see.
    */
   hidden: boolean;
+  /**
+   * The TREE is not drawing this pane: another tile has its box (maximized,
+   * or chat mode's single tile). One of the two reasons `hidden` is true,
+   * published apart because they route differently — see `overlayCardTile`.
+   */
+  paneHidden: boolean;
   currentSessionProject: SessionProjectSummary;
   /** Load a session into this tile, refusing mid-turn. */
   loadSession: (sessionId: string) => Promise<boolean>;
@@ -118,6 +124,7 @@ const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
   insertImportedTriggerEntry: () => {},
   currentSessionId: "",
   hidden: false,
+  paneHidden: false,
   currentSessionProject: {},
   loadSession: async () => false,
   fallbackToast: null,
@@ -137,6 +144,8 @@ export interface TileSession {
   streaming: boolean;
   /** Mounted but not drawn — see {@link ChatGroupSessionHandle.hidden}. */
   hidden: boolean;
+  /** The pane itself is not drawn — see {@link ChatGroupSessionHandle.paneHidden}. */
+  paneHidden: boolean;
   /**
    * The gates this tile holds. On the tile list rather than read through the
    * handle because the window has to RE-DECIDE where they are drawn whenever a
@@ -214,18 +223,29 @@ export interface OverlayCardPlacement {
  * (`adoptedChatGroupId`), taken from focus once, when the card arrived — the
  * same adoption `tileDrawsSession` gives an unheld question. Reading focus here
  * instead would slide the card between tiles while it is being read. The window
- * band keeps only what no tile can draw: an orphaned origin, a pin whose tile
- * has since closed, and cards that arrived with no tile open at all.
+ * band keeps only what no drawn pane can hold: an orphaned origin, a pin whose
+ * pane has since closed, and cards that arrived with no pane open at all.
+ *
+ * "Drawn" is asked of the PANE, not of its conversation. A tile is `hidden`
+ * for two reasons that route differently. The tree gave its box to another
+ * tile (maximized, chat mode): nothing of it is on screen, so the window band
+ * lends the surface. Or the pane is routed to Settings or a plugin view: its
+ * conversation is behind `display:none`, but the pane is drawn, and the overlay
+ * lane is the pane frame's — so the card stays in its pane, whatever the pane
+ * shows. Only the first reason (`paneHidden`) moves an overlay card here.
+ * `tileDrawsSession` and the approval claims keep reading `hidden`: their
+ * cards sit over the composer, which a routed pane does not show, so for them
+ * the window band is still the right surface.
  */
 export function overlayCardTile(
   tiles: readonly TileSession[],
   card: { originSessionId?: string; adoptedChatGroupId?: string },
 ): OverlayCardPlacement {
-  // Drawing is what is at stake here, not ownership: a hidden tile is mounted
-  // so its turn survives, but it paints nothing, and a card handed to it would
-  // be a card nobody can see. The window's band takes those, exactly as it took
-  // them when the tile was unmounted instead.
-  const drawn = tiles.filter((tile) => !tile.hidden);
+  // A pane the tree is not drawing is mounted so its turn survives, but it
+  // paints nothing, and a card handed to it would be a card nobody can see.
+  // The window's band takes those, exactly as it took them when the tile was
+  // unmounted instead.
+  const drawn = tiles.filter((tile) => !tile.paneHidden);
   if (card.originSessionId !== undefined) {
     const holder = tileHoldingSession(drawn, card.originSessionId);
     return holder === undefined
@@ -316,6 +336,7 @@ export class ChatGroupSessionRegistry {
       && previous.streaming === handle.streaming
       && previous.currentSessionId === handle.currentSessionId
       && previous.hidden === handle.hidden
+      && previous.paneHidden === handle.paneHidden
       && previous.askQuestions === handle.askQuestions
       && previous.currentSessionProject === handle.currentSessionProject
       && previous.fallbackToast === handle.fallbackToast
@@ -354,6 +375,7 @@ export class ChatGroupSessionRegistry {
       sessionId: handle.currentSessionId,
       streaming: handle.streaming,
       hidden: handle.hidden,
+      paneHidden: handle.paneHidden,
       askQuestions: handle.askQuestions,
     }));
     const same = next.length === this.tiles.length && next.every((tile, index) => {
@@ -362,6 +384,7 @@ export class ChatGroupSessionRegistry {
         && previous.sessionId === tile.sessionId
         && previous.streaming === tile.streaming
         && previous.hidden === tile.hidden
+        && previous.paneHidden === tile.paneHidden
         && previous.askQuestions === tile.askQuestions;
     });
     if (same) return;
@@ -416,6 +439,7 @@ export class ChatGroupSessionRegistry {
       >[0]) => live()?.insertImportedTriggerEntry(input),
       currentSessionId: handle.currentSessionId,
       hidden: handle.hidden,
+      paneHidden: handle.paneHidden,
       currentSessionProject: handle.currentSessionProject,
       loadSession: async (sessionId: string) => await live()?.loadSession(sessionId) ?? false,
       fallbackToast: handle.fallbackToast,

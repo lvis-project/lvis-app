@@ -27,6 +27,7 @@ const handleFor = (streaming: boolean, entries: readonly ChatEntry[] = NO_ENTRIE
   entries,
   streaming,
   hidden: false,
+  paneHidden: false,
   askQuestions: NO_ASK_QUESTIONS,
   resolveAskQuestion: () => {},
   applyLoadedSession: () => {},
@@ -141,11 +142,11 @@ describe("tile sessions — every tile at once", () => {
     registry.publish("main", holding("s-1", false));
     registry.publish("group-2", holding("s-2", true));
     expect(registry.readTiles()).toEqual([
-      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, askQuestions: [] },
-      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, askQuestions: [] },
+      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
+      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, paneHidden: false, askQuestions: [] },
     ]);
     registry.retract("group-2");
-    expect(registry.readTiles()).toEqual([{ chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, askQuestions: [] }]);
+    expect(registry.readTiles()).toEqual([{ chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] }]);
   });
 
   it("keeps the same array while only transcripts change — tokens must not re-render the sidebar", () => {
@@ -178,7 +179,7 @@ describe("tile sessions — every tile at once", () => {
     const { result } = renderHook(() => useTileSessions(registry));
     expect(result.current).toEqual([]);
     act(() => registry.publish("group-2", holding("s-2", true)));
-    expect(result.current).toEqual([{ chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, askQuestions: [] }]);
+    expect(result.current).toEqual([{ chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, paneHidden: false, askQuestions: [] }]);
     act(() => registry.retract("group-2"));
     expect(result.current).toEqual([]);
   });
@@ -187,8 +188,8 @@ describe("tile sessions — every tile at once", () => {
 describe("tileHoldingSession", () => {
   it("names the tile already holding a conversation, and nothing when none does", () => {
     const tiles = [
-      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, askQuestions: [] },
-      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, askQuestions: [] },
+      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
+      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, paneHidden: false, askQuestions: [] },
     ];
     expect(tileHoldingSession(tiles, "s-2")?.chatGroupId).toBe("group-2");
     expect(tileHoldingSession(tiles, "s-9")).toBeUndefined();
@@ -197,8 +198,8 @@ describe("tileHoldingSession", () => {
 
 describe("overlayCardTile", () => {
   const tiles = [
-    { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, askQuestions: [] },
-    { chatGroupId: "group-2", sessionId: "s-2", streaming: false, hidden: false, askQuestions: [] },
+    { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
+    { chatGroupId: "group-2", sessionId: "s-2", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
   ];
 
   it("sends a card to the tile holding the conversation it came from", () => {
@@ -216,13 +217,39 @@ describe("overlayCardTile", () => {
     });
   });
 
-  it("hands a hidden tile's card to the window instead, because a hidden tile paints nothing", () => {
-    // A tile the view is not drawing stays MOUNTED so its conversation's turn
-    // keeps its stream subscription. It still holds that conversation — but it
-    // cannot show anything, so a card given to it is a card nobody can see.
+  it("keeps a card in a pane that is drawn but routed off its conversation — the lane is the pane frame's", () => {
+    // A pane showing Settings or a plugin view hides its CONVERSATION, not
+    // itself: `hidden` is true for the composer-bound cards, `paneHidden` is
+    // not. The overlay lane belongs to the frame, so the card stays where it
+    // was pinned. The defect this guards: a card pinned to a pane showing the
+    // work board fell out to the window band.
+    const routed = [
+      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: true, paneHidden: false, askQuestions: [] },
+      { chatGroupId: "group-2", sessionId: "s-2", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
+    ];
+    expect(overlayCardTile(routed, { adoptedChatGroupId: "main" })).toEqual({
+      chatGroupId: "main",
+      orphaned: false,
+    });
+    expect(overlayCardTile(routed, { originSessionId: "s-1" })).toEqual({
+      chatGroupId: "main",
+      orphaned: false,
+    });
+    // The composer-bound routing still reads `hidden`: the routed pane's own
+    // question is not drawn into a composer nobody sees.
+    expect(tileDrawsSession({
+      tiles: routed, sessionId: "s-1", owned: true, focused: true, hidden: true,
+    })).toBe(false);
+  });
+
+  it("hands a card for a pane the tree is not drawing to the window instead, because that pane paints nothing", () => {
+    // A tile the tree is not drawing stays MOUNTED so its conversation's turn
+    // keeps its stream subscription. It still holds that conversation — but
+    // nothing of it is on screen, not even its frame, so a card given to it is
+    // a card nobody can see.
     const hidden = [
-      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, askQuestions: [] },
-      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: true, askQuestions: [] },
+      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
+      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: true, paneHidden: true, askQuestions: [] },
     ];
     expect(overlayCardTile(hidden, { originSessionId: "s-2" })).toEqual({
       chatGroupId: null,
@@ -292,8 +319,8 @@ describe("overlayCardTile", () => {
 describe("tileDrawsSession", () => {
   // Two tiles, each showing a conversation of its own. "main" is focused.
   const tiles = [
-    { chatGroupId: "main", sessionId: "s-main", streaming: false, hidden: false, askQuestions: [] },
-    { chatGroupId: "group-2", sessionId: "s-other", streaming: false, hidden: false, askQuestions: [] },
+    { chatGroupId: "main", sessionId: "s-main", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
+    { chatGroupId: "group-2", sessionId: "s-other", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
   ];
 
   it("adopts a routine's headless session into the focused tile, and only that tile", () => {

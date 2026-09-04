@@ -40,7 +40,7 @@ const PLUGIN_ITEM: OverlayItem = {
   createdAt: "2026-08-23T00:00:00.000Z",
 };
 
-/** Render the lane the way ChatView does in work mode. */
+/** Render the lane the way PaneFrame does for a tile. */
 function renderLane() {
   const addFireRef = createRef<((item: OverlayItem) => void) | null>();
   const view = render(
