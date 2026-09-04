@@ -6,6 +6,7 @@ export const MARKETPLACE_PACKAGE_TYPES = [
   "provider",
   "theme",
   "language-pack",
+  "messaging-connection",
 ] as const;
 
 export type MarketplacePackageType = (typeof MARKETPLACE_PACKAGE_TYPES)[number];

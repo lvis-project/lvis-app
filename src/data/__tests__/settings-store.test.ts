@@ -96,6 +96,7 @@ describe("SettingsService marketplace defaults", () => {
       installedProviderPresets: [],
       installedThemeBundleIds: [],
       installedLanguagePacks: [],
+      installedMessagingConnections: [],
     });
   });
 
@@ -124,7 +125,46 @@ describe("SettingsService marketplace defaults", () => {
       installedProviderPresets: [],
       installedThemeBundleIds: [],
       installedLanguagePacks: [],
+      installedMessagingConnections: [],
     });
+  });
+
+  it("keeps only the declaration of an installed messaging connection", async () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        marketplace: {
+          backend: "real-cloud",
+          installedMessagingConnections: [
+            {
+              connectionId: "telegram",
+              label: "Telegram",
+              summary: "Reach one LVIS conversation from Telegram.",
+              pairing: "one-time-code",
+              credentials: [{ key: "botToken", label: "Bot token", secret: true }],
+              egress: ["api.telegram.org"],
+              // Neither of these belongs in settings; both must be dropped.
+              botToken: "123456:REAL-TOKEN",
+              credentialValues: { botToken: "123456:REAL-TOKEN" },
+            },
+            { connectionId: "telegram", label: "Duplicate", summary: "x", pairing: "one-time-code", credentials: [] },
+            { connectionId: "broken", label: "Broken" },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    expect(service.get("marketplace").installedMessagingConnections).toEqual([{
+      connectionId: "telegram",
+      label: "Telegram",
+      summary: "Reach one LVIS conversation from Telegram.",
+      pairing: "one-time-code",
+      credentials: [{ key: "botToken", label: "Bot token", secret: true }],
+      egress: ["api.telegram.org"],
+    }]);
+    expect(JSON.stringify(service.get("marketplace"))).not.toContain("REAL-TOKEN");
   });
 
   it("persists only valid marketplace-installed provider/theme/language assets", async () => {

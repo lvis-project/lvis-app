@@ -102,11 +102,24 @@ export interface PluginMarketplaceItem {
   requires?: RequiresSpec;
   /**
    * Catalog package kind. Defaults to `"plugin"` when the server omits the
-   * field (back-compat with pre-#52 catalogs). Provider/theme/language-pack
-   * entries are discoverable before their installers are enabled.
+   * field (back-compat with pre-#52 catalogs). Asset entries are discoverable
+   * before their installers are enabled.
+   *
+   * Absent alongside {@link unsupportedPackageKind}, which is the opposite
+   * case; read the pair through `marketplacePackageTypeOf` rather than
+   * defaulting this field at each call site.
    */
   pluginType?: MarketplacePackageType;
-  /** Structured target for provider/theme/language-pack marketplace packages. */
+  /**
+   * The kind the catalog declared when this build does not recognise it.
+   *
+   * The catalog is an external boundary and it grows kinds this app has never
+   * heard of. Such a row is carried so it can be SHOWN — named, with the update
+   * affordance — and never treated as a plugin, which is what the fetcher's
+   * former coercion did: it offered an install that could only fail.
+   */
+  unsupportedPackageKind?: string;
+  /** Structured target for an asset marketplace package. */
   packageAsset?: MarketplacePackageAsset;
   /**
    * Display-only compatibility result for an app that must update before this

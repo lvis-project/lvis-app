@@ -17,6 +17,7 @@ import {
   type MarketplaceEligibleThemeBundleId,
 } from "./theme-bundles.js";
 import { isLoopbackHttpUrl } from "./loopback-url.js";
+import { normalizeAllowedHosts } from "../main/host-allow-list.js";
 
 export interface MarketplaceProviderPackageAsset {
   type: "provider";
@@ -158,10 +159,60 @@ export interface MarketplaceLanguagePackPackageAsset {
   messages?: Record<string, string>;
 }
 
+/**
+ * How the owner proves to the messaging service that the account on the other
+ * side is theirs. Only what the host can actually drive is admitted; a row
+ * naming a scheme this build cannot run is rejected rather than installed and
+ * left unusable.
+ */
+const MARKETPLACE_MESSAGING_CONNECTION_PAIRINGS = ["one-time-code"] as const;
+
+type MarketplaceMessagingConnectionPairing =
+  (typeof MARKETPLACE_MESSAGING_CONNECTION_PAIRINGS)[number];
+
+/**
+ * One credential the connection will ask its owner for.
+ *
+ * A DECLARATION, never a value: this is what the catalog says the connection
+ * needs, so the owner can read it before installing. Entry happens in the
+ * connection's own surface, and a field marked `secret` is written to the
+ * encrypted secret store from there — never to settings, and never here.
+ */
+interface MarketplaceMessagingConnectionCredentialField {
+  readonly key: string;
+  readonly label: string;
+  readonly secret: boolean;
+  readonly placeholder?: string;
+  readonly helpUrl?: string;
+}
+
+interface MarketplaceMessagingConnectionPackageAsset {
+  type: "messaging-connection";
+  connectionId: string;
+  label: string;
+  summary: string;
+  pairing: MarketplaceMessagingConnectionPairing;
+  credentials: readonly MarketplaceMessagingConnectionCredentialField[];
+  /** Hosts the connection reaches, as the catalog discloses them. */
+  egress?: readonly string[];
+  trust?: MarketplaceProviderPackageTrustMetadata;
+  docsUrl?: string;
+}
+
 export type MarketplacePackageAsset =
   | MarketplaceProviderPackageAsset
   | MarketplaceThemePackageAsset
-  | MarketplaceLanguagePackPackageAsset;
+  | MarketplaceLanguagePackPackageAsset
+  | MarketplaceMessagingConnectionPackageAsset;
+
+/**
+ * An installed messaging connection as the host records it — the asset without
+ * its discriminant, mirroring {@link MarketplaceInstalledProviderPreset}. It
+ * holds the connection's declaration only; the credentials it names are stored
+ * by the connection itself, in the encrypted secret store.
+ */
+export type MarketplaceInstalledMessagingConnection =
+  Omit<MarketplaceMessagingConnectionPackageAsset, "type">;
 
 export type MarketplacePackageAssetType = MarketplacePackageAsset["type"];
 
@@ -176,17 +227,37 @@ const MAX_PROVIDER_MODEL_OPTIONS = 100;
 const MAX_PACKAGE_METADATA_LENGTH = 256;
 const MAX_PACKAGE_METADATA_VALUE_LENGTH = 4_000;
 const MAX_THEME_TOKENS = 500;
+const MAX_MESSAGING_CONNECTION_ID_LENGTH = 64;
+const MAX_MESSAGING_CONNECTION_SUMMARY_LENGTH = 400;
+const MAX_MESSAGING_CONNECTION_CREDENTIALS = 8;
+const MAX_MESSAGING_CONNECTION_EGRESS_HOSTS = 16;
 const MAX_LANGUAGE_MESSAGES = 10_000;
 const MARKETPLACE_PROVIDER_PRESET_ID_PATTERN =
   new RegExp(`^${MARKETPLACE_PROVIDER_PRESET_ID_PATTERN_SOURCE}$`);
 
-export function isMarketplaceProviderPresetId(value: unknown): value is string {
+/**
+ * The token grammar every marketplace asset identifier shares.
+ *
+ * A provider-preset id, a messaging-connection id and a credential key all end
+ * up in the same three places — a settings key, a secret-store key segment, and
+ * a `packageSpec` suffix — so they are judged by one rule. Only the bound
+ * differs, and each caller states its own: the preset id's is pinned to the
+ * plugin-manifest schema, which a connection id has no reason to inherit.
+ */
+function isMarketplaceAssetIdToken(
+  value: unknown,
+  maxLength: number,
+): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
-    value.length <= MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH &&
+    value.length <= maxLength &&
     MARKETPLACE_PROVIDER_PRESET_ID_PATTERN.test(value)
   );
+}
+
+export function isMarketplaceProviderPresetId(value: unknown): value is string {
+  return isMarketplaceAssetIdToken(value, MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH);
 }
 
 function normalizeProviderId(value: unknown): string | undefined {
@@ -582,6 +653,9 @@ export function marketplacePackageSpecForAsset(
 ): string {
   if (asset.type === "provider") return `provider:${asset.providerId}`;
   if (asset.type === "theme") return `theme:${asset.bundleId}`;
+  if (asset.type === "messaging-connection") {
+    return `messaging-connection:${asset.connectionId}`;
+  }
   return `language-pack:${asset.locale}`;
 }
 
@@ -678,6 +752,157 @@ function languagePackAsset(
   };
 }
 
+function messagingConnectionCredentialField(
+  value: unknown,
+): MarketplaceMessagingConnectionCredentialField | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const key = record.key;
+  if (!isMarketplaceAssetIdToken(key, MAX_MESSAGING_CONNECTION_ID_LENGTH)) return undefined;
+  const label = cleanString(record.label, MAX_PROVIDER_LABEL_LENGTH);
+  if (!label || typeof record.secret !== "boolean") return undefined;
+  const placeholder = cleanString(record.placeholder, MAX_PACKAGE_METADATA_LENGTH);
+  const helpUrl = cleanUrl(record.helpUrl ?? record.help_url);
+  return Object.freeze({
+    key,
+    label,
+    secret: record.secret,
+    ...(placeholder ? { placeholder } : {}),
+    ...(helpUrl ? { helpUrl } : {}),
+  });
+}
+
+function messagingConnectionCredentials(
+  value: unknown,
+): readonly MarketplaceMessagingConnectionCredentialField[] | undefined {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > MAX_MESSAGING_CONNECTION_CREDENTIALS
+  ) {
+    return undefined;
+  }
+  const fields: MarketplaceMessagingConnectionCredentialField[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const field = messagingConnectionCredentialField(entry);
+    // Refuse the whole list on one bad entry. Skipping it would show the owner
+    // a shorter list of what the connection asks for than the truth.
+    if (!field || seen.has(field.key)) return undefined;
+    seen.add(field.key);
+    fields.push(field);
+  }
+  return Object.freeze(fields);
+}
+
+/**
+ * The hosts the connection reaches, as the catalog discloses them.
+ *
+ * Three outcomes, not two: `undefined` is "nothing declared", `null` is
+ * "declared and unreadable". A malformed disclosure must not read as an absent
+ * one — that would understate the connection's network reach on the very card
+ * the owner uses to decide whether to install it.
+ *
+ * Two shapes, one reading: the catalog nests the list under `network`, and the
+ * record this parser emits carries it flat. Normalization re-reads its own
+ * output, so a shape it could not read back would silently drop the disclosure
+ * the first time an installed connection was loaded from settings.
+ */
+function messagingConnectionEgress(
+  metadata: Record<string, unknown>,
+): readonly string[] | null | undefined {
+  let declared: unknown;
+  if (metadata.network !== undefined) {
+    const network = asRecord(metadata.network);
+    // A `network` block that names no hosts is a disclosure this host cannot
+    // read, not an absent one.
+    if (!network || network.egress === undefined) return null;
+    declared = network.egress;
+  } else {
+    if (metadata.egress === undefined) return undefined;
+    declared = metadata.egress;
+  }
+  if (
+    !Array.isArray(declared) ||
+    declared.length === 0 ||
+    declared.length > MAX_MESSAGING_CONNECTION_EGRESS_HOSTS ||
+    !declared.every((entry) => typeof entry === "string")
+  ) {
+    return null;
+  }
+  try {
+    const hosts = normalizeAllowedHosts(declared as string[]);
+    return hosts.length > 0 ? Object.freeze(hosts) : null;
+  } catch {
+    // `normalizeAllowedHosts` throws on a wildcard, a URL, or a bare public
+    // suffix. Here that is a catalog the host refuses to read, not a crash.
+    return null;
+  }
+}
+
+function messagingConnectionAsset(
+  connectionId: unknown,
+  metadata?: Record<string, unknown>,
+): MarketplaceMessagingConnectionPackageAsset | undefined {
+  if (!isMarketplaceAssetIdToken(connectionId, MAX_MESSAGING_CONNECTION_ID_LENGTH)) {
+    return undefined;
+  }
+  // Unlike a theme or a locale, a messaging connection has no host-side
+  // registry to fill the rest in from: the catalog is the only description of
+  // it, so a bare `messaging-connection:<id>` spec names nothing showable.
+  if (!metadata) return undefined;
+  const label = cleanString(metadata.label, MAX_PROVIDER_LABEL_LENGTH);
+  const summary = cleanString(metadata.summary, MAX_MESSAGING_CONNECTION_SUMMARY_LENGTH);
+  const pairing = cleanEnum(metadata.pairing, MARKETPLACE_MESSAGING_CONNECTION_PAIRINGS);
+  const credentials = messagingConnectionCredentials(metadata.credentials);
+  if (!label || !summary || !pairing || !credentials) return undefined;
+  const egress = messagingConnectionEgress(metadata);
+  if (egress === null) return undefined;
+  const trust = cleanTrustMetadata(
+    metadata.trust ?? metadata.trustMetadata ?? metadata.trust_metadata,
+  );
+  const docsUrl = cleanUrl(metadata.docsUrl ?? metadata.docs_url);
+  return {
+    type: "messaging-connection",
+    connectionId,
+    label,
+    summary,
+    pairing,
+    credentials,
+    ...(egress ? { egress } : {}),
+    ...(trust ? { trust } : {}),
+    ...(docsUrl ? { docsUrl } : {}),
+  };
+}
+
+/**
+ * Strip an installed messaging connection back to its declaration.
+ *
+ * Rebuilt through the parser rather than spread, so a record read off disk or
+ * sent by a renderer can only ever carry the fields this contract names — a
+ * credential VALUE smuggled into the record never survives the round trip.
+ */
+export function marketplaceMessagingConnectionFromAsset(
+  asset: MarketplacePackageAsset | undefined,
+): MarketplaceInstalledMessagingConnection | undefined {
+  if (!asset || asset.type !== "messaging-connection") return undefined;
+  return normalizeMarketplaceMessagingConnection(asset);
+}
+
+export function normalizeMarketplaceMessagingConnection(
+  value: unknown,
+): MarketplaceInstalledMessagingConnection | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const asset = messagingConnectionAsset(
+    record.connectionId ?? record.connection_id ?? record.id,
+    record,
+  );
+  if (!asset) return undefined;
+  const { type: _type, ...connection } = asset;
+  return connection;
+}
+
 export function assetFromMarketplacePackageSpec(
   pluginType: MarketplacePackageType | undefined,
   packageSpec: string,
@@ -695,6 +920,9 @@ export function assetFromMarketplacePackageSpec(
   if (!type || prefix !== type) return undefined;
   if (type === "provider") return providerAsset(value, metadata);
   if (type === "theme") return themeAsset(value, metadata);
+  if (type === "messaging-connection") {
+    return messagingConnectionAsset(value, metadata);
+  }
   return languagePackAsset(value, metadata);
 }
 
@@ -765,6 +993,14 @@ export function parseMarketplacePackageAsset(
       ? assetFromMarketplacePackageSpec(type, packageSpec, record)
       : undefined);
   }
+  if (type === "messaging-connection") {
+    return messagingConnectionAsset(
+      stringField(record, ["connectionId", "connection_id", "id"]),
+      record,
+    ) ?? (packageSpec
+      ? assetFromMarketplacePackageSpec(type, packageSpec, record)
+      : undefined);
+  }
   return languagePackAsset(
     stringField(record, [
       "locale",
@@ -816,6 +1052,12 @@ export function assetFromMarketplaceCatalogFields(
           "themeBundleId",
           "theme_bundle_id",
         ]),
+        fields,
+      );
+      if (fromFields) return fromFields;
+    } else if (type === "messaging-connection") {
+      const fromFields = messagingConnectionAsset(
+        stringField(fields, ["connectionId", "connection_id"]),
         fields,
       );
       if (fromFields) return fromFields;

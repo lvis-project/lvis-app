@@ -9,6 +9,7 @@ export const MARKETPLACE_ASSET_PACKAGE_TYPES = [
   "provider",
   "theme",
   "language-pack",
+  "messaging-connection",
 ] as const satisfies readonly MarketplacePackageType[];
 
 export type MarketplaceAssetPackageType =
@@ -39,6 +40,7 @@ export const MARKETPLACE_PACKAGE_TYPE_LABELS: Readonly<Record<MarketplacePackage
     provider: "Providers",
     theme: "Themes",
     "language-pack": "Languages",
+    "messaging-connection": "Messaging",
   });
 
 const INSTALLABLE_PACKAGE_TYPE_SET = new Set<string>(INSTALLABLE_MARKETPLACE_PACKAGE_TYPES);
@@ -65,6 +67,10 @@ const MARKETPLACE_ASSET_PACKAGE_TRUST_LABEL_KEYS: Readonly<
     "marketplaceTab.trustNoCode",
     "marketplaceTab.trustLanguageCatalog",
   ]),
+  "messaging-connection": Object.freeze([
+    "marketplaceTab.trustMessagingCredentials",
+    "marketplaceTab.trustMessagingNetwork",
+  ]),
 });
 
 export function isInstallableMarketplacePackageType(
@@ -81,6 +87,31 @@ export function isMarketplaceAssetPackageType(
 
 export function marketplacePackageLabel(packageType: MarketplacePackageType): string {
   return MARKETPLACE_PACKAGE_TYPE_LABELS[packageType];
+}
+
+/** The two ways a catalog row can name its kind, as the host reads them. */
+export interface MarketplacePackageKindFields {
+  readonly pluginType?: MarketplacePackageType;
+  /** The kind the catalog declared when this build does not recognise it. */
+  readonly unsupportedPackageKind?: string;
+}
+
+/**
+ * THE reading of a catalog row's kind: the package type to treat it as, or
+ * `undefined` when the catalog named a kind this build does not know.
+ *
+ * The two absent-`pluginType` cases mean opposite things and every consumer has
+ * to tell them apart. A row carrying no kind at all predates the field, and
+ * every such row was a plugin — so it reads as one. A row that DID name a kind
+ * this build cannot honour must never read as a plugin: offering it as an
+ * installable one produces an install that can only fail, which is what the
+ * fetcher's old coercion did.
+ */
+export function marketplacePackageTypeOf(
+  fields: MarketplacePackageKindFields,
+): MarketplacePackageType | undefined {
+  if (fields.unsupportedPackageKind !== undefined) return undefined;
+  return fields.pluginType ?? "plugin";
 }
 
 export function marketplaceTrustLabelKeysForPackage(

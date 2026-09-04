@@ -6,6 +6,8 @@ import {
   marketplacePackageTypeForAsset,
   parseMarketplacePackageAsset,
   isValidIsoTimestamp,
+  marketplaceMessagingConnectionFromAsset,
+  normalizeMarketplaceMessagingConnection,
 } from "../marketplace-package-assets.js";
 
 describe("marketplace package assets", () => {
@@ -236,6 +238,144 @@ describe("marketplace package assets", () => {
     expect(parseMarketplacePackageAsset({ type: "theme", bundle_id: "moonstone" }))
       .toBeUndefined();
     expect(parseMarketplacePackageAsset({ type: "language-pack", locale: "en" }))
+      .toBeUndefined();
+  });
+});
+
+/**
+ * The row the marketplace seeds for Telegram, verbatim. It is the contract this
+ * parser exists to accept, so the test carries it whole rather than a reduction.
+ */
+const TELEGRAM_CONNECTION_ROW = {
+  type: "messaging-connection",
+  connectionId: "telegram",
+  label: "Telegram",
+  summary: "Reach one LVIS conversation from Telegram through a private chat with a bot you create yourself.",
+  minAppVersion: "0.9.2",
+  pairing: "one-time-code",
+  credentials: [{
+    key: "botToken",
+    label: "Bot token",
+    secret: true,
+    placeholder: "123456:ABC...",
+    helpUrl: "https://core.telegram.org/bots#botfather",
+  }],
+  network: { egress: ["api.telegram.org"] },
+  trust: {
+    credentialUse: "required",
+    networkAccess: "provider-api",
+    dataPolicy: "provider-policy",
+  },
+  docsUrl: "https://core.telegram.org/bots/api",
+} as const;
+
+const TELEGRAM_CONNECTION_ASSET = {
+  type: "messaging-connection",
+  connectionId: "telegram",
+  label: "Telegram",
+  summary: TELEGRAM_CONNECTION_ROW.summary,
+  pairing: "one-time-code",
+  credentials: [{
+    key: "botToken",
+    label: "Bot token",
+    secret: true,
+    placeholder: "123456:ABC...",
+    helpUrl: "https://core.telegram.org/bots#botfather",
+  }],
+  egress: ["api.telegram.org"],
+  trust: {
+    credentialUse: "required",
+    networkAccess: "provider-api",
+    dataPolicy: "provider-policy",
+  },
+  docsUrl: "https://core.telegram.org/bots/api",
+};
+
+describe("messaging-connection package asset", () => {
+  it("parses the seeded Telegram row", () => {
+    expect(parseMarketplacePackageAsset(TELEGRAM_CONNECTION_ROW))
+      .toEqual(TELEGRAM_CONNECTION_ASSET);
+  });
+
+  it("reads the same asset off a flat catalog row", () => {
+    expect(assetFromMarketplaceCatalogFields(
+      "messaging-connection",
+      "messaging-connection:telegram",
+      { ...TELEGRAM_CONNECTION_ROW },
+    )).toEqual(TELEGRAM_CONNECTION_ASSET);
+  });
+
+  it("round-trips through the package spec", () => {
+    const asset = parseMarketplacePackageAsset(TELEGRAM_CONNECTION_ROW);
+    expect(asset && marketplacePackageSpecForAsset(asset))
+      .toBe("messaging-connection:telegram");
+  });
+
+  it("rejects a row missing any field the card is built from", () => {
+    for (const field of ["connectionId", "label", "summary", "pairing", "credentials"] as const) {
+      const { [field]: _dropped, ...rest } = TELEGRAM_CONNECTION_ROW;
+      expect(parseMarketplacePackageAsset(rest)).toBeUndefined();
+    }
+  });
+
+  it("rejects a pairing scheme this build cannot run", () => {
+    expect(parseMarketplacePackageAsset({
+      ...TELEGRAM_CONNECTION_ROW,
+      pairing: "oauth-device-code",
+    })).toBeUndefined();
+  });
+
+  it("rejects the whole row when one credential is malformed", () => {
+    expect(parseMarketplacePackageAsset({
+      ...TELEGRAM_CONNECTION_ROW,
+      credentials: [
+        TELEGRAM_CONNECTION_ROW.credentials[0],
+        { key: "webhookSecret", label: "Webhook secret" },
+      ],
+    })).toBeUndefined();
+    expect(parseMarketplacePackageAsset({
+      ...TELEGRAM_CONNECTION_ROW,
+      credentials: [],
+    })).toBeUndefined();
+  });
+
+  it("rejects a network disclosure it cannot read rather than dropping it", () => {
+    for (const network of [{ egress: ["*"] }, { egress: ["https://api.telegram.org/x"] }, { egress: [] }, {}]) {
+      expect(parseMarketplacePackageAsset({ ...TELEGRAM_CONNECTION_ROW, network }))
+        .toBeUndefined();
+    }
+  });
+
+  it("carries no field the contract does not name, including a credential value", () => {
+    const asset = parseMarketplacePackageAsset({
+      ...TELEGRAM_CONNECTION_ROW,
+      credentials: [{ ...TELEGRAM_CONNECTION_ROW.credentials[0], value: "123456:REAL-TOKEN" }],
+    });
+    expect(asset).toEqual(TELEGRAM_CONNECTION_ASSET);
+    expect(JSON.stringify(asset)).not.toContain("REAL-TOKEN");
+  });
+
+  it("cannot be named by a bare package spec, which describes nothing", () => {
+    expect(assetFromMarketplacePackageSpec(
+      "messaging-connection",
+      "messaging-connection:telegram",
+    )).toBeUndefined();
+  });
+});
+
+describe("installed messaging connection record", () => {
+  it("rebuilds the declaration and drops everything else", () => {
+    const asset = parseMarketplacePackageAsset(TELEGRAM_CONNECTION_ROW);
+    const { type: _type, ...declaration } = TELEGRAM_CONNECTION_ASSET;
+    expect(marketplaceMessagingConnectionFromAsset(asset)).toEqual(declaration);
+    expect(normalizeMarketplaceMessagingConnection({
+      ...declaration,
+      botToken: "123456:REAL-TOKEN",
+    })).toEqual(declaration);
+  });
+
+  it("refuses an asset of another kind", () => {
+    expect(marketplaceMessagingConnectionFromAsset({ type: "theme", bundleId: "tokyo-night" }))
       .toBeUndefined();
   });
 });

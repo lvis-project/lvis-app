@@ -23,6 +23,7 @@ import {
   type PluginUpdateCondition,
 } from "./update-condition.js";
 import { getCachedCatalog, setCachedCatalog } from "./offline-cache.js";
+import { marketplacePackageTypeOf } from "../shared/marketplace-package-sections.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { throwIfMarketplaceInstallAborted } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
@@ -453,6 +454,11 @@ function cleanupJournalAfterCommit(entry: PluginRegistryEntry): PluginRegistryEn
   return journal.length > 0 ? journal : undefined;
 }
 
+/** What the catalog called this row, for a refusal message that can name it. */
+function declaredMarketplacePackageKind(item: PluginMarketplaceItem): string {
+  return item.unsupportedPackageKind ?? item.pluginType ?? "plugin";
+}
+
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
   enabled: boolean;
@@ -733,7 +739,7 @@ export class PluginMarketplaceService {
     ]);
     const items: MarketplaceListItem[] = [];
     for (const plugin of plugins) {
-      const packageType = plugin.pluginType ?? "plugin";
+      const packageType = marketplacePackageTypeOf(plugin);
       const entry = packageType === "plugin" || packageType === "mcp"
         ? registry.plugins.find((x) => x.id === plugin.id && !x.pendingUpdate)
         : undefined;
@@ -987,9 +993,9 @@ export class PluginMarketplaceService {
       return { pluginId: canonicalPluginId, installed: true };
     }
     seen.add(canonicalPluginId);
-    if ((plugin.pluginType ?? "plugin") !== "plugin") {
+    if (marketplacePackageTypeOf(plugin) !== "plugin") {
       throw new Error(
-        `Marketplace package "${canonicalPluginId}" is a ${plugin.pluginType} entry, not a plugin package`,
+        `Marketplace package "${canonicalPluginId}" is a ${declaredMarketplacePackageKind(plugin)} entry, not a plugin package`,
       );
     }
 
@@ -1642,9 +1648,9 @@ export class PluginMarketplaceService {
       if (!plugin) {
         throw new Error(`Plugin not found in marketplace: ${pluginId}`);
       }
-      if ((plugin.pluginType ?? "plugin") !== "plugin") {
+      if (marketplacePackageTypeOf(plugin) !== "plugin") {
         throw new Error(
-          `Marketplace package "${pluginId}" is a ${plugin.pluginType} entry, not a plugin package`,
+          `Marketplace package "${pluginId}" is a ${declaredMarketplacePackageKind(plugin)} entry, not a plugin package`,
         );
       }
       assertMarketplaceAppUpgradeNotRequired(plugin);

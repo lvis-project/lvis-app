@@ -483,6 +483,94 @@ describe("MarketplaceTab", () => {
     expect(api.updateSettings).not.toHaveBeenCalled();
   });
 
+  it("marks a row of an unknown kind unsupported rather than offering it as a plugin", async () => {
+    const futureKind: MarketplaceItem = {
+      id: "workflow-pack-alpha",
+      name: "Workflow Pack",
+      description: "A catalog kind released after this app",
+      packageSpec: "workflow-automation-pack:alpha",
+      installed: false,
+      enabled: false,
+      unsupportedPackageKind: "workflow-automation-pack",
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([futureKind]),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} />);
+
+    expect(await screen.findByText("Workflow Pack")).toBeTruthy();
+    // Named by what the catalog called it, not coerced to "plugin".
+    expect(await screen.findByText("workflow-automation-pack")).toBeTruthy();
+    expect(await screen.findByTestId("marketplace:unsupported-asset:workflow-pack-alpha"))
+      .toHaveTextContent("현재 앱 버전 미지원");
+    const action = await screen.findByTestId("marketplace:action:workflow-pack-alpha");
+    expect(action.textContent).toContain("지원 안 됨");
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps an unknown kind out of every kind filter", async () => {
+    const futureKind: MarketplaceItem = {
+      id: "workflow-pack-alpha",
+      name: "Workflow Pack",
+      description: "A catalog kind released after this app",
+      packageSpec: "workflow-automation-pack:alpha",
+      installed: false,
+      enabled: false,
+      unsupportedPackageKind: "workflow-automation-pack",
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([futureKind]),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} initialFilter="plugin" />);
+
+    await waitFor(() => expect(api.listMarketplacePlugins).toHaveBeenCalled());
+    expect(screen.queryByText("Workflow Pack")).toBeNull();
+  });
+
+  it("installs a messaging connection as its declaration only", async () => {
+    const telegram: MarketplaceItem = {
+      id: "telegram-connection",
+      name: "Telegram",
+      description: "Messaging connection package",
+      packageSpec: "messaging-connection:telegram",
+      installed: false,
+      enabled: false,
+      pluginType: "messaging-connection",
+      packageAsset: {
+        type: "messaging-connection",
+        connectionId: "telegram",
+        label: "Telegram",
+        summary: "Reach one LVIS conversation from Telegram.",
+        pairing: "one-time-code",
+        credentials: [{ key: "botToken", label: "Bot token", secret: true }],
+        egress: ["api.telegram.org"],
+      },
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([telegram]),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} initialFilter="messaging-connection" />);
+
+    const action = await screen.findByTestId("marketplace:action:telegram-connection");
+    expect((action as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(action);
+
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        marketplace: {
+          installedMessagingConnections: [{
+            connectionId: "telegram",
+            label: "Telegram",
+            summary: "Reach one LVIS conversation from Telegram.",
+            pairing: "one-time-code",
+            credentials: [{ key: "botToken", label: "Bot token", secret: true }],
+            egress: ["api.telegram.org"],
+          }],
+        },
+      });
+    });
+  });
+
   it("installs user-authored provider presets from marketplace metadata", async () => {
     const customProvider: MarketplaceItem = {
       id: "provider-future-router",
