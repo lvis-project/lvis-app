@@ -81,12 +81,12 @@ export interface ConfinedChildSpec {
   /**
    * The child's standard streams.
    *
-   * Defaults to `["ignore", "pipe", "pipe"]` — the Python worker takes its
-   * orders over a Unix socket and has nothing to say on stdin, so leaving it
-   * open would be an idle descriptor into a confined process. A JS plugin child
-   * is the opposite case: it is a JSON-RPC server whose pipes the host owns, so
-   * it asks for `"pipe"` on stdin and that is the whole reason this is a
-   * parameter rather than a constant.
+   * Defaults to `["ignore", "pipe", "pipe"]`, so a caller with no use for
+   * stdin does not hand an idle descriptor into a confined process. Both
+   * callers pipe stdin today, for different reasons: the JS plugin child is a
+   * JSON-RPC server whose pipes the host owns, and the plugin worker's stdin is
+   * the host's liveness pipe (see `worker-spawn.ts`) — it carries no bytes and
+   * closes only when the host process is gone.
    */
   readonly stdio?: StdioOptions;
 }

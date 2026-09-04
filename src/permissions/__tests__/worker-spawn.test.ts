@@ -240,13 +240,15 @@ describe("spawnWorker — gate OFF (default)", () => {
     // No wrap, no UDS dir creation.
     expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
     expect(mkdirMock).not.toHaveBeenCalled();
-    // Plain spawn with the EXACT command + args, stdin ignored, shell:false.
+    // Plain spawn with the EXACT command + args, shell:false. stdin is piped:
+    // it is the host's liveness pipe, the one EOF a worker of a crashed or
+    // killed host ever gets.
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const [cmd, args, opts] = spawnMock.mock.calls[0] as [string, string[], { shell: boolean; stdio: unknown[] }];
     expect(cmd).toBe("/opt/worker");
     expect(args).toEqual(["--serve"]);
     expect(opts.shell).toBe(false);
-    expect(opts.stdio).toEqual(["ignore", "pipe", "pipe"]);
+    expect(opts.stdio).toEqual(["pipe", "pipe", "pipe"]);
     // Legacy path signal: socketPath null.
     expect(worker.socketPath).toBeNull();
     expect(worker.pid).toBe(4242);
@@ -254,6 +256,22 @@ describe("spawnWorker — gate OFF (default)", () => {
     expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
     const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer");
     expect(cap.kind).toBe("none");
+  });
+
+  it("absorbs an 'error' on the worker's stdin so a worker that exits first cannot crash the host", async () => {
+    const child = new StubWorkerChild();
+    spawnMock.mockReturnValueOnce(child);
+
+    await spawnWorker({
+      pluginId: "local-indexer",
+      workerId: "embed",
+      command: "/opt/worker",
+    });
+
+    // An 'error' with no listener throws out of the emitter — on a real child
+    // that is the unhandled event a late EPIPE on the liveness pipe would raise.
+    expect(child.stdin.listenerCount("error")).toBeGreaterThan(0);
+    expect(() => child.stdin.emit("error", new Error("EPIPE"))).not.toThrow();
   });
 });
 
@@ -335,11 +353,13 @@ describe("spawnWorker — gate ON (macOS)", () => {
     expect(cmdline).toContain(socketPath);
     expect((cmdline.match(/--uds/g) ?? []).length).toBe(1);
 
-    // Spawn ran the WRAPPED argv, shell:false, stdin ignored.
-    const [scmd, sargs, sopts] = spawnMock.mock.calls[0] as [string, string[], { shell: boolean }];
+    // Spawn ran the WRAPPED argv, shell:false, stdin piped (the liveness pipe
+    // reaches the worker through the wrapper on this path too).
+    const [scmd, sargs, sopts] = spawnMock.mock.calls[0] as [string, string[], { shell: boolean; stdio: unknown[] }];
     expect(scmd).toBe("/bin/bash");
     expect(sargs[0]).toBe("-c");
     expect(sopts.shell).toBe(false);
+    expect(sopts.stdio).toEqual(["pipe", "pipe", "pipe"]);
 
     // Non-null socketPath + reviewer reports genuine asrt for the plugin tool.
     expect(worker.socketPath).toBe(socketPath);
@@ -671,7 +691,7 @@ describe("spawnWorker — Windows with gate ON", () => {
     expect(workerOpts.env?.ANTHROPIC_API_KEY).toBeUndefined();
     expect(workerOpts.env?.LVIS_INTERNAL_SECRET).toBeUndefined();
     expect(workerOpts.shell).toBe(false);
-    expect(workerOpts.stdio).toEqual(["ignore", "pipe", "pipe"]);
+    expect(workerOpts.stdio).toEqual(["pipe", "pipe", "pipe"]);
 
     expect(worker.socketPath).toBeNull();
     expect(worker.pid).toBe(5102);

@@ -55,7 +55,7 @@
  * UDS dir is created, nothing is wrapped.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { unlinkSync, rmdirSync, chmodSync, lstatSync } from "node:fs";
 import { join, resolve as pathResolve } from "node:path";
@@ -271,6 +271,16 @@ function stopWindowsAclGrantHolder(child: ChildProcess): void {
   terminateChildBestEffort(child);
 }
 
+/**
+ * The worker's standard streams. stdin is the host's LIVENESS PIPE: the host
+ * never writes to it and never ends it, so the only EOF a worker can ever read
+ * there is the OS closing the write end because the host process is gone — in
+ * every death mode, not only the graceful Quit that runs the managed-child
+ * force-kill sweep. A worker reparented by a crashed or killed host has no
+ * other signal that its owner left; with stdin `"ignore"` it lived on forever.
+ */
+const WORKER_STDIO: StdioOptions = ["pipe", "pipe", "pipe"];
+
 function terminateChildBestEffort(child: ChildProcess): void {
   if (child.exitCode !== null || child.signalCode !== null) return;
   try {
@@ -314,7 +324,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   if (!isAsrtSandboxActive()) {
     assertManagedChildProcessAdmissionOpen(`worker:${safePlugin}:${safeWorker}`);
     const child = spawn(spec.command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: WORKER_STDIO,
       shell: false,
       windowsHide: true,
       env: baseEnv,
@@ -427,6 +437,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
         grantMode: "deny-only",
         baseEnv,
         extraEnv: { ...sandboxHome.env },
+        stdio: WORKER_STDIO,
         assertStillValid: assertHolderAlive,
         onWrapped: () => {
           wrapped = true;
@@ -543,6 +554,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       allowWrite,
       baseEnv,
       extraEnv: { ...sandboxHome.env },
+      stdio: WORKER_STDIO,
       onWrapped: () => {
         // The wrap incremented ASRT's per-command state (Linux
         // activeSandboxCount, proxy ref); from here a failure MUST decrement
@@ -614,6 +626,10 @@ function makeHandle(
   socketPath: string | null,
 ): SpawnedWorker {
   let stopped = false;
+  // A worker that exits first leaves the liveness pipe without a reader. A
+  // late EPIPE on it is that pipe ending as designed, not a host fault, and
+  // must not surface as an unhandled 'error' on the host.
+  child.stdin?.on("error", () => {});
   return {
     socketPath,
     pid: child.pid,
