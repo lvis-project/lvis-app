@@ -328,7 +328,10 @@ Key boundaries:
   the user-activation gate and runs on a plugin-origin chain) (#1556);
 - long-lived plugin workers are spawned only through HostApi `spawnWorker`;
   filesystem read grants must be declared explicitly as `allowReadPaths` and are
-  never inferred from argv.
+  never inferred from argv. The worker's stdin is the host's liveness pipe — it
+  carries no bytes and closes only when the host process is gone — so a
+  long-lived worker treats EOF on stdin as the order to exit; that, not the
+  shutdown sweep, is what keeps workers from outliving a crashed or killed host.
 
 ## Main-process composition and boot readiness
 

@@ -1154,6 +1154,12 @@ export type PluginLifecycleEvent =
  * cannot spawn a worker under another plugin's namespace. (The host-internal
  * primitive in `src/permissions/worker-spawn.ts` accepts the same shape plus
  * the bound `pluginId`.)
+ *
+ * The worker's stdin is the host's liveness pipe: it carries no bytes and
+ * closes only when the host process is gone. A long-lived worker MUST treat
+ * EOF on stdin as "exit now" — it is the one signal that survives a host crash
+ * or kill, which the host's shutdown sweep never sees. A short-lived command
+ * may ignore it.
  */
 export interface PluginWorkerSpec {
   /**
@@ -1192,7 +1198,9 @@ export interface PluginWorkerSpec {
  * host-side UDS path to connect to, or `null` when the worker should use TCP
  * control. `null` covers gate-OFF plain spawn and Windows ASRT-wrapped workers
  * (Windows keeps TCP control while filesystem/network effects are confined).
- * Callers must not infer sandbox status from transport alone.
+ * Callers must not infer sandbox status from transport alone. `stop()` is the
+ * host's orderly path; the worker's stdin (see {@link PluginWorkerSpec}) is the
+ * one that outlives the host.
  */
 export interface SpawnedPluginWorker {
   readonly socketPath: string | null;
