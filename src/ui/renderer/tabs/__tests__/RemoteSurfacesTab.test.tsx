@@ -83,13 +83,23 @@ function observerSnapshot() {
   };
 }
 
-function makeApi(options: { telegramState?: string; resumeFails?: boolean } = {}) {
+function makeApi(options: {
+  telegramState?: string;
+  resumeFails?: boolean;
+  /** What `marketplace.installedMessagingConnections` holds. Null is what a
+   *  desktop that never installed one actually stores. */
+  installed?: readonly MarketplaceInstalledMessagingConnection[] | null;
+} = {}) {
   const resume = vi.fn(async () => (options.resumeFails === true
     ? { ok: false as const, error: "telegram-connection-unavailable" as const }
     : { ok: true as const }));
   const api = {
     getSettings: vi.fn(async () => ({
-      marketplace: { installedMessagingConnections: [TELEGRAM] },
+      marketplace: {
+        installedMessagingConnections: options.installed === undefined
+          ? [TELEGRAM]
+          : options.installed,
+      },
       system: {},
       features: {},
     })),
@@ -146,24 +156,39 @@ describe("RemoteSurfacesTab", () => {
     const { api } = makeApi();
     const { container } = render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
-    await screen.findByTestId("messaging-connection:telegram");
+    await screen.findByTestId("connection:telegram");
     const rows = [...container.querySelectorAll("[data-connection-row]")]
       .map((row) => row.getAttribute("data-connection-row"));
     expect(rows).toEqual([
       "connection:tailnet",
-      "messaging-connection:telegram",
+      "connection:telegram",
       "connection:local-api",
     ]);
+  });
+
+  it("keeps Telegram a row on a desktop that installed no messaging connection", async () => {
+    // What a desktop that never installed one actually stores. Telegram is
+    // built into this build, so its row cannot depend on that list.
+    const { api } = makeApi({ installed: null });
+    const { container } = render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
+
+    await screen.findByTestId("connection:telegram");
+    expect([...container.querySelectorAll("[data-connection-row]")]
+      .map((row) => row.getAttribute("data-connection-row")))
+      .toEqual(["connection:tailnet", "connection:telegram", "connection:local-api"]);
+
+    fireEvent.click(screen.getByTestId("connection:telegram:toggle"));
+    expect(await screen.findByTestId("telegram-connection-content")).toBeTruthy();
   });
 
   it("keeps every row's detail folded away until it is opened", async () => {
     const { api } = makeApi();
     render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
-    await screen.findByTestId("messaging-connection:telegram");
+    await screen.findByTestId("connection:telegram");
     expect(screen.queryByTestId("connection:tailnet:detail")).toBeNull();
     expect(screen.queryByTestId("connection:local-api:detail")).toBeNull();
-    expect(screen.queryByTestId("messaging-connection:telegram:detail")).toBeNull();
+    expect(screen.queryByTestId("connection:telegram:detail")).toBeNull();
   });
 
   it("opens a row onto the controls that vendor already had", async () => {
@@ -189,11 +214,11 @@ describe("RemoteSurfacesTab", () => {
     const { api } = makeApi({ telegramState: "paused-by-owner" });
     render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
-    fireEvent.click(await screen.findByTestId("messaging-connection:telegram:toggle"));
+    fireEvent.click(await screen.findByTestId("connection:telegram:toggle"));
     fireEvent.click(await screen.findByTestId("telegram-connection-resume"));
 
     await waitFor(() => {
-      expect(screen.queryByTestId("messaging-connection:telegram:detail")).toBeNull();
+      expect(screen.queryByTestId("connection:telegram:detail")).toBeNull();
     });
   });
 
@@ -201,11 +226,11 @@ describe("RemoteSurfacesTab", () => {
     const { api } = makeApi({ telegramState: "paused-by-owner", resumeFails: true });
     render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
-    fireEvent.click(await screen.findByTestId("messaging-connection:telegram:toggle"));
+    fireEvent.click(await screen.findByTestId("connection:telegram:toggle"));
     fireEvent.click(await screen.findByTestId("telegram-connection-resume"));
 
     expect(await screen.findByTestId("telegram-connection-feedback")).toBeTruthy();
-    expect(screen.getByTestId("messaging-connection:telegram:detail")).toBeTruthy();
+    expect(screen.getByTestId("connection:telegram:detail")).toBeTruthy();
   });
 
   it("opens the row that holds the section a deep link named", async () => {
@@ -238,10 +263,10 @@ describe("RemoteSurfacesTab", () => {
     const { api } = makeApi();
     const { container } = render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
-    await screen.findByTestId("messaging-connection:telegram");
+    await screen.findByTestId("connection:telegram");
     expect(container.querySelector("[data-settings-section='remote-messaging-connections']"))
       .not.toBeNull();
-    expect(screen.queryByTestId("messaging-connection:telegram:detail")).toBeNull();
+    expect(screen.queryByTestId("connection:telegram:detail")).toBeNull();
   });
 
   it("reads a listener that was never set up as setup-needed", async () => {

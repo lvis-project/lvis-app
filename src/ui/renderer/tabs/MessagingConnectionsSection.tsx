@@ -1,21 +1,25 @@
 /**
- * The messaging connections installed from the marketplace, as rows in the
- * 원격 연결 list.
+ * The messaging connections, as rows in the 원격 연결 list.
  *
- * A messaging connection is not a plugin bundle: installing one records that
- * this desktop may be reached through that service and nothing more. What the
- * catalog declared about it — the credentials it will ask for, the hosts it
- * reaches — is shown inside the row so the owner can read it back after
- * installing, and the controls that actually drive the connection open in the
- * same place rather than in a second section further down the page. One vendor
- * is one line; there is nowhere left to jump to.
+ * Two kinds sit in this group and they are not the same thing. Telegram is
+ * BUILT INTO this build: the host owns the bot connection, the pairing and the
+ * share outright, so its row is always here whether or not a catalog entry for
+ * it was ever installed. A marketplace-installed messaging connection is only a
+ * record — installing one says this desktop may be reached through that service
+ * and nothing more — so it appears as a row that can read back what the catalog
+ * declared and nothing else, because this build carries nothing that could
+ * drive it.
+ *
+ * Gating the Telegram row on the installed list is exactly the regression this
+ * comment exists to prevent: on a machine with an empty
+ * `installedMessagingConnections` the only way to connect a bot would vanish
+ * from the app.
  *
  * Its own file rather than a block inside `RemoteSurfacesTab`: this is the one
- * group on the tab whose membership is data — what the owner installed — so it
- * owns the read, the per-connection state subscriptions, and the driver table
- * that says which of those this build can actually operate.
+ * group on the tab whose membership is partly data — what the owner installed —
+ * so it owns that read and the per-connection state subscription.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -27,33 +31,39 @@ import { ConnectionRow, type ConnectionRowState } from "../components/Connection
 import { TelegramConnectionContent } from "./TelegramConnectionContent.js";
 import type { LvisApi } from "../types.js";
 
-/** What a driver reports about its connection for the collapsed row. */
-interface MessagingConnectionReading {
-  /** Null until the driver has answered — the row draws no word until then. */
-  readonly state: ConnectionRowState | null;
-  /** The handle or address this connection is reachable at, when it has one. */
-  readonly endpoint: string | null;
+/**
+ * The connection ids this build implements itself.
+ *
+ * A catalog entry for one of these is metadata ABOUT the built-in row, not a
+ * second connection: it is folded into that row rather than listed beside it,
+ * so installing the Telegram entry never produces two Telegram lines.
+ */
+const HOST_BUILT_IN_CONNECTION_IDS: ReadonlySet<string> = new Set(["telegram"]);
+
+/** The built-in Telegram row, in the accordion the tab owns. */
+const TELEGRAM_ROW_ID = "connection:telegram";
+
+/** The row id for a marketplace connection this build cannot drive. */
+function marketplaceConnectionRowId(connectionId: string): string {
+  return `messaging-connection:${connectionId}`;
 }
 
 /**
- * A connection this build can actually drive.
+ * The row a settings deep link into a messaging connection has to open.
  *
- * The host owns these connections outright — they are not plugins — so the
- * table is the host's own list of what it implements. A connection installed
- * from a catalog that this build has no entry for stays visible and reads
- * `unavailable`, rather than disappearing or pretending to work.
+ * Null for an anchor this group does not own, which is how the tab tells its
+ * own sections from another vendor's.
  */
-interface MessagingConnectionDriver {
-  /** The `data-settings-section` this connection's controls carry. */
-  readonly settingsSection: string;
-  readonly read: (api: LvisApi) => Promise<MessagingConnectionReading>;
-  readonly subscribe: (api: LvisApi, onChanged: () => void) => () => void;
-  /** The controls themselves, rendered inside the row this driver owns. */
-  readonly renderSection: (
-    api: LvisApi,
-    chatGroupId: string,
-    onCompleted: () => void,
-  ) => ReactNode;
+export function messagingConnectionRowForSection(section: string): string | null {
+  return section === "remote-telegram" ? TELEGRAM_ROW_ID : null;
+}
+
+/** What the collapsed Telegram line says, read from the host. */
+interface TelegramReading {
+  /** Null until the host has answered — the row draws no word until then. */
+  readonly state: ConnectionRowState | null;
+  /** The bot the owner connected, when there is one. */
+  readonly endpoint: string | null;
 }
 
 function telegramConnectionState(
@@ -72,8 +82,9 @@ function telegramConnectionState(
     case "pairing-pending":
     case "paired-unapproved":
       return "pending";
-    // No driver in this build is something the owner fixes by updating, which
-    // is the same kind of "you have to do something" the word already means.
+    // A build with no Telegram support is something the owner fixes by
+    // updating, which is the same kind of "you have to do something" the word
+    // already means.
     case "unsupported":
       return "needs-setup";
     case "pairing-unrecognized":
@@ -83,57 +94,14 @@ function telegramConnectionState(
   }
 }
 
-const MESSAGING_CONNECTION_DRIVERS: Readonly<Record<string, MessagingConnectionDriver>> =
-  Object.freeze({
-    telegram: {
-      settingsSection: "remote-telegram",
-      read: async (api) => {
-        const result = await api.telegramConnection.snapshot();
-        if (!result.ok) return { state: "attention", endpoint: null };
-        return {
-          state: telegramConnectionState(result.snapshot),
-          endpoint: result.snapshot.botUsername === null
-            ? null
-            : `@${result.snapshot.botUsername}`,
-        };
-      },
-      subscribe: (api, onChanged) => api.telegramConnection.onChanged(onChanged),
-      renderSection: (api, chatGroupId, onCompleted) => (
-        <TelegramConnectionContent
-          api={api}
-          chatGroupId={chatGroupId}
-          onCompleted={onCompleted}
-        />
-      ),
-    },
-  });
-
-/** The row id the tab's accordion uses for one installed connection. */
-function messagingConnectionRowId(connectionId: string): string {
-  return `messaging-connection:${connectionId}`;
-}
-
-/**
- * The row a settings deep link into a messaging connection has to open.
- *
- * Null for an anchor no driver claims, which is how the tab tells a section
- * this group owns from one belonging to another vendor on the page.
- */
-export function messagingConnectionRowForSection(section: string): string | null {
-  for (const [connectionId, driver] of Object.entries(MESSAGING_CONNECTION_DRIVERS)) {
-    if (driver.settingsSection === section) return messagingConnectionRowId(connectionId);
-  }
-  return null;
-}
-
 /** The catalog read-back: what this connection will ask for, and what it reaches. */
-function MessagingConnectionCatalog({ api, connection }: {
+function MessagingConnectionCatalog({ api, connection, rowId }: {
   api: LvisApi;
   connection: MarketplaceInstalledMessagingConnection;
+  rowId: string;
 }) {
   const { t } = useTranslation();
   const { docsUrl } = connection;
-  const rowId = messagingConnectionRowId(connection.connectionId);
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-muted-foreground">{connection.summary}</p>
@@ -182,62 +150,90 @@ function MessagingConnectionCatalog({ api, connection }: {
   );
 }
 
-function MessagingConnectionRow({ api, chatGroupId, connection, expanded, onToggle, onCompleted }: {
+function TelegramConnectionRow({ api, chatGroupId, catalog, expanded, onToggle, onCompleted }: {
   api: LvisApi;
   chatGroupId: string;
-  connection: MarketplaceInstalledMessagingConnection;
+  /** The catalog entry, when the owner installed one. The row exists either way. */
+  catalog: MarketplaceInstalledMessagingConnection | undefined;
   expanded: boolean;
   onToggle: () => void;
   onCompleted: () => void;
 }) {
   const { t } = useTranslation();
-  const driver = MESSAGING_CONNECTION_DRIVERS[connection.connectionId];
-  const [reading, setReading] = useState<MessagingConnectionReading>(
-    driver ? { state: null, endpoint: null } : { state: "needs-setup", endpoint: null },
-  );
+  const [reading, setReading] = useState<TelegramReading>({ state: null, endpoint: null });
 
   useEffect(() => {
-    if (!driver) {
-      setReading({ state: "needs-setup", endpoint: null });
-      return;
-    }
     let alive = true;
     const refresh = () => {
-      void driver.read(api).then((next) => {
-        if (alive) setReading(next);
+      void api.telegramConnection.snapshot().then((result) => {
+        if (!alive) return;
+        setReading(result.ok
+          ? {
+              state: telegramConnectionState(result.snapshot),
+              endpoint: result.snapshot.botUsername === null
+                ? null
+                : `@${result.snapshot.botUsername}`,
+            }
+          : { state: "attention", endpoint: null });
       });
     };
     refresh();
-    const unsubscribe = driver.subscribe(api, refresh);
-    return () => {
-      alive = false;
-      unsubscribe();
-    };
-  }, [api, driver]);
+    return api.telegramConnection.onChanged(refresh);
+  }, [api]);
 
-  const rowId = messagingConnectionRowId(connection.connectionId);
+  return (
+    <ConnectionRow
+      label={t("telegramConnection.sectionTitle")}
+      state={reading.state}
+      endpoint={reading.endpoint}
+      expanded={expanded}
+      onToggle={onToggle}
+      separated={true}
+      testId={TELEGRAM_ROW_ID}
+    >
+      <div className="space-y-3">
+        <TelegramConnectionContent
+          api={api}
+          chatGroupId={chatGroupId}
+          onCompleted={onCompleted}
+        />
+        {catalog === undefined ? null : (
+          <MessagingConnectionCatalog api={api} connection={catalog} rowId={TELEGRAM_ROW_ID} />
+        )}
+      </div>
+    </ConnectionRow>
+  );
+}
+
+/** A connection the owner installed that this build carries no code to drive. */
+function MarketplaceConnectionRow({ api, connection, expanded, onToggle }: {
+  api: LvisApi;
+  connection: MarketplaceInstalledMessagingConnection;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
+  const rowId = marketplaceConnectionRowId(connection.connectionId);
   return (
     <ConnectionRow
       label={connection.label}
-      state={reading.state}
-      endpoint={reading.endpoint}
+      // Updating the app is the something the owner has to do, which is what
+      // the word already means. It stays visible rather than disappearing:
+      // the owner installed it and is owed an explanation.
+      state="needs-setup"
       expanded={expanded}
       onToggle={onToggle}
       separated={true}
       testId={rowId}
     >
       <div className="space-y-3">
-        {driver === undefined ? (
-          <p
-            className="text-[11px] text-muted-foreground"
-            data-testid={`${rowId}:unavailable`}
-          >
-            {t("remoteSurfacesTab.messagingUnavailableHelp")}
-          </p>
-        ) : (
-          driver.renderSection(api, chatGroupId, onCompleted)
-        )}
-        <MessagingConnectionCatalog api={api} connection={connection} />
+        <p
+          className="text-[11px] text-muted-foreground"
+          data-testid={`${rowId}:unavailable`}
+        >
+          {t("remoteSurfacesTab.messagingUnavailableHelp")}
+        </p>
+        <MessagingConnectionCatalog api={api} connection={connection} rowId={rowId} />
       </div>
     </ConnectionRow>
   );
@@ -260,7 +256,6 @@ export function MessagingConnectionsSection({
   onToggleRow,
   onRowCompleted,
 }: MessagingConnectionsSectionProps) {
-  const { t } = useTranslation();
   const [connections, setConnections] = useState<
     readonly MarketplaceInstalledMessagingConnection[]
   >([]);
@@ -275,13 +270,19 @@ export function MessagingConnectionsSection({
     return () => { alive = false; };
   }, [api]);
 
-  const sorted = useMemo(
-    () => [...connections].sort((a, b) => a.label.localeCompare(b.label)),
+  const telegramCatalog = useMemo(
+    () => connections.find((connection) => connection.connectionId === "telegram"),
+    [connections],
+  );
+  const marketplaceOnly = useMemo(
+    () => connections
+      .filter((connection) => !HOST_BUILT_IN_CONNECTION_IDS.has(connection.connectionId))
+      .sort((a, b) => a.label.localeCompare(b.label)),
     [connections],
   );
 
-  const toggle = useCallback(
-    (connectionId: string) => onToggleRow(messagingConnectionRowId(connectionId)),
+  const toggleMarketplaceRow = useCallback(
+    (connectionId: string) => onToggleRow(marketplaceConnectionRowId(connectionId)),
     [onToggleRow],
   );
 
@@ -294,22 +295,21 @@ export function MessagingConnectionsSection({
       tabIndex={-1}
       data-testid="messaging-connections-content"
     >
-      {sorted.length === 0 ? (
-        <p
-          className="border-t border-border px-3 py-2.5 text-sm text-muted-foreground"
-          data-testid="messaging-connections-empty"
-        >
-          {t("remoteSurfacesTab.messagingEmpty")}
-        </p>
-      ) : sorted.map((connection) => (
-        <MessagingConnectionRow
+      <TelegramConnectionRow
+        api={api}
+        chatGroupId={chatGroupId}
+        catalog={telegramCatalog}
+        expanded={expandedRowIds.includes(TELEGRAM_ROW_ID)}
+        onToggle={() => onToggleRow(TELEGRAM_ROW_ID)}
+        onCompleted={() => onRowCompleted(TELEGRAM_ROW_ID)}
+      />
+      {marketplaceOnly.map((connection) => (
+        <MarketplaceConnectionRow
           key={connection.connectionId}
           api={api}
-          chatGroupId={chatGroupId}
           connection={connection}
-          expanded={expandedRowIds.includes(messagingConnectionRowId(connection.connectionId))}
-          onToggle={() => toggle(connection.connectionId)}
-          onCompleted={() => onRowCompleted(messagingConnectionRowId(connection.connectionId))}
+          expanded={expandedRowIds.includes(marketplaceConnectionRowId(connection.connectionId))}
+          onToggle={() => toggleMarketplaceRow(connection.connectionId)}
         />
       ))}
     </div>

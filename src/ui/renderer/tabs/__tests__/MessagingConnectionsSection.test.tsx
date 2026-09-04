@@ -1,11 +1,15 @@
 /**
  * The messaging-connection rows in the 원격 연결 list.
  *
- * What is asserted is the reading, not the layout: an installed connection is
- * one row worded in the shared state vocabulary, a connection this build has no
- * driver for still appears and says why it cannot be driven, opening a row
- * shows the connection's own controls together with what the catalog declared,
- * and nothing is listed before one is installed.
+ * The first assertion is the one that matters most: Telegram is built into this
+ * build, so its row is on the page whether or not a marketplace catalog entry
+ * for it was ever installed. Gating it on that list would delete the only way
+ * to connect a bot from a machine that installed nothing.
+ *
+ * The rest is the reading, not the layout: the row is worded in the shared
+ * state vocabulary, a marketplace connection this build cannot drive still
+ * appears and says why, and a catalog entry for Telegram is folded INTO the
+ * built-in row rather than listed beside it as a second Telegram.
  */
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
@@ -74,70 +78,71 @@ function Harness({ api }: { api: LvisApi }) {
 }
 
 describe("MessagingConnectionsSection", () => {
-  it("says nothing is installed before a connection is installed", async () => {
+  it("keeps Telegram on the page when nothing is installed from the marketplace", async () => {
     const { api } = makeApi([]);
     render(<Harness api={api} />);
-    expect(await screen.findByTestId("messaging-connections-empty")).toBeTruthy();
+
+    expect(await screen.findByTestId("connection:telegram")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("connection:telegram:toggle"));
+    // The bot connection is a host surface, so its controls are reachable with
+    // no catalog entry behind them at all.
+    expect(await screen.findByTestId("telegram-connection-content")).toBeTruthy();
   });
 
-  it("lists an installed connection as one row with the state its driver reports", async () => {
-    const { api } = makeApi([TELEGRAM], "active");
+  it("words the built-in row with the state the host reports", async () => {
+    const { api } = makeApi([], "active");
     render(<Harness api={api} />);
 
-    const rows = await screen.findAllByTestId("messaging-connection:telegram");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain("Telegram");
     await waitFor(() => {
-      expect(screen.getByTestId("messaging-connection:telegram:state").textContent)
-        .toBe("연결됨");
+      expect(screen.getByTestId("connection:telegram:state").textContent).toBe("연결됨");
     });
     // The handle is what makes the collapsed line concrete.
-    expect(screen.getByTestId("messaging-connection:telegram:endpoint").textContent)
+    expect(screen.getByTestId("connection:telegram:endpoint").textContent)
       .toBe("@lvis_desk_bot");
   });
 
   it("reads a connection that still needs its bot token as setup-needed", async () => {
-    const { api } = makeApi([TELEGRAM], "connected-unpaired");
+    const { api } = makeApi([], "connected-unpaired");
     render(<Harness api={api} />);
     await waitFor(() => {
-      expect(screen.getByTestId("messaging-connection:telegram:state").textContent)
-        .toBe("설정 필요");
+      expect(screen.getByTestId("connection:telegram:state").textContent).toBe("설정 필요");
     });
   });
 
   it("reads a pairing waiting on the other side as waiting, not as unset", async () => {
-    const { api } = makeApi([TELEGRAM], "pairing-pending");
+    const { api } = makeApi([], "pairing-pending");
     render(<Harness api={api} />);
     await waitFor(() => {
-      expect(screen.getByTestId("messaging-connection:telegram:state").textContent)
-        .toBe("대기 중");
+      expect(screen.getByTestId("connection:telegram:state").textContent).toBe("대기 중");
     });
   });
 
   it("reads a connection the owner paused as off", async () => {
-    const { api } = makeApi([TELEGRAM], "paused-by-owner");
+    const { api } = makeApi([], "paused-by-owner");
     render(<Harness api={api} />);
     await waitFor(() => {
-      expect(screen.getByTestId("messaging-connection:telegram:state").textContent)
-        .toBe("꺼짐");
+      expect(screen.getByTestId("connection:telegram:state").textContent).toBe("꺼짐");
     });
   });
 
-  it("opens the connection's own controls and catalog in the row", async () => {
+  it("folds an installed Telegram catalog entry into the built-in row", async () => {
     const { api, openExternalUrl } = makeApi([TELEGRAM]);
     render(<Harness api={api} />);
 
-    fireEvent.click(await screen.findByTestId("messaging-connection:telegram:toggle"));
-    const detail = await screen.findByTestId("messaging-connection:telegram:detail");
-    // The driver's own section — the controls that used to live further down
-    // the page — is what the row opens onto.
+    // One Telegram, not two: the catalog entry is metadata about the built-in
+    // row, not a second connection.
+    expect(await screen.findAllByTestId("connection:telegram")).toHaveLength(1);
+    expect(screen.queryByTestId("messaging-connection:telegram")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("connection:telegram:toggle"));
+    const detail = await screen.findByTestId("connection:telegram:detail");
     expect(await screen.findByTestId("telegram-connection-content")).toBeTruthy();
     expect(detail.textContent).toContain("Bot token");
     expect(detail.textContent).toContain("비밀");
-    expect(screen.getByTestId("messaging-connection:telegram:egress").textContent)
+    expect(screen.getByTestId("connection:telegram:egress").textContent)
       .toContain("api.telegram.org");
 
-    fireEvent.click(screen.getByTestId("messaging-connection:telegram:docs"));
+    fireEvent.click(screen.getByTestId("connection:telegram:docs"));
     expect(openExternalUrl).toHaveBeenCalledWith("https://core.telegram.org/bots/api");
   });
 
@@ -153,6 +158,9 @@ describe("MessagingConnectionsSection", () => {
       expect(screen.getByTestId("messaging-connection:future-messenger:state").textContent)
         .toBe("설정 필요");
     });
+    // And it is listed BESIDE the built-in row, never instead of it.
+    expect(screen.getByTestId("connection:telegram")).toBeTruthy();
+
     fireEvent.click(screen.getByTestId("messaging-connection:future-messenger:toggle"));
     expect(await screen.findByTestId("messaging-connection:future-messenger:unavailable"))
       .toBeTruthy();
