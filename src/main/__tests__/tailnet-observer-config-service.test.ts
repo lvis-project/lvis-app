@@ -51,6 +51,8 @@ function service(options: {
   restartListener?: () => Promise<unknown>;
   runServe?: (input: { cliPath: string; port: number }) => Promise<TailscaleServeOutcome>;
   choosePort?: (preferred: number | null) => Promise<number | null>;
+  ownDeviceAdmission?: boolean;
+  writeOwnDeviceAdmission?: (enabled: boolean) => Promise<void>;
 } = {}) {
   return createTailnetObserverConfigService({
     pairedSharingBootstrapFailed: () => options.pairedSharingBootstrapFailed === true,
@@ -67,6 +69,10 @@ function service(options: {
     // running it happens to have Tailscale installed and a listener bound.
     probeEnvironment: async () => options.environment ?? readyEnvironment(),
     restartListener: options.restartListener ?? (async () => undefined),
+    // Injected for the same reason: the admission record is real host state,
+    // and reading it would make this matrix depend on the developer's own.
+    readOwnDeviceAdmission: async () => options.ownDeviceAdmission === true,
+    writeOwnDeviceAdmission: options.writeOwnDeviceAdmission ?? (async () => undefined),
     ...(options.runServe === undefined ? {} : { runServe: options.runServe as never }),
     ...(options.choosePort === undefined ? {} : { choosePort: options.choosePort }),
   });
@@ -510,6 +516,27 @@ describe("Tailnet observer configuration service", () => {
 
       expect(result.ok).toBe(true);
       expect(writeConfigFile).toHaveBeenCalled();
+    });
+  });
+
+  describe("own-device admission", () => {
+    it("reports whether this desktop's own devices skip the approval click", async () => {
+      await expect(service().snapshot()).resolves.toMatchObject({ ownDeviceAdmission: false });
+      await expect(service({ ownDeviceAdmission: true }).snapshot())
+        .resolves.toMatchObject({ ownDeviceAdmission: true });
+    });
+
+    it("passes the direction to the host and never restarts the listener for it", async () => {
+      const writeOwnDeviceAdmission = vi.fn(async () => undefined);
+      const restartListener = vi.fn(async () => undefined);
+      const target = service({ writeOwnDeviceAdmission, restartListener });
+
+      await target.setOwnDeviceAdmission(true);
+      await target.setOwnDeviceAdmission(false);
+
+      expect(writeOwnDeviceAdmission.mock.calls).toEqual([[true], [false]]);
+      // A live remote must not be dropped to change who may skip an approval.
+      expect(restartListener).not.toHaveBeenCalled();
     });
   });
 });

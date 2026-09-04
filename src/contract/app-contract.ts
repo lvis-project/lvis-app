@@ -256,6 +256,10 @@ export const CHANNELS = {
     // It is `apply` plus `configureServe` with the host choosing the answers,
     // so it carries exactly their gate — never a weaker one for being one press.
     guidedSetup: "lvis:tailnet-observer:guided-setup",
+    // Decides whether this desktop's own Tailscale account skips the approval
+    // click. The payload is one boolean: the account it applies to is the one
+    // the host's own probe reports, never a login a renderer names.
+    setOwnDeviceAdmission: "lvis:tailnet-observer:set-own-device-admission",
   },
   // Local-owner-only Telegram private-DM connection administration. These are
   // INTERNAL for the same reasons as tailnetSharing, and additionally because
@@ -786,6 +790,9 @@ export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
   // Running a binary for the owner is its own decision, made at this keyboard
   // against a command the surface has already shown in full.
   [CHANNELS.tailnetObserver.configureServe]: "required",
+  // Waiving the approval click for a whole account, and taking that waiver
+  // back, is a grant decision — gated exactly like the click it replaces.
+  [CHANNELS.tailnetObserver.setOwnDeviceAdmission]: "required",
   // Local-owner Telegram connection: same rule. Saving a bot token, starting
   // the outbound connection, minting a pairing code, and sharing the open
   // conversation are each an owner decision made at this keyboard.

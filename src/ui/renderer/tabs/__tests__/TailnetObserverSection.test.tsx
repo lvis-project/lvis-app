@@ -51,6 +51,7 @@ function snapshotOf(overrides: Partial<TailnetObserverSnapshot> = {}): TailnetOb
     listeningPort: null,
     lastStartError: null,
     pairedSharingBootstrapFailed: false,
+    ownDeviceAdmission: false,
     environment: READY_ENVIRONMENT,
     derivedWebOrigin: "https://" + DNS_NAME,
     serveCommand: null,

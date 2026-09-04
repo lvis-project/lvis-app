@@ -116,6 +116,16 @@ export interface TailnetObserverSnapshot {
   readonly lastStartError: string | null;
   /** Whether paired-sharing setup failed at boot, leaving owner controls off. */
   readonly pairedSharingBootstrapFailed: boolean;
+  /**
+   * Whether a device on this desktop's own Tailscale account is paired and
+   * approved without the approval click.
+   *
+   * Off by default, and it widens nothing else: a different Tailscale login
+   * still needs an invitation code and still needs approving here, and an
+   * admitted device still sees no transcript until a conversation is shared
+   * with it.
+   */
+  readonly ownDeviceAdmission: boolean;
   /** What this desktop's Tailscale install says about itself. */
   readonly environment: TailscaleEnvironmentView;
   /** The web origin derived from this node's MagicDNS name; never typed in. */
@@ -212,6 +222,12 @@ export interface TailnetObserverConfigApi {
   configureServe(): Promise<TailnetServeResult>;
   /** Choose, persist, and start the whole recommended configuration in one press. */
   guidedSetup(): Promise<TailnetGuidedSetupResult>;
+  /**
+   * Admit, or stop admitting, this desktop's own Tailscale account without an
+   * approval click. Which account that is comes from the host's own probe —
+   * the renderer says only on or off, never whose device it is.
+   */
+  setOwnDeviceAdmission(enabled: boolean): Promise<TailnetObserverMutationResult>;
 }
 
 export const DEFAULT_TAILNET_OBSERVER_VIEW_PORT = 46_173;
@@ -352,6 +368,7 @@ export function parseTailnetObserverSnapshot(
     listeningPort,
     lastStartError,
     pairedSharingBootstrapFailed,
+    ownDeviceAdmission,
     derivedWebOrigin,
     serveCommand,
     configFileError,
@@ -364,6 +381,7 @@ export function parseTailnetObserverSnapshot(
     || !(listeningPort === null || (typeof listeningPort === "number" && Number.isSafeInteger(listeningPort)))
     || !isOptionalText(lastStartError)
     || typeof pairedSharingBootstrapFailed !== "boolean"
+    || typeof ownDeviceAdmission !== "boolean"
     || !isOptionalText(derivedWebOrigin)
     || !isOptionalText(serveCommand)
     || !isOptionalText(configFileError)
@@ -377,6 +395,7 @@ export function parseTailnetObserverSnapshot(
     listeningPort,
     lastStartError,
     pairedSharingBootstrapFailed,
+    ownDeviceAdmission,
     environment,
     derivedWebOrigin,
     serveCommand,

@@ -106,6 +106,10 @@ export function tailnetObserverErrorText(code: string, t: (key: string) => strin
       return t("tailnetSetup.errorNotReady");
     case "tailnet-guided-setup-port-unavailable":
       return t("tailnetSetup.errorPortUnavailable");
+    case "tailnet-own-device-admission-unavailable":
+      return t("tailnetSetup.errorOwnDeviceAdmissionUnavailable");
+    case "tailnet-own-device-admission-login-unreadable":
+      return t("tailnetSetup.errorOwnDeviceAdmissionLogin");
     case "user-keyboard-required":
       return t("tailnetObserver.errorKeyboardIntent");
     case "tailnet-observer-unavailable":

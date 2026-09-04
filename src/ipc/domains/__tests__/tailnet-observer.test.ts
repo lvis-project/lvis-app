@@ -40,6 +40,7 @@ function snapshotFixture() {
     listeningPort: 46_173,
     lastStartError: null,
     pairedSharingBootstrapFailed: false,
+    ownDeviceAdmission: false,
     environment: {
       state: "ready" as const,
       login: "owner@example.com",
@@ -60,6 +61,7 @@ async function setup(overrides: {
   apply?: (config: unknown) => Promise<void>;
   configureServe?: () => Promise<unknown>;
   guidedSetup?: () => Promise<unknown>;
+  setOwnDeviceAdmission?: (enabled: boolean) => Promise<void>;
 } = {}) {
   handlers.clear();
   vi.clearAllMocks();
@@ -79,6 +81,9 @@ async function setup(overrides: {
           port: 46_173,
           serve: "configured" as const,
         })),
+    ),
+    setOwnDeviceAdmission: vi.fn(
+      overrides.setOwnDeviceAdmission ?? (async () => undefined),
     ),
   };
   const { registerTailnetObserverHandlers } = await import("../tailnet-observer.js");
@@ -330,6 +335,53 @@ describe("Tailnet observer configuration IPC boundary", () => {
       await expect(
         invokeFileIpcHandler(handlers, CHANNELS.tailnetObserver.guidedSetup, { intent }),
       ).resolves.toEqual({ ok: false, error: "tailnet-observer-write-failed", output: null });
+    });
+  });
+
+  describe("own-device admission", () => {
+    it("carries the same gates as every other grant on this surface", async () => {
+      const service = await setup();
+      const channel = CHANNELS.tailnetObserver.setOwnDeviceAdmission;
+
+      const handler = handlers.get(channel)!;
+      await expect(Promise.resolve(handler(
+        { senderFrame: { url: "file:///app/plugin-ui-shell.html" } } as never,
+        { intent, enabled: true },
+      ))).resolves.toEqual({ ok: false, error: "unauthorized-frame" });
+
+      await expect(invokeFileIpcHandler(handlers, channel, { enabled: true }))
+        .resolves.toEqual({ ok: false, error: "user-keyboard-required" });
+
+      expect(service.setOwnDeviceAdmission).not.toHaveBeenCalled();
+    });
+
+    it("takes a direction and nothing else", async () => {
+      const service = await setup();
+      const channel = CHANNELS.tailnetObserver.setOwnDeviceAdmission;
+
+      for (const payload of [{}, { enabled: "yes" }, { enabled: 1 }, { login: "owner@example.com" }]) {
+        await expect(invokeFileIpcHandler(handlers, channel, { intent, ...payload }))
+          .resolves.toEqual({ ok: false, error: "tailnet-observer-input-invalid" });
+      }
+      expect(service.setOwnDeviceAdmission).not.toHaveBeenCalled();
+
+      await expect(invokeFileIpcHandler(handlers, channel, { intent, enabled: true }))
+        .resolves.toEqual({ ok: true });
+      expect(service.setOwnDeviceAdmission).toHaveBeenCalledWith(true);
+    });
+
+    it("reports the host's own refusal code", async () => {
+      await setup({
+        setOwnDeviceAdmission: async () => {
+          throw new Error("tailnet-own-device-admission-login-unreadable");
+        },
+      });
+
+      await expect(invokeFileIpcHandler(
+        handlers,
+        CHANNELS.tailnetObserver.setOwnDeviceAdmission,
+        { intent, enabled: true },
+      )).resolves.toEqual({ ok: false, error: "tailnet-own-device-admission-login-unreadable" });
     });
   });
 });

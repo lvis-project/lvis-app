@@ -116,4 +116,23 @@ export function registerTailnetObserverHandlers(deps: IpcDeps): void {
       return { ...rejection(err), output: null };
     }
   });
+
+  // The payload is one boolean and nothing else. Which account this admits is
+  // read from this desktop's own Tailscale probe, so a renderer can never
+  // assert that some other login is the owner's own device.
+  ipcMain.handle(CHANNELS.tailnetObserver.setOwnDeviceAdmission, async (event, payload: unknown) => {
+    if (!validateHostRendererSender(event)) {
+      auditUnauthorized(deps.auditLogger, CHANNELS.tailnetObserver.setOwnDeviceAdmission, event);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!service) return DISABLED;
+    if (!hasUserKeyboardIntentPayload(payload)) return USER_KEYBOARD_REQUIRED;
+    if (!isRecord(payload) || typeof payload.enabled !== "boolean") return INPUT_INVALID;
+    try {
+      await service.setOwnDeviceAdmission(payload.enabled);
+      return { ok: true as const };
+    } catch (err) {
+      return rejection(err);
+    }
+  });
 }

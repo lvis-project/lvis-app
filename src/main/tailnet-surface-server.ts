@@ -41,10 +41,12 @@ import {
   createTailnetPairedSharingRuntime,
   type TailnetPairedSharingRuntime,
 } from "./tailnet-paired-sharing-runtime.js";
-import type {
-  TailnetPairingShareStore,
-  TailnetShareActorId,
+import {
+  isTailnetShareActorId,
+  type TailnetPairingShareStore,
+  type TailnetShareActorId,
 } from "./tailnet-pairing-share-store.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
 
 export const DEFAULT_TAILNET_OBSERVER_PORT = 46_173;
 
@@ -109,6 +111,7 @@ export interface TailnetObserverConfigFile {
 
 const TAILNET_FEATURE_NAMESPACE = "tailnet";
 const TAILNET_OBSERVER_CONFIG_FILE = "observer.json";
+const TAILNET_OWN_DEVICE_ADMISSION_FILE = "own-device-admission.json";
 
 const CONFIG_KEYS: readonly TailnetObserverConfigKey[] = [
   "enabled",
@@ -159,6 +162,12 @@ interface TailnetObserverServerDependencies {
    * the tests happen to run on".
    */
   probeEnvironment: () => Promise<TailscaleEnvironment>;
+  /**
+   * Where the own-device admission record is read from. Injected for the same
+   * reason as the two above: a test must not read — or write — the state of
+   * whoever happens to be running it.
+   */
+  openTailnetNamespace: () => FeatureNamespaceHandle;
 }
 
 export interface StartTailnetObserverServerOptions {
@@ -176,6 +185,14 @@ export interface StartTailnetObserverServerOptions {
   readonly tailnetPairedSharingRuntime?: TailnetPairedSharingRuntime | null;
   readonly env?: NodeJS.ProcessEnv;
   readonly log?: (message: string) => void;
+  /**
+   * Where automatic own-device grants are recorded.
+   *
+   * The listener's log is a developer-facing stream; an admission that skipped
+   * the approval click belongs in the same audit log every other grant of this
+   * authority already lands in.
+   */
+  readonly auditLogger?: AuditLogger;
   /** @internal deterministic lifecycle injection for tests. */
   readonly dependencies?: Partial<TailnetObserverServerDependencies>;
 }
@@ -504,8 +521,96 @@ function dependencies(
     startServer: startTailnetSurfaceServer,
     readConfigFile: () => readTailnetObserverConfigFile(),
     probeEnvironment: () => probeTailscaleEnvironment(),
+    openTailnetNamespace: () => openFeatureNamespace(TAILNET_FEATURE_NAMESPACE),
     ...overrides,
   };
+}
+
+/**
+ * Which account, if any, this desktop admits without an approval click.
+ *
+ * The record holds the actor id rather than a raw login — the same opaque HMAC
+ * the pairing store keys everything on — because the only two questions asked
+ * of it are "is admission on" and "whose grant do I take back when it goes
+ * off", and neither needs the account's name. `null` is the default and the
+ * off state: the file may not exist at all.
+ *
+ * It is kept beside `observer.json` in the same `~/.lvis/tailnet/` namespace
+ * rather than inside it, because `guidedSetup` and `apply` rewrite that file
+ * wholesale from a renderer-supplied view; a grant ledger living there would be
+ * erased by the next press of Connect.
+ */
+interface TailnetOwnDeviceAdmissionRecord {
+  readonly version: 1;
+  readonly admittedActorId: TailnetShareActorId | null;
+}
+
+/** What an automatic admission did, for the audit log. */
+type TailnetOwnDeviceAdmissionAction = "granted" | "revoked";
+
+type TailnetOwnDeviceAdmissionAudit = (
+  action: TailnetOwnDeviceAdmissionAction,
+  actorFingerprint: string,
+  pairingId: string,
+) => void;
+
+/**
+ * The account currently admitted, or null.
+ *
+ * A damaged record reads as `null`, which is the off state: an unreadable
+ * policy must not admit anybody. It is not a fallback in the sense the repo
+ * bans — there is no second code path here, only the absence of a grant.
+ */
+async function readOwnDeviceAdmission(
+  namespace: FeatureNamespaceHandle,
+): Promise<TailnetShareActorId | null> {
+  const raw = await namespace.readJson<unknown>(TAILNET_OWN_DEVICE_ADMISSION_FILE, null);
+  if (!isRecord(raw) || raw.version !== 1) return null;
+  return isTailnetShareActorId(raw.admittedActorId) ? raw.admittedActorId : null;
+}
+
+/**
+ * Point the admission at one account, taking back what the previous one got.
+ *
+ * Every state change the control can produce is this one call: turning it on
+ * (`previous` null), turning it off (`next` null), and the desktop having
+ * signed into a different Tailscale account since the grant was made (both
+ * present and different). Revocation runs before the new grant is recorded, so
+ * a failure part-way through leaves less access, never more.
+ */
+async function applyOwnDeviceAdmission(input: {
+  readonly store: TailnetPairingShareStore;
+  readonly namespace: FeatureNamespaceHandle;
+  readonly audit: TailnetOwnDeviceAdmissionAudit;
+  readonly previousActorId: TailnetShareActorId | null;
+  readonly nextActorId: TailnetShareActorId | null;
+}): Promise<void> {
+  const changed = input.previousActorId !== input.nextActorId;
+  if (changed && input.previousActorId !== null) {
+    // `revokePairing` also revokes that pairing's live conversation shares, so
+    // the access really goes away rather than the desktop merely declining to
+    // hand out the next one.
+    const previous = input.store.currentPairing(input.previousActorId);
+    if (previous !== null && await input.store.revokePairing(previous.id)) {
+      input.audit("revoked", previous.actorFingerprint, previous.id);
+    }
+  }
+  if (changed) {
+    const record: TailnetOwnDeviceAdmissionRecord = {
+      version: 1,
+      admittedActorId: input.nextActorId,
+    };
+    await input.namespace.writeJson(TAILNET_OWN_DEVICE_ADMISSION_FILE, record);
+  }
+  if (input.nextActorId === null) return;
+  // Exactly what a human approving this device on the desktop does — the same
+  // store call the owner service makes — so the setting cannot grow a second,
+  // wider idea of what approval means. A pairing already active answers false
+  // and is not audited twice.
+  const pairing = input.store.currentPairing(input.nextActorId);
+  if (pairing !== null && pairing.state === "pending" && await input.store.activatePairing(pairing.id)) {
+    input.audit("granted", pairing.actorFingerprint, pairing.id);
+  }
 }
 
 /**
@@ -515,12 +620,16 @@ function dependencies(
  * Serve fills the login header from the tailnet, and the probe says which login
  * this desktop itself is signed in as. When they are the same account, carrying
  * a 56-character code from one of the owner's screens to another proves nothing
- * the tailnet has not already proved. Approval is not what this skips: the
- * invitation minted here is claimed the ordinary way, so the pairing lands
- * `pending` and the desktop still has to activate it.
+ * the tailnet has not already proved.
+ *
+ * Whether the approval click is skipped too is the owner's separate, off-by-
+ * default choice, read here rather than captured at boot so the control takes
+ * effect without restarting the listener out from under a live remote.
  */
 async function claimOwnTailnetDevice(input: {
   readonly store: TailnetPairingShareStore;
+  readonly namespace: FeatureNamespaceHandle;
+  readonly audit: TailnetOwnDeviceAdmissionAudit;
   readonly probeEnvironment: () => Promise<TailscaleEnvironment>;
   readonly login: string;
   readonly actorId: TailnetShareActorId;
@@ -534,9 +643,100 @@ async function claimOwnTailnetDevice(input: {
   // A pairing this actor already has is the answer; minting a second invitation
   // on every five-second reload would spend the invitation budget and then be
   // refused by `claimInvitation` for being already paired.
-  if (input.store.currentPairing(input.actorId) !== null) return true;
-  const invitation = await input.store.createInvitation();
-  return await input.store.claimInvitation(invitation.code, input.actorId) !== null;
+  const existing = input.store.currentPairing(input.actorId);
+  let pairingId = existing?.id ?? null;
+  if (pairingId === null) {
+    const invitation = await input.store.createInvitation();
+    const claim = await input.store.claimInvitation(invitation.code, input.actorId);
+    if (claim === null) return false;
+    pairingId = claim.pairingId;
+  }
+  const admitted = await readOwnDeviceAdmission(input.namespace);
+  // Off, or pointed at nobody: the pairing stays `pending` and the desktop
+  // still has to activate it, which is the behaviour with no setting at all.
+  if (admitted === null) return true;
+  // The request has already proved the caller is this desktop's current login,
+  // so an admission recorded against a different account is one made before the
+  // desktop changed accounts. Move it, which takes the old account's grant back
+  // rather than leaving an automatic grant behind for an account that is no
+  // longer this desktop's.
+  await applyOwnDeviceAdmission({
+    store: input.store,
+    namespace: input.namespace,
+    audit: input.audit,
+    previousActorId: admitted,
+    nextActorId: input.actorId,
+  });
+  return true;
+}
+
+/**
+ * Turn automatic admission of this desktop's own devices on or off.
+ *
+ * On: the account this desktop is signed in as right now is recorded, and a
+ * device of that account already waiting for approval is approved on the spot.
+ * A desktop whose Tailscale login cannot be read refuses rather than recording
+ * an admission it could never match a request against.
+ *
+ * Off: the recorded account's pairing — and every conversation share hanging
+ * off it — is revoked. Off does not mean "stop granting new ones".
+ */
+export async function setTailnetOwnDeviceAdmission(
+  enabled: boolean,
+  overrides: {
+    readonly runtime?: TailnetPairedSharingRuntime | null;
+    readonly namespace?: FeatureNamespaceHandle;
+    readonly probeEnvironment?: () => Promise<TailscaleEnvironment>;
+    readonly auditLogger?: AuditLogger;
+  } = {},
+): Promise<void> {
+  const runtime = overrides.runtime === undefined ? activePairedSharingRuntime : overrides.runtime;
+  if (runtime === null) throw new Error("tailnet-own-device-admission-unavailable");
+  const namespace = overrides.namespace ?? openFeatureNamespace(TAILNET_FEATURE_NAMESPACE);
+  const previousActorId = await readOwnDeviceAdmission(namespace);
+  let nextActorId: TailnetShareActorId | null = null;
+  if (enabled) {
+    const probe = overrides.probeEnvironment ?? (() => probeTailscaleEnvironment());
+    const environment = await probe();
+    nextActorId = environment.login === null
+      ? null
+      : runtime.authorizer.actorIdFor(environment.login);
+    if (nextActorId === null) throw new Error("tailnet-own-device-admission-login-unreadable");
+  }
+  await applyOwnDeviceAdmission({
+    store: runtime.store,
+    namespace,
+    audit: ownDeviceAdmissionAudit(
+      overrides.auditLogger ?? compositionOptions?.auditLogger,
+    ),
+    previousActorId,
+    nextActorId,
+  });
+}
+
+/** Whether this desktop currently admits its own devices without approval. */
+export async function isTailnetOwnDeviceAdmissionEnabled(
+  namespace: FeatureNamespaceHandle = openFeatureNamespace(TAILNET_FEATURE_NAMESPACE),
+): Promise<boolean> {
+  return await readOwnDeviceAdmission(namespace) !== null;
+}
+
+/**
+ * Write automatic grants and revocations to the same audit log the IPC layer
+ * uses, so a grant nobody clicked for is not the one event with no record. The
+ * account appears only as the store's own opaque fingerprint — never a login.
+ */
+function ownDeviceAdmissionAudit(
+  auditLogger: AuditLogger | undefined,
+): TailnetOwnDeviceAdmissionAudit {
+  return (action, actorFingerprint, pairingId) => {
+    auditLogger?.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "tailnet-own-device-admission",
+      type: "approval",
+      input: JSON.stringify({ action, actorFingerprint, pairingId }),
+    });
+  };
 }
 
 async function startForBoot(
@@ -582,6 +782,8 @@ async function startForBoot(
             claimInvitation: pairedSharingRuntime.store.claimInvitation.bind(pairedSharingRuntime.store),
             claimOwnDevice: (login: string, actorId: TailnetShareActorId) => claimOwnTailnetDevice({
               store: pairedSharingRuntime.store,
+              namespace: resolved.openTailnetNamespace(),
+              audit: ownDeviceAdmissionAudit(options.auditLogger),
               probeEnvironment: resolved.probeEnvironment,
               login,
               actorId,

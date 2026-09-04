@@ -3,6 +3,9 @@ import { occupyLoopbackPort as occupy } from "../../__tests__/test-helpers.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
 import type { TailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runtime.js";
+import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
+import type { TailnetShareActorId } from "../tailnet-pairing-share-store.js";
+import type { AuditLogger } from "../../audit/audit-logger.js";
 import {
   chooseObserverPort,
   configureTailscaleServe,
@@ -14,8 +17,10 @@ import {
   parseTailnetObserverConfigFile,
   probeTailscaleEnvironment,
   resetTailnetObserverServerForTests,
+  isTailnetOwnDeviceAdmissionEnabled,
   resolveTailnetObserverConfig,
   restartTailnetObserverServer,
+  setTailnetOwnDeviceAdmission,
   stopTailnetObserverServer,
   tailnetWebOriginFor,
   tailscaleServeCommandText,
@@ -249,15 +254,15 @@ describe("Tailnet observer lifecycle", () => {
   it("pairs the desktop's own signed-in login without a code, still only as pending", async () => {
     const ACTOR = ("tailnet:" + "b".repeat(64)) as `tailnet:${string}`;
     const OWNER_LOGIN = "owner@example.test";
-    let pairing: { readonly state: "pending"; readonly expiresAt: number } | null = null;
+    let pairing: { readonly id: string; readonly state: "pending"; readonly expiresAt: number } | null = null;
     const createInvitation = vi.fn(async () => ({
       id: "44444444-4444-4444-8444-444444444444",
       code: "lvis-pair-v1." + "c".repeat(43),
       expiresAt: 4_102_444_800_000,
     }));
     const claimInvitation = vi.fn(async () => {
-      pairing = { state: "pending", expiresAt: 123_456 };
-      return { pairingId: "55555555-5555-4555-8555-555555555555", expiresAt: 123_456 };
+      pairing = { id: "55555555-5555-4555-8555-555555555555", state: "pending", expiresAt: 123_456 };
+      return { pairingId: pairing.id, expiresAt: 123_456 };
     });
     const pairedRuntime = {
       store: { createInvitation, claimInvitation, currentPairing: () => pairing },
@@ -293,7 +298,7 @@ describe("Tailnet observer lifecycle", () => {
     expect(createInvitation).toHaveBeenCalledOnce();
     // The deadline stays on this side: what crossed the boundary is only that a
     // pairing exists, and it is `pending` — the desktop still has to activate it.
-    expect(pairing).toEqual({ state: "pending", expiresAt: 123_456 });
+    expect(pairing).toMatchObject({ state: "pending", expiresAt: 123_456 });
 
     // The waiting page reloads on a timer; re-entry must not spend a second
     // invitation on a claim that the existing pairing would refuse.
@@ -864,5 +869,308 @@ describe("choosing a loopback port for the observer", () => {
       await releaseDefault();
       await releasePreferred();
     }
+  });
+});
+
+/**
+ * A namespace that lives only in this test, so nothing here reads — or writes —
+ * the admission record of whoever is running the suite.
+ */
+function memoryNamespace(seed: Record<string, unknown> = {}): FeatureNamespaceHandle {
+  const files = new Map<string, unknown>(Object.entries(seed));
+  return {
+    dir: "/nonexistent",
+    readJson: async <T>(name: string, fallback: T) => (
+      files.has(name) ? files.get(name) as T : fallback
+    ),
+    writeJson: async (name: string, value: unknown) => {
+      files.set(name, value);
+    },
+    childDir: async () => "/nonexistent",
+  };
+}
+
+const ADMISSION_FILE = "own-device-admission.json";
+const OWNER_LOGIN = "owner@example.test";
+const PENDING_ID = "55555555-5555-4555-8555-555555555555";
+const OWN_ACTOR = ("tailnet:" + "a".repeat(64)) as TailnetShareActorId;
+const OTHER_ACTOR = ("tailnet:" + "b".repeat(64)) as TailnetShareActorId;
+
+interface FakePairing {
+  id: string;
+  actorId: TailnetShareActorId;
+  state: "pending" | "active" | "revoked";
+}
+
+/**
+ * The pairing store reduced to what admission touches. `activatePairing` and
+ * `revokePairing` behave exactly as the durable store does — including
+ * answering false for a pairing that is already in the target state, which is
+ * what keeps a re-entry from being audited as a second grant.
+ */
+function fakeStore(initial: readonly FakePairing[] = []) {
+  const pairings = initial.map((entry) => ({ ...entry }));
+  const store = {
+    pairings,
+    createInvitation: vi.fn(async () => ({
+      id: "11111111-1111-4111-8111-111111111111",
+      code: "lvis-pair-v1." + "c".repeat(43),
+      expiresAt: 4_102_444_800_000,
+    })),
+    claimInvitation: vi.fn(async (_code: string, actorId: TailnetShareActorId) => {
+      const id = "5555555" + pairings.length + "-5555-4555-8555-555555555555";
+      pairings.push({ id, actorId, state: "pending" });
+      return { pairingId: id, expiresAt: 123_456 };
+    }),
+    currentPairing: vi.fn((actorId: TailnetShareActorId) => {
+      const found = pairings.find((entry) => (
+        entry.actorId === actorId && entry.state !== "revoked"
+      ));
+      return found === undefined ? null : {
+        id: found.id,
+        actorFingerprint: "fingerprint-" + found.actorId.slice(-4),
+        state: found.state,
+        expiresAt: found.state === "pending" ? 123_456 : null,
+      };
+    }),
+    activatePairing: vi.fn(async (id: string) => {
+      const found = pairings.find((entry) => entry.id === id);
+      if (found === undefined || found.state !== "pending") return false;
+      found.state = "active";
+      return true;
+    }),
+    revokePairing: vi.fn(async (id: string) => {
+      const found = pairings.find((entry) => entry.id === id);
+      if (found === undefined || found.state === "revoked") return false;
+      found.state = "revoked";
+      return true;
+    }),
+  };
+  return store;
+}
+
+function fakeRuntime(store: ReturnType<typeof fakeStore>, logins: Record<string, TailnetShareActorId> = {
+  [OWNER_LOGIN]: OWN_ACTOR,
+}): TailnetPairedSharingRuntime {
+  return {
+    store,
+    authorizer: {
+      actorIdFor: (login: string) => logins[login] ?? null,
+      authorize: vi.fn(),
+      subscribe: vi.fn(() => () => {}),
+    },
+  } as unknown as TailnetPairedSharingRuntime;
+}
+
+/** Collects the audit entries the admission path writes. */
+function fakeAuditLogger() {
+  const entries: { sessionId: string; type: string; input?: string }[] = [];
+  return {
+    logger: { log: (entry: { sessionId: string; type: string; input?: string }) => {
+      entries.push(entry);
+    } } as unknown as AuditLogger,
+    entries,
+  };
+}
+
+async function claimOwnDeviceFor(input: {
+  namespace: FeatureNamespaceHandle;
+  runtime: TailnetPairedSharingRuntime;
+  probeLogin: string | null;
+  auditLogger?: AuditLogger;
+}) {
+  const f = options({
+    LVIS_TAILNET_OBSERVER: "1",
+    LVIS_TAILNET_OBSERVER_AUTHORIZATION: CAPABILITY_ENV,
+    LVIS_TAILNET_PAIRED_SHARING: "1",
+  });
+  await maybeStartTailnetObserverServer({
+    ...f.input,
+    ...(input.auditLogger === undefined ? {} : { auditLogger: input.auditLogger }),
+    dependencies: {
+      ...f.input.dependencies,
+      probeEnvironment: async () => tailscaleEnvironment(input.probeLogin),
+      openTailnetNamespace: () => input.namespace,
+    },
+    tailnetPairedSharingRuntime: input.runtime,
+  });
+  const claimOwnDevice = (f.startServer.mock.calls[0]?.[0] as {
+    pairing?: {
+      claimOwnDevice?: (login: string, actorId: TailnetShareActorId) => Promise<boolean>;
+    };
+  }).pairing?.claimOwnDevice;
+  if (claimOwnDevice === undefined) throw new Error("claimOwnDevice-missing");
+  return claimOwnDevice;
+}
+
+describe("own-device admission", () => {
+  it("admits a same-account device with no approval click while it is on", async () => {
+    const namespace = memoryNamespace({
+      [ADMISSION_FILE]: { version: 1, admittedActorId: OWN_ACTOR },
+    });
+    const store = fakeStore();
+    const audit = fakeAuditLogger();
+    const claimOwnDevice = await claimOwnDeviceFor({
+      namespace,
+      runtime: fakeRuntime(store),
+      probeLogin: OWNER_LOGIN,
+      auditLogger: audit.logger,
+    });
+
+    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    expect(store.pairings).toEqual([
+      expect.objectContaining({ actorId: OWN_ACTOR, state: "active" }),
+    ]);
+    expect(audit.entries).toEqual([
+      expect.objectContaining({ sessionId: "tailnet-own-device-admission", type: "approval" }),
+    ]);
+    expect(JSON.parse(audit.entries[0]?.input ?? "{}")).toMatchObject({ action: "granted" });
+
+    // The waiting page reloads on a timer. A pairing that is already active is
+    // not a second grant, so it is neither re-activated nor audited again.
+    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    expect(audit.entries).toHaveLength(1);
+  });
+
+  it("leaves the same device waiting for approval while it is off", async () => {
+    const namespace = memoryNamespace();
+    const store = fakeStore();
+    const audit = fakeAuditLogger();
+    const claimOwnDevice = await claimOwnDeviceFor({
+      namespace,
+      runtime: fakeRuntime(store),
+      probeLogin: OWNER_LOGIN,
+      auditLogger: audit.logger,
+    });
+
+    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    expect(store.pairings).toEqual([
+      expect.objectContaining({ actorId: OWN_ACTOR, state: "pending" }),
+    ]);
+    expect(store.activatePairing).not.toHaveBeenCalled();
+    expect(audit.entries).toHaveLength(0);
+  });
+
+  it("admits nobody but this desktop's own login, on or off", async () => {
+    const namespace = memoryNamespace({
+      [ADMISSION_FILE]: { version: 1, admittedActorId: OWN_ACTOR },
+    });
+    const store = fakeStore();
+    const claimOwnDevice = await claimOwnDeviceFor({
+      namespace,
+      runtime: fakeRuntime(store),
+      probeLogin: OWNER_LOGIN,
+    });
+
+    await expect(claimOwnDevice("guest@example.test", OTHER_ACTOR)).resolves.toBe(false);
+    expect(store.createInvitation).not.toHaveBeenCalled();
+    expect(store.activatePairing).not.toHaveBeenCalled();
+    expect(store.pairings).toEqual([]);
+  });
+
+  it("approves a device already waiting when the owner turns it on", async () => {
+    const namespace = memoryNamespace();
+    const store = fakeStore([{ id: PENDING_ID, actorId: OWN_ACTOR, state: "pending" }]);
+    const audit = fakeAuditLogger();
+
+    await setTailnetOwnDeviceAdmission(true, {
+      runtime: fakeRuntime(store),
+      namespace,
+      probeEnvironment: async () => tailscaleEnvironment(OWNER_LOGIN),
+      auditLogger: audit.logger,
+    });
+
+    expect(store.pairings[0]).toMatchObject({ state: "active" });
+    expect(await namespace.readJson(ADMISSION_FILE, null))
+      .toEqual({ version: 1, admittedActorId: OWN_ACTOR });
+    expect(JSON.parse(audit.entries[0]?.input ?? "{}"))
+      .toMatchObject({ action: "granted", pairingId: PENDING_ID });
+  });
+
+  it("refuses to record an admission it could not identify an account for", async () => {
+    const namespace = memoryNamespace();
+    const store = fakeStore();
+
+    await expect(setTailnetOwnDeviceAdmission(true, {
+      runtime: fakeRuntime(store),
+      namespace,
+      probeEnvironment: async () => tailscaleEnvironment(null),
+    })).rejects.toThrow("tailnet-own-device-admission-login-unreadable");
+    expect(await namespace.readJson(ADMISSION_FILE, null)).toBeNull();
+  });
+
+  it("takes the granted access back when the owner turns it off", async () => {
+    const namespace = memoryNamespace({
+      [ADMISSION_FILE]: { version: 1, admittedActorId: OWN_ACTOR },
+    });
+    const store = fakeStore([{ id: PENDING_ID, actorId: OWN_ACTOR, state: "active" }]);
+    const audit = fakeAuditLogger();
+
+    await setTailnetOwnDeviceAdmission(false, {
+      runtime: fakeRuntime(store),
+      namespace,
+      probeEnvironment: async () => tailscaleEnvironment(OWNER_LOGIN),
+      auditLogger: audit.logger,
+    });
+
+    expect(store.revokePairing).toHaveBeenCalledWith(PENDING_ID);
+    expect(store.pairings[0]).toMatchObject({ state: "revoked" });
+    expect(await namespace.readJson(ADMISSION_FILE, null))
+      .toEqual({ version: 1, admittedActorId: null });
+    expect(JSON.parse(audit.entries[0]?.input ?? "{}"))
+      .toMatchObject({ action: "revoked", pairingId: PENDING_ID });
+
+    // Off means off: the next request from that same device waits for approval.
+    const claimOwnDevice = await claimOwnDeviceFor({
+      namespace,
+      runtime: fakeRuntime(store),
+      probeLogin: OWNER_LOGIN,
+    });
+    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    expect(store.pairings.at(-1)).toMatchObject({ state: "pending" });
+  });
+
+  it("moves the admission with the desktop's account and revokes the old one", async () => {
+    const namespace = memoryNamespace({
+      [ADMISSION_FILE]: { version: 1, admittedActorId: OTHER_ACTOR },
+    });
+    const store = fakeStore([{ id: PENDING_ID, actorId: OTHER_ACTOR, state: "active" }]);
+    const audit = fakeAuditLogger();
+    const claimOwnDevice = await claimOwnDeviceFor({
+      namespace,
+      runtime: fakeRuntime(store),
+      probeLogin: OWNER_LOGIN,
+      auditLogger: audit.logger,
+    });
+
+    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    expect(store.pairings[0]).toMatchObject({ actorId: OTHER_ACTOR, state: "revoked" });
+    expect(store.pairings[1]).toMatchObject({ actorId: OWN_ACTOR, state: "active" });
+    expect(await namespace.readJson(ADMISSION_FILE, null))
+      .toEqual({ version: 1, admittedActorId: OWN_ACTOR });
+    expect(audit.entries.map((entry) => JSON.parse(entry.input ?? "{}").action))
+      .toEqual(["revoked", "granted"]);
+  });
+
+  it("reads a damaged admission record as off rather than as a grant", async () => {
+    const namespace = memoryNamespace({ [ADMISSION_FILE]: { version: 9, admittedActorId: OWN_ACTOR } });
+    expect(await isTailnetOwnDeviceAdmissionEnabled(namespace)).toBe(false);
+
+    const store = fakeStore();
+    const claimOwnDevice = await claimOwnDeviceFor({
+      namespace,
+      runtime: fakeRuntime(store),
+      probeLogin: OWNER_LOGIN,
+    });
+    await expect(claimOwnDevice(OWNER_LOGIN, OWN_ACTOR)).resolves.toBe(true);
+    expect(store.activatePairing).not.toHaveBeenCalled();
+  });
+
+  it("has no admission to change without a pairing runtime", async () => {
+    await expect(setTailnetOwnDeviceAdmission(true, {
+      runtime: null,
+      namespace: memoryNamespace(),
+      probeEnvironment: async () => tailscaleEnvironment(OWNER_LOGIN),
+    })).rejects.toThrow("tailnet-own-device-admission-unavailable");
   });
 });
