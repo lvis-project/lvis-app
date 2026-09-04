@@ -28,6 +28,7 @@ import {
   type ModelProviderNetworkAccess,
 } from "./marketplace-provider-fetch.js";
 import { secretKeyFor } from "./provider-factory.js";
+import { errorMessageWithCauseCode } from "../../shared/error-message.js";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -742,9 +743,7 @@ export async function listLlmModelsFromSettings(
       message:
         err instanceof Error && err.name === "AbortError"
           ? "Model list request timed out."
-          : err instanceof Error
-            ? err.message
-            : String(err),
+          : errorMessageWithCauseCode(err),
     };
   }
 }

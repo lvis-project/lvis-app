@@ -378,6 +378,68 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
     expect(lookupMock).toHaveBeenCalledTimes(2);
   });
 
+  // The guard's per-hop re-validation is only real if it survives the transport
+  // swap: a host caller runs on an injected Chromium-stack fetch, and that
+  // transport returns the 3xx instead of chasing it. Both properties are
+  // measured here against the injected implementation, not the ambient one.
+  it("re-validates every hop of a redirect chain served by an injected transport", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const ambient = vi.fn();
+    vi.stubGlobal("fetch", ambient);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://final.example.com/ok" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response("final", { status: 200 }));
+
+    const resp = await fetchPublicHttpResponse("https://start.example.com/", {
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(resp.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(lookupMock).toHaveBeenCalledTimes(2);
+    expect(ambient).not.toHaveBeenCalled();
+    // Every hop is asked for manually so the guard, not the transport, decides
+    // whether the next request happens.
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit).redirect).toBe("manual");
+    }
+  });
+
+  it("rejects a private redirect target reached through an injected transport", async () => {
+    lookupMock.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://10.0.0.1/internal" },
+      }),
+    );
+
+    await expect(
+      fetchPublicHttpResponse("https://start.example.com/", {
+        fetchImpl: fetchMock as typeof fetch,
+      }),
+    ).rejects.toThrowError(/non-public/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a private target before an injected transport is called", async () => {
+    lookupMock.mockResolvedValue([{ address: "10.0.0.1", family: 4 }]);
+    const fetchMock = vi.fn();
+
+    await expect(
+      fetchPublicHttpResponse("https://intranet.example.com/", {
+        fetchImpl: fetchMock as typeof fetch,
+      }),
+    ).rejects.toThrowError(/non-public/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects a redirect that points to a private IP", async () => {
     // First hop resolves public, second hop is http://10.0.0.1/ → blocked
     // before fetch is called.

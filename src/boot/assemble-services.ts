@@ -100,6 +100,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     feedbackStore: ctx.feedbackStore,
     notificationService: ctx.notificationService,
     scriptHookManager: ctx.scriptHookManager,
+    singleHopNetworkFetch: ctx.singleHopNetworkFetch,
     telemetry: ctx.telemetry,
     pluginTelemetry: ctx.pluginTelemetry,
     autoUpdaterStop: ctx.autoUpdaterStop,

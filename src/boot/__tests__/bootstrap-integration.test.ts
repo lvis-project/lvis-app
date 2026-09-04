@@ -678,6 +678,7 @@ describe("bootstrap() integration lock", () => {
         "shutdown",
         "sideChatConversationLoop",
         "sideChatMemoryManager",
+        "singleHopNetworkFetch",
         "skillArtifactStore",
         "skillStore",
         "starredStore",

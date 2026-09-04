@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { errorMessage, errorMessageOrSerialized } from "../error-message.js";
+import {
+  errorMessage,
+  errorMessageOrSerialized,
+  errorMessageWithCauseCode,
+} from "../error-message.js";
 
 describe("errorMessage", () => {
   it("returns the message of an Error", () => {
@@ -36,5 +40,27 @@ describe("errorMessageOrSerialized", () => {
     cyclic.self = cyclic;
     expect(errorMessageOrSerialized(cyclic)).toBe("[object Object]");
     expect(errorMessageOrSerialized(10n)).toBe("10");
+  });
+
+  it("appends the transport code a fetch failure hides on cause", () => {
+    const err = new TypeError("fetch failed", {
+      cause: { code: "SELF_SIGNED_CERT_IN_CHAIN" },
+    });
+    expect(errorMessageWithCauseCode(err)).toBe(
+      "fetch failed (SELF_SIGNED_CERT_IN_CHAIN)",
+    );
+  });
+
+  it("keeps the cause's own message out of the diagnostic", () => {
+    const err = new TypeError("fetch failed", {
+      cause: { code: "ENOTFOUND", message: "getaddrinfo ENOTFOUND host.example" },
+    });
+    expect(errorMessageWithCauseCode(err)).toBe("fetch failed (ENOTFOUND)");
+  });
+
+  it("returns the plain message when there is no cause code to add", () => {
+    expect(errorMessageWithCauseCode(new Error("boom"))).toBe("boom");
+    expect(errorMessageWithCauseCode(new TypeError("x", { cause: {} }))).toBe("x");
+    expect(errorMessageWithCauseCode("plain")).toBe("plain");
   });
 });

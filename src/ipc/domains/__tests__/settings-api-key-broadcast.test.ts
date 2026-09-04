@@ -69,6 +69,9 @@ function makeDeps(appWindows: ReturnType<typeof makeWindow>[], vendorBaseUrl?: s
     },
     auditLogger: { log: vi.fn() },
     getAppWindows: vi.fn(() => appWindows),
+    // Main's Chromium-stack transport; the handler is expected to hand it to
+    // the engine rather than let the engine reach for ambient `fetch`.
+    singleHopNetworkFetch: vi.fn() as unknown as typeof fetch,
   };
 }
 
@@ -570,6 +573,7 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
         credentialScope: "manual-router",
         modelDiscoveryPolicy: "manual",
       },
+      { fetchImpl: deps.singleHopNetworkFetch },
     );
   });
 
@@ -619,6 +623,7 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
         baseUrl: "https://manual.example/v1",
         modelDiscoveryPolicy: "manual",
       },
+      { fetchImpl: deps.singleHopNetworkFetch },
     );
   });
 

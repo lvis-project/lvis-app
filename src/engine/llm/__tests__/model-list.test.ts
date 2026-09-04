@@ -1010,4 +1010,49 @@ describe("LLM model list sync", () => {
       error: "invalid-model-list-response",
     });
   });
+
+  // A request that never reached a server is the case the renderer can say the
+  // least about: `fetch` throws the same three words whatever went wrong. The
+  // code the runtime parked on `cause` is the whole diagnostic, so it has to
+  // survive into the result the renderer carries.
+  it("carries the transport cause code into the diagnostic message", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError("fetch failed", {
+        cause: { code: "SELF_SIGNED_CERT_IN_CHAIN" },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await listLlmModelsFromSettings(
+      makeSettingsService() as never,
+      { vendor: "openrouter" },
+      guardedFetchOptions(fetchImpl),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "model-list-fetch-failed",
+    });
+    expect((result as { message: string }).message).toContain("SELF_SIGNED_CERT_IN_CHAIN");
+  });
+
+  it("uses the injected transport rather than the ambient fetch", async () => {
+    const ambient = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", ambient);
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "m-1" }] }), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    try {
+      const result = await listLlmModelsFromSettings(
+        makeSettingsService() as never,
+        { vendor: "openrouter" },
+        guardedFetchOptions(fetchImpl),
+      );
+      expect(result).toMatchObject({ ok: true, models: ["m-1"] });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(ambient).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

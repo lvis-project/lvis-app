@@ -602,7 +602,7 @@ export async function bootstrap(
     pythonRuntime,
     bootAuditLogger: ctx.bootAuditLogger,
     mainWindow,
-    networkFetch: ctx.pluginNetworkFetch,
+    networkFetch: ctx.singleHopNetworkFetch,
     getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
