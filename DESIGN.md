@@ -177,6 +177,108 @@ Two constraints we impose on ourselves that VS Code does not:
   disabled. An empty tile that looks live is worse than no tile, and a chat box that cannot
   answer is not a layout feature.
 
+### One frame for every pane, whatever it holds
+
+The frame is the layout's origin, and there is one of it. A pane may hold a conversation,
+a built-in view, Settings, or a plugin surface; the chrome around it does not change with
+the content. `src/ui/renderer/components/PaneFrame.tsx` is the only place that chrome is
+drawn, and `src/ui/renderer/__tests__/PaneFrame.test.tsx` holds it there. A second frame
+for a second kind of content is the defect this rule exists to name: two frames drift, and
+the user learns two sets of controls for one idea.
+
+What the frame owns, in order from the outside in:
+
+- **Outline.** A 1px hairline on all four sides, `border-border` at rest. Focus is expressed
+  on this border and nowhere else (see "The work container is a framed group"). Each cell
+  pads by the tight chrome gap on every side, so two adjacent halves make the gutter between
+  tiles; the frame's floors are measured on its content, and a split subtracts the cell
+  inset (`PANE_CELL_INSET`) before comparing.
+- **Header band.** One row, `--chrome-band-height` tall, the same height as every other
+  chrome band. The leading edge starts with the same glyph the sidebar row uses
+  for this content, then the title; a longer description lives on the title's hover and is
+  never a second line. Then the content's own actions — what the caller passes, followed by
+  what the body publishes through `usePaneActions` — drawn in the same row with the same
+  control recipe. Then the split control. The trailing edge ends with the tile's own
+  cluster: whatever this KIND of pane owns as a tile (a conversation's work-panel toggle,
+  through `trailing`), maximize, close. Close is absent on the last tile, and a routed pane
+  labels it with the view's own name because closing it returns the pane to its
+  conversation rather than removing it.
+- **Body.** Inset `none` for content that lays out its own edges — a conversation draws its
+  transcript and composer to the hairline — or `page` for a built-in view that keeps the
+  `PageShell` padding it had. The inset is a prop of the frame, not a wrapper the content
+  adds, so a view moved into a pane inherits the margin instead of restating it.
+- **Aside slot.** The work panel is the frame's guest: it stands as tall as the tile, beside
+  the header rather than under it, and the conversation portals into the slot the frame
+  publishes (`usePanePanelSlot`). The docked-or-floating verdict is measured against the
+  frame, never against the content the panel itself resizes.
+
+Floors are the frame's, not the content's, and there are two: `PANE_MIN_WIDTH` is the 448px
+support floor every surface already holds (see "Responsive behavior"), and `PANE_MIN_HEIGHT`
+is 280px — the measured height at which a tile still holds a header, a composer, and one
+visible turn. A split that would put either half under a floor is not offered.
+
+What differs between kinds is exactly three props — the leading glyph and title, the action
+list, and the body inset — and nothing else. Everything a tile can have done to it (split,
+close, maximize, receive a dropped conversation) is common to every kind because it acts on
+the tile, not on what the tile shows. Settings is a pane like any other and takes the same
+frame; its former page heading is the frame's header now. A plugin surface takes the frame
+too, and the plugin draws only inside the body — the chrome is the host's, per "Plugin
+surfaces".
+
+### One frame for what must be settled before the next input
+
+Some surfaces stop the conversation until the user answers: a tool approval, a question the
+model put to the user, a deferred approval it is still waiting on. These share one frame and
+one placement, because they share one meaning — *nothing further can happen in this
+conversation until you decide*. The test for membership is that a turn is parked on the
+answer. A surface that does not park a turn is not in this frame, however important it
+looks.
+
+The frame is the **card over the composer**: it covers the composer of the surface whose
+turn asked, in front of that surface's own transcript, flush with the bottom edge, at the
+column's full width. That composer goes `inert` while the card is up, and the card takes
+the focus the composer would have had. No backdrop, no dimming, no window-wide modal — the
+tile next door keeps its caret and its running turn. The boundary the card may affect is the
+element marked `data-approval-scope`, and the invariant is that such a scope contains at most
+ONE composer, the one this card is allowed to cover. `ApprovalDock`
+(`src/ui/renderer/components/permissions/ApprovalDock.tsx`, placement `over-composer`) and
+`QuestionOverlay` (`src/ui/renderer/components/QuestionOverlay.tsx`, inside the composer dock)
+are the two drawings of it; the reviewer's suggestion is a band inside the approval card
+rather than a toast of its own, and a deferred approval is put to the user as a question
+through the same card, in the tile that deferred the call, rather than as a chip of its own.
+`ApprovalDock.test.tsx` holds the scope contract.
+
+A card belongs to the conversation that asked. It renders in the tile holding that
+conversation, or in a side chat's own panel, and its answer goes back over the same signed
+path whichever surface drew it. What no surface claims — a host or plugin ask naming no
+conversation, or a session whose tile has left the screen — has one explicit home, the
+window's own band (`placement="window-chrome"`): a flex sibling *below* the tile grid, not a
+float over it, because the window has no composer of its own and every composer on screen
+belongs to someone else. The band takes its height out of the grid down to the grid's own
+floor, and the card scrolls inside itself below `WINDOW_DOCK_MIN_HEIGHT`. An unowned question
+is the one exception, adopted by the focused tile at arrival, because its answer needs a
+conversation to land in. The full routing is in `docs/design/tiled-chat-groups.md`, "Cards
+belong to the conversation that asked".
+
+What is deliberately NOT in this frame, and where it goes instead:
+
+- **A result or a proposal the user may leave for later** — a routine that fired, a plugin
+  prompt staged for confirmation, a plugin's onboarding highlight — parks no turn. It is a
+  card in the tile's floating right lane (`FloatingRightLane`, one width for every occupant),
+  or in the window band when it has no conversation. Its actions are answer-shaped (accept,
+  later, never) and the host stores the answer; it never inerts a composer.
+- **Status the app is reporting about itself** — a plugin update, bootstrap outcome, an app
+  update, dev mode — is a pill in the window band's toolbar (`ToolbarStatusPill`), never a
+  card. A pill's detail is its tooltip, so a busy pill stays hoverable and focusable.
+- **An announcement from the marketplace** is external content: a dismissible banner in the
+  top banner stack whose only action is navigation to a settings section. It moves the user;
+  it changes nothing on their behalf.
+
+The rule that sorts a new surface: if the turn cannot continue without the answer, it is the
+card over the composer; if the user can act on it later, it is the lane or a pill; if it only
+informs, it is a banner. A surface placed in the wrong tier is a frame violation the same way
+a control in the wrong part is a token violation.
+
 ### Rows carry inline actions on hover and the same actions in a context menu
 
 VS Code's list rows reveal inline actions on hover, and the row's context menu offers the same
@@ -214,6 +316,9 @@ not be drawn with the same value.
     the same frame either way. The window's location is the FOCUSED pane's, and the window
     band carries it as the path on its leading edge.
   - ActionPanel: floating operational activity surface.
+  - Pre-input decision frame: the card over the composer of the surface whose turn is
+    parked — approvals and questions — and the window band for what no surface claims
+    (see Workbench model, "One frame for what must be settled before the next input").
   - Command picker: search and 1st/2nd-depth command navigation.
   - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
   - SettingsSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.
