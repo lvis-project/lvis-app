@@ -368,6 +368,24 @@
   }
 }
 
+/* Spotlight ring for the onboarding tour. The step marks the element it is
+   about and the element carries its own ring, so the layout engine moves the
+   highlight with the target — a ring drawn at coordinates copied from the
+   anchor goes stale the moment anything in the window shifts, and the copy
+   cannot be refreshed for shifts that fire neither resize nor scroll.
+
+   Unlayered so a utility class on the anchor cannot outrank the ring, and
+   lifted one step over the tour's own `z-50` backdrop, otherwise the ring
+   would be dimmed along with everything else. The lift is paint only: the
+   backdrop still owns the pointer while the tour runs. */
+[data-tour-highlight="true"] {
+  position: relative;
+  z-index: 51;
+  pointer-events: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-spotlight);
+}
+
 /* Radix Dialog state-driven entry/exit — DialogContent fades + zoom-in on
    open, fades + zoom-out on close. The DialogOverlay (theme backdrop) fades
    independently so the backdrop blur appears before the card content lands. */
@@ -404,6 +422,11 @@
   .lvis-settings-section-arrival {
     box-shadow: var(--shadow-spotlight-reduced);
     transition: none;
+  }
+  /* Same for the tour's ring: it still marks the element the step is about,
+     in the tighter no-bloom variant. */
+  [data-tour-highlight="true"] {
+    box-shadow: var(--shadow-spotlight-reduced);
   }
   /* Marquee never scrolls under reduced motion. MarqueeText also renders the
      static truncated variant in this case, so this is belt-and-suspenders. */

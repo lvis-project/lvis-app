@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   SpotlightTour,
@@ -8,7 +8,7 @@ import {
 } from "../SpotlightTour.js";
 import type { TourScenario } from "../../onboarding/default-tour-scenarios.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
-import { TEST_IDS } from "../../../../shared/test-ids.js";
+import { BLOCKING_SURFACE_SELECTOR, TEST_IDS } from "../../../../shared/test-ids.js";
 
 /**
  * Tutorial-C — SpotlightTour component tests.
@@ -362,5 +362,219 @@ describe("SpotlightTour", () => {
     fireStart("test-scenario");
     card = await findByTestId("spotlight-tour:card");
     expect(card.getAttribute("data-step-index")).toBe("1");
+  });
+});
+
+/**
+ * The highlight is carried by the element a step is about, not by coordinates
+ * copied from it. These specs hold that contract from the DOM: the mark lands
+ * on the anchor and only the anchor, it follows the step, and it is gone the
+ * moment the tour is.
+ *
+ * jsdom lays nothing out, so none of these assert pixels — a geometry
+ * assertion here would pass without measuring anything. What they assert is
+ * the mechanism: which node is marked, and whether the card is placed by the
+ * shared popover against that node or by arithmetic of the tour's own.
+ */
+describe("SpotlightTour anchoring", () => {
+  const mountedAnchors: HTMLElement[] = [];
+
+  function mountAnchors(names: string[]): HTMLElement[] {
+    return names.map((name) => {
+      const el = document.createElement("button");
+      el.setAttribute("data-tour-anchor", name);
+      el.textContent = name;
+      document.body.appendChild(el);
+      mountedAnchors.push(el);
+      return el;
+    });
+  }
+
+  function marked(): Element[] {
+    return [...document.querySelectorAll("[data-tour-highlight]")];
+  }
+
+  afterEach(() => {
+    for (const el of mountedAnchors.splice(0)) el.remove();
+  });
+
+  it("marks the active step's anchor, and only that element", async () => {
+    const [a] = mountAnchors(["a", "b", "c"]);
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    await findByTestId("spotlight-tour:card");
+    expect(marked()).toEqual([a]);
+    expect(a.getAttribute("data-tour-highlight")).toBe("true");
+  });
+
+  it("moves the mark when the step advances", async () => {
+    const [a, b] = mountAnchors(["a", "b", "c"]);
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    await findByTestId("spotlight-tour:card");
+    expect(marked()).toEqual([a]);
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="spotlight-tour:next"]')!);
+    });
+    await findByTestId("spotlight-tour:card");
+    expect(marked()).toEqual([b]);
+  });
+
+  it("clears the mark when the tour is skipped", async () => {
+    mountAnchors(["a", "b", "c"]);
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId, queryByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    const skip = await findByTestId("spotlight-tour:skip");
+    act(() => {
+      skip.click();
+    });
+    await waitFor(() => {
+      expect(queryByTestId("spotlight-tour:card")).toBeNull();
+    });
+    expect(marked()).toEqual([]);
+  });
+
+  it("clears the mark when the last step completes", async () => {
+    mountAnchors(["a", "b", "c"]);
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId, queryByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    for (let i = 0; i < FIXTURE_SCENARIO.steps.length; i++) {
+      const next = await findByTestId("spotlight-tour:next");
+      act(() => {
+        next.click();
+      });
+    }
+    await waitFor(() => {
+      expect(queryByTestId("spotlight-tour:card")).toBeNull();
+    });
+    expect(marked()).toEqual([]);
+  });
+
+  it("clears the mark on unmount", async () => {
+    mountAnchors(["a", "b", "c"]);
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId, unmount } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    await findByTestId("spotlight-tour:card");
+    expect(marked()).toHaveLength(1);
+    unmount();
+    expect(marked()).toEqual([]);
+  });
+
+  // An anchor that leaves the DOM mid-step takes its mark with it, so nothing
+  // is left ringed. This is what replaces the old off-screen guard: a ring
+  // that lives on the element cannot be pinned where the element is not — it
+  // scrolls out of view with the element and disappears with it.
+  it("leaves nothing marked when the anchor disappears mid-step", async () => {
+    const [a] = mountAnchors(["a", "b", "c"]);
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId, queryByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    await findByTestId("spotlight-tour:card");
+    expect(marked()).toEqual([a]);
+    a.remove();
+    expect(marked()).toEqual([]);
+    // There is no separate ring node that could survive its anchor.
+    expect(queryByTestId("spotlight-tour:ring")).toBeNull();
+  });
+
+  // The step card is the shared popover, so it carries `role="dialog"` and
+  // `data-state="open"` like any dialog. The tour reads the blocking-surface
+  // set to decide whether it may open at all — if its own card were in that
+  // set, the tour would be queueing behind itself.
+  it("does not count its own card as a blocking surface", async () => {
+    mountAnchors(["a", "b", "c"]);
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    const card = await findByTestId("spotlight-tour:card");
+    expect(card.getAttribute("data-state")).toBe("open");
+    expect(card.getAttribute("role")).toBe("dialog");
+    expect(document.querySelectorAll(BLOCKING_SURFACE_SELECTOR)).toHaveLength(0);
+  });
+
+  it("centres the card and marks nothing when the selector matches no element", async () => {
+    // No anchors mounted — every selector in the fixture misses.
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    const card = await findByTestId("spotlight-tour:card");
+    expect(marked()).toEqual([]);
+    // The anchorless card centres itself against the viewport, which is the
+    // one placement the tour still computes for itself.
+    expect(card.style.position).toBe("fixed");
+    expect(card.style.marginLeft).toBe("auto");
+    expect(card.closest("[data-radix-popper-content-wrapper]")).toBeNull();
+  });
+
+  // The reported bug: the card landed in the wrong place, and whether it
+  // landed right depended on how long the translated copy was — the old
+  // placement compared the space below the anchor against a hard-coded
+  // 200px card height, so any body longer than that guess put the card
+  // where it did not fit.
+  //
+  // The fix removes the guess: the card is the shared popover's content,
+  // anchored to the same element the mark is on, and Radix owns the flip.
+  // jsdom cannot measure that, so this asserts the mechanism — with copy far
+  // longer than the old constant the card is still the popover content of the
+  // marked anchor, and its placement is not computed by the tour.
+  it("keeps a long-copy card attached to its anchor rather than placing it by a height guess", async () => {
+    const [anchor] = mountAnchors(["a"]);
+    const longBody =
+      "긴 번역 문구가 카드 높이를 키우는 경우에도 카드는 앵커에 붙어 있어야 한다. ".repeat(
+        12,
+      );
+    const LONG_COPY_SCENARIO: TourScenario = {
+      id: "long-copy-scenario",
+      title: "Long copy",
+      steps: [
+        {
+          anchorSelector: '[data-tour-anchor="a"]',
+          title: "Step 1",
+          body: longBody,
+        },
+      ],
+    };
+    const { api, fireStart } = spotlightTourHarness();
+    const { findByTestId } = render(
+      <SpotlightTour
+        api={api}
+        scenarios={Object.freeze({ [LONG_COPY_SCENARIO.id]: LONG_COPY_SCENARIO })}
+      />,
+    );
+    fireStart("long-copy-scenario");
+    const card = await findByTestId("spotlight-tour:card");
+    expect(card.textContent).toContain("앵커에 붙어 있어야 한다");
+    // The marked element and the popover's anchor are the same node — the
+    // component resolves it once and hands that node to both.
+    expect(marked()).toEqual([anchor]);
+    // The card is the popover's content, so the popper positions it against
+    // the anchor on every layout change.
+    expect(card.closest("[data-radix-popper-content-wrapper]")).not.toBeNull();
+    // …and the tour computes no placement of its own for it: no viewport
+    // coordinates, and nothing derived from a card-height constant.
+    expect(card.style.position).toBe("");
+    expect(card.style.top).toBe("");
+    expect(card.style.bottom).toBe("");
   });
 });
