@@ -16,7 +16,10 @@
 import { describe, it, expect } from "vitest";
 import { WorkBoardStore } from "../../main/work-board-store.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
-import type { SubAgentRunner } from "../../engine/subagent-runner.js";
+import type {
+  SubAgentRunner,
+  SubAgentToolScope,
+} from "../../engine/subagent-runner.js";
 import type { ApprovalGate } from "../../permissions/approval-gate.js";
 import { BRIEFING_PROPOSAL_SOURCE_ID } from "../../shared/work-board-types.js";
 import {
@@ -27,7 +30,8 @@ import {
 interface SurveySpawn {
   title: string;
   instructions: string;
-  sourceTools?: string[];
+  /** @see SubAgentToolScope */
+  toolScope: SubAgentToolScope;
   maxRounds?: number;
   profileMode?: string;
   originSessionId?: string;
@@ -105,9 +109,11 @@ describe("WorkBoardEngine — briefing survey", () => {
       // Bounded: the survey has no answer channel, so it runs on a host budget.
       expect(spawn.maxRounds).toBe(20);
       // Read-only at the registry, not merely in the prompt.
-      expect(spawn.sourceTools).toContain("read_file");
-      expect(spawn.sourceTools).not.toContain("write_file");
-      expect(spawn.sourceTools).not.toContain("web_fetch");
+      expect(spawn.toolScope.kind).toBe("exactly");
+      const granted = spawn.toolScope.kind === "exactly" ? spawn.toolScope.names : [];
+      expect(granted).toContain("read_file");
+      expect(granted).not.toContain("write_file");
+      expect(granted).not.toContain("web_fetch");
       expect(spawn.profileMode).toBe("plan");
       // Autonomous: it is told there is nobody to ask.
       expect(spawn.instructions).toContain("AUTONOMOUSLY");

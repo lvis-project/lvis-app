@@ -7,8 +7,8 @@
  * the canned summaries:
  *
  *   - the PLAN phase is handed a scoped (read-only) registry while the EXECUTE
- *     phase is deliberately handed the FULL parent registry (sourceTools
- *     omitted) — the two-tier tool-scoping guarantee;
+ *     phase is deliberately handed the FULL parent registry (an explicit
+ *     `parent-all` scope) — the two-tier tool-scoping guarantee;
  *   - progress events fire in the exact lifecycle ORDER (not merely "present"),
  *     on both the approve and the deny branch;
  *   - the run session id is PERSISTED to the board and survives a fresh store
@@ -27,7 +27,10 @@ import { tmpdir } from "node:os";
 import { WorkBoardStore } from "../../main/work-board-store.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
-import type { SubAgentRunner } from "../../engine/subagent-runner.js";
+import type {
+  SubAgentRunner,
+  SubAgentToolScope,
+} from "../../engine/subagent-runner.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import type { LoadedAgentProfile } from "../../main/agent-profile-store.js";
 import {
@@ -52,7 +55,10 @@ function tempBoard(): {
 
 interface SpawnCall {
   title: string;
-  sourceTools?: string[];
+  /** Which grant the phase asked for. @see SubAgentToolScope */
+  toolScopeKind: SubAgentToolScope["kind"];
+  /** The names an `exactly` grant names; `undefined` for the other kinds. */
+  grantedToolNames?: readonly string[];
   profileMode?: string;
   profileModel?: string;
   originSessionId?: string;
@@ -81,14 +87,17 @@ function fakeRunner(opts?: {
     async spawn(input: {
       title: string;
       instructions: string;
-      sourceTools?: string[];
+      toolScope: SubAgentToolScope;
       profileMode?: string;
       profileModel?: string;
       originSessionId?: string;
     }) {
       calls.push({
         title: input.title,
-        sourceTools: input.sourceTools,
+        toolScopeKind: input.toolScope.kind,
+        ...(input.toolScope.kind === "exactly"
+          ? { grantedToolNames: input.toolScope.names }
+          : {}),
         profileMode: input.profileMode,
         profileModel: input.profileModel,
         originSessionId: input.originSessionId,
@@ -166,10 +175,10 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       // exclude any write/mutating tool surface.
       const planCall = calls[0];
       expect(planCall.profileMode).toBe("plan");
-      expect(planCall.sourceTools).toBeDefined();
-      expect(planCall.sourceTools!.length).toBeGreaterThan(0);
-      expect(planCall.sourceTools).toContain("read_file");
-      expect(planCall.sourceTools).toContain("sample_lookup");
+      expect(planCall.toolScopeKind).toBe("exactly");
+      expect(planCall.grantedToolNames!.length).toBeGreaterThan(0);
+      expect(planCall.grantedToolNames).toContain("read_file");
+      expect(planCall.grantedToolNames).toContain("sample_lookup");
       // No write/mutation tools leak into the plan allowlist.
       for (const forbidden of [
         "write_file",
@@ -177,15 +186,16 @@ describe("WorkBoardEngine — run-flow contracts", () => {
         "web_fetch",
         "agent_spawn",
       ]) {
-        expect(planCall.sourceTools).not.toContain(forbidden);
+        expect(planCall.grantedToolNames).not.toContain(forbidden);
       }
 
-      // EXECUTE phase: sourceTools OMITTED ⇒ the runner grants the full parent
+      // EXECUTE phase: `parent-all` ⇒ the runner grants the full parent
       // registry (agent_spawn stripped by the runner itself). This is the
-      // deliberate asymmetry — execute is not boxed to the plan allowlist.
+      // deliberate asymmetry — execute is not boxed to the plan allowlist, and
+      // it now SAYS so instead of leaving the field out.
       const execCall = calls[1];
       expect(execCall.profileMode).toBe("execute");
-      expect(execCall.sourceTools).toBeUndefined();
+      expect(execCall.toolScopeKind).toBe("parent-all");
     } finally {
       await cleanup();
     }
@@ -213,7 +223,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       });
 
       expect((await engine.runItem(created.itemId)).status).toBe("completed");
-      const granted = calls[0].sourceTools;
+      const granted = calls[0].grantedToolNames;
 
       // (a) every read-tier tool, whoever owns it — including a plugin's.
       expect(granted).toEqual(expect.arrayContaining(["read_file", "grep_files", "sample_lookup"]));
@@ -228,9 +238,9 @@ describe("WorkBoardEngine — run-flow contracts", () => {
   });
 
   it("stops the run rather than widening when the registry holds no read-tier tool", async () => {
-    // An empty `sourceTools` reads to the runner as "the whole parent
-    // registry", so an empty derivation must fail the run instead of handing
-    // the plan agent the surface it was scoped away from.
+    // An `exactly` scope cannot be built from an empty name list, so an empty
+    // derivation must fail the run as a board-visible error rather than reach
+    // the runner at all — and it must never fall back to a wider grant.
     const { store, cleanup } = tempBoard();
     try {
       const created = await store.create({ title: "empty derivation" });

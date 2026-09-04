@@ -5,12 +5,15 @@
  *   - A fresh history (instructions become the initial user message; the
  *     parent's system prompt builder still runs but the child's session is
  *     isolated).
- *   - A scoped {@link ToolRegistry} restricted to the parent-supplied
- *     `sourceTools` list (or the parent's full tool set if omitted). The
- *     `agent_spawn` tool itself is ALWAYS stripped from the child registry
- *     regardless of the supplied list — sub-agents cannot recurse.
- *   - A host-assigned round budget (default 30; lower per mode) —
- *     runTurn(`maxRounds: cappedRounds`) terminates
+ *   - A scoped {@link ToolRegistry} restricted by the caller-supplied
+ *     {@link SubAgentToolScope}, which states which of the three grants this
+ *     run gets instead of leaving it to be inferred from a list's emptiness.
+ *     The `agent_spawn` tool itself is ALWAYS stripped from the child registry
+ *     whatever the scope says — sub-agents cannot recurse.
+ *   - A host-assigned round budget (the user's configured
+ *     `chat.subAgentMaxRounds`, else {@link MAX_TURNS_DEFAULT}; a host caller
+ *     running a fixed-shape task may pass its own, and no per-mode budget
+ *     exists to consult) — runTurn(`maxRounds: cappedRounds`) terminates
  *     queryLoop cleanly between rounds, and the executor's per-round
  *     fan-out cap (5 calls/round) bounds total tool execution count.
  *   - An ApprovalGate wrapper that prepends "[Sub-Agent: <title>]" to the
@@ -136,6 +139,107 @@ function maskSubAgentText(text: string): string {
   return maskSensitiveData(text).masked;
 }
 
+/**
+ * What a sub-agent's tool surface is. THE specification of the grant: every
+ * other comment about sub-agent tool scope in this repository points here.
+ *
+ * One `string[]` used to carry three opposite meanings, and which one applied
+ * depended on the code path rather than on the value: absent or empty granted
+ * the parent's whole registry on the spawn path, granted nothing on the A2A
+ * wire path, and meant "this metadata is unreadable, refuse to run" on the
+ * resume path. Each meaning is a separate inhabitant here, and an `exactly`
+ * scope cannot be constructed empty ({@link exactToolScope} throws), so neither
+ * the widening nor the narrowing a misread used to produce is reachable.
+ *
+ * - `parent-all` — every tool the parent registry holds, minus
+ *   {@link SUB_AGENT_TOOL_BLOCKLIST}. The spawn that names no tools.
+ * - `exactly` — those names and nothing else, minus the blocklist. At least one
+ *   name: an empty grant is `deny-all` and has to say so.
+ * - `deny-all` — no source tool at all. The A2A wire path uses it when the
+ *   bound profile names none, so a remote-triggered run gets nothing rather
+ *   than everything.
+ *
+ * `agent_send` is not part of this scope. It is the child's channel back to its
+ * parent, registered separately from `includeAgentSend`, so even a `deny-all`
+ * child can answer whoever started it.
+ *
+ * A resume takes no scope from its caller: it decodes the one its spawn froze
+ * to disk ({@link fromPersistedToolScope}). The parent registry is never
+ * consulted a second time, so a resume cannot gain tools the parent gained
+ * after the spawn.
+ */
+export type SubAgentToolScope =
+  | { readonly kind: "parent-all" }
+  | { readonly kind: "exactly"; readonly names: readonly string[] }
+  | { readonly kind: "deny-all" };
+
+/**
+ * The scope kinds a spawn can freeze into session metadata. `parent-all` is not
+ * one: a spawn persists the names it RESOLVED, never "whatever the parent holds
+ * at the time", which is what makes the resume guarantee in
+ * {@link SubAgentToolScope} a property of the type rather than a convention.
+ */
+export type PersistedSubAgentToolScope = Exclude<SubAgentToolScope, { kind: "parent-all" }>;
+
+/** @see SubAgentToolScope */
+export const PARENT_ALL_TOOL_SCOPE: SubAgentToolScope = Object.freeze({
+  kind: "parent-all",
+} as const);
+
+/** @see SubAgentToolScope */
+export const DENY_ALL_TOOL_SCOPE: PersistedSubAgentToolScope = Object.freeze({
+  kind: "deny-all",
+} as const);
+
+/**
+ * A scope naming exactly these tools. Empty is a construction-time error rather
+ * than a quiet `deny-all` or a quiet `parent-all`: those two traded places for
+ * as long as one array carried both, and a caller that derives its names from a
+ * registry query has to learn that the query returned nothing, not run with
+ * whatever the empty result happens to mean at the site it reaches.
+ *
+ * @see SubAgentToolScope
+ */
+export function exactToolScope(names: readonly string[]): PersistedSubAgentToolScope {
+  if (names.length === 0) {
+    throw new Error(
+      "sub-agent tool scope: an `exactly` scope needs at least one tool name (an empty grant is deny-all)",
+    );
+  }
+  return Object.freeze({ kind: "exactly", names: Object.freeze([...names]) } as const);
+}
+
+/**
+ * Encode a frozen grant as the `sourceTools` field of sub-agent session
+ * metadata. Paired with {@link fromPersistedToolScope}: these two are the only
+ * places the on-disk shape and the meaning are converted into each other.
+ *
+ * @see SubAgentToolScope
+ */
+export function toPersistedToolScope(scope: PersistedSubAgentToolScope): string[] {
+  return scope.kind === "deny-all" ? [] : [...scope.names];
+}
+
+/**
+ * Decode persisted `sourceTools` back into a scope. `null` means the record
+ * cannot be read as one at all, and a resume refuses rather than guessing.
+ *
+ * `wireBound` supplies the one thing the stored array cannot say about itself:
+ * an empty list is a deliberate `deny-all` for an A2A-wire task, because the
+ * wire path is the only one that can spawn with no tools, and is corruption or
+ * tampering for anything else.
+ *
+ * @see SubAgentToolScope
+ */
+export function fromPersistedToolScope(
+  persisted: readonly string[] | undefined,
+  wireBound: boolean,
+): PersistedSubAgentToolScope | null {
+  if (persisted === undefined) return null;
+  if (persisted.length === 0) return wireBound ? DENY_ALL_TOOL_SCOPE : null;
+  return exactToolScope(persisted);
+}
+
 export interface SubAgentSpawnInput {
   title: string;
   instructions: string;
@@ -143,7 +247,12 @@ export interface SubAgentSpawnInput {
   spawnId?: string;
   /** Parent `agent_spawn` tool_use id, persisted as the reload join key. */
   toolUseId?: string;
-  sourceTools?: string[];
+  /**
+   * The child's tool grant. Required, and with no default: which of the three
+   * grants a run gets is the caller's decision to state, not the runner's to
+   * infer from an omission. See {@link SubAgentToolScope}.
+   */
+  toolScope: SubAgentToolScope;
   /**
    * Host-assigned round budget for the child loop, in assistant rounds.
    * The LLM cannot pick this: the `agent_spawn` tool no longer exposes a
@@ -398,7 +507,6 @@ const A2A_WIRE_LABEL_BRACKET = /[\[\]]/;
 interface SubAgentExecutionPolicy {
   inputOrigin: "agent-message";
   approvalReasonPrefix: typeof A2A_WIRE_APPROVAL_REASON_PREFIX;
-  forceExplicitToolScope: true;
   wireBinding: {
     handlerId: string;
     internalOriginSessionId: string;
@@ -747,10 +855,10 @@ function normalizeRoundBudget(requested: number): number {
     : MAX_TURNS_DEFAULT;
 }
 /**
- * C3(b): tools that must NEVER appear in a sub-agent's registry, regardless
- * of `sourceTools`. Adding `agent_spawn` here is the primary fork-bomb
- * defense; depth check on the tool itself (in `agent-spawn.ts`) is the
- * defense-in-depth backstop.
+ * Tools that must NEVER appear in a sub-agent's registry, whatever the run's
+ * {@link SubAgentToolScope} says. Adding `agent_spawn` here is the primary
+ * fork-bomb defense; the depth check on the tool itself (in `agent-spawn.ts`)
+ * is the defense-in-depth backstop.
  */
 const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
   "agent_spawn",
@@ -2489,23 +2597,6 @@ export class SubAgentRunner {
   }
 
   /**
-   * Shared child-loop reconstruction used by BOTH `spawn()` and `resume()`.
-   * Returns the composed {@link ConversationLoopDeps}, the resolved scoped tool
-   * list (the frozen permission surface), and the wrapped ApprovalGate.
-   *
-   * The tool surface is derived ONLY from `frozenSourceTools`:
-   *   - spawn passes the caller-supplied `sourceTools` (or null → full parent
-   *     surface minus blocklist, the historical "no allowlist" behavior);
-   *   - resume passes `meta.sourceTools` from disk as a NON-NULL explicit list,
-   *     so a resumed child's scope is frozen to exactly what the original spawn
-   *     recorded — the parent registry is never consulted, closing scope
-   *     widening mathematically (a resume cannot gain tools the parent gained
-   *     after the spawn).
-   *
-   * The blocklist (agent_spawn) is ALWAYS stripped so a sub-agent — spawned or
-   * resumed — cannot recurse.
-   */
-  /**
    * The user's configured sub-agent round budget, or `null` when it is unset or
    * not a usable number. Returning `null` rather than a substituted default
    * keeps the resolution order in `spawn()` readable as a single `??` chain and
@@ -2531,7 +2622,7 @@ export class SubAgentRunner {
 
   /**
    * The parent registry every child is scoped from — the same one
-   * `buildChildDeps` narrows with `sourceTools`.
+   * `buildChildDeps` narrows with a {@link SubAgentToolScope}.
    *
    * A caller that needs a SUBSET of the parent surface reads the registry's own
    * per-tool `category` through this and derives the names, instead of writing
@@ -2598,14 +2689,19 @@ export class SubAgentRunner {
     return this.spentResumeAxis(meta) !== null;
   }
 
+  /**
+   * Shared child-loop reconstruction used by BOTH `spawn()` and `resume()`.
+   * Returns the composed {@link ConversationLoopDeps}, the grant the child
+   * ended up with (its frozen permission surface, ready to persist), and the
+   * wrapped ApprovalGate.
+   *
+   * The tool surface comes ONLY from `toolScope`; what each kind grants is
+   * specified once on {@link SubAgentToolScope}. The blocklist (`agent_spawn`)
+   * is ALWAYS stripped so a sub-agent — spawned or resumed — cannot recurse.
+   */
   private buildChildDeps(args: {
-    /**
-     * The frozen source-tool allowlist. `null` ⇒ full parent surface minus the
-     * blocklist (spawn's "no explicit allowlist" path). A non-null array ⇒ the
-     * child is scoped to exactly those names (minus the blocklist). resume
-     * ALWAYS passes a non-null array (meta.sourceTools) so it never widens.
-     */
-    frozenSourceTools: string[] | null;
+    /** @see SubAgentToolScope */
+    toolScope: SubAgentToolScope;
     includeAgentSend?: boolean;
     title: string;
     profileModel: string | undefined;
@@ -2617,23 +2713,23 @@ export class SubAgentRunner {
     approvalProvenance: SubAgentApprovalProvenance | null;
   }): {
     childDeps: ConversationLoopDeps;
-    scopedTools: import("../tools/base.js").Tool[];
+    grantedScope: PersistedSubAgentToolScope;
   } {
-    // C3(b): build the sub-agent's tool surface. Always strip the blocklist
-    // (agent_spawn) so a sub-agent cannot recurse. When the allowlist is
-    // null (spawn's no-allowlist path) we still want the agent_spawn block to
-    // apply, so we start from the full tool list and intersect with the
-    // blocklist. resume never takes the null branch — it hands a frozen list.
+    // Build the sub-agent's tool surface. The blocklist (agent_spawn) is
+    // stripped on every branch, including `parent-all`, which starts from the
+    // full registry and intersects with it. `agent_send` is dropped here and
+    // re-registered below, because it is the parent channel rather than a
+    // source tool: see SubAgentToolScope.
+    const scope = args.toolScope;
     const exposeAgentSend = args.includeAgentSend === true
-      || args.frozenSourceTools?.includes("agent_send") === true;
-    const frozenSourceTools = args.frozenSourceTools && args.includeAgentSend
-      ? [...new Set([...args.frozenSourceTools, "agent_send"])]
-      : args.frozenSourceTools;
-    const filteredSourceTools = frozenSourceTools
-      ? frozenSourceTools.filter((name) => !SUB_AGENT_TOOL_BLOCKLIST.has(name))
-      : null;
-    const baseToolNames = filteredSourceTools
-      ? filteredSourceTools.filter((name) => name !== "agent_send")
+      || (scope.kind === "exactly" && scope.names.includes("agent_send"));
+    const allowlist = scope.kind === "parent-all"
+      ? null
+      : scope.kind === "deny-all"
+        ? []
+        : scope.names.filter((name) => !SUB_AGENT_TOOL_BLOCKLIST.has(name));
+    const baseToolNames = allowlist
+      ? allowlist.filter((name) => name !== "agent_send")
       : this.deps.toolRegistry
           .listAll()
           .map((tool) => tool.name)
@@ -2646,13 +2742,13 @@ export class SubAgentRunner {
     }
     const scopedTools = scopedRegistry.listAll();
     const forcedActivePluginIds = new Set(
-      filteredSourceTools
+      allowlist
         ? scopedTools
             .filter((tool) => tool.source === "plugin" && tool.pluginId)
             .map((tool) => tool.pluginId as string)
         : [],
     );
-    const forcedActiveToolNames = filteredSourceTools
+    const forcedActiveToolNames = allowlist
       ? new Set(scopedTools.map((tool) => tool.name))
       : undefined;
 
@@ -2721,7 +2817,14 @@ export class SubAgentRunner {
       // runtime's persisted model selection.
       modelOverride: resolvedModel ?? undefined,
     };
-    return { childDeps, scopedTools };
+    // The grant as resolved, not as requested: what a resume must re-scope to
+    // exactly, and the only form that reaches disk. A registry view that
+    // yielded nothing is `deny-all` — the one kind an empty name list means.
+    const grantedNames = scopedTools.map((tool) => tool.name);
+    const grantedScope: PersistedSubAgentToolScope = grantedNames.length > 0
+      ? exactToolScope(grantedNames)
+      : DENY_ALL_TOOL_SCOPE;
+    return { childDeps, grantedScope };
   }
 
   /**
@@ -2764,7 +2867,12 @@ export class SubAgentRunner {
       {
         title: binding.profile.name.trim(),
         instructions: renderAgentProfilePrompt(binding.profile, messageText),
-        sourceTools: [...binding.profile.sourceTools],
+        // A wire-bound run gets the profile's tools and NOTHING else. A profile
+        // that names none grants none: the remote peer chose the profile, so
+        // the empty case must not be the one that hands it the whole registry.
+        toolScope: binding.profile.sourceTools.length > 0
+          ? exactToolScope(binding.profile.sourceTools)
+          : DENY_ALL_TOOL_SCOPE,
         originSessionId: internalOriginSessionId,
         projectRoot: binding.project.root,
         ...(binding.project.name ? { projectName: binding.project.name } : {}),
@@ -2776,7 +2884,6 @@ export class SubAgentRunner {
       {
         inputOrigin: "agent-message",
         approvalReasonPrefix: A2A_WIRE_APPROVAL_REASON_PREFIX,
-        forceExplicitToolScope: true,
         wireBinding: {
           handlerId: binding.handlerId,
           internalOriginSessionId,
@@ -2854,15 +2961,8 @@ export class SubAgentRunner {
           input.maxRounds ?? this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT;
         const cappedRounds = normalizeRoundBudget(requestedRounds);
 
-        // sourceTools empty/absent retains the historical full parent surface
-        // minus the hard blocklist. Resume uses its frozen metadata instead.
-        const frozenSourceTools = executionPolicy?.forceExplicitToolScope
-          ? (input.sourceTools ?? [])
-          : input.sourceTools && input.sourceTools.length > 0
-            ? input.sourceTools
-            : null;
-        const { childDeps, scopedTools } = this.buildChildDeps({
-          frozenSourceTools,
+        const { childDeps, grantedScope } = this.buildChildDeps({
+          toolScope: input.toolScope,
           title: input.title,
           profileModel: input.profileModel,
           includeAgentSend: true,
@@ -2902,7 +3002,7 @@ export class SubAgentRunner {
         child.sessionId = childSessionId;
         child.sessionKind = "subagent";
         child.rebindTracer();
-        return { ok: true as const, modeResult, cappedRounds, scopedTools, child };
+        return { ok: true as const, modeResult, cappedRounds, grantedScope, child };
       } catch (error) {
         return { ok: false as const, error };
       }
@@ -2929,16 +3029,17 @@ export class SubAgentRunner {
       return result;
     }
 
-    const { modeResult, cappedRounds, scopedTools, child } = setupResult;
-    // Persist resume metadata (PR-B) alongside the child JSONL before provider
+    const { modeResult, cappedRounds, grantedScope, child } = setupResult;
+    // Persist resume metadata alongside the child JSONL before provider
     // validation and the first turn, into the SAME isolated subagent namespace (child loop's
     // MemoryManager). run-turn's saveSession writes the JSONL; this writes the
     // .meta.json sibling. `sessionKind: "subagent"` lets listing/rotation
-    // distinguish sub-agent sessions from main/routine. The scoped tool surface
-    // (`scopedTools`, the resolved allowlist the child was frozen with) is the
-    // exact set PR-C's resume must re-scope to — permission is frozen at spawn,
-    // not re-granted on resume. `resumeCount`/`cumulativeRounds` init to 0 for
-    // PR-D's loop guards. No resume logic here — this is metadata foundation.
+    // distinguish sub-agent sessions from main/routine. `grantedScope` is the
+    // grant as RESOLVED, encoded by the one codec that writes this field, and
+    // is the exact set a resume must re-scope to — permission is frozen at
+    // spawn, not re-granted on resume. `resumeCount`/`cumulativeRounds` init to
+    // 0 for the resume-loop guards. No resume logic here — this is metadata
+    // foundation.
     const spawnMetadata: Parameters<MemoryManager["saveSessionMetadata"]>[1] = {
       sessionKind: "subagent",
       ...(executionPolicy
@@ -2946,7 +3047,7 @@ export class SubAgentRunner {
         : !child.getSessionProjectIsDefault()
           ? child.getSessionProjectContext()
           : {}),
-      sourceTools: scopedTools.map((tool) => tool.name),
+      sourceTools: toPersistedToolScope(grantedScope),
       ...(input.profileModel !== undefined ? { profileModel: input.profileModel } : {}),
       ...(input.profileMode !== undefined ? { profileMode: input.profileMode } : {}),
       ...(input.originSessionId !== undefined ? { originSessionId: input.originSessionId } : {}),
@@ -3372,12 +3473,13 @@ export class SubAgentRunner {
    * ── Security invariant: RE-HYDRATE, never RE-AUTHORIZE ──
    * A resume reconstructs the child from the metadata the ORIGINAL spawn froze
    * to disk. It does NOT re-grant permissions:
-   *   - Tool scope is `meta.sourceTools` (the frozen allowlist) minus the
-   *     blocklist — the parent registry is NEVER consulted, so a resume cannot
-   *     gain a tool the parent registered after the spawn (scope widening is
-   *     closed mathematically: there is no "empty → full parent surface" branch;
-   *     spawn always persisted the concrete resolved list, so meta.sourceTools
-   *     is a complete explicit allowlist).
+   *   - Tool scope is `meta.sourceTools`, decoded by
+   *     {@link fromPersistedToolScope} into the {@link SubAgentToolScope} the
+   *     spawn froze, minus the blocklist. The parent registry is NEVER
+   *     consulted, so a resume cannot gain a tool the parent registered after
+   *     the spawn: no `parent-all` inhabitant can reach this path, and a record
+   *     that decodes to nothing refuses the run rather than defaulting to a
+   *     grant.
    *   - `agent_spawn` is stripped from the registry (blocklist) AND the turn
    *     runs at `spawnDepth: 1`, so a resumed child cannot recurse — the same
    *     byte-identical double defense a fresh spawn gets.
@@ -3719,7 +3821,6 @@ export class SubAgentRunner {
       {
         inputOrigin: "agent-message",
         approvalReasonPrefix: A2A_WIRE_APPROVAL_REASON_PREFIX,
-        forceExplicitToolScope: true,
         wireBinding: {
           handlerId: binding.handlerId,
           internalOriginSessionId: meta.a2aWireInternalOrigin,
@@ -4037,15 +4138,18 @@ export class SubAgentRunner {
       Math.min(normalizeRoundBudget(requestedRounds), remainingRounds),
     );
 
-    const frozenSourceTools = meta.sourceTools;
-    if (!frozenSourceTools || (!executionPolicy && frozenSourceTools.length === 0)) {
+    const frozenToolScope = fromPersistedToolScope(
+      meta.sourceTools,
+      executionPolicy !== undefined,
+    );
+    if (!frozenToolScope) {
       return await finishAuthorizedFailure(
         'sub-agent resume: session "' + resumeId
           + '" has a missing or empty frozen tool scope; metadata may be corrupted or tampered',
       );
     }
     const { childDeps } = this.buildChildDeps({
-      frozenSourceTools,
+      toolScope: frozenToolScope,
       title: meta.subAgentTitle,
       profileModel: meta.profileModel,
       // A resumed run's ORIGINAL instructions are not persisted, so the task
@@ -4069,7 +4173,7 @@ export class SubAgentRunner {
       // Spawn passes this; resume used to omit it, so a re-hydrated child came
       // back WITHOUT the ability to reach its parent unless `agent_send` happened
       // to survive in the persisted scope — and spawn deliberately filters it out
-      // of `sourceTools` before registering it separately, so it usually did not.
+      // of the allowlist before registering it separately, so it usually did not.
       // A resumed sub-agent is the same agent as before the suspension; losing
       // its channel to the parent on re-hydration is a capability regression, not
       // a scope narrowing. This does NOT widen the frozen tool scope: every other
@@ -4524,10 +4628,4 @@ export class SubAgentRunner {
     this.finalizeRun(trackedRun, result);
     return result;
   }
-  /**
-   * C3(b): build a scoped registry covering every parent-registered tool
-   * EXCEPT the entries on {@link SUB_AGENT_TOOL_BLOCKLIST}. Used when the
-   * spawn caller did not provide an explicit `sourceTools` allowlist —
-   * we still need to enforce the blocklist defense.
-   */
 }
