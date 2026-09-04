@@ -395,6 +395,13 @@ budget. Anything the window has to show has the same problem and takes the same
 answer — a second float, anchored top-right, would land on the rightmost tile's
 own lane and take clicks meant for it.
 
+Overlay cards are the same rule read from the pane's side: the floating right
+lane is the PANE FRAME's, so a card is drawn in a pane whatever that pane shows
+— its conversation, Settings, the work board, a plugin view. A card no
+conversation owns is drawn in the focused pane and follows focus; only when no
+pane is drawn at all does it fall to the band. See "Overlay cards: the pane's,
+or the window's" below.
+
 Because a band takes its height out of the grid, its cap comes from the grid's
 own arithmetic rather than from a share of the viewport: the shortest tile must
 still clear `PANE_MIN_HEIGHT` plus the cell inset and the tile row's
@@ -482,23 +489,37 @@ permission-review suggestion report on the window's permission settings, not on
 a conversation. They are subscribed once at App level and rendered once — per
 tile they would raise the same toast in every open conversation at once.
 
-**Overlay cards: owned, or the window's.** An `OverlayItem` carries the
+**Overlay cards: the pane's, or the window's.** An `OverlayItem` carries the
 conversation it came from when main knew one. A card with an origin renders in
 the tile holding that conversation and its primary action continues THAT
 conversation, resolved from the origin at click time rather than from the
-surface that drew the card.
+surface that drew the card. A card with no origin — a routine fire, a plugin
+event — is drawn in the FOCUSED pane and follows focus: the window holds one
+queue of such cards, and that queue has one reader, the user, who is at the
+focused pane. A card parked in an unfocused pane is a card nobody is looking
+at, and with several panes open it would soon be one card per pane. The
+focused pane's region acts in its own pane (`actionChatGroupId`), so confirming
+the card starts the turn where the user is.
 
-A card with no origin — a routine fire, a plugin event — and a card whose origin
-conversation has left the screen are drawn once in the window's own band, above
-the approval dock and inside the same height budget. This is stated, not fallen
-back to, and it is literally the same home the window's approval dock gives an
-unclaimed request. The alternative, drawing it in whichever tile
-is focused, says the card belongs to that conversation when it does not, and
-makes the card jump between tiles as focus moves. The window's region has no
-conversation of its own, so its action names the focused one explicitly
-(`actionChatGroupId`) — the same rule an unowned question already follows. An
-orphaned card keeps its dismiss and loses its action: running it in a
-conversation it was never staged for is the mismatch main refuses on the way in.
+The lane a card floats in is the PANE FRAME's, not the conversation's
+(`PaneFrame`'s `lane`, rendered as `FloatingRightLane` at the top-right of the
+frame body). A card is therefore drawn in its pane whatever the pane shows —
+its conversation, Settings, the work board, a plugin view. The routing asks
+whether the pane is DRAWN (`paneHidden`, the tree's answer), not whether its
+conversation is visible (`hidden`, the tree's or the route's): a routed pane
+hides its composer, so approvals and questions still fall to the window band,
+but an overlay card is not the composer's and does not.
+
+The window's own band keeps only what no drawn pane can hold: a card whose
+origin conversation has left the screen, and — while no pane is drawn at all —
+the cards no conversation owns. It is drawn
+once there, above the approval dock and inside the same height budget — the
+same home the window's approval dock gives an unclaimed request. The window's
+region has no conversation of its own, so its action names the focused one
+explicitly (`actionChatGroupId`) — the same rule an unowned question already
+follows. An orphaned card keeps its dismiss and loses its action: running it in
+a conversation it was never staged for is the mismatch main refuses on the way
+in.
 
 **The dock's activity line.** The floating dock holds ONE activity line while
 the window can hold four conversations, so `DockActivity` names the conversation

@@ -53,7 +53,6 @@ export function useRoutineOverlay({
   t,
   locale,
   registry,
-  focusedChatGroupId,
   onNavigateToSettings,
 }: {
   api: Api;
@@ -61,8 +60,6 @@ export function useRoutineOverlay({
   /** The locale an accepted proposal's follow-up list is resolved in. */
   locale: string;
   registry: ChatGroupSessionRegistry;
-  /** The tile a card with no origin conversation is pinned to on arrival. */
-  focusedChatGroupId: string;
   /**
    * Move the settings view onto a destination. A proposal's `settings` action
    * names a tab and optionally a section within it, and the window owns
@@ -77,26 +74,8 @@ export function useRoutineOverlay({
   // so the IPC subscription below can call it without prop-drilling
   const addFireRef = useRef<OverlayContextValue["addFire"] | null>(null);
 
-  // Read through a ref so a focus change does not tear down the IPC
-  // subscriptions below, which would drop cards mid-flight.
-  const focusedChatGroupIdRef = useRef(focusedChatGroupId);
-  focusedChatGroupIdRef.current = focusedChatGroupId;
-
-  /**
-   * Every card enters the queue here so the pin is stamped in ONE place. A card
-   * that names its origin conversation needs no pin — the tile holding that
-   * session draws it. A card without one is pinned to the focused tile now,
-   * rather than resolved against focus at paint time; see `overlayCardTile`.
-   */
-  const pushCard = useCallback((item: OverlayItem): OverlayItem => {
-    const pinned = item.originSessionId === undefined
-      ? { ...item, adoptedChatGroupId: focusedChatGroupIdRef.current }
-      : item;
-    addFireRef.current?.(pinned);
-    return pinned;
-  }, []);
   const pushRoutineResult = useCallback((evt: RoutineFiredPayload) => {
-    pushCard({
+    addFireRef.current?.({
       id: `${evt.id}-${evt.firedAt}`,
       source: { kind: "routine", routineId: evt.id, firedAt: evt.firedAt },
       title: evt.title,
@@ -115,7 +94,7 @@ export function useRoutineOverlay({
     const unsubStarted = api.onRoutineRunningStarted((payload) => {
       const { routineId, firedAt, title } = payload;
       setRunningRoutines((prev) => new Set([...prev, routineId]));
-      pushCard({
+      addFireRef.current?.({
         id: `${routineId}-running`,
         source: { kind: "routine", routineId, firedAt },
         title,
@@ -143,7 +122,7 @@ export function useRoutineOverlay({
         return next;
       });
       const failedAt = new Date().toISOString();
-      pushCard({
+      addFireRef.current?.({
         id: `${evt.routineId}-running`,
         source: { kind: "routine", routineId: evt.routineId, firedAt: failedAt },
         title: t("app.routineFailedTitle"),
@@ -177,11 +156,10 @@ export function useRoutineOverlay({
   useEffect(() => {
     if (typeof api.onOverlayShow !== "function") return;
     const unsubShow = api.onOverlayShow((item) => {
-      // Populate lookup ref so handlePluginPrimaryAction can find the item
-      // The queue and this lookup hold the SAME object: the handler below reads
-      // the map, and a card whose pin lived only in the queue would be acted on
-      // without it.
-      overlayItemsRef.current.set(item.id, pushCard(item));
+      // The lookup handlePluginPrimaryAction reads by id; the queue takes the
+      // same object.
+      overlayItemsRef.current.set(item.id, item);
+      addFireRef.current?.(item);
     });
     const unsubDismiss = typeof api.onOverlayDismiss === "function"
       ? api.onOverlayDismiss((id) => {
@@ -220,7 +198,7 @@ export function useRoutineOverlay({
       // has no conversation to contradict, so the group the caller named (a
       // tile's own, or the focused one for the window's region) stands.
       const targetGroupId = item.originSessionId === undefined
-        ? item.adoptedChatGroupId ?? chatGroupId
+        ? chatGroupId
         : tileHoldingSession(registry.readTiles(), item.originSessionId)?.chatGroupId;
       const tile = targetGroupId === undefined ? undefined : registry.read(targetGroupId);
       if (!tile) {
@@ -283,9 +261,9 @@ export function useRoutineOverlay({
 
       if (disposition === "accepted") {
         if (action.kind === "composer") {
-          // The tile the card was pinned to, for the same reason an insertion
-          // card inserts there: focus can move between the paint and the click.
-          const tile = registry.read(item.adoptedChatGroupId ?? chatGroupId);
+          // The pane whose region showed the card — the focused one, where the
+          // user is — the same rule an insertion card inserts by.
+          const tile = registry.read(chatGroupId);
           if (tile) tile.prefillComposer(action.prompt);
         } else if (action.kind === "settings") {
           // Fail-closed rather than landing on the default tab: manifest
