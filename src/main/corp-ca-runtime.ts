@@ -9,7 +9,7 @@
  * platforms or PEM parsing beyond counting what it was handed.
  */
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, rm } from "node:fs/promises";
 import * as https from "node:https";
 import { join } from "node:path";
 import * as tls from "node:tls";
@@ -92,6 +92,40 @@ async function writeCacheSecure(pem: string, cachePath: string): Promise<void> {
   }
 }
 
+/**
+ * The trust bundle a CHILD PROCESS is pointed at, written where the plugin
+ * runtime already looks for it (`~/.lvis/certs/corp-ca.pem`).
+ *
+ * Two files live in this directory and they do different jobs. The per-name
+ * cache (`corp-ca-<digest>.pem`) holds ONLY the extracted corporate
+ * certificates — it is this module's own extraction cache, keyed so that
+ * changing the name in Settings re-extracts. This one holds the COMPLETE set:
+ * the platform roots plus that corporate certificate.
+ *
+ * Complete is not a nicety. `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and
+ * `CURL_CA_BUNDLE` REPLACE the default trust set with the file they name —
+ * Python's `ssl`, httpx and requests all read them that way. A child pointed
+ * at a corporate-only file would trust that one root and nothing else, so
+ * every public index (PyPI, model downloads) would fail verification. The
+ * in-process TLS injection below has always used the union; this writes the
+ * same union down for the processes that cannot be injected.
+ *
+ * When there is no corporate CA to add, any bundle from an earlier launch is
+ * REMOVED rather than left behind. A child that keeps reading a stale file
+ * verifies against whatever the roots were the day it was written, and nothing
+ * refreshes it — which is worse than having no file at all.
+ */
+export async function writeSubprocessTrustBundle(
+  corporatePem: string | null,
+  bundlePath: string = join(CACHE_DIR, "corp-ca.pem"),
+): Promise<void> {
+  if (!corporatePem) {
+    await rm(bundlePath, { force: true });
+    return;
+  }
+  await writeCacheSecure([...tls.rootCertificates, corporatePem].join("\n"), bundlePath);
+}
+
 // ─── CA acquisition ───────────────────────────────────────────────────────────
 
 /**
@@ -152,6 +186,14 @@ const log = createLogger("lvis");
 async function injectCorporateCa(config: CorpCaConfig) {
   try {
     const result = await ensureCorporateCa(config);
+    // Child processes are pointed at the bundle whether or not there is a
+    // corporate certificate today: the no-certificate case is what clears a
+    // stale bundle from a machine that used to have one.
+    try {
+      await writeSubprocessTrustBundle(result.pem);
+    } catch (bundleErr) {
+      caLog.warn("subprocess trust bundle write failed (non-fatal): %s", (bundleErr as Error).message);
+    }
     if (!result.pem) {
       // The one line for "nothing was injected", whatever the reason — the
       // setting is off, the platform has no reader, or no certificate in the

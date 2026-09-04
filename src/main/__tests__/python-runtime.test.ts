@@ -152,6 +152,7 @@ import {
   buildPipSyncArgs,
   buildPipSyncFallbackArgs,
   PythonRuntimeBootstrapper,
+  uvProxyEnvFromPacResolutions,
 } from "../python-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
@@ -187,6 +188,52 @@ describe("buildPipSyncArgs", () => {
       "copy",
     ]);
     expect(buildPipSyncFallbackArgs(lockFile, pythonPath, "darwin")).toBeNull();
+  });
+});
+
+describe("uvProxyEnvFromPacResolutions", () => {
+  it("says nothing when the OS routes every host directly", () => {
+    // The common machine. No variables is not "we gave up" — it is the
+    // configuration, stated.
+    expect(uvProxyEnvFromPacResolutions([
+      ["https://pypi.org/simple/", "DIRECT"],
+      ["https://files.pythonhosted.org/", "DIRECT"],
+    ])).toEqual({});
+  });
+
+  it("carries the one proxy and names the hosts that bypass it", () => {
+    expect(uvProxyEnvFromPacResolutions([
+      ["https://pypi.org/simple/", "PROXY proxy.example.com:8080"],
+      ["https://files.pythonhosted.org/", "PROXY proxy.example.com:8080; DIRECT"],
+      ["https://astral.sh/", "DIRECT"],
+    ])).toEqual({
+      HTTP_PROXY: "http://proxy.example.com:8080",
+      HTTPS_PROXY: "http://proxy.example.com:8080",
+      NO_PROXY: "astral.sh",
+    });
+  });
+
+  it("refuses to guess when two hosts route through different proxies", () => {
+    // `HTTP_PROXY` is one value for all hosts, so per-host routing cannot be
+    // expressed. Picking one would send the other host's traffic somewhere the
+    // configuration did not choose.
+    expect(uvProxyEnvFromPacResolutions([
+      ["https://pypi.org/simple/", "PROXY one.example.com:8080"],
+      ["https://astral.sh/", "PROXY two.example.com:3128"],
+    ])).toEqual({});
+  });
+
+  it("refuses a proxy kind these variables cannot express", () => {
+    expect(uvProxyEnvFromPacResolutions([
+      ["https://pypi.org/simple/", "SOCKS4 legacy.example.com:1080"],
+    ])).toEqual({});
+  });
+
+  it("maps each expressible kind onto its scheme", () => {
+    expect(uvProxyEnvFromPacResolutions([["https://pypi.org/", "HTTPS secure.example.com:443"]]))
+      .toMatchObject({ HTTPS_PROXY: "https://secure.example.com:443" });
+    expect(uvProxyEnvFromPacResolutions([["https://pypi.org/", "SOCKS5 socks.example.com:1080"]]))
+      .toMatchObject({ HTTPS_PROXY: "socks5://socks.example.com:1080" });
   });
 });
 
@@ -250,6 +297,55 @@ describe("PythonRuntimeBootstrapper", () => {
       "bootstrap.status",
       expect.objectContaining({ phase: "ready", pct: 100 })
     );
+  });
+
+  it("gives uv the machine's proxy and trust store, and gives the verifier neither", async () => {
+    // `uv` is the only child here that touches the network: it downloads a
+    // CPython build and the locked wheels. The import verifier runs entirely
+    // offline, so it gets no egress environment at all — the asymmetry is the
+    // point, and asserting it keeps a later edit from widening the grant.
+    const manifestPath = "/installed/local-indexer/plugin.json";
+    mockedAccess
+      .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined);
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+    const resolveOsProxy = vi.fn(async (url: string) =>
+      url.includes("astral.sh") ? "DIRECT" : "PROXY proxy.example.com:8080");
+    const bootstrapper = new PythonRuntimeBootstrapper({
+      pluginManifestPaths: [manifestPath],
+      resolveOsProxy,
+    });
+    await bootstrapper.ensureReady(makeBrowserWindow());
+
+    const uvCall = mockedSpawn.mock.calls.find(
+      ([, args]) => (args as string[]).includes("venv"),
+    );
+    expect(uvCall).toBeDefined();
+    const uvEnv = (uvCall![2] as SpawnOptionsWithoutStdio).env!;
+    expect(uvEnv.HTTP_PROXY).toBe("http://proxy.example.com:8080");
+    expect(uvEnv.HTTPS_PROXY).toBe("http://proxy.example.com:8080");
+    expect(uvEnv.NO_PROXY).toBe("astral.sh");
+    expect(uvEnv.UV_NATIVE_TLS).toBe("1");
+    // Derived, never inherited: nothing here came from this process's own env.
+    expect(uvEnv.SSL_CERT_FILE).toBeUndefined();
+
+    const verifyCall = mockedSpawn.mock.calls.find(
+      ([, args]) => (args as string[]).some((arg) => arg === "-c"),
+    );
+    expect(verifyCall).toBeDefined();
+    const verifyEnv = (verifyCall![2] as SpawnOptionsWithoutStdio).env!;
+    expect(verifyEnv.HTTP_PROXY).toBeUndefined();
+    expect(verifyEnv.HTTPS_PROXY).toBeUndefined();
+    expect(verifyEnv.UV_NATIVE_TLS).toBeUndefined();
+
+    // Four probe URLs, resolved once for the whole provision.
+    expect(resolveOsProxy).toHaveBeenCalledTimes(4);
   });
 
   // ─── 2. .ready 부재 시 spawn 호출 ────────────────────────────────────────

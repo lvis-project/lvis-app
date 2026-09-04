@@ -31,6 +31,7 @@ vi.mock("node:fs/promises", () => ({
     writeFile: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
   })),
+  rm: vi.fn(async () => undefined),
 }));
 
 import * as cpMock from "node:child_process";
@@ -82,6 +83,42 @@ function mockExecFileError(err: Error): void {
 
 // Save the real platform value once at module-evaluation time (before any mock).
 const REAL_PLATFORM = process.platform;
+
+describe("writeSubprocessTrustBundle", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("writes the platform roots together with the corporate certificate", async () => {
+    // The whole point of the file. `SSL_CERT_FILE` REPLACES the trust set, so a
+    // bundle holding only the corporate root would make every public download
+    // fail verification in the child that reads it.
+    const written: string[] = [];
+    vi.mocked(fspMock.open).mockResolvedValue({
+      writeFile: vi.fn(async (data: string) => { written.push(data); }),
+      close: vi.fn(async () => undefined),
+    } as unknown as Awaited<ReturnType<typeof fspMock.open>>);
+
+    const { writeSubprocessTrustBundle } = await import("../corp-ca-runtime.js");
+    await writeSubprocessTrustBundle("-----BEGIN CERTIFICATE-----\ncorp\n-----END CERTIFICATE-----");
+
+    expect(written).toHaveLength(1);
+    const bundle = written[0]!;
+    expect(bundle).toContain("corp");
+    // ...and the platform's own roots are all still in there.
+    const tls = await import("node:tls");
+    for (const root of tls.rootCertificates) expect(bundle).toContain(root);
+    expect(vi.mocked(fspMock.rm)).not.toHaveBeenCalled();
+  });
+
+  it("removes a bundle left by an earlier launch when there is no corporate certificate", async () => {
+    // A child that keeps reading a bundle nothing refreshes verifies against
+    // the roots of the day it was written. No file is better than a stale one.
+    const { writeSubprocessTrustBundle } = await import("../corp-ca-runtime.js");
+    await writeSubprocessTrustBundle(null, "/certs/corp-ca.pem");
+
+    expect(vi.mocked(fspMock.rm)).toHaveBeenCalledWith("/certs/corp-ca.pem", { force: true });
+    expect(vi.mocked(fspMock.open)).not.toHaveBeenCalled();
+  });
+});
 
 describe("ensureCorporateCa", () => {
   beforeEach(() => {

@@ -106,6 +106,17 @@ export interface PythonRuntimeBootstrapperOptions {
   runtimeDir?: string;
   /** Exact lockfile selected by a plugin prepare path. */
   lockFilePath?: string;
+  /**
+   * Asks the OS what proxy reaches a URL, in Chromium's PAC form
+   * (`"DIRECT"`, `"PROXY host:port"`). Main supplies it — this module is
+   * loaded by tests, so it cannot import `electron` itself.
+   *
+   * Absent means the caller resolved nothing, and `uv` runs with no proxy
+   * variables, exactly as it does today. That is not a fallback transport:
+   * "no proxy" is a real answer for most machines, and the one caller that
+   * can ask always does.
+   */
+  resolveOsProxy?: (url: string) => Promise<string>;
   /** Force uv pip sync even when a ready sentinel exists. */
   forceSetup?: boolean;
   /** Optional observer for status surfaces that need scoped progress. */
@@ -130,7 +141,78 @@ export function buildPipSyncFallbackArgs(
 
 // ─── PythonRuntimeBootstrapper ───────────────────────
 
+/**
+ * The hosts `uv` reaches while provisioning: the package index, the file CDN
+ * it redirects to, and the two origins a managed CPython is downloaded from.
+ *
+ * They are probed rather than assumed because a machine can route some of them
+ * through a proxy and reach the rest directly, and `NO_PROXY` is how that is
+ * said to a subprocess.
+ */
+const UV_EGRESS_PROBE_URLS = [
+  "https://pypi.org/simple/",
+  "https://files.pythonhosted.org/",
+  "https://github.com/astral-sh/python-build-standalone/releases/",
+  "https://astral.sh/",
+] as const;
+
+/** `PROXY host:port` and friends, as the scheme a subprocess env expects. */
+function proxyUrlFromPacEntry(entry: string): string | null {
+  const [kind, endpoint] = entry.trim().split(/\s+/, 2);
+  if (!endpoint) return null;
+  switch (kind?.toUpperCase()) {
+    case "PROXY": return `http://${endpoint}`;
+    case "HTTPS": return `https://${endpoint}`;
+    case "SOCKS5": return `socks5://${endpoint}`;
+    default: return null;
+  }
+}
+
+/**
+ * The proxy environment for the uv subprocess, derived from what the OS says.
+ *
+ * DERIVED, never inherited. Reading the host's own `HTTP_PROXY` would take the
+ * value from whatever shell launched the app rather than from the machine's
+ * configuration — two sources for one fact, and the ambient one can carry
+ * credentials in its userinfo. Chromium's resolver answers from the
+ * configuration itself and never returns credentials.
+ *
+ * Three shapes come back:
+ *   - every host DIRECT ⇒ no variables at all, which is what this returns
+ *     today on a machine with no proxy;
+ *   - one proxy, some hosts direct ⇒ that proxy plus `NO_PROXY` naming them;
+ *   - two or more DIFFERENT proxies ⇒ nothing. Per-host routing cannot be said
+ *     in these variables, and guessing one of them would send part of the
+ *     traffic somewhere the configuration did not choose. Failing visibly is
+ *     the honest outcome; the caller logs it.
+ */
+export function uvProxyEnvFromPacResolutions(
+  resolutions: ReadonlyArray<readonly [url: string, pac: string]>,
+): Record<string, string> {
+  const proxies = new Set<string>();
+  const direct: string[] = [];
+  for (const [url, pac] of resolutions) {
+    const first = pac.split(";")[0] ?? "";
+    if (first.trim().toUpperCase() === "DIRECT") {
+      direct.push(new URL(url).hostname);
+      continue;
+    }
+    const proxyUrl = proxyUrlFromPacEntry(first);
+    if (!proxyUrl) return {};
+    proxies.add(proxyUrl);
+  }
+  if (proxies.size !== 1) return {};
+  const [proxy] = [...proxies];
+  return {
+    HTTP_PROXY: proxy!,
+    HTTPS_PROXY: proxy!,
+    ...(direct.length > 0 ? { NO_PROXY: direct.join(",") } : {}),
+  };
+}
+
 export class PythonRuntimeBootstrapper {
+  /** Resolved once — see {@link PythonRuntimeBootstrapper.uvEgressEnv}. */
+  private uvEgressEnvOnce: Promise<Record<string, string>> | null = null;
   private mainWindow: BrowserWindow | null = null;
 
   constructor(private readonly options: PythonRuntimeBootstrapperOptions = {}) {}
@@ -459,11 +541,52 @@ export class PythonRuntimeBootstrapper {
    * a follow-up wires through {@link wrapWorkerCommand}; do not re-add a sandbox
    * branch here (it would always plain-spawn — the gate is not yet active).
    */
-  private runUv(
+  /**
+   * What `uv` needs to reach the internet the way this machine does.
+   *
+   * Resolved once per bootstrapper: the answer cannot change mid-provision,
+   * and the probe is four IPC round-trips.
+   */
+  private uvEgressEnv(): Promise<Record<string, string>> {
+    this.uvEgressEnvOnce ??= (async () => {
+      const env: Record<string, string> = {
+        // uv 0.7.3 `--native-tls` / `UV_NATIVE_TLS`: read the platform's own
+        // certificate store rather than uv's bundled Mozilla roots. The same
+        // principle as the proxy above — the machine's trust decisions are the
+        // machine's to make. NOT `SSL_CERT_FILE`: that REPLACES the trust set
+        // with one file, so pointing it at a private root would make every
+        // public index fail verification.
+        UV_NATIVE_TLS: "1",
+      };
+      const resolve = this.options.resolveOsProxy;
+      if (!resolve) return env;
+      try {
+        const resolutions = await Promise.all(
+          UV_EGRESS_PROBE_URLS.map(async (url) => [url, await resolve(url)] as const),
+        );
+        const proxyEnv = uvProxyEnvFromPacResolutions(resolutions);
+        if (Object.keys(proxyEnv).length === 0 && resolutions.some(([, pac]) =>
+          pac.split(";")[0]?.trim().toUpperCase() !== "DIRECT")) {
+          await this.log(
+            "[python-runtime] the OS routes uv's hosts through more than one proxy; "
+            + "HTTP_PROXY cannot express that, so uv runs without proxy variables",
+          );
+        }
+        return { ...env, ...proxyEnv };
+      } catch (error) {
+        await this.log(`[python-runtime] OS proxy resolution failed: ${(error as Error).message}`);
+        return env;
+      }
+    })();
+    return this.uvEgressEnvOnce;
+  }
+
+  private async runUv(
     uvBin: string,
     args: string[],
     extraEnv: Record<string, string> = {}
   ): Promise<string> {
+    const egressEnv = await this.uvEgressEnv();
     return new Promise((resolve, reject) => {
       // Whitelist-only env — only the uv subprocess needs PATH/HOME/locale.
       // uv only needs PATH + HOME + locale + tmp dirs. Callers supply
@@ -490,6 +613,9 @@ export class PythonRuntimeBootstrapper {
         const value = process.env[key];
         if (value !== undefined) env[key] = value;
       }
+      // Derived from the OS, not inherited from this process: the allow-list
+      // above deliberately does NOT carry the ambient proxy variables.
+      Object.assign(env, egressEnv);
       Object.assign(env, extraEnv);
       // uv가 interactive prompt를 띄우지 않도록
       env.UV_NO_PROGRESS = "1";

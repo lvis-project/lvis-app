@@ -5,7 +5,7 @@
  * before plugin loading (settings, memory, audit, python runtime coordinator,
  * input classification, route/tool registry, and native builtin tools).
  */
-import { app } from "electron";
+import { app, session } from "electron";
 import type { BrowserWindow } from "electron";
 import { SettingsService } from "../data/settings-store.js";
 import { getIsPackaged } from "./dev-flags.js";
@@ -100,7 +100,15 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
 
   // Python runtime coordination is app-owned, but runtime assets and plugin
   // dependencies are materialized lazily by plugin-level async prepare.
-  const pythonRuntime = new PythonRuntimeBootstrapper();
+  const pythonRuntime = new PythonRuntimeBootstrapper({
+    // `uv` downloads a CPython build and the locked wheels. It is a plain
+    // spawn (deliberately outside the ASRT sandbox — see asrt-sandbox.ts), so
+    // it already has unrestricted egress; what it lacks is the ADDRESS of the
+    // path this machine actually uses. Chromium's resolver is the same source
+    // the host's own requests follow, which keeps one answer to "how does this
+    // machine reach the internet" rather than two.
+    resolveOsProxy: (url) => session.defaultSession.resolveProxy(url),
+  });
   let pythonPath: string | undefined;
   void mainWindow;
 
