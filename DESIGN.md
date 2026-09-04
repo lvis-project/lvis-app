@@ -85,6 +85,10 @@
 - Motion:
   - Use `--motion-fast`, `--motion-base`, `--motion-slow`, `--motion-ease-out`, and `--motion-ease-standard`.
   - `prefers-reduced-motion` is authoritative.
+  - An in-flow surface that appears and disappears (the status bar, the window's notice
+    strip) animates its height too — `lvis-anim-notice-in/-out`, a grid row from 0fr to
+    1fr with a fade — and stays mounted through its exit, so what sits below it moves
+    with it instead of jumping.
 - Imagery/iconography:
   - Use lucide icons for actions and categories when available.
   - Icon sizes (de-facto standard): 14px (`h-3.5 w-3.5`) is the default in dense chrome and buttons; 12px (`h-3 w-3`) inline beside captions/metadata; 16px (`h-4 w-4`) in comfortable rows and dialogs. Larger sizes are reserved for identity marks (plugin/app icons), not actions.

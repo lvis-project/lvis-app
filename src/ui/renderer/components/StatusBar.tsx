@@ -1,3 +1,4 @@
+import { useRef, useState, type AnimationEvent } from "react";
 import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-status-bar.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -24,6 +25,13 @@ const EMOJI_STYLE = { fontFamily: EMOJI_FONT_STACK };
  *
  * Sequential toast display: only `visibleToast` (the queue head) is rendered
  * at any time. `pendingCount` shows how many more are waiting.
+ *
+ * The bar sits IN FLOW — above the composer, or in the window's notice strip
+ * above the canvas — so it appears and disappears as a surface, not a snap:
+ * `lvis-anim-notice-in/-out` fade and slide it while a grid row goes 0fr ⇄ 1fr
+ * so what is below moves with it. The bar stays mounted through its exit and
+ * unmounts on `animationend`. Under reduced motion the motion tokens are 1ms
+ * and the same path collapses to an immediate change.
  */
 export interface StatusBarProps {
   persistent: PersistentItem[];
@@ -62,14 +70,40 @@ const TOAST_TONE: Record<StatusBarSeverity, string> = {
 };
 
 export function StatusBar(props: StatusBarProps) {
-  const { persistent, visibleToast, pendingCount = 0, onToastClick, onToastDismiss } = props;
+  const hasContent = (props.persistent?.length ?? 0) > 0 || props.visibleToast !== null;
 
-  // Render nothing when there is no persistent indicator and no toast, so the
-  // composer dock does not reserve empty vertical space.
-  if ((!persistent || persistent.length === 0) && !visibleToast) return null;
+  // Presence: what the bar last showed is drawn once more, leaving, when the
+  // content goes away. Derived during render (not in an effect) so the frame
+  // in which the content disappears already draws the exit — an effect would
+  // commit one empty frame first, a visible blink.
+  const lastContentRef = useRef(props);
+  if (hasContent) lastContentRef.current = props;
+  const [leaving, setLeaving] = useState(false);
+  const [hadContent, setHadContent] = useState(hasContent);
+  if (hadContent !== hasContent) {
+    setHadContent(hasContent);
+    setLeaving(!hasContent);
+  }
+  const onAnimationEnd = (event: AnimationEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && leaving) setLeaving(false);
+  };
+
+  // Render nothing once there is no persistent indicator, no toast and the
+  // exit has played, so the composer dock does not reserve empty space.
+  if (!hasContent && !leaving) return null;
+
+  const { persistent, visibleToast, pendingCount = 0, onToastClick, onToastDismiss } =
+    hasContent ? props : lastContentRef.current;
 
   return (
     <TooltipProvider>
+    <div
+      className={leaving ? "lvis-anim-notice-out" : "lvis-anim-notice-in"}
+      data-testid="status-bar-presence"
+      data-leaving={leaving ? "true" : undefined}
+      onAnimationEnd={onAnimationEnd}
+    >
+    <div className="min-h-0 overflow-hidden">
     <footer
       className="flex w-full min-w-0 items-center gap-3 text-[11px] text-muted-foreground"
       data-testid="status-bar"
@@ -232,6 +266,8 @@ export function StatusBar(props: StatusBarProps) {
         })()}
       </div>
     </footer>
+    </div>
+    </div>
     </TooltipProvider>
   );
 }

@@ -1097,6 +1097,62 @@ describe("ChatView", () => {
     expect(container.querySelector('[data-testid="input-action-bar"]')).not.toBeNull();
   });
 
+  it("opening a conversation that once ran sub-agents does not open the panel or the sub-agent tab", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      history: {
+        sessionId: MOCK_DEFAULT_SESSION_ID,
+        messages: [{ index: 0, role: "user", content: "어제 서브에이전트를 돌린 대화" }],
+        restoredSubAgents: [
+          { spawnId: "from-disk", childSessionId: "child-1", title: "어제의 조사", modifiedAt: "2026-09-03T00:00:00.000Z" },
+        ],
+      },
+    });
+    await waitFor(() => expect(container.textContent).toContain("어제 서브에이전트를 돌린 대화"));
+    // Give the restore a turn to land before asserting nothing opened.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(container.querySelector('[data-testid="chat-side-panel-tab-subagent"]')).toBeNull();
+    expect(container.querySelector('[data-testid="chat-side-panel-subagent-viewer"]')).toBeNull();
+
+    // The rows are there for the user who asks: the launcher opens the list.
+    await act(async () => {
+      fireEvent.click(container.querySelector(testIdSelector(TEST_IDS.panePanelToggle))!);
+    });
+    const subagentLauncher = await waitFor(() => {
+      const button = container.querySelector('[data-testid="chat-side-panel-launcher-subagent"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => { fireEvent.click(subagentLauncher); });
+    await waitFor(() => expect(container.textContent).toContain("어제의 조사"));
+  });
+
+  it("a sub-agent starting now opens the tab, and the tab leaves with the conversation", async () => {
+    const OTHER = "sess-other";
+    const { container, emitAgentSpawnEvent } = await renderApp({
+      hasApiKey: true,
+      sessions: [
+        { id: MOCK_DEFAULT_SESSION_ID, title: "서브에이전트 대화", modifiedAt: new Date(2, 0, 2).toISOString() },
+        { id: OTHER, title: "조용한 대화", modifiedAt: new Date(2, 0, 1).toISOString() },
+      ],
+      history: { sessionId: MOCK_DEFAULT_SESSION_ID, messages: [{ index: 0, role: "user", content: "여기서 스폰" }] },
+      historyBySession: { [OTHER]: { sessionId: OTHER, messages: [{ index: 0, role: "user", content: "여기엔 없음" }] } },
+    });
+    await waitFor(() => expect(container.textContent).toContain("여기서 스폰"));
+
+    await act(async () => {
+      emitAgentSpawnEvent({ spawnId: "live-now", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "지금 조사", parentSessionId: MOCK_DEFAULT_SESSION_ID });
+    });
+    await waitFor(() => expect(container.querySelector('[data-testid="chat-side-panel-tab-subagent"]')).not.toBeNull());
+
+    await act(async () => {
+      fireEvent.click(container.querySelector(`[data-testid="sidebar-session-${OTHER}"]`)!);
+    });
+    await waitFor(() => expect(container.textContent).toContain("여기엔 없음"));
+    // The other conversation never spawned anything: no sub-agent tab rides along.
+    await waitFor(() => expect(container.querySelector('[data-testid="chat-side-panel-tab-subagent"]')).toBeNull());
+  });
+
   it("does not reconstruct sub-agent rows from loaded parent history", async () => {
     const now = new Date().toISOString();
     const { container } = await renderApp({

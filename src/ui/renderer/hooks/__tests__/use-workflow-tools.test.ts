@@ -47,6 +47,32 @@ describe("useWorkflowTools", () => {
     ]);
   });
 
+  it("marks rows rebuilt from disk as restored, and a live start as not", () => {
+    let onSpawn: Parameters<LvisApi["onAgentSpawnEvent"]>[0] | undefined;
+    const api = {
+      onAskUserQuestion: vi.fn(() => () => undefined),
+      onAgentSpawnEvent: vi.fn((handler: Parameters<LvisApi["onAgentSpawnEvent"]>[0]) => {
+        onSpawn = handler;
+        return () => undefined;
+      }),
+      onSkillLoaded: vi.fn(() => () => undefined),
+      onAskUserQuestionTimeout: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+    const { result } = renderHook(() => useWorkflowTools(api));
+
+    act(() => {
+      result.current.restoreSubAgentSpawns([
+        { spawnId: "from-disk", childSessionId: "child-1", title: "어제의 조사", modifiedAt: "2026-09-03T00:00:00.000Z" },
+      ]);
+    });
+    act(() => {
+      onSpawn?.({ spawnId: "live-now", type: "start", taskState: "TASK_STATE_SUBMITTED", title: "지금 조사", parentSessionId: "s-main" } as AgentSpawnEvent);
+    });
+    const byId = new Map(result.current.subAgentSpawns.map((spawn) => [spawn.spawnId, spawn]));
+    expect(byId.get("from-disk")?.restored).toBe(true);
+    expect(byId.get("live-now")?.restored).toBeUndefined();
+  });
+
   it("a tile keeps only the sub-agent frames of the conversation it is showing", () => {
     let onSpawn: Parameters<LvisApi["onAgentSpawnEvent"]>[0] | undefined;
     const api = {

@@ -1,6 +1,7 @@
 import "../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { endAnimation } from "../../../../test/renderer/helpers.js";
 import { StatusBar } from "../components/StatusBar.js";
 import type { PersistentItem, ToastItem } from "../hooks/use-status-bar.js";
 
@@ -37,6 +38,31 @@ describe("StatusBar", () => {
   it("renders nothing when empty (notifications moved to the top-right banner stack)", () => {
     render(<StatusBar persistent={[]} visibleToast={null} />);
     expect(screen.queryByTestId("status-bar")).toBeNull();
+  });
+
+  it("stays mounted, leaving, after its content is gone and unmounts when the exit animation ends", () => {
+    const { rerender } = render(<StatusBar persistent={[]} visibleToast={toast({ message: "로그인이 취소되었습니다" })} />);
+    const presence = screen.getByTestId("status-bar-presence");
+    expect(presence.className).toBe("lvis-anim-notice-in");
+    expect(presence.dataset.leaving).toBeUndefined();
+
+    rerender(<StatusBar persistent={[]} visibleToast={null} />);
+    // The last content is still drawn, now on its way out.
+    expect(screen.getByTestId("status-bar-presence").className).toBe("lvis-anim-notice-out");
+    expect(screen.getByTestId("status-bar-presence").dataset.leaving).toBe("true");
+    expect(screen.getByTestId("status-toast-message")).toHaveTextContent("로그인이 취소되었습니다");
+
+    endAnimation(screen.getByTestId("status-bar-presence"));
+    expect(screen.queryByTestId("status-bar")).toBeNull();
+  });
+
+  it("new content during the exit brings the bar back without unmounting it", () => {
+    const { rerender } = render(<StatusBar persistent={[]} visibleToast={toast({ id: "toast:1", message: "첫 번째" })} />);
+    rerender(<StatusBar persistent={[]} visibleToast={null} />);
+    expect(screen.getByTestId("status-bar-presence").dataset.leaving).toBe("true");
+    rerender(<StatusBar persistent={[]} visibleToast={toast({ id: "toast:2", message: "두 번째" })} />);
+    expect(screen.getByTestId("status-bar-presence").className).toBe("lvis-anim-notice-in");
+    expect(screen.getByTestId("status-toast-message")).toHaveTextContent("두 번째");
   });
 
   it("renders persistent items with label and value", () => {

@@ -283,6 +283,7 @@ export function useWorkflowTools(api: LvisApi, options: WorkflowToolsOptions = {
           spawnId: row.spawnId,
           title: row.title || "(sub-agent)",
           status: restoredSpawnStatus(row),
+          restored: true,
           entries: [],
           toolCallCount: 0,
           childSessionId: row.childSessionId,

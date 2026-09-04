@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
+import { endAnimation } from "../../../../test/renderer/helpers.js";
 
 describe("App notification toasts", () => {
   const originalGlobalResizeObserver = globalThis.ResizeObserver;
@@ -52,9 +53,12 @@ describe("App notification toasts", () => {
       kind: "ask-user",
       contextRef: { questionId: "q-1" },
     });
+    // Dismissed: the bar draws the toast once more on its way out, then leaves.
     await waitFor(() => {
-      expect(screen.queryByTestId("status-toast-message")).toBeNull();
+      expect(screen.getByTestId("status-bar-presence").dataset.leaving).toBe("true");
     });
+    endAnimation(screen.getByTestId("status-bar-presence"));
+    expect(screen.queryByTestId("status-toast-message")).toBeNull();
   });
 
   it("handles clicked session notifications by loading the referenced chat", async () => {

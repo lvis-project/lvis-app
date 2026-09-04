@@ -411,20 +411,32 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
   // kept by the store. Depends only on the session id + the stable prune fn, so
   // it runs on switch — not on every intra-session target change (which would
   // wrongly close a tab whose target id was reclassified mid-stream).
-  const { pruneContentTabs } = workspaceTabs;
+  const { pruneContentTabs, closeContainerTab } = workspaceTabs;
   useEffect(() => {
     pruneContentTabs((targetId) => previewTargetIdsRef.current.has(targetId));
   }, [currentSessionId, pruneContentTabs]);
 
+  // The sub-agent tab is a view of THIS conversation's spawns, so it leaves
+  // with the conversation: the other container tabs (terminal, browser…) are
+  // tools that outlive a session, but a sub-agent list carried into the next
+  // conversation shows an empty "no sub-agents yet" for a chat that never
+  // asked for one. The launcher reopens it on request.
   useEffect(() => {
-    let sawNewSpawn = false;
+    closeContainerTab("subagent");
+  }, [currentSessionId, closeContainerTab]);
+
+  // A sub-agent starting NOW is worth opening the panel for; a row rebuilt
+  // from disk when the conversation was opened is not — entering a session
+  // that once ran sub-agents must not pop the panel.
+  useEffect(() => {
+    let sawLiveSpawn = false;
     for (const spawn of subAgentSpawns) {
       const key = `${currentSessionId}:${spawn.spawnId}`;
       if (seenSubAgentSpawnKeysRef.current.has(key)) continue;
       seenSubAgentSpawnKeysRef.current.add(key);
-      sawNewSpawn = true;
+      if (!spawn.restored) sawLiveSpawn = true;
     }
-    if (!sawNewSpawn) return;
+    if (!sawLiveSpawn) return;
     workspaceTabs.ensureContainerTab("subagent");
     onSidePanelOpenChange(true);
   }, [currentSessionId, subAgentSpawns, workspaceTabs, onSidePanelOpenChange]);
