@@ -352,4 +352,24 @@ export interface AppServices {
    * directory cannot be created (rare).
    */
   scriptHookManager?: import("../hooks/script-hook-manager.js").ScriptHookManager;
+  /**
+   * The transport every HOST-INITIATED outbound request runs on: Chromium's
+   * network stack, one hop per call, redirects returned rather than followed.
+   *
+   * It is a wired service and not an import because the engine must not reach
+   * for Electron — a module that does cannot be loaded by a test, and the same
+   * code has to stay runnable off the main process with an injected default.
+   * Main composition owes it to the IPC layer for the same reason it owes it
+   * the settings store.
+   *
+   * WHY the host's own requests need it: Node's `fetch` reads neither the
+   * machine's proxy configuration nor its trust store, so a request issued on
+   * that stack goes direct on a machine whose configuration routes that host
+   * through a proxy — a path the user never chose, and one that fails outright
+   * where the direct route is intercepted. Chromium's stack follows the
+   * configuration the user set. Single-hop is not incidental either: the SSRF
+   * guard re-validates every redirect target, which it can only do if the
+   * transport hands the 3xx back instead of chasing it.
+   */
+  singleHopNetworkFetch: typeof fetch;
 }

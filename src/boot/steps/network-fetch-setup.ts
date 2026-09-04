@@ -24,7 +24,7 @@ export async function setupNetworkFetch(ctx: BootContext): Promise<void> {
   const llmFetch = createSafeLlmFetch(electronNetFetch);
 
   ctx.networkFetch = networkFetch;
-  ctx.pluginNetworkFetch = createSingleHopFetch();
+  ctx.singleHopNetworkFetch = createSingleHopFetch();
   ctx.llmFetch = llmFetch;
 }
 
@@ -43,19 +43,24 @@ export async function setupNetworkFetch(ctx: BootContext): Promise<void> {
  *
  * So this wrapper materializes a redirect as an ordinary `Response` — status,
  * `location` and the rest of the headers, no body — and NEVER follows one.
- * Whether a next hop happens is its caller's decision (`runHostFetchHops`,
- * which re-runs the egress gate per hop). `init.redirect` is deliberately
- * ignored: a transport that could be talked into following would put the gate
- * back where `net.fetch` had it, behind the first request only.
+ * Whether a next hop happens is its caller's decision (`runHostFetchHops` for
+ * `hostApi.hostFetch`, `fetchPublicHttpResponse` for host-initiated egress);
+ * both re-run their gate per hop. `init.redirect` is deliberately ignored: a
+ * transport that could be talked into following would put the gate back where
+ * `net.fetch` had it, behind the first request only.
  *
- * Kept on Chromium's stack rather than Node's on purpose — OS proxy (PAC/WPAD)
- * and the OS trust store are the reasons `hostFetch` exists at all.
+ * Kept on Chromium's stack rather than Node's on purpose, and that is what
+ * makes it the transport for HOST egress too: Chromium resolves the machine's
+ * proxy configuration and reads the OS trust store, while Node's `fetch` knows
+ * neither. A host request issued on Node's stack goes direct on a machine whose
+ * configuration says otherwise — a path the user never chose, and one that on
+ * an intercepted network cannot complete at all.
  *
- * Not exported: its one consumer is the binding above, and its behaviour was
- * verified in a REAL Electron main (vitest under this repo runs as Node, where
- * `electron.net` is undefined) — a 302 comes back as a Response with the
- * resolved location, a relative Location arrives resolved, method/headers/body
- * pass through, and an aborted signal rejects with AbortError.
+ * Its behaviour was verified in a REAL Electron main (vitest under this repo
+ * runs as Node, where `electron.net` is undefined) — a 302 comes back as a
+ * Response with the resolved location, a relative Location arrives resolved,
+ * method/headers/body pass through, and an aborted signal rejects with
+ * AbortError.
  */
 function createSingleHopFetch(): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {

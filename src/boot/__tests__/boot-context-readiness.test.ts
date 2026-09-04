@@ -11,7 +11,7 @@ describe("BootContext readiness", () => {
     });
 
     expect(() => assertBootContextReady(ctx)).toThrowError(
-      /boot-context-incomplete: missing networkFetch, pluginNetworkFetch, llmFetch/,
+      /boot-context-incomplete: missing networkFetch, singleHopNetworkFetch, llmFetch/,
     );
     expect(() => assertBootContextReady(ctx)).toThrowError(/rationaleHostService/);
   });

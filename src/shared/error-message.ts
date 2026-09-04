@@ -29,6 +29,29 @@ export function errorMessage(error: unknown): string {
 }
 
 /**
+ * Message of a thrown value, plus the transport code the runtime hid on
+ * `cause`.
+ *
+ * `fetch` reports every transport failure as the same three words — "fetch
+ * failed" — and puts what actually happened (`SELF_SIGNED_CERT_IN_CHAIN`,
+ * `ENOTFOUND`, `ECONNREFUSED`) on `error.cause.code`. A diagnostic that drops
+ * it tells the reader only that something went wrong, which is the difference
+ * between naming a misconfigured network in one glance and bisecting for it.
+ *
+ * The CODE only, never the cause's own message: `cause` can carry the request
+ * that produced it, and that message may repeat a URL a diagnostic field is
+ * not entitled to widen.
+ */
+export function errorMessageWithCauseCode(error: unknown): string {
+  const message = errorMessage(error);
+  if (!(error instanceof Error) || !isRecord(error.cause)) return message;
+  const code = error.cause.code;
+  return typeof code === "string" && code.length > 0
+    ? `${message} (${code})`
+    : message;
+}
+
+/**
  * Message of an `Error`, a string as-is, `.message` of a record that carries
  * one, otherwise the JSON form of the value (`String()` when it cannot be
  * serialised — cyclic structures, BigInt).

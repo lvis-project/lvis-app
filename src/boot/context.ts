@@ -98,7 +98,7 @@ export class BootContext {
 
   // ── Network fetch surface (setupNetworkFetch) ──────────────────────────────
   declare networkFetch: typeof fetch;
-  declare pluginNetworkFetch: typeof fetch;
+  declare singleHopNetworkFetch: typeof fetch;
   declare llmFetch: typeof fetch;
 
   // ── Home docs seed ─────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ const BOOT_CONTEXT_FIELDS = [
   "mainWindow",
   "getMainWindow",
   "networkFetch",
-  "pluginNetworkFetch",
+  "singleHopNetworkFetch",
   "llmFetch",
   "lvisHomeDocUpgradeMarkers",
   "pythonPath",

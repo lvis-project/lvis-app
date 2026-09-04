@@ -1058,6 +1058,13 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       baseUrl,
       credentialScope,
       ...(modelDiscoveryPolicy ? { modelDiscoveryPolicy } : {}),
+    }, {
+      // Main owns Electron, so main supplies the transport. On Node's `fetch`
+      // this request ignores the machine's proxy configuration and goes direct;
+      // `deps.singleHopNetworkFetch` is Chromium's stack, which follows it. It
+      // returns a 3xx rather than chasing it, so the SSRF guard still gets to
+      // re-validate every hop.
+      fetchImpl: deps.singleHopNetworkFetch,
     });
   });
 
