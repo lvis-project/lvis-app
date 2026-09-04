@@ -8,10 +8,13 @@ import {
   useRegisterChatGroupSession,
   useTileSessions,
   type ChatGroupSessionHandle,
+  type TileSession,
   tileDrawsSession,
   tileHoldingSession,
   overlayCardTile,
+  pendingAnswers,
 } from "../chat-group-session-registry.js";
+import type { ApprovalRequest } from "../../types.js";
 
 // `entries` identity is the store's change signal — useChatState owns it as
 // state and replaces it only when the transcript actually changes. A fresh
@@ -23,12 +26,33 @@ const NO_ASK_QUESTIONS: readonly [] = [];
 // identity changes only when the session's project does.
 const NO_PROJECT: SessionProjectSummary = {};
 
+const NO_CHILDREN: ReadonlySet<string> = new Set();
+
+/** A tile as the window's selectors see it; every field the tree can vary is a knob. */
+const tile = (
+  chatGroupId: string,
+  sessionId: string,
+  overrides: Partial<TileSession> = {},
+): TileSession => ({
+  chatGroupId,
+  sessionId,
+  streaming: false,
+  hidden: false,
+  paneHidden: false,
+  askQuestions: [],
+  childSessionIds: NO_CHILDREN,
+  sideChat: null,
+  ...overrides,
+});
+
 const handleFor = (streaming: boolean, entries: readonly ChatEntry[] = NO_ENTRIES): ChatGroupSessionHandle => ({
   entries,
   streaming,
   hidden: false,
   paneHidden: false,
   askQuestions: NO_ASK_QUESTIONS,
+  childSessionIds: NO_CHILDREN,
+  sideChat: null,
   resolveAskQuestion: () => {},
   applyLoadedSession: () => {},
   applyInitialSession: () => {},
@@ -141,12 +165,9 @@ describe("tile sessions — every tile at once", () => {
     const registry = new ChatGroupSessionRegistry();
     registry.publish("main", holding("s-1", false));
     registry.publish("group-2", holding("s-2", true));
-    expect(registry.readTiles()).toEqual([
-      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
-      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, paneHidden: false, askQuestions: [] },
-    ]);
+    expect(registry.readTiles()).toEqual([tile("main", "s-1"), tile("group-2", "s-2", { streaming: true })]);
     registry.retract("group-2");
-    expect(registry.readTiles()).toEqual([{ chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] }]);
+    expect(registry.readTiles()).toEqual([tile("main", "s-1")]);
   });
 
   it("keeps the same array while only transcripts change — tokens must not re-render the sidebar", () => {
@@ -179,7 +200,7 @@ describe("tile sessions — every tile at once", () => {
     const { result } = renderHook(() => useTileSessions(registry));
     expect(result.current).toEqual([]);
     act(() => registry.publish("group-2", holding("s-2", true)));
-    expect(result.current).toEqual([{ chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: false, paneHidden: false, askQuestions: [] }]);
+    expect(result.current).toEqual([tile("group-2", "s-2", { streaming: true })]);
     act(() => registry.retract("group-2"));
     expect(result.current).toEqual([]);
   });
@@ -196,11 +217,24 @@ describe("tileHoldingSession", () => {
   });
 });
 
+const approval = (id: string, overrides: Partial<ApprovalRequest> = {}): ApprovalRequest => ({
+  id,
+  toolName: "bash",
+  args: {},
+  category: "shell",
+  kind: "rationale",
+  ...overrides,
+} as ApprovalRequest);
+
+const question = (id: string, sessionId: string) => ({
+  id,
+  sessionId,
+  questions: [{ question: "?", choices: ["yes", "no"] }],
+  createdAt: 0,
+});
+
 describe("overlayCardTile", () => {
-  const tiles = [
-    { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
-    { chatGroupId: "group-2", sessionId: "s-2", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
-  ];
+  const tiles = [tile("main", "s-1"), tile("group-2", "s-2")];
 
   it("sends a card to the tile holding the conversation it came from", () => {
     // Which tile is focused does not enter into it: the card's action
@@ -229,11 +263,8 @@ describe("overlayCardTile", () => {
     // itself: `hidden` is true for the composer-bound cards, `paneHidden` is
     // not. The overlay lane belongs to the frame, so the card is drawn in the
     // pane. The defect this guards: a card shown over a pane showing the work
-    // board fell out to the window band.
-    const routed = [
-      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: true, paneHidden: false, askQuestions: [] },
-      { chatGroupId: "group-2", sessionId: "s-2", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
-    ];
+    // board fell out of the pane.
+    const routed = [tile("main", "s-1", { hidden: true }), tile("group-2", "s-2")];
     expect(overlayCardTile(routed, "main", {})).toEqual({
       chatGroupId: "main",
       orphaned: false,
@@ -242,58 +273,45 @@ describe("overlayCardTile", () => {
       chatGroupId: "main",
       orphaned: false,
     });
-    // The composer-bound routing still reads `hidden`: the routed pane's own
-    // question is not drawn into a composer nobody sees.
-    expect(tileDrawsSession({
-      tiles: routed, sessionId: "s-1", owned: true, focused: true, hidden: true,
-    })).toBe(false);
+    // The routed pane still draws its own conversation's question — in the
+    // routed frame's settle slot, not over a composer nobody sees.
+    expect(tileDrawsSession({ tiles: routed, sessionId: "s-1", owned: true, focused: true })).toBe(true);
   });
 
-  it("hands a card for a pane the tree is not drawing to the window instead, because that pane paints nothing", () => {
+  it("draws nothing for a pane the tree is not drawing — the card waits there, and the row gets the dot", () => {
     // A tile the tree is not drawing stays MOUNTED so its conversation's turn
     // keeps its stream subscription. It still holds that conversation — but
     // nothing of it is on screen, not even its frame, so a card given to it is
-    // a card nobody can see.
-    const hidden = [
-      { chatGroupId: "main", sessionId: "s-1", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
-      { chatGroupId: "group-2", sessionId: "s-2", streaming: true, hidden: true, paneHidden: true, askQuestions: [] },
-    ];
+    // a card nobody can see. It is not handed to another pane: it is that
+    // conversation's card, and the way to it is the sidebar row.
+    const hidden = [tile("main", "s-1"), tile("group-2", "s-2", { streaming: true, hidden: true, paneHidden: true })];
     expect(overlayCardTile(hidden, "main", { originSessionId: "s-2" })).toEqual({
       chatGroupId: null,
       orphaned: true,
     });
     // Focus resting on a pane the tree is not drawing draws nowhere the user
-    // can see; the band shows the card until a drawn pane is focused.
+    // can see; the card waits until a drawn pane is focused.
     expect(overlayCardTile(hidden, "group-2", {})).toEqual({
       chatGroupId: null,
       orphaned: false,
     });
-    // …and the focused tile adopts a question for that conversation, rather
-    // than leaving it to the tile that holds it and draws nothing.
-    expect(tileDrawsSession({
-      tiles: hidden, sessionId: "s-2", owned: false, focused: true, hidden: false,
-    })).toBe(true);
-    // The other half of the same answer, and the one that decides whether the
-    // card is drawn ONCE: the hidden tile owns "s-2" and must still decline.
-    // Owning is the ordinary case while its turn runs off-screen, so an
-    // ownership check that ran first would draw the card twice — invisibly
-    // here, and again in the tile that adopted it above. Only the second copy
-    // can be answered, and the first would outlive the answer.
-    expect(tileDrawsSession({
-      tiles: hidden, sessionId: "s-2", owned: true, focused: false, hidden: true,
-    })).toBe(false);
+    // The hidden tile keeps its own question; the focused tile never adopts a
+    // session some tile holds, drawn or not — or the card would be drawn twice
+    // once the hidden pane came back, and only one copy could be answered.
+    expect(tileDrawsSession({ tiles: hidden, sessionId: "s-2", owned: false, focused: true })).toBe(false);
+    expect(tileDrawsSession({ tiles: hidden, sessionId: "s-2", owned: true, focused: false })).toBe(true);
   });
 
-  it("sends an unowned card to the window's own chrome only when no pane is drawn", () => {
+  it("draws an unowned card nowhere while no pane is drawn", () => {
     expect(overlayCardTile([], "main", {})).toEqual({
       chatGroupId: null,
       orphaned: false,
     });
   });
 
-  it("shows an orphaned card in the window's chrome, marked as having no origin", () => {
+  it("marks an orphaned card as having no origin on screen", () => {
     // Its conversation is gone; nothing on screen can run its action, and the
-    // window says so rather than drawing an action that would run elsewhere.
+    // selector says so rather than drawing an action that would run elsewhere.
     expect(overlayCardTile(tiles, "main", { originSessionId: "s-gone" })).toEqual({
       chatGroupId: null,
       orphaned: true,
@@ -303,30 +321,151 @@ describe("overlayCardTile", () => {
 
 describe("tileDrawsSession", () => {
   // Two tiles, each showing a conversation of its own. "main" is focused.
-  const tiles = [
-    { chatGroupId: "main", sessionId: "s-main", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
-    { chatGroupId: "group-2", sessionId: "s-other", streaming: false, hidden: false, paneHidden: false, askQuestions: [] },
-  ];
+  const tiles = [tile("main", "s-main"), tile("group-2", "s-other")];
 
   it("adopts a routine's headless session into the focused tile, and only that tile", () => {
     // A routine turn runs in a session no tile is showing. Its question has to
     // land somewhere or the gate waits out its timeout against a blank window.
     const routineSession = "s-routine";
-    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: true, hidden: false })).toBe(true);
-    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: false, hidden: false })).toBe(false);
+    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: true })).toBe(true);
+    expect(tileDrawsSession({ tiles, sessionId: routineSession, owned: false, focused: false })).toBe(false);
   });
 
   it("never adopts a session another tile is showing — that tile draws it", () => {
-    expect(tileDrawsSession({ tiles, sessionId: "s-other", owned: false, focused: true, hidden: false })).toBe(false);
+    expect(tileDrawsSession({ tiles, sessionId: "s-other", owned: false, focused: true })).toBe(false);
+  });
+
+  it("never adopts a child another tile spawned — the parent tile draws it", () => {
+    const withChild = [tile("main", "s-main"), tile("group-2", "s-other", { childSessionIds: new Set(["s-child"]) })];
+    expect(tileDrawsSession({ tiles: withChild, sessionId: "s-child", owned: false, focused: true })).toBe(false);
+  });
+
+  it("never adopts a side chat's session — the side chat is a drawing surface of its own", () => {
+    const withSideChat = [
+      tile("main", "s-main", { sideChat: { sessionId: "s-side", askQuestions: [], shown: true } }),
+      tile("group-2", "s-other"),
+    ];
+    // The tile beside it, focused, leaves it alone…
+    expect(tileDrawsSession({ tiles: withSideChat, sessionId: "s-side", owned: false, focused: true })).toBe(false);
+    // …and so does the tile that holds the side chat: the side chat draws.
+    expect(tileDrawsSession({ tiles: withSideChat, sessionId: "s-side", owned: false, focused: false })).toBe(false);
   });
 
   it("adopts a background child whose parent tile has since switched conversations", () => {
     // The switch cleared the parent's spawn list, so the child is no longer
     // owned by anyone and no tile holds its session.
-    expect(tileDrawsSession({ tiles, sessionId: "s-background-child", owned: false, focused: true, hidden: false })).toBe(true);
+    expect(tileDrawsSession({ tiles, sessionId: "s-background-child", owned: false, focused: true })).toBe(true);
   });
 
   it("draws its own conversation whether or not it is the focused tile", () => {
-    expect(tileDrawsSession({ tiles, sessionId: "s-main", owned: true, focused: false, hidden: false })).toBe(true);
+    expect(tileDrawsSession({ tiles, sessionId: "s-main", owned: true, focused: false })).toBe(true);
+  });
+});
+
+describe("pendingAnswers", () => {
+  const sessions = [
+    { id: "s-main", family: "main" as const },
+    { id: "s-other", family: "main" as const },
+    { id: "s-routine", family: "routine" as const },
+    { id: "s-board", family: "work-board" as const },
+    { id: "s-side", family: "side-chat" as const, originSessionId: "s-main" },
+  ];
+  const empty = { approvals: [], deferredSessionIds: [], overlayCards: [], sessions };
+
+  it("marks nothing for a card the user can already see", () => {
+    // Over a drawn pane's composer or in its settle slot — no dot anywhere.
+    const tiles = [tile("main", "s-main", { askQuestions: [question("q1", "s-main")] })];
+    const result = pendingAnswers({ ...empty, tiles, approvals: [approval("a1", { sessionId: "s-main" })] });
+    expect(result.sessionIds.size).toBe(0);
+    expect(result.hiddenPaneIds.size).toBe(0);
+    expect(result.unattributed).toEqual([]);
+  });
+
+  it("marks a routed pane's conversation nowhere — its routed frame draws the card", () => {
+    const tiles = [tile("main", "s-main", { hidden: true, askQuestions: [question("q1", "s-main")] })];
+    const result = pendingAnswers({ ...empty, tiles, approvals: [approval("a1", { sessionId: "s-main" })] });
+    expect(result.sessionIds.size).toBe(0);
+    expect(result.hiddenPaneIds.size).toBe(0);
+  });
+
+  it("marks the row and the pane of a conversation the tree hides — approval, question, child, deferred, overlay", () => {
+    const hidden = { hidden: true, paneHidden: true };
+    const cases: Array<[string, Parameters<typeof pendingAnswers>[0]]> = [
+      ["approval", { ...empty, tiles: [tile("g2", "s-other", hidden)], approvals: [approval("a1", { sessionId: "s-other" })] }],
+      ["question", { ...empty, tiles: [tile("g2", "s-other", { ...hidden, askQuestions: [question("q1", "s-other")] })] }],
+      ["child approval", { ...empty, tiles: [tile("g2", "s-other", { ...hidden, childSessionIds: new Set(["s-child"]) })], approvals: [approval("a1", { sessionId: "s-child" })] }],
+      ["deferred", { ...empty, tiles: [tile("g2", "s-other", hidden)], deferredSessionIds: ["s-other"] }],
+      ["overlay", { ...empty, tiles: [tile("g2", "s-other", hidden)], overlayCards: [{ originSessionId: "s-other" }] }],
+    ];
+    for (const [name, input] of cases) {
+      const result = pendingAnswers(input);
+      expect([name, [...result.sessionIds]]).toEqual([name, ["s-other"]]);
+      expect([name, [...result.hiddenPaneIds]]).toEqual([name, ["g2"]]);
+      expect(result.unattributed).toEqual([]);
+    }
+  });
+
+  it("marks the row of a listed conversation no pane holds — every family", () => {
+    const tiles = [tile("main", "s-main")];
+    const result = pendingAnswers({
+      ...empty,
+      tiles,
+      approvals: [
+        approval("a1", { sessionId: "s-other" }),
+        approval("a2", { sessionId: "s-routine" }),
+        approval("a3", { sessionId: "s-board" }),
+      ],
+      overlayCards: [{ originSessionId: "s-routine" }],
+    });
+    expect([...result.sessionIds].sort()).toEqual(["s-board", "s-other", "s-routine"]);
+    expect(result.hiddenPaneIds.size).toBe(0);
+    expect(result.unattributed).toEqual([]);
+  });
+
+  it("marks a side chat AND its parent row when the side chat is not on screen", () => {
+    // Collapsed panel or another tab active: the tile says `shown: false`.
+    const tiles = [tile("main", "s-main", { sideChat: { sessionId: "s-side", askQuestions: [question("q1", "s-side")], shown: false } })];
+    const result = pendingAnswers({ ...empty, tiles, approvals: [approval("a1", { sessionId: "s-side" })] });
+    expect([...result.sessionIds].sort()).toEqual(["s-main", "s-side"]);
+    expect([...result.sideChatSessionIds]).toEqual(["s-side"]);
+    expect(result.hiddenPaneIds.size).toBe(0);
+  });
+
+  it("marks nothing for a side chat the user is looking at", () => {
+    const tiles = [tile("main", "s-main", { sideChat: { sessionId: "s-side", askQuestions: [question("q1", "s-side")], shown: true } })];
+    const result = pendingAnswers({ ...empty, tiles, approvals: [approval("a1", { sessionId: "s-side" })] });
+    expect(result.sessionIds.size).toBe(0);
+    expect(result.sideChatSessionIds.size).toBe(0);
+  });
+
+  it("takes a side chat's parent from the list when its own tile has moved on", () => {
+    // No tile holds the side chat: the listed row still nests under s-main.
+    const result = pendingAnswers({ ...empty, tiles: [tile("main", "s-other")], approvals: [approval("a1", { sessionId: "s-side" })] });
+    expect([...result.sessionIds].sort()).toEqual(["s-main", "s-side"]);
+    expect([...result.sideChatSessionIds]).toEqual(["s-side"]);
+  });
+
+  it("marks the hidden pane too when the side chat's tile is one the tree hides", () => {
+    const tiles = [tile("g2", "s-other", { hidden: true, paneHidden: true, sideChat: { sessionId: "s-side", askQuestions: [], shown: true } })];
+    const result = pendingAnswers({ ...empty, tiles, approvals: [approval("a1", { sessionId: "s-side" })] });
+    expect([...result.sessionIds].sort()).toEqual(["s-main", "s-side"]);
+    expect([...result.hiddenPaneIds]).toEqual(["g2"]);
+  });
+
+  it("puts a request that names no conversation, or one nothing holds or lists, in the lane", () => {
+    const tiles = [tile("main", "s-main")];
+    const host = approval("a1");
+    const plugin = approval("a2", { sourcePluginId: "some-plugin" });
+    const unknown = approval("a3", { sessionId: "s-nobody-knows" });
+    const result = pendingAnswers({ ...empty, tiles, approvals: [host, plugin, unknown] });
+    expect(result.unattributed).toEqual([host, plugin, unknown]);
+    expect(result.sessionIds.size).toBe(0);
+  });
+
+  it("marks the asking session's row for a question a hidden tile adopted", () => {
+    const tiles = [tile("g2", "s-other", { hidden: true, paneHidden: true, askQuestions: [question("q1", "s-routine")] })];
+    const result = pendingAnswers({ ...empty, tiles });
+    expect([...result.sessionIds]).toEqual(["s-routine"]);
+    expect([...result.hiddenPaneIds]).toEqual(["g2"]);
   });
 });

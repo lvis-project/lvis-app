@@ -281,15 +281,53 @@ export function useApproval(): ApprovalQueueApi {
   return useMemo(() => ({ queue, decide, dropSettled, claims }), [queue, decide, dropSettled, claims]);
 }
 
-/** Re-render when a surface claims or releases sessions. */
-export function useApprovalClaimsVersion(claims: ApprovalSurfaceClaims): number {
-  return useSyncExternalStore(claims.subscribe, claims.readVersion, claims.readVersion);
+const NO_DEFERRED_SESSIONS: readonly string[] = Object.freeze([]);
+
+/**
+ * The conversations the reviewer's deferred entries are waiting on.
+ *
+ * A deferred approval is a parked answer like any other, so the window has to
+ * be able to mark its conversation's row. The list is read once and again on
+ * every `onDeferredPending`, which is the host's word that the set changed;
+ * the entries themselves stay in the panel that resolves them. Identity is
+ * kept while the ids are unchanged so readers keyed on it do not re-derive.
+ */
+export function useDeferredSessionIds(
+  permission: {
+    deferredList?: () => Promise<{ ok: true; pending: { sessionId?: string }[] } | { ok: false }>;
+    onDeferredPending?: (cb: (summary: { pending: number }) => void) => () => void;
+  } | undefined,
+): readonly string[] {
+  const [sessionIds, setSessionIds] = useState<readonly string[]>(NO_DEFERRED_SESSIONS);
+  useEffect(() => {
+    if (!permission?.deferredList) return;
+    let cancelled = false;
+    const read = async () => {
+      try {
+        const result = await permission.deferredList?.();
+        if (cancelled || !result?.ok) return;
+        const next = [...new Set(result.pending.flatMap((entry) =>
+          entry.sessionId === undefined ? [] : [entry.sessionId]))];
+        setSessionIds((prev) =>
+          prev.length === next.length && prev.every((id, index) => id === next[index]) ? prev : next);
+      } catch {
+        // A host that cannot list has nothing parked to mark.
+      }
+    };
+    void read();
+    const off = permission.onDeferredPending?.(() => { void read(); });
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, [permission]);
+  return sessionIds;
 }
 
 /**
  * The window's approval queue plus the decisions only the window can host —
  * the exact-deny draft in Settings and the `/allow` sentence proposal. Every
- * drawing surface (tile, side chat, the window's own dock) reads this one
+ * drawing surface (tile, side chat, the focused pane's lane) reads this one
  * value, so a card is answered through the same path wherever it is shown.
  */
 export interface ApprovalSurfaceContextValue extends ApprovalQueueApi {

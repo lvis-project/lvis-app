@@ -10,7 +10,7 @@
     `/docs/getstarted/userinterface`, `/api/ux-guidelines/{overview,sidebars,editor-actions,context-menus}`
   - Downloaded reference docs via `getdesign`: Linear, Raycast, Vercel, VoltAgent
   - Local token system: `src/styles.css`, `src/shared/theme-bundles.ts`, `src/ui/renderer/theme/`
-  - Local component surfaces: `src/ui/renderer/components/ActionPanel.tsx`, `Sidebar.tsx`, `InputActionBar.tsx`, plugin host pages
+  - Local component surfaces: `src/ui/renderer/components/ChatSidePanel.tsx` (the work panel, which holds tool activity), `Sidebar.tsx`, `InputActionBar.tsx`, plugin host pages
   - Local docs: `docs/development/theme-system.md`
 
 ## Brand
@@ -236,31 +236,44 @@ conversation until you decide*. The test for membership is that a turn is parked
 answer. A surface that does not park a turn is not in this frame, however important it
 looks.
 
-The frame is the **card over the composer**: it covers the composer of the surface whose
-turn asked, in front of that surface's own transcript, flush with the bottom edge, at the
-column's full width. That composer goes `inert` while the card is up, and the card takes
-the focus the composer would have had. No backdrop, no dimming, no window-wide modal — the
-tile next door keeps its caret and its running turn. The boundary the card may affect is the
-element marked `data-approval-scope`, and the invariant is that such a scope contains at most
-ONE composer, the one this card is allowed to cover. `ApprovalDock`
-(`src/ui/renderer/components/permissions/ApprovalDock.tsx`, placement `over-composer`) and
-`QuestionOverlay` (`src/ui/renderer/components/QuestionOverlay.tsx`, inside the composer dock)
-are the two drawings of it; the reviewer's suggestion is a band inside the approval card
-rather than a toast of its own, and a deferred approval is put to the user as a question
-through the same card, in the tile that deferred the call, rather than as a chip of its own.
-`ApprovalDock.test.tsx` holds the scope contract.
+The frame is the **card at the foot of the pane whose conversation asked**: flush with the
+bottom edge, at the column's full width, in front of that pane's own content. When the pane
+draws its conversation, that is the card over the composer; the composer goes `inert` while
+the card is up, and the card takes the focus the composer would have had. When the pane is
+routed to Settings, the work board or a plugin view, the same card is drawn in the same place
+— the pane frame's `settle` slot — over the view, because the conversation behind the view is
+still the one waiting. No backdrop, no dimming, no window-wide modal — the tile next door
+keeps its caret and its running turn. The boundary the card may affect is the element marked
+`data-approval-scope`, which is the PANE FRAME's column, and the invariant is that such a
+scope contains at most ONE composer, the one this card is allowed to cover — a routed pane's
+scope holds none, and the card covers nothing. `ApprovalDock`
+(`src/ui/renderer/components/permissions/ApprovalDock.tsx`) and `QuestionOverlay`
+(`src/ui/renderer/components/QuestionOverlay.tsx`) are the two cards; one drawing each, in
+one slot, whether the pane shows its conversation or a view. The reviewer's suggestion is a
+band inside the approval card rather than a toast of its own, and a deferred approval is put
+to the user as a question through the same card, in the tile that deferred the call, rather
+than as a chip of its own. `ApprovalDock.test.tsx` holds the scope contract.
 
-A card belongs to the conversation that asked. It renders in the tile holding that
-conversation, or in a side chat's own panel, and its answer goes back over the same signed
-path whichever surface drew it. What no surface claims — a host or plugin ask naming no
-conversation, or a session whose tile has left the screen — has one explicit home, the
-window's own band (`placement="window-chrome"`): a flex sibling *below* the tile grid, not a
-float over it, because the window has no composer of its own and every composer on screen
-belongs to someone else. The band takes its height out of the grid down to the grid's own
-floor, and the card scrolls inside itself below `WINDOW_DOCK_MIN_HEIGHT`. An unowned question
-is the one exception, adopted by the focused tile at arrival, because its answer needs a
-conversation to land in. The full routing is in `docs/design/tiled-chat-groups.md`, "Cards
-belong to the conversation that asked".
+A card belongs to the conversation that asked, and it is drawn ONLY by the surface that
+holds that conversation: the pane holding it, or a side chat's own panel. It is never moved
+to another pane, and the window draws none of them. When that surface is not on screen — a
+pane the tree hides behind a maximized neighbour, a side chat whose panel is closed or whose
+tab is not in front, a conversation no pane holds — the card stays parked in it, and the way
+to it is marked with the **pending-answer dot**: one token (`--warning`), one size, one
+label ("답변 대기 중"), on the sidebar row of the conversation (a side chat's row and its parent's
+both), on the maximize control of the pane covering a hidden one, on the work-panel toggle and
+the side-chat tab. A card the user can already see gets no dot. One selector (`pendingAnswers`
+in `chat-group-session-registry.ts`) decides every dot, so the sidebar and a pane header
+cannot disagree about who is waiting.
+
+The one request with no conversation to belong to — a host or plugin ask that names no
+session — is not in this frame: no turn is parked on it and no composer waits. It is an
+answer-shaped card in the focused pane's floating right lane (`ApprovalLaneCard`), attributed
+to the plugin or the host, following focus the way an unowned overlay card does, and the
+Plugins row in the sidebar carries the dot while it waits. An unowned question is adopted by
+the focused tile at arrival, because its answer needs a conversation to land in. The full
+routing is in `docs/design/tiled-chat-groups.md`, "Cards belong to the conversation that
+asked".
 
 What is deliberately NOT in this frame, and where it goes instead:
 
@@ -269,9 +282,10 @@ What is deliberately NOT in this frame, and where it goes instead:
   card in the floating right lane of the focused pane (`FloatingRightLane`, rendered by the
   pane frame, one width for every occupant): it follows focus, and it is drawn whatever that
   pane shows — a conversation, Settings, a plugin view. A card raised by a conversation stays
-  with the pane holding that conversation. The window band keeps only an orphaned origin
-  and, while no pane is drawn, the unowned cards. Its actions are answer-shaped (accept,
-  later, never) and the host stores the answer; it never inerts a composer.
+  with the pane holding that conversation; while that pane is not drawn the card waits with
+  it and the conversation's sidebar row carries the pending-answer dot. Its actions are
+  answer-shaped (accept, later, never) and the host stores the answer; it never inerts a
+  composer.
 - **Status the app is reporting about itself** — a plugin update, bootstrap outcome, an app
   update, dev mode — is a pill in the window band's toolbar (`ToolbarStatusPill`), never a
   card. A pill's detail is its tooltip, so a busy pill stays hoverable and focusable.
@@ -320,10 +334,14 @@ not be drawn with the same value.
     is on over it — its own conversation, a feature panel, Settings, or a plugin view — inside
     the same frame either way. The window's location is the FOCUSED pane's, and the window
     band carries it as the path on its leading edge.
-  - ActionPanel: floating operational activity surface.
-  - Pre-input decision frame: the card over the composer of the surface whose turn is
-    parked — approvals and questions — and the window band for what no surface claims
-    (see Workbench model, "One frame for what must be settled before the next input").
+  - Pre-input decision frame: the card at the foot of the pane whose turn is parked —
+    approvals and questions, over the composer or over the view the pane is routed to —
+    drawn only by the surface holding that conversation (see Workbench model, "One frame
+    for what must be settled before the next input").
+  - Pending-answer dot (`PendingAnswerDot`): the one mark for "a card you cannot see from
+    here is waiting for your answer" — `--warning` fill, a ring of the surface colour, one
+    aria-label — on sidebar rows, the maximize control, the work-panel toggle, the side-chat
+    tab and the Plugins row. One selector feeds every instance.
   - Command picker: search and 1st/2nd-depth command navigation.
   - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
   - SettingsSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.

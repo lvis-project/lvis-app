@@ -177,8 +177,8 @@ export interface EffectGateContext {
   readonly toolName: string;
   /**
    * The conversation whose turn is blocked on this effect, when there is one.
-   * It decides which tile draws the modal; without it the ask lands in the
-   * window's chrome, away from the transcript that is waiting on it. Absent for
+   * It decides which tile draws the modal; without it the ask is drawn as a
+   * lane card in the focused pane, with no transcript waiting on it. Absent for
    * effects raised outside a turn (a plugin's own background work).
    */
   readonly sessionId?: string;

@@ -2,9 +2,29 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { RestoredSubAgentRow } from "../hooks/use-workflow-tools.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import type { SessionFamily } from "../../../shared/session-lookup.js";
 import type { SendMode } from "../hooks/use-send-message.js";
 import type { SessionProjectSummary } from "../hooks/use-sessions.js";
+import type { ApprovalRequest } from "../types.js";
 import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
+
+/**
+ * The side chat a tile's work panel holds, as the window sees it.
+ *
+ * A side chat is a drawing surface of its own — it claims its session and
+ * draws its own approval and question cards — but the window has to know it
+ * exists: a tile must not adopt a question the side chat beside it already
+ * draws, and the sidebar has to mark the side chat's row while a card waits
+ * where the user cannot see it. `shown` is whether the side chat is on screen
+ * at all: its tab active, its panel open, and the tile's conversation drawn.
+ */
+export interface SideChatSurface {
+  sessionId: string;
+  askQuestions: readonly AskUserQuestionRequest[];
+  shown: boolean;
+}
+
+const NO_SESSION_IDS: ReadonlySet<string> = new Set();
 
 /**
  * What the WINDOW still needs from a conversation once the conversation lives
@@ -38,11 +58,20 @@ export interface ChatGroupSessionHandle {
   resetForNewSession: () => void;
   /**
    * The `ask_user_question` gates this tile is holding. Published, not kept
-   * private, because a hidden tile draws nothing: the window has to be able to
-   * put them somewhere the user can answer them. Same identity contract as
-   * `entries` — React state, replaced only when the list changes.
+   * private, because a hidden tile draws nothing: the window has to mark the
+   * conversation's sidebar row so the user knows to come back. Same identity
+   * contract as `entries` — React state, replaced only when the list changes.
    */
   askQuestions: readonly AskUserQuestionRequest[];
+  /**
+   * Sessions of the sub-agents this tile spawned. A child's ask names the
+   * child's session, and the tile that spawned it is the conversation waiting
+   * on the answer — so the window maps a parked child ask to this tile's row
+   * through the same `sessionOwnedBy` rule the tile's own claim uses.
+   */
+  childSessionIds: ReadonlySet<string>;
+  /** The side chat drawn beside this conversation, once it has a session. */
+  sideChat: SideChatSurface | null;
   /** Retire one of them, wherever it was answered from. */
   resolveAskQuestion: (id: string) => void;
   restoreSubAgentSpawns: (restored: readonly RestoredSubAgentRow[]) => void;
@@ -114,6 +143,8 @@ const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
   entries: [] as readonly ChatEntry[],
   streaming: false,
   askQuestions: [] as readonly AskUserQuestionRequest[],
+  childSessionIds: NO_SESSION_IDS,
+  sideChat: null,
   resolveAskQuestion: () => {},
   applyLoadedSession: () => {},
   applyInitialSession: () => {},
@@ -148,10 +179,14 @@ export interface TileSession {
   paneHidden: boolean;
   /**
    * The gates this tile holds. On the tile list rather than read through the
-   * handle because the window has to RE-DECIDE where they are drawn whenever a
+   * handle because the window has to RE-DECIDE which rows to mark whenever a
    * tile is hidden, and only a subscribed list wakes it for that.
    */
   askQuestions: readonly AskUserQuestionRequest[];
+  /** See {@link ChatGroupSessionHandle.childSessionIds}. */
+  childSessionIds: ReadonlySet<string>;
+  /** See {@link ChatGroupSessionHandle.sideChat}. */
+  sideChat: SideChatSurface | null;
 }
 
 /**
@@ -184,20 +219,20 @@ export function sessionOwnedBy(
 /** Where an overlay card renders, and whether it can still be acted on. */
 export interface OverlayCardPlacement {
   /**
-   * The one tile that shows the card, or `null` for the window's own chrome —
-   * where every card no open conversation owns is drawn, once.
+   * The one tile that shows the card, or `null` when no drawn pane can: the
+   * card is then held, undrawn, and the sidebar marks the conversation it
+   * belongs to (see `pendingAnswers`).
    */
   chatGroupId: string | null;
   /**
-   * The card names a conversation NO mounted tile is holding — it was closed,
+   * The card names a conversation NO drawn tile is holding — it was closed,
    * maximized away, or folded out of sight by chat mode.
    *
-   * The card is still shown, in the window's chrome, because a staged prompt
-   * the user can neither see nor dismiss is worse than one they can dismiss.
-   * What it must not have is its primary action: that action continues the
-   * origin conversation, and running it in another would put a prompt staged
-   * for one conversation into a different one. Main refuses exactly that
-   * mismatch on the way in, and the renderer must not undo the refusal.
+   * The card is not drawn until that conversation is opened again, and must
+   * not be: its primary action continues the origin conversation, and running
+   * it in another would put a prompt staged for one conversation into a
+   * different one. Main refuses exactly that mismatch on the way in, and the
+   * renderer must not undo the refusal.
    */
   orphaned: boolean;
 }
@@ -212,7 +247,8 @@ export interface OverlayCardPlacement {
  *
  * A card that names the conversation it came from goes to the tile holding
  * that conversation, because its action continues THAT conversation. When no
- * drawn pane holds it, the card is orphaned and the window band shows it.
+ * drawn pane holds it, the card is orphaned: it waits, and the sidebar row of
+ * its conversation carries the attention dot until the row is opened.
  *
  * A card with NO origin conversation — a plugin trigger, a headless routine —
  * is drawn in the FOCUSED pane, and follows focus. The window holds one queue
@@ -220,29 +256,19 @@ export interface OverlayCardPlacement {
  * pane: a card parked in an unfocused pane is a card nobody is looking at, and
  * with several panes open it would soon be one card per pane. The region that
  * draws it acts in its own pane (`actionChatGroupId`), so confirming the card
- * starts the turn where the user is. Only when no pane is drawn at all does
- * such a card fall to the window band.
+ * starts the turn where the user is.
  *
- * "Drawn" is asked of the PANE, not of its conversation. A tile is `hidden`
- * for two reasons that route differently. The tree gave its box to another
- * tile (maximized, chat mode): nothing of it is on screen, so the window band
- * lends the surface. Or the pane is routed to Settings or a plugin view: its
- * conversation is behind `display:none`, but the pane is drawn, and the overlay
- * lane is the pane frame's — so the card is drawn in it, whatever the pane
- * shows. Only the first reason (`paneHidden`) moves an overlay card to the
- * band. `tileDrawsSession` and the approval claims keep reading `hidden`: their
- * cards sit over the composer, which a routed pane does not show, so for them
- * the window band is still the right surface.
+ * "Drawn" is asked of the PANE, not of its conversation: a pane routed to
+ * Settings or a plugin view hides its conversation, but the pane is drawn and
+ * the overlay lane is the pane frame's — so the card is drawn in it, whatever
+ * the pane shows. Only a pane the tree is not drawing (`paneHidden`) holds its
+ * cards undrawn.
  */
 export function overlayCardTile(
   tiles: readonly TileSession[],
   focusedChatGroupId: string,
   card: { originSessionId?: string },
 ): OverlayCardPlacement {
-  // A pane the tree is not drawing is mounted so its turn survives, but it
-  // paints nothing, and a card handed to it would be a card nobody can see.
-  // The window's band takes those, exactly as it took them when the tile was
-  // unmounted instead.
   const drawn = tiles.filter((tile) => !tile.paneHidden);
   if (card.originSessionId !== undefined) {
     const holder = tileHoldingSession(drawn, card.originSessionId);
@@ -257,19 +283,43 @@ export function overlayCardTile(
 }
 
 /**
+ * The tile whose turn `sessionId` belongs to — the tile showing it, or the
+ * tile that spawned it as a sub-agent. Drawn or not: a tile the tree hides
+ * still holds its conversation and its children.
+ */
+export function tileOwningSession(
+  tiles: readonly TileSession[],
+  sessionId: string,
+): TileSession | undefined {
+  return tiles.find((tile) => sessionOwnedBy(tile.sessionId, tile.childSessionIds, sessionId));
+}
+
+/** The tile whose side chat runs `sessionId`, if any side chat does. */
+export function tileWithSideChat(
+  tiles: readonly TileSession[],
+  sessionId: string,
+): TileSession | undefined {
+  return tiles.find((tile) => tile.sideChat?.sessionId === sessionId);
+}
+
+/**
  * Does this tile draw a window-wide card (a question, a skill badge) addressed
  * to `sessionId`?
  *
  * Ownership alone is not enough. Turns run in sessions no tile is showing: a
- * routine fires headless, a side chat runs beside the transcript, and a
- * background sub-agent outlives the moment its parent tile switched to another
- * conversation. `ask_user_question` is reachable from all three, and a card
- * only its own tile may draw is a card nobody draws — the gate then sits out
- * its full timeout with nothing on screen to answer.
+ * routine fires headless, and a background sub-agent outlives the moment its
+ * parent tile switched to another conversation. `ask_user_question` is
+ * reachable from both, and a card only its own tile may draw is a card nobody
+ * draws — the gate then sits out its full timeout with nothing on screen to
+ * answer.
  *
- * So an unheld session is ADOPTED by the focused tile. Exactly one tile is
- * focused, so the card is drawn once; and a session another tile is showing is
- * never adopted, because that tile draws it itself.
+ * So a session NO surface holds is ADOPTED by the focused tile. Exactly one
+ * tile is focused, so the card is drawn once. A session some surface already
+ * holds is never adopted: another tile draws its own conversation and its
+ * children, and a side chat is a drawing surface of its own, so the tile
+ * beside it leaves the side chat's questions to it. A tile the tree hides
+ * still holds its sessions — its cards wait with it, undrawn, rather than
+ * moving to whichever pane is focused.
  */
 export function tileDrawsSession(args: {
   tiles: readonly TileSession[];
@@ -277,26 +327,142 @@ export function tileDrawsSession(args: {
   /** The tile already knows this session (its own conversation or a child it spawned). */
   owned: boolean;
   focused: boolean;
-  /** This tile is mounted but paints nothing. */
-  hidden: boolean;
 }): boolean {
-  // Ahead of ownership, not after it. A hidden tile owning the session is the
-  // ordinary case while its turn runs off-screen, and answering yes there draws
-  // the card twice: once inside `display:none`, and once in the focused tile,
-  // which adopts the session precisely because no DRAWN tile holds it. The
-  // second copy is the one the user answers, and the first outlives the answer.
-  //
-  // Unless NO tile is drawn — the route left the chat surface (Settings, a
-  // plugin view, the board). Then nobody else can adopt: the owner keeps its
-  // own question and the focused tile adopts a headless one. Both are hidden,
-  // so neither paints it; the window band lends the surface instead.
-  const anyTileDrawn = args.tiles.some((tile) => !tile.hidden);
-  if (args.hidden && anyTileDrawn) return false;
   if (args.owned) return true;
   if (!args.focused) return false;
-  // A hidden tile holds its conversation but paints nothing, so it cannot be
-  // the reason a card goes undrawn.
-  return tileHoldingSession(args.tiles.filter((tile) => !tile.hidden), args.sessionId) === undefined;
+  return tileOwningSession(args.tiles, args.sessionId) === undefined
+    && tileWithSideChat(args.tiles, args.sessionId) === undefined;
+}
+
+/** What `pendingAnswers` reads: the window's queues and what each tile holds. */
+export interface PendingAnswerInput {
+  /** The window's approval queue, every request the host is parked on. */
+  approvals: readonly ApprovalRequest[];
+  tiles: readonly TileSession[];
+  /** Sessions of the reviewer's deferred entries still awaiting the user. */
+  deferredSessionIds: readonly string[];
+  /** Overlay cards that name the conversation they came from. */
+  overlayCards: readonly { originSessionId?: string }[];
+  /** The conversation list, for the family of a row and a side chat's parent. */
+  sessions: readonly { id: string; family: SessionFamily; originSessionId?: string }[];
+}
+
+/** Every place the attention dot goes, and the requests the focused pane's lane draws. */
+export interface PendingAnswers {
+  /** Sidebar rows to mark: sessions with a card the user cannot see from where they are. */
+  sessionIds: ReadonlySet<string>;
+  /** Panes the tree hides while holding a parked card — the restore control's dot. */
+  hiddenPaneIds: ReadonlySet<string>;
+  /** Side chats holding a parked card off screen — the panel toggle's and the tab's dot. */
+  sideChatSessionIds: ReadonlySet<string>;
+  /** Requests no conversation owns, in queue order — the focused pane's lane draws these. */
+  unattributed: readonly ApprovalRequest[];
+}
+
+/**
+ * "There is a card here you must answer, and you cannot see it from where you
+ * are" — decided ONCE for every surface that shows the attention dot, so the
+ * sidebar, a pane header and a panel tab can never disagree about which
+ * cards are parked.
+ *
+ * A parked card is one of: an approval request in the window's queue, an
+ * `ask_user_question` a tile or side chat holds, a deferred approval the
+ * reviewer set aside, or an overlay card whose origin conversation is not
+ * open. Each is mapped to the surface that draws it, and the dot goes
+ * wherever that surface is NOT on screen: a tile the tree hides, a side chat
+ * whose panel is closed or whose tab is not the active one, a conversation no
+ * pane holds at all. A card the user can already see — over a drawn pane's
+ * composer, in its settle slot, in the focused pane's lane — gets no dot.
+ *
+ * A request that names no conversation, or a session no surface holds and no
+ * row lists, is drawn as an answer-shaped card in the focused pane's lane
+ * (`unattributed`) rather than marked anywhere: there is no row to mark and no
+ * composer to cover.
+ */
+export function pendingAnswers(input: PendingAnswerInput): PendingAnswers {
+  const sessionIds = new Set<string>();
+  const hiddenPaneIds = new Set<string>();
+  const sideChatSessionIds = new Set<string>();
+  const unattributed: ApprovalRequest[] = [];
+  const listed = new Map(input.sessions.map((session) => [session.id, session]));
+
+  // A side chat's row nests under its parent's, and a card parked in a side
+  // chat is news about the parent conversation too. The list knows the
+  // parent when the side chat has a file; before that, the tile holding the
+  // side chat is the only parent there is.
+  const markSideChat = (sessionId: string, tile: TileSession | undefined) => {
+    sessionIds.add(sessionId);
+    sideChatSessionIds.add(sessionId);
+    const parent = listed.get(sessionId)?.originSessionId ?? tile?.sessionId;
+    if (parent) sessionIds.add(parent);
+    if (tile?.paneHidden) hiddenPaneIds.add(tile.chatGroupId);
+  };
+
+  // One session, one verdict. `drawn` says the user can see the card now.
+  const park = (sessionId: string): void => {
+    const sideChatTile = tileWithSideChat(input.tiles, sessionId);
+    if (sideChatTile !== undefined) {
+      const drawn = sideChatTile.sideChat!.shown && !sideChatTile.paneHidden;
+      if (!drawn) markSideChat(sessionId, sideChatTile);
+      return;
+    }
+    const owner = tileOwningSession(input.tiles, sessionId);
+    if (owner !== undefined) {
+      if (owner.paneHidden) {
+        sessionIds.add(owner.sessionId);
+        hiddenPaneIds.add(owner.chatGroupId);
+      }
+      return;
+    }
+    const row = listed.get(sessionId);
+    if (row === undefined) return;
+    if (row.family === "side-chat") markSideChat(sessionId, undefined);
+    else sessionIds.add(sessionId);
+  };
+
+  for (const request of input.approvals) {
+    if (request.sessionId === undefined) {
+      unattributed.push(request);
+      continue;
+    }
+    const held = tileWithSideChat(input.tiles, request.sessionId) !== undefined
+      || tileOwningSession(input.tiles, request.sessionId) !== undefined
+      || listed.has(request.sessionId);
+    if (held) park(request.sessionId);
+    else unattributed.push(request);
+  }
+
+  for (const tile of input.tiles) {
+    // A question a tile holds is drawn by that tile — its own conversation's,
+    // a child's, or one it adopted from a session nobody holds. The dot goes
+    // on the row the user would open to see it: the tile's conversation for
+    // its own and its children's, the asking session's row for an adopted one.
+    for (const question of tile.askQuestions) {
+      if (!tile.paneHidden) continue;
+      hiddenPaneIds.add(tile.chatGroupId);
+      const own = sessionOwnedBy(tile.sessionId, tile.childSessionIds, question.sessionId);
+      sessionIds.add(own ? tile.sessionId : question.sessionId);
+    }
+    const sideChat = tile.sideChat;
+    if (sideChat !== null && sideChat.askQuestions.length > 0 && (!sideChat.shown || tile.paneHidden)) {
+      markSideChat(sideChat.sessionId, tile);
+    }
+  }
+
+  for (const sessionId of input.deferredSessionIds) park(sessionId);
+
+  for (const card of input.overlayCards) {
+    if (card.originSessionId === undefined) continue;
+    const holder = tileHoldingSession(input.tiles, card.originSessionId);
+    if (holder === undefined) {
+      if (listed.has(card.originSessionId)) sessionIds.add(card.originSessionId);
+    } else if (holder.paneHidden) {
+      sessionIds.add(holder.sessionId);
+      hiddenPaneIds.add(holder.chatGroupId);
+    }
+  }
+
+  return { sessionIds, hiddenPaneIds, sideChatSessionIds, unattributed };
 }
 
 /**
@@ -335,6 +501,8 @@ export class ChatGroupSessionRegistry {
       && previous.hidden === handle.hidden
       && previous.paneHidden === handle.paneHidden
       && previous.askQuestions === handle.askQuestions
+      && previous.childSessionIds === handle.childSessionIds
+      && previous.sideChat === handle.sideChat
       && previous.currentSessionProject === handle.currentSessionProject
       && previous.fallbackToast === handle.fallbackToast
       && this.snapshots.has(chatGroupId);
@@ -374,6 +542,8 @@ export class ChatGroupSessionRegistry {
       hidden: handle.hidden,
       paneHidden: handle.paneHidden,
       askQuestions: handle.askQuestions,
+      childSessionIds: handle.childSessionIds,
+      sideChat: handle.sideChat,
     }));
     const same = next.length === this.tiles.length && next.every((tile, index) => {
       const previous = this.tiles[index]!;
@@ -382,7 +552,9 @@ export class ChatGroupSessionRegistry {
         && previous.streaming === tile.streaming
         && previous.hidden === tile.hidden
         && previous.paneHidden === tile.paneHidden
-        && previous.askQuestions === tile.askQuestions;
+        && previous.askQuestions === tile.askQuestions
+        && previous.childSessionIds === tile.childSessionIds
+        && previous.sideChat === tile.sideChat;
     });
     if (same) return;
     this.tiles = Object.freeze(next.map((tile) => Object.freeze(tile)));
@@ -417,6 +589,8 @@ export class ChatGroupSessionRegistry {
       entries: handle.entries,
       streaming: handle.streaming,
       askQuestions: handle.askQuestions,
+      childSessionIds: handle.childSessionIds,
+      sideChat: handle.sideChat,
       resolveAskQuestion: (id: string) => live()?.resolveAskQuestion(id),
       applyLoadedSession: (loaded: ChatEntry[]) => live()?.applyLoadedSession(loaded),
       applyInitialSession: (loaded: ChatEntry[]) => live()?.applyInitialSession(loaded),

@@ -136,6 +136,12 @@ export interface ChatViewProps {
   sideChatOpenRequest?: SideChatOpenRequest | undefined;
   /** Tell the window its conversation list is stale — a side-chat turn moves a row in it. */
   onSessionsChanged?: (() => void | Promise<void>) | undefined;
+  /**
+   * The side chat holds a card the user cannot see from here — the window's
+   * verdict, passed down so the panel's tab carries the same dot the pane's
+   * toggle does.
+   */
+  sideChatPendingAnswer?: boolean;
   /** Constrain transcript and composer to a centered reading column. */
   blogLayout?: boolean;
   /** Active project — drives the empty-state composer's project selector trigger label. */
@@ -152,7 +158,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, sideChatOpenRequest, onSessionsChanged, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, sideChatOpenRequest, onSessionsChanged, sideChatPendingAnswer = false, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   const approvals = useApprovalSurface();
   const approvalHead = pendingApprovals[0] ?? null;
@@ -679,7 +685,6 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
       <div
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [container-type:size]"
         data-testid="chat-main-column"
-        data-approval-scope
       >
 
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
@@ -838,8 +843,8 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
         onProjectSelectorOpenChange={setProjectSelectorOpen}
       />
       {/* This conversation's approval card, floating over its own composer.
-          The column above is the dock's scope: the composer it covers goes
-          inert, the tile next door does not. */}
+          The pane frame around this view is the dock's scope: the composer it
+          covers goes inert, the tile next door does not. */}
       <ApprovalDock
         queue={pendingApprovals}
         conversationLabel={currentSessionTitle ?? t("mainToolbar.newChat")}
@@ -922,6 +927,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
             onClose={() => onSidePanelOpenChange(false)}
             sideChatOpenRequest={sideChatOpenRequest}
             onSessionsChanged={onSessionsChanged}
+            sideChatPendingAnswer={sideChatPendingAnswer}
             activity={toolActivity}
             onOpenActivityItem={routeActivityItem}
             onOpenActivityItemPinned={routeActivityItemPinned}

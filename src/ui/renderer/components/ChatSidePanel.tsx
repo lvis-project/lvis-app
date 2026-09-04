@@ -29,6 +29,7 @@ import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
 import { PtyTerminalView } from "./PtyTerminalView.js";
 import { SideChatView, type SideChatOpenRequest } from "./SideChatView.js";
+import { PendingAnswerDot } from "./PendingAnswerDot.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
 import type { SubAgentSpawn } from "../subagents/types.js";
@@ -665,6 +666,8 @@ export interface ChatSidePanelProps {
   sideChatOpenRequest?: SideChatOpenRequest | undefined;
   /** Tell the window its conversation list is stale — a side-chat turn moves a row in it. */
   onSessionsChanged?: (() => void | Promise<void>) | undefined;
+  /** The side chat holds a card the user cannot see — its tab carries the attention dot while it is not the active one. */
+  sideChatPendingAnswer?: boolean;
   /**
    * What this conversation did — the empty launcher shows it above the tab
    * picker, so an open panel with nothing in it still says something, and the
@@ -695,6 +698,7 @@ export function ChatSidePanel({
   onClose,
   sideChatOpenRequest,
   onSessionsChanged,
+  sideChatPendingAnswer = false,
   activity,
   onOpenActivityItem,
   onOpenActivityItemPinned,
@@ -809,6 +813,13 @@ export function ChatSidePanel({
     [targets],
   );
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null;
+  // The side chat stays MOUNTED while any side-chat tab exists, whichever tab
+  // is up: it is a drawing surface of its own, holding its session, its
+  // approval claim and the questions its turn parked. Unmounting it on a tab
+  // switch would drop all three — and a question dropped here is a gate the
+  // host keeps waiting on with no card left anywhere to answer it.
+  const sideChatActive = activeTab?.kind === "side-chat" && !activeTab.content;
+  const sideChatMounted = tabs.some((tab) => tab.kind === "side-chat" && !tab.content);
 
   // Panel-scoped launcher shortcuts (§6.10.3). Bound only while the panel is
   // mounted so ⌘T/⌘P/⌃⇧G reach the workspace rail without stealing app-wide
@@ -903,6 +914,9 @@ export function ChatSidePanel({
                   >
                     <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                     <span className={`max-w-24 truncate ${isEphemeral ? "italic" : ""}`}>{label}</span>
+                    {tab.kind === "side-chat" && !tab.content && sideChatPendingAnswer && !active ? (
+                      <PendingAnswerDot inline testId="chat-side-panel-tab-side-chat-pending-answer" />
+                    ) : null}
                   </button>
                   {isEphemeral ? (
                     <button
@@ -1022,17 +1036,26 @@ export function ChatSidePanel({
           ) : activeTab.kind === "activity" ? (
             <ToolActivityWorkspace activity={activity} />
           ) : activeTab.kind === "side-chat" ? (
-            // Side chat — a second, independently-streaming chat session driven
-            // by a dedicated ConversationLoop in main. The view subscribes to the
-            // DEDICATED side-chat IPC channel, fully isolated from the main chat.
-            <SideChatView
-              api={api}
-              openRequest={sideChatOpenRequest}
-              onSessionsChanged={onSessionsChanged}
-            />
+            // Drawn below, where it stays mounted across tab switches.
+            null
           ) : (
             <PreviewWorkspace api={api} sessionId={sessionId} targets={previewTargets} selectedId={selectedId} onSelect={onSelect} />
           )}
+          {sideChatMounted ? (
+            // Side chat — a second, independently-streaming chat session driven
+            // by a dedicated ConversationLoop in main. The view subscribes to the
+            // DEDICATED side-chat IPC channel, fully isolated from the main chat.
+            // `contents` while its tab is up so the wrapper adds no box; hidden,
+            // not unmounted, while another tab is (see `sideChatMounted`).
+            <div className={sideChatActive ? "contents" : "hidden"} data-testid="chat-side-panel-side-chat-host">
+              <SideChatView
+                api={api}
+                openRequest={sideChatOpenRequest}
+                onSessionsChanged={onSessionsChanged}
+                shown={sideChatActive}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
     </aside>

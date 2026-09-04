@@ -108,6 +108,7 @@ function HarnessPanel({
   onClose = vi.fn(),
   activity = emptyToolActivity(),
   onOpenActivityItem,
+  sideChatPendingAnswer,
 }: {
   api: LvisApi;
   sessionId?: string;
@@ -119,6 +120,7 @@ function HarnessPanel({
   onClose?: () => void;
   activity?: ToolActivityState;
   onOpenActivityItem?: (target: string, web: boolean) => void;
+  sideChatPendingAnswer?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId);
   const workspaceTabs = useWorkspaceTabs();
@@ -138,6 +140,7 @@ function HarnessPanel({
       onWidthCommit={vi.fn()}
       onClose={onClose}
       activity={activity}
+      sideChatPendingAnswer={sideChatPendingAnswer}
       onOpenActivityItem={onOpenActivityItem}
     />
   );
@@ -243,6 +246,43 @@ describe("ChatSidePanel", () => {
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     expect(screen.getByTestId("chat-side-panel-tab-browser")).toBeTruthy();
     expect(screen.getByTestId("chat-side-panel-browser-workspace")).toBeTruthy();
+  });
+
+  it("keeps the side chat mounted behind another tab, and marks its tab while a card waits there", () => {
+    const panel = (pending: boolean) => (
+      <HarnessPanel
+        api={api()}
+        sessionId="session-1"
+        targets={[]}
+        files={[]}
+        initialSelectedId={null}
+        sideChatPendingAnswer={pending}
+      />
+    );
+    const view = renderPanel(panel(false));
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("side-chat")));
+    expect(screen.getByTestId("side-chat-view")).toBeTruthy();
+    const host = () => screen.getByTestId("chat-side-panel-side-chat-host");
+    expect(host().className).not.toBe("hidden");
+
+    // Another tab takes the panel: the side chat's view stays in the tree —
+    // its claim and its parked cards live in it — but out of sight.
+    openLauncherMenu();
+    fireEvent.click(screen.getByTestId(chatSidePanelLauncherTestId("menu-browser")));
+    expect(screen.getByTestId("chat-side-panel-tab-browser").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("side-chat-view")).toBeTruthy();
+    expect(host().className).toBe("hidden");
+    expect(screen.queryByTestId("chat-side-panel-tab-side-chat-pending-answer")).toBeNull();
+
+    // The window says a card is parked there: the tab says so too.
+    view.rerender(panel(true));
+    const dot = screen.getByTestId("chat-side-panel-tab-side-chat-pending-answer");
+    expect(screen.getByTestId("chat-side-panel-tab-side-chat").contains(dot)).toBe(true);
+
+    // Back on the side-chat tab the card is on screen — no dot for a card the user can see.
+    fireEvent.click(screen.getByTestId("chat-side-panel-tab-side-chat"));
+    expect(screen.queryByTestId("chat-side-panel-tab-side-chat-pending-answer")).toBeNull();
+    expect(host().className).not.toBe("hidden");
   });
 
   it("launcher keyboard shortcut opens the mapped tab (⌘T -> browser)", () => {

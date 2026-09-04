@@ -35,6 +35,9 @@ export type SessionSeed = Partial<SessionSummary> & Pick<SessionSummary, "id" | 
  * other fields when a fixture does not name one, so a test written before
  * families still describes the row it meant.
  */
+/** The session the mock side-chat channel opens on `new` and `load`. */
+export const MOCK_SIDE_CHAT_SESSION_ID = "side-chat-1";
+
 export function sessionRow(seed: SessionSeed): SessionSummary {
   const sessionKind = seed.sessionKind ?? "main";
   return {
@@ -119,6 +122,12 @@ type ApiOverrides = {
   pluginCards?: unknown[];
   marketplace?: unknown[];
   pluginUiExtensions?: unknown[];
+  /**
+   * Give the app a side-chat channel. Off by default because the panel offers
+   * the side-chat tab only when the host has one, and most suites want the
+   * launcher as it is without it.
+   */
+  sideChat?: boolean;
   latestRoutineResult?: unknown;
   pendingRoutineResults?: unknown[];
   routineSessionsByRoutine?: Record<string, unknown[]>;
@@ -787,6 +796,18 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     respondAskUserQuestion: vi.fn(async () => ({ ok: true })),
 
     submitFeedback: vi.fn(async () => ({ ok: true })),
+
+    ...(overrides.sideChat ? {
+      sideChat: {
+        send: vi.fn(async () => ({ ok: true, result: {} })),
+        new: vi.fn(async () => ({ ok: true, sessionId: MOCK_SIDE_CHAT_SESSION_ID })),
+        load: vi.fn(async () => ({ ok: true, sessionId: MOCK_SIDE_CHAT_SESSION_ID, messages: [] })),
+        list: vi.fn(async () => ({ current: null, sessions: [] })),
+        abort: vi.fn(async () => ({ ok: true })),
+        onStream: vi.fn(() => () => undefined),
+        onFallback: vi.fn(() => () => undefined),
+      },
+    } : {}),
 
     onViewActivate: vi.fn((h: (v: string, settingsTab?: string) => void) => {
       viewHandlers.add(h);

@@ -450,9 +450,9 @@ describe("ApprovalDock", () => {
   });
 
   it("inerts only the composer inside its own scope; a dock whose scope holds no composer inerts none", async () => {
-    // Two tiles under one route canvas, each its own scope, plus the window's
-    // scope beside them: the tile-2 card covers tile 2's composer only, and
-    // the unclaimed card in the window's scope covers neither.
+    // Two tiles under one route canvas, each its own scope, plus a pane routed
+    // off its conversation — a scope with no composer in it: the tile-2 card
+    // covers tile 2's composer only, and the routed pane's card covers neither.
     const { container } = render(
       <main data-testid={TEST_IDS.routeCanvas}>
         <section data-approval-scope data-testid="tile-1">
@@ -462,8 +462,8 @@ describe("ApprovalDock", () => {
           <div data-composer-placement="bottom"><textarea data-testid="composer-2" /></div>
           <ApprovalDock conversationLabel="tile 2" queue={[makeRequest({ id: "req-tile-2" })]} onDecide={vi.fn()} />
         </section>
-        <div data-approval-scope data-testid={TEST_IDS.windowApprovalScope}>
-          <ApprovalDock conversationLabel="window" queue={[makeRequest({ id: "req-unclaimed" })]} onDecide={vi.fn()} />
+        <div data-approval-scope data-testid="routed-pane">
+          <ApprovalDock conversationLabel="routed" queue={[makeRequest({ id: "req-routed" })]} onDecide={vi.fn()} />
         </div>
       </main>,
     );
@@ -472,7 +472,7 @@ describe("ApprovalDock", () => {
     await waitFor(() => expect(second).toHaveAttribute("inert"));
     expect(first).not.toHaveAttribute("inert");
     expect(first).not.toHaveAttribute("aria-hidden");
-    // The window's card alone: with no tile card up, still no composer is touched.
+    // The routed pane's card alone: with no tile card up, still no composer is touched.
     const { container: alone } = render(
       <main data-testid={TEST_IDS.routeCanvas}>
         <section data-approval-scope>
@@ -481,8 +481,8 @@ describe("ApprovalDock", () => {
         <section data-approval-scope>
           <div data-composer-placement="bottom"><textarea /></div>
         </section>
-        <div data-approval-scope data-testid={TEST_IDS.windowApprovalScope}>
-          <ApprovalDock conversationLabel="window" queue={[makeRequest({ id: "req-unclaimed-alone" })]} onDecide={vi.fn()} />
+        <div data-approval-scope data-testid="routed-pane">
+          <ApprovalDock conversationLabel="routed" queue={[makeRequest({ id: "req-routed-alone" })]} onDecide={vi.fn()} />
         </div>
       </main>,
     );

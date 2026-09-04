@@ -30,6 +30,7 @@ import {
   type DropTarget,
 } from "./pane-drop.js";
 import { FloatingRightLane } from "./FloatingRightLane.js";
+import { PendingAnswerDot } from "./PendingAnswerDot.js";
 import { AXIS_OF,
   closeLeaf,
   countLeaves,
@@ -98,7 +99,7 @@ const SPLIT_EDGE: Record<PaneSplitAxis, DropEdge> = { row: "right", column: "bot
  *
  * OWNERSHIP. Pin, export, and import act on a CONVERSATION, so they belong to
  * the part that owns the conversation — the header of the pane drawing it —
- * not to the window band they used to sit in. The work-panel toggle arrives
+ * not to the window's top band they used to sit in. The work-panel toggle arrives
  * the same way, as `trailing` from the conversation: each conversation owns
  * its own panel, so the control that opens it cannot be global.
  */
@@ -190,6 +191,12 @@ interface PaneFrameProps {
   maximized?: boolean;
   onToggleMaximize?: () => void;
   /**
+   * A pane the tree hides behind this one holds a card the user must answer.
+   * Drawn as the attention dot on the restore control: restoring is how the
+   * user gets to that card, and the dot says there is one to get to.
+   */
+  restoreAttention?: boolean;
+  /**
    * How far the body stands in from the frame.
    *
    * `none`: the content draws to the hairline — a conversation lays out its own
@@ -213,11 +220,19 @@ interface PaneFrameProps {
    * shows must stay visible whatever the pane draws — a conversation,
    * Settings, a plugin view. Anchored inside the conversation, it went behind
    * `display:none` the moment a view covered that conversation, and the card
-   * fell out to the window band, off the pane the user was looking at. The
-   * frame renders the `FloatingRightLane` itself so the anchor lives in one
-   * place.
+   * left the pane the user was looking at. The frame renders the
+   * `FloatingRightLane` itself so the anchor lives in one place.
    */
   lane?: ReactNode;
+  /**
+   * What must be settled before this pane's conversation takes its next
+   * input, drawn while the pane shows something else: the conversation's
+   * approval and question cards. Rendered at the bottom of the body, full
+   * width, exactly where the same cards sit over the composer when the
+   * conversation is what the pane draws — the card belongs to the pane, and
+   * routing the pane to a view does not move it.
+   */
+  settle?: ReactNode;
   children: ReactNode;
 }
 
@@ -303,9 +318,11 @@ export function PaneFrame({
   closeLabel,
   maximized = false,
   onToggleMaximize,
+  restoreAttention = false,
   bodyInset = "none",
   asideSlot: publishAsideSlot = false,
   lane,
+  settle,
   children,
 }: PaneFrameProps) {
   const { t } = useTranslation();
@@ -389,7 +406,13 @@ export function PaneFrame({
         focused ? "border-primary/(--opacity-half)" : "border-border",
       ].join(" ")}
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* One approval scope per pane: the column that holds this pane's
+          header and body — its conversation's composer when the conversation
+          is drawn, or no composer at all when a view is. The work panel's
+          slot is a sibling, outside it, so a side chat's own scope is never
+          inside a pane's. A card drawn here (over the composer, or in the
+          settle slot) may affect this column and nothing beyond it. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-approval-scope>
       <header
         data-testid="pane-header"
         className="flex h-(--chrome-band-height) shrink-0 items-center gap-(--chrome-gap-tight) border-b border-border/(--opacity-half) px-(--chrome-gap)"
@@ -528,7 +551,7 @@ export function PaneFrame({
               <Button
                 variant="ghost"
                 size="icon"
-                className={HEADER_BUTTON_CLASS}
+                className={`relative ${HEADER_BUTTON_CLASS}`}
                 onClick={onToggleMaximize}
                 title={maximized ? t("pane.restore") : t("pane.maximize")}
                 aria-label={maximized ? t("pane.restore") : t("pane.maximize")}
@@ -536,6 +559,7 @@ export function PaneFrame({
                 data-testid="pane-maximize"
               >
                 {maximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                {restoreAttention ? <PendingAnswerDot testId="pane-maximize-pending-answer" /> : null}
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">{maximized ? t("pane.restore") : t("pane.maximize")}</TooltipContent>
@@ -576,6 +600,10 @@ export function PaneFrame({
           >
             {children}
             {lane !== undefined ? <FloatingRightLane>{lane}</FloatingRightLane> : null}
+            {/* The settle slot is the body's own bottom edge: its occupants
+                position themselves against this `relative` body exactly as
+                they do against the conversation column. */}
+            {settle}
           </div>
         </PaneBodyActionsContext.Provider>
       </PanePanelSlotContext.Provider>

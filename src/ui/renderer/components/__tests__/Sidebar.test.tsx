@@ -1642,3 +1642,79 @@ describe("Sidebar — every conversation family", () => {
     }
   });
 });
+
+describe("Sidebar pending-answer dot", () => {
+  const sideChat: SessionSummary = sessionRow({
+    id: "side-1",
+    title: "환경 변수 확인",
+    modifiedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    family: "side-chat",
+    originSessionId: "sess-1",
+  });
+  const routine: SessionSummary = sessionRow({
+    id: "routine-run-1",
+    title: "아침 브리핑",
+    modifiedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+    family: "routine",
+  });
+
+  it("marks exactly the rows the window says are parked on an answer, whatever their family", async () => {
+    const { getByTestId, queryByTestId, restore } = renderSidebar({
+      sessions: [
+        sessionRow({ id: "sess-1", title: "현재", modifiedAt: new Date().toISOString() }),
+        sessionRow({ id: "sess-2", title: "다른 대화", modifiedAt: new Date(Date.now() - 3600_000).toISOString() }),
+        sideChat,
+        routine,
+      ],
+      pendingAnswerSessionIds: new Set(["sess-1", "side-1", "routine-run-1"]),
+    });
+    try {
+      await waitFor(() => getByTestId("sidebar-session-sess-1"));
+      // The parent row and its nested side chat both carry the dot: a card
+      // parked in the side chat is news about the conversation it belongs to.
+      const tree = getByTestId("sidebar-conversation-tree-sess-1");
+      expect(tree.contains(getByTestId("sidebar-pending-answer-sess-1"))).toBe(true);
+      expect(tree.contains(getByTestId("sidebar-pending-answer-side-1"))).toBe(true);
+      expect(getByTestId("sidebar-pending-answer-routine-run-1")).toBeTruthy();
+      expect(queryByTestId("sidebar-pending-answer-sess-2")).toBeNull();
+      expect(getByTestId("sidebar-pending-answer-sess-1").getAttribute("aria-label")).toBe("답변 대기 중");
+      // Inside the row's button, so the way to the card is the row itself.
+      expect(getByTestId("sidebar-session-sess-1").contains(getByTestId("sidebar-pending-answer-sess-1"))).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("marks the Plugins group while a request outside every conversation waits, expanded and collapsed", () => {
+    const expanded = renderSidebar({
+      failedPluginCards: [FAILED_PLUGIN_CARD],
+      pluginRequestPending: true,
+    });
+    try {
+      const dot = expanded.getByTestId("sidebar-group-plugins-pending-answer");
+      expect(expanded.getByTestId("sidebar-group-plugins").contains(dot)).toBe(true);
+    } finally {
+      expanded.restore();
+      cleanup();
+    }
+    const collapsed = renderSidebar({
+      collapsed: true,
+      failedPluginCards: [FAILED_PLUGIN_CARD],
+      pluginRequestPending: true,
+    });
+    try {
+      expect(collapsed.getByTestId("sidebar-group-plugins").contains(
+        collapsed.getByTestId("sidebar-group-plugins-pending-answer"),
+      )).toBe(true);
+    } finally {
+      collapsed.restore();
+      cleanup();
+    }
+    const quiet = renderSidebar({ failedPluginCards: [FAILED_PLUGIN_CARD] });
+    try {
+      expect(quiet.queryByTestId("sidebar-group-plugins-pending-answer")).toBeNull();
+    } finally {
+      quiet.restore();
+    }
+  });
+});

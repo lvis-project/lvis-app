@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 186
+ * Fragments: 187
  */
 import { en as en_app } from "./app.js";
 import { en as en_appearanceTab } from "./appearanceTab.js";
@@ -128,6 +128,7 @@ import { en as en_midnight } from "./midnight.js";
 import { en as en_nord } from "./nord.js";
 import { en as en_overlayCard } from "./overlayCard.js";
 import { en as en_overlayCardRegion } from "./overlayCardRegion.js";
+import { en as en_pendingAnswerDot } from "./pendingAnswerDot.js";
 import { en as en_permissionDecisionCard } from "./permissionDecisionCard.js";
 import { en as en_permissionEvaluationContextPanel } from "./permissionEvaluationContextPanel.js";
 import { en as en_permissionModeBadge } from "./permissionModeBadge.js";
@@ -316,6 +317,7 @@ export const generatedEn: Record<string, string> = {
   ...en_nord,
   ...en_overlayCard,
   ...en_overlayCardRegion,
+  ...en_pendingAnswerDot,
   ...en_permissionDecisionCard,
   ...en_permissionEvaluationContextPanel,
   ...en_permissionModeBadge,

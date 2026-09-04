@@ -4,7 +4,7 @@ import { MAX_CHAT_GROUPS } from "../../contract/app-contract.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ThemeProvider } from "./theme/index.js";
-import { OverlayContextProvider } from "./context/OverlayContext.js";
+import { OverlayContextProvider, type OverlayItem } from "./context/OverlayContext.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { Sidebar, isDarwinPlatform } from "./components/Sidebar.js";
@@ -14,7 +14,7 @@ import { DevComponentLabels } from "./components/DevComponentLabels.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
-import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession, overlayCardTile, type OverlayCardPlacement } from "./components/chat-group-session-registry.js";
+import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions, tileHoldingSession, overlayCardTile, pendingAnswers as selectPendingAnswers, type OverlayCardPlacement } from "./components/chat-group-session-registry.js";
 import { leafIds } from "./components/pane-tree.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
@@ -28,8 +28,7 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { PANE_CELL_INSET, PANE_MIN_HEIGHT, PaneGutter, PANE_HOME, PaneFrame, areaStyle, chatGroupApi, useChatGroups, type PaneSplitAxis } from "./components/PaneFrame.js";
-import { minimumCanvasHeight } from "./components/pane-tree.js";
+import { PaneGutter, PANE_HOME, PaneFrame, areaStyle, chatGroupApi, useChatGroups, type PaneSplitAxis } from "./components/PaneFrame.js";
 import type { DropTarget } from "./components/pane-drop.js";
 import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import { parseInlineViewKey, type InlineViewKey, type PluginViewKey } from "../../shared/view-key.js";
@@ -37,8 +36,7 @@ import { CONTENT_TITLE_INSET, SHELL_GUTTER, collapsedBandLeadClearance } from ".
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
-import { ApprovalDock, WINDOW_DOCK_MIN_HEIGHT } from "./components/permissions/ApprovalDock.js";
-import { AskUserQuestionCard } from "./components/AskUserQuestionCard.js";
+import { ApprovalLaneCard, unattributedRequestLabel } from "./components/permissions/ApprovalDock.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import type { ApprovalRequest } from "./types.js";
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
@@ -68,7 +66,7 @@ import { useOnboardingTourController } from "./hooks/use-onboarding-tour-control
 import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
-import { ApprovalSurfaceProvider, useApproval, useApprovalClaimsVersion, type ApprovalSurfaceContextValue } from "./hooks/use-approval.js";
+import { ApprovalSurfaceProvider, useApproval, useDeferredSessionIds, type ApprovalSurfaceContextValue } from "./hooks/use-approval.js";
 import { usePermissionSignals } from "./hooks/use-permission-signals.js";
 import { useApprovalSentence } from "./hooks/use-approval-sentence.js";
 import { useSearch } from "./hooks/use-search.js";
@@ -294,25 +292,6 @@ export function App() {
     focusGroup(chatGroupId);
     return true;
   }, [focusGroup]);
-  // What the window's own band may take, in the layout's own terms: the room
-  // left once the shortest tile still clears the floor a split or a gutter drag
-  // would hold it to. A card that arrives must not be able to squeeze the grid
-  // past what the user's own gestures can. `SHELL_GUTTER` is the tile row's
-  // bottom air, which is canvas height the tiles never see.
-  //
-  // One budget for everything the band holds — the dock and the window's own
-  // overlay cards stack inside it and share it.
-  //
-  // Expressed as a percentage of `<main>`, the flex parent the band and the
-  // route canvas share, so it tracks the window without measuring it.
-  const windowBandMaxHeight = useMemo(() => {
-    const reserved = minimumCanvasHeight(
-      chatGroups.groups.map((group) => group.box),
-      PANE_MIN_HEIGHT + PANE_CELL_INSET,
-    ) + SHELL_GUTTER;
-    return `max(${WINDOW_DOCK_MIN_HEIGHT}px, calc(100% - ${reserved}px))`;
-  }, [chatGroups.groups]);
-
   // Which surface shows an overlay card. Only the window can answer it: it
   // needs every tile's conversation to say whether any of them owns the card,
   // and it knows which pane is focused — where a card no conversation owns is
@@ -520,34 +499,27 @@ export function App() {
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const approvals = useApproval();
   const { queue: approvalQueue, decide: handleApprovalDecide, claims: approvalClaims } = approvals;
-  // A card is drawn by the surface that claimed its session: a tile for its
-  // own conversation and its sub-agents, a side chat for its loop. What is
-  // left for the window's own dock is exactly the requests no surface
-  // claimed — a request that names no conversation (a host or plugin ask),
-  // or a session no open surface holds (a routine's turn, a session this
-  // window closed while its ask was still parked). That dock is those
-  // requests' home, not a catch-all: it draws nothing a surface has claimed.
-  const approvalClaimsVersion = useApprovalClaimsVersion(approvalClaims);
-  const unclaimedApprovals = useMemo(
-    () => approvalQueue.filter((req) =>
-      req.sessionId === undefined || approvalClaims.ownerOf(req.sessionId) === null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read claims when they change
-    [approvalQueue, approvalClaims, approvalClaimsVersion],
-  );
-  const windowApprovalHead = unclaimedApprovals[0] ?? null;
-  // A question a hidden tile is holding. Unlike an approval, a question was
-  // delivered to ONE tile and lives only there, so when that tile stops being
-  // drawn there is no second copy anywhere — the gate would sit out its
-  // deadline with nothing on screen. The tile keeps owning it (answering still
-  // goes back through its own queue); the window only lends it a surface.
-  const strandedQuestion = useMemo(() => {
-    for (const tile of tileSessions) {
-      if (!tile.hidden) continue;
-      const head = tile.askQuestions[0];
-      if (head !== undefined) return { chatGroupId: tile.chatGroupId, request: head };
-    }
-    return null;
-  }, [tileSessions]);
+  // A card is drawn by the surface whose conversation asked: a tile for its
+  // own conversation and its sub-agents, a side chat for its loop — and it is
+  // drawn THERE, in that surface, whether or not the user is looking at it.
+  // The window draws none of them. What it does draw, in the focused pane's
+  // lane, is the one request that has no conversation to belong to: a host or
+  // plugin ask. Everything else the user cannot see from where they are
+  // becomes a yellow dot on the row or control that leads to it.
+  //
+  // One selector answers both — which rows and controls carry the dot, and
+  // which requests the lane draws — so the sidebar, the pane headers and the
+  // lane cannot disagree about who is waiting.
+  const deferredSessionIds = useDeferredSessionIds(api.permission);
+  const [overlayQueue, setOverlayQueue] = useState<readonly OverlayItem[]>([]);
+  const pendingAnswers = useMemo(() => selectPendingAnswers({
+    approvals: approvalQueue,
+    tiles: tileSessions,
+    deferredSessionIds,
+    overlayCards: overlayQueue,
+    sessions,
+  }), [approvalQueue, tileSessions, deferredSessionIds, overlayQueue, sessions]);
+  const laneApprovalHead = pendingAnswers.unattributed[0] ?? null;
   // Approval-memory hit + reviewer suggestion. Both report on the WINDOW's
   // permission settings, not on one conversation, so they are subscribed once
   // here — per tile they would raise the same disclosure in every open
@@ -557,16 +529,17 @@ export function App() {
   const [exactDenyDraft, setExactDenyDraft] = useState<ExactDenyDraft | null>(null);
   // `/allow <sentence>` is typed into the focused tile's composer, so it
   // addresses the out-of-directory card shown in that tile; with none there,
-  // the window's own card. Other approval kinds keep their own explicit
-  // decision form and must never consume a proposal they cannot display.
+  // the lane card that pane also draws. Other approval kinds keep their own
+  // explicit decision form and must never consume a proposal they cannot
+  // display.
   const approvalSentenceTarget = useMemo(() => {
     const inFocusedTile = approvalQueue.find((req) =>
       req.kind === "out-of-allowed-dir"
         && req.sessionId !== undefined
         && approvalClaims.ownerOf(req.sessionId) === chatGroups.focusedId);
     if (inFocusedTile !== undefined) return inFocusedTile;
-    return unclaimedApprovals.find((req) => req.kind === "out-of-allowed-dir") ?? null;
-  }, [approvalQueue, approvalClaims, chatGroups.focusedId, unclaimedApprovals]);
+    return pendingAnswers.unattributed.find((req) => req.kind === "out-of-allowed-dir") ?? null;
+  }, [approvalQueue, approvalClaims, chatGroups.focusedId, pendingAnswers.unattributed]);
   const {
     proposedChoice: approvalProposedChoice,
     interceptSubmit: interceptApprovalSentence,
@@ -1444,6 +1417,7 @@ export function App() {
     onNewChatForProject,
     onRefreshProjects: refreshWorkspaceProjects,
     onProjectError: handleProjectError,
+    pendingAnswers,
   }), [
     llmVendor, llmModel, settingsLoaded, subscriptionRuntimeSelected, subscriptionRuntimePolicy,
     subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider,
@@ -1464,33 +1438,65 @@ export function App() {
     interceptApprovalSentence,
     activeProject, defaultWorkspaceProject, workspaceProjects,
     onNewChatForProject, refreshWorkspaceProjects, handleProjectError,
+    pendingAnswers,
   ]);
 
   // ─── Render ───────────────────────────────────
   /**
-   * The overlay cards ONE pane shows, for that pane's frame lane.
+   * A pane's maximize control carries the dot while it is the maximized pane
+   * and a pane the tree hides behind it holds a parked request. The card stays
+   * in that hidden pane, undrawn; the dot on the one control that brings the
+   * pane back is what says something is waiting there.
+   */
+  const paneRestoreAttention = (paneId: string): boolean =>
+    chatGroups.maximizedId === paneId && pendingAnswers.hiddenPaneIds.size > 0;
+
+  /**
+   * What ONE pane's frame lane holds.
    *
    * Built by the window because only the window sees every tile
    * (`overlayCardTile`) and holds the handlers a card's action runs through.
    * The region acts in its own pane: a card no conversation owns is drawn here
    * because this pane is focused — where the user is — and the turn it starts
-   * belongs here. It is handed to whichever frame is DRAWN for the pane — the routed one while a
-   * view covers the conversation, the conversation's otherwise — never both,
-   * or one card would be drawn twice.
+   * belongs here. It is handed to whichever frame is DRAWN for the pane — the
+   * routed one while a view covers the conversation, the conversation's
+   * otherwise — never both, or one card would be drawn twice.
+   *
+   * The focused pane's lane also draws the one approval that has no
+   * conversation to be drawn in — a host or plugin ask. It is a lane card, not
+   * a dock: no composer is waiting on it, so it covers and inerts nothing, and
+   * it follows focus the way an unowned overlay card does.
    */
   const paneLane = (chatGroupId: string): ReactNode => (
-    <OverlayCardRegion
-      chatGroupId={chatGroupId}
-      actionChatGroupId={chatGroupId}
-      overlayCardTile={overlayCardTileForWindow}
-      onPluginPrimaryAction={(id, actionChatGroupId) => {
-        void handlePluginPrimaryAction(id, actionChatGroupId);
-      }}
-      onRoutineAcknowledge={handleRoutineAcknowledge}
-      onProposalAnswer={(id, disposition, actionChatGroupId) => {
-        void handleProposalAnswer(id, disposition, actionChatGroupId);
-      }}
-    />
+    <>
+      {chatGroupId === chatGroups.focusedId && laneApprovalHead !== null ? (
+        <ApprovalLaneCard
+          queue={pendingAnswers.unattributed}
+          conversationLabel={unattributedRequestLabel(laneApprovalHead, t)}
+          proposedChoice={
+            approvalProposal?.requestId === laneApprovalHead.id ? approvalProposal.choice : null
+          }
+          onDecide={(choice, pattern, extras) => {
+            void handleApprovalDecide(laneApprovalHead.id, choice, pattern, extras);
+          }}
+          onOpenPermanentDeny={handleOpenPermanentDeny}
+          interactionLocked={exactDenyDraft?.requestId === laneApprovalHead.id}
+          reviewerSuggestion={reviewerSuggestion}
+        />
+      ) : null}
+      <OverlayCardRegion
+        chatGroupId={chatGroupId}
+        actionChatGroupId={chatGroupId}
+        overlayCardTile={overlayCardTileForWindow}
+        onPluginPrimaryAction={(id, actionChatGroupId) => {
+          void handlePluginPrimaryAction(id, actionChatGroupId);
+        }}
+        onRoutineAcknowledge={handleRoutineAcknowledge}
+        onProposalAnswer={(id, disposition, actionChatGroupId) => {
+          void handleProposalAnswer(id, disposition, actionChatGroupId);
+        }}
+      />
+    </>
   );
 
   /**
@@ -1505,7 +1511,7 @@ export function App() {
    * included — and a plugin surface all go into the same frame a conversation
    * gets.
    */
-  const renderPaneRoute = (view: InlineViewKey, paneId: string): ReactNode => {
+  const renderPaneRoute = (view: InlineViewKey, paneId: string, settle: ReactNode): ReactNode => {
     // Closing a routed pane does not close the pane: it puts THIS one back on
     // home, so the conversation the view was covering comes back (design §3).
     // Loading a conversation from Memory, Insights or Routines ends the same
@@ -1536,6 +1542,12 @@ export function App() {
       onFocus: () => chatGroups.focus(paneId),
       // The overlay cards this pane shows come with it into whatever it draws.
       lane: paneLane(paneId),
+      // So do the cards its CONVERSATION is parked on: the view covers the
+      // conversation, not the answer it is waiting for. The tile builds them
+      // (it owns the queue they answer through); the frame gives them the same
+      // bottom slot the conversation's composer dock would.
+      settle,
+      restoreAttention: paneRestoreAttention(paneId),
       ...(chatGroups.canSplit ? {
         canSplit: true,
         onSplit: (axis: PaneSplitAxis) => chatGroups.split(paneId, axis),
@@ -1769,6 +1781,7 @@ export function App() {
             onOpenSession={handleOpenRoutineSession}
             addFireRef={addFireRef}
             runningRoutines={runningRoutines}
+            onQueueChange={setOverlayQueue}
           >
             {/* `relative` makes THIS full-height shell column the positioning
                 context for the floating-card Sidebar, so the card's `top-0` reaches
@@ -1843,6 +1856,8 @@ export function App() {
                 onOpenWorkBoardItem={openWorkBoardItem}
                 onOpenSideChat={(sideChatSessionId, originSessionId) =>
                   void openSideChat(sideChatSessionId, originSessionId)}
+                pendingAnswerSessionIds={pendingAnswers.sessionIds}
+                pluginRequestPending={pendingAnswers.unattributed.length > 0}
                 hasApiKey={effectiveLlmReady}
                 subscriptionUnavailable={subscriptionUnavailableProvider !== undefined}
                 subscriptionPending={subscriptionPendingProvider !== undefined}
@@ -2042,14 +2057,12 @@ export function App() {
                           frames of a turn still in flight — and take the
                           composer draft and scroll position with it.
 
-                          `data-visible` answers "is a conversation on screen",
-                          which is what the window-level approval band asks
-                          before it draws a card no pane could: with one pane it
-                          is the old `activeView === "home"`, and with several it
-                          is true while any of them still draws its
-                          conversation. `contents` keeps the wrapper out of the
-                          layout entirely, so the flex chain reads exactly as it
-                          does when this is the only child. */}
+                          `data-visible` answers "is a conversation on screen":
+                          with one pane it is the old `activeView === "home"`,
+                          and with several it is true while any of them still
+                          draws its conversation. `contents` keeps the wrapper
+                          out of the layout entirely, so the flex chain reads
+                          exactly as it does when this is the only child. */}
                       <div
                         data-testid="chat-surface"
                         data-visible={chatGroups.groups.some((group) => !group.hidden
@@ -2102,21 +2115,22 @@ export function App() {
                                   data-testid={`pane-cell:${group.id}`}
                                   data-hidden={group.hidden ? "true" : undefined}
                                 >
-                                  {/* What this pane is showing. A routed view replaces
-                                      the conversation IN THE CELL, so it inherits the
-                                      tile's box, its inset and its place in the split
-                                      tree — and the panes beside it keep drawing
-                                      whatever they hold. */}
-                                  {renderPaneRoute(paneView, group.id)}
                                   {/* The tile owns its conversation: every hook inside is
                                       keyed on its group-bound api, so two tiles stream at
                                       once without either seeing the other's transcript.
 
-                                      Hidden rather than unmounted while a view covers it —
-                                      the turn it may be streaming, its composer draft and
-                                      its scroll position all live in here. `contents` while
-                                      it draws, so the wrapper adds no box of its own. */}
-                                  <div className={paneView === "home" ? "contents" : "hidden"}>
+                                      A routed view replaces the conversation IN THE CELL,
+                                      so it inherits the tile's box, its inset and its place
+                                      in the split tree — and the panes beside it keep
+                                      drawing whatever they hold. It is rendered from inside
+                                      the tile's render prop because it carries the tile's
+                                      own `settle` cards: the conversation behind the view
+                                      is hidden rather than unmounted — the turn it may be
+                                      streaming, its composer draft and its scroll position
+                                      all live in here — and the cards its turn is parked
+                                      on are drawn in the frame that IS visible, whichever
+                                      that is. `contents` while the conversation draws, so
+                                      the wrapper adds no box of its own. */}
                                   <ChatGroupSession
                                     chatGroupId={group.id}
                                     api={api}
@@ -2128,17 +2142,16 @@ export function App() {
                                     // screen NOW, whatever the reason. The tree answers one
                                     // reason (another pane has the box); the route answers the
                                     // other (this pane is showing Settings or a plugin view, so
-                                    // its conversation is behind display:none). A tile that only
-                                    // knew the tree kept its approval claim and drew its question
-                                    // cards into a surface nobody could see, and the window band
-                                    // drew nothing — so approvals and questions, which sit over
-                                    // the composer, read this combined flag. The wrapper above
-                                    // reads the same fact.
+                                    // its conversation is behind display:none). The composer
+                                    // dock and the question overlay sit over the composer, so
+                                    // they read this combined flag: routed, the same cards go
+                                    // into the routed frame's `settle` slot instead.
                                     //
-                                    // `paneHidden` is the tree's answer alone. An overlay card is
-                                    // drawn in the FOCUSED pane, and the pane frame owns the lane
-                                    // it floats in, so a routed pane still draws them; only a
-                                    // pane the tree is not drawing sends them to the window band.
+                                    // `paneHidden` is the tree's answer alone, and it is the
+                                    // one that decides whether this tile DRAWS its cards at
+                                    // all: a routed pane still has a frame on screen to draw
+                                    // them in; a pane the tree is not drawing has none, so its
+                                    // cards stay parked in it and the window shows a dot.
                                     //
                                     // The route is asked of THIS pane's own content, not of
                                     // the window: a pane showing Settings hides its
@@ -2148,7 +2161,10 @@ export function App() {
                                     paneHidden={group.hidden}
                                     onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
                                   >
-                                    {({ actions, trailing, content, currentSessionId: tileSessionId }) => (
+                                    {({ actions, trailing, content, settle, currentSessionId: tileSessionId }) => (
+                                      <>
+                                      {renderPaneRoute(paneView, group.id, settle)}
+                                      <div className={paneView === "home" ? "contents" : "hidden"}>
                                       <PaneFrame
                                         title={
                                           sessions.find((session: SessionSummary) => session.id === tileSessionId)?.title
@@ -2180,12 +2196,14 @@ export function App() {
                                           maximized: chatGroups.maximizedId === group.id,
                                           onToggleMaximize: () => chatGroups.toggleMaximize(group.id),
                                         } : {})}
+                                        restoreAttention={paneRestoreAttention(group.id)}
                                       >
                                         {content}
                                       </PaneFrame>
+                                      </div>
+                                      </>
                                     )}
                                   </ChatGroupSession>
-                                  </div>
                                 </div>
                                 );
                                 })}
@@ -2207,95 +2225,6 @@ export function App() {
                             </PageShell>
                       </div>
                     </ErrorBoundary>
-                  </div>
-                  {/* The window's own band: everything the window itself has to
-                      show, stacked in one strip beside the tiles rather than
-                      floating over them.
-
-                      Two occupants. The dock draws only the approval requests
-                      no conversation surface claimed (see `unclaimedApprovals`).
-                      The overlay region draws only what no tile can draw: a
-                      card whose origin conversation has left the screen, and
-                      while no pane is drawn at all, the cards no conversation
-                      owns. Otherwise a card with no origin is drawn in the
-                      FOCUSED pane and follows focus, and that pane's frame owns
-                      the lane it floats in — so it is drawn there, whatever the
-                      pane is showing, not here. See `overlayCardTile`.
-
-                      It is a BAND, not a float: a flex sibling BELOW the route
-                      canvas, so the space it takes is space the tile grid does
-                      not get, and nothing here can win a hit-test over a tile.
-                      An absolutely positioned surface over the canvas left
-                      `inert` and the caret alone and still took the click at a
-                      tile composer's centre — keyboard-reachable, not
-                      mouse-clickable. `empty:hidden` gives the band back when
-                      both occupants draw nothing.
-
-                      Its cap is what the tile grid can spare, not a share of
-                      the viewport: the shortest tile still has to clear the
-                      floor the split and resize rules already hold it to, or
-                      every transcript on screen collapses to nothing. Below
-                      `WINDOW_DOCK_MIN_HEIGHT` the band stops giving and its
-                      occupants scroll inside it instead — `overflow-y-auto`,
-                      because two occupants asking for more than the budget
-                      would otherwise paint outside the band and back over the
-                      tiles, which is the whole thing the band exists to stop. */}
-                  <div
-                    className="flex shrink-0 flex-col gap-2 overflow-y-auto overscroll-contain px-3 pb-3 empty:hidden"
-                    style={{ maxHeight: windowBandMaxHeight }}
-                    data-approval-scope
-                    data-testid={TEST_IDS.windowApprovalScope}
-                  >
-                    <OverlayCardRegion
-                      chatGroupId={null}
-                      actionChatGroupId={chatGroups.focusedId}
-                      overlayCardTile={overlayCardTileForWindow}
-                      onPluginPrimaryAction={(id, chatGroupId) => {
-                        void handlePluginPrimaryAction(id, chatGroupId);
-                      }}
-                      onRoutineAcknowledge={handleRoutineAcknowledge}
-                      onProposalAnswer={(id, disposition, chatGroupId) => {
-                        void handleProposalAnswer(id, disposition, chatGroupId);
-                      }}
-                    />
-                    {strandedQuestion !== null && (
-                      <div data-testid={TEST_IDS.questionOverlay}>
-                        <AskUserQuestionCard
-                          key={strandedQuestion.request.id}
-                          api={api}
-                          request={strandedQuestion.request}
-                          onResolved={(id) => {
-                            chatGroupSessions.read(strandedQuestion.chatGroupId)
-                              ?.resolveAskQuestion(id);
-                          }}
-                        />
-                      </div>
-                    )}
-                    <ApprovalDock
-                      placement="window-chrome"
-                      queue={unclaimedApprovals}
-                      conversationLabel={
-                        windowApprovalHead?.sessionId === undefined
-                          ? t("approvalAttribution.unattributed")
-                          : t("approvalAttribution.headlessSession")
-                      }
-                      proposedChoice={
-                        windowApprovalHead !== null
-                          && approvalProposal?.requestId === windowApprovalHead.id
-                          ? approvalProposal.choice
-                          : null
-                      }
-                      onDecide={(choice, pattern, extras) => {
-                        if (windowApprovalHead === null) return;
-                        void handleApprovalDecide(windowApprovalHead.id, choice, pattern, extras);
-                      }}
-                      onOpenPermanentDeny={handleOpenPermanentDeny}
-                      interactionLocked={
-                        windowApprovalHead !== null
-                          && exactDenyDraft?.requestId === windowApprovalHead.id
-                      }
-                      reviewerSuggestion={reviewerSuggestion}
-                    />
                   </div>
                   {/* StatusBar notifications render inside ChatView, directly above
                       the composer. The composer's own status sub-row keeps showing

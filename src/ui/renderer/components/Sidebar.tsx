@@ -1,5 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
+import { PendingAnswerDot } from "./PendingAnswerDot.js";
 import { ViewHistoryNav, type ViewPathNavProps } from "./ViewPathNav.js";
 import {
   Blocks,
@@ -210,6 +211,16 @@ export interface SidebarProps {
   conversationActions?: ConversationRowActions;
   /** What a project row can do to itself — see ProjectRowActions. */
   projectActions?: ProjectRowActions;
+  /**
+   * Sessions whose turn is parked on a request the user cannot currently see
+   * — an approval, a question or a deferred approval held by a pane that is
+   * hidden, routed away, or not open at all. Their rows carry the yellow dot.
+   * One selector (`pendingAnswers`) feeds this and the header controls, so
+   * the sidebar and a pane header cannot disagree about who is waiting.
+   */
+  pendingAnswerSessionIds?: ReadonlySet<string>;
+  /** A plugin or host request names no conversation and is waiting — the Plugins row carries the dot. */
+  pluginRequestPending?: boolean;
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
@@ -401,6 +412,8 @@ interface NavGroupProps {
   icon: React.ReactNode;
   /** A row inside this group is the current page — lights the trigger. */
   containsActive: boolean;
+  /** Something inside this group is waiting on the user — draws the pending-answer dot. */
+  attention?: boolean;
   collapsed: boolean;
   /** The rows, rendered inside the flyout; `close` dismisses it after a pick. */
   children: (close: () => void) => React.ReactNode;
@@ -416,7 +429,7 @@ const MENU_ROW_KEYS = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
  * label + chevron, collapsed the icon alone. Enter/Space open, arrows and
  * Home/End walk the rows, Esc closes, a pick navigates and closes.
  */
-function NavGroup({ group, label, icon, containsActive, collapsed, children }: NavGroupProps) {
+function NavGroup({ group, label, icon, containsActive, attention = false, collapsed, children }: NavGroupProps) {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -445,6 +458,7 @@ function NavGroup({ group, label, icon, containsActive, collapsed, children }: N
         <span className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-full ${toneStyle.bar}`} />
       )}
       <span className="h-4 w-4 flex items-center justify-center">{icon}</span>
+      {attention ? <PendingAnswerDot testId={`sidebar-group-${group}-pending-answer`} /> : null}
     </button>
   ) : (
     <button
@@ -460,6 +474,7 @@ function NavGroup({ group, label, icon, containsActive, collapsed, children }: N
       )}
       <span className="shrink-0 h-4 w-4 flex items-center justify-center">{icon}</span>
       <span className="min-w-0 truncate flex-1 text-left">{label}</span>
+      {attention ? <PendingAnswerDot inline testId={`sidebar-group-${group}-pending-answer`} /> : null}
       <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60" />
     </button>
   );
@@ -983,6 +998,7 @@ function SessionRow({
   onTogglePin,
   onOpenMenu,
   unread,
+  pendingAnswer = false,
   responding,
   archived,
   renaming,
@@ -1012,6 +1028,11 @@ function SessionRow({
   onOpenMenu?: (event: MouseEvent<HTMLElement>) => void;
   /** Marked unread — drawn as a dot plus a heavier title. */
   unread?: boolean;
+  /**
+   * This conversation's turn is parked on a request the user cannot see from
+   * where they are — the yellow dot says "come here, something is waiting".
+   */
+  pendingAnswer?: boolean;
   /** A turn is running here — the kind glyph gives way to a pulsing dot. */
   responding?: boolean;
   /** Archived — kept legible but visibly set aside. */
@@ -1158,6 +1179,9 @@ function SessionRow({
           <span className={`min-w-0 flex-1 truncate ${unread ? "font-semibold text-foreground" : ""}`}>
             {session.title}
           </span>
+          {pendingAnswer ? (
+            <PendingAnswerDot inline testId={`sidebar-pending-answer-${session.id}`} />
+          ) : null}
         </button>
       )}
       {time ? (
@@ -1215,6 +1239,7 @@ function ProjectSessionList({
   projectActions,
   scrollViewportRef,
   onExpandSidebar,
+  pendingAnswerSessionIds,
 }: {
   collapsed: boolean;
   sessions: SessionSummary[];
@@ -1253,6 +1278,8 @@ function ProjectSessionList({
   scrollViewportRef: RefObject<HTMLDivElement | null>;
   /** Collapsed rail: expand the sidebar so the folders can be shown. */
   onExpandSidebar?: () => void;
+  /** See `SidebarProps.pendingAnswerSessionIds`. */
+  pendingAnswerSessionIds?: ReadonlySet<string>;
 }) {
   const { t } = useTranslation();
   const openNativeContextMenu = useNativeContextMenu();
@@ -1488,6 +1515,7 @@ function ProjectSessionList({
         active={false}
         family={session.family}
         nested={nested}
+        pendingAnswer={pendingAnswerSessionIds?.has(session.id) ?? false}
         {...(open ? { onOpenFamilyRow: open } : {})}
         onOpenMenu={(event) => openNativeContextMenu(
           event,
@@ -1512,6 +1540,7 @@ function ProjectSessionList({
         onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}
         onOpenMenu={(event) => openNativeContextMenu(event, "conversation", conversationMenuHandlers(session))}
         unread={conversationActions?.isUnread(session.id)}
+        pendingAnswer={pendingAnswerSessionIds?.has(session.id) ?? false}
         responding={conversationActions?.isResponding(session.id)}
         archived={conversationActions?.isArchived(session.id)}
         renaming={renamingKey === `session:${session.id}`}
@@ -1975,6 +2004,8 @@ export function Sidebar({
   projectActions,
   isProjectPinned,
   onToggleProjectPin,
+  pendingAnswerSessionIds,
+  pluginRequestPending = false,
 }: SidebarProps) {
   const { t } = useTranslation();
   const resizable = !collapsed && Boolean(onWidthChange && onWidthCommit);
@@ -2390,6 +2421,7 @@ export function Sidebar({
                     label={t("sidebar.pluginsLabel")}
                     icon={<Blocks className="h-4 w-4" />}
                     containsActive={pluginsContainActive}
+                    attention={pluginRequestPending}
                     collapsed={compact}
                   >
                     {(close) => {
@@ -2467,6 +2499,7 @@ export function Sidebar({
                     onToggleProjectPin={onToggleProjectPin}
                     conversationActions={conversationActions}
                     projectActions={projectActions}
+                    pendingAnswerSessionIds={pendingAnswerSessionIds}
                     scrollViewportRef={navScrollViewportRef}
                     onExpandSidebar={expandSidebar}
                   />

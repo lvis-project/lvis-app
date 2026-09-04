@@ -35,7 +35,6 @@ export const TEST_IDS = {
   slashPickerTrigger: "slash-picker-trigger",
   tokenCostBadge: "token-cost-badge",
   viewPathBack: "view-path-back",
-  windowApprovalScope: "window-approval-scope",
 } as const;
 
 export type TestId = (typeof TEST_IDS)[keyof typeof TEST_IDS];

@@ -118,6 +118,45 @@ describe("PaneFrame", () => {
     expect(view.container.querySelector('[data-testid="floating-right-lane"]')).toBeNull();
   });
 
+  it("draws the settle slot at the foot of its body, after the content and the lane, and none when given none", () => {
+    // What the pane's conversation is parked on — an approval, a question —
+    // is drawn in the frame whatever the frame shows, so a routed pane can
+    // settle its conversation's ask without going back to it. The slot is the
+    // body's, like the lane: under the header band, inside the outline.
+    const view = render(pane({
+      children: <div data-testid="pane-content">body</div>,
+      lane: <div data-testid="pinned-card">card</div>,
+      settle: <div data-testid="settle-card">approve?</div>,
+    }));
+    const body = view.container.querySelector<HTMLElement>("[data-body-inset]")!;
+    const settle = view.container.querySelector<HTMLElement>('[data-testid="settle-card"]')!;
+    expect(body.contains(settle)).toBe(true);
+    expect(view.container.querySelector('[data-testid="pane-header"]')!.contains(settle)).toBe(false);
+    const lane = view.container.querySelector<HTMLElement>('[data-testid="floating-right-lane"]')!;
+    const content = view.container.querySelector<HTMLElement>('[data-testid="pane-content"]')!;
+    expect(content.compareDocumentPosition(settle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lane.compareDocumentPosition(settle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The frame column is the approval scope: a dock in the slot looks up to
+    // it for the composer to cover, and finds none on a routed pane.
+    expect(settle.closest("[data-approval-scope]")).not.toBeNull();
+    expect(settle.closest("[data-approval-scope]")!.contains(body)).toBe(true);
+
+    view.rerender(pane());
+    expect(view.container.querySelector('[data-testid="settle-card"]')).toBeNull();
+  });
+
+  it("marks the maximize control while a pane it hides holds a parked answer", () => {
+    const view = render(pane({ onToggleMaximize: vi.fn(), maximized: true, restoreAttention: true }));
+    const dot = screen.getByTestId("pane-maximize-pending-answer");
+    expect(screen.getByTestId("pane-maximize").contains(dot)).toBe(true);
+    expect(dot.getAttribute("aria-label")).toBe("답변 대기 중");
+    view.rerender(pane({ onToggleMaximize: vi.fn(), maximized: true }));
+    expect(screen.queryByTestId("pane-maximize-pending-answer")).toBeNull();
+    // No control, no dot: the mark lives on the control that brings the pane back.
+    view.rerender(pane({ restoreAttention: true }));
+    expect(screen.queryByTestId("pane-maximize-pending-answer")).toBeNull();
+  });
+
   it("swaps the border on focus without changing the frame's size", () => {
     const view = render(pane());
     const frame = () => view.container.querySelector('[data-testid="pane"]')!;
