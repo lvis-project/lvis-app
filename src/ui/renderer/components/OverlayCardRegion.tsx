@@ -1,9 +1,10 @@
 // OverlayCardRegion — mounts one surface's active OverlayCard from OverlayContext.
 //
-// Renders in a separate z-layer above the scroll area: in the pane frame's
-// floating lane for a tile (`PaneFrame`'s `lane`, so the card stays with the
-// pane whatever it shows), in the window's own band for the cards no drawn
-// pane can hold.
+// Renders in a separate z-layer above the scroll area, in the pane frame's
+// floating lane (`PaneFrame`'s `lane`, so the card stays with the pane
+// whatever it shows). A card whose conversation no drawn pane holds is drawn
+// by no region: it waits with its conversation, and the sidebar row carries
+// the attention dot — see `overlayCardTile` and `pendingAnswers`.
 // Never injects entries into chat history; routine sources remain isolated.
 //
 // One card renders on ONE surface — see `overlayCardTile`. The queue is the
@@ -16,8 +17,7 @@
 //   - routine: primary action opens the routine's session (only when
 //     `routineSessionId` is present — notification-only routines hide it)
 //   - plugin / app (insertion-type): primary action deferred to
-//     `onPluginPrimaryAction`, and withheld entirely when the card's origin
-//     conversation is no longer open.
+//     `onPluginPrimaryAction`.
 //   - proposal: a plugin's onboarding question. Three answers instead of one
 //     confirm, and the host performs the accepted action itself.
 
@@ -30,17 +30,13 @@ import type { OverlayCardPlacement } from "./chat-group-session-registry.js";
 import type { OnboardingProposalDisposition } from "../../../main/onboarding-proposal-store.js";
 
 export interface OverlayCardRegionProps {
+  /** The tile this region renders inside. */
+  chatGroupId: string;
   /**
-   * The tile this region renders inside, or `null` when it is the window's
-   * own region — the one that draws what no conversation owns.
-   */
-  chatGroupId: string | null;
-  /**
-   * The conversation this region's primary action runs in. A tile's region
-   * acts in its own tile. The window's region has no conversation of its own,
-   * so it names the focused one — the conversation the user is looking at,
-   * the same rule an unowned question already follows. Stated here rather
-   * than inferred from where the card happens to be drawn.
+   * The conversation this region's primary action runs in — this tile's.
+   * Stated here rather than inferred from where the card happens to be
+   * drawn, because a card with no origin is drawn in the FOCUSED pane and
+   * its turn has to start there.
    */
   actionChatGroupId: string;
   /**
@@ -76,23 +72,16 @@ export function OverlayCardRegion({
   const { queue, dismiss, openSession, expandedCardIds, setCardExpanded } =
     useOverlayContext();
 
-  // This surface's slice of the window queue. Every tile mounts a region, the
-  // window mounts one more, and each keeps only the cards attributed to it, so
-  // a card is shown — and so dismissed or confirmed — exactly once however
-  // many tiles are open.
+  // This surface's slice of the window queue. Every tile mounts a region and
+  // each keeps only the cards attributed to it, so a card is shown — and so
+  // dismissed or confirmed — exactly once however many tiles are open.
   const mine = useMemo(
     () => queue.filter((item) => overlayCardTile(item).chatGroupId === chatGroupId),
     [queue, overlayCardTile, chatGroupId],
   );
 
-  // Where this region sits decides its box. A tile's region hangs in the
-  // tile's floating lane at the lane's own width; the window's region is one
-  // occupant of the window band, so it takes the band's reading column the way
-  // the dock beside it does.
-  const inWindowBand = chatGroupId === null;
-  const regionClassName = inWindowBand
-    ? "pointer-events-none mx-auto w-full min-w-0 max-w-(--reading-column-max)"
-    : `pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`;
+  // The region hangs in the tile's floating lane at the lane's own width.
+  const regionClassName = `pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`;
 
   const [activeIndex, setActiveIndex] = useState(0);
   // Clamped rather than corrected in an effect: the slice can shrink between
@@ -126,11 +115,9 @@ export function OverlayCardRegion({
     return (
       <div
         data-testid="overlay-card-region"
-        data-overlay-surface={chatGroupId ?? "window"}
-        // In a tile, position comes from `FloatingRightLane`, which is also what
-        // kept the old tool-activity rail from landing on top of this card's
-        // controls. In the window band the card is in flow — see
-        // `regionClassName`.
+        data-overlay-surface={chatGroupId}
+        // Position comes from `FloatingRightLane`, which is also what kept the
+        // old tool-activity rail from landing on top of this card's controls.
         className={regionClassName}
       >
         <div className="pointer-events-auto">
@@ -179,7 +166,7 @@ export function OverlayCardRegion({
     return (
       <div
         data-testid="overlay-card-region"
-        data-overlay-surface={chatGroupId ?? "window"}
+        data-overlay-surface={chatGroupId}
         data-overlay-source="proposal"
         className={regionClassName}
       >
@@ -215,19 +202,10 @@ export function OverlayCardRegion({
   // provenance (the envelope in `pendingPrompt` and the badge below).
   if (active.source.kind === "plugin" || active.source.kind === "app") {
     const kind = active.source.kind;
-    // The card outlived the conversation it was staged for. Confirming would
-    // start the turn in whatever tile happens to be focused, which is the very
-    // mismatch main refuses on the way in — so the card keeps only its dismiss,
-    // and says why.
-    const { orphaned } = overlayCardTile(active);
     return (
       <div
         data-testid="overlay-card-region"
-        data-overlay-surface={chatGroupId ?? "window"}
-        // In a tile, position comes from `FloatingRightLane`, which is also what
-        // kept the old tool-activity rail from landing on top of this card's
-        // controls. In the window band the card is in flow — see
-        // `regionClassName`.
+        data-overlay-surface={chatGroupId}
         className={regionClassName}
       >
         <div className="pointer-events-auto">
@@ -244,12 +222,11 @@ export function OverlayCardRegion({
             onDismiss={() => dismiss(active.id)}
             expanded={expanded}
             onExpandedChange={onExpandedChange}
-            onPrimaryAction={orphaned ? undefined : () => {
+            onPrimaryAction={() => {
               // Dismiss from queue first, then notify App for chat insert
               dismiss(active.id);
               onPluginPrimaryAction(active.id, actionChatGroupId);
             }}
-            {...(orphaned ? { notice: t("overlayCardRegion.originConversationClosed") } : {})}
             primaryActionLabel={active.primaryActionLabel ?? t("overlayCardRegion.confirm")}
             kind={kind}
           />

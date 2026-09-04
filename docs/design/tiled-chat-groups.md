@@ -56,8 +56,11 @@ On top is its **location** — a `ViewLocation`, the same union the window's
 location has always used, held per pane in `contentById`. `{view:"home"}` means
 "draw this pane's own conversation"; every other value is a feature panel,
 Settings or a plugin view drawn over it. The conversation is not taken away
-while a view covers it: the tile stays mounted and goes `hidden`, exactly as it
-does when another tile has the box.
+while a view covers it: the tile stays mounted and goes `hidden`, as it does
+when another tile has the box — with one difference the cards care about. A
+routed pane still has a frame on screen, so the cards its conversation is
+parked on are drawn in that frame; a pane the tree is not drawing has none,
+and its cards wait with it (`paneHidden`).
 
 The location lives beside the tree, not inside it, for the same reason
 `panelOpenIds` does: the tree is geometry, and a leaf that carried content would
@@ -371,48 +374,74 @@ The routing is one rule, `sessionOwnedBy`, applied by two readers:
   approvals (`agent_spawn` asks by contract), so the spawn card follows the
   same rule: it is drawn in the tile whose turn is spawning.
 
-What no surface claims has one explicit home, the window's own dock: a
-request that names no conversation (a host or plugin ask), or a session no
-open surface holds (a tile maximized away while its turn asked). That dock
-draws only unclaimed requests; it is those requests' home, not a catch-all
-behind the tiles. It has a `data-approval-scope` of its own, beside the tiles
-and an ancestor of none — so an unclaimed card covers no tile's composer and
-takes no tile's caret. The invariant, then: a `data-approval-scope` contains at
-most ONE composer, the one its dock may cover.
+The surface that holds the conversation is the ONLY surface that draws its
+cards, and it draws them whether or not the user is looking at it. There is no
+second copy and no fallback surface: a card never moves to another pane, and
+the window draws no card of a conversation's. What changes with where the user
+is looking is the FRAME the pane draws the card in, and whether a dot marks the
+way to it:
 
-The window's dock is a **band**, not a float: a flex sibling below the route
-canvas, so the space it takes is space the tile grid does not get. Over a
-conversation the float is right — the card covers that surface's own composer,
-which that surface inerts anyway. The window has no composer of its own and
-every composer on screen belongs to someone else, so floating there left `inert`
-and the caret correct while still winning the hit-test at a tile's textarea:
-keyboard-reachable, not mouse-clickable. Position follows the same rule the
-scope does — a surface may only take space from itself.
+- **The pane shows its conversation.** The card sits over the composer, which
+  goes `inert` (`ApprovalDock`, `QuestionOverlay` in the composer dock).
+- **The pane is routed** to Settings, the work board or a plugin view. The
+  conversation is hidden, not the pane: the tile builds the same two cards and
+  hands them to the routed frame's `settle` slot (`PaneFrame`'s `settle`,
+  rendered at the foot of the frame body, full width — the same place the
+  composer dock would be). The `data-approval-scope` is the pane frame's
+  column, so the dock finds no composer in it and inerts nothing. The card is
+  attributed to "이 패널의 대화 <title>" so the user knows what is waiting under
+  the view.
+- **The pane is not drawn** — the tree hides it behind a maximized neighbour
+  (`paneHidden`). The tile keeps its claim and its cards and draws nothing:
+  there is no frame to draw into. The pending-answer dot goes on the
+  maximize control of the pane that covers it and on the conversation's
+  sidebar row.
+- **A side chat.** Its panel claims its loop's session for as long as the loop
+  has one and draws its approvals and, through `useWorkflowTools`, its
+  questions over its own composer. The side chat's view stays mounted behind
+  another tab (`ChatSidePanel` hides it rather than unmounting it), so the
+  claim and the cards live on; while the panel is closed or the tab is not in
+  front the dot goes on the pane's work-panel toggle, on the side-chat tab, and
+  on the side chat's sidebar row and its parent's. A tile never adopts a side
+  chat's session (`tileDrawsSession`).
+- **A conversation no pane holds** — a routine's, a work-board run's, a main
+  conversation this window closed with its ask still parked. Nothing draws the
+  card; the conversation's sidebar row carries the dot and the card appears
+  when the row is opened. The host's `lvis:approval:settled` announcement
+  keeps the queue honest meanwhile (below).
 
-That band is the window's whole surface, not the dock's alone: the unclaimed
-approval dock and the window's own overlay cards stack inside it and share one
-budget. Anything the window has to show has the same problem and takes the same
-answer — a second float, anchored top-right, would land on the rightmost tile's
-own lane and take clicks meant for it.
+A `data-approval-scope` contains at most ONE composer, the one its dock may
+cover; that invariant is what lets the routed frame and the side chat reuse
+the same dock without covering a composer that is not theirs.
+
+**The one request with no conversation** — a host or plugin ask whose
+`sessionId` is undefined, or names a session no surface holds and no row
+lists — is not parked on any turn, so no composer waits and no dock is right.
+It is drawn as an answer-shaped card in the FOCUSED pane's floating right lane
+(`ApprovalLaneCard`), attributed "플러그인 요청 · <plugin>" or "호스트 요청"
+from the request's own `sourcePluginId`, following focus the way an unowned
+overlay card does; it inerts nothing, and the sidebar's Plugins row carries the
+dot while it waits.
+
+**The dot.** One meaning, one drawing: `PendingAnswerDot`, a `--warning` fill
+with a ring of the surface colour, labelled "답변 대기 중". On a sidebar row it
+says "this conversation is interrupted on a card you must answer", whether or
+not that card is on screen; on the maximize control, the work-panel toggle
+and the side-chat tab it says "the card is behind this", so those carry it only
+while the card is off screen. Every place it appears is decided by ONE
+selector, `pendingAnswers` in `chat-group-session-registry.ts`, from the
+window's approval queue, every tile's questions and side chat, the reviewer's
+deferred entries and the overlay queue: the sidebar rows, the maximize
+control, the work-panel toggle and side-chat tab, and the Plugins row all read
+that one answer, so two of them cannot disagree. A sub-agent's ask maps to the
+row of the tile that spawned it; a side chat's, to its own row and its
+parent's.
 
 Overlay cards are the same rule read from the pane's side: the floating right
 lane is the PANE FRAME's, so a card is drawn in a pane whatever that pane shows
 — its conversation, Settings, the work board, a plugin view. A card no
-conversation owns is drawn in the focused pane and follows focus; only when no
-pane is drawn at all does it fall to the band. See "Overlay cards: the pane's,
-or the window's" below.
-
-Because a band takes its height out of the grid, its cap comes from the grid's
-own arithmetic rather than from a share of the viewport: the shortest tile must
-still clear `PANE_MIN_HEIGHT` plus the cell inset and the tile row's
-bottom gutter — the floor a split or a gutter drag already holds it to — and the
-band gets what is left, down to `WINDOW_DOCK_MIN_HEIGHT`, below which the card
-scrolls inside itself instead of taking more. A fraction of the window would be
-comfortable above one tile and starve four: measured at 1243x768 with a 2x2
-holding an unclaimed request and a window card, an uncapped band grows to 590px
-and leaves 59px frames with no transcript at all, while the cap holds the band
-at 144px and the frames at 282px. The cap is a ceiling, not a size: with one
-short card the band settles at 112px on its own and the frames keep 298px.
+conversation owns is drawn in the focused pane and follows focus. See "Overlay
+cards: owned, or the window's" below.
 
 `PANE_MIN_HEIGHT` is the measured floor, not a round number: it is the
 frame height at which a tile still holds a header, a composer, AND one visible
@@ -420,14 +449,15 @@ turn. Shrinking the window with one tile up, the turn goes first — at a 290px
 frame the transcript viewport is 11px, at 270px it is 0 and the composer starts
 overflowing its column. 280px is where all three still fit. The floor lives on
 what the tile contains, so it moves when the composer does rather than when the
-window does, and the band's cap moves with it.
+window does.
 
 A headless or routine turn is **not** a source of cards here. It has no
 interactive approver by construction: the reviewer's headless lane answers
 `low → allow` and anything above it `deny` (`PermissionManager.resolveReviewerDecision`),
-so it never parks a request for a human. What actually populates the window's
-dock is therefore host and plugin asks that name no conversation, plus cards
-whose conversation left the screen while the ask was parked.
+so it never parks a request for a human. What actually reaches the lane is
+therefore host and plugin asks that name no conversation; what reaches a
+sidebar dot with no pane behind it is a card whose conversation left the
+screen while the ask was parked.
 
 The second kind used to stay forever. A card is normally taken down by the turn
 that asked it, and a tile that closes retires its parked ask host-side
@@ -442,12 +472,13 @@ announced causes would be a second thing to keep in step with the gate's
 
 The two unowned cases split on purpose. An unowned question is adopted by the
 focused tile at arrival: an answer needs a conversation to land in. An unowned
-approval goes to the window's dock: its answer needs none. An unowned overlay
-card takes the second road too — see below.
+approval goes to the focused pane's lane: its answer needs none. An unowned
+overlay card takes the second road too — see below.
 
 The card names the conversation by the surface's own label — the tile's title,
-"Side chat", "Conversation not open in any tile" — and keeps the raw session
-id in the review details, where an identifier is useful.
+"Side chat", "이 패널의 대화 <title>" under a routed view, "Conversation not
+open in any tile" — and keeps the raw session id in the review details, where
+an identifier is useful.
 
 While a tile's turn is parked on an approval, a band above its composer says
 which tools are waiting, and its message queue says it is held by the
@@ -489,7 +520,7 @@ permission-review suggestion report on the window's permission settings, not on
 a conversation. They are subscribed once at App level and rendered once — per
 tile they would raise the same toast in every open conversation at once.
 
-**Overlay cards: the pane's, or the window's.** An `OverlayItem` carries the
+**Overlay cards: owned, or the window's.** An `OverlayItem` carries the
 conversation it came from when main knew one. A card with an origin renders in
 the tile holding that conversation and its primary action continues THAT
 conversation, resolved from the origin at click time rather than from the
@@ -507,19 +538,17 @@ frame body). A card is therefore drawn in its pane whatever the pane shows —
 its conversation, Settings, the work board, a plugin view. The routing asks
 whether the pane is DRAWN (`paneHidden`, the tree's answer), not whether its
 conversation is visible (`hidden`, the tree's or the route's): a routed pane
-hides its composer, so approvals and questions still fall to the window band,
-but an overlay card is not the composer's and does not.
+draws its lane, and its approval and question cards go into the same frame's
+`settle` slot, so nothing a routed pane holds leaves it.
 
-The window's own band keeps only what no drawn pane can hold: a card whose
-origin conversation has left the screen, and — while no pane is drawn at all —
-the cards no conversation owns. It is drawn
-once there, above the approval dock and inside the same height budget — the
-same home the window's approval dock gives an unclaimed request. The window's
-region has no conversation of its own, so its action names the focused one
-explicitly (`actionChatGroupId`) — the same rule an unowned question already
-follows. An orphaned card keeps its dismiss and loses its action: running it in
-a conversation it was never staged for is the mismatch main refuses on the way
-in.
+A card whose origin conversation is not drawn — its pane hidden by the tree,
+or no pane holding it — is drawn nowhere (`overlayCardTile` answers `null`).
+It is that conversation's card: running it in whatever pane is focused is the
+mismatch main refuses on the way in, and drawing it without its action was a
+card that could only be dismissed. It waits in the queue instead, and the
+conversation's sidebar row (and, for a hidden pane, the maximize control)
+carries the pending-answer dot; opening the row draws the card with its
+action, in the pane that then holds the conversation.
 
 **The dock's activity line.** The floating dock holds ONE activity line while
 the window can hold four conversations, so `DockActivity` names the conversation

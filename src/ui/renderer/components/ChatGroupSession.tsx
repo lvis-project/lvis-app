@@ -12,7 +12,12 @@ import {
   tileDrawsSession,
   useRegisterChatGroupSession,
   type ChatGroupSessionRegistry,
+  type PendingAnswers,
+  type SideChatSurface,
 } from "./chat-group-session-registry.js";
+import { ApprovalDock } from "./permissions/ApprovalDock.js";
+import { PendingAnswerDot } from "./PendingAnswerDot.js";
+import { QuestionOverlay } from "./QuestionOverlay.js";
 import { useApprovalSurface } from "../hooks/use-approval.js";
 import { useChatState } from "../hooks/use-chat-state.js";
 import { useChatStatusIndicators } from "../hooks/use-chat-status-indicators.js";
@@ -84,6 +89,12 @@ export interface ChatGroupEnvironment {
   sideChatOpenRequest?: { chatGroupId: string; sessionId: string; nonce: number } | null;
   /** Bring a chat group forward, including one chat mode has folded away. Returns whether focus moved. */
   focusChatGroup: (chatGroupId: string) => boolean;
+  /**
+   * Where the attention dot goes, decided once by the window. A tile reads
+   * its own side chat's verdict from here rather than deciding for itself,
+   * so the panel toggle, the panel's tab and the sidebar row agree.
+   */
+  pendingAnswers: PendingAnswers;
   sessions: readonly { id: string; title: string }[];
   isSessionStarred: (sessionId: string) => boolean;
   handleToggleSessionStar: (sessionId: string, title?: string) => Promise<void>;
@@ -147,6 +158,13 @@ export interface ChatGroupSessionProps {
      */
     trailing: ReactNode;
     content: ReactNode;
+    /**
+     * This conversation's approval and question cards while the pane shows
+     * something else — for the routed frame's settle slot. `null` while the
+     * conversation is drawn (the cards are over its composer) and while the
+     * pane is not drawn at all (nothing to put them in).
+     */
+    settle: ReactNode;
     /** This tile's session — the frame titles itself by its OWN conversation,
      *  not the focused one, or four tiles would all wear the same name. */
     currentSessionId: string;
@@ -162,9 +180,10 @@ export interface ChatGroupSessionProps {
   hidden: boolean;
   /**
    * The TREE is not drawing this pane — another tile has its box. One of the
-   * two reasons `hidden` can be true, published on its own because the overlay
-   * lane is the pane frame's: a pane routed to a view is still drawn, and it
-   * still draws the cards that belong on it. See `overlayCardTile`.
+   * two reasons `hidden` can be true, published on its own because every card
+   * belongs to the PANE: a pane routed to a view is still drawn, and draws its
+   * conversation's cards in its frame's settle slot and its overlay cards in
+   * its frame's lane. Only a pane the tree hides draws nothing.
    */
   paneHidden: boolean;
   onSidePanelOpenChange: (open: boolean) => void;
@@ -209,10 +228,9 @@ export function ChatGroupSession({
     [],
   );
   const focusedRef = useRef(focused);
-  const hiddenRef = useRef(hidden);
-  // A window-wide card whose session no tile is showing — a routine's, a side
-  // chat's, a background agent's after its parent tile moved on — is adopted
-  // here rather than dropped by every tile at once. `readTiles` is read at
+  // A window-wide card whose session no surface holds — a routine's, a
+  // background agent's after its parent tile moved on — is adopted here
+  // rather than dropped by every tile at once. `readTiles` is read at
   // delivery time, not subscribed to: the answer must reflect the window as it
   // is when the card arrives, and this predicate must stay referentially
   // stable or the channel resubscribes and loses in-flight events.
@@ -222,7 +240,6 @@ export function ChatGroupSession({
       sessionId,
       owned: ownsSession(sessionId),
       focused: focusedRef.current,
-      hidden: hiddenRef.current,
     }),
     [registry, ownsSession],
   );
@@ -232,8 +249,17 @@ export function ChatGroupSession({
   } = useWorkflowTools(api, { ownsSession, drawsSession });
   useLayoutEffect(() => {
     focusedRef.current = focused;
-    hiddenRef.current = hidden;
-  }, [focused, hidden]);
+  }, [focused]);
+  // What the side chat beside this conversation is holding, as it reports
+  // it. `shown` is combined here with what only the tile knows — whether its
+  // panel is open and its conversation drawn — before the window reads it.
+  const [sideChatSurface, setSideChatSurface] = useState<SideChatSurface | null>(null);
+  const sideChat = useMemo<SideChatSurface | null>(
+    () => (sideChatSurface === null
+      ? null
+      : { ...sideChatSurface, shown: sideChatSurface.shown && panelOpen && !hidden }),
+    [sideChatSurface, panelOpen, hidden],
+  );
   const ownedChildSessionIds = useMemo(
     () => new Set(
       subAgentSpawns
@@ -601,29 +627,30 @@ export function ChatGroupSession({
 
   // ── the approvals this tile's turn is parked on ────────────────────────────
 
-  // The approval card is drawn where the conversation that asked is shown.
-  // This tile claims the sessions it owns (its own, and its sub-agents'), so
-  // the window leaves their cards to it; the cards render inside this tile's
-  // conversation column (ChatView) and nowhere else.
+  // The approval card is drawn in the PANE holding the conversation that
+  // asked. This tile claims the sessions it owns (its own, and its
+  // sub-agents'), so no other surface draws their cards; the cards render
+  // over this conversation's composer while the conversation is drawn, and
+  // in the pane frame's settle slot while a view covers it.
   const approvals = useApprovalSurface();
   useEffect(
     () => {
-      // A hidden tile claims nothing. Its turn keeps running — which is why it
-      // is still mounted — and a running turn parks on approvals, so the claim
-      // would send the card to a surface inside `display:none` and the turn
-      // would sit out its timeout with nothing on screen to answer. Releasing
-      // the claim (this effect's own cleanup, on the way into hiding) hands the
-      // request to the window's dock, which is exactly where the card belongs
-      // while the conversation that asked is off-screen.
-      if (hidden) return;
+      // A pane the tree is not drawing claims nothing. Its turn keeps running
+      // — which is why it is still mounted — and a running turn parks on
+      // approvals, but there is no surface here to draw the card in: the
+      // request stays in the window's queue, unclaimed, and the sidebar marks
+      // this conversation's row until the pane is drawn again and claims it
+      // back. Whether the pane is ROUTED does not enter into it — a routed
+      // pane is drawn, and draws its cards in its settle slot.
+      if (paneHidden) return;
       return approvals.claims.claim(chatGroupId, ownsSession);
     },
     // `ownsSession` is stable and reads refs, so what this tile owns changes
     // without the claim changing. Re-claiming on every such change is how
     // the window learns to re-read the predicate; without it a request parked
-    // before this tile knew its session (a reload) stays on the window's
-    // dock beside the card this tile draws for the same request.
-    [approvals.claims, chatGroupId, ownsSession, currentSessionId, ownedChildSessionIds, hidden],
+    // before this tile knew its session (a reload) stays unclaimed beside the
+    // card this tile draws for the same request.
+    [approvals.claims, chatGroupId, ownsSession, currentSessionId, ownedChildSessionIds, paneHidden],
   );
   // A request names the session that asked. A sub-agent's ask names the
   // child's session, which the tile that spawned it also owns — its turn is
@@ -635,28 +662,59 @@ export function ChatGroupSession({
         && sessionOwnedBy(currentSessionId, ownedChildSessionIds, req.sessionId)),
     [approvals.queue, currentSessionId, ownedChildSessionIds],
   );
-  // What this tile DRAWS. A hidden tile draws none of them — it released its
-  // claim above, so the window's dock is showing these, and a second copy in a
-  // `display:none` subtree is not merely invisible: the dock takes keyboard
+  // What this PANE draws. A pane the tree hides draws none of them: a copy in
+  // a `display:none` subtree is not merely invisible — the dock takes keyboard
   // focus when it mounts, and focusing anything inside a tile focuses that
   // tile, which would drag the view back to the conversation the user just
   // navigated away from. The unfiltered list is still what the turn-end notice
   // below reads: a turn that ends on an unanswered ask has to say so wherever
   // it was parked.
-  const pendingApprovals = useMemo(
-    () => (hidden ? [] : ownedApprovals),
-    [hidden, ownedApprovals],
+  const drawnApprovals = useMemo(
+    () => (paneHidden ? [] : ownedApprovals),
+    [paneHidden, ownedApprovals],
   );
   // A question is a gate with a deadline, so the same rule as the approvals
-  // above: a hidden tile keeps holding it — nothing else received it — and
-  // stops drawing it, and the window draws it in its band instead. Kept here
-  // rather than moved to the window because ONE surface has to own the answer:
-  // resolving is `dismissAskQuestion`, and a second copy of the queue would
-  // leave the tile showing a card whose gate is already closed.
+  // above: a hidden pane keeps holding it — nothing else received it — and
+  // stops drawing it. Kept here rather than moved to the window because ONE
+  // surface has to own the answer: resolving is `dismissAskQuestion`, and a
+  // second copy of the queue would leave the tile showing a card whose gate
+  // is already closed.
   const drawnAskQuestions = useMemo(
-    () => (hidden ? [] : askQuestions),
-    [hidden, askQuestions],
+    () => (paneHidden ? [] : askQuestions),
+    [paneHidden, askQuestions],
   );
+  // Which of the pane's two slots draws them: over the composer while the
+  // conversation is what the pane shows, the frame's settle slot while a view
+  // covers it. Never both — one card, one place.
+  const routed = hidden && !paneHidden;
+  const pendingApprovals = routed ? [] : drawnApprovals;
+  const composerAskQuestions = routed ? [] : drawnAskQuestions;
+  const settleApprovalHead = routed ? drawnApprovals[0] ?? null : null;
+  const settle: ReactNode = routed ? (
+    <>
+      <ApprovalDock
+        queue={drawnApprovals}
+        conversationLabel={t("approvalAttribution.paneConversation", {
+          title: currentSessionTitle ?? t("mainToolbar.newChat"),
+        })}
+        proposedChoice={
+          settleApprovalHead !== null && approvals.proposal?.requestId === settleApprovalHead.id
+            ? approvals.proposal.choice
+            : null
+        }
+        onDecide={(choice, pattern, extras) => {
+          if (settleApprovalHead === null) return;
+          void approvals.decide(settleApprovalHead.id, choice, pattern, extras);
+        }}
+        onOpenPermanentDeny={approvals.openPermanentDeny}
+        interactionLocked={
+          settleApprovalHead !== null && approvals.lockedRequestId === settleApprovalHead.id
+        }
+        reviewerSuggestion={approvals.reviewerSuggestion}
+      />
+      <QuestionOverlay api={api} requests={drawnAskQuestions} onResolved={dismissAskQuestion} />
+    </>
+  ) : null;
 
   // A turn that ends while an ask of ITS OWN session is still parked here ended
   // without an answer: the host settled the ask (timeout, cancel) and moved on,
@@ -689,6 +747,8 @@ export function ChatGroupSession({
   useRegisterChatGroupSession(registry, chatGroupId, {
     entries, streaming, hidden, paneHidden,
     askQuestions, resolveAskQuestion: dismissAskQuestion,
+    childSessionIds: ownedChildSessionIds,
+    sideChat,
     applyLoadedSession, applyInitialSession, clearForNewChat,
     resetForNewSession, restoreSubAgentSpawns,
     ask: handleAsk,
@@ -723,13 +783,18 @@ export function ChatGroupSession({
   // The one control this pane owns as a TILE rather than as content: the work
   // panel is the conversation's, so it opens from the conversation's own frame.
   const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
+  // The side chat holds a card the user cannot see from here — the panel is
+  // closed, or another tab is up. The window decided that; the toggle only
+  // carries the dot, because opening the panel is how the user reaches it.
+  const sideChatPendingAnswer =
+    sideChat !== null && env.pendingAnswers.sideChatSessionIds.has(sideChat.sessionId);
   const trailing = (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
-          className={HEADER_BUTTON_CLASS}
+          className={`relative ${HEADER_BUTTON_CLASS}`}
           onClick={() => onSidePanelOpenChange(!panelOpen)}
           title={panelLabel}
           aria-label={panelLabel}
@@ -737,6 +802,7 @@ export function ChatGroupSession({
           data-testid={TEST_IDS.panePanelToggle}
         >
           {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+          {sideChatPendingAnswer ? <PendingAnswerDot testId="pane-panel-toggle-pending-answer" /> : null}
         </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom">{panelLabel}</TooltipContent>
@@ -746,6 +812,7 @@ export function ChatGroupSession({
   const chatContextValue = useMemo<ChatContextValue>(() => ({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId, hidden,
+    publishSideChatSurface: setSideChatSurface,
     hasApiKey: env.effectiveLlmReady, settingsLoaded: env.settingsLoaded,
     onOpenSettings: env.onOpenSettings,
     ...env.search,
@@ -795,11 +862,12 @@ export function ChatGroupSession({
         onFeedback={handleFeedback}
         subAgentSpawns={subAgentSpawns}
         loadedSkills={loadedSkills}
-        hasAskQuestions={drawnAskQuestions.length > 0}
-        askQuestions={drawnAskQuestions}
+        hasAskQuestions={composerAskQuestions.length > 0}
+        askQuestions={composerAskQuestions}
         onResolveAskQuestion={dismissAskQuestion}
         approvalSentenceInterceptSubmit={env.approvalSentenceInterceptSubmit}
         pendingApprovals={pendingApprovals}
+        sideChatPendingAnswer={sideChatPendingAnswer}
         plugins={env.plugins}
         onSelectPlugin={env.onSelectPlugin}
         appMode={env.appMode}
@@ -836,5 +904,5 @@ export function ChatGroupSession({
     </ChatContextProvider>
   );
 
-  return <>{children({ actions, trailing, content, currentSessionId })}</>;
+  return <>{children({ actions, trailing, content, settle, currentSessionId })}</>;
 }

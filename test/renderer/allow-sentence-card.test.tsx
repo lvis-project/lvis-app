@@ -17,11 +17,16 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import { submitChatMessage } from "./helpers.js";
+import { MOCK_DEFAULT_SESSION_ID } from "./mock-lvis-api.js";
 import { TEST_IDS, testIdSelector } from "../../src/shared/test-ids.js";
 
 const TARGET = "/home/example/reports/q3.md";
 const PARENT = "/home/example/reports";
 
+/**
+ * A directory approval raised by the focused pane's own turn, so its card is
+ * the dock over that pane's composer — the composer `/allow` is typed into.
+ */
 function approvalRequest(overrides: Record<string, unknown> = {}) {
   return {
     id: "req-allow-1",
@@ -32,6 +37,7 @@ function approvalRequest(overrides: Record<string, unknown> = {}) {
     reason: "outside allowed directories",
     createdAt: 0,
     requireExplicit: false,
+    sessionId: MOCK_DEFAULT_SESSION_ID,
     outOfAllowedDir: {
       candidatePath: TARGET,
       suggestedParent: PARENT,
@@ -114,6 +120,41 @@ describe("/allow — the sentence fills the form", () => {
       choice: "allow-always",
       rememberPattern: PARENT,
     });
+  });
+
+  it("fills the lane card of a request that names no conversation — a host or plugin ask drawn in the focused pane", async () => {
+    // No turn is parked on such a request, so no composer dock draws it; the
+    // focused pane's lane does, and the sentence typed into that pane's
+    // composer addresses it the same way.
+    const app = await renderApp({ hasApiKey: true });
+    const { sessionId: _own, ...unattributed } = approvalRequest({ id: "req-allow-host" });
+    await act(async () => {
+      app.emitApproval(unattributed);
+    });
+    await waitFor(() =>
+      expect(app.container.querySelector('[data-testid="approval-lane-card"]')).toBeTruthy(),
+    );
+    expect(app.container.querySelector(testIdSelector(TEST_IDS.approvalDock))).toBeNull();
+    const ns = window.lvis as unknown as {
+      approval: { selectSentence: ReturnType<typeof vi.fn>; respond: ReturnType<typeof vi.fn> };
+    };
+    ns.approval.selectSentence.mockResolvedValueOnce({
+      ok: true,
+      requestId: "req-allow-host",
+      choice: "allow-always",
+      rememberPattern: PARENT,
+    });
+
+    await submitChatMessage(app.container, "/allow 그 폴더 허용해줘");
+
+    await waitFor(() => expect(ns.approval.selectSentence).toHaveBeenCalledTimes(1));
+    expect(ns.approval.selectSentence.mock.calls[0][0]).toBe("req-allow-host");
+    await waitFor(() =>
+      expect(choice(app.container, "allow-always")?.getAttribute("data-proposed")).toBe("true"),
+    );
+    expect(ns.approval.respond).not.toHaveBeenCalled();
+    expect(app.api.chatSend).not.toHaveBeenCalled();
+    expect(app.container.querySelector('[data-testid="approval-lane-card"]')).toBeTruthy();
   });
 
   it("never sends the sentence to the model as a chat message", async () => {

@@ -119,6 +119,7 @@ import { ko as ko_midnight } from "../generated/midnight.js";
 import { ko as ko_nord } from "../generated/nord.js";
 import { ko as ko_overlayCard } from "../generated/overlayCard.js";
 import { ko as ko_overlayCardRegion } from "../generated/overlayCardRegion.js";
+import { ko as ko_pendingAnswerDot } from "../generated/pendingAnswerDot.js";
 import { ko as ko_permissionDecisionCard } from "../generated/permissionDecisionCard.js";
 import { ko as ko_permissionEvaluationContextPanel } from "../generated/permissionEvaluationContextPanel.js";
 import { ko as ko_permissionModeBadge } from "../generated/permissionModeBadge.js";
@@ -307,6 +308,7 @@ export const koMessages: Record<string, string> = {
   ...ko_nord,
   ...ko_overlayCard,
   ...ko_overlayCardRegion,
+  ...ko_pendingAnswerDot,
   ...ko_permissionDecisionCard,
   ...ko_permissionEvaluationContextPanel,
   ...ko_permissionModeBadge,

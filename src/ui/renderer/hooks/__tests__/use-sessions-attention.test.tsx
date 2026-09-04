@@ -6,7 +6,7 @@ import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import type { LvisApi } from "../../types.js";
 
 const tile = (chatGroupId: string, sessionId: string, streaming: boolean): TileSession =>
-  ({ chatGroupId, sessionId, streaming, hidden: false, paneHidden: false, askQuestions: [] });
+  ({ chatGroupId, sessionId, streaming, hidden: false, paneHidden: false, askQuestions: [], childSessionIds: new Set<string>(), sideChat: null });
 
 describe("turnsEndedUnseen", () => {
   const looking = { focusedChatGroupId: "main", conversationVisible: true };

@@ -12,10 +12,10 @@
  *       loads another conversation, while the host keeps waiting on it.
  *
  * Both were found by an audit that reproduced them; these are those probes
- * with the assertions turned the right way round. The third case followed
- * from the first: once the route hides EVERY tile, a question arriving in
- * that window has no drawn tile to adopt it, so the owner (or the focused
- * tile, for a headless session) must keep it for the window band to lend.
+ * with the assertions turned the right way round. The cards belong to the
+ * conversation that asked, so a routed pane draws its own conversation's
+ * cards in the routed frame's settle slot — the same pane, over the view
+ * that covers the conversation — and nothing of them appears anywhere else.
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
@@ -26,67 +26,79 @@ import { MOCK_DEFAULT_SESSION_ID } from "../../../../test/renderer/mock-lvis-api
 import { MAIN_CHAT_GROUP_ID } from "../../../contract/app-contract.js";
 
 const chatSurface = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-testid="chat-surface"]')!;
-const windowBand = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-testid="window-approval-scope"]')!;
+// The conversation's own column — where a card sits over the composer.
+const conversation = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-testid="chat-main-column"]')!;
+const routedPane = (c: HTMLElement, view: string) =>
+  c.querySelector<HTMLElement>(`[data-testid="main-pane-shell"][data-view="${view}"]`)!;
 const count = (root: ParentNode, id: string) => root.querySelectorAll(`[data-testid="${id}"]`).length;
+const question = (id: string, sessionId: string) => ({
+  id,
+  sessionId,
+  questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
+  createdAt: Date.now(),
+});
 
 describe("gates reach the user when the route leaves the chat surface", () => {
-  it("an approval card moves to the window dock while Settings is open, and back when home returns", async () => {
+  it("an approval card is drawn in the routed pane while Settings is open, and over the composer when home returns", async () => {
     const pendingSend = deferred<{ ok: true }>();
-    const { container, api, emitApproval, emitViewActivate } = await renderApp({ hasApiKey: true });
+    // The conversation is listed so the sidebar has a row to carry the dot;
+    // without one, "no dot" would pass for the wrong reason.
+    const { container, api, emitApproval, emitViewActivate } = await renderApp({
+      hasApiKey: true,
+      sessions: [{ id: MOCK_DEFAULT_SESSION_ID, title: "설정 중 승인", modifiedAt: new Date(2, 0, 1).toISOString() }],
+    });
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
     await submitChatMessage(container, "turn in flight");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => { emitApproval(approvalRequest({ sessionId: MOCK_DEFAULT_SESSION_ID })); });
     await waitFor(() => expect(count(container, "approval-dock")).toBe(1));
-    expect(count(windowBand(container), "approval-dock")).toBe(0);
+    expect(count(conversation(container), "approval-dock")).toBe(1);
 
     await act(async () => { emitViewActivate("settings"); });
     await waitFor(() => expect(chatSurface(container).getAttribute("data-visible")).toBe("false"));
 
-    // The tile released its claim; the window band — outside the route canvas,
-    // so visible over Settings — is the one drawing the card now.
-    await waitFor(() => expect(count(windowBand(container), "approval-dock")).toBe(1));
-    expect(count(chatSurface(container), "approval-dock")).toBe(0);
+    // The pane still holds the conversation the request belongs to, so the
+    // pane draws it: in the settle slot of the frame showing Settings.
+    await waitFor(() => expect(count(routedPane(container, "settings"), "approval-dock")).toBe(1));
+    expect(count(conversation(container), "approval-dock")).toBe(0);
     expect(count(container, "approval-dock")).toBe(1);
+    // Nothing of the window's own draws it — there is no window band.
+    expect(container.querySelector('[data-testid="window-approval-scope"]')).toBeNull();
+    // The conversation is interrupted, seen or not: its row carries the dot.
+    expect(container.querySelector(`[data-testid="sidebar-session-${MOCK_DEFAULT_SESSION_ID}"]`)).not.toBeNull();
+    await waitFor(() => expect(container.querySelector(`[data-testid="sidebar-pending-answer-${MOCK_DEFAULT_SESSION_ID}"]`)).not.toBeNull());
 
     await act(async () => { emitViewActivate("home"); });
     await waitFor(() => expect(chatSurface(container).getAttribute("data-visible")).toBe("true"));
-    await waitFor(() => expect(count(chatSurface(container), "approval-dock")).toBe(1));
-    expect(count(windowBand(container), "approval-dock")).toBe(0);
+    await waitFor(() => expect(count(conversation(container), "approval-dock")).toBe(1));
+    expect(count(container, "approval-dock")).toBe(1);
 
     await act(async () => { pendingSend.resolve({ ok: true }); await pendingSend.promise; });
   });
 
-  it("an ask_user_question card is lent to the window band while a plugin view is open", async () => {
+  it("an ask_user_question card is drawn in the routed pane while a view covers the conversation", async () => {
     const pendingSend = deferred<{ ok: true }>();
     const { container, api, emitAskUserQuestion, emitViewActivate } = await renderApp({ hasApiKey: true });
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
     await submitChatMessage(container, "turn in flight");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
-    await act(async () => {
-      emitAskUserQuestion({
-        id: "ask-gate",
-        sessionId: MOCK_DEFAULT_SESSION_ID,
-        questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
-        createdAt: Date.now(),
-      });
-    });
+    await act(async () => { emitAskUserQuestion(question("ask-gate", MOCK_DEFAULT_SESSION_ID)); });
     await waitFor(() => expect(count(container, "question-overlay")).toBe(1));
 
     await act(async () => { emitViewActivate("settings"); });
     await waitFor(() => expect(chatSurface(container).getAttribute("data-visible")).toBe("false"));
 
-    await waitFor(() => expect(count(windowBand(container), "question-overlay")).toBe(1));
-    expect(count(chatSurface(container), "question-overlay")).toBe(0);
-    // Still ONE card: the tile owns the question and only lends the surface.
+    await waitFor(() => expect(count(routedPane(container, "settings"), "question-overlay")).toBe(1));
+    expect(count(conversation(container), "question-overlay")).toBe(0);
+    // Still ONE card: the tile owns the question and draws it once.
     expect(count(container, "question-overlay")).toBe(1);
 
     await act(async () => { pendingSend.resolve({ ok: true }); await pendingSend.promise; });
   });
 
-  it("a question that ARRIVES while Settings is open reaches the window band, then the tile when home returns", async () => {
+  it("a question that ARRIVES while Settings is open reaches the routed pane, then the composer when home returns", async () => {
     const pendingSend = deferred<{ ok: true }>();
     const { container, api, emitAskUserQuestion, emitViewActivate } = await renderApp({ hasApiKey: true });
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
@@ -96,43 +108,28 @@ describe("gates reach the user when the route leaves the chat surface", () => {
     await act(async () => { emitViewActivate("settings"); });
     await waitFor(() => expect(chatSurface(container).getAttribute("data-visible")).toBe("false"));
 
-    await act(async () => {
-      emitAskUserQuestion({
-        id: "ask-late",
-        sessionId: MOCK_DEFAULT_SESSION_ID,
-        questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
-        createdAt: Date.now(),
-      });
-    });
-    await waitFor(() => expect(count(windowBand(container), "question-overlay")).toBe(1));
+    await act(async () => { emitAskUserQuestion(question("ask-late", MOCK_DEFAULT_SESSION_ID)); });
+    await waitFor(() => expect(count(routedPane(container, "settings"), "question-overlay")).toBe(1));
     expect(count(container, "question-overlay")).toBe(1);
 
     await act(async () => { emitViewActivate("home"); });
-    await waitFor(() => expect(count(chatSurface(container), "question-overlay")).toBe(1));
-    expect(count(windowBand(container), "question-overlay")).toBe(0);
+    await waitFor(() => expect(count(conversation(container), "question-overlay")).toBe(1));
     expect(count(container, "question-overlay")).toBe(1);
 
     await act(async () => { pendingSend.resolve({ ok: true }); await pendingSend.promise; });
   });
 
-  it("a headless session's question that ARRIVES while Settings is open is adopted by the focused tile and lent to the window band", async () => {
+  it("a headless session's question that ARRIVES while Settings is open is adopted by the focused tile and drawn in its routed pane", async () => {
     const { container, emitAskUserQuestion, emitViewActivate } = await renderApp({ hasApiKey: true });
     await act(async () => { emitViewActivate("settings"); });
     await waitFor(() => expect(chatSurface(container).getAttribute("data-visible")).toBe("false"));
 
-    await act(async () => {
-      emitAskUserQuestion({
-        id: "ask-headless-late",
-        sessionId: "routine-headless-session",
-        questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
-        createdAt: Date.now(),
-      });
-    });
-    await waitFor(() => expect(count(windowBand(container), "question-overlay")).toBe(1));
+    await act(async () => { emitAskUserQuestion(question("ask-headless-late", "routine-headless-session")); });
+    await waitFor(() => expect(count(routedPane(container, "settings"), "question-overlay")).toBe(1));
     expect(count(container, "question-overlay")).toBe(1);
 
     await act(async () => { emitViewActivate("home"); });
-    await waitFor(() => expect(count(chatSurface(container), "question-overlay")).toBe(1));
+    await waitFor(() => expect(count(conversation(container), "question-overlay")).toBe(1));
     expect(count(container, "question-overlay")).toBe(1);
   });
 });
@@ -147,14 +144,7 @@ describe("an adopted question survives the adopting tile loading another session
         { id: OTHER, title: "다른 대화", modifiedAt: new Date(2, 0, 1).toISOString() },
       ],
     });
-    await act(async () => {
-      emitAskUserQuestion({
-        id: "ask-headless",
-        sessionId: "routine-headless-session",
-        questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
-        createdAt: Date.now(),
-      });
-    });
+    await act(async () => { emitAskUserQuestion(question("ask-headless", "routine-headless-session")); });
     await waitFor(() => expect(count(container, "question-overlay")).toBe(1));
     const cell = container.querySelector(`[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`)!;
     expect(count(cell, "question-overlay")).toBe(1);

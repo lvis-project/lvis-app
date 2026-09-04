@@ -63,12 +63,6 @@ export interface OverlayCardProps {
   primaryActionLabel?: string;
 
   /**
-   * Why this card has no primary action, in the user's words. Rendered in
-   * place of the action so a card that can only be dismissed says so.
-   */
-  notice?: string;
-
-  /**
    * Whether the summary is expanded, and how to change it.
    *
    * Controlled by the overlay queue rather than held here: the card unmounts
@@ -122,7 +116,6 @@ export function OverlayCard({
   onDismiss,
   onPrimaryAction,
   primaryActionLabel,
-  notice,
   expanded,
   onExpandedChange,
   kind = "routine",
@@ -321,14 +314,6 @@ export function OverlayCard({
               {primaryActionLabel ?? t("overlayCard.pluginPrimaryAction")}
             </Button>
           </div>
-        )}
-        {!running && !dispositions && !onPrimaryAction && notice && (
-          <p
-            data-testid="overlay-card-notice"
-            className="mt-2 text-[11px] text-muted-foreground/(--opacity-stronger)"
-          >
-            {notice}
-          </p>
         )}
         {!running && !dispositions && onPrimaryAction && (
           <div className="mt-2 flex justify-end">

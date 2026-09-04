@@ -64,9 +64,9 @@ export interface OverlayItem {
    *
    * Required, and never minted at render: an insertion card shows this as its
    * relative time, and a card that re-derived "now" whenever it was re-rendered
-   * — a routine's spinner being replaced by its result, or its tile closing and
-   * the card falling to the window band — would reset its own age in front of
-   * the user. Main stamps it on the two emit paths; a routine item takes the
+   * — a routine's spinner being replaced by its result, or its tile coming
+   * back into the tree with the card still parked in it — would reset its own
+   * age in front of the user. Main stamps it on the two emit paths; a routine item takes the
    * instant it fired.
    */
   createdAt: string;
@@ -101,9 +101,9 @@ export interface OverlayContextValue {
    * Cards the user has expanded, by id.
    *
    * Held here rather than inside the card because the card UNMOUNTS whenever it
-   * changes surface — its pinned tile closes and it falls to the window band,
-   * or its origin conversation is re-opened in another tile — and a summary the
-   * user opened must not close itself because the layout moved around it.
+   * changes surface — focus moves to another pane, or its origin conversation
+   * is re-opened in another tile — and a summary the user opened must not
+   * close itself because the layout moved around it.
    */
   expandedCardIds: ReadonlySet<string>;
   setCardExpanded: (id: string, expanded: boolean) => void;
@@ -116,6 +116,7 @@ export function OverlayContextProvider({
   onOpenSession,
   addFireRef,
   runningRoutines,
+  onQueueChange,
 }: {
   children: ReactNode;
   onOpenSession: (sessionId: string) => boolean | Promise<boolean>;
@@ -130,9 +131,19 @@ export function OverlayContextProvider({
    * Provider syncs queue items' running flag when this set changes.
    */
   runningRoutines?: Set<string>;
+  /**
+   * The queue, handed back up to the window that renders this provider. The
+   * window sits ABOVE the provider and cannot read the context, but it has to
+   * know which cards name a conversation no pane is drawing — those are the
+   * ones the sidebar marks rather than any pane draws.
+   */
+  onQueueChange?: (queue: readonly OverlayItem[]) => void;
 }) {
   const [queue, setQueue] = useState<OverlayItem[]>([]);
   const [expandedCardIds, setExpandedCardIds] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    onQueueChange?.(queue);
+  }, [queue, onQueueChange]);
 
   // C1: sync running flag from runningRoutines set whenever it changes
   useEffect(() => {

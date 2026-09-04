@@ -8,8 +8,9 @@ import type { ChatStreamEvent } from "../../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../../types.js";
 import { ChatContextProvider, type ChatContextValue } from "../../context/ChatContext.js";
 import { ApprovalSurfaceProvider } from "../../hooks/use-approval.js";
-import { approvalSurfaceStub } from "../../../../../test/renderer/helpers.js";
+import { approvalRequest, approvalSurfaceStub } from "../../../../../test/renderer/helpers.js";
 import { TEST_IDS } from "../../../../shared/test-ids.js";
+import type { ApprovalRequest, AskUserQuestionRequest } from "../../types.js";
 
 function makeApi() {
   // Two subscribers share the side stream — the transcript reducer and the
@@ -291,5 +292,113 @@ describe("SideChatView — the conversation a side chat belongs to", () => {
       );
     });
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("SideChatView — the cards its own turn parks", () => {
+  /** The side channel plus the window-wide question channel, as the panel subscribes to it. */
+  function makeAskApi() {
+    const base = makeApi();
+    const askHandlers = new Set<(req: AskUserQuestionRequest) => void>();
+    const load = base.api.sideChat!.load as ReturnType<typeof vi.fn>;
+    load.mockResolvedValue({ ok: true, sessionId: "side-9", messages: [] });
+    const api = {
+      ...base.api,
+      onAskUserQuestion: (h: (req: AskUserQuestionRequest) => void) => {
+        askHandlers.add(h);
+        return () => { askHandlers.delete(h); };
+      },
+      onAskUserQuestionTimeout: () => () => {},
+      respondAskUserQuestion: vi.fn(async () => ({ ok: true })),
+    } as unknown as LvisApi;
+    return {
+      ...base,
+      api,
+      ask: (req: AskUserQuestionRequest) => act(() => { for (const h of askHandlers) h(req); }),
+    };
+  }
+  const question = (sessionId: string): AskUserQuestionRequest => ({
+    id: `ask-${sessionId}`,
+    sessionId,
+    questions: [{ question: "어느 형식으로 정리할까요?", choices: ["표", "목록"] }],
+    createdAt: Date.now(),
+  });
+  const openRequest = { chatGroupId: "main", sessionId: "side-9", nonce: 1 };
+
+  function renderSurface(api: LvisApi, surface = approvalSurfaceStub(), shown = true) {
+    const publishSideChatSurface = vi.fn();
+    const chatContext = { hasApiKey: true, publishSideChatSurface } as unknown as ChatContextValue;
+    const tree = (visible: boolean) => (
+      <TooltipProvider>
+        <ApprovalSurfaceProvider value={surface}>
+          <ChatContextProvider value={chatContext}>
+            <SideChatView api={api} openRequest={openRequest} shown={visible} />
+          </ChatContextProvider>
+        </ApprovalSurfaceProvider>
+      </TooltipProvider>
+    );
+    const result = render(tree(shown));
+    return {
+      ...result,
+      publishSideChatSurface,
+      show: (visible: boolean) => act(() => { result.rerender(tree(visible)); }),
+    };
+  }
+
+  it("draws a question its own session asked over its own composer, and tells the tile so", async () => {
+    const { api, ask } = makeAskApi();
+    const { publishSideChatSurface } = renderSurface(api);
+    await waitFor(() => expect(publishSideChatSurface).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "side-9", shown: true }),
+    ));
+
+    ask(question("side-9"));
+    const view = within(screen.getByTestId("side-chat-view"));
+    expect(view.getByTestId(TEST_IDS.questionOverlay)).toBeTruthy();
+    expect(view.getByTestId(TEST_IDS.questionOverlay).textContent).toContain("어느 형식으로 정리할까요?");
+    const published = publishSideChatSurface.mock.calls.at(-1)![0] as { askQuestions: AskUserQuestionRequest[] };
+    expect(published.askQuestions.map((each) => each.id)).toEqual(["ask-side-9"]);
+
+    // A question for another session is somebody else's — a tile's, the
+    // window's — never drawn here.
+    ask(question("elsewhere"));
+    expect(view.getAllByTestId(TEST_IDS.questionOverlay)).toHaveLength(1);
+  });
+
+  it("keeps its claim and its cards while it is not shown — the card waits here for the user to come to it", async () => {
+    const { api } = makeAskApi();
+    const surface = approvalSurfaceStub();
+    surface.queue = [approvalRequest({ id: "req-side", sessionId: "side-9" }) as unknown as ApprovalRequest];
+    const { publishSideChatSurface, show } = renderSurface(api, surface);
+    await waitFor(() => expect(surface.claims.ownerOf("side-9")).toBe("side-chat:side-9"));
+    const view = () => within(screen.getByTestId("side-chat-view"));
+    expect(view().getByTestId(TEST_IDS.approvalDock)).toBeTruthy();
+
+    // Another tab took the panel: the panel's view is hidden, not unmounted.
+    await show(false);
+    expect(surface.claims.ownerOf("side-9")).toBe("side-chat:side-9");
+    expect(view().getByTestId(TEST_IDS.approvalDock)).toBeTruthy();
+    expect(publishSideChatSurface).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: "side-9", shown: false }),
+    );
+
+    await show(true);
+    expect(publishSideChatSurface).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: "side-9", shown: true }),
+    );
+  });
+
+  it("withdraws its surface from the tile only when it unmounts", async () => {
+    const { api } = makeAskApi();
+    const { publishSideChatSurface, unmount } = renderSurface(api);
+    await waitFor(() => expect(publishSideChatSurface).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "side-9" }),
+    ));
+    // Before the loop had a session there was nothing to publish; from the
+    // moment it has one, the surface stays published until the view goes.
+    publishSideChatSurface.mockClear();
+    unmount();
+    expect(publishSideChatSurface).toHaveBeenCalledTimes(1);
+    expect(publishSideChatSurface).toHaveBeenLastCalledWith(null);
   });
 });

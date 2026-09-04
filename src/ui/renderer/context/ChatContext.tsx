@@ -7,6 +7,7 @@ import type { ModelPricing } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { Attachment } from "../types/attachments.js";
 import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
+import type { SideChatSurface } from "../components/chat-group-session-registry.js";
 
 /**
  * Cross-cutting chat-view state bundle. Groups props by concern so ChatView
@@ -33,12 +34,21 @@ export interface ChatContextValue {
    */
   currentSessionId: string;
   /**
-   * The tile around this subtree is mounted but paints nothing — its turn is
-   * running off-screen. Surfaces that claim a card for themselves (the side
-   * chat's approval claim) must stand down while this holds, or the card is
-   * drawn where nobody can answer it.
+   * The tile around this subtree is mounted but its conversation is not
+   * drawn — its turn is running off-screen, or a view covers it. A surface
+   * inside it that is on screen only while the conversation is (the side
+   * chat) reads this to say whether the user can see it.
    */
   hidden: boolean;
+  /**
+   * The side chat tells the tile what it is holding — its session, its
+   * parked questions, whether it is on screen — and the tile publishes that
+   * to the window. The window needs it to leave the side chat's questions to
+   * the side chat and to mark the side chat's sidebar row while a card waits
+   * where the user cannot see it. Optional because the side chat also mounts
+   * in harnesses with no tile around it.
+   */
+  publishSideChatSurface?: (surface: SideChatSurface | null) => void;
 
   // API state
   hasApiKey: boolean | null;

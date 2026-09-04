@@ -25,9 +25,9 @@ import {
   mountedTileIds,
   toggleTileMaximized,
 } from "./helpers.js";
-import { MOCK_DEFAULT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
+import { MOCK_DEFAULT_SESSION_ID, MOCK_SIDE_CHAT_SESSION_ID, type MockLvisApi } from "./mock-lvis-api.js";
 import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../src/contract/app-contract.js";
-import { BLOCKING_SURFACE_SELECTOR, TEST_IDS } from "../../src/shared/test-ids.js";
+import { BLOCKING_SURFACE_SELECTOR, TEST_IDS, chatSidePanelLauncherTestId, testIdSelector } from "../../src/shared/test-ids.js";
 import type { MarketplaceAnnouncement } from "../../src/shared/marketplace-announcements.js";
 import { CHAT_SESSION_DRAG_TYPE } from "../../src/ui/renderer/components/pane-drop.js";
 
@@ -362,7 +362,7 @@ describe("overlay cards whose origin conversation leaves the screen", () => {
     createdAt: new Date().toISOString(),
   });
 
-  it("shows the card in the window's chrome without its action, and restores the action with the tile", async () => {
+  it("keeps the card with its hidden conversation, marks the way back with a dot, and restores the action with the tile", async () => {
     const { container, emitOverlayShow } = await renderApp({ hasApiKey: true });
     const [primary, second] = await splitIntoTwoTiles(container);
     await focusTile(primary!);
@@ -373,26 +373,25 @@ describe("overlay cards whose origin conversation leaves the screen", () => {
     await waitFor(() => {
       expect(second!.element.querySelector('[data-testid="overlay-card-region"]')).not.toBeNull();
     });
+    expect(primary!.element.querySelector('[data-testid="pane-maximize-pending-answer"]')).toBeNull();
 
-    // Showing only the primary tile unmounts the tile holding the card's
-    // conversation. Nothing owns the card now, so it falls to the window's own
-    // region — it must not vanish with the tile, and must not become
-    // actionable in a conversation it was never staged for.
+    // Showing only the primary tile hides the tile holding the card's
+    // conversation. The card is that conversation's: it is not drawn in a
+    // conversation it was never staged for, and it does not vanish — it waits,
+    // and the one control that brings its pane back says something is waiting.
     await toggleTileMaximized(primary!);
-    const maximized = await waitFor(() => {
-      const region = container.querySelector<HTMLElement>('[data-testid="overlay-card-region"]');
-      expect(region).not.toBeNull();
-      return region!;
+    await waitFor(() => {
+      expect(primary!.element.querySelector('[data-testid="pane-maximize-pending-answer"]')).not.toBeNull();
     });
-    expect(container.querySelectorAll('[data-testid="overlay-card-region"]')).toHaveLength(1);
-    expect(maximized).toHaveAttribute("data-overlay-surface", "window");
-    expect(maximized.querySelector('[data-testid="overlay-card-primary-action"]')).toBeNull();
-    expect(maximized.querySelector('[data-testid="overlay-card-notice"]')).not.toBeNull();
-    expect(maximized.querySelector('[data-testid="routine-card-dismiss"]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-testid="overlay-card-region"]')).toHaveLength(0);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
 
     // Restoring the split brings the origin conversation back, and with it the
     // action — which runs in that conversation, not the focused one.
     await toggleTileMaximized(primary!);
+    await waitFor(() => {
+      expect(primary!.element.querySelector('[data-testid="pane-maximize-pending-answer"]')).toBeNull();
+    });
     const tiles = collectTiles(container);
     const origin = tiles.find((tile) => tile.chatGroupId === second!.chatGroupId)!;
     const confirm = await waitFor(() => {
@@ -645,6 +644,14 @@ describe("a turn parked on an approval, with two tiles", () => {
     tile.element.querySelector('[data-testid="approval-waiting-band"]');
   const dock = (within: HTMLElement) =>
     within.querySelectorAll('[data-testid="approval-dock"]');
+  const laneCard = (within: HTMLElement) =>
+    within.querySelectorAll('[data-testid="approval-lane-card"]');
+  /** A plugin sidebar view, so the sidebar has a Plugins row to mark. */
+  const pluginSidebarView = (pluginId: string, viewId: string) => ({
+    pluginId,
+    extension: { id: viewId, slot: "sidebar", kind: "embedded-module", title: "Inbox", entry: "ui/index.js", exportName: "mount" },
+    entryUrl: "file:///plugins/example/dist/ui/index.js",
+  });
 
   it("draws the card and the waiting band in the tile holding the session that asked, and nowhere else, until the card is answered", async () => {
     const { container, emitApproval } = await renderApp({ hasApiKey: true });
@@ -754,11 +761,12 @@ describe("a turn parked on an approval, with two tiles", () => {
     await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
   });
 
-  it("draws a request parked before this tile knew its session once: in the tile, never beside it in the window", async () => {
+  it("draws a request parked before this tile knew its session once: in the tile, never beside it in the lane", async () => {
     // A reload: the request comes back from the host before the primary tile
-    // has loaded the session it names. Until then nothing owns it and the
-    // window's dock holds it; once the tile knows its session it claims the
-    // request, and the window's dock must let go of it.
+    // has loaded the session it names. Until then no surface holds that
+    // session and no row lists it, so the focused pane's lane draws it as a
+    // request without a conversation; once the tile knows its session it
+    // claims the request, and the lane must let go of it.
     let resolveHistory!: (history: { sessionId: string; messages: never[] }) => void;
     const history = new Promise<{ sessionId: string; messages: never[] }>((resolve) => {
       resolveHistory = resolve;
@@ -768,9 +776,8 @@ describe("a turn parked on an approval, with two tiles", () => {
       history,
       pendingApprovals: [request({ sessionId: MOCK_DEFAULT_SESSION_ID })],
     });
-    await waitFor(() => expect(dock(container)).toHaveLength(1));
-    expect(dock(container)[0]!.closest("[data-approval-scope]"))
-      .toHaveAttribute("data-testid", "window-approval-scope");
+    await waitFor(() => expect(laneCard(container)).toHaveLength(1));
+    expect(dock(container)).toHaveLength(0);
 
     await act(async () => {
       resolveHistory({ sessionId: MOCK_DEFAULT_SESSION_ID, messages: [] });
@@ -778,26 +785,31 @@ describe("a turn parked on an approval, with two tiles", () => {
     const [primary] = collectTiles(container);
     await waitFor(() => expect(dock(primary!.element)).toHaveLength(1));
     expect(dock(container)).toHaveLength(1);
+    expect(laneCard(container)).toHaveLength(0);
     expect(band(primary!)!.getAttribute("data-tool-names")).toBe("read_file");
   });
 
-  it("leaves a request that names no conversation to the window's own dock, outside every tile", async () => {
-    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+  it("draws a request that names no conversation as a lane card in the focused pane, covering no composer", async () => {
+    const { container, emitApproval } = await renderApp({
+      hasApiKey: true,
+      pluginUiExtensions: [pluginSidebarView("mail-assistant", "inbox")],
+    });
     const [primary, second] = await splitIntoTwoTiles(container);
-
+    // Focus follows the split: the second pane is where the user is.
     await act(async () => {
       emitApproval(request({ id: "req-host" }));
     });
 
-    await waitFor(() => expect(dock(container)).toHaveLength(1));
-    expect(dock(primary!.element)).toHaveLength(0);
-    expect(dock(second!.element)).toHaveLength(0);
+    await waitFor(() => expect(laneCard(second!.element)).toHaveLength(1));
+    expect(laneCard(container)).toHaveLength(1);
+    expect(laneCard(primary!.element)).toHaveLength(0);
+    // Not a dock: nobody's turn is parked, so no composer is covered.
+    expect(dock(container)).toHaveLength(0);
     expect(band(primary!)).toBeNull();
     expect(band(second!)).toBeNull();
-    // The window's dock has a scope of its own beside the tiles: no tile's
-    // composer goes inert, and both still take the keyboard.
-    expect(dock(container)[0]!.closest("[data-approval-scope]"))
-      .toHaveAttribute("data-testid", "window-approval-scope");
+    expect(second!.element.querySelector('[data-testid="approval-lane-card"]')!.textContent).toContain("호스트 요청");
+    // The Plugins row says a request outside every conversation is waiting.
+    expect(container.querySelector('[data-testid="sidebar-group-plugins-pending-answer"]')).not.toBeNull();
     for (const tile of [primary!, second!]) {
       const composer = tile.element.querySelector<HTMLElement>("[data-composer-placement]")!;
       expect(composer).not.toHaveAttribute("inert");
@@ -809,42 +821,191 @@ describe("a turn parked on an approval, with two tiles", () => {
     }
   });
 
-  it("keeps the window's dock out of the tile grid, in a band of its own", async () => {
+  it("moves the lane card with focus, and names the plugin that asked", async () => {
     const { container, emitApproval } = await renderApp({ hasApiKey: true });
     const [primary, second] = await splitIntoTwoTiles(container);
 
     await act(async () => {
-      emitApproval(request({ id: "req-host" }));
+      emitApproval(request({ id: "req-plugin", sourcePluginId: "mail-assistant" }));
     });
-    await waitFor(() => expect(dock(container)).toHaveLength(1));
+    await waitFor(() => expect(laneCard(second!.element)).toHaveLength(1));
+    expect(second!.element.querySelector('[data-testid="approval-lane-card"]')!.textContent)
+      .toContain("플러그인 요청 · mail-assistant");
+    // In the frame's lane — the same place an unowned overlay card is drawn.
+    expect(laneCard(container)[0]!.closest('[data-testid="floating-right-lane"]')).not.toBeNull();
 
-    const card = dock(container)[0]!;
-    const scope = card.closest<HTMLElement>("[data-approval-scope]")!;
-    const canvas = container.querySelector<HTMLElement>('[data-testid="route-canvas"]')!;
-
-    // Disjoint subtrees, both ways: the dock is not drawn over the canvas the
-    // tiles live in, and no tile is drawn inside the dock's band. `inert` and
-    // the caret were already left alone — what was not was the hit-test, and
-    // hit-testing follows the box, not the DOM courtesies.
-    expect(canvas.contains(scope)).toBe(false);
-    expect(scope.contains(canvas)).toBe(false);
-    for (const tile of [primary!, second!]) {
-      expect(scope.contains(tile.element)).toBe(false);
-    }
-    // Nothing for it to cover, so it covers nothing: the band holds no
-    // composer, and the card is in flow rather than floating over one.
-    expect(scope.querySelectorAll("[data-composer-placement]")).toHaveLength(0);
-    expect(card).toHaveAttribute("data-overlay-position", "window-chrome");
+    // One reader, the user, who is at the focused pane: focus moving moves it.
+    await focusTile(primary!);
+    await waitFor(() => expect(laneCard(primary!.element)).toHaveLength(1));
+    expect(laneCard(second!.element)).toHaveLength(0);
+    expect(laneCard(container)).toHaveLength(1);
+    // No window band exists to fall back to.
+    expect(container.querySelector('[data-testid="window-approval-scope"]')).toBeNull();
   });
 
-  it("takes the unclaimed card down when the host retires the request", async () => {
+  it("keeps a maximized-away pane's approval in that pane, undrawn, and marks the way back", async () => {
+    const { container, emitApproval } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+    await focusTile(primary!);
+
+    await act(async () => {
+      emitApproval(request({ sessionId: `session-${second!.chatGroupId}` }));
+    });
+    await waitFor(() => expect(dock(second!.element)).toHaveLength(1));
+    expect(primary!.element.querySelector('[data-testid="pane-maximize-pending-answer"]')).toBeNull();
+
+    // The primary pane takes the canvas: the second is in the tree but drawn
+    // nowhere. Its card is its own — not moved to the pane the user is in,
+    // not drawn into a box nobody sees. The maximize control, the one way
+    // back to the hidden pane, says something is waiting there.
+    await toggleTileMaximized(primary!);
+    await waitFor(() => {
+      expect(primary!.element.querySelector('[data-testid="pane-maximize-pending-answer"]')).not.toBeNull();
+    });
+    expect(dock(container)).toHaveLength(0);
+    expect(laneCard(container)).toHaveLength(0);
+    expect(container.querySelector('[data-testid="window-approval-scope"]')).toBeNull();
+
+    // Restoring the split draws the pane, and the card with it, where it was.
+    await toggleTileMaximized(primary!);
+    const restored = collectTiles(container).find((tile) => tile.chatGroupId === second!.chatGroupId)!;
+    await waitFor(() => expect(dock(restored.element)).toHaveLength(1));
+    expect(dock(container)).toHaveLength(1);
+    expect(primary!.element.querySelector('[data-testid="pane-maximize-pending-answer"]')).toBeNull();
+  });
+
+  it("draws a side chat's approval over the side composer, and marks the panel toggle and the tab while it is out of sight", async () => {
+    const { container, api, emitApproval } = await renderApp({ hasApiKey: true, sideChat: true });
+    const toggle = () => container.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.panePanelToggle))!;
+    await act(async () => { fireEvent.click(toggle()); });
+    await act(async () => {
+      fireEvent.click(container.querySelector(`[data-testid="${chatSidePanelLauncherTestId("side-chat")}"]`)!);
+    });
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="side-chat-new"]')!);
+    });
+    const sideChatNew = (api.sideChat as unknown as { new: ReturnType<typeof vi.fn> }).new;
+    await waitFor(() => expect(sideChatNew).toHaveBeenCalled());
+
+    // The side loop's turn parks: the card is the side chat's, over its composer.
+    await act(async () => {
+      emitApproval(request({ id: "req-side", sessionId: MOCK_SIDE_CHAT_SESSION_ID }));
+    });
+    const sideView = () => container.querySelector<HTMLElement>('[data-testid="side-chat-view"]')!;
+    await waitFor(() => expect(dock(sideView())).toHaveLength(1));
+    expect(dock(container)).toHaveLength(1);
+    expect(container.querySelector('[data-testid="pane-panel-toggle-pending-answer"]')).toBeNull();
+
+    // Another tab in front of it: the card stays with the side chat; the tab
+    // says so.
+    const add = container.querySelector<HTMLElement>('[data-testid="chat-side-panel-add-tab"]')!;
+    await act(async () => {
+      fireEvent.pointerDown(add, { button: 0 });
+      fireEvent.click(add);
+    });
+    await act(async () => {
+      fireEvent.click(await waitFor(() => {
+        const item = container.querySelector<HTMLElement>(`[data-testid="${chatSidePanelLauncherTestId("menu-browser")}"]`)
+          ?? document.querySelector<HTMLElement>(`[data-testid="${chatSidePanelLauncherTestId("menu-browser")}"]`);
+        expect(item).not.toBeNull();
+        return item!;
+      }));
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="chat-side-panel-tab-side-chat-pending-answer"]')).not.toBeNull();
+    });
+    expect(container.querySelector('[data-testid="pane-panel-toggle-pending-answer"]')).not.toBeNull();
+
+    // The panel closed: the toggle is the way back, and it says so too. Past
+    // the close transition as well — the settled-closed panel used to unmount,
+    // taking the side chat's claim and its parked question with it.
+    await act(async () => { fireEvent.click(toggle()); });
+    // Longer than the panel's close transition (ChatView's
+    // SIDE_PANEL_LAYOUT_TRANSITION_MS), after which the panel settles closed.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(container.querySelector('[data-testid="side-chat-view"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="chat-side-panel-motion"]')).toHaveStyle({ display: "none" });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="pane-panel-toggle-pending-answer"]')).not.toBeNull();
+    });
+    expect(dock(container)).toHaveLength(1);
+    // No composer in the tile is covered by a card that is not its own.
+    const tileComposer = container.querySelector<HTMLElement>('[data-testid="chat-main-column"] [data-composer-placement]')!;
+    expect(tileComposer).not.toHaveAttribute("inert");
+
+    // Open again, back on the side-chat tab: the card is on screen, no dot.
+    await act(async () => { fireEvent.click(toggle()); });
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-tab-side-chat"]')!);
+    });
+    await waitFor(() => expect(dock(sideView())).toHaveLength(1));
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="pane-panel-toggle-pending-answer"]')).toBeNull();
+    });
+    expect(container.querySelector('[data-testid="chat-side-panel-tab-side-chat-pending-answer"]')).toBeNull();
+  });
+
+  it("opening a side chat from its sidebar row does not pin the panel to that tab afterwards", async () => {
+    const parent = { id: MOCK_DEFAULT_SESSION_ID, title: "부모 대화", modifiedAt: new Date(2, 0, 2).toISOString() };
+    const { container, api } = await renderApp({
+      hasApiKey: true,
+      sideChat: true,
+      sessions: [
+        parent,
+        { ...parent, id: MOCK_SIDE_CHAT_SESSION_ID, title: "사이드 챗", family: "side-chat", originSessionId: MOCK_DEFAULT_SESSION_ID },
+      ],
+    });
+    const sidebarToggle = container.querySelector<HTMLButtonElement>('[data-testid="sidebar-collapse-toggle"]');
+    if (sidebarToggle && sidebarToggle.getAttribute("aria-pressed") !== "true") {
+      await act(async () => { fireEvent.click(sidebarToggle); });
+    }
+    const row = await waitFor(() => {
+      const found = container.querySelector<HTMLElement>(`[data-testid="sidebar-session-${MOCK_SIDE_CHAT_SESSION_ID}"]`);
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    await act(async () => { fireEvent.click(row); });
+    const sideChatLoad = (api.sideChat as unknown as { load: ReturnType<typeof vi.fn> }).load;
+    await waitFor(() => expect(sideChatLoad).toHaveBeenCalledWith(MOCK_SIDE_CHAT_SESSION_ID));
+    const tab = (kind: string) => container.querySelector<HTMLElement>(`[data-testid="chat-side-panel-tab-${kind}"]`);
+    await waitFor(() => expect(tab("side-chat")?.getAttribute("aria-selected")).toBe("true"));
+
+    // The request opened the tab once. Moving to another tab is the user's
+    // call and must hold — the request is not re-applied on the next render.
+    const add = container.querySelector<HTMLElement>('[data-testid="chat-side-panel-add-tab"]')!;
+    await act(async () => {
+      fireEvent.pointerDown(add, { button: 0 });
+      fireEvent.click(add);
+    });
+    const menuBrowser = await waitFor(() => {
+      const item = document.querySelector<HTMLElement>(`[data-testid="${chatSidePanelLauncherTestId("menu-browser")}"]`);
+      expect(item).not.toBeNull();
+      return item!;
+    });
+    await act(async () => { fireEvent.click(menuBrowser); });
+    await waitFor(() => expect(tab("browser")?.getAttribute("aria-selected")).toBe("true"));
+    await act(async () => { fireEvent.click(tab("side-chat")!); });
+    await waitFor(() => expect(tab("side-chat")?.getAttribute("aria-selected")).toBe("true"));
+    await act(async () => { fireEvent.click(tab("browser")!); });
+    await waitFor(() => expect(tab("browser")?.getAttribute("aria-selected")).toBe("true"));
+    expect(tab("side-chat")?.getAttribute("aria-selected")).toBe("false");
+
+    // Closing the panel holds too.
+    const toggle = container.querySelector<HTMLButtonElement>(testIdSelector(TEST_IDS.panePanelToggle))!;
+    await act(async () => { fireEvent.click(toggle); });
+    await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("false"));
+  });
+
+  it("takes the lane card down when the host retires the request", async () => {
     const { container, emitApproval, emitApprovalSettled } = await renderApp({ hasApiKey: true });
     await splitIntoTwoTiles(container);
 
     await act(async () => {
       emitApproval(request({ id: "req-host" }));
     });
-    await waitFor(() => expect(dock(container)).toHaveLength(1));
+    await waitFor(() => expect(laneCard(container)).toHaveLength(1));
 
     // The tile that asked closed, so the host cancelled the ask. Nothing in
     // this window watches that turn any more — the announcement is the only
@@ -853,7 +1014,7 @@ describe("a turn parked on an approval, with two tiles", () => {
       emitApprovalSettled("req-host");
     });
 
-    await waitFor(() => expect(dock(container)).toHaveLength(0));
+    await waitFor(() => expect(laneCard(container)).toHaveLength(0));
   });
 });
 
@@ -1385,7 +1546,7 @@ describe("opening a conversation while another is mid-turn", () => {
     });
   });
 
-  it("hands a hidden tile's card to the window band, not to the tile nobody can see", async () => {
+  it("keeps a hidden tile's card with it, undrawn, and marks its sidebar row", async () => {
     const restoreMode = startInChatMode();
     try {
       const pendingSend = deferred<{ ok: true }>();
@@ -1415,14 +1576,14 @@ describe("opening a conversation while another is mid-turn", () => {
       });
 
       await waitFor(() => {
-        const band = container.querySelector<HTMLElement>('[data-overlay-surface="window"]');
-        expect(band?.textContent).toContain("숨은 타일의 카드");
+        expect(container.querySelector(`[data-testid="sidebar-pending-answer-${MOCK_DEFAULT_SESSION_ID}"]`)).not.toBeNull();
       });
+      expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
+      expect(container.textContent).not.toContain("숨은 타일의 카드");
       const hiddenTile = container.querySelector<HTMLElement>(
         `[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`,
       );
       expect(hiddenTile?.getAttribute("data-hidden")).toBe("true");
-      expect(hiddenTile?.textContent).not.toContain("숨은 타일의 카드");
 
       await act(async () => {
         pendingSend.resolve({ ok: true });
@@ -1433,7 +1594,7 @@ describe("opening a conversation while another is mid-turn", () => {
     }
   });
 
-  it("lends the window a surface for a question its tile can no longer draw", async () => {
+  it("keeps a hidden tile's question parked in it, and marks its sidebar row", async () => {
     const restoreMode = startInChatMode();
     try {
       const pendingSend = deferred<{ ok: true }>();
@@ -1465,16 +1626,15 @@ describe("opening a conversation while another is mid-turn", () => {
         `[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`,
       )!;
       expect(hiddenTile.getAttribute("data-hidden")).toBe("true");
-      // Still exactly one card, and it is no longer the one inside the tile
-      // nobody can see. A question has a deadline: left there it would time out
-      // against a blank window, which is what an approval used to do too.
+      // The question is that conversation's, so it stays with it — not drawn
+      // into a surface nobody can see, not handed to the tile that is. The
+      // way to it is the row, which says something is waiting there.
       await waitFor(() => {
-        expect(container.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(1);
+        expect(container.querySelector(`[data-testid="sidebar-pending-answer-${MOCK_DEFAULT_SESSION_ID}"]`)).not.toBeNull();
       });
+      expect(container.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(0);
       expect(hiddenTile.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(0);
-      const band = container.querySelector<HTMLElement>('[data-testid="window-approval-scope"]')!;
-      expect(band.querySelectorAll('[data-testid="question-overlay"]')).toHaveLength(1);
-      expect(band.textContent).toContain("어느 형식으로 정리할까요?");
+      expect(container.querySelector('[data-testid="window-approval-scope"]')).toBeNull();
 
       await act(async () => {
         pendingSend.resolve({ ok: true });
@@ -1485,7 +1645,7 @@ describe("opening a conversation while another is mid-turn", () => {
     }
   });
 
-  it("parks a hidden tile's approval on the window's dock, where it can be answered", async () => {
+  it("keeps a hidden tile's approval parked in it, and marks its sidebar row", async () => {
     const restoreMode = startInChatMode();
     try {
       const pendingSend = deferred<{ ok: true }>();
@@ -1499,9 +1659,9 @@ describe("opening a conversation while another is mid-turn", () => {
       await waitFor(() => expect(mountedTileIds(container).length).toBe(2));
 
       // The turn that is still running is the reason the tile stays mounted —
-      // and a running turn parks on approvals. Claiming one here would draw the
-      // card inside `display:none`: no buttons anyone can reach, and the turn
-      // sits out its timeout with nothing on screen to explain the wait.
+      // and a running turn parks on approvals. The tile keeps the request but
+      // draws nothing inside `display:none`; the row's dot is what says the
+      // turn is waiting, and opening the row is what brings the card back.
       await act(async () => {
         emitApproval({
           id: "req-hidden-tile",
@@ -1523,9 +1683,10 @@ describe("opening a conversation while another is mid-turn", () => {
       )!;
       expect(hiddenTile.getAttribute("data-hidden")).toBe("true");
       await waitFor(() => {
-        expect(container.querySelectorAll('[data-testid="approval-dock"]')).toHaveLength(1);
+        expect(container.querySelector(`[data-testid="sidebar-pending-answer-${MOCK_DEFAULT_SESSION_ID}"]`)).not.toBeNull();
       });
-      expect(hiddenTile.querySelectorAll('[data-testid="approval-dock"]')).toHaveLength(0);
+      expect(container.querySelectorAll('[data-testid="approval-dock"]')).toHaveLength(0);
+      expect(container.querySelectorAll('[data-testid="approval-lane-card"]')).toHaveLength(0);
 
       await act(async () => {
         pendingSend.resolve({ ok: true });

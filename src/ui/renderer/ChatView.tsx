@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { ChevronDown } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
@@ -136,6 +136,12 @@ export interface ChatViewProps {
   sideChatOpenRequest?: SideChatOpenRequest | undefined;
   /** Tell the window its conversation list is stale — a side-chat turn moves a row in it. */
   onSessionsChanged?: (() => void | Promise<void>) | undefined;
+  /**
+   * The side chat holds a card the user cannot see from here — the window's
+   * verdict, passed down so the panel's tab carries the same dot the pane's
+   * toggle does.
+   */
+  sideChatPendingAnswer?: boolean;
   /** Constrain transcript and composer to a centered reading column. */
   blogLayout?: boolean;
   /** Active project — drives the empty-state composer's project selector trigger label. */
@@ -152,7 +158,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, sideChatOpenRequest, onSessionsChanged, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
+export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onReturnHere, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, pendingApprovals, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, slashPickerOpen, onSlashPickerOpenChange, statusBar, onAttachmentWarning, sidePanelOpen = false, onSidePanelOpenChange, sideChatOpenRequest, onSessionsChanged, sideChatPendingAnswer = false, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects, onProjectError }: ChatViewProps) {
   const { t } = useTranslation();
   const approvals = useApprovalSurface();
   const approvalHead = pendingApprovals[0] ?? null;
@@ -273,6 +279,12 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
   const dockedPanelWidth = Math.min(panelLayout.max, Math.max(panelLayout.min, sidePanelWidth));
   const dockedPanelShouldOpen = previewRailVisible;
   const [dockedPanelPresent, setDockedPanelPresent] = useState(dockedPanelShouldOpen);
+  // A side chat's session claim, its parked approval cards and its question
+  // queue live in its view, and that view lives in the panel. Closing the
+  // panel therefore keeps it mounted — hidden — while a side-chat tab exists:
+  // unmounting it released the claim and dropped a question the host was
+  // still waiting on, so the gate sat out its deadline with nothing to answer.
+  const sideChatKeepsPanel = workspaceTabs.tabs.some((tab) => tab.kind === "side-chat" && !tab.content);
   // Always start collapsed so an initially-open persisted panel never paints
   // expanded before the opening transition lifecycle begins.
   const [dockedPanelExpanded, setDockedPanelExpanded] = useState(false);
@@ -418,13 +430,23 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
   }, [currentSessionId, subAgentSpawns, workspaceTabs, onSidePanelOpenChange]);
 
   // A sidebar row asked for a side chat: the rail has to be open and on its
-  // side-chat tab before the panel below can show what it loaded.
+  // side-chat tab before the panel below can show what it loaded. Once per
+  // request — the nonce is the only dependency. The tab store's identity
+  // changes with every tab switch and the panel callback's with every render
+  // of the window, and keying the effect on either re-ran it after the user
+  // moved to another tab or closed the panel, snapping both straight back.
   const sideChatOpenNonce = sideChatOpenRequest?.nonce;
+  const openSideChatTabRef = useRef<() => void>(() => {});
+  useLayoutEffect(() => {
+    openSideChatTabRef.current = () => {
+      workspaceTabs.ensureContainerTab("side-chat");
+      onSidePanelOpenChange(true);
+    };
+  }, [workspaceTabs, onSidePanelOpenChange]);
   useEffect(() => {
     if (sideChatOpenNonce === undefined) return;
-    workspaceTabs.ensureContainerTab("side-chat");
-    onSidePanelOpenChange(true);
-  }, [sideChatOpenNonce, workspaceTabs, onSidePanelOpenChange]);
+    openSideChatTabRef.current();
+  }, [sideChatOpenNonce]);
 
   useEffect(() => {
     if (previewModel.targets.length === 0) {
@@ -679,7 +701,6 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
       <div
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [container-type:size]"
         data-testid="chat-main-column"
-        data-approval-scope
       >
 
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
@@ -838,8 +859,8 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
         onProjectSelectorOpenChange={setProjectSelectorOpen}
       />
       {/* This conversation's approval card, floating over its own composer.
-          The column above is the dock's scope: the composer it covers goes
-          inert, the tile next door does not. */}
+          The pane frame around this view is the dock's scope: the composer it
+          covers goes inert, the tile next door does not. */}
       <ApprovalDock
         queue={pendingApprovals}
         conversationLabel={currentSessionTitle ?? t("mainToolbar.newChat")}
@@ -857,7 +878,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
         reviewerSuggestion={approvals.reviewerSuggestion}
       />
       </div>
-      {dockedPanelPresent ? (() => {
+      {dockedPanelPresent || sideChatKeepsPanel ? (() => {
         // Inside a frame the panel waits for the slot to commit: rendering it
         // inline for one pass and portaling it on the next would remount the
         // whole panel (a portal and a host element are different fiber kinds).
@@ -870,7 +891,12 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
           data-panel-mode={panelLayout.mode}
           aria-hidden={!dockedPanelExpanded}
           inert={!dockedPanelExpanded}
-          style={{ width: dockedPanelExpanded ? `${dockedPanelWidth}px` : "0px" }}
+          style={{
+            width: dockedPanelExpanded ? `${dockedPanelWidth}px` : "0px",
+            // Closed and settled, but kept for the side chat it holds: out of
+            // the layout entirely, not a collapsed sliver of padding.
+            ...(dockedPanelPresent ? {} : { display: "none" }),
+          }}
           className={[
             // The card's air — the floating sidebar's own insets — lives on this
             // wrapper in both modes, so the reserve the transcript is pushed by
@@ -922,6 +948,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onRet
             onClose={() => onSidePanelOpenChange(false)}
             sideChatOpenRequest={sideChatOpenRequest}
             onSessionsChanged={onSessionsChanged}
+            sideChatPendingAnswer={sideChatPendingAnswer}
             activity={toolActivity}
             onOpenActivityItem={routeActivityItem}
             onOpenActivityItemPinned={routeActivityItemPinned}
