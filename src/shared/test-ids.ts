@@ -33,6 +33,7 @@ export const TEST_IDS = {
   settingsMobileBack: "settings-mobile-back",
   settingsPageTitle: "settings-page-title",
   slashPickerTrigger: "slash-picker-trigger",
+  spotlightTourCard: "spotlight-tour:card",
   tokenCostBadge: "token-cost-badge",
   viewPathBack: "view-path-back",
 } as const;
@@ -55,8 +56,11 @@ export function testIdSelector(id: TestId): string {
 }
 
 /** An open modal dialog. Portaled to the body, so it is window-wide by construction. */
-export const MODAL_DIALOG_SELECTOR =
-  '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]';
+const MODAL_DIALOG_SELECTORS = [
+  '[role="dialog"][data-state="open"]',
+  '[role="alertdialog"][data-state="open"]',
+] as const;
+export const MODAL_DIALOG_SELECTOR = MODAL_DIALOG_SELECTORS.join(", ");
 
 /**
  * Any open dialog, the approval dock, or a user-question card: the surfaces
@@ -71,5 +75,13 @@ export const MODAL_DIALOG_SELECTOR =
  * readers that answer for ONE composer ask `blockingSurfaceCovers`
  * (permissions/ApprovalDock) rather than the whole document.
  */
-export const BLOCKING_SURFACE_SELECTOR =
-  `${MODAL_DIALOG_SELECTOR}, ${testIdSelector(TEST_IDS.approvalDock)}, ${testIdSelector(TEST_IDS.questionOverlay)}`;
+export const BLOCKING_SURFACE_SELECTOR = [
+  // The tour's own step card is the shared popover, so it carries
+  // `role="dialog"` + `data-state="open"` like any dialog does. The tour reads
+  // this set; it is never a member of it, or it would queue behind itself.
+  ...MODAL_DIALOG_SELECTORS.map(
+    (selector) => `${selector}:not(${testIdSelector(TEST_IDS.spotlightTourCard)})`,
+  ),
+  testIdSelector(TEST_IDS.approvalDock),
+  testIdSelector(TEST_IDS.questionOverlay),
+].join(", ");

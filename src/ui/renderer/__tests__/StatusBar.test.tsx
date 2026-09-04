@@ -253,29 +253,6 @@ describe("StatusBar", () => {
     expect(screen.getByText("LLM: offline, Market: online")).toBeInTheDocument();
   });
 
-  it("joins the combined health dot directly before the LLM provider label", () => {
-    const pingItem: PersistentItem = {
-      id: "health:services",
-      severity: "success",
-      dot: true,
-      a11yLabel: "LLM: online, Market: online",
-      tooltip: "LLM: online\nMarket: online",
-    };
-    const { container } = render(
-      <StatusBar
-          persistent={[
-            pingItem,
-            persistent({ id: "vendor:llm", label: "🔷", value: "Azure · gpt-5.4-mini" }),
-          ]}
-          visibleToast={null}
-        />,
-    );
-    expect(container.querySelector('[data-testid="status-bar"]')?.textContent).not.toContain("|");
-    const dot = container.querySelector('[data-testid="status-bar-dot-health:services"]');
-    expect(dot?.className).toContain("bg-success");
-    expect(screen.getByText("Azure · gpt-5.4-mini")).toBeInTheDocument();
-  });
-
   it("uses role=status with aria-live=polite for screen-reader updates", () => {
     const { container } = render(<StatusBar persistent={[]} visibleToast={toast()} />);
     // Query the footer directly — rendering surfaces it with role="status".

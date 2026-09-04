@@ -1,8 +1,7 @@
 
 
 
-
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import {
   DEFAULT_TOUR_SCENARIOS,
@@ -11,8 +10,13 @@ import {
   type TourScenario,
   type TourStep,
 } from "../onboarding/default-tour-scenarios.js";
-import { BLOCKING_SURFACE_SELECTOR } from "../../../shared/test-ids.js";
+import { BLOCKING_SURFACE_SELECTOR, TEST_IDS } from "../../../shared/test-ids.js";
 import { usePrefersReducedMotion } from "../hooks/use-prefers-reduced-motion.js";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "../../../components/ui/popover.js";
 
 /**
  * Narrow API surface this component needs. Declared structurally so the
@@ -69,38 +73,48 @@ export interface SpotlightTourProps {
   onDismiss?: (scenarioId: string) => void;
 }
 
-interface SpotlightRect {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
+/**
+ * The mark a step puts on the element it is about. It is the semantic record
+ * of which node the step targets — read by tests and by anything asking what
+ * the tour is pointing at. It draws nothing: the ring is a portaled layer of
+ * its own (see `.lvis-tour-ring` in `styles.css` for why it cannot live on
+ * the element).
+ */
+const TOUR_HIGHLIGHT_ATTR = "data-tour-highlight";
 
-function readRect(selector: string): SpotlightRect | null {
+/**
+ * How far outside the anchor's own box the ring is drawn. The ring is its own
+ * layer, so without this gap it would trace the anchor's edge exactly and read
+ * as a border on the control rather than a highlight around it.
+ */
+const RING_INSET_PX = 3;
+
+/**
+ * The element a step's selector means.
+ *
+ * `data-tour-anchor` is per-surface chrome and the main area holds up to four
+ * tiles, so a step selector matches once per open tile — and document order is
+ * not screen order, so `querySelector`'s first hit can be a tile the user
+ * cannot see. The step is about the one that is on screen.
+ *
+ * A zero-area rect is the test that carries the weight: it covers
+ * `display: none`, a collapsed container, and a detached node alike.
+ * `visibility: hidden` keeps its box, so it needs asking about separately.
+ * `offsetParent` is deliberately not consulted — it is null for every
+ * `position: fixed` element, which would misread the window-level chrome some
+ * steps point at as hidden.
+ */
+function firstVisibleMatch(selector: string): HTMLElement | null {
   if (typeof document === "undefined") return null;
-  const el = document.querySelector(selector);
-  if (!el) return null;
-  const rect = el.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return null;
-  // U3 — viewport visibility check. An anchor whose bounding rect lands
-  // fully off-screen (e.g. hidden behind a still-mounted Radix Dialog
-  // portal that ate the layout, or scrolled out of view) would cause
-  // the spotlight ring to draw at coordinates the user cannot see.
-  // Returning null lets the caller fall back to the centred card.
-  if (typeof window !== "undefined") {
-    const offScreen =
-      rect.bottom <= 0 ||
-      rect.right <= 0 ||
-      rect.top >= window.innerHeight ||
-      rect.left >= window.innerWidth;
-    if (offScreen) return null;
+  for (const el of document.querySelectorAll<HTMLElement>(selector)) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    if (typeof window !== "undefined") {
+      if (window.getComputedStyle(el).visibility === "hidden") continue;
+    }
+    return el;
   }
-  return {
-    top: rect.top,
-    left: rect.left,
-    width: rect.width,
-    height: rect.height,
-  };
+  return null;
 }
 
 /**
@@ -118,79 +132,6 @@ function anyBlockingSurfaceOpen(): boolean {
   );
 }
 
-/**
- * Compute a safe placement for the floating card so it never overflows
- * the viewport. Returns CSS positioning hints in absolute pixels.
- */
-function cardPlacement(rect: SpotlightRect | null): React.CSSProperties {
-  if (typeof window === "undefined") {
-    return { position: "fixed", left: 0, right: 0, bottom: 24 };
-  }
-  if (!rect) {
-    // No anchor — centre in the viewport. Matches the mockup fallback
-    // "tour must not block the chat surface" — if a renderer refactor
-    // drops the anchor, the user can still see + dismiss the card.
-    return {
-      position: "fixed",
-      left: 24,
-      right: 24,
-      bottom: Math.max(24, Math.floor(window.innerHeight * 0.18)),
-      maxWidth: 480,
-      marginLeft: "auto",
-      marginRight: "auto",
-    };
-  }
-  // Place the card under the anchor when there's room; otherwise above.
-  const padding = 16;
-  const cardHeight = 200; // rough estimate — exact height is content-driven
-  const spaceBelow = window.innerHeight - (rect.top + rect.height);
-  const placeBelow = spaceBelow >= cardHeight + padding;
-  const top = placeBelow
-    ? rect.top + rect.height + padding
-    : Math.max(padding, rect.top - cardHeight - padding);
-  return {
-    position: "fixed",
-    top,
-    left: padding,
-    right: padding,
-    maxWidth: 480,
-    marginLeft: "auto",
-    marginRight: "auto",
-  };
-}
-
-function ringStyle(
-  rect: SpotlightRect | null,
-  reduceMotion: boolean,
-): React.CSSProperties | null {
-  if (!rect) return null;
-  // The ring is drawn 6px outside the anchor so it doesn't visually
-  // crop the underlying element. The matching glow uses a wider
-  // box-shadow for the "halo" effect from the mockup.
-  //
-  // F5 — when `prefers-reduced-motion: reduce`, drop the glowing
-  // box-shadow halo (which animates in via the dialog mount). The
-  // 1px violet border still marks the anchor unambiguously without
-  // the visually-animated glow that a vestibular user would notice.
-  const inset = 6;
-  return {
-    position: "fixed",
-    top: rect.top - inset,
-    left: rect.left - inset,
-    width: rect.width + inset * 2,
-    height: rect.height + inset * 2,
-    borderRadius: "var(--radius-md)",
-    pointerEvents: "none",
-    // Halo composed from the active bundle's --primary + named opacity scale
-    // via --shadow-spotlight (see styles.css). Reduced-motion drops the wide
-    // bloom for the tighter ring so a vestibular user still sees the anchor.
-    boxShadow: reduceMotion
-      ? "var(--shadow-spotlight-reduced)"
-      : "var(--shadow-spotlight)",
-    border: "1px solid hsl(var(--primary) / var(--opacity-stronger))",
-  };
-}
-
 export function SpotlightTour({
   api,
   scenarios = DEFAULT_TOUR_SCENARIOS,
@@ -203,9 +144,6 @@ export function SpotlightTour({
     initialScenarioId ?? null,
   );
   const [stepIndex, setStepIndex] = useState(0);
-  // `tick` forces a re-render when the anchor moves (window resize /
-  // layout shift) so the spotlight ring follows the target.
-  const [, setTick] = useState(0);
   const dismissedRef = useRef(false);
 
   // Reset step index whenever a new scenario activates.
@@ -273,11 +211,25 @@ export function SpotlightTour({
   // U6 — observer that flushes the queued scenario when every modal
   // dialog has closed. We watch `document.body` for the data-state
   // attribute mutations Radix emits on close.
+  //
+  // It also carries the anchor's liveness: the ring and the card are portaled
+  // layers positioned against the anchor node, so a node that leaves the DOM
+  // would leave both painting where nothing is any more. Bumping the epoch
+  // re-runs the resolution effect below, which re-anchors to whatever the
+  // selector means now — the replacement node after a re-render, or nothing,
+  // in which case the card falls back to centring itself.
+  const anchorElRef = useRef<HTMLElement | null>(null);
+  const [anchorEpoch, setAnchorEpoch] = useState(0);
   useEffect(() => {
     if (typeof MutationObserver === "undefined" || typeof document === "undefined") {
       return;
     }
     const observer = new MutationObserver(() => {
+      const anchored = anchorElRef.current;
+      if (anchored && !anchored.isConnected) {
+        anchorElRef.current = null;
+        setAnchorEpoch((n) => n + 1);
+      }
       if (pendingScenarioRef.current && !anyBlockingSurfaceOpen()) {
         const next = pendingScenarioRef.current;
         pendingScenarioRef.current = null;
@@ -295,17 +247,58 @@ export function SpotlightTour({
     return () => observer.disconnect();
   }, []);
 
-  // Refresh the anchor rect on resize so the ring follows the target.
-  useEffect(() => {
-    if (!scenario) return;
-    const onResize = () => setTick((n) => n + 1);
-    window.addEventListener("resize", onResize);
-    window.addEventListener("scroll", onResize, true);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("scroll", onResize, true);
+  // Resolve the element this step is about, and mark it. Everything visual
+  // then hangs off that element: both the ring and the card are Radix popovers
+  // anchored to it. Because the anchor is a live node rather than a copied
+  // rect, an in-app layout shift — a notice strip opening, the composer
+  // growing, a list re-rendering — moves the ring and the card with it, with
+  // nothing to re-measure.
+  //
+  // The cleanup unmarks the node this effect actually marked rather than
+  // whatever the selector resolves to later, so a step that swaps the target
+  // cannot leave the previous element ringed. A node that leaves the DOM
+  // mid-step takes its own mark with it.
+  const anchorSelector = currentStep?.anchorSelector ?? null;
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return;
+    const el = anchorSelector ? firstVisibleMatch(anchorSelector) : null;
+    anchorElRef.current = el;
+    setAnchorEl(el);
+    if (!el) return;
+    el.setAttribute(TOUR_HIGHLIGHT_ATTR, "true");
+    return () => el.removeAttribute(TOUR_HIGHLIGHT_ATTR);
+  }, [anchorSelector, stepIndex, scenario, anchorEpoch]);
+
+  // The ring is drawn on a layer of its own, so it needs the anchor's size —
+  // and only its size. Where the layer goes stays the popper's job against the
+  // live node, so nothing here holds a coordinate that could go stale; a
+  // control that grows (the composer gaining a line) re-sizes the ring through
+  // the observer while the popper re-places it.
+  const [anchorSize, setAnchorSize] = useState<{ width: number; height: number } | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    if (!anchorEl) {
+      setAnchorSize(null);
+      return;
+    }
+    const measure = () => {
+      const rect = anchorEl.getBoundingClientRect();
+      setAnchorSize((prev) =>
+        prev && prev.width === rect.width && prev.height === rect.height
+          ? prev
+          : { width: rect.width, height: rect.height },
+      );
     };
-  }, [scenario]);
+    measure();
+    const ResizeObserverCtor =
+      typeof window === "undefined" ? undefined : window.ResizeObserver;
+    if (typeof ResizeObserverCtor !== "function") return;
+    const observer = new ResizeObserverCtor(measure);
+    observer.observe(anchorEl);
+    return () => observer.disconnect();
+  }, [anchorEl]);
 
   const closeAfterCompletion = useCallback(
     (id: string) => {
@@ -435,15 +428,18 @@ export function SpotlightTour({
       window.addEventListener("keydown", onKey);
       cleanup = () => window.removeEventListener("keydown", onKey);
     } else if (triggerForStep.kind === "input") {
+      // Same resolver as the anchor: a trigger selector and an anchor selector
+      // name the same control, so two resolvers disagreeing about which tile
+      // it lives in would ring one composer and wait on another.
       const selector = triggerForStep.selector;
-      const target = document.querySelector<HTMLElement>(selector);
+      const target = firstVisibleMatch(selector);
       if (!target) return;
       const onInput = () => handleNext();
       target.addEventListener("input", onInput);
       cleanup = () => target.removeEventListener("input", onInput);
     } else if (triggerForStep.kind === "click") {
       const selector = triggerForStep.selector;
-      const target = document.querySelector<HTMLElement>(selector);
+      const target = firstVisibleMatch(selector);
       if (!target) return;
       const onClick = () => handleNext();
       target.addEventListener("click", onClick);
@@ -460,12 +456,177 @@ export function SpotlightTour({
 
   const total = scenario.steps.length;
   const isLast = stepIndex >= total - 1;
-  const rect = readRect(currentStep.anchorSelector);
-  const ring = ringStyle(rect, reduceMotion);
-  const card = cardPlacement(rect);
+
+  // The ring both rings the anchor and carries the dim, so one value answers
+  // for both: until there is a node AND a measurement there is no hole, and the
+  // backdrop has to keep painting the dim or the window would flash undimmed
+  // for the frame between resolving the anchor and measuring it.
+  const ringTarget =
+    anchorEl !== null && anchorSize !== null
+      ? { el: anchorEl, size: anchorSize }
+      : null;
 
   const titleId = `lvis-tour-title-${scenario.id}-${stepIndex}`;
   const bodyId = `lvis-tour-body-${scenario.id}-${stepIndex}`;
+
+  const cardChrome: React.CSSProperties = {
+    background: "hsl(var(--popover))",
+    color: "hsl(var(--popover-foreground))",
+    border: "1px solid hsl(var(--primary) / var(--opacity-half))",
+    borderRadius: "var(--radius-lg)",
+    padding: 20,
+    // F5 — under `prefers-reduced-motion: reduce`, drop the soft
+    // drop-shadow that "floats" the card; a vestibular-sensitive user
+    // still sees the card via the primary border + filled backdrop.
+    // Elevation now rides the bundle depth ladder (--shadow-e4) instead
+    // of a theme-blind `rgba(0,0,0,.6)` so it re-tints per bundle.
+    boxShadow: reduceMotion ? "none" : "var(--shadow-e4)",
+  };
+
+  const cardAria = {
+    role: "dialog" as const,
+    "aria-modal": true,
+    "aria-labelledby": titleId,
+    "aria-describedby": bodyId,
+    "data-testid": TEST_IDS.spotlightTourCard,
+    "data-step-index": stepIndex,
+  };
+
+  const cardBody = (
+    <>
+      <div
+        className="text-[11px]"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          color: "hsl(var(--muted-foreground))",
+        }}
+      >
+        <span
+          data-testid="spotlight-tour:step-badge"
+          className="text-[10px] font-bold"
+          style={{
+            display: "inline-flex",
+            width: 18,
+            height: 18,
+            borderRadius: "9999px",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "hsl(var(--primary))",
+            color: "hsl(var(--primary-foreground))",
+          }}
+        >
+          {stepIndex + 1}
+        </span>
+        <span>
+          {stepIndex + 1} / {total} {t("spotlightTour.stepUnit")}
+        </span>
+      </div>
+      <h3
+        id={titleId}
+        className="mt-2 text-[14px] font-semibold"
+        style={{
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {currentStep.title}
+      </h3>
+      <p
+        id={bodyId}
+        className="mt-1.5 min-h-0 overflow-y-auto text-[12px] leading-relaxed"
+        style={{
+          color: "hsl(var(--muted-foreground))",
+        }}
+      >
+        {currentStep.body}
+      </p>
+      {currentStep.keyHint && currentStep.keyHint.length > 0 ? (
+        <div
+          data-testid="spotlight-tour:key-hints"
+          className="mt-2"
+          style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
+        >
+          {currentStep.keyHint.map((label) => (
+            <kbd
+              key={label}
+              aria-label={t("spotlightTour.shortcutAriaLabel", { label })}
+              className="font-mono text-[11px]"
+              style={{
+                background: "hsl(var(--kbd-bg))",
+                border: "1px solid hsl(var(--kbd-border))",
+                borderRadius: "var(--radius-sm)",
+                padding: "1px 6px",
+                color: "hsl(var(--popover-foreground))",
+              }}
+            >
+              {label}
+            </kbd>
+          ))}
+        </div>
+      ) : null}
+      <div
+        className="mt-4"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <div
+          data-testid="spotlight-tour:dots"
+          style={{ display: "flex", gap: 6 }}
+        >
+          {scenario.steps.map((_, i) => (
+            <span
+              key={i}
+              aria-hidden="true"
+              style={{
+                display: "inline-block",
+                width: 6,
+                height: 6,
+                borderRadius: "9999px",
+                background:
+                  i === stepIndex
+                    ? "hsl(var(--primary))"
+                    : "hsl(var(--muted))",
+              }}
+            />
+          ))}
+        </div>
+        <button
+          type="button"
+          data-testid="spotlight-tour:skip"
+          onClick={() => closeAfterDismissal(scenario.id)}
+          className="ml-auto text-[11px]"
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "hsl(var(--muted-foreground))",
+            cursor: "pointer",
+          }}
+        >
+          {t("spotlightTour.skip")}
+        </button>
+        <button
+          type="button"
+          data-testid="spotlight-tour:next"
+          onClick={handleNext}
+          className="text-[12px]"
+          style={{
+            borderRadius: "var(--radius-md)",
+            padding: "6px 12px",
+            color: "hsl(var(--primary-foreground))",
+            background: "hsl(var(--primary))",
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          {isLast ? t("spotlightTour.complete") : t("spotlightTour.next")}
+        </button>
+      </div>
+    </>
+  );
 
   return (
     <div
@@ -473,197 +634,161 @@ export function SpotlightTour({
       data-scenario-id={scenario.id}
       data-reduce-motion={reduceMotion ? "true" : "false"}
     >
-      {/* Backdrop — clicking it dismisses the tour. The 78% black layer
-          matches the mockup; pointer-events stay on so anchor clicks are
-          intentionally blocked while the tour is active.
+      {/* Backdrop — what catches the dismiss click, over the whole window.
 
-          The three layers sit in the shared `z-50` floating band, ordered by
+          It paints the dim only when the step has no anchor. With an anchor the
+          ring carries the dim in its own outermost shadow layer, which leaves a
+          hole exactly over the anchor; painting the same tone here as well would
+          double it and dim the anchor back down. The element stays either way,
+          because it is the click target and the ring is pointer-transparent.
+
+          The layers sit in the shared `z-50` floating band, ordered by
           mount order like every other overlay there: the tour mounts after the
           whole shell, so it covers the shell, and a dialog portal that opens
           during the tour mounts after the tour and stays reachable above it. */}
       <div
         data-testid="spotlight-tour:backdrop"
+        data-dimming={ringTarget ? "false" : "true"}
         onClick={() => closeAfterDismissal(scenario.id)}
         className="z-50"
         style={{
           position: "fixed",
           inset: 0,
           // Matches the shared Dialog overlay ladder (bundle --overlay tone).
-          background: "hsl(var(--overlay) / var(--opacity-emphatic))",
+          background: ringTarget
+            ? "transparent"
+            : "hsl(var(--overlay) / var(--opacity-emphatic))",
         }}
       />
-      {ring ? (
-        <div
-          data-testid="spotlight-tour:ring"
-          aria-hidden="true"
-          className="z-50"
-          style={ring}
-        />
+      {ringTarget ? (
+        /* The ring. It is its own portaled layer rather than a box-shadow on
+           the anchor because the anchor cannot carry one: every ancestor from
+           the composer's input bar out to the route canvas is `overflow:
+           hidden`, which clips a shadow drawn outside the border box, and the
+           route canvas is `isolation: isolate`, which traps any z-index put on
+           the anchor below this tour's own backdrop.
+
+           Placed by the same popper as the card, against the same live node,
+           so it tracks the anchor without anything re-measuring coordinates —
+           only the anchor's size crosses over, and a ResizeObserver keeps that
+           fresh. `side="bottom"` with a negative side offset lands the layer's
+           top edge on the anchor's, `align="start"` its left edge, and
+           collisions stay off so nothing nudges the ring off its target. */
+        <Popover open>
+          <PopoverAnchor virtualRef={{ current: ringTarget.el }} />
+          <PopoverContent
+            data-testid="spotlight-tour:ring"
+            // Decorative: it is the mark made visible, and the marked element
+            // is already in the accessibility tree in its own right. `dialog`
+            // is what Radix would give it, which would put a phantom blocking
+            // surface on screen for the whole tour.
+            role="presentation"
+            aria-hidden
+            key={`ring-${scenario.id}-${stepIndex}`}
+            className="lvis-tour-ring w-auto border-0 bg-transparent p-0"
+            side="bottom"
+            align="start"
+            avoidCollisions={false}
+            sideOffset={-(ringTarget.size.height + RING_INSET_PX)}
+            alignOffset={-RING_INSET_PX}
+            style={{
+              width: ringTarget.size.width + RING_INSET_PX * 2,
+              height: ringTarget.size.height + RING_INSET_PX * 2,
+            }}
+            // A press on the lit anchor hands it the focus rather than
+            // dismissing the tour. The ring covers the anchor exactly and the
+            // popper keeps it there, so this is the anchor's own hit area
+            // without the tour computing a rectangle for it. Focus is all that
+            // is forwarded: firing the control underneath — the model picker,
+            // the settings entry — would be a side effect of reading the tour,
+            // and step 1 needs nothing but the caret in the box.
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              ringTarget.el.focus();
+            }}
+            // The layer takes no focus of its own and dismisses nothing:
+            // Escape and presses outside the anchor belong to the tour's own
+            // handlers and to the backdrop, so it declines all four rather
+            // than competing for them.
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onCloseAutoFocus={(e) => e.preventDefault()}
+            onEscapeKeyDown={(e) => e.preventDefault()}
+            onPointerDownOutside={(e) => e.preventDefault()}
+            onFocusOutside={(e) => e.preventDefault()}
+            onInteractOutside={(e) => e.preventDefault()}
+          />
+        </Popover>
       ) : null}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={bodyId}
-        data-testid="spotlight-tour:card"
-        data-step-index={stepIndex}
-        // Y2 — slide-up + fade entrance keyframe smooths the hand-off
-        // into the SpotlightTour so the
-        // tour card doesn't pop into place. The shared `lvis-anim-slide-up`
-        // utility collapses to opacity-only fade under
-        // prefers-reduced-motion (styles.css §290).
-        className="lvis-anim-slide-up z-50"
-        // Step transitions inside the same scenario also benefit from a
-        // light re-mount fade — keying the card on the step index gives
-        // React a unique key so the animation re-runs on advance.
-        key={`${scenario.id}-${stepIndex}`}
-        style={{
-          ...card,
-          background: "hsl(var(--popover))",
-          color: "hsl(var(--popover-foreground))",
-          border: "1px solid hsl(var(--primary) / var(--opacity-half))",
-          borderRadius: "var(--radius-lg)",
-          padding: 20,
-          // F5 — under `prefers-reduced-motion: reduce`, drop the soft
-          // drop-shadow that "floats" the card; a vestibular-sensitive user
-          // still sees the card via the primary border + filled backdrop.
-          // Elevation now rides the bundle depth ladder (--shadow-e4) instead
-          // of a theme-blind `rgba(0,0,0,.6)` so it re-tints per bundle.
-          boxShadow: reduceMotion ? "none" : "var(--shadow-e4)",
-        }}
-      >
+      {anchorEl ? (
+        <Popover open>
+          {/* The anchor is the live element, handed to Radix as a measurable.
+              Radix owns side flipping and collision padding from here, so a
+              step whose translated copy makes the card taller than the room
+              below the anchor flips above it instead of covering it. */}
+          <PopoverAnchor virtualRef={{ current: anchorEl }} />
+          <PopoverContent
+            {...cardAria}
+            // Y2 — slide-up + fade entrance keyframe smooths the hand-off
+            // into the SpotlightTour so the
+            // tour card doesn't pop into place. The shared `lvis-anim-slide-up`
+            // utility collapses to opacity-only fade under
+            // prefers-reduced-motion (styles.css §290).
+            className="lvis-tour-card lvis-anim-slide-up w-auto max-w-[480px]"
+            // Step transitions inside the same scenario also benefit from a
+            // light re-mount fade — keying the card on the step index gives
+            // React a unique key so the animation re-runs on advance.
+            key={`${scenario.id}-${stepIndex}`}
+            side="bottom"
+            align="center"
+            sideOffset={12}
+            collisionPadding={16}
+            // The tour drives its own focus story: a step may ask the user to
+            // type into the anchor, so the card must neither take focus when
+            // it mounts nor throw focus somewhere on step change.
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onCloseAutoFocus={(e) => e.preventDefault()}
+            style={{
+              ...cardChrome,
+              // Copy long enough to outgrow the room beside the anchor scrolls
+              // inside the body instead of running the card off the window
+              // edge and taking Skip / Next with it. Radix publishes the room
+              // it had to place the card in; the column keeps the step counter
+              // and the footer pinned while only the body gives way.
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "var(--radix-popover-content-available-height)",
+              overflow: "hidden",
+            }}
+          >
+            {cardBody}
+          </PopoverContent>
+        </Popover>
+      ) : (
+        // No anchor — the selector matched nothing, or the element it names is
+        // not rendered in this build. The card centres itself so the narrative
+        // stays legible and the tour is never stuck.
         <div
-          className="text-[11px]"
+          {...cardAria}
+          className="lvis-anim-slide-up z-50"
+          key={`${scenario.id}-${stepIndex}`}
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            color: "hsl(var(--muted-foreground))",
+            position: "fixed",
+            left: 24,
+            right: 24,
+            bottom:
+              typeof window === "undefined"
+                ? 24
+                : Math.max(24, Math.floor(window.innerHeight * 0.18)),
+            maxWidth: 480,
+            marginLeft: "auto",
+            marginRight: "auto",
+            ...cardChrome,
           }}
         >
-          <span
-            data-testid="spotlight-tour:step-badge"
-            className="text-[10px] font-bold"
-            style={{
-              display: "inline-flex",
-              width: 18,
-              height: 18,
-              borderRadius: "9999px",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "hsl(var(--primary))",
-              color: "hsl(var(--primary-foreground))",
-            }}
-          >
-            {stepIndex + 1}
-          </span>
-          <span>
-            {stepIndex + 1} / {total} {t("spotlightTour.stepUnit")}
-          </span>
+          {cardBody}
         </div>
-        <h3
-          id={titleId}
-          className="mt-2 text-[14px] font-semibold"
-          style={{
-            letterSpacing: "-0.01em",
-          }}
-        >
-          {currentStep.title}
-        </h3>
-        <p
-          id={bodyId}
-          className="mt-1.5 text-[12px] leading-relaxed"
-          style={{
-            color: "hsl(var(--muted-foreground))",
-          }}
-        >
-          {currentStep.body}
-        </p>
-        {currentStep.keyHint && currentStep.keyHint.length > 0 ? (
-          <div
-            data-testid="spotlight-tour:key-hints"
-            className="mt-2"
-            style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
-          >
-            {currentStep.keyHint.map((label) => (
-              <kbd
-                key={label}
-                aria-label={t("spotlightTour.shortcutAriaLabel", { label })}
-                className="font-mono text-[11px]"
-                style={{
-                  background: "hsl(var(--kbd-bg))",
-                  border: "1px solid hsl(var(--kbd-border))",
-                  borderRadius: "var(--radius-sm)",
-                  padding: "1px 6px",
-                  color: "hsl(var(--popover-foreground))",
-                }}
-              >
-                {label}
-              </kbd>
-            ))}
-          </div>
-        ) : null}
-        <div
-          className="mt-4"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <div
-            data-testid="spotlight-tour:dots"
-            style={{ display: "flex", gap: 6 }}
-          >
-            {scenario.steps.map((_, i) => (
-              <span
-                key={i}
-                aria-hidden="true"
-                style={{
-                  display: "inline-block",
-                  width: 6,
-                  height: 6,
-                  borderRadius: "9999px",
-                  background:
-                    i === stepIndex
-                      ? "hsl(var(--primary))"
-                      : "hsl(var(--muted))",
-                }}
-              />
-            ))}
-          </div>
-          <button
-            type="button"
-            data-testid="spotlight-tour:skip"
-            onClick={() => closeAfterDismissal(scenario.id)}
-            className="ml-auto text-[11px]"
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "hsl(var(--muted-foreground))",
-              cursor: "pointer",
-            }}
-          >
-            {t("spotlightTour.skip")}
-          </button>
-          <button
-            type="button"
-            data-testid="spotlight-tour:next"
-            onClick={handleNext}
-            className="text-[12px]"
-            style={{
-              borderRadius: "var(--radius-md)",
-              padding: "6px 12px",
-              color: "hsl(var(--primary-foreground))",
-              background: "hsl(var(--primary))",
-              border: "none",
-              cursor: "pointer",
-            }}
-          >
-            {isLast ? t("spotlightTour.complete") : t("spotlightTour.next")}
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

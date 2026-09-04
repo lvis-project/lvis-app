@@ -462,6 +462,7 @@ Tiers map 1:1 onto the Tailwind default scale already used across the renderer (
 - Error: use destructive semantics and include the next actionable recovery when available.
 - Success: use success semantics sparingly; avoid celebratory motion.
 - Disabled: preserve legibility and explain disabled controls through tooltip or adjacent status only when the reason is not obvious.
+- Highlight: a highlight is carried by the element it marks — the element takes the mark and the ring is drawn on it — never by a separate box placed at coordinates copied from it. A copied rect goes stale on every layout change its copier did not subscribe to, and most in-app shifts fire neither resize nor scroll; a surface anchored to the element (the shared popover) keeps the relation for free.
 - Offline/slow network: keep local app navigation responsive and isolate remote failure to the affected operation.
 - Notification hierarchy (pick the narrowest surface that fits):
   - **Inline status** next to the affected control — the default for operation results.

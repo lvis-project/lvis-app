@@ -259,11 +259,6 @@
     },
     {
       "type": "exports",
-      "file": "src/components/ui/popover.tsx",
-      "name": "PopoverAnchor"
-    },
-    {
-      "type": "exports",
       "file": "src/components/ui/select.tsx",
       "name": "SelectScrollDownButton"
     },
