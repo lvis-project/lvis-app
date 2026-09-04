@@ -963,6 +963,37 @@ describe("LlmTab names each route's state on a row that has two", () => {
     expect(document.querySelectorAll("[data-provider-sync-status]")).toHaveLength(1);
   });
 
+  it("still calls a provider connected when one of its two routes failed to sync", async () => {
+    // The other half of the rule above, and the one a real account hits: the
+    // sign-in is live, its models are in the chooser, and the SECOND route —
+    // the stored API key — cannot fetch a catalogue. Wording the row "needs
+    // checking" over that sends someone to repair a provider they are
+    // successfully using; the failed route is named on the sub-line instead,
+    // which is on screen with the row shut.
+    installSubscription([codexView({
+      status: {
+        runtime: "ready",
+        connection: "connected",
+        models: [{ id: "codex-mini", label: "codex-mini" }],
+      },
+    })], { refreshStatus: vi.fn(), useForChat: vi.fn(), useApiForChat: vi.fn() });
+    const api = makeApi({ hasApiKey: storedKeysFor("openai") });
+    await renderTab(api, { vendor: "openai", model: "" });
+
+    const card = await screen.findByTestId("llm-tab:connection:codex");
+    // The endpoint handshake really did fail, and the row says so on its line.
+    await waitFor(() => expect(
+      within(card).getByTestId("llm-tab:connection-subline:codex"),
+    ).toHaveAttribute("data-provider-sync-status", "error"));
+    // ...and the word above it still describes the provider, which works.
+    const state = within(card).getByTestId("llm-tab:connection:codex:state");
+    expect(state).toHaveAttribute("data-state", "connected");
+    expect(state).toHaveTextContent(CONNECTED);
+    // The claim that makes "connected" true: this provider is feeding the one
+    // chooser right now.
+    expect(await chooserModelIds()).toContain("codex-mini");
+  });
+
   it("keeps a row down to the shared five words and says the rest on its line", async () => {
     // A runtime the user has not chosen yet is not a sixth state word. The
     // column has to stay readable straight down against the remote connections
