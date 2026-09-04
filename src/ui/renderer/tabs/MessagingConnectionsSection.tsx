@@ -188,7 +188,6 @@ function TelegramConnectionRow({ api, chatGroupId, catalog, expanded, onToggle, 
       endpoint={reading.endpoint}
       expanded={expanded}
       onToggle={onToggle}
-      separated={true}
       testId={TELEGRAM_ROW_ID}
     >
       <div className="space-y-3">
@@ -223,7 +222,6 @@ function MarketplaceConnectionRow({ api, connection, expanded, onToggle }: {
       state="needs-setup"
       expanded={expanded}
       onToggle={onToggle}
-      separated={true}
       testId={rowId}
     >
       <div className="space-y-3">
@@ -291,6 +289,7 @@ export function MessagingConnectionsSection({
     // this element and focuses it, and a box with no layout of its own reports
     // no position to scroll to.
     <div
+      className="flex flex-col gap-3"
       data-settings-section="remote-messaging-connections"
       tabIndex={-1}
       data-testid="messaging-connections-content"

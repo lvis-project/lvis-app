@@ -103,12 +103,6 @@ export interface ConnectionRowProps {
   action?: ReactNode;
   expanded: boolean;
   onToggle: () => void;
-  /**
-   * Whether a row precedes this one in the list. The separator is a prop
-   * rather than a `first:` rule because the list groups its rows — a group
-   * wrapper would make its first row look like the top of the list.
-   */
-  separated?: boolean;
   /** Stem for this row's test ids and for the body's `aria-controls` id. */
   testId: string;
   children?: ReactNode;
@@ -123,7 +117,6 @@ export function ConnectionRow({
   action,
   expanded,
   onToggle,
-  separated = false,
   testId,
   children,
 }: ConnectionRowProps) {
@@ -132,7 +125,7 @@ export function ConnectionRow({
 
   return (
     <div
-      className={cn("min-w-0 bg-card", separated && "border-t border-border")}
+      className="min-w-0 rounded-md border border-border bg-card"
       data-connection-row={testId}
       data-testid={testId}
     >

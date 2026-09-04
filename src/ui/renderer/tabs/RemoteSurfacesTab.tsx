@@ -160,7 +160,7 @@ export function RemoteSurfacesTab({ api, chatGroupId, sectionTarget = null }: Re
         description={t("remoteSurfacesTab.pageDescription")}
       />
       <div
-        className="overflow-hidden rounded-md border border-border"
+        className="flex flex-col gap-3"
         data-testid="remote-connections-list"
       >
         <ConnectionRow
@@ -191,7 +191,6 @@ export function RemoteSurfacesTab({ api, chatGroupId, sectionTarget = null }: Re
           endpoint={localApiSubline}
           expanded={expandedRowIds.includes(LOCAL_API_ROW)}
           onToggle={() => toggleRow(LOCAL_API_ROW)}
-          separated={true}
           testId={LOCAL_API_ROW}
         >
           <LocalApiSurfacesSection />

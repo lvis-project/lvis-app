@@ -2842,8 +2842,8 @@ export function LlmTab(props: LlmTabProps) {
           two independent computations of the same facts, which is how the
           screen came to contradict itself. */}
       {visibleRows.length > 0 ? (
-        <div className="overflow-hidden rounded-md border border-border" data-testid="llm-tab:connections-list">
-          {visibleRows.map((row, index) => (
+        <div className="flex flex-col gap-3" data-testid="llm-tab:connections-list">
+          {visibleRows.map((row) => (
             <ConnectionRow
               key={row.id}
               label={row.label}
@@ -2875,7 +2875,6 @@ export function LlmTab(props: LlmTabProps) {
                 else setOpenRowIds((current) => [...current, row.id]);
                 setRowToReveal(row.id);
               }}
-              separated={index > 0}
               testId={`llm-tab:connection:${row.id}`}
             >
               <div className="space-y-3">
