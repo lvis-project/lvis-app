@@ -368,17 +368,23 @@
   }
 }
 
-/* Spotlight ring for the onboarding tour. The step marks the element it is
-   about and the element carries its own ring, so the layout engine moves the
-   highlight with the target — a ring drawn at coordinates copied from the
-   anchor goes stale the moment anything in the window shifts, and the copy
-   cannot be refreshed for shifts that fire neither resize nor scroll.
+/* Spotlight ring for the onboarding tour — a layer of its own, portaled onto
+   the body and placed against the live anchor by the same popper that places
+   the step card. The ring cannot live on the anchor: a `box-shadow` is painted
+   outside the border box, and every ancestor of a composer or toolbar anchor
+   clips (`overflow: hidden` from the input bar out through the pane to the
+   route canvas), so the ring would be cut away the moment it was drawn. Nor
+   could it be lifted over the backdrop from there — the route canvas is
+   `isolation: isolate`, so a `z-index` on the anchor is trapped inside that
+   stacking context and can never rise above a `z-50` layer outside it.
 
-   Unlayered so a utility class on the anchor cannot outrank the ring, and
-   lifted one step over the tour's own `z-50` backdrop, otherwise the ring
-   would be dimmed along with everything else. The lift is paint only: the
-   backdrop still owns the pointer while the tour runs. */
-[data-tour-highlight="true"] {
+   Unlayered so the popover's own utility classes cannot outrank it. On the
+   body the z-index is real, and puts the ring over the tour's `z-50` backdrop
+   so the anchor reads at full strength instead of being dimmed with the rest
+   of the window. Pointer-transparent because a step may ask the user to type
+   into the very control it rings, and because a click that misses the control
+   should still reach the backdrop and dismiss the tour. */
+.lvis-tour-ring {
   position: relative;
   z-index: 51;
   pointer-events: none;
@@ -425,7 +431,7 @@
   }
   /* Same for the tour's ring: it still marks the element the step is about,
      in the tighter no-bloom variant. */
-  [data-tour-highlight="true"] {
+  .lvis-tour-ring {
     box-shadow: var(--shadow-spotlight-reduced);
   }
   /* Marquee never scrolls under reduced motion. MarqueeText also renders the

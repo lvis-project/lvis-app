@@ -30,7 +30,7 @@ const RENDERER_DIR = resolve(fileURLToPath(import.meta.url), "../..");
 /** Files that may position a box against the viewport, and why. */
 const FIXED_POSITIONING_ALLOWED: Record<string, string> = {
   "components/SpotlightTour.tsx":
-    "first-boot tour: a backdrop over the whole window, and the anchorless fallback card that centres itself in it; the ring is carried by the anchor and the anchored card by the shared popover",
+    "first-boot tour: a backdrop over the whole window, and the anchorless fallback card that centres itself in it; the ring and the anchored card are both placed by the shared popover against the anchor",
   "components/McpAppFullscreenPanel.tsx":
     "an MCP app card's fullscreen mount covers the window by design; the card left its tile for it",
   "components/McpAppPipPanel.tsx":

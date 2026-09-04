@@ -74,12 +74,48 @@ export interface SpotlightTourProps {
 }
 
 /**
- * The mark a step puts on the element it is about. `styles.css` draws the
- * ring on the marked element itself, so the layout engine carries the
- * highlight with the target: nothing copies the anchor's coordinates, so
- * nothing can hold a stale copy of them.
+ * The mark a step puts on the element it is about. It is the semantic record
+ * of which node the step targets — read by tests and by anything asking what
+ * the tour is pointing at. It draws nothing: the ring is a portaled layer of
+ * its own (see `.lvis-tour-ring` in `styles.css` for why it cannot live on
+ * the element).
  */
 const TOUR_HIGHLIGHT_ATTR = "data-tour-highlight";
+
+/**
+ * How far outside the anchor's own box the ring is drawn. The ring is its own
+ * layer, so without this gap it would trace the anchor's edge exactly and read
+ * as a border on the control rather than a highlight around it.
+ */
+const RING_INSET_PX = 3;
+
+/**
+ * The element a step's selector means.
+ *
+ * `data-tour-anchor` is per-surface chrome and the main area holds up to four
+ * tiles, so a step selector matches once per open tile — and document order is
+ * not screen order, so `querySelector`'s first hit can be a tile the user
+ * cannot see. The step is about the one that is on screen.
+ *
+ * A zero-area rect is the test that carries the weight: it covers
+ * `display: none`, a collapsed container, and a detached node alike.
+ * `visibility: hidden` keeps its box, so it needs asking about separately.
+ * `offsetParent` is deliberately not consulted — it is null for every
+ * `position: fixed` element, which would misread the window-level chrome some
+ * steps point at as hidden.
+ */
+function firstVisibleMatch(selector: string): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  for (const el of document.querySelectorAll<HTMLElement>(selector)) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    if (typeof window !== "undefined") {
+      if (window.getComputedStyle(el).visibility === "hidden") continue;
+    }
+    return el;
+  }
+  return null;
+}
 
 /**
  * U6 — Detect whether another modal Dialog / AlertDialog is currently
@@ -175,11 +211,25 @@ export function SpotlightTour({
   // U6 — observer that flushes the queued scenario when every modal
   // dialog has closed. We watch `document.body` for the data-state
   // attribute mutations Radix emits on close.
+  //
+  // It also carries the anchor's liveness: the ring and the card are portaled
+  // layers positioned against the anchor node, so a node that leaves the DOM
+  // would leave both painting where nothing is any more. Bumping the epoch
+  // re-runs the resolution effect below, which re-anchors to whatever the
+  // selector means now — the replacement node after a re-render, or nothing,
+  // in which case the card falls back to centring itself.
+  const anchorElRef = useRef<HTMLElement | null>(null);
+  const [anchorEpoch, setAnchorEpoch] = useState(0);
   useEffect(() => {
     if (typeof MutationObserver === "undefined" || typeof document === "undefined") {
       return;
     }
     const observer = new MutationObserver(() => {
+      const anchored = anchorElRef.current;
+      if (anchored && !anchored.isConnected) {
+        anchorElRef.current = null;
+        setAnchorEpoch((n) => n + 1);
+      }
       if (pendingScenarioRef.current && !anyBlockingSurfaceOpen()) {
         const next = pendingScenarioRef.current;
         pendingScenarioRef.current = null;
@@ -198,11 +248,11 @@ export function SpotlightTour({
   }, []);
 
   // Resolve the element this step is about, and mark it. Everything visual
-  // then hangs off that element: the ring is drawn on it by `styles.css`,
-  // and the card is the Radix popover anchored to it. Because the anchor is
-  // a live node rather than a copied rect, an in-app layout shift — a notice
-  // strip opening, the composer growing, a list re-rendering — moves the ring
-  // and the card with it, with nothing to re-measure.
+  // then hangs off that element: both the ring and the card are Radix popovers
+  // anchored to it. Because the anchor is a live node rather than a copied
+  // rect, an in-app layout shift — a notice strip opening, the composer
+  // growing, a list re-rendering — moves the ring and the card with it, with
+  // nothing to re-measure.
   //
   // The cleanup unmarks the node this effect actually marked rather than
   // whatever the selector resolves to later, so a step that swaps the target
@@ -212,14 +262,43 @@ export function SpotlightTour({
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
     if (typeof document === "undefined") return;
-    const el = anchorSelector
-      ? document.querySelector<HTMLElement>(anchorSelector)
-      : null;
+    const el = anchorSelector ? firstVisibleMatch(anchorSelector) : null;
+    anchorElRef.current = el;
     setAnchorEl(el);
     if (!el) return;
     el.setAttribute(TOUR_HIGHLIGHT_ATTR, "true");
     return () => el.removeAttribute(TOUR_HIGHLIGHT_ATTR);
-  }, [anchorSelector, stepIndex, scenario]);
+  }, [anchorSelector, stepIndex, scenario, anchorEpoch]);
+
+  // The ring is drawn on a layer of its own, so it needs the anchor's size —
+  // and only its size. Where the layer goes stays the popper's job against the
+  // live node, so nothing here holds a coordinate that could go stale; a
+  // control that grows (the composer gaining a line) re-sizes the ring through
+  // the observer while the popper re-places it.
+  const [anchorSize, setAnchorSize] = useState<{ width: number; height: number } | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    if (!anchorEl) {
+      setAnchorSize(null);
+      return;
+    }
+    const measure = () => {
+      const rect = anchorEl.getBoundingClientRect();
+      setAnchorSize((prev) =>
+        prev && prev.width === rect.width && prev.height === rect.height
+          ? prev
+          : { width: rect.width, height: rect.height },
+      );
+    };
+    measure();
+    const ResizeObserverCtor =
+      typeof window === "undefined" ? undefined : window.ResizeObserver;
+    if (typeof ResizeObserverCtor !== "function") return;
+    const observer = new ResizeObserverCtor(measure);
+    observer.observe(anchorEl);
+    return () => observer.disconnect();
+  }, [anchorEl]);
 
   const closeAfterCompletion = useCallback(
     (id: string) => {
@@ -349,15 +428,18 @@ export function SpotlightTour({
       window.addEventListener("keydown", onKey);
       cleanup = () => window.removeEventListener("keydown", onKey);
     } else if (triggerForStep.kind === "input") {
+      // Same resolver as the anchor: a trigger selector and an anchor selector
+      // name the same control, so two resolvers disagreeing about which tile
+      // it lives in would ring one composer and wait on another.
       const selector = triggerForStep.selector;
-      const target = document.querySelector<HTMLElement>(selector);
+      const target = firstVisibleMatch(selector);
       if (!target) return;
       const onInput = () => handleNext();
       target.addEventListener("input", onInput);
       cleanup = () => target.removeEventListener("input", onInput);
     } else if (triggerForStep.kind === "click") {
       const selector = triggerForStep.selector;
-      const target = document.querySelector<HTMLElement>(selector);
+      const target = firstVisibleMatch(selector);
       if (!target) return;
       const onClick = () => handleNext();
       target.addEventListener("click", onClick);
@@ -544,9 +626,8 @@ export function SpotlightTour({
       data-reduce-motion={reduceMotion ? "true" : "false"}
     >
       {/* Backdrop — clicking it dismisses the tour. The dimmed layer matches
-          the mockup; the marked anchor is lifted over it by `styles.css` so
-          the ring it carries reads at full strength, and stays pointer-
-          transparent so a click on it still reaches the backdrop.
+          the mockup; the ring and the card are portaled onto the body, above
+          this band, so the anchor reads at full strength through it.
 
           The layers sit in the shared `z-50` floating band, ordered by
           mount order like every other overlay there: the tour mounts after the
@@ -563,6 +644,54 @@ export function SpotlightTour({
           background: "hsl(var(--overlay) / var(--opacity-emphatic))",
         }}
       />
+      {anchorEl && anchorSize ? (
+        /* The ring. It is its own portaled layer rather than a box-shadow on
+           the anchor because the anchor cannot carry one: every ancestor from
+           the composer's input bar out to the route canvas is `overflow:
+           hidden`, which clips a shadow drawn outside the border box, and the
+           route canvas is `isolation: isolate`, which traps any z-index put on
+           the anchor below this tour's own backdrop.
+
+           Placed by the same popper as the card, against the same live node,
+           so it tracks the anchor without anything re-measuring coordinates —
+           only the anchor's size crosses over, and a ResizeObserver keeps that
+           fresh. `side="bottom"` with a negative side offset lands the layer's
+           top edge on the anchor's, `align="start"` its left edge, and
+           collisions stay off so nothing nudges the ring off its target. */
+        <Popover open>
+          <PopoverAnchor virtualRef={{ current: anchorEl }} />
+          <PopoverContent
+            data-testid="spotlight-tour:ring"
+            // Decorative: it is the mark made visible, and the marked element
+            // is already in the accessibility tree in its own right. `dialog`
+            // is what Radix would give it, which would put a phantom blocking
+            // surface on screen for the whole tour.
+            role="presentation"
+            aria-hidden
+            key={`ring-${scenario.id}-${stepIndex}`}
+            className="lvis-tour-ring w-auto border-0 bg-transparent p-0"
+            side="bottom"
+            align="start"
+            avoidCollisions={false}
+            sideOffset={-(anchorSize.height + RING_INSET_PX)}
+            alignOffset={-RING_INSET_PX}
+            style={{
+              width: anchorSize.width + RING_INSET_PX * 2,
+              height: anchorSize.height + RING_INSET_PX * 2,
+            }}
+            // A decorative layer takes no focus and dismisses nothing: Escape
+            // and outside clicks belong to the tour's own handlers and to the
+            // backdrop, so this layer declines all four rather than competing
+            // for them.
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onCloseAutoFocus={(e) => e.preventDefault()}
+            onEscapeKeyDown={(e) => e.preventDefault()}
+            onPointerDownOutside={(e) => e.preventDefault()}
+            onFocusOutside={(e) => e.preventDefault()}
+            onInteractOutside={(e) => e.preventDefault()}
+          />
+        </Popover>
+      ) : null}
       {anchorEl ? (
         <Popover open>
           {/* The anchor is the live element, handed to Radix as a measurable.

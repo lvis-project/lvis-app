@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   SpotlightTour,
@@ -279,6 +282,7 @@ describe("SpotlightTour", () => {
     // Inject the anchor target.
     const composer = document.createElement("input");
     composer.id = "composer-fake";
+    stubRect(composer, ANCHOR_WIDTH, ANCHOR_HEIGHT);
     document.body.appendChild(composer);
     const { api, fireStart } = spotlightTourHarness();
     const { findByTestId } = render(
@@ -366,6 +370,30 @@ describe("SpotlightTour", () => {
 });
 
 /**
+ * jsdom lays nothing out: every element reports a 0×0 rect. The tour reads
+ * that rect to tell an on-screen match from an off-screen one, so a spec that
+ * wants an anchor to be findable has to give it a box. Sizes are arbitrary
+ * except where a spec reads them back off the ring.
+ */
+const ANCHOR_WIDTH = 240;
+const ANCHOR_HEIGHT = 32;
+
+function stubRect(el: HTMLElement, width: number, height: number): void {
+  el.getBoundingClientRect = () =>
+    ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: width,
+      bottom: height,
+      width,
+      height,
+      toJSON: () => ({}),
+    }) as DOMRect;
+}
+
+/**
  * The highlight is carried by the element a step is about, not by coordinates
  * copied from it. These specs hold that contract from the DOM: the mark lands
  * on the anchor and only the anchor, it follows the step, and it is gone the
@@ -384,6 +412,7 @@ describe("SpotlightTour anchoring", () => {
       const el = document.createElement("button");
       el.setAttribute("data-tour-anchor", name);
       el.textContent = name;
+      stubRect(el, ANCHOR_WIDTH, ANCHOR_HEIGHT);
       document.body.appendChild(el);
       mountedAnchors.push(el);
       return el;
@@ -490,8 +519,12 @@ describe("SpotlightTour anchoring", () => {
     expect(marked()).toEqual([a]);
     a.remove();
     expect(marked()).toEqual([]);
-    // There is no separate ring node that could survive its anchor.
-    expect(queryByTestId("spotlight-tour:ring")).toBeNull();
+    // The ring is a layer of its own, so it has to be told: the tour watches
+    // the document and re-resolves the anchor, and with nothing left to point
+    // at the ring goes with it rather than floating where the anchor was.
+    await waitFor(() => {
+      expect(queryByTestId("spotlight-tour:ring")).toBeNull();
+    });
   });
 
   // The step card is the shared popover, so it carries `role="dialog"` and
@@ -576,5 +609,174 @@ describe("SpotlightTour anchoring", () => {
     expect(card.style.position).toBe("");
     expect(card.style.top).toBe("");
     expect(card.style.bottom).toBe("");
+  });
+});
+
+/**
+ * The ring is a portaled layer placed against the anchor, not a shadow the
+ * anchor paints. It has to be: the anchors the tour points at sit inside a
+ * chain of `overflow: hidden` ancestors that clips a shadow drawn outside the
+ * border box, under a route canvas whose `isolation: isolate` traps any
+ * z-index put on the anchor below the tour's own backdrop.
+ *
+ * jsdom paints nothing, so what these specs hold is the wiring: a ring node
+ * exists for an anchored step, it is sized from the anchor's own box, and it
+ * neither takes a role that would read as a blocking dialog nor leaves the
+ * anchor unusable.
+ */
+describe("SpotlightTour ring", () => {
+  const mounted: HTMLElement[] = [];
+
+  function mountAnchor(
+    name: string,
+    opts: { width?: number; height?: number; display?: string; visibility?: string } = {},
+  ): HTMLElement {
+    const el = document.createElement("button");
+    el.setAttribute("data-tour-anchor", name);
+    if (opts.display) el.style.display = opts.display;
+    if (opts.visibility) el.style.visibility = opts.visibility;
+    stubRect(el, opts.width ?? ANCHOR_WIDTH, opts.height ?? ANCHOR_HEIGHT);
+    document.body.appendChild(el);
+    mounted.push(el);
+    return el;
+  }
+
+  const SINGLE_STEP: TourScenario = {
+    id: "ring-scenario",
+    title: "Ring",
+    steps: [
+      { anchorSelector: '[data-tour-anchor="a"]', title: "Step 1", body: "Body 1" },
+    ],
+  };
+  const REGISTRY = Object.freeze({ [SINGLE_STEP.id]: SINGLE_STEP });
+
+  function renderTour() {
+    const { api, fireStart } = spotlightTourHarness();
+    const utils = render(<SpotlightTour api={api} scenarios={REGISTRY} />);
+    fireStart(SINGLE_STEP.id);
+    return utils;
+  }
+
+  afterEach(() => {
+    for (const el of mounted.splice(0)) el.remove();
+  });
+
+  it("renders a ring for an anchored step, sized from the anchor's own box", async () => {
+    mountAnchor("a", { width: 300, height: 44 });
+    const { findByTestId } = renderTour();
+    const ring = await findByTestId("spotlight-tour:ring");
+    // The ring stands off the anchor's edge by a fixed inset on every side, so
+    // it reads as a highlight around the control rather than a border on it.
+    const width = Number.parseFloat(ring.style.width);
+    const height = Number.parseFloat(ring.style.height);
+    expect(width).toBeGreaterThan(300);
+    expect(height).toBeGreaterThan(44);
+    expect(width - 300).toBe(height - 44);
+    // Placed by the popper against the live anchor — the tour computes no
+    // coordinates of its own for it.
+    expect(ring.closest("[data-radix-popper-content-wrapper]")).not.toBeNull();
+    expect(ring.style.top).toBe("");
+    expect(ring.style.left).toBe("");
+  });
+
+  // A control that grows mid-step — the composer gaining a line — must take
+  // the ring with it. jsdom ships no ResizeObserver, so the spec supplies a
+  // driveable one and fires it the way the browser would.
+  it("re-sizes the ring when the anchor grows", async () => {
+    // The popper observes elements of its own, so entries are keyed by target
+    // and only the anchor's are fired.
+    type ObserverCallback = (entries: Array<{ target: Element }>) => void;
+    const observed: Array<{ target: Element; cb: ObserverCallback }> = [];
+    class DriveableResizeObserver {
+      constructor(private readonly cb: ObserverCallback) {}
+      observe(target: Element) {
+        observed.push({ target, cb: this.cb });
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    const original = window.ResizeObserver;
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      writable: true,
+      value: DriveableResizeObserver,
+    });
+    try {
+      const anchor = mountAnchor("a", { width: 300, height: 44 });
+      const { findByTestId } = renderTour();
+      const ring = await findByTestId("spotlight-tour:ring");
+      expect(ring.style.height).toBe("50px");
+      const onAnchor = observed.filter((entry) => entry.target === anchor);
+      expect(onAnchor.length).toBeGreaterThan(0);
+      stubRect(anchor, 300, 88);
+      act(() => {
+        for (const entry of onAnchor) entry.cb([{ target: anchor }]);
+      });
+      await waitFor(() => {
+        expect(
+          (document.querySelector(
+            '[data-testid="spotlight-tour:ring"]',
+          ) as HTMLElement).style.height,
+        ).toBe("94px");
+      });
+    } finally {
+      Object.defineProperty(window, "ResizeObserver", {
+        configurable: true,
+        writable: true,
+        value: original,
+      });
+    }
+  });
+
+  it("is decorative: no dialog role, and no blocking surface for the rest of the app", async () => {
+    mountAnchor("a");
+    const { findByTestId } = renderTour();
+    const ring = await findByTestId("spotlight-tour:ring");
+    expect(ring.getAttribute("role")).toBe("presentation");
+    expect(ring.getAttribute("aria-hidden")).toBe("true");
+    expect(document.querySelectorAll(BLOCKING_SURFACE_SELECTOR)).toHaveLength(0);
+  });
+
+  it("leaves the anchor usable — nothing forces pointer-events off on it", async () => {
+    const anchor = mountAnchor("a");
+    const { findByTestId } = renderTour();
+    await findByTestId("spotlight-tour:ring");
+    expect(anchor.getAttribute("data-tour-highlight")).toBe("true");
+    expect(anchor.style.pointerEvents).toBe("");
+    // The stylesheet is the other half of that claim: a rule keyed on the mark
+    // used to disable the very control a step asks the user to type into.
+    const styles = readFileSync(
+      resolve(fileURLToPath(import.meta.url), "../../../../../styles.css"),
+      "utf8",
+    );
+    expect(styles).not.toContain("[data-tour-highlight");
+    expect(styles).toContain(".lvis-tour-ring");
+  });
+
+  it("anchors to the visible match when an earlier one is display:none", async () => {
+    const hidden = mountAnchor("a", { display: "none", width: 0, height: 0 });
+    const visible = mountAnchor("a");
+    const { findByTestId } = renderTour();
+    await findByTestId("spotlight-tour:ring");
+    expect(hidden.hasAttribute("data-tour-highlight")).toBe(false);
+    expect(visible.getAttribute("data-tour-highlight")).toBe("true");
+  });
+
+  it("anchors to the visible match when an earlier one has a zero-area box", async () => {
+    const collapsed = mountAnchor("a", { width: 0, height: 0 });
+    const visible = mountAnchor("a");
+    const { findByTestId } = renderTour();
+    await findByTestId("spotlight-tour:ring");
+    expect(collapsed.hasAttribute("data-tour-highlight")).toBe(false);
+    expect(visible.getAttribute("data-tour-highlight")).toBe("true");
+  });
+
+  it("anchors to the visible match when an earlier one is visibility:hidden", async () => {
+    const invisible = mountAnchor("a", { visibility: "hidden" });
+    const visible = mountAnchor("a");
+    const { findByTestId } = renderTour();
+    await findByTestId("spotlight-tour:ring");
+    expect(invisible.hasAttribute("data-tour-highlight")).toBe(false);
+    expect(visible.getAttribute("data-tour-highlight")).toBe("true");
   });
 });
