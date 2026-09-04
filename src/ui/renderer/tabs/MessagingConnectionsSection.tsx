@@ -1,19 +1,21 @@
 /**
- * Owner-facing list of the messaging connections installed from the
- * marketplace.
+ * The messaging connections installed from the marketplace, as rows in the
+ * 원격 연결 list.
  *
  * A messaging connection is not a plugin bundle: installing one records that
  * this desktop may be reached through that service and nothing more. What the
  * catalog declared about it — the credentials it will ask for, the hosts it
- * reaches — is shown here so the owner can read it back after installing, and
- * the controls that actually drive a connection stay in that connection's own
- * section, which the card's action jumps to.
+ * reaches — is shown inside the row so the owner can read it back after
+ * installing, and the controls that actually drive the connection open in the
+ * same place rather than in a second section further down the page. One vendor
+ * is one line; there is nowhere left to jump to.
  *
- * Its own file rather than a block inside `RemoteSurfacesTab`: every other
- * surface on that tab is a section module of its own, and a tab body that also
- * held one section's state and IPC would be the odd one out.
+ * Its own file rather than a block inside `RemoteSurfacesTab`: this is the one
+ * group on the tab whose membership is data — what the owner installed — so it
+ * owns the read, the per-connection state subscriptions, and the driver table
+ * that says which of those this build can actually operate.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -21,24 +23,16 @@ import type {
   MarketplaceInstalledMessagingConnection,
 } from "../../../shared/marketplace-package-assets.js";
 import type { TelegramConnectionSnapshot } from "../../../shared/telegram-connection.js";
-import { SettingsSection } from "../components/PageShell.js";
-import { usePrefersReducedMotion } from "../hooks/use-prefers-reduced-motion.js";
+import { ConnectionRow, type ConnectionRowState } from "../components/ConnectionRow.js";
+import { TelegramConnectionContent } from "./TelegramConnectionContent.js";
 import type { LvisApi } from "../types.js";
 
-/**
- * Coarse owner-visible state, shared by every connection.
- *
- * Deliberately far coarser than any one connection's own state machine: this
- * card answers "can I be reached here right now, and if not is that on me?".
- * The detail belongs to the connection's own section.
- */
-type MessagingConnectionState =
-  | "connected"
-  | "paused"
-  | "needs-setup"
-  | "attention"
-  /** Installed, but this build carries no driver for it. */
-  | "unavailable";
+/** What a driver reports about its connection for the collapsed row. */
+interface MessagingConnectionReading {
+  readonly state: ConnectionRowState;
+  /** The handle or address this connection is reachable at, when it has one. */
+  readonly endpoint: string | null;
+}
 
 /**
  * A connection this build can actually drive.
@@ -49,15 +43,17 @@ type MessagingConnectionState =
  * `unavailable`, rather than disappearing or pretending to work.
  */
 interface MessagingConnectionDriver {
-  /** The `data-settings-section` the card's action sends the owner to. */
+  /** The `data-settings-section` this connection's controls carry. */
   readonly settingsSection: string;
-  readonly readState: (api: LvisApi) => Promise<MessagingConnectionState>;
+  readonly read: (api: LvisApi) => Promise<MessagingConnectionReading>;
   readonly subscribe: (api: LvisApi, onChanged: () => void) => () => void;
+  /** The controls themselves, rendered inside the row this driver owns. */
+  readonly renderSection: (api: LvisApi, chatGroupId: string) => ReactNode;
 }
 
 function telegramConnectionState(
   snapshot: TelegramConnectionSnapshot,
-): MessagingConnectionState {
+): ConnectionRowState {
   switch (snapshot.state) {
     case "active":
       return "connected";
@@ -80,45 +76,119 @@ const MESSAGING_CONNECTION_DRIVERS: Readonly<Record<string, MessagingConnectionD
   Object.freeze({
     telegram: {
       settingsSection: "remote-telegram",
-      readState: async (api) => {
+      read: async (api) => {
         const result = await api.telegramConnection.snapshot();
-        return result.ok ? telegramConnectionState(result.snapshot) : "attention";
+        if (!result.ok) return { state: "attention", endpoint: null };
+        return {
+          state: telegramConnectionState(result.snapshot),
+          endpoint: result.snapshot.botUsername === null
+            ? null
+            : `@${result.snapshot.botUsername}`,
+        };
       },
       subscribe: (api, onChanged) => api.telegramConnection.onChanged(onChanged),
+      renderSection: (api, chatGroupId) => (
+        <TelegramConnectionContent api={api} chatGroupId={chatGroupId} />
+      ),
     },
   });
 
-function stateLabelKey(state: MessagingConnectionState): string {
-  switch (state) {
-    case "connected": return "remoteSurfacesTab.messagingStateConnected";
-    case "paused": return "remoteSurfacesTab.messagingStatePaused";
-    case "needs-setup": return "remoteSurfacesTab.messagingStateNeedsSetup";
-    case "attention": return "remoteSurfacesTab.messagingStateAttention";
-    case "unavailable": return "remoteSurfacesTab.messagingStateUnavailable";
-  }
+/** The row id the tab's accordion uses for one installed connection. */
+function messagingConnectionRowId(connectionId: string): string {
+  return `messaging-connection:${connectionId}`;
 }
 
-function MessagingConnectionCard({ api, connection }: {
+/**
+ * The row a settings deep link into a messaging connection has to open.
+ *
+ * Null for an anchor no driver claims, which is how the tab tells a section
+ * this group owns from one belonging to another vendor on the page.
+ */
+export function messagingConnectionRowForSection(section: string): string | null {
+  for (const [connectionId, driver] of Object.entries(MESSAGING_CONNECTION_DRIVERS)) {
+    if (driver.settingsSection === section) return messagingConnectionRowId(connectionId);
+  }
+  return null;
+}
+
+/** The catalog read-back: what this connection will ask for, and what it reaches. */
+function MessagingConnectionCatalog({ api, connection }: {
   api: LvisApi;
   connection: MarketplaceInstalledMessagingConnection;
 }) {
   const { t } = useTranslation();
-  const reducedMotion = usePrefersReducedMotion();
-  const [expanded, setExpanded] = useState(false);
+  const { docsUrl } = connection;
+  const rowId = messagingConnectionRowId(connection.connectionId);
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-muted-foreground">{connection.summary}</p>
+      <div className="space-y-1">
+        <p className="text-[11px] font-medium">
+          {t("remoteSurfacesTab.messagingCredentialsLabel")}
+        </p>
+        <ul className="space-y-0.5">
+          {connection.credentials.map((credential) => (
+            <li
+              key={credential.key}
+              className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+            >
+              <span>{credential.label}</span>
+              {credential.secret && (
+                <Badge variant="outline" className="h-4 px-1 text-[9px]">
+                  {t("remoteSurfacesTab.messagingSecretBadge")}
+                </Badge>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+      {connection.egress && connection.egress.length > 0 && (
+        <p
+          className="text-[11px] text-muted-foreground"
+          data-testid={`${rowId}:egress`}
+        >
+          {t("remoteSurfacesTab.messagingEgressLabel", {
+            hosts: connection.egress.join(", "),
+          })}
+        </p>
+      )}
+      {docsUrl && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={() => void api.openExternalUrl(docsUrl)}
+          data-testid={`${rowId}:docs`}
+        >
+          {t("remoteSurfacesTab.messagingDocsLink")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function MessagingConnectionRow({ api, chatGroupId, connection, expanded, onToggle }: {
+  api: LvisApi;
+  chatGroupId: string;
+  connection: MarketplaceInstalledMessagingConnection;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
   const driver = MESSAGING_CONNECTION_DRIVERS[connection.connectionId];
-  const [state, setState] = useState<MessagingConnectionState>(
-    driver ? "needs-setup" : "unavailable",
+  const [reading, setReading] = useState<MessagingConnectionReading>(
+    driver ? { state: "checking", endpoint: null } : { state: "unavailable", endpoint: null },
   );
 
   useEffect(() => {
     if (!driver) {
-      setState("unavailable");
+      setReading({ state: "unavailable", endpoint: null });
       return;
     }
     let alive = true;
     const refresh = () => {
-      void driver.readState(api).then((next) => {
-        if (alive) setState(next);
+      void driver.read(api).then((next) => {
+        if (alive) setReading(next);
       });
     };
     refresh();
@@ -129,126 +199,48 @@ function MessagingConnectionCard({ api, connection }: {
     };
   }, [api, driver]);
 
-  const openDriverSection = useCallback(() => {
-    if (!driver) return;
-    const node = document.querySelector<HTMLElement>(
-      `[data-settings-section="${driver.settingsSection}"]`,
-    );
-    if (!node) return;
-    node.scrollIntoView({ block: "start", behavior: reducedMotion ? "auto" : "smooth" });
-    // The scroll already put the section on screen; focusing without a second
-    // scroll moves the keyboard caret to the controls the owner asked for.
-    node.focus({ preventScroll: true });
-  }, [driver, reducedMotion]);
-
-  const bodyId = `messaging-connection-body-${connection.connectionId}`;
-  const { docsUrl } = connection;
+  const rowId = messagingConnectionRowId(connection.connectionId);
   return (
-    <div
-      className="rounded-md border border-border px-3 py-2.5"
-      data-testid={`messaging-connection:${connection.connectionId}`}
+    <ConnectionRow
+      label={connection.label}
+      state={reading.state}
+      endpoint={reading.endpoint}
+      expanded={expanded}
+      onToggle={onToggle}
+      separated={true}
+      testId={rowId}
     >
-      <div className="flex items-start justify-between gap-3">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-start gap-2 text-left"
-          aria-expanded={expanded}
-          aria-controls={bodyId}
-          onClick={() => setExpanded((open) => !open)}
-          data-testid={`messaging-connection:toggle:${connection.connectionId}`}
-        >
-          <span className="mt-0.5 inline-block w-3 shrink-0 text-xs leading-none" aria-hidden={true}>
-            {expanded ? "▾" : "▸"}
-          </span>
-          <span className="min-w-0 space-y-0.5">
-            <span className="block truncate text-sm font-medium">{connection.label}</span>
-            <span className="block line-clamp-1 text-[11px] text-muted-foreground">
-              {connection.summary}
-            </span>
-          </span>
-        </button>
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge
-            variant={state === "connected" ? "default" : "secondary"}
-            className="h-5 whitespace-nowrap px-2 text-[10px]"
-            data-testid={`messaging-connection:state:${connection.connectionId}`}
+      <div className="space-y-3">
+        {driver === undefined ? (
+          <p
+            className="text-[11px] text-muted-foreground"
+            data-testid={`${rowId}:unavailable`}
           >
-            {t(stateLabelKey(state))}
-          </Badge>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-xs"
-            disabled={driver === undefined}
-            title={driver === undefined
-              ? t("remoteSurfacesTab.messagingUnavailableHelp")
-              : undefined}
-            onClick={openDriverSection}
-            data-testid={`messaging-connection:configure:${connection.connectionId}`}
-          >
-            {t("remoteSurfacesTab.messagingConfigure")}
-          </Button>
-        </div>
+            {t("remoteSurfacesTab.messagingUnavailableHelp")}
+          </p>
+        ) : (
+          driver.renderSection(api, chatGroupId)
+        )}
+        <MessagingConnectionCatalog api={api} connection={connection} />
       </div>
-
-      {expanded && (
-        <div
-          id={bodyId}
-          className="mt-3 space-y-2 border-t border-border/(--opacity-medium) pt-2.5"
-          data-testid={`messaging-connection:detail:${connection.connectionId}`}
-        >
-          <div className="space-y-1">
-            <p className="text-[11px] font-medium">
-              {t("remoteSurfacesTab.messagingCredentialsLabel")}
-            </p>
-            <ul className="space-y-0.5">
-              {connection.credentials.map((credential) => (
-                <li
-                  key={credential.key}
-                  className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
-                >
-                  <span>{credential.label}</span>
-                  {credential.secret && (
-                    <Badge variant="outline" className="h-4 px-1 text-[9px]">
-                      {t("remoteSurfacesTab.messagingSecretBadge")}
-                    </Badge>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-          {connection.egress && connection.egress.length > 0 && (
-            <p
-              className="text-[11px] text-muted-foreground"
-              data-testid={`messaging-connection:egress:${connection.connectionId}`}
-            >
-              {t("remoteSurfacesTab.messagingEgressLabel", {
-                hosts: connection.egress.join(", "),
-              })}
-            </p>
-          )}
-          {docsUrl && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs"
-              onClick={() => void api.openExternalUrl(docsUrl)}
-              data-testid={`messaging-connection:docs:${connection.connectionId}`}
-            >
-              {t("remoteSurfacesTab.messagingDocsLink")}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
+    </ConnectionRow>
   );
 }
 
 export interface MessagingConnectionsSectionProps {
   api: LvisApi;
+  chatGroupId: string;
+  /** The one row the tab currently has open, across every vendor on the page. */
+  expandedRowId: string | null;
+  onToggleRow: (rowId: string) => void;
 }
 
-export function MessagingConnectionsSection({ api }: MessagingConnectionsSectionProps) {
+export function MessagingConnectionsSection({
+  api,
+  chatGroupId,
+  expandedRowId,
+  onToggleRow,
+}: MessagingConnectionsSectionProps) {
   const { t } = useTranslation();
   const [connections, setConnections] = useState<
     readonly MarketplaceInstalledMessagingConnection[]
@@ -269,25 +261,37 @@ export function MessagingConnectionsSection({ api }: MessagingConnectionsSection
     [connections],
   );
 
+  const toggle = useCallback(
+    (connectionId: string) => onToggleRow(messagingConnectionRowId(connectionId)),
+    [onToggleRow],
+  );
+
   return (
-    <SettingsSection
+    // A real block rather than a display-contents wrapper: arrival scrolls to
+    // this element and focuses it, and a box with no layout of its own reports
+    // no position to scroll to.
+    <div
       data-settings-section="remote-messaging-connections"
-      title={t("remoteSurfacesTab.messagingTitle")}
-      description={t("remoteSurfacesTab.messagingDescription")}
+      tabIndex={-1}
+      data-testid="messaging-connections-content"
     >
-      <div className="space-y-2" data-testid="messaging-connections-content">
-        {sorted.length === 0 ? (
-          <p className="text-sm text-muted-foreground" data-testid="messaging-connections-empty">
-            {t("remoteSurfacesTab.messagingEmpty")}
-          </p>
-        ) : sorted.map((connection) => (
-          <MessagingConnectionCard
-            key={connection.connectionId}
-            api={api}
-            connection={connection}
-          />
-        ))}
-      </div>
-    </SettingsSection>
+      {sorted.length === 0 ? (
+        <p
+          className="border-t border-border px-3 py-2.5 text-sm text-muted-foreground"
+          data-testid="messaging-connections-empty"
+        >
+          {t("remoteSurfacesTab.messagingEmpty")}
+        </p>
+      ) : sorted.map((connection) => (
+        <MessagingConnectionRow
+          key={connection.connectionId}
+          api={api}
+          chatGroupId={chatGroupId}
+          connection={connection}
+          expanded={expandedRowId === messagingConnectionRowId(connection.connectionId)}
+          onToggle={() => toggle(connection.connectionId)}
+        />
+      ))}
+    </div>
   );
 }

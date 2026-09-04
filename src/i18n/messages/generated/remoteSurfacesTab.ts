@@ -1,18 +1,19 @@
 // Owner-facing home for surfaces that observe or drive this desktop remotely.
+//
+// The `connectionRow.*` block is the one state vocabulary every connection row
+// is worded in — one word per row, so the column reads straight down.
 export const en = {
+  "connectionRow.stateAttention": "Needs attention",
+  "connectionRow.stateChecking": "Checking",
+  "connectionRow.stateConnected": "Connected",
+  "connectionRow.stateNeedsSetup": "Setup needed",
+  "connectionRow.statePaused": "Paused",
+  "connectionRow.stateUnavailable": "Not supported",
   "settingsContent.groupConnections": "Connections",
   "settingsContent.tabRemoteSurfaces": "Remote surfaces",
   "remoteSurfacesTab.pageDescription": "Let another surface watch or drive the conversation you have open. Each surface is off until you connect it, and each keeps its own trust boundary.",
   "remoteSurfacesTab.tailnetSectionTitle": "Tailnet access",
-  "remoteSurfacesTab.messagingTitle": "Messaging connections",
-  "remoteSurfacesTab.messagingDescription": "Services you installed from the marketplace that can reach one conversation on this desktop. Each one stays idle until you set it up in its own section below.",
   "remoteSurfacesTab.messagingEmpty": "No messaging connection is installed. You can install one from the Marketplace tab.",
-  "remoteSurfacesTab.messagingStateConnected": "Connected",
-  "remoteSurfacesTab.messagingStatePaused": "Paused",
-  "remoteSurfacesTab.messagingStateNeedsSetup": "Setup needed",
-  "remoteSurfacesTab.messagingStateAttention": "Needs attention",
-  "remoteSurfacesTab.messagingStateUnavailable": "Not in this version",
-  "remoteSurfacesTab.messagingConfigure": "Configure",
   "remoteSurfacesTab.messagingUnavailableHelp": "This version of LVIS carries nothing that can drive this connection. Update LVIS and open this tab again.",
   "remoteSurfacesTab.messagingCredentialsLabel": "It will ask you for",
   "remoteSurfacesTab.messagingSecretBadge": "Secret",
@@ -36,19 +37,17 @@ export const en = {
 } as const;
 
 export const ko = {
+  "connectionRow.stateAttention": "확인 필요",
+  "connectionRow.stateChecking": "확인 중",
+  "connectionRow.stateConnected": "연결됨",
+  "connectionRow.stateNeedsSetup": "설정 필요",
+  "connectionRow.statePaused": "일시 중지",
+  "connectionRow.stateUnavailable": "지원 안 됨",
   "settingsContent.groupConnections": "연결",
   "settingsContent.tabRemoteSurfaces": "원격 연결",
   "remoteSurfacesTab.pageDescription": "지금 열어 둔 대화를 다른 기기나 프로그램에서 보거나 조작하게 합니다. 연결 방식마다 따로 켜야 하고, 각각 서로 다른 신뢰 경계를 유지합니다.",
   "remoteSurfacesTab.tailnetSectionTitle": "Tailnet 접근",
-  "remoteSurfacesTab.messagingTitle": "메시지 연결",
-  "remoteSurfacesTab.messagingDescription": "마켓플레이스에서 설치한 서비스이며, 이 데스크톱의 대화 하나에 도달할 수 있습니다. 각 항목은 아래 자체 구역에서 설정하기 전까지 아무 일도 하지 않습니다.",
   "remoteSurfacesTab.messagingEmpty": "설치된 메시지 연결이 없습니다. 마켓플레이스 탭에서 설치할 수 있습니다.",
-  "remoteSurfacesTab.messagingStateConnected": "연결됨",
-  "remoteSurfacesTab.messagingStatePaused": "일시 중지",
-  "remoteSurfacesTab.messagingStateNeedsSetup": "설정 필요",
-  "remoteSurfacesTab.messagingStateAttention": "확인 필요",
-  "remoteSurfacesTab.messagingStateUnavailable": "이 버전에서는 사용할 수 없음",
-  "remoteSurfacesTab.messagingConfigure": "설정",
   "remoteSurfacesTab.messagingUnavailableHelp": "이 버전의 LVIS 에는 이 연결을 구동하는 코드가 없습니다. LVIS 를 업데이트한 뒤 이 탭을 다시 여세요.",
   "remoteSurfacesTab.messagingCredentialsLabel": "요청하는 정보",
   "remoteSurfacesTab.messagingSecretBadge": "비밀",
