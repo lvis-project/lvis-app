@@ -83,7 +83,6 @@ import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
 import { normalizeSettingsTab, type SettingsPath } from "../../shared/settings-tabs.js";
-import type { OnboardingProposalDisposition } from "../../main/onboarding-proposal-store.js";
 import {
   BUILTIN_LABEL_KEYS,
   BUILTIN_VIEW_ICONS,
@@ -315,11 +314,13 @@ export function App() {
   }, [chatGroups.groups]);
 
   // Which surface shows an overlay card. Only the window can answer it: it
-  // needs every tile's conversation to say whether any of them owns the card.
+  // needs every tile's conversation to say whether any of them owns the card,
+  // and it knows which pane is focused — where a card no conversation owns is
+  // drawn.
   const overlayCardTileForWindow = useCallback(
-    (card: { originSessionId?: string; adoptedChatGroupId?: string }): OverlayCardPlacement =>
-      overlayCardTile(tileSessions, card),
-    [tileSessions],
+    (card: { originSessionId?: string }): OverlayCardPlacement =>
+      overlayCardTile(tileSessions, chatGroups.focusedId, card),
+    [tileSessions, chatGroups.focusedId],
   );
 
   // Letting a conversation go in main. Fire-and-forget because nothing in the
@@ -666,7 +667,7 @@ export function App() {
     handleRoutineAcknowledge,
     handleProposalAnswer,
   } = useRoutineOverlay({
-    api, t, locale, registry: chatGroupSessions, focusedChatGroupId: chatGroups.focusedId,
+    api, t, locale, registry: chatGroupSessions,
     onNavigateToSettings: navigateToSettingsPath,
   });
 
@@ -1437,19 +1438,6 @@ export function App() {
     appMode,
     onOpenApprovalQueue: () => setDeferredQueueOpen(true),
     commandActions, slashPickerOpen, onSlashPickerOpenChange: setSlashPickerOpen,
-    // The window answers where a card goes, because only it sees every tile.
-    overlayCardTile: overlayCardTileForWindow,
-    onPluginPrimaryAction: (id: string, chatGroupId: string) => {
-      void handlePluginPrimaryAction(id, chatGroupId);
-    },
-    onRoutineAcknowledge: handleRoutineAcknowledge,
-    onProposalAnswer: (
-      id: string,
-      disposition: OnboardingProposalDisposition,
-      chatGroupId: string,
-    ) => {
-      void handleProposalAnswer(id, disposition, chatGroupId);
-    },
     approvalSentenceInterceptSubmit: interceptApprovalSentence,
     activeProject: activeProject ?? defaultWorkspaceProject,
     workspaceProjects,
@@ -1472,14 +1460,39 @@ export function App() {
     searchHighlight, searchChangeQuery, searchToggleCase, searchNext, searchPrev,
     searchCloseOverlay, searchToggleOverlay,
     handleExport, handleImport, pluginEntries, handleViewSelectWithDoctor, appMode,
-    commandActions, slashPickerOpen, overlayCardTileForWindow,
-    handlePluginPrimaryAction, handleRoutineAcknowledge, handleProposalAnswer,
+    commandActions, slashPickerOpen,
     interceptApprovalSentence,
     activeProject, defaultWorkspaceProject, workspaceProjects,
     onNewChatForProject, refreshWorkspaceProjects, handleProjectError,
   ]);
 
   // ─── Render ───────────────────────────────────
+  /**
+   * The overlay cards ONE pane shows, for that pane's frame lane.
+   *
+   * Built by the window because only the window sees every tile
+   * (`overlayCardTile`) and holds the handlers a card's action runs through.
+   * The region acts in its own pane: a card no conversation owns is drawn here
+   * because this pane is focused — where the user is — and the turn it starts
+   * belongs here. It is handed to whichever frame is DRAWN for the pane — the routed one while a
+   * view covers the conversation, the conversation's otherwise — never both,
+   * or one card would be drawn twice.
+   */
+  const paneLane = (chatGroupId: string): ReactNode => (
+    <OverlayCardRegion
+      chatGroupId={chatGroupId}
+      actionChatGroupId={chatGroupId}
+      overlayCardTile={overlayCardTileForWindow}
+      onPluginPrimaryAction={(id, actionChatGroupId) => {
+        void handlePluginPrimaryAction(id, actionChatGroupId);
+      }}
+      onRoutineAcknowledge={handleRoutineAcknowledge}
+      onProposalAnswer={(id, disposition, actionChatGroupId) => {
+        void handleProposalAnswer(id, disposition, actionChatGroupId);
+      }}
+    />
+  );
+
   /**
    * What ONE pane draws while it is not showing its conversation.
    *
@@ -1521,6 +1534,8 @@ export function App() {
     const asTile = {
       focused: chatGroups.focusedId === paneId,
       onFocus: () => chatGroups.focus(paneId),
+      // The overlay cards this pane shows come with it into whatever it draws.
+      lane: paneLane(paneId),
       ...(chatGroups.canSplit ? {
         canSplit: true,
         onSplit: (axis: PaneSplitAxis) => chatGroups.split(paneId, axis),
@@ -2066,7 +2081,9 @@ export function App() {
                                     the air that lines the chat group's bottom edge up with
                                     the sidebar's. */}
                                 <div ref={chatGroupCanvasRef} className="relative h-full w-full" data-testid="pane-canvas">
-                                {chatGroups.groups.map((group) => (
+                                {chatGroups.groups.map((group) => {
+                                const paneView = (chatGroups.contentById[group.id]?.view ?? "home") as InlineViewKey;
+                                return (
                                 <div
                                   key={group.id}
                                   /* The half-gutter: two adjacent tiles make the 8px gap
@@ -2090,10 +2107,7 @@ export function App() {
                                       tile's box, its inset and its place in the split
                                       tree — and the panes beside it keep drawing
                                       whatever they hold. */}
-                                  {renderPaneRoute(
-                                    (chatGroups.contentById[group.id]?.view ?? "home") as InlineViewKey,
-                                    group.id,
-                                  )}
+                                  {renderPaneRoute(paneView, group.id)}
                                   {/* The tile owns its conversation: every hook inside is
                                       keyed on its group-bound api, so two tiles stream at
                                       once without either seeing the other's transcript.
@@ -2102,9 +2116,7 @@ export function App() {
                                       the turn it may be streaming, its composer draft and
                                       its scroll position all live in here. `contents` while
                                       it draws, so the wrapper adds no box of its own. */}
-                                  <div className={(chatGroups.contentById[group.id]?.view ?? "home") === "home"
-                                    ? "contents"
-                                    : "hidden"}>
+                                  <div className={paneView === "home" ? "contents" : "hidden"}>
                                   <ChatGroupSession
                                     chatGroupId={group.id}
                                     api={api}
@@ -2112,22 +2124,28 @@ export function App() {
                                     env={chatGroupEnvironment}
                                     panelOpen={group.panelOpen}
                                     focused={chatGroups.focusedId === group.id}
-                                    // "Hidden" means this tile is not drawn on screen NOW, whatever
-                                    // the reason. The tree answers one reason (another pane has the
-                                    // box); the route answers the other (this pane is showing
-                                    // Settings or a plugin view, so its conversation is behind
-                                    // display:none). A tile that only knew the tree kept its
-                                    // approval claim and drew its question cards into a surface
-                                    // nobody could see, and the window-level bands — built for
-                                    // exactly this — drew nothing. `conversationVisible` below
-                                    // reads the same fact, and so does the wrapper above.
+                                    // "Hidden" means this tile's CONVERSATION is not drawn on
+                                    // screen NOW, whatever the reason. The tree answers one
+                                    // reason (another pane has the box); the route answers the
+                                    // other (this pane is showing Settings or a plugin view, so
+                                    // its conversation is behind display:none). A tile that only
+                                    // knew the tree kept its approval claim and drew its question
+                                    // cards into a surface nobody could see, and the window band
+                                    // drew nothing — so approvals and questions, which sit over
+                                    // the composer, read this combined flag. The wrapper above
+                                    // reads the same fact.
+                                    //
+                                    // `paneHidden` is the tree's answer alone. An overlay card is
+                                    // drawn in the FOCUSED pane, and the pane frame owns the lane
+                                    // it floats in, so a routed pane still draws them; only a
+                                    // pane the tree is not drawing sends them to the window band.
                                     //
                                     // The route is asked of THIS pane's own content, not of
                                     // the window: a pane showing Settings hides its
                                     // conversation, and a pane still on home does not,
                                     // whatever its neighbours are showing.
-                                    hidden={group.hidden
-                                      || (chatGroups.contentById[group.id]?.view ?? "home") !== "home"}
+                                    hidden={group.hidden || paneView !== "home"}
+                                    paneHidden={group.hidden}
                                     onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
                                   >
                                     {({ actions, trailing, content, currentSessionId: tileSessionId }) => (
@@ -2146,6 +2164,9 @@ export function App() {
                                            slot — the two things this pane's content brings. */
                                         asideSlot
                                         bodyInset="none"
+                                        /* The pane's cards, while the conversation is what this
+                                           pane draws. Routed, the routed frame carries them. */
+                                        lane={paneView === "home" ? paneLane(group.id) : undefined}
                                         trailing={trailing}
                                         actions={actions}
                                         {...(chatGroups.canSplit ? {
@@ -2166,7 +2187,8 @@ export function App() {
                                   </ChatGroupSession>
                                   </div>
                                 </div>
-                                ))}
+                                );
+                                })}
                                 {/* The boundaries sit in the 8px the cells' half-gutters
                                     leave between tiles, so the bar's strip is exactly
                                     the gap and steals nothing from either transcript. */}
@@ -2194,9 +2216,11 @@ export function App() {
                       no conversation surface claimed (see `unclaimedApprovals`).
                       The overlay region draws only what no tile can draw: a
                       card whose origin conversation has left the screen, and
-                      one pinned to a tile that has since closed. A card with no
-                      origin belongs to the tile it arrived over — see
-                      `overlayCardTile` — so it is drawn there, not here.
+                      while no pane is drawn at all, the cards no conversation
+                      owns. Otherwise a card with no origin is drawn in the
+                      FOCUSED pane and follows focus, and that pane's frame owns
+                      the lane it floats in — so it is drawn there, whatever the
+                      pane is showing, not here. See `overlayCardTile`.
 
                       It is a BAND, not a float: a flex sibling BELOW the route
                       canvas, so the space it takes is space the tile grid does

@@ -100,6 +100,24 @@ describe("PaneFrame", () => {
     expect(view.container.querySelector("[data-body-inset]")!.getAttribute("data-body-inset")).toBe("none");
   });
 
+  it("floats the lane it is given at the top-right of its body, and draws no lane when given none", () => {
+    // The lane is the frame's: a card pinned to a pane stays in that pane
+    // whatever the pane shows. So the anchor lives in the frame's body — inside
+    // the outline, under the header band — not in the conversation, which a
+    // routed pane hides.
+    const view = render(pane({ lane: <div data-testid="pinned-card">card</div> }));
+    const lane = view.container.querySelector<HTMLElement>('[data-testid="floating-right-lane"]');
+    expect(lane).not.toBeNull();
+    const body = view.container.querySelector<HTMLElement>("[data-body-inset]")!;
+    expect(body.contains(lane)).toBe(true);
+    expect(body.className, "the body is the lane's positioning context").toContain("relative");
+    expect(lane!.contains(view.container.querySelector('[data-testid="pinned-card"]'))).toBe(true);
+    expect(view.container.querySelector('[data-testid="pane-header"]')!.contains(lane)).toBe(false);
+
+    view.rerender(pane());
+    expect(view.container.querySelector('[data-testid="floating-right-lane"]')).toBeNull();
+  });
+
   it("swaps the border on focus without changing the frame's size", () => {
     const view = render(pane());
     const frame = () => view.container.querySelector('[data-testid="pane"]')!;

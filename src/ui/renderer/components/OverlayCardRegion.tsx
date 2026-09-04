@@ -1,7 +1,9 @@
 // OverlayCardRegion — mounts one surface's active OverlayCard from OverlayContext.
 //
-// Renders in a separate z-layer above the scroll area: inside ChatView for a
-// tile, in the window's own lane for the cards no conversation owns.
+// Renders in a separate z-layer above the scroll area: in the pane frame's
+// floating lane for a tile (`PaneFrame`'s `lane`, so the card stays with the
+// pane whatever it shows), in the window's own band for the cards no drawn
+// pane can hold.
 // Never injects entries into chat history; routine sources remain isolated.
 //
 // One card renders on ONE surface — see `overlayCardTile`. The queue is the
@@ -46,7 +48,7 @@ export interface OverlayCardRegionProps {
    * that conversation is still open. The window answers it, because only the
    * window can see every tile.
    */
-  overlayCardTile: (card: { originSessionId?: string; adoptedChatGroupId?: string }) => OverlayCardPlacement;
+  overlayCardTile: (card: { originSessionId?: string }) => OverlayCardPlacement;
   /**
    * Called when the user confirms a plugin overlay item, with the tile that
    * showed the card — the conversation the staged prompt is inserted into and

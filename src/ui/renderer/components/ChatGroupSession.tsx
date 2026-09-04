@@ -12,7 +12,6 @@ import {
   tileDrawsSession,
   useRegisterChatGroupSession,
   type ChatGroupSessionRegistry,
-  type OverlayCardPlacement,
 } from "./chat-group-session-registry.js";
 import { useApprovalSurface } from "../hooks/use-approval.js";
 import { useChatState } from "../hooks/use-chat-state.js";
@@ -125,13 +124,6 @@ export interface ChatGroupEnvironment {
   commandActions: React.ComponentProps<typeof ChatView>["commandActions"];
   slashPickerOpen: boolean;
   onSlashPickerOpenChange: Dispatch<SetStateAction<boolean>>;
-  /**
-   * Which tile shows an overlay card, given the conversation it came from —
-   * the window's answer, since only it sees every tile.
-   */
-  overlayCardTile: (card: { originSessionId?: string; adoptedChatGroupId?: string }) => OverlayCardPlacement;
-  onPluginPrimaryAction: (id: string, chatGroupId: string) => void;
-  onRoutineAcknowledge: React.ComponentProps<typeof ChatView>["onRoutineAcknowledge"];
   approvalSentenceInterceptSubmit: React.ComponentProps<typeof ChatView>["approvalSentenceInterceptSubmit"];
 
   // project binding
@@ -175,6 +167,13 @@ export interface ChatGroupSessionProps {
    * control — but it must claim nothing the user has to see.
    */
   hidden: boolean;
+  /**
+   * The TREE is not drawing this pane — another tile has its box. One of the
+   * two reasons `hidden` can be true, published on its own because the overlay
+   * lane is the pane frame's: a pane routed to a view is still drawn, and it
+   * still draws the cards that belong on it. See `overlayCardTile`.
+   */
+  paneHidden: boolean;
   onSidePanelOpenChange: (open: boolean) => void;
 }
 
@@ -189,7 +188,7 @@ export interface ChatGroupSessionProps {
  */
 export function ChatGroupSession({
   chatGroupId, api: windowApi, registry, env, children, panelOpen, focused, hidden,
-  onSidePanelOpenChange,
+  paneHidden, onSidePanelOpenChange,
 }: ChatGroupSessionProps) {
   const { t } = useTranslation();
 
@@ -668,7 +667,7 @@ export function ChatGroupSession({
   // ── what this tile tells the window ────────────────────────────────────────
 
   useRegisterChatGroupSession(registry, chatGroupId, {
-    entries, streaming, hidden,
+    entries, streaming, hidden, paneHidden,
     askQuestions, resolveAskQuestion: dismissAskQuestion,
     applyLoadedSession, applyInitialSession, clearForNewChat,
     resetForNewSession, restoreSubAgentSpawns,
@@ -792,10 +791,6 @@ export function ChatGroupSession({
         commandActions={env.commandActions}
         slashPickerOpen={env.slashPickerOpen}
         onSlashPickerOpenChange={env.onSlashPickerOpenChange}
-        chatGroupId={chatGroupId}
-        overlayCardTile={env.overlayCardTile}
-        onPluginPrimaryAction={env.onPluginPrimaryAction}
-        onRoutineAcknowledge={env.onRoutineAcknowledge}
         statusBar={env.statusBar}
         onAttachmentWarning={handleAttachmentWarning}
         sidePanelOpen={panelOpen}

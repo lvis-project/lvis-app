@@ -13,6 +13,7 @@ import { act, createEvent, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp, startInChatMode } from "./render-app.js";
 import {
   approvalRequest,
+  clickSidebarNavRow,
   collectTiles,
   focusTile,
   forceOverflowingSummaries,
@@ -206,12 +207,12 @@ describe("overlay cards with two tiles", () => {
     expect(primary!.element.textContent).not.toContain("archive the invoice");
   });
 
-  it("draws a routine card once in the tile it arrived over, and does not move it when focus moves", async () => {
+  it("draws a routine card once, in the focused tile, and moves it when focus moves", async () => {
     const { container, emitRoutineFired } = await renderApp({ hasApiKey: true });
     const [primary, second] = await splitIntoTwoTiles(container);
-    // Focus follows the split, so the second tile is the one the card arrives
-    // over. A routine turn runs in no tile, but confirming its card starts a
-    // turn in one, so the card is pinned to the tile that shows it.
+    // Focus follows the split, so the second tile is the focused one when the
+    // card arrives. A routine turn runs in no tile; the card is drawn where
+    // the user is, and confirming it starts a turn there.
     await act(async () => {
       emitRoutineFired({
         id: "schedule-daily",
@@ -229,15 +230,16 @@ describe("overlay cards with two tiles", () => {
 
     await focusTile(primary!);
 
-    // The pin was taken once, on arrival. Reading live focus instead would
-    // slide the card out from under the user mid-read, and the turn would
-    // start in whichever tile focus had reached by the click.
+    // One card, where the user is now. A card left in the unfocused tile is a
+    // card nobody is looking at, and with several tiles open it would soon be
+    // one card per tile.
+    await waitFor(() => expect(overlayRegions(primary!)).toHaveLength(1));
     expect(container.querySelectorAll('[data-testid="overlay-card-region"]')).toHaveLength(1);
-    expect(overlayRegions(second!)).toHaveLength(1);
-    expect(overlayRegions(primary!)).toHaveLength(0);
+    expect(overlayRegions(second!)).toHaveLength(0);
+    expect(windowRegion(container)).toBeNull();
   });
 
-  it("keeps a routine card on its tile when the result replaces the spinner", async () => {
+  it("replaces the spinner with the result in the focused tile, still one card", async () => {
     const { container, emitRoutineRunningStarted, emitRoutineFired } =
       await renderApp({ hasApiKey: true });
     const [primary, second] = await splitIntoTwoTiles(container);
@@ -262,49 +264,51 @@ describe("overlay cards with two tiles", () => {
       });
     });
 
-    // The result REPLACES the spinner in the queue. If the pin were taken per
-    // push rather than per slot, the replacement would carry the card to
-    // whichever tile focus had reached.
-    await waitFor(() => expect(second!.element.textContent).toContain("daily summary"));
-    expect(overlayRegions(second!)).toHaveLength(1);
-    expect(overlayRegions(primary!)).toHaveLength(0);
+    // The result REPLACES the spinner in the queue — one card, drawn where the
+    // user is now, not a spinner left behind in the other tile.
+    await waitFor(() => expect(primary!.element.textContent).toContain("daily summary"));
+    expect(overlayRegions(primary!)).toHaveLength(1);
+    expect(overlayRegions(second!)).toHaveLength(0);
     expect(container.querySelectorAll('[data-testid="overlay-card-region"]')).toHaveLength(1);
   });
 
-  it("starts the confirmed turn in the tile that showed the card, not the focused one", async () => {
+  it("starts the confirmed turn in the focused tile — the one showing the card", async () => {
     const { container, api, emitOverlayShow } = await renderApp({ hasApiKey: true });
     const [primary, second] = await splitIntoTwoTiles(container);
 
     await act(async () => {
       emitOverlayShow({
-        id: "plugin:notes:pinned",
-        source: { kind: "plugin", pluginId: "notes", eventId: "pinned" },
+        id: "plugin:notes:focused",
+        source: { kind: "plugin", pluginId: "notes", eventId: "focused" },
         title: "notes",
-        summary: "pinned target",
+        summary: "focused target",
         running: false,
         pendingPrompt: "<untrusted-plugin>notes</untrusted-plugin>",
         createdAt: new Date().toISOString(),
       });
     });
+    await waitFor(() => {
+      expect(second!.element.querySelector('[data-testid="overlay-card-primary-action"]')).not.toBeNull();
+    });
+
+    // Focus moves before the click; the card moves with it, and the confirm
+    // the user reaches is the one in the tile they are in.
+    await focusTile(primary!);
     const confirm = await waitFor(() => {
-      const button = second!.element.querySelector<HTMLButtonElement>(
+      const button = primary!.element.querySelector<HTMLButtonElement>(
         '[data-testid="overlay-card-primary-action"]',
       );
       expect(button).not.toBeNull();
       return button!;
     });
-
-    // Focus moves between the card appearing and the click. The turn belongs to
-    // the conversation the card was shown over.
-    await focusTile(primary!);
     await act(async () => {
       fireEvent.click(confirm);
     });
 
     // The staged prompt is inserted through the TILE's own handle, so the
     // transcript it lands in is the answer to "which conversation ran it".
-    await waitFor(() => expect(second!.element.textContent).toContain("pinned target"));
-    expect(primary!.element.textContent).not.toContain("pinned target");
+    await waitFor(() => expect(primary!.element.textContent).toContain("focused target"));
+    expect(second!.element.textContent).not.toContain("focused target");
     expect(api.chatSend).toHaveBeenCalled();
   });
 
@@ -324,7 +328,7 @@ describe("overlay cards with two tiles", () => {
     });
 
     const dismiss = await waitFor(() => {
-      // Wherever the card was pinned, there is exactly one of it to dismiss.
+      // Wherever the card is drawn, there is exactly one of it to dismiss.
       const button = container.querySelector<HTMLButtonElement>(
         '[data-testid="routine-card-dismiss"]',
       );
@@ -409,6 +413,111 @@ describe("overlay cards whose origin conversation leaves the screen", () => {
   });
 });
 
+describe("overlay cards in a pane routed off its conversation", () => {
+  /** A plugin's staged prompt: no origin conversation, so it is drawn in the focused pane. */
+  const pluginCard = (id: string, summary: string) => ({
+    id,
+    source: { kind: "plugin", pluginId: "mail-assistant", eventId: id },
+    title: "mail-action",
+    summary,
+    running: false,
+    pendingPrompt: `<plugin-message source="plugin:mail-assistant">\n${summary}\n</plugin-message>`,
+    createdAt: new Date().toISOString(),
+  });
+  const routedShell = (container: HTMLElement, view: string) =>
+    container.querySelector<HTMLElement>(`[data-testid="main-pane-shell"][data-view="${view}"]`);
+  const regions = (root: ParentNode) => root.querySelectorAll('[data-testid="overlay-card-region"]');
+  /** The lane the region floats in must be the FRAME's body, under its header band. */
+  const expectInFrameLane = (frame: HTMLElement, region: HTMLElement) => {
+    const lane = region.closest<HTMLElement>('[data-testid="floating-right-lane"]');
+    expect(lane).not.toBeNull();
+    expect(frame.querySelector("[data-body-inset]")!.contains(lane)).toBe(true);
+    expect(frame.querySelector('[data-testid="pane-header"]')!.contains(lane)).toBe(false);
+  };
+
+  it("draws a card with no origin in the frame of the pane it arrived over while that pane shows the work board — not in the window band", async () => {
+    const { container, emitOverlayShow } = await renderApp({ hasApiKey: true });
+    await clickSidebarNavRow("features", "toolbar-work-board");
+    const shell = await waitFor(() => {
+      const routed = routedShell(container, "work-board");
+      expect(routed).not.toBeNull();
+      return routed!;
+    });
+    const cell = container.querySelector<HTMLElement>(`[data-testid="pane-cell:${MAIN_CHAT_GROUP_ID}"]`)!;
+    expect(cell.contains(shell)).toBe(true);
+    // The pane is drawn; only its conversation is behind the view.
+    expect(cell.getAttribute("data-hidden")).toBeNull();
+
+    await act(async () => {
+      emitOverlayShow(pluginCard("plugin:mail:e1", "메일에 답장할까요?"));
+    });
+
+    const region = await waitFor(() => {
+      const drawn = container.querySelector<HTMLElement>('[data-testid="overlay-card-region"]');
+      expect(drawn).not.toBeNull();
+      return drawn!;
+    });
+    expect(regions(container)).toHaveLength(1);
+    expect(shell.contains(region)).toBe(true);
+    expect(region.getAttribute("data-overlay-surface")).toBe(MAIN_CHAT_GROUP_ID);
+    expect(region.textContent).toContain("메일에 답장할까요?");
+    const frame = shell.querySelector<HTMLElement>('[data-testid="pane"]')!;
+    expectInFrameLane(frame, region);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
+
+    // Closing the view hands the pane back to its conversation, and the card
+    // comes with it — still drawn once, in the conversation frame's lane.
+    await act(async () => {
+      fireEvent.click(frame.querySelector('[data-testid="pane-close"]')!);
+    });
+    await waitFor(() => expect(routedShell(container, "work-board")).toBeNull());
+    const homeRegion = await waitFor(() => {
+      const drawn = cell.querySelector<HTMLElement>('[data-testid="overlay-card-region"]');
+      expect(drawn).not.toBeNull();
+      return drawn!;
+    });
+    expect(regions(container)).toHaveLength(1);
+    expect(homeRegion.getAttribute("data-overlay-surface")).toBe(MAIN_CHAT_GROUP_ID);
+    expectInFrameLane(cell.querySelector<HTMLElement>('[data-testid="pane"]')!, homeRegion);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
+  });
+
+  it("with two panes, draws the card in the focused pane — routed or not — and moves it when focus moves", async () => {
+    const { container, emitOverlayShow } = await renderApp({ hasApiKey: true });
+    const [primary, second] = await splitIntoTwoTiles(container);
+    // Focus follows the split, so the sidebar routes the SECOND pane.
+    await clickSidebarNavRow("features", "toolbar-work-board");
+    const shell = await waitFor(() => {
+      const routed = routedShell(container, "work-board");
+      expect(routed).not.toBeNull();
+      return routed!;
+    });
+    expect(second!.element.contains(shell)).toBe(true);
+    expect(primary!.element.contains(shell)).toBe(false);
+
+    await act(async () => {
+      emitOverlayShow(pluginCard("plugin:mail:e2", "두 번째 판에 도착한 카드"));
+    });
+    await waitFor(() => expect(regions(second!.element)).toHaveLength(1));
+    expect(shell.contains(second!.element.querySelector('[data-testid="overlay-card-region"]'))).toBe(true);
+    expect(regions(primary!.element)).toHaveLength(0);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
+
+    // Focus moving to the conversation pane carries the card with it: one
+    // card, in the pane the user is in, in that frame's lane.
+    await focusTile(primary!);
+    const moved = await waitFor(() => {
+      const region = primary!.element.querySelector<HTMLElement>('[data-testid="overlay-card-region"]');
+      expect(region).not.toBeNull();
+      return region!;
+    });
+    expect(regions(second!.element)).toHaveLength(0);
+    expect(regions(container)).toHaveLength(1);
+    expectInFrameLane(primary!.element.querySelector<HTMLElement>('[data-testid="pane"]')!, moved);
+    expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
+  });
+});
+
 describe("overlay queue navigation with two tiles", () => {
   it("counts and steps through each surface's own cards", async () => {
     const { container, emitOverlayShow } = await renderApp({ hasApiKey: true });
@@ -426,7 +535,7 @@ describe("overlay queue navigation with two tiles", () => {
       createdAt: new Date().toISOString(),
     });
 
-    // Two with no origin — both pinned to the focused tile — and one for the
+    // Two with no origin — both drawn in the focused tile — and one for the
     // tile holding its origin conversation.
     await act(async () => {
       emitOverlayShow(card("a1", undefined, "first for the window"));
@@ -457,7 +566,7 @@ describe("overlay queue navigation with two tiles", () => {
   });
 });
 
-describe("a card pinned to a tile stays put when focus moves", () => {
+describe("an unowned card follows focus without losing its state", () => {
   it("keeps the expanded summary and the original timestamp across a focus change", async () => {
     const restoreOverflow = forceOverflowingSummaries();
     try {
@@ -465,8 +574,8 @@ describe("a card pinned to a tile stays put when focus moves", () => {
       const [primary, second] = await splitIntoTwoTiles(container);
       await focusTile(primary!);
 
-      // No origin, so the card is pinned to the tile it arrived over — the
-      // primary here. Moving focus neither moves it nor remounts it.
+      // No origin, so the card is drawn in the focused tile — the primary
+      // here. Moving focus moves it; what the user did to it comes along.
       const createdAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       await act(async () => {
         emitOverlayShow({
@@ -480,10 +589,10 @@ describe("a card pinned to a tile stays put when focus moves", () => {
         });
       });
 
-      const pinnedRegion = () =>
+      const shownRegion = () =>
         primary!.element.querySelector<HTMLElement>('[data-testid="overlay-card-region"]')!;
       const toggle = await waitFor(() => {
-        const button = pinnedRegion().querySelector<HTMLButtonElement>(
+        const button = shownRegion().querySelector<HTMLButtonElement>(
           '[data-testid="overlay-card-expand-toggle"]',
         );
         expect(button).not.toBeNull();
@@ -493,25 +602,30 @@ describe("a card pinned to a tile stays put when focus moves", () => {
         fireEvent.click(toggle);
       });
       expect(
-        pinnedRegion().querySelector('[data-testid="overlay-card-summary"]')
+        shownRegion().querySelector('[data-testid="overlay-card-summary"]')
           ?.getAttribute("data-expanded"),
       ).toBe("true");
-      expect(pinnedRegion().textContent).toContain("10분 전");
+      expect(shownRegion().textContent).toContain("10분 전");
 
       await focusTile(second!);
 
-      // Same surface, same card. Expansion lives in the queue and the
-      // timestamp came from main, so neither is re-derived here — a card that
-      // re-minted "now" would read 방금 instead.
+      // Same card, now in the focused tile. Expansion lives in the window's
+      // context and the timestamp came from main, so neither is re-derived by
+      // the region that draws it next — a card that re-minted "now" would
+      // read 방금 instead.
+      const movedRegion = await waitFor(() => {
+        const region = second!.element.querySelector<HTMLElement>('[data-testid="overlay-card-region"]');
+        expect(region).not.toBeNull();
+        return region!;
+      });
       expect(container.querySelectorAll('[data-testid="overlay-card-region"]')).toHaveLength(1);
-      expect(primary!.element.querySelectorAll('[data-testid="overlay-card-region"]')).toHaveLength(1);
-      expect(second!.element.querySelectorAll('[data-testid="overlay-card-region"]')).toHaveLength(0);
+      expect(primary!.element.querySelectorAll('[data-testid="overlay-card-region"]')).toHaveLength(0);
       expect(
-        pinnedRegion().querySelector('[data-testid="overlay-card-summary"]')
+        movedRegion.querySelector('[data-testid="overlay-card-summary"]')
           ?.getAttribute("data-expanded"),
       ).toBe("true");
-      expect(pinnedRegion().textContent).toContain("10분 전");
-      expect(pinnedRegion().textContent).not.toContain("방금");
+      expect(movedRegion.textContent).toContain("10분 전");
+      expect(movedRegion.textContent).not.toContain("방금");
     } finally {
       restoreOverflow();
     }
@@ -1006,15 +1120,19 @@ describe("three tiles, every kind of surface at once", () => {
     expect(count(container, "skill-badge")).toBe(1);
     expect(count(container, "overlay-card-region")).toBe(1);
 
+    // The approval card that just landed in the middle tile takes focus with
+    // it; the user goes back to the third tile, and the routine card — drawn
+    // where the user is — goes with them.
+    await focusTile(third!);
+
     // The two the middle tile's turn raised are inside the middle tile.
     expect(count(middle!.element, "approval-dock")).toBe(1);
     expect(count(middle!.element, "skill-badge")).toBe(1);
-    // The routine belongs to no conversation, so it is pinned to the tile it
-    // arrived over — exactly one tile draws it, and the window draws none.
-    // Focus follows each split, so the third tile is the one the routine
-    // arrived over. Naming it is the point: "exactly one tile draws it" would
-    // pass with the card on the wrong tile, which is the whole subject here.
-    expect(count(third!.element, "overlay-card-region")).toBe(1);
+    // The routine belongs to no conversation, so it is drawn in the focused
+    // tile — exactly one tile draws it, and the window draws none. Naming the
+    // tile is the point: "exactly one tile draws it" would pass with the card
+    // on the wrong tile, which is the whole subject here.
+    await waitFor(() => expect(count(third!.element, "overlay-card-region")).toBe(1));
     expect(count(first!.element, "overlay-card-region")).toBe(0);
     expect(count(middle!.element, "overlay-card-region")).toBe(0);
     expect(container.querySelector('[data-overlay-surface="window"]')).toBeNull();
@@ -1037,16 +1155,16 @@ describe("three tiles, every kind of surface at once", () => {
     await submitChatMessage(third!.element, "셋째 타일 질문");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalledTimes(2));
 
-    // Nothing the middle tile raised reached its neighbours, and typing in two
-    // other tiles did not drag the routine card off the tile it was pinned to.
-    const pinned = third!;
+    // Nothing the middle tile raised reached its neighbours, and the routine
+    // card is where focus ended up: the third tile, and only there.
+    const focused = third!;
     for (const tile of [first!, third!]) {
       expect(tile.element.querySelectorAll(BLOCKING_SURFACE_SELECTOR)).toHaveLength(0);
       expect(count(tile.element, "skill-badge")).toBe(0);
       expect(count(tile.element, "user-approval-hit-toast")).toBe(0);
-      expect(count(tile.element, "overlay-card-region")).toBe(tile === pinned ? 1 : 0);
+      expect(count(tile.element, "overlay-card-region")).toBe(tile === focused ? 1 : 0);
     }
-    expect(count(pinned.element, "overlay-card-region")).toBe(1);
+    expect(count(focused.element, "overlay-card-region")).toBe(1);
     expect(count(container, "overlay-card-region")).toBe(1);
   });
 });

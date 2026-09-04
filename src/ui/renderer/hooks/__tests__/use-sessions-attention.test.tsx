@@ -6,7 +6,7 @@ import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import type { LvisApi } from "../../types.js";
 
 const tile = (chatGroupId: string, sessionId: string, streaming: boolean): TileSession =>
-  ({ chatGroupId, sessionId, streaming, hidden: false, askQuestions: [] });
+  ({ chatGroupId, sessionId, streaming, hidden: false, paneHidden: false, askQuestions: [] });
 
 describe("turnsEndedUnseen", () => {
   const looking = { focusedChatGroupId: "main", conversationVisible: true };
@@ -279,9 +279,6 @@ describe("useCurrentSession — what a tile holds on mount", () => {
 });
 
 describe("turn ends refresh the window's list, seen or not", () => {
-  const tile = (chatGroupId: string, sessionId: string, streaming: boolean): TileSession =>
-    ({ chatGroupId, sessionId, streaming, hidden: false, askQuestions: [] });
-
   it("turnsEnded names every conversation whose tile stopped streaming", () => {
     const before = [tile("main", "s-1", true), tile("group-2", "s-2", true), tile("group-3", "s-3", false)];
     const after = [tile("main", "s-1", false), tile("group-2", "s-2", true), tile("group-3", "s-3", false)];
