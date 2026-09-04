@@ -86,5 +86,18 @@ export function buildTailnetObserverApiSurface(): TailnetObserverConfigApi {
         return unavailableGuidedSetup();
       }
     },
+
+    async setOwnDeviceAdmission(enabled: boolean): Promise<TailnetObserverMutationResult> {
+      try {
+        return parseTailnetObserverMutationResult(
+          await ipcRenderer.invoke(CHANNELS.tailnetObserver.setOwnDeviceAdmission, {
+            enabled,
+            intent: ipcUserKeyboardIntent(),
+          }),
+        ) ?? unavailableMutation();
+      } catch {
+        return unavailableMutation();
+      }
+    },
   });
 }

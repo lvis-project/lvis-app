@@ -141,7 +141,14 @@ function uuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
-function actorId(value: unknown): value is TailnetShareActorId {
+/**
+ * Whether a value is an actor id this store would accept.
+ *
+ * Exported because the own-device admission record persists one of these ids
+ * and has to validate the bytes it reads back. A second pattern kept beside
+ * that record would be a second opinion on what an actor id is.
+ */
+export function isTailnetShareActorId(value: unknown): value is TailnetShareActorId {
   return typeof value === "string" && ACTOR_ID.test(value);
 }
 
@@ -170,7 +177,7 @@ function validPairing(value: unknown): value is StoredPairing {
       "expiresAt", "activatedAt", "terminalAt",
     ])
     || !uuid(value.id)
-    || !actorId(value.actorId)
+    || !isTailnetShareActorId(value.actorId)
     || !uuid(value.invitationId)
     || !isNonNegativeSafeInteger(value.createdAt)
     || !isPositiveSafeInteger(value.epoch)
@@ -208,7 +215,7 @@ function validShare(value: unknown): value is StoredShare {
     ])
     || !uuid(value.id)
     || !uuid(value.pairingId)
-    || !actorId(value.actorId)
+    || !isTailnetShareActorId(value.actorId)
     || !isPositiveSafeInteger(value.pairingEpoch)
     || !digest(value.conversationDigest)
     || !uuid(value.scope)
@@ -530,7 +537,7 @@ export class TailnetPairingShareStore {
     code: string,
     claimedActorId: TailnetShareActorId,
   ): Promise<TailnetPairingClaim | null> {
-    if (!invitationCode(code) || !actorId(claimedActorId)) return null;
+    if (!invitationCode(code) || !isTailnetShareActorId(claimedActorId)) return null;
     return await this.mutate((state, now) => {
       const codeDigest = inviteDigest(code);
       const invitationIndex = state.invitations.findIndex((entry) => (
@@ -582,7 +589,7 @@ export class TailnetPairingShareStore {
    * had just paid for, spending the invitation budget on nothing.
    */
   currentPairing(resolvedActorId: TailnetShareActorId): TailnetOwnerPairingSummary | null {
-    if (!actorId(resolvedActorId)) return null;
+    if (!isTailnetShareActorId(resolvedActorId)) return null;
     const state = this.requireState();
     const now = this.checkedNow();
     const pairing = state.pairings.find((entry): entry is StoredPairing & { state: "pending" | "active" } => (
@@ -740,7 +747,7 @@ export class TailnetPairingShareStore {
     currentConversationId: string,
     required: TailnetSharePermission,
   ): TailnetPairingShareAuthority | null {
-    if (!actorId(resolvedActorId) || !conversationId(currentConversationId)) return null;
+    if (!isTailnetShareActorId(resolvedActorId) || !conversationId(currentConversationId)) return null;
     const state = this.requireState();
     const now = this.checkedNow();
     const pairing = state.pairings.find((entry) => (
@@ -771,7 +778,7 @@ export class TailnetPairingShareStore {
     currentConversationId: string,
     required: TailnetSharePermission = "control",
   ): boolean {
-    if (!authority || !actorId(authority.actorId) || !validBinding(authority.pairing)) return false;
+    if (!authority || !isTailnetShareActorId(authority.actorId) || !validBinding(authority.pairing)) return false;
     const latest = this.resolveActiveShare(authority.actorId, currentConversationId, required);
     return latest !== null
       && permits(latest.permission, required)

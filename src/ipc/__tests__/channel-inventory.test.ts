@@ -465,6 +465,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:tailnet-observer:apply",
         "lvis:tailnet-observer:configure-serve",
         "lvis:tailnet-observer:guided-setup",
+        "lvis:tailnet-observer:set-own-device-admission",
         "lvis:tailnet-observer:snapshot",
         "lvis:tailnet-sharing:activate-pairing",
         "lvis:tailnet-sharing:create-current-conversation-share",

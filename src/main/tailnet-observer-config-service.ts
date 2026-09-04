@@ -12,10 +12,12 @@ import {
   configureTailscaleServe,
   DEFAULT_TAILNET_OBSERVER_PORT,
   getTailnetObserverRuntimeState,
+  isTailnetOwnDeviceAdmissionEnabled,
   loadTailnetObserverConfig,
   probeTailscaleEnvironment,
   readTailnetObserverConfigFile,
   restartTailnetObserverServer,
+  setTailnetOwnDeviceAdmission,
   tailnetWebOriginFor,
   tailscaleServeCommandText,
   writeTailnetObserverConfigFile,
@@ -45,6 +47,11 @@ export interface TailnetObserverConfigService {
    * the web origin — are things the host can read rather than ask about.
    */
   guidedSetup(): Promise<TailnetGuidedSetupResult>;
+  /**
+   * Admit — or stop admitting — this desktop's own Tailscale account without an
+   * approval click, taking back what a previous admission granted.
+   */
+  setOwnDeviceAdmission(enabled: boolean): Promise<void>;
 }
 
 export interface TailnetObserverConfigServiceOptions {
@@ -66,6 +73,10 @@ export interface TailnetObserverConfigServiceOptions {
   readonly runServe?: typeof configureTailscaleServe;
   /** @internal deterministic injection for tests. */
   readonly choosePort?: typeof chooseObserverPort;
+  /** @internal deterministic injection for tests. */
+  readonly readOwnDeviceAdmission?: () => Promise<boolean>;
+  /** @internal deterministic injection for tests. */
+  readonly writeOwnDeviceAdmission?: (enabled: boolean) => Promise<void>;
 }
 
 /**
@@ -214,6 +225,10 @@ export function createTailnetObserverConfigService(
   const restartListener = options.restartListener ?? restartTailnetObserverServer;
   const runServe = options.runServe ?? configureTailscaleServe;
   const choosePort = options.choosePort ?? chooseObserverPort;
+  const readOwnDeviceAdmission = options.readOwnDeviceAdmission
+    ?? (() => isTailnetOwnDeviceAdmissionEnabled());
+  const writeOwnDeviceAdmission = options.writeOwnDeviceAdmission
+    ?? ((enabled: boolean) => setTailnetOwnDeviceAdmission(enabled));
 
   const service: TailnetObserverConfigService = Object.freeze({
     async snapshot(): Promise<TailnetObserverSnapshot> {
@@ -244,6 +259,7 @@ export function createTailnetObserverConfigService(
         listeningPort: state.listeningPort,
         lastStartError: state.lastStartError,
         pairedSharingBootstrapFailed: options.pairedSharingBootstrapFailed(),
+        ownDeviceAdmission: await readOwnDeviceAdmission(),
         environment: environmentView(environment),
         derivedWebOrigin: tailnetWebOriginFor(environment.dnsName),
         serveCommand: environment.cliPath === null || state.listeningPort === null
@@ -259,6 +275,12 @@ export function createTailnetObserverConfigService(
       // The listener used to wait for the next launch, which is the step nobody
       // knew to take: a toggle that does nothing for an hour reads as broken.
       await restartListener();
+    },
+
+    // No restart: the listener reads this policy per request, so a running
+    // remote session is not dropped to change who may skip an approval click.
+    setOwnDeviceAdmission(enabled: boolean): Promise<void> {
+      return writeOwnDeviceAdmission(enabled);
     },
 
     async configureServe(): Promise<TailnetServeResult> {

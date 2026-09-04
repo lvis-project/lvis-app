@@ -58,6 +58,7 @@ function snapshotOf(overrides: Partial<TailnetObserverSnapshot> = {}): TailnetOb
     listeningPort: null,
     lastStartError: null,
     pairedSharingBootstrapFailed: false,
+    ownDeviceAdmission: false,
     environment: READY_ENVIRONMENT,
     derivedWebOrigin: WEB_ORIGIN,
     serveCommand: null,
@@ -82,6 +83,7 @@ function makeApi(options: {
   snapshots?: TailnetObserverSnapshot[];
   snapshot?: TailnetObserverSnapshot;
   guidedSetup?: TailnetGuidedSetupResult;
+  setOwnDeviceAdmission?: { ok: false; error: string };
 } = {}) {
   const queue = options.snapshots ? [...options.snapshots] : null;
   const snapshot = vi.fn(async () => ({
@@ -102,10 +104,13 @@ function makeApi(options: {
   }));
   const apply = vi.fn(async () => ({ ok: true as const }));
   const configureServe = vi.fn(async () => ({ ok: true as const, url: WEB_ORIGIN + "/" }));
+  const setOwnDeviceAdmission = vi.fn(async (_enabled: boolean) => (
+    options.setOwnDeviceAdmission ?? { ok: true as const }
+  ));
   const api = {
-    tailnetObserver: { snapshot, apply, configureServe, guidedSetup },
+    tailnetObserver: { snapshot, apply, configureServe, guidedSetup, setOwnDeviceAdmission },
   } as unknown as LvisApi;
-  return { api, snapshot, guidedSetup, apply };
+  return { api, snapshot, guidedSetup, apply, setOwnDeviceAdmission };
 }
 
 let localeBeforeTest = getLocale();
@@ -473,5 +478,68 @@ describe("TailnetSetupCard", () => {
     expect(done.closest("[data-settings-section='remote-tailnet-observer']")).not.toBeNull();
     expect(document.querySelector("[role='dialog']")).toBeNull();
     expect(document.querySelector("[role='alertdialog']")).toBeNull();
+  });
+
+  describe("the own-device control", () => {
+    it("offers the grant, and once on says so with the way back beside it", async () => {
+      const off = configuredSnapshot();
+      const on = configuredSnapshot({ ownDeviceAdmission: true });
+      const { api, setOwnDeviceAdmission } = makeApi({ snapshots: [off, on] });
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
+
+      const allow = await screen.findByTestId("tailnet-own-device-admission-allow");
+      expect(allow).toHaveTextContent("Allow my own devices");
+      expect(screen.queryByTestId("tailnet-own-device-admission-release")).toBeNull();
+
+      fireEvent.click(allow);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("tailnet-own-device-admission-state"))
+          .toHaveTextContent("My own devices allowed");
+      });
+      expect(setOwnDeviceAdmission).toHaveBeenCalledWith(true);
+      // The way back is visible, not a second press of the same control.
+      expect(screen.getByTestId("tailnet-own-device-admission-release")).toBeEnabled();
+      expect(screen.queryByTestId("tailnet-own-device-admission-allow")).toBeNull();
+    });
+
+    it("asks the host to take the access back", async () => {
+      const { api, setOwnDeviceAdmission } = makeApi({
+        snapshot: configuredSnapshot({ ownDeviceAdmission: true }),
+      });
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-own-device-admission-release"));
+
+      await waitFor(() => {
+        expect(setOwnDeviceAdmission).toHaveBeenCalledWith(false);
+      });
+    });
+
+    it("says why the host refused without hiding the connection facts", async () => {
+      const { api } = makeApi({
+        snapshot: configuredSnapshot(),
+        setOwnDeviceAdmission: { ok: false, error: "tailnet-own-device-admission-login-unreadable" },
+      });
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-own-device-admission-allow"));
+
+      const failure = await screen.findByTestId("tailnet-own-device-admission-error");
+      expect(failure).toHaveTextContent("Tailscale login could not be read");
+      expect(screen.getByTestId("tailnet-setup-status-serve")).toBeInTheDocument();
+    });
+
+    it("is absent where there is no pairing to waive an approval for", async () => {
+      const { api } = makeApi({
+        snapshot: configuredSnapshot({
+          effective: { ...ON, pairedSharingEnabled: false },
+        }),
+      });
+      render(<TailnetSetupCard api={api} onCreateInvitation={() => undefined} />);
+
+      await screen.findByTestId("tailnet-setup-status");
+      expect(screen.queryByTestId("tailnet-own-device-admission")).toBeNull();
+    });
   });
 });

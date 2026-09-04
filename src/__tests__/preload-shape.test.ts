@@ -532,6 +532,7 @@ describe("preload contextBridge world shape lock", () => {
             "apply",
             "configureServe",
             "guidedSetup",
+            "setOwnDeviceAdmission",
             "snapshot",
           ],
           "tailnetSharing": [

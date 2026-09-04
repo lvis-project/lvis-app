@@ -97,6 +97,10 @@ export function TailnetSetupCard({ api, onCreateInvitation }: TailnetSetupCardPr
   const [showManualForm, setShowManualForm] = useState(false);
   const [chosenPort, setChosenPort] = useState<number | null>(null);
   const [webOrigin, setWebOrigin] = useState<string | null>(null);
+  const [admissionBusy, setAdmissionBusy] = useState(false);
+  // Kept apart from `error`, which belongs to the connect button: a refused
+  // admission must not replace the sentence explaining why Serve failed.
+  const [admissionError, setAdmissionError] = useState<string | null>(null);
   const { copied, copy: copyToClipboard } = useCopyFlash();
   // Whether the reader has been shown a screen yet. The first snapshot decides
   // between the setup card and the status card; every later one must not yank
@@ -162,6 +166,18 @@ export function TailnetSetupCard({ api, onCreateInvitation }: TailnetSetupCardPr
     }
     setBusy(false);
   }, [api, busy, readSnapshot]);
+
+  // Two presses, one operation: which account is admitted is the host's answer,
+  // so the renderer sends only the direction and re-reads what the host decided.
+  const setOwnDeviceAdmission = useCallback(async (enabled: boolean) => {
+    if (admissionBusy) return;
+    setAdmissionBusy(true);
+    setAdmissionError(null);
+    const result = await api.tailnetObserver.setOwnDeviceAdmission(enabled);
+    if (!result.ok) setAdmissionError(result.error);
+    await readSnapshot();
+    setAdmissionBusy(false);
+  }, [admissionBusy, api, readSnapshot]);
 
   // The manual form is both the escape hatch beside the connect button and the
   // one on the status card. Only the first of those can finish setup, so a save
@@ -236,6 +252,60 @@ export function TailnetSetupCard({ api, onCreateInvitation }: TailnetSetupCardPr
     </>
   );
 
+  /**
+   * The own-device control, in its two states.
+   *
+   * A button rather than a switch, because the way back has to be visible: the
+   * on state says what is true and puts 해제 next to it, so nobody has to guess
+   * that pressing the same thing again would take the access away.
+   *
+   * It is drawn only where pairing exists at all — without paired sharing there
+   * is no pairing to waive an approval for, and a control that cannot act is
+   * worse than an absent one.
+   */
+  const ownDeviceAdmissionControl = snapshot.effective.pairedSharingEnabled ? (
+    <div className="min-w-0 space-y-1" data-testid="tailnet-own-device-admission">
+      <div className="flex flex-wrap items-center gap-2">
+        {snapshot.ownDeviceAdmission ? (
+          <>
+            <Badge variant="secondary" data-testid="tailnet-own-device-admission-state">
+              {t("tailnetSetup.ownDeviceAdmissionOn")}
+            </Badge>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={admissionBusy}
+              onClick={() => void setOwnDeviceAdmission(false)}
+              data-testid="tailnet-own-device-admission-release"
+            >
+              {t("tailnetSetup.ownDeviceAdmissionRelease")}
+            </Button>
+          </>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={admissionBusy}
+            onClick={() => void setOwnDeviceAdmission(true)}
+            data-testid="tailnet-own-device-admission-allow"
+          >
+            {t("tailnetSetup.ownDeviceAdmissionAllow")}
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {snapshot.ownDeviceAdmission
+          ? t("tailnetSetup.ownDeviceAdmissionOnDescription")
+          : t("tailnetSetup.ownDeviceAdmissionOffDescription")}
+      </p>
+      {admissionError === null ? null : (
+        <p className="text-sm text-destructive" data-testid="tailnet-own-device-admission-error">
+          {tailnetObserverErrorText(admissionError, t)}
+        </p>
+      )}
+    </div>
+  ) : null;
+
   const manualToggle = (
     <Button
       size="sm"
@@ -299,6 +369,7 @@ export function TailnetSetupCard({ api, onCreateInvitation }: TailnetSetupCardPr
           <p className="text-sm text-muted-foreground" data-testid="tailnet-setup-status-serve">
             {serveOn ? t("tailnetSetup.statusServeOn") : t("tailnetSetup.statusServeOff")}
           </p>
+          {ownDeviceAdmissionControl}
           <div className="flex flex-wrap items-center gap-2">
             <ConnectButton
               busy={busy}

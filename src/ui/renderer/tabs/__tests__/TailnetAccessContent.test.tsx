@@ -49,6 +49,7 @@ function observerSnapshot() {
     listeningPort: null,
     lastStartError: null,
     pairedSharingBootstrapFailed: false,
+    ownDeviceAdmission: false,
     environment: {
       state: "ready" as const,
       login: "owner@example.com",
