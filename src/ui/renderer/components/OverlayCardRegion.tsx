@@ -48,7 +48,7 @@ export interface OverlayCardRegionProps {
    * that conversation is still open. The window answers it, because only the
    * window can see every tile.
    */
-  overlayCardTile: (card: { originSessionId?: string; adoptedChatGroupId?: string }) => OverlayCardPlacement;
+  overlayCardTile: (card: { originSessionId?: string }) => OverlayCardPlacement;
   /**
    * Called when the user confirms a plugin overlay item, with the tile that
    * showed the card — the conversation the staged prompt is inserted into and

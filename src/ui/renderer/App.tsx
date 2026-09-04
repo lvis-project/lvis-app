@@ -314,11 +314,13 @@ export function App() {
   }, [chatGroups.groups]);
 
   // Which surface shows an overlay card. Only the window can answer it: it
-  // needs every tile's conversation to say whether any of them owns the card.
+  // needs every tile's conversation to say whether any of them owns the card,
+  // and it knows which pane is focused — where a card no conversation owns is
+  // drawn.
   const overlayCardTileForWindow = useCallback(
-    (card: { originSessionId?: string; adoptedChatGroupId?: string }): OverlayCardPlacement =>
-      overlayCardTile(tileSessions, card),
-    [tileSessions],
+    (card: { originSessionId?: string }): OverlayCardPlacement =>
+      overlayCardTile(tileSessions, chatGroups.focusedId, card),
+    [tileSessions, chatGroups.focusedId],
   );
 
   // Letting a conversation go in main. Fire-and-forget because nothing in the
@@ -665,7 +667,7 @@ export function App() {
     handleRoutineAcknowledge,
     handleProposalAnswer,
   } = useRoutineOverlay({
-    api, t, locale, registry: chatGroupSessions, focusedChatGroupId: chatGroups.focusedId,
+    api, t, locale, registry: chatGroupSessions,
     onNavigateToSettings: navigateToSettingsPath,
   });
 
@@ -1466,13 +1468,13 @@ export function App() {
 
   // ─── Render ───────────────────────────────────
   /**
-   * The overlay cards pinned to ONE pane, for that pane's frame lane.
+   * The overlay cards ONE pane shows, for that pane's frame lane.
    *
    * Built by the window because only the window sees every tile
    * (`overlayCardTile`) and holds the handlers a card's action runs through.
-   * The region acts in its own pane: a card was pinned here because this pane
-   * was focused when it arrived, and the turn it starts belongs here. It is
-   * handed to whichever frame is DRAWN for the pane — the routed one while a
+   * The region acts in its own pane: a card no conversation owns is drawn here
+   * because this pane is focused — where the user is — and the turn it starts
+   * belongs here. It is handed to whichever frame is DRAWN for the pane — the routed one while a
    * view covers the conversation, the conversation's otherwise — never both,
    * or one card would be drawn twice.
    */
@@ -1532,7 +1534,7 @@ export function App() {
     const asTile = {
       focused: chatGroups.focusedId === paneId,
       onFocus: () => chatGroups.focus(paneId),
-      // The cards pinned to this pane come with it into whatever it shows.
+      // The overlay cards this pane shows come with it into whatever it draws.
       lane: paneLane(paneId),
       ...(chatGroups.canSplit ? {
         canSplit: true,
@@ -2134,8 +2136,8 @@ export function App() {
                                     // reads the same fact.
                                     //
                                     // `paneHidden` is the tree's answer alone. An overlay card is
-                                    // pinned to the PANE, and the pane frame owns the lane it
-                                    // floats in, so a routed pane still draws its cards; only a
+                                    // drawn in the FOCUSED pane, and the pane frame owns the lane
+                                    // it floats in, so a routed pane still draws them; only a
                                     // pane the tree is not drawing sends them to the window band.
                                     //
                                     // The route is asked of THIS pane's own content, not of
@@ -2214,11 +2216,11 @@ export function App() {
                       no conversation surface claimed (see `unclaimedApprovals`).
                       The overlay region draws only what no tile can draw: a
                       card whose origin conversation has left the screen, and
-                      one pinned to a pane that has since closed or that the
-                      tree is not drawing. A card with no origin belongs to the
-                      pane it arrived over, and that pane's FRAME owns the lane
-                      it floats in — so it is drawn there, whatever the pane is
-                      showing, not here. See `overlayCardTile`.
+                      while no pane is drawn at all, the cards no conversation
+                      owns. Otherwise a card with no origin is drawn in the
+                      FOCUSED pane and follows focus, and that pane's frame owns
+                      the lane it floats in — so it is drawn there, whatever the
+                      pane is showing, not here. See `overlayCardTile`.
 
                       It is a BAND, not a float: a flex sibling BELOW the route
                       canvas, so the space it takes is space the tile grid does

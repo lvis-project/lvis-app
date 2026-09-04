@@ -82,17 +82,6 @@ export interface OverlayItem {
    * NOT `source.eventId`: that identifies the plugin EVENT, not a session.
    */
   originSessionId?: string;
-  /**
-   * The tile a card WITHOUT an origin conversation was pinned to, stamped by
-   * the renderer when the card arrived — never by main, which has no focus.
-   *
-   * A plugin trigger and a headless routine have no conversation to belong to,
-   * yet confirming one starts a turn in a tile. Reading live focus at paint
-   * time would let the card slide between tiles while the user reads it, and
-   * the turn would start wherever focus happened to land on the click. Pinning
-   * at arrival makes the tile that shows the card the tile that runs it.
-   */
-  adoptedChatGroupId?: string;
 }
 
 export interface OverlayContextValue {
@@ -172,12 +161,6 @@ export function OverlayContextProvider({
       // Date.parse() defensive comparison — handles any ISO string normalisation differences.
       // Invalid timestamp on incoming item → drop (stale-by-default); invalid existing → accept incoming.
       let dominated = false;
-      // The pin belongs to the SLOT, not to the push. A routine's spinner and
-      // the result that replaces it are two pushes seconds apart, and focus can
-      // move between them; re-stamping the replacement would carry the card to
-      // whichever tile the user had reached, which is the move the pin exists
-      // to prevent. The first push decides, and the slot keeps that decision.
-      let inheritedPin: string | undefined;
       const filtered = prev.filter((it) => {
         if (item.source.kind === "routine" && it.source.kind === "routine") {
           if (it.source.routineId !== item.source.routineId) return true;
@@ -194,13 +177,11 @@ export function OverlayContextProvider({
             dominated = true;
             return true;
           }
-          inheritedPin ??= it.adoptedChatGroupId;
           return false; // drop existing, incoming is newer (or existing timestamp invalid)
         }
         if (item.source.kind === "plugin" && it.source.kind === "plugin") {
           const replaced = it.source.pluginId === item.source.pluginId
             && it.source.eventId === item.source.eventId;
-          if (replaced) inheritedPin ??= it.adoptedChatGroupId;
           return !replaced;
         }
         // A proposal is one QUESTION, and main may stage it again — a second
@@ -210,18 +191,12 @@ export function OverlayContextProvider({
         if (item.source.kind === "proposal" && it.source.kind === "proposal") {
           const replaced = it.source.pluginId === item.source.pluginId
             && it.source.proposalId === item.source.proposalId;
-          if (replaced) inheritedPin ??= it.adoptedChatGroupId;
           return !replaced;
         }
         return true;
       });
       if (dominated) return prev; // stale replay — discard
-      // The slot's pin wins over the incoming one: the replacement was stamped
-      // from focus a moment ago, and that is exactly the value to discard.
-      return [...filtered, {
-        ...item,
-        ...(inheritedPin === undefined ? {} : { adoptedChatGroupId: inheritedPin }),
-      }];
+      return [...filtered, item];
     });
   }, []);
 

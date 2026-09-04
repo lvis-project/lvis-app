@@ -211,35 +211,33 @@ export interface OverlayCardPlacement {
  * rest behind.
  *
  * A card that names the conversation it came from goes to the tile holding
- * that conversation, because its action continues THAT conversation.
+ * that conversation, because its action continues THAT conversation. When no
+ * drawn pane holds it, the card is orphaned and the window band shows it.
  *
- * A card no conversation owns — a routine fire, a plugin event, or one whose
- * origin conversation has left the screen — goes to the window's own chrome.
- * This is the same rule the window's approval dock follows.
- *
- * A card with NO origin conversation is a different case, and it is the common
- * one: a plugin trigger and a headless routine belong to no conversation, but
- * confirming either starts a turn in a tile. That tile is the card's pin
- * (`adoptedChatGroupId`), taken from focus once, when the card arrived — the
- * same adoption `tileDrawsSession` gives an unheld question. Reading focus here
- * instead would slide the card between tiles while it is being read. The window
- * band keeps only what no drawn pane can hold: an orphaned origin, a pin whose
- * pane has since closed, and cards that arrived with no pane open at all.
+ * A card with NO origin conversation — a plugin trigger, a headless routine —
+ * is drawn in the FOCUSED pane, and follows focus. The window holds one queue
+ * of such cards and that queue has one reader, the user, who is at the focused
+ * pane: a card parked in an unfocused pane is a card nobody is looking at, and
+ * with several panes open it would soon be one card per pane. The region that
+ * draws it acts in its own pane (`actionChatGroupId`), so confirming the card
+ * starts the turn where the user is. Only when no pane is drawn at all does
+ * such a card fall to the window band.
  *
  * "Drawn" is asked of the PANE, not of its conversation. A tile is `hidden`
  * for two reasons that route differently. The tree gave its box to another
  * tile (maximized, chat mode): nothing of it is on screen, so the window band
  * lends the surface. Or the pane is routed to Settings or a plugin view: its
  * conversation is behind `display:none`, but the pane is drawn, and the overlay
- * lane is the pane frame's — so the card stays in its pane, whatever the pane
- * shows. Only the first reason (`paneHidden`) moves an overlay card here.
- * `tileDrawsSession` and the approval claims keep reading `hidden`: their
+ * lane is the pane frame's — so the card is drawn in it, whatever the pane
+ * shows. Only the first reason (`paneHidden`) moves an overlay card to the
+ * band. `tileDrawsSession` and the approval claims keep reading `hidden`: their
  * cards sit over the composer, which a routed pane does not show, so for them
  * the window band is still the right surface.
  */
 export function overlayCardTile(
   tiles: readonly TileSession[],
-  card: { originSessionId?: string; adoptedChatGroupId?: string },
+  focusedChatGroupId: string,
+  card: { originSessionId?: string },
 ): OverlayCardPlacement {
   // A pane the tree is not drawing is mounted so its turn survives, but it
   // paints nothing, and a card handed to it would be a card nobody can see.
@@ -252,9 +250,8 @@ export function overlayCardTile(
       ? { chatGroupId: null, orphaned: true }
       : { chatGroupId: holder.chatGroupId, orphaned: false };
   }
-  const pinned = card.adoptedChatGroupId;
-  if (pinned !== undefined && drawn.some((tile) => tile.chatGroupId === pinned)) {
-    return { chatGroupId: pinned, orphaned: false };
+  if (drawn.some((tile) => tile.chatGroupId === focusedChatGroupId)) {
+    return { chatGroupId: focusedChatGroupId, orphaned: false };
   }
   return { chatGroupId: null, orphaned: false };
 }

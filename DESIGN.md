@@ -182,7 +182,7 @@ Two constraints we impose on ourselves that VS Code does not:
 The frame is the layout's origin, and there is one of it. A pane may hold a conversation,
 a built-in view, Settings, or a plugin surface; the chrome around it does not change with
 the content. The frame also owns the floating lane at the top-right of its body, so a card
-pinned to a pane floats over whatever that pane holds.
+floats over whatever the pane it is drawn in holds.
 `src/ui/renderer/components/PaneFrame.tsx` is the only place that chrome is
 drawn, and `src/ui/renderer/__tests__/PaneFrame.test.tsx` holds it there. A second frame
 for a second kind of content is the defect this rule exists to name: two frames drift, and
@@ -266,12 +266,12 @@ What is deliberately NOT in this frame, and where it goes instead:
 
 - **A result or a proposal the user may leave for later** — a routine that fired, a plugin
   prompt staged for confirmation, a plugin's onboarding highlight — parks no turn. It is a
-  card in the floating right lane of the pane it is pinned to (`FloatingRightLane`, rendered
-  by the pane frame, one width for every occupant), and it stays in that pane whatever the
-  pane shows — a conversation, Settings, a plugin view. The window band keeps only an
-  orphaned origin, a pin whose pane closed, and a card that arrived with no pane open. Its
-  actions are answer-shaped (accept, later, never) and the host stores the answer; it never
-  inerts a composer.
+  card in the floating right lane of the focused pane (`FloatingRightLane`, rendered by the
+  pane frame, one width for every occupant): it follows focus, and it is drawn whatever that
+  pane shows — a conversation, Settings, a plugin view. A card raised by a conversation stays
+  with the pane holding that conversation. The window band keeps only an orphaned origin
+  and, while no pane is drawn, the unowned cards. Its actions are answer-shaped (accept,
+  later, never) and the host stores the answer; it never inerts a composer.
 - **Status the app is reporting about itself** — a plugin update, bootstrap outcome, an app
   update, dev mode — is a pill in the window band's toolbar (`ToolbarStatusPill`), never a
   card. A pill's detail is its tooltip, so a busy pill stays hoverable and focusable.

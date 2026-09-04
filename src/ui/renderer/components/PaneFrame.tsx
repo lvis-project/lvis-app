@@ -206,15 +206,16 @@ interface PaneFrameProps {
    */
   asideSlot?: boolean;
   /**
-   * What floats at the top-right of the body: the overlay cards pinned to
-   * this pane.
+   * What floats at the top-right of the body: the overlay cards this pane
+   * shows.
    *
-   * The lane is the FRAME's, not the conversation's, because a card pinned to
-   * a pane must stay visible whatever the pane draws — a conversation,
+   * The lane is the FRAME's, not the conversation's, because the cards a pane
+   * shows must stay visible whatever the pane draws — a conversation,
    * Settings, a plugin view. Anchored inside the conversation, it went behind
    * `display:none` the moment a view covered that conversation, and the card
-   * fell out to the window band, off the pane it was pinned to. The frame
-   * renders the `FloatingRightLane` itself so the anchor lives in one place.
+   * fell out to the window band, off the pane the user was looking at. The
+   * frame renders the `FloatingRightLane` itself so the anchor lives in one
+   * place.
    */
   lane?: ReactNode;
   children: ReactNode;

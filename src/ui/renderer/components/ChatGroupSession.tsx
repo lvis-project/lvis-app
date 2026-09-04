@@ -170,8 +170,8 @@ export interface ChatGroupSessionProps {
   /**
    * The TREE is not drawing this pane — another tile has its box. One of the
    * two reasons `hidden` can be true, published on its own because the overlay
-   * lane is the pane frame's: a pane routed to a view is still drawn, and the
-   * cards pinned to it stay in it. See `overlayCardTile`.
+   * lane is the pane frame's: a pane routed to a view is still drawn, and it
+   * still draws the cards that belong on it. See `overlayCardTile`.
    */
   paneHidden: boolean;
   onSidePanelOpenChange: (open: boolean) => void;

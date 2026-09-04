@@ -61,7 +61,6 @@ function setup() {
       t: ((key: string) => key) as never,
       locale: "en",
       registry: registry as never,
-      focusedChatGroupId: TILE,
       onNavigateToSettings,
     }));
 
