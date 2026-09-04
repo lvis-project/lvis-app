@@ -29,7 +29,10 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
-import { SubAgentRunner } from "../subagent-runner.js";
+import {
+  SubAgentRunner,
+  exactToolScope,
+} from "../subagent-runner.js";
 import { ParentDirectiveMailbox } from "../parent-directive-mailbox.js";
 import {
   formatParentDirective,
@@ -460,7 +463,7 @@ describe("parent directive delivery into a live sub-agent run", () => {
       spawned = await runner.spawn({
         title: "live-directive-child",
         instructions: "work until told otherwise",
-        sourceTools: ["directive_probe"],
+        toolScope: exactToolScope(["directive_probe"]),
         maxRounds: 3,
         originSessionId: ROOT_SESSION,
       });
@@ -512,7 +515,7 @@ describe("parent directive delivery into a live sub-agent run", () => {
     const spawned = await runner.spawn({
       title: "suspended-directive-child",
       instructions: "pause for input",
-      sourceTools: ["idle_step"],
+      toolScope: exactToolScope(["idle_step"]),
       maxRounds: 1,
       originSessionId: ROOT_SESSION,
     });

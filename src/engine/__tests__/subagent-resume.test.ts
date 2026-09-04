@@ -35,7 +35,11 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
-import { SubAgentRunner } from "../subagent-runner.js";
+import {
+  SubAgentRunner,
+  exactToolScope,
+  PARENT_ALL_TOOL_SCOPE,
+} from "../subagent-runner.js";
 import { ParentDirectiveMailbox } from "../parent-directive-mailbox.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams,
 } from "../llm/types.js";
@@ -306,7 +310,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       spawned = await runner.spawn({
         title: "project child",
         instructions: "inspect the project",
-        sourceTools: ["cwd_probe"],
+        toolScope: exactToolScope(["cwd_probe"]),
         maxRounds: 1,
         projectRoot: explicitRoot,
         projectName: "agent-connector",
@@ -388,7 +392,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const spawned = await runner.spawn({
         title: "default child",
         instructions: "work in the default workspace",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
       });
       const metadata = subStore.loadSessionMetadata(spawned.childSessionId);
       expect(metadata?.sessionKind).toBe("subagent");
@@ -413,7 +417,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const result = await runner.spawn({
         title: "linked child",
         instructions: "collect evidence",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         maxRounds: 2,
         originSessionId: "092d865f-192a-48ae-8603-8a838c39d4dc",
         toolUseId: "tool-use-1",
@@ -519,7 +523,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const spawnPromise = runner.spawn({
         title: "interruptible child",
         instructions: "wait until interrupted",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         originSessionId: "092d865f-192a-48ae-8603-8a838c39d4dc",
         spawnId: "spawn-interrupt",
         maxRounds: 3,
@@ -579,7 +583,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const spawn = await runner.spawn({
         title: "terminal-resume",
         instructions: "wait",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         maxRounds: 2,
         originSessionId,
       });
@@ -678,7 +682,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "hist",
       instructions: "do work",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 5,
     });
     restore();
@@ -760,7 +764,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "scoped",
       instructions: "do",
-      sourceTools: ["read_only"], // bash intentionally excluded
+      toolScope: exactToolScope(["read_only"]), // bash intentionally excluded
       maxRounds: 2,
     });
     restore();
@@ -805,7 +809,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "frozen",
       instructions: "do",
-      sourceTools: ["orig_tool"],
+      toolScope: exactToolScope(["orig_tool"]),
       maxRounds: 2,
     });
     restore();
@@ -861,7 +865,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "depth",
       instructions: "do",
-      sourceTools: ["noop", "agent_spawn"], // agent_spawn must be stripped
+      toolScope: exactToolScope(["noop", "agent_spawn"]), // agent_spawn must be stripped
       maxRounds: 2,
     });
     restore();
@@ -919,7 +923,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "exhaust",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -992,7 +996,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const result = await runner.spawn({
         title: "question-wait",
         instructions: "ask when blocked",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         originSessionId,
       });
       expect(result).toMatchObject({
@@ -1269,7 +1273,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       spawned = await runner.spawn({
         title: "resume removal race",
         instructions: "wait",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         maxRounds: 1,
         projectRoot: removedRoot,
         projectName: "removed",
@@ -1411,7 +1415,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawned = await runner.spawn({
       title: "mailbox-recipient",
       instructions: "wait",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 1,
       originSessionId,
     });
@@ -1507,7 +1511,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const spawned = await runner.spawn({
         title: "mailbox-retain",
         instructions: "wait",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         maxRounds: 1,
         originSessionId,
       });
@@ -1558,7 +1562,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "question-validation",
       instructions: "wait",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 1,
     });
     restore();
@@ -1669,7 +1673,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "question-security",
       instructions: "wait",
-      sourceTools: ["question_probe"],
+      toolScope: exactToolScope(["question_probe"]),
       maxRounds: 1,
       originSessionId,
     });
@@ -1750,7 +1754,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "question-counter",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -1809,7 +1813,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const spawn = await runner.spawn({
         title: `resume-${stopReason}`,
         instructions: "wait",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         maxRounds: 2,
         originSessionId,
       });
@@ -1876,7 +1880,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "ceiling",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -1920,7 +1924,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "near-ceiling",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -2019,7 +2023,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "guided",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
       originSessionId,
     });
@@ -2107,7 +2111,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "guided-failure",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
       originSessionId,
     });
@@ -2169,7 +2173,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "scaled-ceiling",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -2253,7 +2257,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       spawn = await runner.spawn({
         title: "partial-spawn",
         instructions: "do",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         maxRounds: 3,
       });
     } finally {
@@ -2286,7 +2290,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "partial-resume",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -2361,7 +2365,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "concurrent",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -2467,7 +2471,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "background-resume",
       instructions: "wait",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
       originSessionId,
     });
@@ -2625,7 +2629,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "resume-final-save",
       instructions: "wait",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
       originSessionId,
     });
@@ -2711,7 +2715,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "resume-commit",
       instructions: "wait",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
       originSessionId,
     });
@@ -2813,7 +2817,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "iso",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -2873,7 +2877,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "counter",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       profileModel: "high",
       profileMode: "execute",
       maxRounds: 5,
@@ -3128,7 +3132,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const spawn = await runner.spawn({
       title: "untagged",
       instructions: "do",
-      sourceTools: ["noop"],
+      toolScope: exactToolScope(["noop"]),
       maxRounds: 2,
     });
     restore();
@@ -3249,6 +3253,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     let restore = patchProvider(cleanSpawnProvider());
     try {
       const completed = await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "terminal cleanup",
         instructions: "finish",
       });
@@ -3266,7 +3271,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const waiting = await runner.spawn({
         title: "waiting retain",
         instructions: "pause",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         maxRounds: 1,
       });
       expect(waiting).toMatchObject({
@@ -3353,6 +3358,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const restore = patchProvider(provider);
     try {
       const result = await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "question child",
         instructions: "ask parent",
         originSessionId,
@@ -3434,6 +3440,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const restore = patchProvider(provider);
     try {
       const result = await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "question fallback",
         instructions: "ask parent",
         originSessionId,

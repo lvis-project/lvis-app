@@ -15,6 +15,7 @@ import { createWorkBoardEngine } from "../work-board-engine.js";
 import type {
   SubAgentRunner,
   SubAgentSpawnCallbacks,
+  SubAgentToolScope,
 } from "../../engine/subagent-runner.js";
 import type { WorkBoardRunEvent } from "../../shared/work-board-types.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
@@ -29,7 +30,10 @@ import { assistantEntry } from "../../__tests__/test-helpers.js";
 
 interface SpawnCall {
   title: string;
-  sourceTools?: string[];
+  /** Which grant the phase asked for. @see SubAgentToolScope */
+  toolScopeKind: SubAgentToolScope["kind"];
+  /** The names an `exactly` grant names; `undefined` for the other kinds. */
+  grantedToolNames?: readonly string[];
   profileMode?: string;
   originSessionId?: string;
   projectRoot?: string;
@@ -42,14 +46,17 @@ function fakeRunner(): { runner: SubAgentRunner; calls: SpawnCall[] } {
   const runner = {
     async spawn(input: {
       title: string;
-      sourceTools?: string[];
+      toolScope: SubAgentToolScope;
       profileMode?: string;
       originSessionId?: string;
       projectRoot?: string;
     }) {
       calls.push({
         title: input.title,
-        sourceTools: input.sourceTools,
+        toolScopeKind: input.toolScope.kind,
+        ...(input.toolScope.kind === "exactly"
+          ? { grantedToolNames: input.toolScope.names }
+          : {}),
         profileMode: input.profileMode,
         originSessionId: input.originSessionId,
         projectRoot: input.projectRoot,
@@ -98,11 +105,11 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
       // Two spawns: plan (read-only tools) then execute (full registry).
       expect(calls).toHaveLength(2);
       expect(calls[0].profileMode).toBe("plan");
-      expect(calls[0].sourceTools).toContain("read_file");
-      expect(calls[0].sourceTools).not.toContain("write_file");
+      expect(calls[0].grantedToolNames).toContain("read_file");
+      expect(calls[0].grantedToolNames).not.toContain("write_file");
       expect(calls[1].profileMode).toBe("execute");
-      // Execute omits sourceTools → full parent registry.
-      expect(calls[1].sourceTools).toBeUndefined();
+      // Execute asks for `parent-all` → full parent registry.
+      expect(calls[1].toolScopeKind).toBe("parent-all");
       expect(calls[0].originSessionId).toBe(`work-board:${id}`);
       expect(calls[0].projectRoot).toBe(projectRoot);
       expect(calls[1].projectRoot).toBe(projectRoot);
@@ -167,7 +174,7 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
       // The plan phase is read-only, so nothing the plugin's text asked for can
       // mutate anything before the user has read the plan.
       expect(calls[0].profileMode).toBe("plan");
-      expect(calls[0].sourceTools).toContain("read_file");
+      expect(calls[0].grantedToolNames).toContain("read_file");
 
       // The gate was asked with the durable answer refused up front, and the
       // engine clamps whatever comes back on top of that.
