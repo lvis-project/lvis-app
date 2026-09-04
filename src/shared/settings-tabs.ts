@@ -87,6 +87,7 @@ export const SETTINGS_SECTIONS: Record<SettingsTab, readonly string[]> = {
   "remote-surfaces": [
     "remote-tailnet",
     "remote-tailnet-observer",
+    "remote-messaging-connections",
     "remote-telegram",
     "remote-local-api",
   ],

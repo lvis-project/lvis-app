@@ -9,6 +9,7 @@ import {
   isMarketplaceAssetPackageType,
   isInstallableMarketplacePackageType,
   marketplacePackageLabel,
+  marketplacePackageTypeOf,
   marketplaceTrustLabelKeysForPackage,
 } from "../marketplace-package-sections.js";
 
@@ -20,14 +21,25 @@ describe("marketplace package sections", () => {
       .toEqual(["all", ...MARKETPLACE_PACKAGE_TYPES]);
   });
 
-  it("keeps provider, theme, and language pack as settings-backed asset sections", () => {
+  it("keeps the artifact-free kinds as settings-backed asset sections", () => {
     expect(MARKETPLACE_ASSET_PACKAGE_TYPES)
-      .toEqual(["provider", "theme", "language-pack"]);
+      .toEqual(["provider", "theme", "language-pack", "messaging-connection"]);
     expect(isMarketplaceAssetPackageType("provider")).toBe(true);
     expect(isMarketplaceAssetPackageType("theme")).toBe(true);
     expect(isMarketplaceAssetPackageType("language-pack")).toBe(true);
+    expect(isMarketplaceAssetPackageType("messaging-connection")).toBe(true);
     expect(isMarketplaceAssetPackageType("plugin")).toBe(false);
     expect(isMarketplaceAssetPackageType("language")).toBe(false);
+  });
+
+  it("reads a declared kind this build does not know as no package type", () => {
+    expect(marketplacePackageTypeOf({ pluginType: "messaging-connection" }))
+      .toBe("messaging-connection");
+    // A row from a catalog that predates the field is a plugin...
+    expect(marketplacePackageTypeOf({})).toBe("plugin");
+    // ...and a row that named a kind this build has never heard of is not.
+    expect(marketplacePackageTypeOf({ unsupportedPackageKind: "workflow-pack" }))
+      .toBeUndefined();
   });
 
   it("centralizes labels and trust badges for marketplace UI rows", () => {
@@ -47,6 +59,10 @@ describe("marketplace package sections", () => {
     ]);
     expect(marketplaceTrustLabelKeysForPackage("provider", { hasSupportedAsset: false }))
       .toEqual([]);
+    expect(marketplaceTrustLabelKeysForPackage("messaging-connection")).toEqual([
+      "marketplaceTab.trustMessagingCredentials",
+      "marketplaceTab.trustMessagingNetwork",
+    ]);
     expect(marketplaceTrustLabelKeysForPackage("plugin")).toEqual([]);
   });
 

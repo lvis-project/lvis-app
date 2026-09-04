@@ -16,6 +16,7 @@ import {
   canUninstallMarketplacePackageType,
   isMarketplaceAssetPackageType,
   marketplacePackageLabel,
+  marketplacePackageTypeOf,
   marketplaceTrustLabelKeysForPackage,
   type MarketplacePackageFilter,
 } from "../../../shared/marketplace-package-sections.js";
@@ -29,6 +30,7 @@ import {
   hasNetworkAccessDisclosure,
 } from "../../../shared/network-access.js";
 import {
+  marketplaceMessagingConnectionFromAsset,
   marketplaceProviderPresetFromAsset,
 } from "../../../shared/marketplace-package-assets.js";
 import { isMarketplaceEligibleLLMVendor } from "../../../shared/llm-vendor-defaults.js";
@@ -36,8 +38,20 @@ import { errorMessage } from "../../../shared/error-message.js";
 
 type MarketplaceAssetInstallState = Pick<
   MarketplaceSettings,
-  "installedProviderIds" | "installedProviderPresets" | "installedThemeBundleIds" | "installedLanguagePacks"
+  | "installedProviderIds"
+  | "installedProviderPresets"
+  | "installedThemeBundleIds"
+  | "installedLanguagePacks"
+  | "installedMessagingConnections"
 >;
+
+const NO_ASSETS_INSTALLED: MarketplaceAssetInstallState = {
+  installedProviderIds: [],
+  installedProviderPresets: [],
+  installedThemeBundleIds: [],
+  installedLanguagePacks: [],
+  installedMessagingConnections: [],
+};
 
 function installedAssetsFromMarketplace(
   marketplace?: Partial<MarketplaceSettings>,
@@ -55,19 +69,29 @@ function installedAssetsFromMarketplace(
     installedLanguagePacks: Array.isArray(marketplace?.installedLanguagePacks)
       ? marketplace.installedLanguagePacks
       : [],
+    installedMessagingConnections: Array.isArray(marketplace?.installedMessagingConnections)
+      ? marketplace.installedMessagingConnections
+      : [],
   };
 }
 
 function isMarketplaceAssetPackage(item: MarketplaceItem): boolean {
-  const packageType = item.pluginType ?? "plugin";
+  const packageType = marketplacePackageTypeOf(item);
   return (
+    packageType !== undefined &&
     isMarketplaceAssetPackageType(packageType) &&
     item.packageAsset?.type === packageType
   );
 }
 
+/**
+ * A row this build can show but not install: an asset package whose payload it
+ * cannot read, or a row of a kind released after this app. Both are answered
+ * the same way — name it, and say LVIS has to be updated.
+ */
 function isUnsupportedMarketplaceAssetPackage(item: MarketplaceItem): boolean {
-  const packageType = item.pluginType ?? "plugin";
+  const packageType = marketplacePackageTypeOf(item);
+  if (packageType === undefined) return true;
   return isMarketplaceAssetPackageType(packageType) && !isMarketplaceAssetPackage(item);
 }
 
@@ -87,6 +111,11 @@ function isMarketplaceAssetInstalled(
   }
   if (asset.type === "theme") {
     return installed.installedThemeBundleIds.includes(asset.bundleId);
+  }
+  if (asset.type === "messaging-connection") {
+    return installed.installedMessagingConnections.some(
+      (connection) => connection.connectionId === asset.connectionId,
+    );
   }
   return installed.installedLanguagePacks.includes(asset.locale);
 }
@@ -276,12 +305,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       setPackages(mergedItems);
       setPackageStatus(t("marketplaceTab.packageCount", { count: String(mergedItems.length) }));
     } catch (err) {
-      let installed: MarketplaceAssetInstallState = {
-        installedProviderIds: [],
-        installedProviderPresets: [],
-        installedThemeBundleIds: [],
-        installedLanguagePacks: [],
-      };
+      let installed: MarketplaceAssetInstallState = NO_ASSETS_INSTALLED;
       try {
         const settings = await api.getSettings();
         installed = installedAssetsFromMarketplace(settings.marketplace);
@@ -297,13 +321,15 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     void refreshPackages();
   }, [refreshPackages]);
 
+  // A row of an unrecognised kind belongs to no filter, so it appears only
+  // under "all" — a kind filter that listed it would be claiming to know it.
   const visiblePackages = useMemo(() => (
     filter === "all"
       ? packages
-      : packages.filter((item) => (item.pluginType ?? "plugin") === filter)
+      : packages.filter((item) => marketplacePackageTypeOf(item) === filter)
   ), [filter, packages]);
   const needsInstallDisclosure = useCallback((item: MarketplaceItem): boolean => {
-    if ((item.pluginType ?? "plugin") !== "plugin") return false;
+    if (marketplacePackageTypeOf(item) !== "plugin") return false;
     return item.installPolicy === "admin" || hasNetworkAccessDisclosure(item.networkAccess);
   }, []);
 
@@ -347,6 +373,19 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       marketplace.installedThemeBundleIds = install
         ? addUnique(installed.installedThemeBundleIds, asset.bundleId)
         : removeValue(installed.installedThemeBundleIds, asset.bundleId);
+    } else if (asset.type === "messaging-connection") {
+      // The declaration only. Whatever the connection asks its owner for is
+      // entered in the connection's own surface and stored encrypted there.
+      const connection = marketplaceMessagingConnectionFromAsset(asset);
+      if (!connection) {
+        throw new Error("Marketplace messaging connection is missing its declaration");
+      }
+      const remaining = installed.installedMessagingConnections.filter(
+        (entry) => entry.connectionId !== connection.connectionId,
+      );
+      marketplace.installedMessagingConnections = install
+        ? [...remaining, connection]
+        : remaining;
     } else {
       marketplace.installedLanguagePacks = install
         ? addUnique(installed.installedLanguagePacks, asset.locale)
@@ -371,7 +410,11 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       setPackageStatus(item.upgradeRequired.message);
       return;
     }
-    const packageType = item.pluginType ?? "plugin";
+    const packageType = marketplacePackageTypeOf(item);
+    if (packageType === undefined) {
+      setPackageStatus(t("marketplaceTab.unsupportedAssetPackageTitle"));
+      return;
+    }
     setWorkingSlug(item.id);
     try {
       if (isMarketplaceAssetPackage(item)) {
@@ -404,7 +447,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   }, [api, refreshPackages, t, updateMarketplaceAssetInstall]);
 
   const uninstallPackage = useCallback(async (item: MarketplaceItem) => {
-    const packageType = item.pluginType ?? "plugin";
+    const packageType = marketplacePackageTypeOf(item);
     setWorkingSlug(item.id);
     try {
       if (isMarketplaceAssetPackage(item)) {
@@ -517,15 +560,20 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             {visiblePackages.length === 0 ? (
               <div className="p-4 text-center text-xs text-muted-foreground">{t("marketplaceTab.emptyPackages")}</div>
             ) : visiblePackages.map((item) => {
-              const packageType = item.pluginType ?? "plugin";
+              const packageType = marketplacePackageTypeOf(item);
+              // What the catalog called it, which is the only name this build
+              // has for a kind it does not know.
+              const declaredKind = packageType ?? item.unsupportedPackageKind ?? "";
               const isWorking = workingSlug === item.id;
               const upgradeRequired = item.upgradeRequired;
               const supportedAssetPackage = isMarketplaceAssetPackage(item);
               const unsupportedAssetPackage = isUnsupportedMarketplaceAssetPackage(item);
-              const canInstall = !upgradeRequired && canInstallMarketplacePackageType(packageType, {
-                hasSupportedAsset: supportedAssetPackage,
-              });
-              const canUninstall = item.installed && (
+              const canInstall = !upgradeRequired
+                && packageType !== undefined
+                && canInstallMarketplacePackageType(packageType, {
+                  hasSupportedAsset: supportedAssetPackage,
+                });
+              const canUninstall = item.installed && packageType !== undefined && (
                 canUninstallMarketplacePackageType(packageType, {
                   hasSupportedAsset: supportedAssetPackage,
                 })
@@ -544,22 +592,26 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                         : t("marketplaceTab.comingSoon");
               const unavailableTitle = upgradeRequired
                 ? upgradeRequired.message
-                : canInstall
-                  ? undefined
-                  : unsupportedAssetPackage
-                    ? t("marketplaceTab.unsupportedAssetPackageTitle")
-                    : t("marketplaceTab.packageInstallUnavailableTitle", {
-                      label: marketplacePackageLabel(packageType),
-                    });
-              const trustLabelKeys = marketplaceTrustLabelKeysForPackage(packageType, {
-                hasSupportedAsset: supportedAssetPackage,
-              });
+                : packageType === undefined
+                  ? t("marketplaceTab.unsupportedAssetPackageTitle")
+                  : canInstall
+                    ? undefined
+                    : unsupportedAssetPackage
+                      ? t("marketplaceTab.unsupportedAssetPackageTitle")
+                      : t("marketplaceTab.packageInstallUnavailableTitle", {
+                        label: marketplacePackageLabel(packageType),
+                      });
+              const trustLabelKeys = packageType === undefined
+                ? []
+                : marketplaceTrustLabelKeysForPackage(packageType, {
+                  hasSupportedAsset: supportedAssetPackage,
+                });
               return (
-                <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
+                <div key={`${declaredKind}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
                   <div className="min-w-0">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <span className="min-w-0 line-clamp-1 text-sm font-medium">{item.name}</span>
-                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">{packageType}</Badge>
+                      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">{declaredKind}</Badge>
                       {packageType === "mcp" && item.mcpAuth?.mode === "oauth" && (
                         <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">OAuth</Badge>
                       )}

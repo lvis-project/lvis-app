@@ -1,4 +1,5 @@
 import { assetFromMarketplacePackageSpec } from "../../shared/marketplace-package-assets.js";
+import { isMarketplaceAssetPackageType } from "../../shared/marketplace-package-sections.js";
 import { LOCAL_MARKETPLACE_ASSET_ENTRIES } from "./marketplace-asset-registry.js";
 import type { MarketplaceItem } from "./types.js";
 
@@ -9,13 +10,7 @@ function candidateKey(item: Pick<MarketplaceItem, "id" | "packageSpec" | "plugin
 function withCandidatePackageAsset(item: MarketplaceItem): MarketplaceItem {
   if (item.packageAsset) return item;
   const pluginType = item.pluginType;
-  if (
-    pluginType !== "provider" &&
-    pluginType !== "theme" &&
-    pluginType !== "language-pack"
-  ) {
-    return item;
-  }
+  if (!isMarketplaceAssetPackageType(pluginType)) return item;
   const packageAsset = assetFromMarketplacePackageSpec(pluginType, item.packageSpec);
   return packageAsset ? { ...item, packageAsset } : item;
 }

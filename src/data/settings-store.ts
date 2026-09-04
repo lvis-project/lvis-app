@@ -50,6 +50,7 @@ import {
   isMarketplaceProviderPresetId,
   marketplaceProviderPresetSecretKey,
   normalizeMarketplaceProviderPreset,
+  type MarketplaceInstalledMessagingConnection,
   type MarketplaceInstalledProviderPreset,
 } from "../shared/marketplace-package-assets.js";
 import {
@@ -839,6 +840,12 @@ export interface MarketplaceSettings {
   installedThemeBundleIds: BundleId[];
   /** Marketplace-installed language packs shown in the language picker. */
   installedLanguagePacks: Locale[];
+  /**
+   * Messaging connections the owner installed, as the catalog declared them.
+   * Declarations only — the credentials each one names are held by the
+   * connection itself in the encrypted secret store, never here.
+   */
+  installedMessagingConnections: MarketplaceInstalledMessagingConnection[];
 }
 
 export interface SettingsServiceOptions {

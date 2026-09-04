@@ -55,7 +55,9 @@ import {
 import {
   isMarketplaceProviderPresetId,
   modelDiscoveryPolicyUsesSeededOptions,
+  normalizeMarketplaceMessagingConnection,
   normalizeMarketplaceProviderPreset,
+  type MarketplaceInstalledMessagingConnection,
   type MarketplaceInstalledProviderPreset,
 } from "../shared/marketplace-package-assets.js";
 import { projectRootKey } from "../shared/project-identity.js";
@@ -738,6 +740,29 @@ function uniqueValidProviderPresets(value: unknown): MarketplaceInstalledProvide
   return result;
 }
 
+/**
+ * Rebuild every installed connection through the asset parser.
+ *
+ * The settings file is an external boundary like any other, and this is the one
+ * place a stored connection is re-read. Rebuilding rather than trusting the
+ * record is what keeps a credential VALUE from surviving in settings if one
+ * were ever written there: the parser only names declaration fields.
+ */
+function uniqueValidMessagingConnections(
+  value: unknown,
+): MarketplaceInstalledMessagingConnection[] {
+  if (!Array.isArray(value)) return [];
+  const result: MarketplaceInstalledMessagingConnection[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    const connection = normalizeMarketplaceMessagingConnection(raw);
+    if (!connection || seen.has(connection.connectionId)) continue;
+    seen.add(connection.connectionId);
+    result.push(connection);
+  }
+  return result;
+}
+
 function removedMarketplaceProviderPresetIds(
   previous: readonly MarketplaceInstalledProviderPreset[],
   next: readonly MarketplaceInstalledProviderPreset[],
@@ -803,6 +828,9 @@ export function normalizeMarketplace(input: unknown): MarketplaceSettings {
   merged.installedThemeBundleIds = uniqueValidList(
     raw.installedThemeBundleIds,
     isMarketplaceEligibleThemeBundleId,
+  );
+  merged.installedMessagingConnections = uniqueValidMessagingConnections(
+    raw.installedMessagingConnections,
   );
   merged.installedLanguagePacks = uniqueValidList(
     raw.installedLanguagePacks,

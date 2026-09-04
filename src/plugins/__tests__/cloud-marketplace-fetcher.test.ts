@@ -279,6 +279,98 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     });
   });
 
+  it("listPlugins() maps a messaging-connection row to its asset", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse({
+        plugins: [
+          {
+            id: "telegram-connection",
+            display_name: "Telegram",
+            description: "Messaging connection package",
+            package_spec: "messaging-connection:telegram",
+            package_name: "@lvis/telegram-connection",
+            plugin_type: "messaging-connection",
+            connection_id: "telegram",
+            label: "Telegram",
+            summary: "Reach one LVIS conversation from Telegram.",
+            pairing: "one-time-code",
+            credentials: [{ key: "botToken", label: "Bot token", secret: true }],
+            network: { egress: ["api.telegram.org"] },
+          },
+        ],
+      }),
+    );
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+    });
+    const [item] = await fetcher.listPlugins();
+
+    expect(item?.pluginType).toBe("messaging-connection");
+    expect(item?.unsupportedPackageKind).toBeUndefined();
+    expect(item?.packageAsset).toEqual({
+      type: "messaging-connection",
+      connectionId: "telegram",
+      label: "Telegram",
+      summary: "Reach one LVIS conversation from Telegram.",
+      pairing: "one-time-code",
+      credentials: [{ key: "botToken", label: "Bot token", secret: true }],
+      egress: ["api.telegram.org"],
+    });
+  });
+
+  it("listPlugins() reports an unknown plugin_type as unsupported, never as a plugin", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse({
+        plugins: [
+          {
+            id: "future-thing",
+            display_name: "Future Thing",
+            description: "A kind released after this app",
+            package_spec: "@lvis/future-thing@1.0.0",
+            package_name: "@lvis/future-thing",
+            // Longer than 16 characters on purpose: nothing may truncate it.
+            plugin_type: "workflow-automation-pack",
+          },
+        ],
+      }),
+    );
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+    });
+    const [item] = await fetcher.listPlugins();
+
+    expect(item?.pluginType).toBeUndefined();
+    expect(item?.unsupportedPackageKind).toBe("workflow-automation-pack");
+    expect(item?.packageAsset).toBeUndefined();
+    expect(item?.name).toBe("Future Thing");
+  });
+
+  it("listPlugins() still reads a row that names no kind at all as a plugin", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse({
+        plugins: [
+          {
+            id: "legacy-plugin",
+            display_name: "Legacy Plugin",
+            description: "Catalog row from before plugin_type existed",
+            package_spec: "@lvis/legacy-plugin@1.0.0",
+            package_name: "@lvis/legacy-plugin",
+          },
+        ],
+      }),
+    );
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+    });
+    const [item] = await fetcher.listPlugins();
+
+    expect(item?.pluginType).toBe("plugin");
+    expect(item?.unsupportedPackageKind).toBeUndefined();
+  });
+
   it("listPlugins() passes through marketplace-eligible package assets", async () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse({

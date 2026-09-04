@@ -31,7 +31,10 @@ import {
   isMarketplaceAnnouncementLevel,
   parseMarketplaceAnnouncementActions,
 } from "../shared/marketplace-announcements.js";
-import { isMarketplacePackageType } from "../shared/assistant-context.js";
+import {
+  isMarketplacePackageType,
+  type MarketplacePackageType,
+} from "../shared/assistant-context.js";
 import { assetFromMarketplaceCatalogFields } from "../shared/marketplace-package-assets.js";
 import { mapNetworkAccessGrant } from "../shared/network-access.js";
 import type {
@@ -75,6 +78,16 @@ function isResolverInstallablePackageType(
 ): pluginType is ResolverInstallablePackageType {
   return pluginType === "plugin" || pluginType === "mcp" || pluginType === "agent" || pluginType === "skill";
 }
+
+/**
+ * How one catalog row named its kind, as this build reads it.
+ *
+ * A discriminated pair rather than a defaulted string: the catalog can name a
+ * kind released after this app, and that row is neither a plugin nor droppable.
+ */
+type CatalogPackageKind =
+  | { readonly kind: "supported"; readonly packageType: MarketplacePackageType }
+  | { readonly kind: "unsupported"; readonly declared: string };
 
 function upgradeRequiredMessage(minAppVersion: string): string {
   return `LVIS ${minAppVersion}+ is required to install this version. Update LVIS and try again.`;
@@ -606,11 +619,19 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
   }
 
   private mapItem(row: ServerCatalogRow): PluginMarketplaceItem | null {
-    const pluginType = this.catalogPackageType(row);
+    const packageKind = this.catalogPackageKind(row);
+    if (packageKind === null) return null;
     const resolution = row.app_version_resolution ?? row.appVersionResolution;
-    if (isResolverInstallablePackageType(pluginType)) {
+    if (
+      packageKind.kind === "supported" &&
+      isResolverInstallablePackageType(packageKind.packageType)
+    ) {
+      const pluginType = packageKind.packageType;
       if (resolution === "resolved") {
-        return this.mapCatalogItem(this.mapResolvedArtifactRow(row, pluginType));
+        return this.mapCatalogItem(
+          this.mapResolvedArtifactRow(row, pluginType),
+          packageKind,
+        );
       }
       if (resolution === "no_compatible_version") {
         return this.mapUpgradeRequiredItem(row, pluginType);
@@ -622,7 +643,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
         return null;
       }
     }
-    return this.mapCatalogItem(row);
+    return this.mapCatalogItem(row, packageKind);
   }
 
   /**
@@ -717,7 +738,10 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     return Object.keys(map).length > 0 ? Object.freeze(map) : undefined;
   }
 
-  private mapCatalogItem(row: ServerCatalogRow): PluginMarketplaceItem {
+  private mapCatalogItem(
+    row: ServerCatalogRow,
+    packageKind: CatalogPackageKind,
+  ): PluginMarketplaceItem {
     if (typeof row.id === "string" && !SAFE_ID_RE.test(row.id)) {
       throw new Error(`marketplace row has invalid id format: "${row.id}"`);
     }
@@ -882,10 +906,11 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     // lvis-marketplace#52/#456: surface plugin_type + advisory runtime block.
     // The renderer uses pluginType to filter entries; install paths always
     // re-read authoritative package files from the verified signed zip.
-    const pluginTypeRaw = row.plugin_type ?? row.pluginType;
-    const pluginType = isMarketplacePackageType(pluginTypeRaw)
-      ? pluginTypeRaw
-      : "plugin";
+    if (packageKind.kind === "unsupported") {
+      item.unsupportedPackageKind = packageKind.declared;
+      return item;
+    }
+    const pluginType = packageKind.packageType;
     item.pluginType = pluginType;
     const packageAsset = assetFromMarketplaceCatalogFields(
       pluginType,
@@ -903,13 +928,26 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     return item;
   }
 
-  private catalogPackageType(
-    row: ServerCatalogRow,
-  ): NonNullable<PluginMarketplaceItem["pluginType"]> {
-    const pluginTypeRaw = row.plugin_type ?? row.pluginType;
-    return isMarketplacePackageType(pluginTypeRaw)
-      ? pluginTypeRaw
-      : "plugin";
+  /**
+   * Read one catalog row's declared kind, or `null` when the row does not name
+   * one at all — a `plugin_type` that is not even a string is a malformed row,
+   * and the fetcher drops malformed rows rather than guessing at them.
+   *
+   * A row carrying NO `plugin_type` is a pre-#52 catalog row and every such row
+   * was a plugin. A row that names a kind this build has never heard of is the
+   * opposite: naming it "plugin" would offer an install that can only fail, so
+   * the declared name is carried through and the renderer says so.
+   */
+  private catalogPackageKind(row: ServerCatalogRow): CatalogPackageKind | null {
+    const declared = row.plugin_type ?? row.pluginType;
+    if (declared === undefined || declared === null) {
+      return { kind: "supported", packageType: "plugin" };
+    }
+    if (isMarketplacePackageType(declared)) {
+      return { kind: "supported", packageType: declared };
+    }
+    if (typeof declared !== "string" || declared.trim().length === 0) return null;
+    return { kind: "unsupported", declared: declared.trim() };
   }
 
   /**

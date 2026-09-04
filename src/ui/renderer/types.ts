@@ -136,6 +136,11 @@ export type MarketplaceItem = {
    */
   installPolicy?: "admin" | "user";
   pluginType?: MarketplacePackageType;
+  /**
+   * The kind the catalog declared when this build does not recognise it. Read
+   * the pair with `pluginType` through `marketplacePackageTypeOf`.
+   */
+  unsupportedPackageKind?: string;
   packageAsset?: MarketplacePackageAsset;
   /** Display-only compatibility result: update LVIS before installing. */
   upgradeRequired?: {
