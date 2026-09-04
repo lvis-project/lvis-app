@@ -585,8 +585,8 @@ export function SettingsContent({
               baseUrl={s.baseUrl}
               hasKey={s.hasKey}
               setHasKey={s.setHasKey}
-              providerCredentialDraft={s.providerCredentialDraft}
-              onProviderCredentialDraftChange={s.setProviderCredentialDraft}
+              providerCredentialDrafts={s.providerCredentialDrafts}
+              onProviderCredentialDraftsChange={s.setProviderCredentialDrafts}
               onSaveProviderCredential={s.saveProviderCredential}
               marketplaceProviderPresetId={s.marketplaceProviderPresetId}
               marketplaceProviderPresets={s.marketplaceProviderPresets}

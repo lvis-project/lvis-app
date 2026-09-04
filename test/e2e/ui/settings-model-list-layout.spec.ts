@@ -109,10 +109,10 @@ for (const bundleId of ['violet-light', 'violet-dark'] as const) {
       const modelSelect = settingsPage.getByTestId(TEST_IDS.llmModelSelect);
       await expect(modelSelect).toBeVisible({ timeout: 10_000 });
       // The seeded ids only reach the dropdown once the cache-hydration effect
-      // has run; the sync status line reports the hydrated catalog size.
-      await expect(settingsPage.getByTestId('llm-tab:model-sync-status')).toBeVisible({
-        timeout: 10_000,
-      });
+      // has run; the provider row's sub-line reports the hydrated catalog size.
+      await expect(
+        settingsPage.locator('[data-testid^="llm-tab:connection-subline:"]').first(),
+      ).toBeVisible({ timeout: 10_000 });
       await modelSelect.click();
 
       const content = settingsPage.locator('[data-slot="select-content"]');

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   SUBSCRIPTION_RUNTIME_DESCRIPTORS,
+  subscriptionRuntimeDescriptor,
   type ActiveChatRuntime,
   type SubscriptionRuntimeActionResult,
   type SubscriptionRuntimeErrorCode,
@@ -21,7 +22,6 @@ import {
 type ProviderState = {
   readonly status: SubscriptionRuntimeStatus | null;
   readonly models: readonly SubscriptionProviderModel[];
-  readonly selectedModelId: string | null;
   readonly errorCode: SubscriptionRuntimeErrorCode | null;
   readonly busyAction: SubscriptionBusyAction | null;
   /** A read-only status probe is in flight. It must never replace a mutation's busy state. */
@@ -36,7 +36,6 @@ function initialProviderStates(): ProviderStateMap {
   const initialState = (): ProviderState => ({
     status: null,
     models: [],
-    selectedModelId: null,
     errorCode: null,
     busyAction: null,
     statusRefreshPending: false,
@@ -60,6 +59,16 @@ function initialProviderRevisionMap(): Record<SubscriptionRuntimeId, number> {
   );
 }
 
+function initialProviderFlagMap(): Record<SubscriptionRuntimeId, boolean> {
+  return SUBSCRIPTION_RUNTIME_DESCRIPTORS.reduce<Record<SubscriptionRuntimeId, boolean>>(
+    (flags, descriptor) => {
+      flags[descriptor.id] = false;
+      return flags;
+    },
+    {} as Record<SubscriptionRuntimeId, boolean>,
+  );
+}
+
 function safeFailure(): SubscriptionRuntimeActionResult {
   return { ok: false, error: "subscription-operation-failed" };
 }
@@ -70,15 +79,6 @@ function safeModelsFailure(): SubscriptionRuntimeModelsResult {
 
 function activeRuntimeFromSettings(settings: AppSettings): ActiveChatRuntime {
   return settings.llm.activeChatRuntime ?? { kind: "api" };
-}
-
-function selectedModelFor(
-  activeRuntime: ActiveChatRuntime,
-  provider: SubscriptionRuntimeId,
-): string | null {
-  return activeRuntime.kind === "subscription" && activeRuntime.provider === provider
-    ? activeRuntime.model ?? null
-    : null;
 }
 
 function sameActiveRuntime(left: ActiveChatRuntime, right: ActiveChatRuntime): boolean {
@@ -102,7 +102,6 @@ function projectStatus(
     pendingLoginMethod: status.pendingLogin,
     canOpenLoginBrowser: status.canOpenVerificationUrl,
     models: state.models,
-    selectedModelId: state.selectedModelId,
     capabilities: status.capabilities,
     errorCode: state.errorCode,
   };
@@ -132,6 +131,8 @@ export function useSubscriptionProviders(api: LvisApi) {
   const statusRevisionByProviderRef = useRef(initialProviderRevisionMap());
   const mutationRevisionByProviderRef = useRef(initialProviderRevisionMap());
   const activeMutationRevisionByProviderRef = useRef(initialProviderRevisionMap());
+  /** Which providers have had their catalogue asked for since they connected. */
+  const modelsRequestedByProviderRef = useRef(initialProviderFlagMap());
   const activeRuntimeRef = useRef<ActiveChatRuntime>({ kind: "api" });
   const chatSelectionBusyRef = useRef(false);
 
@@ -141,20 +142,6 @@ export function useSubscriptionProviders(api: LvisApi) {
     activeRuntimeRef.current = nextRuntime;
     setActiveRuntime(nextRuntime);
     if (runtimeChanged) setApiChatError(null);
-    setStates((current) => {
-      // An inactive card's model is an unsaved local choice until the user
-      // selects it for chat. Cross-window status/settings updates must not
-      // erase that draft. Only the authoritative active subscription choice
-      // may replace its card's selected model.
-      if (nextRuntime.kind !== "subscription") return current;
-      const provider = nextRuntime.provider;
-      const selectedModelId = selectedModelFor(nextRuntime, provider);
-      if (current[provider].selectedModelId === selectedModelId) return current;
-      return {
-        ...current,
-        [provider]: { ...current[provider], selectedModelId },
-      };
-    });
   }, []);
 
   const refreshSettings = useCallback(async () => {
@@ -317,17 +304,12 @@ export function useSubscriptionProviders(api: LvisApi) {
         label: model.displayName,
         isDefault: model.isDefault,
       }));
-      const selectedModelId = previous.selectedModelId
-        && models.some((model) => model.id === previous.selectedModelId)
-        ? previous.selectedModelId
-        : models.find((model) => model.isDefault)?.id ?? null;
       return {
         ...current,
         [provider]: {
           ...previous,
           status: result.status,
           models,
-          selectedModelId,
           errorCode: null,
           busyAction: null,
           statusRefreshPending: false,
@@ -352,6 +334,31 @@ export function useSubscriptionProviders(api: LvisApi) {
     void refreshStatus(provider);
   }), [api, refreshStatus]);
 
+  /**
+   * A connected subscription's catalogue, asked for as soon as it is reachable.
+   *
+   * The settings page offers subscription models in the same chooser as every
+   * API vendor's, and a chooser cannot offer what was never fetched. This used
+   * to wait on a "Load models" button on the provider card; that button was the
+   * only way in, so the chooser sat empty until the user found it. Asked once
+   * per connection: leaving `connected` clears the marker, so signing back in
+   * asks again, and a provider that answers with an empty catalogue is not
+   * re-asked in a loop.
+   */
+  useEffect(() => {
+    for (const provider of PROVIDER_IDS) {
+      const connected = states[provider].status?.connection === "connected";
+      if (!connected) {
+        modelsRequestedByProviderRef.current[provider] = false;
+        continue;
+      }
+      if (modelsRequestedByProviderRef.current[provider]) continue;
+      if (!subscriptionRuntimeDescriptor(provider).supportsModelSelection) continue;
+      modelsRequestedByProviderRef.current[provider] = true;
+      void loadModels(provider);
+    }
+  }, [loadModels, states]);
+
   useEffect(() => {
     const pendingProviders = PROVIDER_IDS.filter((provider) =>
       states[provider].status?.connection === "pending",
@@ -372,7 +379,6 @@ export function useSubscriptionProviders(api: LvisApi) {
         loginMethods: descriptor.loginMethods,
         supportsRuntimeSelection: descriptor.requiresExecutable,
         supportsLogout: descriptor.supportsManagedLogout,
-        modelSelection: descriptor.supportsModelSelection ? "optional" : "none",
       },
       status: projectStatus(states[descriptor.id]),
       busyAction: states[descriptor.id].busyAction,
@@ -442,11 +448,6 @@ export function useSubscriptionProviders(api: LvisApi) {
         () => api.subscriptionLogout(provider),
       );
     },
-    loadModels,
-    selectModel: (provider, modelId) => setStates((current) => ({
-      ...current,
-      [provider]: { ...current[provider], selectedModelId: modelId, errorCode: null },
-    })),
     useForChat: async (provider, modelId) => {
       await runChatSelection(async () => {
         const result = await runAction(

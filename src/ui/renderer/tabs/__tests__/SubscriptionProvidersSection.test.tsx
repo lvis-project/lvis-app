@@ -4,14 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getLocale, setLocale } from "../../../../i18n/runtime.js";
 import type { SubscriptionRuntimeCapabilities } from "../../../../shared/subscription-runtime.js";
 import {
-  ProviderCapabilityGrid,
-  SubscriptionProviderRow,
+  SubscriptionAuthControls,
   type SubscriptionProviderView,
 } from "../SubscriptionProvidersSection.js";
-import {
-  API_PATH_RUNTIME_CAPABILITIES,
-  DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
-} from "../../../../shared/subscription-runtime.js";
 
 function runtimeCapabilities(
   overrides: Partial<SubscriptionRuntimeCapabilities> = {},
@@ -44,7 +39,6 @@ const connectedCodex = (overrides: Partial<SubscriptionProviderView> = {}): Subs
     description: "Use your existing ChatGPT subscription.",
     loginMethods: ["browser", "device-code"],
     supportsLogout: true,
-    modelSelection: "required",
   },
   status: {
     runtime: "ready",
@@ -53,7 +47,6 @@ const connectedCodex = (overrides: Partial<SubscriptionProviderView> = {}): Subs
       { id: "gpt-5.6-codex", label: "GPT-5.6 Codex", isDefault: true },
       { id: "gpt-5.4-mini", label: "GPT-5.4 mini" },
     ],
-    selectedModelId: "gpt-5.6-codex",
     capabilities: runtimeCapabilities(),
   },
   ...overrides,
@@ -72,28 +65,23 @@ afterEach(() => {
 
 
 /**
- * The settings page lays these rows out itself now, so the tests drive the ROW
- * — the piece that still ships — through the same prop shape the page uses.
+ * The settings page draws the provider row itself — header, badges, state word,
+ * sub-line and refresh — so what ships from this module is the sign-in half,
+ * and that is what these tests drive.
  */
 function SubscriptionProvidersSection({
   providers,
-  activeSelection,
-  chatSelectionBusy,
   actions,
 }: {
   providers: readonly SubscriptionProviderView[];
-  activeSelection: Parameters<typeof SubscriptionProviderRow>[0]["activeSelection"];
-  chatSelectionBusy?: boolean;
-  actions: Parameters<typeof SubscriptionProviderRow>[0]["actions"];
+  actions: Parameters<typeof SubscriptionAuthControls>[0]["actions"];
 }) {
   return (
     <div>
       {providers.map((provider) => (
-        <SubscriptionProviderRow
+        <SubscriptionAuthControls
           key={provider.descriptor.id}
           provider={provider}
-          activeSelection={activeSelection}
-          chatSelectionBusy={chatSelectionBusy ?? false}
           actions={actions}
         />
       ))}
@@ -101,83 +89,32 @@ function SubscriptionProvidersSection({
   );
 }
 
-describe("SubscriptionProvidersSection", () => {
-  it("shows only host-verified runtime capabilities as available", () => {
+describe("SubscriptionAuthControls", () => {
+  it("carries nothing but sign-in: no header, no state word, no refresh, no model controls", () => {
     render(
       <SubscriptionProvidersSection
         providers={[connectedCodex()]}
-        activeSelection={{ providerId: "codex", modelId: "gpt-5.6-codex" }}
-        actions={{}}
+        actions={{ refreshStatus: vi.fn(), useForChat: vi.fn(), logout: vi.fn() }}
       />,
     );
 
-    expect(screen.getByTestId("subscription-provider:codex:active-selection")).toBeInTheDocument();
-    for (const capability of [
-      "chat",
-      "images",
-      "files",
-      "tools",
-      "projectAccess",
-      "plugins",
-      "mcp",
-      "generateText",
-      "compaction",
-      "routine",
-      "subagent",
+    // Every one of these belongs to the row the settings page draws, and having
+    // it here too is what gave one provider two headers, two state words and
+    // two refresh buttons — each computing its own answer.
+    for (const testId of [
+      "subscription-provider:codex:refresh",
+      "subscription-provider:codex:connection",
+      "subscription-provider:codex:capabilities",
+      "subscription-provider:codex:capability:chat",
+      "subscription-provider:codex:load-models",
+      "subscription-provider:codex:model-select",
+      "subscription-provider:codex:use-for-chat",
+      "subscription-provider:codex:active-selection",
     ]) {
-      expect(screen.getByTestId(`subscription-provider:codex:capability:${capability}`))
-        .toHaveTextContent("Available");
+      expect(screen.queryByTestId(testId)).toBeNull();
     }
-  });
-
-  it("never claims a missing capability projection is available", () => {
-    const provider = connectedCodex();
-    const status = provider.status!;
-    render(
-      <SubscriptionProvidersSection
-        providers={[{ ...provider, status: { ...status, capabilities: undefined } }]}
-        activeSelection={null}
-        actions={{ useForChat: vi.fn() }}
-      />,
-    );
-
-    expect(screen.getByTestId("subscription-provider:codex:capability:chat"))
-      .toHaveTextContent("Not verified yet");
-    expect(screen.getByTestId("subscription-provider:codex:capability:tools"))
-      .toHaveTextContent("Not verified yet");
-    expect(screen.getByTestId("subscription-provider:codex:use-for-chat")).toBeDisabled();
-  });
-
-  it("does not render an empty provider description paragraph", () => {
-    const provider = connectedCodex();
-    render(
-      <SubscriptionProvidersSection
-        providers={[{ ...provider, descriptor: { ...provider.descriptor, description: "" } }]}
-        activeSelection={null}
-        actions={{}}
-      />,
-    );
-
-    expect(screen.getByTestId("subscription-provider:codex").querySelector(".min-w-0 > p")).toBeNull();
-  });
-
-  it("sends the selected provider and model through the common selection callbacks", async () => {
-    const selectModel = vi.fn();
-    const useForChat = vi.fn();
-    render(
-      <SubscriptionProvidersSection
-        providers={[connectedCodex()]}
-        activeSelection={null}
-        actions={{ selectModel, useForChat }}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId("subscription-provider:codex:model-select"));
-    fireEvent.click(await screen.findByRole("option", { name: /GPT-5\.4 mini/ }));
-    await waitFor(() => expect(selectModel).toHaveBeenCalledWith("codex", "gpt-5.4-mini"));
-
-    fireEvent.click(screen.getByTestId("subscription-provider:codex:use-for-chat"));
-    await waitFor(() => expect(useForChat).toHaveBeenCalledWith("codex", "gpt-5.6-codex"));
+    // ...and what it does carry is the half with no API-key counterpart.
+    expect(screen.getByTestId("subscription-provider:codex:logout")).toBeInTheDocument();
   });
 
   it("supports common browser/device login, pending browser opening, cancellation, and logout actions", async () => {
@@ -195,7 +132,6 @@ describe("SubscriptionProvidersSection", () => {
             capabilities: runtimeCapabilities({ chat: false }),
           },
         }]}
-        activeSelection={null}
         actions={{ beginLogin, openLoginBrowser, cancelLogin, logout }}
       />,
     );
@@ -220,7 +156,6 @@ describe("SubscriptionProvidersSection", () => {
             capabilities: runtimeCapabilities({ chat: false }),
           },
         }]}
-        activeSelection={null}
         actions={{ beginLogin, openLoginBrowser, cancelLogin, logout }}
       />,
     );
@@ -236,7 +171,6 @@ describe("SubscriptionProvidersSection", () => {
     rerender(
       <SubscriptionProvidersSection
         providers={[connectedCodex()]}
-        activeSelection={null}
         actions={{ logout }}
       />,
     );
@@ -265,7 +199,6 @@ describe("SubscriptionProvidersSection", () => {
     render(
       <SubscriptionProvidersSection
         providers={[unsafeProvider]}
-        activeSelection={null}
         actions={{}}
       />,
     );
@@ -288,47 +221,11 @@ describe("SubscriptionProvidersSection", () => {
             capabilities: runtimeCapabilities({ chat: false }),
           },
         }]}
-        activeSelection={null}
         actions={{}}
       />,
     );
 
     expect(screen.queryByTestId("subscription-provider:codex:device-code")).toBeNull();
     expect(document.body).not.toHaveTextContent("https://auth.example.test/secret-token");
-  });
-});
-
-describe("ProviderCapabilityGrid", () => {
-  it("answers every checklist row for the API path", () => {
-    render(
-      <ProviderCapabilityGrid
-        capabilities={API_PATH_RUNTIME_CAPABILITIES}
-        known={() => true}
-        testIdPrefix="api-path"
-      />,
-    );
-
-    const grid = screen.getByTestId("api-path:capabilities");
-    const rows = grid.querySelectorAll("[data-testid^='api-path:capability:']");
-    // The API path claims the host engine's features, so no row may read
-    // "unavailable" — a new capability key added to the checklist without a
-    // matching entry in the projection fails right here.
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) {
-      expect(row.querySelector("dd")?.textContent).toBe("Available");
-    }
-  });
-
-  it("reads unknown, not unavailable, for a vendor that has answered nothing", () => {
-    render(
-      <ProviderCapabilityGrid
-        capabilities={DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES}
-        known={() => false}
-        testIdPrefix="api-path"
-      />,
-    );
-
-    const chat = screen.getByTestId("api-path:capability:chat");
-    expect(chat.querySelector("dd")?.textContent).toBe("Not verified yet");
   });
 });
