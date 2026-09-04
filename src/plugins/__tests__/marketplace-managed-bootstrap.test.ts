@@ -542,19 +542,22 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
     const result = await service.ensureManagedInstalled(PRE_START_SYNC);
 
-    expect(result.skippedReason).toBe("catalog unreachable: ENOTFOUND marketplace");
+    expect(result.skipped).toEqual({
+      reason: "catalog-unreachable",
+      detail: "ENOTFOUND marketplace",
+    });
     expect(result.installed).toEqual([]);
     expect(result.failed).toEqual([]);
   });
 
-  it("leaves skippedReason absent when the pass actually ran", async () => {
+  it("leaves the skip absent when the pass actually ran", async () => {
     await writeAdminCatalog("1.0.0");
     const service = makeManagedService(testDir, marketplacePath);
     spyInstalledAtVersion(service, "1.0.0");
 
     const result = await service.ensureManagedInstalled(PRE_START_SYNC);
 
-    expect(result.skippedReason).toBeUndefined();
+    expect(result.skipped).toBeUndefined();
   });
 
   it("commits a pre-start managed artifact without publishing or starting a candidate", async () => {
@@ -1389,7 +1392,10 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       const result = await service.ensureManagedInstalled(PRE_START_SYNC);
 
       expect(result.removed).toEqual([]);
-      expect(result.skippedReason).toBe("catalog unreachable: ENOTFOUND marketplace");
+      expect(result.skipped).toEqual({
+        reason: "catalog-unreachable",
+        detail: "ENOTFOUND marketplace",
+      });
       // Not even probed: an unreachable catalog says nothing about any plugin.
       expect(detailSpy).not.toHaveBeenCalled();
       const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {

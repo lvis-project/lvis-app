@@ -6,21 +6,30 @@ import type {
   RemoveDelistedAdminInstall,
 } from "../plugins/marketplace.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
+import { describeBootstrapSkip } from "../shared/bootstrap-status.js";
+import type { BootstrapSkip, BootstrapSkipReason } from "../shared/bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
 import { isE2eTestRuntime } from "./dev-flags.js";
 import { withAllPluginInstallLocks } from "../plugins/install-lifecycle.js";
 const log = createLogger("lvis");
 
+/**
+ * Whether the managed pass runs, and — when it does not — which closed skip
+ * code says why. A union rather than an optional field: a disabled decision
+ * without a reason is not a state this function can produce, and the caller
+ * has to forward the code to the renderer either way.
+ */
+export type ManagedPluginBootstrapDecision =
+  | { enabled: true }
+  | { enabled: false; reason: BootstrapSkipReason };
+
 export function resolveManagedPluginBootstrap(input: {
   marketplace: Pick<MarketplaceSettings, "backend" | "cloudBaseUrl">;
   e2eTestMode?: boolean;
-}): { enabled: boolean; reason?: string } {
+}): ManagedPluginBootstrapDecision {
   const { marketplace } = input;
   if (input.e2eTestMode) {
-    return {
-      enabled: false,
-      reason: "managed plugin bootstrap disabled in isolated E2E test mode",
-    };
+    return { enabled: false, reason: "e2e-isolated" };
   }
   // The cloud backend is the only marketplace backend; bootstrap is enabled iff
   // a base URL is configured. (The former mock-backend / isPackaged skip branch
@@ -29,10 +38,7 @@ export function resolveManagedPluginBootstrap(input: {
   if (baseUrl) {
     return { enabled: true };
   }
-  return {
-    enabled: false,
-    reason: "marketplace backend has no configured base URL",
-  };
+  return { enabled: false, reason: "no-base-url" };
 }
 
 interface RunManagedBootstrapBaseInput {
@@ -127,12 +133,13 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     e2eTestMode: isE2eTestRuntime(),
   });
   if (!decision.enabled) {
-    log.warn(`boot: managed plugin bootstrap skipped: ${decision.reason}`);
+    const skipped: BootstrapSkip = { reason: decision.reason };
+    log.warn(`boot: managed plugin bootstrap skipped: ${describeBootstrapSkip(skipped)}`);
     notifyBootstrapStatus(mainWindow, {
       phase: "complete",
       installed: [],
       failed: [],
-      skippedReason: decision.reason,
+      skipped,
     });
     return;
   }
@@ -182,9 +189,9 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
         ensureResult.failed,
       );
     }
-    if (ensureResult.skippedReason) {
+    if (ensureResult.skipped) {
       log.warn(
-        `boot: managed plugin bootstrap skipped: ${ensureResult.skippedReason}`,
+        `boot: managed plugin bootstrap skipped: ${describeBootstrapSkip(ensureResult.skipped)}`,
       );
     }
     notifyBootstrapStatus(mainWindow, {
@@ -194,7 +201,7 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
       // A skipped pass reports empty lists exactly like a clean one, so without
       // the reason the renderer cannot tell "nothing to do" from "nothing was
       // attempted" and shows nothing at all.
-      skippedReason: ensureResult.skippedReason,
+      skipped: ensureResult.skipped,
     });
   } catch (err) {
     const message = (err as Error).message;

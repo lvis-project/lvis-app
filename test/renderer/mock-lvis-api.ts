@@ -10,6 +10,7 @@ import { MAIN_CHAT_GROUP_ID } from "../../src/contract/app-contract.js";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 import type { ChatEntry, ChatStreamEvent } from "../../src/lib/chat-stream-state.js";
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../../src/shared/subagent-events.js";
+import type { AppBootstrapStatus } from "../../src/shared/bootstrap-status.js";
 import type { SubscriptionRuntimeStatusUpdatedEvent } from "../../src/shared/subscription-runtime.js";
 import type { SessionSummary } from "../../src/ui/renderer/hooks/use-sessions.js";
 import type { SessionFamily, SessionListKindFilter } from "../../src/shared/session-lookup.js";
@@ -208,7 +209,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitViewActivate: (v: string, settingsTab?: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
   emitTourStart: (scenarioId: string) => void;
-  emitBootstrapStatus: (status: unknown) => void;
+  emitBootstrapStatus: (status: AppBootstrapStatus) => void;
   emitPluginInstallProgress: (payload: unknown) => void;
   emitPluginInstallResult: (payload: unknown) => void;
   emitPluginRuntimeUpdated: (payload: { pluginId: string }) => void;
@@ -273,7 +274,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const personaPromptsUpdatedHandlers = new Set<() => void>();
   const askUserQuestionHandlers = new Set<(r: unknown) => void>();
   const tourStartHandlers = new Set<(payload: { scenarioId: string }) => void>();
-  const bootstrapStatusHandlers = new Set<(status: unknown) => void>();
+  const bootstrapStatusHandlers = new Set<(status: AppBootstrapStatus) => void>();
   const pluginInstallProgressHandlers = new Set<(payload: unknown) => void>();
   const pluginInstallResultHandlers = new Set<(payload: unknown) => void>();
   const pluginRuntimeUpdatedHandlers = new Set<(payload: { pluginId: string }) => void>();
@@ -806,7 +807,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       pluginRuntimeUpdatedHandlers.add(handler);
       return () => pluginRuntimeUpdatedHandlers.delete(handler);
     }),
-    onBootstrapStatus: vi.fn((handler: (status: unknown) => void) => {
+    onBootstrapStatus: vi.fn((handler: (status: AppBootstrapStatus) => void) => {
       bootstrapStatusHandlers.add(handler);
       return () => bootstrapStatusHandlers.delete(handler);
     }),

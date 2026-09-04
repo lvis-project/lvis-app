@@ -6,11 +6,8 @@
  * managed-plugin bootstrap is supposed to be graceful end-to-end.
  */
 import { describe, it, expect, vi } from "vitest";
-import {
-  BOOTSTRAP_STATUS_CHANNEL,
-  latestBootstrapStatus,
-  notifyBootstrapStatus,
-} from "../bootstrap-status.js";
+import { latestBootstrapStatus, notifyBootstrapStatus } from "../bootstrap-status.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 
 function makeFakeWindow(opts: {
   destroyed?: boolean;
@@ -35,10 +32,10 @@ function asWindow(fake: ReturnType<typeof makeFakeWindow>): never {
 }
 
 describe("notifyBootstrapStatus", () => {
-  it("sends start payload over BOOTSTRAP_STATUS_CHANNEL", () => {
+  it("sends start payload over the contract's bootstrap status channel", () => {
     const fake = makeFakeWindow();
     notifyBootstrapStatus(asWindow(fake), { phase: "start" });
-    expect(fake.send).toHaveBeenCalledWith(BOOTSTRAP_STATUS_CHANNEL, { phase: "start" });
+    expect(fake.send).toHaveBeenCalledWith(CHANNELS.bootstrap.status, { phase: "start" });
   });
 
   it("sends complete payload with installed/failed lists", () => {
@@ -48,7 +45,7 @@ describe("notifyBootstrapStatus", () => {
       installed: ["calendar"],
       failed: [{ id: "meeting", error: "tarball unreachable" }],
     });
-    expect(fake.send).toHaveBeenCalledWith(BOOTSTRAP_STATUS_CHANNEL, {
+    expect(fake.send).toHaveBeenCalledWith(CHANNELS.bootstrap.status, {
       phase: "complete",
       installed: ["calendar"],
       failed: [{ id: "meeting", error: "tarball unreachable" }],

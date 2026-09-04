@@ -16,6 +16,7 @@ const BASE_FILES = [
   "src/cli/index.ts",
   "src/plugin-preload.ts",
   "src/floating-dock-preload.ts",
+  "src/boot/bootstrap-status.ts",
   "src/boot/plugins.ts",
   "src/boot/steps/ipc-bridge.ts",
   "src/boot/steps/post-boot.ts",
@@ -125,6 +126,21 @@ describe("check-no-inline-channels", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("src/cli/commands.ts:2 inline channel literal");
+  });
+
+  it("fails loudly when a listed target is missing rather than skipping it", () => {
+    // The target list is a hand-written enumeration, so a target that does not
+    // exist is a stale list, not a clean tree — and the gate says so instead of
+    // scanning one file fewer. That also means BASE_FILES above must carry
+    // every entry of that list: a target added to the script without a fixture
+    // beside it fails all of these at once, on a message about the fixture.
+    const root = createRoot();
+    rmSync(join(root, "src/boot/bootstrap-status.ts"));
+
+    const result = runGateScript(SCRIPT, root);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("[no-inline-channels] cannot read src/boot/bootstrap-status.ts");
   });
 
   it("discovers new top-level IPC domain and preload modules", () => {

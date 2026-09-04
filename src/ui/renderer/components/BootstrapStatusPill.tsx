@@ -1,12 +1,12 @@
 // Managed-plugin bootstrap status, as a toolbar pill.
 //
-// Four visible states, one per thing the user can do about it:
-//   - start                    → muted, spinner, nothing to click
-//   - error                    → destructive, click retries the bootstrap
-//   - complete + failed[]      → destructive, click retries the bootstrap
-//   - complete + skippedReason → warning, click dismisses the report
-//   - complete, clean          → renders nothing, which is what most launches
-//                                 are: the band gains no weight for a success
+// Five outcomes, one per thing the user can do about it — four of them visible:
+//   - start                → muted, spinner, nothing to click
+//   - error                → destructive, click retries the bootstrap
+//   - complete + failed[]  → destructive, click retries the bootstrap
+//   - complete + skipped   → warning, click dismisses the report
+//   - complete, clean      → renders nothing, which is what most launches are:
+//                            the band gains no weight for a success
 //
 // The pill does not auto-clear. The host re-emits start/complete/error during a
 // retry, so the subscription drives the next state.
@@ -14,6 +14,7 @@
 import { AlertTriangle, Info, RefreshCw, X } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { ToolbarStatusPill } from "./ToolbarStatusPill.js";
+import { BOOTSTRAP_SKIP_MESSAGE_KEY } from "../../../shared/bootstrap-status.js";
 import type { AppBootstrapStatus } from "../../../shared/bootstrap-status.js";
 
 export interface BootstrapStatusPillProps {
@@ -61,11 +62,18 @@ export function BootstrapStatusPill({
     );
   }
 
-  if (status.skippedReason) {
+  if (status.skipped) {
     // Why the bootstrap was skipped lives in `title`, and hover text is not in
     // the accessibility tree — so the accessible name carries it too, or a
     // screen reader is told only that something can be dismissed.
-    const skippedTitle = t("bootstrapStatusPill.skipped", { skippedReason: status.skippedReason });
+    //
+    // The sentence is translated from the closed code; `detail` is appended
+    // rather than interpolated, because it is the failed request's own text and
+    // is the same English in every locale.
+    const sentence = t(BOOTSTRAP_SKIP_MESSAGE_KEY[status.skipped.reason]);
+    const skippedTitle = status.skipped.detail
+      ? `${sentence} ${truncate(status.skipped.detail)}`
+      : sentence;
     return (
       <ToolbarStatusPill
         tone="warning"

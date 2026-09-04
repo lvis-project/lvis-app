@@ -12,19 +12,13 @@ describe("resolveManagedPluginBootstrap", () => {
     expect(resolveManagedPluginBootstrap({
       marketplace: { backend: "real-cloud", cloudBaseUrl: "https://marketplace.lvis.internal" },
       e2eTestMode: true,
-    })).toEqual({
-      enabled: false,
-      reason: "managed plugin bootstrap disabled in isolated E2E test mode",
-    });
+    })).toEqual({ enabled: false, reason: "e2e-isolated" });
   });
 
   it("disables bootstrap when no base URL is configured", () => {
     expect(resolveManagedPluginBootstrap({
       marketplace: { backend: "real-cloud" },
-    })).toEqual({
-      enabled: false,
-      reason: "marketplace backend has no configured base URL",
-    });
+    })).toEqual({ enabled: false, reason: "no-base-url" });
   });
 
   it("enables bootstrap when a base URL is configured", () => {
@@ -37,7 +31,7 @@ describe("resolveManagedPluginBootstrap", () => {
 /**
  * The unreachable-catalog outcome is the one the status surface exists for, and
  * it is the one that looks identical to a clean run on the wire: empty
- * `installed`, empty `failed`. Only the forwarded reason separates them.
+ * `installed`, empty `failed`. Only the forwarded skip code separates them.
  */
 describe("runManagedBootstrap skip reporting", () => {
   afterEach(() => {
@@ -60,14 +54,14 @@ describe("runManagedBootstrap skip reporting", () => {
     return { window, sends };
   }
 
-  it("forwards the ensure result's skippedReason on the complete event", async () => {
+  it("forwards the ensure result's skip code and detail on the complete event", async () => {
     const { window, sends } = captureStatusWindow();
     const ensureManagedInstalled = vi.fn(async () => ({
       installed: [],
       updated: [],
       removed: [],
       failed: [],
-      skippedReason: "catalog unreachable: ENOTFOUND marketplace",
+      skipped: { reason: "catalog-unreachable" as const, detail: "ENOTFOUND marketplace" },
     }));
 
     await runManagedBootstrap({
@@ -88,12 +82,12 @@ describe("runManagedBootstrap skip reporting", () => {
         phase: "complete",
         installed: [],
         failed: [],
-        skippedReason: "catalog unreachable: ENOTFOUND marketplace",
+        skipped: { reason: "catalog-unreachable", detail: "ENOTFOUND marketplace" },
       },
     ]);
   });
 
-  it("leaves skippedReason undefined when the pass actually ran", async () => {
+  it("leaves skipped undefined when the pass actually ran", async () => {
     const { window, sends } = captureStatusWindow();
     const ensureManagedInstalled = vi.fn(async () => ({
       installed: ["calendar"],
@@ -114,8 +108,8 @@ describe("runManagedBootstrap skip reporting", () => {
       },
     });
 
-    const complete = sends.at(-1)?.[1] as { skippedReason?: string };
-    expect(complete.skippedReason).toBeUndefined();
+    const complete = sends.at(-1)?.[1] as { skipped?: unknown };
+    expect(complete.skipped).toBeUndefined();
   });
 });
 

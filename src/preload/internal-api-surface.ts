@@ -721,7 +721,7 @@ export function buildInternalApiSurface() {
   // The host emits these around `ensureManagedInstalled()` so the renderer
   // can show a banner / toast during startup install. Three lifecycle states:
   //   - { phase: "start" }
-  //   - { phase: "complete", installed[], failed[], skippedReason? }
+  //   - { phase: "complete", installed[], failed[], skipped? }
   //   - { phase: "error", message }
   // Best-effort: the host swallows send errors, so the renderer must
   // tolerate missing events (page reload during startup, etc.).

@@ -9,9 +9,10 @@
  * misconfigured looked like the app was working but actually had zero
  * managed plugins loaded.
  *
- * This module emits a status snapshot to the renderer over a single IPC
- * channel so a small banner / toast can surface "X plugins pending,
- * retry?". Three lifecycle states are reported:
+ * This module emits a status snapshot to the renderer over
+ * `CHANNELS.bootstrap.status` — the contract is the only place that channel
+ * is spelled, here as in the preload bridge — so a small banner / toast can
+ * surface "X plugins pending, retry?". Three lifecycle states are reported:
  *   - `start`       — bootstrap call enqueued (renderer can show a spinner)
  *   - `complete`    — finished; payload lists installed + failed + skipped
  *   - `error`       — bootstrap itself threw (catalog fetch failure, etc.)
@@ -29,10 +30,8 @@
  */
 
 import type { BrowserWindow } from "electron";
+import { CHANNELS } from "../contract/app-contract.js";
 import type { AppBootstrapStatus } from "../shared/bootstrap-status.js";
-
-/** IPC channel name. Mirrored in preload.ts and the renderer hook. */
-export const BOOTSTRAP_STATUS_CHANNEL = "lvis:bootstrap:status";
 
 /**
  * The last snapshot passed to `notifyBootstrapStatus`, or `null` before the
@@ -63,7 +62,7 @@ export function notifyBootstrapStatus(
   recordedStatus = status;
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
-    mainWindow.webContents.send(BOOTSTRAP_STATUS_CHANNEL, status);
+    mainWindow.webContents.send(CHANNELS.bootstrap.status, status);
   } catch {
     // Best-effort: a destroyed/loading webContents shouldn't take down boot.
   }
