@@ -154,8 +154,13 @@ The form above is complete and, for a first-time owner, over-asked: six of its
 seven questions have exactly one defensible answer, and the two values that
 genuinely differ per machine — the loopback port and the web origin — are
 things the host can read rather than ask about. `guidedSetup` is that whole
-configuration as one host-side operation, reached from the setup flow in the
-`remote-tailnet-observer` position.
+configuration as one host-side operation, and it is the only thing the
+`remote-tailnet-observer` position asks for once the probe says the environment
+is ready: a collapsed card carrying that state, the account and node the probe
+named, and one button that runs it. That button is also the probe — it re-reads
+the environment before it commits, so a "ready" that went stale since the
+section mounted can never be the state guided setup acts on, and no separate
+re-check control exists to ask the reader to do that verification themselves.
 
 **What the host decides.** The authorization boundary is `tailnet-identity`
 (the pairing code is what turns an identity into a share; an app capability
@@ -166,9 +171,10 @@ asked to make. The web origin is derived from MagicDNS exactly as `apply`
 derives it. Serve runs unless the probe already reports it forwarding to this
 same port.
 
-**What stays manual.** Everything, on request: choosing "manual" keeps the full
-form, and a configured desktop can still reveal it from the status card. An app
-capability, a hand-picked port, and the controller are only reachable there.
+**What stays manual.** Everything, on request: a quiet "set up manually" beside
+the connect button reveals the full form inline, and a configured desktop can
+still reveal it from the status card. An app capability, a hand-picked port, and
+the controller are only reachable there.
 
 **The port rule.** Preference order is the port already in the file, then
 `DEFAULT_TAILNET_OBSERVER_PORT`, then whatever the OS hands out for

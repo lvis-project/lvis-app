@@ -138,7 +138,7 @@ describe("TailnetAccessContent", () => {
       .toHaveLength(1);
   });
 
-  // The last setup step ends with "now let someone in", and the one-use code
+  // The finished panel ends with "now let someone in", and the one-use code
   // that does it already has a home below. Focus moves there rather than a
   // second minting control appearing inside the flow.
   it("moves the reader to the invitation control when setup asks for a code", async () => {
@@ -148,9 +148,7 @@ describe("TailnetAccessContent", () => {
     const create = await screen.findByTestId("tailnet-access-create-invitation");
     create.scrollIntoView = vi.fn();
 
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-apply"));
+    fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
     fireEvent.click(await screen.findByTestId("tailnet-setup-create-invitation"));
 
     expect(create).toHaveFocus();

@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import { occupyLoopbackPort as occupy } from "../../__tests__/test-helpers.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
 import type { TailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runtime.js";
@@ -799,24 +800,6 @@ describe("Tailnet observer restart", () => {
 });
 
 describe("choosing a loopback port for the observer", () => {
-  /**
-   * Hold a real port. A port the machine running the suite already uses
-   * satisfies the precondition on its own, so that case releases nothing
-   * rather than failing the test for the condition it is arranging.
-   */
-  async function occupy(port: number): Promise<() => Promise<void>> {
-    const held = createServer();
-    const bound = await new Promise<boolean>((resolve, reject) => {
-      held.once("error", (err: NodeJS.ErrnoException) => {
-        if (err.code === "EADDRINUSE") resolve(false);
-        else reject(err);
-      });
-      held.listen({ host: "127.0.0.1", port, exclusive: true }, () => resolve(true));
-    });
-    if (!bound) return async () => undefined;
-    return () => new Promise<void>((resolve) => held.close(() => resolve()));
-  }
-
   /** A port nothing holds right now, learned from the OS rather than guessed. */
   async function freePort(): Promise<number> {
     const probe = createServer();

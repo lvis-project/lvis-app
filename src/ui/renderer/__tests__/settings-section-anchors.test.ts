@@ -42,6 +42,7 @@ const TAB_SOURCES: Record<SettingsTab, readonly string[]> = {
   "remote-surfaces": [
     "tabs/RemoteSurfacesTab.tsx",
     "tabs/TailnetAccessContent.tsx",
+    "tabs/TailnetSetupWizard.tsx",
     "tabs/TailnetObserverSection.tsx",
     "tabs/TelegramConnectionContent.tsx",
     "tabs/AwayAuthorityContent.tsx",

@@ -120,163 +120,276 @@ afterEach(() => {
 });
 
 describe("TailnetSetupWizard", () => {
-  it("opens on the environment step and reports what Tailscale said", async () => {
-    const { api, snapshot } = makeApi();
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+  describe("when Tailscale is ready and nothing is set up yet", () => {
+    // Every value guided setup writes is one the host decides for itself, so
+    // there is nothing to ask: the section reads as a provider row does — a
+    // state, the probe's facts, one button.
+    it("collapses to a card that states the connection is ready", async () => {
+      const { api } = makeApi();
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
-    expect(await screen.findByTestId("tailnet-setup-step-environment")).toHaveTextContent(
-      "Tailscale is running as owner@example.com",
-    );
-    expect(snapshot).toHaveBeenCalled();
-    expect(screen.getByTestId("tailnet-setup-step-indicator")).toHaveTextContent("Step 1 of 4");
-  });
-
-  it.each([
-    ["logged-out", "not signed in"],
-    ["stopped", "not running"],
-    ["cli-not-found", "not installed"],
-    ["cli-failed", "did not report its status"],
-  ] as const)("blocks Next and keeps the guidance for %s", async (state, sentence) => {
-    const { api } = makeApi({
-      snapshot: snapshotOf({ environment: { ...READY_ENVIRONMENT, state } }),
+      const card = await screen.findByTestId("tailnet-setup-ready");
+      expect(screen.getByTestId("tailnet-setup-ready-state")).toHaveTextContent("Ready to connect");
+      expect(screen.getByTestId("tailnet-setup-ready-facts")).toHaveTextContent(
+        "Tailscale is running as owner@example.com",
+      );
+      expect(card).toHaveTextContent(DNS_NAME);
+      expect(screen.getByTestId("tailnet-setup-connect")).toBeEnabled();
     });
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
-    expect(await screen.findByTestId("tailnet-setup-environment")).toHaveTextContent(sentence);
-    expect(screen.getByTestId("tailnet-setup-next")).toBeDisabled();
-    expect(screen.getByTestId("tailnet-setup-recheck")).toBeEnabled();
-  });
+    it("offers no step counter, because there are no steps left to count", async () => {
+      const { api } = makeApi();
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
-  it("re-reads the environment when asked to check again", async () => {
-    const { api, snapshot } = makeApi({
-      snapshots: [
-        snapshotOf({ environment: { ...READY_ENVIRONMENT, state: "stopped" } }),
-        snapshotOf(),
-      ],
+      await screen.findByTestId("tailnet-setup-ready");
+      expect(screen.queryByTestId("tailnet-setup-step-indicator")).toBeNull();
+      expect(screen.queryByTestId("tailnet-setup-next")).toBeNull();
+      expect(screen.queryByTestId("tailnet-setup-back")).toBeNull();
     });
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
-    expect(await screen.findByTestId("tailnet-setup-next")).toBeDisabled();
-    fireEvent.click(screen.getByTestId("tailnet-setup-recheck"));
+    it("runs the whole setup from the connect press and ends on the address", async () => {
+      const { api, guidedSetup } = makeApi();
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
-    await waitFor(() => expect(screen.getByTestId("tailnet-setup-next")).toBeEnabled());
-    expect(snapshot).toHaveBeenCalledTimes(2);
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+
+      await waitFor(() => expect(guidedSetup).toHaveBeenCalledTimes(1));
+      expect(guidedSetup).toHaveBeenCalledWith();
+      expect(await screen.findByTestId("tailnet-setup-done-url")).toHaveTextContent(WEB_ORIGIN);
+      expect(screen.getByTestId("tailnet-setup-done")).toHaveTextContent(
+        "signed in to the same Tailscale account",
+      );
+    });
+
+    it("holds the button disabled and labelled in progress for the whole call", async () => {
+      let release = (): void => undefined;
+      const inFlight = new Promise<void>((resolve) => { release = () => resolve(); });
+      const { api } = makeApi();
+      const bridge = (api as unknown as { tailnetObserver: { guidedSetup: unknown } }).tailnetObserver;
+      bridge.guidedSetup = vi.fn(async () => {
+        await inFlight;
+        return {
+          ok: true as const,
+          snapshot: configuredSnapshot(),
+          webOrigin: WEB_ORIGIN,
+          port: 46_173,
+          serve: "configured" as const,
+        };
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+
+      await waitFor(() => expect(screen.getByTestId("tailnet-setup-connect")).toBeDisabled());
+      expect(screen.getByTestId("tailnet-setup-connect")).toHaveTextContent("Connecting…");
+      release();
+      expect(await screen.findByTestId("tailnet-setup-done")).toBeInTheDocument();
+    });
+
+    // Nothing asks the reader to verify the environment before pressing, so the
+    // press itself has to be the read: a "ready" that went stale since mount
+    // must not be what guided setup runs on.
+    it("re-reads the environment before it runs anything", async () => {
+      const { api, snapshot, guidedSetup } = makeApi();
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+
+      await waitFor(() => expect(guidedSetup).toHaveBeenCalledTimes(1));
+      expect(snapshot).toHaveBeenCalledTimes(2);
+    });
+
+    it("hands the invitation code back to the control that already mints one", async () => {
+      const onCreateInvitation = vi.fn();
+      const { api } = makeApi();
+      render(<TailnetSetupWizard api={api} onCreateInvitation={onCreateInvitation} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+      fireEvent.click(await screen.findByTestId("tailnet-setup-create-invitation"));
+
+      expect(onCreateInvitation).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns to the status card once the finished panel is closed", async () => {
+      const { api } = makeApi({ snapshots: [snapshotOf(), configuredSnapshot()] });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+      fireEvent.click(await screen.findByTestId("tailnet-setup-close"));
+
+      expect(await screen.findByTestId("tailnet-setup-status")).toBeInTheDocument();
+    });
   });
 
-  it("runs the whole setup from one press and ends on the address", async () => {
-    const { api, guidedSetup } = makeApi();
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+  describe("when the connect press is refused", () => {
+    it("falls back to the guidance card when Tailscale stopped being usable", async () => {
+      const { api } = makeApi({
+        snapshots: [snapshotOf(), snapshotOf({ environment: { ...READY_ENVIRONMENT, state: "stopped" } })],
+        guidedSetup: { ok: false, error: "tailnet-guided-setup-not-ready", output: null },
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    // Automatic is the default choice, so the next press is the last one.
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-apply"));
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
 
-    await waitFor(() => expect(guidedSetup).toHaveBeenCalledTimes(1));
-    expect(await screen.findByTestId("tailnet-setup-done-url")).toHaveTextContent(WEB_ORIGIN);
-    expect(screen.getByTestId("tailnet-setup-step-done")).toHaveTextContent(
-      "signed in to the same Tailscale account",
-    );
+      expect(await screen.findByTestId("tailnet-setup-not-ready")).toHaveTextContent("not running");
+      expect(screen.queryByTestId("tailnet-setup-ready")).toBeNull();
+      await waitFor(() => expect(screen.getByTestId("tailnet-setup-connect")).toBeEnabled());
+    });
+
+    it("keeps the manual escape hatch beside the sentence when no port can be opened", async () => {
+      const { api } = makeApi({
+        guidedSetup: { ok: false, error: "tailnet-guided-setup-port-unavailable", output: null },
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+
+      expect(await screen.findByTestId("tailnet-setup-error")).toHaveTextContent(
+        "No local port could be opened",
+      );
+      fireEvent.click(screen.getByTestId("tailnet-setup-manual-toggle"));
+      expect(await screen.findByTestId("tailnet-observer-apply")).toBeInTheDocument();
+    });
+
+    // The sentence for a failed Serve says its output is below. Dropping what
+    // Tailscale printed leaves that promise with nothing under it, and the
+    // certificate case is the one nobody can act on without those words.
+    it("shows what Tailscale printed when the Serve step failed", async () => {
+      const { api } = makeApi({
+        guidedSetup: {
+          ok: false,
+          error: "tailnet-serve-command-failed",
+          output: "HTTPS is not enabled on this tailnet",
+        },
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+
+      expect(await screen.findByTestId("tailnet-setup-error")).toHaveTextContent(
+        "did not complete the Serve command",
+      );
+      expect(screen.getByTestId("tailnet-setup-error-output")).toHaveTextContent(
+        "HTTPS is not enabled on this tailnet",
+      );
+    });
+
+    it("renders the host's own sentence for any other refusal", async () => {
+      const { api } = makeApi({
+        guidedSetup: { ok: false, error: "tailnet-web-origin-underivable", output: null },
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+
+      expect(await screen.findByTestId("tailnet-setup-error")).toHaveTextContent(
+        "needs a MagicDNS name for this computer",
+      );
+    });
   });
 
-  it("hands the invitation code back to the control that already mints one", async () => {
-    const onCreateInvitation = vi.fn();
+  describe("when Tailscale is not ready", () => {
+    it.each([
+      ["logged-out", "not signed in"],
+      ["stopped", "not running"],
+      ["cli-not-found", "not installed"],
+      ["cli-failed", "did not report its status"],
+    ] as const)("says which way Tailscale is unusable for %s", async (state, sentence) => {
+      const { api } = makeApi({
+        snapshot: snapshotOf({ environment: { ...READY_ENVIRONMENT, state } }),
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      expect(await screen.findByTestId("tailnet-setup-environment")).toHaveTextContent(sentence);
+      expect(screen.queryByTestId("tailnet-setup-ready")).toBeNull();
+      expect(screen.getByTestId("tailnet-setup-connect")).toBeEnabled();
+    });
+
+    it("carries what the CLI printed rather than a classification of it", async () => {
+      const { api } = makeApi({
+        snapshot: snapshotOf({
+          environment: { ...READY_ENVIRONMENT, state: "cli-failed", detail: "socket: permission denied" },
+        }),
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      expect(await screen.findByTestId("tailnet-setup-environment-detail")).toHaveTextContent(
+        "socket: permission denied",
+      );
+    });
+
+    it("re-probes on the press and stops there while Tailscale stays unusable", async () => {
+      const { api, snapshot, guidedSetup } = makeApi({
+        snapshot: snapshotOf({ environment: { ...READY_ENVIRONMENT, state: "stopped" } }),
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+
+      await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
+      expect(guidedSetup).not.toHaveBeenCalled();
+      expect(screen.getByTestId("tailnet-setup-environment")).toHaveTextContent("not running");
+      await waitFor(() => expect(screen.getByTestId("tailnet-setup-connect")).toBeEnabled());
+    });
+
+    it("goes on to connect the moment the same press finds Tailscale usable", async () => {
+      const { api, guidedSetup } = makeApi({
+        snapshots: [
+          snapshotOf({ environment: { ...READY_ENVIRONMENT, state: "stopped" } }),
+          snapshotOf(),
+        ],
+      });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      fireEvent.click(await screen.findByTestId("tailnet-setup-connect"));
+
+      await waitFor(() => expect(guidedSetup).toHaveBeenCalledTimes(1));
+      expect(await screen.findByTestId("tailnet-setup-done-url")).toHaveTextContent(WEB_ORIGIN);
+    });
+  });
+
+  // A control that only re-reads asked the reader to verify an environment they
+  // cannot change from here, and left a stale "ready" as the thing setup ran on.
+  it("carries no re-check affordance anywhere in the section", async () => {
     const { api } = makeApi();
-    render(<TailnetSetupWizard api={api} onCreateInvitation={onCreateInvitation} />);
-
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-apply"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-create-invitation"));
-
-    expect(onCreateInvitation).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows the full listener form when the manual method is chosen", async () => {
-    const { api, guidedSetup } = makeApi();
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
-
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-mode-manual"));
-    fireEvent.click(screen.getByTestId("tailnet-setup-next"));
-
-    expect(await screen.findByTestId("tailnet-observer-apply")).toBeInTheDocument();
-    expect(screen.getByTestId("tailnet-setup-step-indicator")).toHaveTextContent("Step 3 of 3");
-    expect(guidedSetup).not.toHaveBeenCalled();
-  });
-
-  it("goes back to the environment step when Tailscale stopped being usable", async () => {
-    const { api } = makeApi({
-      guidedSetup: { ok: false, error: "tailnet-guided-setup-not-ready", output: null },
-    });
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
-
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-apply"));
-
-    expect(await screen.findByTestId("tailnet-setup-step-environment")).toBeInTheDocument();
-  });
-
-  it("offers the manual form rather than a dead end when no port can be opened", async () => {
-    const { api } = makeApi({
-      guidedSetup: { ok: false, error: "tailnet-guided-setup-port-unavailable", output: null },
-    });
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
-
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-apply"));
-
-    expect(await screen.findByTestId("tailnet-setup-error")).toHaveTextContent(
-      "No local port could be opened",
+    const { container } = render(
+      <TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />,
     );
-    fireEvent.click(screen.getByTestId("tailnet-setup-apply-manual"));
-    expect(await screen.findByTestId("tailnet-observer-apply")).toBeInTheDocument();
+
+    await screen.findByTestId("tailnet-setup-ready");
+    expect(screen.queryByTestId("tailnet-setup-recheck")).toBeNull();
+    expect(container.textContent).not.toContain("Check again");
   });
 
-  // The sentence for a failed Serve says its output is below. Dropping what
-  // Tailscale printed leaves that promise with nothing under it, and the
-  // certificate case is the one nobody can act on without those words.
-  it("shows what Tailscale printed when the Serve step failed", async () => {
-    const { api } = makeApi({
-      guidedSetup: {
-        ok: false,
-        error: "tailnet-serve-command-failed",
-        output: "HTTPS is not enabled on this tailnet",
-      },
+  describe("the manual branch", () => {
+    it("reveals the full listener form inline, without calling guided setup", async () => {
+      const { api, guidedSetup } = makeApi();
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
+
+      const toggle = await screen.findByTestId("tailnet-setup-manual-toggle");
+      expect(screen.queryByTestId("tailnet-setup-manual-form")).toBeNull();
+
+      fireEvent.click(toggle);
+      expect(await screen.findByTestId("tailnet-observer-apply")).toBeInTheDocument();
+      expect(guidedSetup).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId("tailnet-setup-manual-toggle"));
+      await waitFor(() => expect(screen.queryByTestId("tailnet-observer-apply")).toBeNull());
     });
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-apply"));
+    it("collapses to the status card once the listener the form asked for is up", async () => {
+      const { api } = makeApi({ snapshots: [snapshotOf(), configuredSnapshot()] });
+      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
-    expect(await screen.findByTestId("tailnet-setup-error")).toHaveTextContent(
-      "did not complete the Serve command",
-    );
-    expect(screen.getByTestId("tailnet-setup-error-output")).toHaveTextContent(
-      "HTTPS is not enabled on this tailnet",
-    );
-  });
+      fireEvent.click(await screen.findByTestId("tailnet-setup-manual-toggle"));
+      fireEvent.click(await screen.findByTestId("tailnet-observer-apply"));
 
-  it("renders the host's own sentence for any other refusal", async () => {
-    const { api } = makeApi({
-      guidedSetup: { ok: false, error: "tailnet-web-origin-underivable", output: null },
+      expect(await screen.findByTestId("tailnet-setup-status")).toBeInTheDocument();
     });
-    render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
-
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-next"));
-    fireEvent.click(await screen.findByTestId("tailnet-setup-apply"));
-
-    expect(await screen.findByTestId("tailnet-setup-error")).toHaveTextContent(
-      "needs a MagicDNS name for this computer",
-    );
   });
 
   describe("once setup is finished", () => {
-    it("shows the facts as a status card instead of the wizard", async () => {
+    it("shows the facts as a status card instead of the setup card", async () => {
       const { api } = makeApi({ snapshot: configuredSnapshot() });
       render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
 
@@ -286,7 +399,8 @@ describe("TailnetSetupWizard", () => {
       expect(screen.getByTestId("tailnet-setup-status-serve")).toHaveTextContent(
         "Serve forwards your tailnet to this listener",
       );
-      expect(screen.queryByTestId("tailnet-setup-wizard")).toBeNull();
+      expect(screen.queryByTestId("tailnet-setup-ready")).toBeNull();
+      expect(screen.queryByTestId("tailnet-setup-not-ready")).toBeNull();
     });
 
     it("says a port nobody named was chosen for them", async () => {
@@ -337,59 +451,27 @@ describe("TailnetSetupWizard", () => {
     });
   });
 
-  describe("keyboard", () => {
-    it("advances on Enter only where Next is enabled", async () => {
-      const { api } = makeApi({
-        snapshot: snapshotOf({ environment: { ...READY_ENVIRONMENT, state: "stopped" } }),
-      });
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
-
-      const wizard = await screen.findByTestId("tailnet-setup-wizard");
-      fireEvent.keyDown(wizard, { key: "Enter" });
-
-      expect(screen.getByTestId("tailnet-setup-step-environment")).toBeInTheDocument();
-      expect(screen.queryByTestId("tailnet-setup-step-mode")).toBeNull();
-    });
-
-    it("advances on Enter when Next is enabled", async () => {
-      const { api } = makeApi();
-      render(<TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />);
-
-      const wizard = await screen.findByTestId("tailnet-setup-wizard");
-      fireEvent.keyDown(wizard, { key: "Enter" });
-
-      expect(await screen.findByTestId("tailnet-setup-step-mode")).toBeInTheDocument();
-    });
-  });
-
-  // Every step is settings-pane content, not an overlay. A wizard that opened a
+  // Setup is settings content, not an overlay. A flow that opened a
   // window-modal dialog would freeze the rest of settings for a decision about
   // one listener, which is the shape this deliberately does not take.
-  it("draws every step in the settings flow, never in an overlay", async () => {
+  it("draws every state in the settings flow, never in an overlay", async () => {
     const { api } = makeApi();
     const { container } = render(
       <TailnetSetupWizard api={api} onCreateInvitation={() => undefined} />,
     );
 
-    const stages = ["tailnet-setup-step-environment", "tailnet-setup-step-mode"];
-    for (const stage of stages) {
-      const node = await screen.findByTestId(stage);
-      expect(container.contains(node)).toBe(true);
-      expect(node.closest("[data-settings-section='remote-tailnet-observer']")).not.toBeNull();
-      expect(document.querySelector("[role='dialog']")).toBeNull();
-      expect(document.querySelector("[role='alertdialog']")).toBeNull();
-      if (stage === "tailnet-setup-step-environment") {
-        fireEvent.click(screen.getByTestId("tailnet-setup-next"));
-      }
-    }
-
-    fireEvent.click(screen.getByTestId("tailnet-setup-next"));
-    const apply = await screen.findByTestId("tailnet-setup-step-apply");
-    expect(container.contains(apply)).toBe(true);
-    fireEvent.click(screen.getByTestId("tailnet-setup-apply"));
-
-    const done = await screen.findByTestId("tailnet-setup-step-done");
-    expect(container.contains(done)).toBe(true);
+    const ready = await screen.findByTestId("tailnet-setup-ready");
+    expect(container.contains(ready)).toBe(true);
+    expect(ready.closest("[data-settings-section='remote-tailnet-observer']")).not.toBeNull();
     expect(document.querySelector("[role='dialog']")).toBeNull();
+    expect(document.querySelector("[role='alertdialog']")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("tailnet-setup-connect"));
+
+    const done = await screen.findByTestId("tailnet-setup-done");
+    expect(container.contains(done)).toBe(true);
+    expect(done.closest("[data-settings-section='remote-tailnet-observer']")).not.toBeNull();
+    expect(document.querySelector("[role='dialog']")).toBeNull();
+    expect(document.querySelector("[role='alertdialog']")).toBeNull();
   });
 });

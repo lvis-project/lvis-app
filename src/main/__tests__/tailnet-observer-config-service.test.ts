@@ -1,4 +1,4 @@
-import { createServer } from "node:net";
+import { occupyLoopbackPort as occupy } from "../../__tests__/test-helpers.js";
 import { describe, expect, it, vi } from "vitest";
 import { createTailnetObserverConfigService } from "../tailnet-observer-config-service.js";
 import type {
@@ -72,25 +72,6 @@ function service(options: {
   });
 }
 
-/**
- * Hold a real loopback port for the duration of one test.
- *
- * A port the machine running the suite already uses satisfies the precondition
- * on its own, so that case releases nothing rather than failing the test for
- * the very condition it is arranging.
- */
-async function occupy(port: number): Promise<() => Promise<void>> {
-  const held = createServer();
-  const bound = await new Promise<boolean>((resolve, reject) => {
-    held.once("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE") resolve(false);
-      else reject(err);
-    });
-    held.listen({ host: "127.0.0.1", port, exclusive: true }, () => resolve(true));
-  });
-  if (!bound) return async () => undefined;
-  return () => new Promise<void>((resolve) => held.close(() => resolve()));
-}
 
 const OFF_VIEW: TailnetObserverConfigView = Object.freeze({
   enabled: false,
