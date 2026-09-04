@@ -4,11 +4,10 @@
 // is worded in — one word per row, so the column reads straight down.
 export const en = {
   "connectionRow.stateAttention": "Needs attention",
-  "connectionRow.stateChecking": "Checking",
   "connectionRow.stateConnected": "Connected",
   "connectionRow.stateNeedsSetup": "Setup needed",
-  "connectionRow.statePaused": "Paused",
-  "connectionRow.stateUnavailable": "Not supported",
+  "connectionRow.stateOff": "Off",
+  "connectionRow.statePending": "Waiting",
   "settingsContent.groupConnections": "Connections",
   "settingsContent.tabRemoteSurfaces": "Remote surfaces",
   "remoteSurfacesTab.pageDescription": "Let another surface watch or drive the conversation you have open. Each surface is off until you connect it, and each keeps its own trust boundary.",
@@ -19,6 +18,7 @@ export const en = {
   "remoteSurfacesTab.messagingSecretBadge": "Secret",
   "remoteSurfacesTab.messagingEgressLabel": "It reaches: {hosts}",
   "remoteSurfacesTab.messagingDocsLink": "Open the service documentation",
+  "localApiSurfaces.rowSubline": "{host} · {enabled} of {total} on",
   "localApiSurfaces.sectionTitle": "Local API and agent connections",
   "localApiSurfaces.sectionDescription": "Four separate opt-ins for the loopback HTTP surface and the agent-to-agent routes on it. Each one is off until you turn it on here, and each is read once when the app starts.",
   "localApiSurfaces.loading": "Reading the current configuration…",
@@ -38,11 +38,10 @@ export const en = {
 
 export const ko = {
   "connectionRow.stateAttention": "확인 필요",
-  "connectionRow.stateChecking": "확인 중",
   "connectionRow.stateConnected": "연결됨",
   "connectionRow.stateNeedsSetup": "설정 필요",
-  "connectionRow.statePaused": "일시 중지",
-  "connectionRow.stateUnavailable": "지원 안 됨",
+  "connectionRow.stateOff": "꺼짐",
+  "connectionRow.statePending": "대기 중",
   "settingsContent.groupConnections": "연결",
   "settingsContent.tabRemoteSurfaces": "원격 연결",
   "remoteSurfacesTab.pageDescription": "지금 열어 둔 대화를 다른 기기나 프로그램에서 보거나 조작하게 합니다. 연결 방식마다 따로 켜야 하고, 각각 서로 다른 신뢰 경계를 유지합니다.",
@@ -53,6 +52,7 @@ export const ko = {
   "remoteSurfacesTab.messagingSecretBadge": "비밀",
   "remoteSurfacesTab.messagingEgressLabel": "접속 대상: {hosts}",
   "remoteSurfacesTab.messagingDocsLink": "서비스 문서 열기",
+  "localApiSurfaces.rowSubline": "{host} · {total}개 중 {enabled}개 켜짐",
   "localApiSurfaces.sectionTitle": "로컬 API 및 에이전트 연결",
   "localApiSurfaces.sectionDescription": "루프백 HTTP 서버와 그 위에서 도는 에이전트 간 경로를 켜는 네 가지 개별 선택입니다. 각각 여기서 켜기 전까지 꺼져 있으며, 앱이 시작할 때 한 번 읽습니다.",
   "localApiSurfaces.loading": "현재 설정을 읽는 중…",

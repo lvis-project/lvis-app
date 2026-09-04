@@ -83,8 +83,11 @@ function observerSnapshot() {
   };
 }
 
-function makeApi() {
-  return {
+function makeApi(options: { telegramState?: string; resumeFails?: boolean } = {}) {
+  const resume = vi.fn(async () => (options.resumeFails === true
+    ? { ok: false as const, error: "telegram-connection-unavailable" as const }
+    : { ok: true as const }));
+  const api = {
     getSettings: vi.fn(async () => ({
       marketplace: { installedMessagingConnections: [TELEGRAM] },
       system: {},
@@ -121,7 +124,7 @@ function makeApi() {
       snapshot: vi.fn(async () => ({
         ok: true as const,
         snapshot: {
-          state: "disconnected" as const,
+          state: options.telegramState ?? "disconnected",
           botUsername: null,
           pairing: null,
           approval: null,
@@ -129,14 +132,18 @@ function makeApi() {
           lastErrorCode: null,
         },
       })),
+      resume,
+      pause: vi.fn(async () => ({ ok: true as const })),
+      disconnect: vi.fn(async () => ({ ok: true as const })),
       onChanged: vi.fn(() => () => undefined),
     },
   } as unknown as LvisApi;
+  return { api, resume };
 }
 
 describe("RemoteSurfacesTab", () => {
   it("puts every connection vendor on the page as exactly one row", async () => {
-    const api = makeApi();
+    const { api } = makeApi();
     const { container } = render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
     await screen.findByTestId("messaging-connection:telegram");
@@ -150,7 +157,7 @@ describe("RemoteSurfacesTab", () => {
   });
 
   it("keeps every row's detail folded away until it is opened", async () => {
-    const api = makeApi();
+    const { api } = makeApi();
     render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
     await screen.findByTestId("messaging-connection:telegram");
@@ -160,21 +167,49 @@ describe("RemoteSurfacesTab", () => {
   });
 
   it("opens a row onto the controls that vendor already had", async () => {
-    const api = makeApi();
+    const { api } = makeApi();
     render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
     fireEvent.click(await screen.findByTestId("connection:local-api:toggle"));
     expect(await screen.findByTestId("local-api-surfaces-local-api")).toBeTruthy();
     expect(screen.getByTestId("local-api-surfaces-a2a-remote-receiver")).toBeTruthy();
 
-    // One row at a time: opening the next one closes the last.
+    // Rows open independently — setting two connections up side by side is a
+    // real thing to want, so opening the next one must not close the last.
     fireEvent.click(screen.getByTestId("connection:tailnet:toggle"));
     expect(await screen.findByTestId("tailnet-access-content")).toBeTruthy();
+    expect(screen.getByTestId("local-api-surfaces-local-api")).toBeTruthy();
+
+    // And the head closes it again.
+    fireEvent.click(screen.getByTestId("connection:local-api:toggle"));
     expect(screen.queryByTestId("local-api-surfaces-local-api")).toBeNull();
   });
 
+  it("folds a row away when the action it was opened for succeeds", async () => {
+    const { api } = makeApi({ telegramState: "paused-by-owner" });
+    render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
+
+    fireEvent.click(await screen.findByTestId("messaging-connection:telegram:toggle"));
+    fireEvent.click(await screen.findByTestId("telegram-connection-resume"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("messaging-connection:telegram:detail")).toBeNull();
+    });
+  });
+
+  it("keeps the row open, with its error, when that action fails", async () => {
+    const { api } = makeApi({ telegramState: "paused-by-owner", resumeFails: true });
+    render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
+
+    fireEvent.click(await screen.findByTestId("messaging-connection:telegram:toggle"));
+    fireEvent.click(await screen.findByTestId("telegram-connection-resume"));
+
+    expect(await screen.findByTestId("telegram-connection-feedback")).toBeTruthy();
+    expect(screen.getByTestId("messaging-connection:telegram:detail")).toBeTruthy();
+  });
+
   it("opens the row that holds the section a deep link named", async () => {
-    const api = makeApi();
+    const { api } = makeApi();
     // The observer anchor lives inside the Tailnet card, which is inside the
     // Tailnet row — folded, it is not in the DOM for arrival to find.
     const { container } = render(
@@ -188,7 +223,7 @@ describe("RemoteSurfacesTab", () => {
   });
 
   it("opens the messaging row a deep link into that connection named", async () => {
-    const api = makeApi();
+    const { api } = makeApi();
     const { container } = render(
       <RemoteSurfacesTab api={api} chatGroupId="main" sectionTarget="remote-telegram" />,
     );
@@ -200,7 +235,7 @@ describe("RemoteSurfacesTab", () => {
   });
 
   it("keeps the messaging group anchor reachable with every row folded", async () => {
-    const api = makeApi();
+    const { api } = makeApi();
     const { container } = render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
     await screen.findByTestId("messaging-connection:telegram");
@@ -210,7 +245,7 @@ describe("RemoteSurfacesTab", () => {
   });
 
   it("reads a listener that was never set up as setup-needed", async () => {
-    const api = makeApi();
+    const { api } = makeApi();
     render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
 
     await waitFor(() => {
@@ -218,5 +253,17 @@ describe("RemoteSurfacesTab", () => {
     });
     expect(screen.getByTestId("connection:tailnet:endpoint").textContent)
       .toBe(`https://${DNS_NAME}`);
+  });
+
+  it("counts the local-API opt-ins on its own line rather than hiding them", async () => {
+    const { api } = makeApi();
+    render(<RemoteSurfacesTab api={api} chatGroupId="main" />);
+
+    await waitFor(() => {
+      // Off, not "setup needed": four switches all down is a resting state.
+      expect(screen.getByTestId("connection:local-api:state").textContent).toBe("꺼짐");
+    });
+    expect(screen.getByTestId("connection:local-api:endpoint").textContent)
+      .toBe("127.0.0.1 · 4개 중 0개 켜짐");
   });
 });

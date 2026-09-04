@@ -29,46 +29,52 @@ import { useTranslation } from "../../../i18n/react.js";
  * failed, which approval expired — belongs to the body the row opens.
  */
 export type ConnectionRowState =
+  /** Working right now. */
   | "connected"
-  | "paused"
+  /** Turning it on needs something from the owner. */
   | "needs-setup"
+  /** Waiting on the owner's or the other side's next move. */
+  | "pending"
+  /** On, but not well. */
   | "attention"
-  /** Installed or declared, but this build carries nothing that can drive it. */
-  | "unavailable"
-  /** No answer yet from the surface that owns the real state. */
-  | "checking";
+  /** Deliberately off. */
+  | "off";
 
 /**
  * The catalog key for each state word.
  *
  * One mapping, inside the component that draws the column, so no embedding
- * list can word the same state differently from the row beside it.
+ * list can word the same state differently from the row beside it. The
+ * connection's OWN wording — "코드를 기다리는 중", "계정을 다시 페어링하세요" —
+ * is not replaced by this; it stays in the body as the explanation, and only
+ * the row is reduced to these five so the column can be read straight down.
  */
 function connectionStateLabelKey(state: ConnectionRowState): string {
   switch (state) {
     case "connected": return "connectionRow.stateConnected";
-    case "paused": return "connectionRow.statePaused";
     case "needs-setup": return "connectionRow.stateNeedsSetup";
+    case "pending": return "connectionRow.statePending";
     case "attention": return "connectionRow.stateAttention";
-    case "unavailable": return "connectionRow.stateUnavailable";
-    case "checking": return "connectionRow.stateChecking";
+    case "off": return "connectionRow.stateOff";
   }
 }
 
-/** Only a state the owner can do nothing about, or must, gets a colour. */
 const STATE_DOT: Record<ConnectionRowState, string> = {
   connected: "bg-success",
-  paused: "bg-muted-foreground",
   "needs-setup": "bg-muted-foreground/(--opacity-half)",
+  pending: "bg-warning",
   attention: "bg-destructive",
-  unavailable: "bg-muted-foreground/(--opacity-half)",
-  checking: "bg-muted-foreground/(--opacity-half)",
+  off: "bg-muted-foreground/(--opacity-half)",
 };
 
 export interface ConnectionRowProps {
   /** The name a reader would say out loud — the vendor, not the runtime. */
   label: string;
-  state: ConnectionRowState;
+  /**
+   * Null until the surface that owns the real state has answered. The row
+   * draws no word then rather than inventing a sixth one for "asking".
+   */
+  state: ConnectionRowState | null;
   /**
    * The address that makes the row concrete: an origin, a bot handle, a
    * loopback host. Omitted when the connection genuinely has none, rather than
@@ -106,7 +112,6 @@ export function ConnectionRow({
 }: ConnectionRowProps) {
   const { t } = useTranslation();
   const bodyId = `connection-row-body-${testId.replace(/[^\w-]/g, "-")}`;
-  const stateWord = t(connectionStateLabelKey(state));
 
   return (
     <div
@@ -126,17 +131,19 @@ export function ConnectionRow({
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="truncate text-sm font-medium">{label}</span>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 text-[11px]",
-                  state === "attention" ? "text-destructive" : "text-muted-foreground",
-                )}
-                data-state={state}
-                data-testid={`${testId}:state`}
-              >
-                <span className={cn("size-1.5 shrink-0 rounded-full", STATE_DOT[state])} aria-hidden={true} />
-                {stateWord}
-              </span>
+              {state === null ? null : (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 text-[11px]",
+                    state === "attention" ? "text-destructive" : "text-muted-foreground",
+                  )}
+                  data-state={state}
+                  data-testid={`${testId}:state`}
+                >
+                  <span className={cn("size-1.5 shrink-0 rounded-full", STATE_DOT[state])} aria-hidden={true} />
+                  {t(connectionStateLabelKey(state))}
+                </span>
+              )}
               {badges}
             </span>
             {endpoint === null || endpoint === "" ? null : (

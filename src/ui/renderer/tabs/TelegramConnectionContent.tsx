@@ -28,6 +28,17 @@ export interface TelegramConnectionContentProps {
    * and main refuses a grant that names no tile.
    */
   chatGroupId: string;
+  /**
+   * The owner finished acting on this connection and it worked.
+   *
+   * Every mutation here is terminal in the same way — the press either did the
+   * thing or reported why it could not — so the embedding surface is told after
+   * a success and never after a refusal, which is what lets a settings row fold
+   * away on completion while leaving a failed attempt on screen with its error.
+   * Minting a pairing code deliberately does NOT report: the code is something
+   * the owner still has to go and use.
+   */
+  onCompleted?: () => void;
 }
 
 function durationLabel(
@@ -82,7 +93,7 @@ function sharedConversationIsOpen(snapshot: TelegramConnectionSnapshot): boolean
  * freshly minted pairing code, which main returns exactly once and which no
  * snapshot can reproduce.
  */
-export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnectionContentProps) {
+export function TelegramConnectionContent({ api, chatGroupId, onCompleted }: TelegramConnectionContentProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TelegramConnectionSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,6 +143,7 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
       }
       setFeedback({ tone: "success", text: t("telegramConnection.operationSucceeded") });
       await refresh();
+      onCompleted?.();
       return true;
     } catch {
       setFeedback({ tone: "error", text: t("telegramConnection.operationFailed") });
@@ -139,7 +151,7 @@ export function TelegramConnectionContent({ api, chatGroupId }: TelegramConnecti
     } finally {
       setBusy(false);
     }
-  }, [refresh, t]);
+  }, [onCompleted, refresh, t]);
 
   const connect = useCallback(async () => {
     // The token never re-enters component state after this call, and there is

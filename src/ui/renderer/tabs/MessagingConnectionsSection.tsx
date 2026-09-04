@@ -29,7 +29,8 @@ import type { LvisApi } from "../types.js";
 
 /** What a driver reports about its connection for the collapsed row. */
 interface MessagingConnectionReading {
-  readonly state: ConnectionRowState;
+  /** Null until the driver has answered — the row draws no word until then. */
+  readonly state: ConnectionRowState | null;
   /** The handle or address this connection is reachable at, when it has one. */
   readonly endpoint: string | null;
 }
@@ -48,7 +49,11 @@ interface MessagingConnectionDriver {
   readonly read: (api: LvisApi) => Promise<MessagingConnectionReading>;
   readonly subscribe: (api: LvisApi, onChanged: () => void) => () => void;
   /** The controls themselves, rendered inside the row this driver owns. */
-  readonly renderSection: (api: LvisApi, chatGroupId: string) => ReactNode;
+  readonly renderSection: (
+    api: LvisApi,
+    chatGroupId: string,
+    onCompleted: () => void,
+  ) => ReactNode;
 }
 
 function telegramConnectionState(
@@ -58,13 +63,19 @@ function telegramConnectionState(
     case "active":
       return "connected";
     case "paused-by-owner":
-      return "paused";
+      return "off";
     case "disconnected":
     case "connected-unpaired":
+      return "needs-setup";
+    // The owner has done their part and something else has to happen next: the
+    // code has to be sent, or the share has to be granted.
     case "pairing-pending":
     case "paired-unapproved":
-      return "needs-setup";
+      return "pending";
+    // No driver in this build is something the owner fixes by updating, which
+    // is the same kind of "you have to do something" the word already means.
     case "unsupported":
+      return "needs-setup";
     case "pairing-unrecognized":
     case "shared-conversation-missing":
     case "error":
@@ -87,8 +98,12 @@ const MESSAGING_CONNECTION_DRIVERS: Readonly<Record<string, MessagingConnectionD
         };
       },
       subscribe: (api, onChanged) => api.telegramConnection.onChanged(onChanged),
-      renderSection: (api, chatGroupId) => (
-        <TelegramConnectionContent api={api} chatGroupId={chatGroupId} />
+      renderSection: (api, chatGroupId, onCompleted) => (
+        <TelegramConnectionContent
+          api={api}
+          chatGroupId={chatGroupId}
+          onCompleted={onCompleted}
+        />
       ),
     },
   });
@@ -167,22 +182,23 @@ function MessagingConnectionCatalog({ api, connection }: {
   );
 }
 
-function MessagingConnectionRow({ api, chatGroupId, connection, expanded, onToggle }: {
+function MessagingConnectionRow({ api, chatGroupId, connection, expanded, onToggle, onCompleted }: {
   api: LvisApi;
   chatGroupId: string;
   connection: MarketplaceInstalledMessagingConnection;
   expanded: boolean;
   onToggle: () => void;
+  onCompleted: () => void;
 }) {
   const { t } = useTranslation();
   const driver = MESSAGING_CONNECTION_DRIVERS[connection.connectionId];
   const [reading, setReading] = useState<MessagingConnectionReading>(
-    driver ? { state: "checking", endpoint: null } : { state: "unavailable", endpoint: null },
+    driver ? { state: null, endpoint: null } : { state: "needs-setup", endpoint: null },
   );
 
   useEffect(() => {
     if (!driver) {
-      setReading({ state: "unavailable", endpoint: null });
+      setReading({ state: "needs-setup", endpoint: null });
       return;
     }
     let alive = true;
@@ -219,7 +235,7 @@ function MessagingConnectionRow({ api, chatGroupId, connection, expanded, onTogg
             {t("remoteSurfacesTab.messagingUnavailableHelp")}
           </p>
         ) : (
-          driver.renderSection(api, chatGroupId)
+          driver.renderSection(api, chatGroupId, onCompleted)
         )}
         <MessagingConnectionCatalog api={api} connection={connection} />
       </div>
@@ -230,16 +246,19 @@ function MessagingConnectionRow({ api, chatGroupId, connection, expanded, onTogg
 export interface MessagingConnectionsSectionProps {
   api: LvisApi;
   chatGroupId: string;
-  /** The one row the tab currently has open, across every vendor on the page. */
-  expandedRowId: string | null;
+  /** Every row the tab currently has open, across every vendor on the page. */
+  expandedRowIds: readonly string[];
   onToggleRow: (rowId: string) => void;
+  /** Fold a row away because what it was opened for is done. */
+  onRowCompleted: (rowId: string) => void;
 }
 
 export function MessagingConnectionsSection({
   api,
   chatGroupId,
-  expandedRowId,
+  expandedRowIds,
   onToggleRow,
+  onRowCompleted,
 }: MessagingConnectionsSectionProps) {
   const { t } = useTranslation();
   const [connections, setConnections] = useState<
@@ -288,8 +307,9 @@ export function MessagingConnectionsSection({
           api={api}
           chatGroupId={chatGroupId}
           connection={connection}
-          expanded={expandedRowId === messagingConnectionRowId(connection.connectionId)}
+          expanded={expandedRowIds.includes(messagingConnectionRowId(connection.connectionId))}
           onToggle={() => toggle(connection.connectionId)}
+          onCompleted={() => onRowCompleted(messagingConnectionRowId(connection.connectionId))}
         />
       ))}
     </div>

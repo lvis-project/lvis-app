@@ -55,15 +55,20 @@ function makeApi(
   return { api, openExternalUrl };
 }
 
-/** The accordion the tab owns, stood up around the group under test. */
+/** The open-row set the tab owns, stood up around the group under test. */
 function Harness({ api }: { api: LvisApi }) {
-  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+  const [expandedRowIds, setExpandedRowIds] = useState<readonly string[]>([]);
+  const close = (rowId: string) =>
+    setExpandedRowIds((open) => open.filter((id) => id !== rowId));
   return (
     <MessagingConnectionsSection
       api={api}
       chatGroupId="main"
-      expandedRowId={expandedRowId}
-      onToggleRow={(rowId) => setExpandedRowId((open) => (open === rowId ? null : rowId))}
+      expandedRowIds={expandedRowIds}
+      onToggleRow={(rowId) => setExpandedRowIds((open) => (
+        open.includes(rowId) ? open.filter((id) => id !== rowId) : [...open, rowId]
+      ))}
+      onRowCompleted={close}
     />
   );
 }
@@ -100,6 +105,24 @@ describe("MessagingConnectionsSection", () => {
     });
   });
 
+  it("reads a pairing waiting on the other side as waiting, not as unset", async () => {
+    const { api } = makeApi([TELEGRAM], "pairing-pending");
+    render(<Harness api={api} />);
+    await waitFor(() => {
+      expect(screen.getByTestId("messaging-connection:telegram:state").textContent)
+        .toBe("대기 중");
+    });
+  });
+
+  it("reads a connection the owner paused as off", async () => {
+    const { api } = makeApi([TELEGRAM], "paused-by-owner");
+    render(<Harness api={api} />);
+    await waitFor(() => {
+      expect(screen.getByTestId("messaging-connection:telegram:state").textContent)
+        .toBe("꺼짐");
+    });
+  });
+
   it("opens the connection's own controls and catalog in the row", async () => {
     const { api, openExternalUrl } = makeApi([TELEGRAM]);
     render(<Harness api={api} />);
@@ -128,7 +151,7 @@ describe("MessagingConnectionsSection", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("messaging-connection:future-messenger:state").textContent)
-        .toBe("지원 안 됨");
+        .toBe("설정 필요");
     });
     fireEvent.click(screen.getByTestId("messaging-connection:future-messenger:toggle"));
     expect(await screen.findByTestId("messaging-connection:future-messenger:unavailable"))
