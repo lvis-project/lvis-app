@@ -39,6 +39,10 @@ import {
   resolveSubAgentCeilingMs,
 } from "../../shared/tool-timeout-policy.js";
 import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../../shared/subagent-policy.js";
+import {
+  exactToolScope,
+  type SubAgentToolScope,
+} from "../../engine/subagent-runner.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
 import { createAgentListTool } from "../agent-list.js";
@@ -1616,13 +1620,13 @@ describe("agent_spawn tool", () => {
         "utf-8",
       );
       const store = new AgentProfileStore({ userDir: agentDir });
-      let captured: { instructions: string; sourceTools?: string[] } | null = null;
+      let captured: { instructions: string; toolScope: SubAgentToolScope } | null = null;
       const tool = createAgentSpawnTool({
         getRunner: () => ({
           spawn: async (input) => {
             captured = {
               instructions: input.instructions,
-              sourceTools: input.sourceTools,
+              toolScope: input.toolScope,
             };
             return {
               summary: "reviewed",
@@ -1645,7 +1649,7 @@ describe("agent_spawn tool", () => {
       expect(captured?.instructions).toContain("<lvis-agent-profile");
       expect(captured?.instructions).toContain("You are a reviewer.");
       expect(captured?.instructions).toContain("check this diff");
-      expect(captured?.sourceTools).toEqual(["web_search"]);
+      expect(captured?.toolScope).toEqual(exactToolScope(["web_search"]));
     } finally {
       await cleanupTmpDir(agentDir);
     }

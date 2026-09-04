@@ -33,7 +33,13 @@ import {
   SubAgentRunner,
   resolveSubAgentModel,
   buildModePreamble,
+  exactToolScope,
+  fromPersistedToolScope,
+  toPersistedToolScope,
+  DENY_ALL_TOOL_SCOPE,
+  PARENT_ALL_TOOL_SCOPE,
   type SubAgentSpawnResult,
+  type SubAgentToolScope,
 } from "../subagent-runner.js";
 import { MODEL_COMPLEXITY_MAP } from "../../shared/model-complexity-map.js";
 import { LLM_VENDOR_MODEL_OPTIONS } from "../../shared/llm-vendor-defaults.js";
@@ -227,7 +233,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
       const result = await runner.spawn({
         title: "test",
         instructions: "do",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         maxRounds: 2,
         originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
       });
@@ -300,6 +306,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
       });
     try {
       const result = await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "clean",
         instructions: "do",
         maxRounds: 5,
@@ -348,6 +355,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
     });
 
     const result = await runner.spawn({
+      toolScope: PARENT_ALL_TOOL_SCOPE,
       title: "subscription child",
       instructions: "finish the task",
       maxRounds: 2,
@@ -398,7 +406,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
         stopReason: "end_turn",
       });
     try {
-      await runner.spawn({ title: "budget", instructions: "do" });
+      await runner.spawn({ toolScope: PARENT_ALL_TOOL_SCOPE, title: "budget", instructions: "do" });
       const options = runTurnSpy.mock.calls[0]?.[3] as { maxRounds?: number } | undefined;
       expect(options?.maxRounds).toBe(500);
     } finally {
@@ -437,7 +445,7 @@ describe("SubAgentRunner — maxRounds bound", () => {
         stopReason: "end_turn",
       });
     try {
-      await runner.spawn({ title: "floor", instructions: "do" });
+      await runner.spawn({ toolScope: PARENT_ALL_TOOL_SCOPE, title: "floor", instructions: "do" });
       const options = runTurnSpy.mock.calls[0]?.[3] as { maxRounds?: number } | undefined;
       expect(options?.maxRounds).toBe(1);
     } finally {
@@ -485,6 +493,7 @@ describe("SubAgentRunner — cross-agent DLP boundary", () => {
     try {
       const result = await runner.spawn(
         {
+          toolScope: PARENT_ALL_TOOL_SCOPE,
           title: "dlp-success",
           instructions: "finish",
           originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
@@ -529,6 +538,7 @@ describe("SubAgentRunner — cross-agent DLP boundary", () => {
     try {
       const result = await runner.spawn(
         {
+          toolScope: PARENT_ALL_TOOL_SCOPE,
           title: "dlp-error",
           instructions: "fail",
           originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
@@ -589,6 +599,7 @@ describe("SubAgentRunner — projected terminal status", () => {
 
     try {
       const result = await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "blocked",
         instructions: "attempt work",
         originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
@@ -660,6 +671,7 @@ describe("SubAgentRunner — projected terminal status", () => {
 
       try {
         const result = await runner.spawn({
+          toolScope: PARENT_ALL_TOOL_SCOPE,
           title: `non-completing-${stopReason}`,
           instructions: "attempt work",
           originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
@@ -1054,6 +1066,124 @@ describe("SubAgentRunner — projected terminal status", () => {
     }
   });
 });
+describe("SubAgentToolScope — one meaning per value", () => {
+  // The three grants used to be encoded in one `string[]` whose EMPTY case read
+  // as "the whole parent registry" on the spawn path, "nothing" on the A2A wire
+  // path, and "unreadable metadata, refuse" on the resume path. These pin that
+  // each meaning is now a distinct value that cannot be mistaken for another.
+  it("refuses to build an `exactly` scope with no names", () => {
+    expect(() => exactToolScope([])).toThrow(/at least one tool name/i);
+  });
+
+  it("names exactly what it was given, and copies rather than aliases", () => {
+    const requested = ["read_file", "grep_files"];
+    const scope = exactToolScope(requested);
+    expect(scope).toEqual({ kind: "exactly", names: ["read_file", "grep_files"] });
+    requested.push("write_file");
+    expect(scope.kind === "exactly" && scope.names).toEqual(["read_file", "grep_files"]);
+  });
+
+  it("round-trips a persistable scope through the codec pair", () => {
+    const scope = exactToolScope(["noop"]);
+    expect(toPersistedToolScope(scope)).toEqual(["noop"]);
+    expect(fromPersistedToolScope(toPersistedToolScope(scope), false)).toEqual(scope);
+    expect(toPersistedToolScope(DENY_ALL_TOOL_SCOPE)).toEqual([]);
+  });
+
+  it("decodes an absent record as unreadable, whoever is asking", () => {
+    expect(fromPersistedToolScope(undefined, false)).toBeNull();
+    expect(fromPersistedToolScope(undefined, true)).toBeNull();
+  });
+
+  it("decodes an EMPTY record as deny-all only for a wire-bound task", () => {
+    // The wire path is the only one that can freeze a run with no tools, so an
+    // empty list is deliberate there and a corruption/tamper signal elsewhere.
+    // Neither reading is "grant the parent registry": there is no decode that
+    // widens.
+    expect(fromPersistedToolScope([], true)).toEqual(DENY_ALL_TOOL_SCOPE);
+    expect(fromPersistedToolScope([], false)).toBeNull();
+  });
+});
+
+describe("SubAgentRunner — what each tool scope grants", () => {
+  /** A parent registry holding one read tool, one shell tool, and the blocklisted `agent_spawn`. */
+  function scopeProbeRegistry(): ToolRegistry {
+    const toolRegistry = new ToolRegistry();
+    for (const [name, category] of [
+      ["read_file", "read"],
+      ["run_shell", "shell"],
+      ["agent_spawn", "meta"],
+    ] as const) {
+      toolRegistry.register(
+        createDynamicTool({
+          name,
+          description: name,
+          source: "builtin",
+          category,
+          // The registry refuses a builtin `meta` tool with no decision policy.
+          ...(category === "meta" ? { decisionOverride: "ask" as const } : {}),
+          jsonSchema: { type: "object", properties: {} },
+          execute: async () => ({ output: name, isError: false }),
+        }),
+      );
+    }
+    return toolRegistry;
+  }
+
+  async function advertisedToolNames(toolScope: SubAgentToolScope): Promise<string[]> {
+    const toolRegistry = scopeProbeRegistry();
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+    try {
+      await runner.spawn({ title: "scope probe", instructions: "probe", toolScope, maxRounds: 1 });
+      return provider.observedToolNames[0] ?? [];
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  }
+
+  it("grants the whole parent registry minus the blocklist for `parent-all`", async () => {
+    const advertised = await advertisedToolNames(PARENT_ALL_TOOL_SCOPE);
+    expect(advertised).toEqual(expect.arrayContaining(["read_file", "run_shell"]));
+    expect(advertised).not.toContain("agent_spawn");
+  });
+
+  it("grants exactly the named tools for `exactly`", async () => {
+    const advertised = await advertisedToolNames(exactToolScope(["read_file"]));
+    expect(advertised).toEqual(["read_file"]);
+  });
+
+  it("grants no source tool at all for `deny-all`", async () => {
+    // The posture the A2A wire path relies on: a bound profile that names no
+    // tool hands the remote peer nothing, never the parent's whole surface.
+    expect(await advertisedToolNames(DENY_ALL_TOOL_SCOPE)).toEqual([]);
+  });
+});
+
 describe("SubAgentRunner — sourceTools allowlist", () => {
   it("filters tools so a not-listed tool is unavailable to the LLM", async () => {
     const toolRegistry = new ToolRegistry();
@@ -1160,7 +1290,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       await runner.spawn({
         title: "team schedule",
         instructions: "오늘 팀 스케줄 조회",
-        sourceTools: [scheduleToolName],
+        toolScope: exactToolScope([scheduleToolName]),
         maxRounds: 2,
       });
 
@@ -1235,7 +1365,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       await runner.spawn({
         title: "scoped child",
         instructions: "summarize",
-        sourceTools: [CARD_FIXTURE_IN_SCOPE_TOOL],
+        toolScope: exactToolScope([CARD_FIXTURE_IN_SCOPE_TOOL]),
         maxRounds: 1,
       });
 
@@ -1299,7 +1429,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       await runner.spawn({
         title: "read only subagent",
         instructions: "summarize",
-        sourceTools: ["memory_write", "noop"],
+        toolScope: exactToolScope(["memory_write", "noop"]),
         maxRounds: 1,
       });
 
@@ -1380,7 +1510,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       await runner.spawn({
         title: "indexer",
         instructions: "scan",
-        sourceTools: [toolName],
+        toolScope: exactToolScope([toolName]),
         maxRounds: 2,
       });
 
@@ -1436,7 +1566,7 @@ describe("SubAgentRunner — the child's agent context", () => {
       });
 
     try {
-      await runner.spawn({ title: "child", instructions: "summarize", maxRounds: 1 });
+      await runner.spawn({ toolScope: PARENT_ALL_TOOL_SCOPE, title: "child", instructions: "summarize", maxRounds: 1 });
 
       const childPrompt = provider.observedSystemPrompts[0] ?? "";
       expect(childPrompt).toContain("<lvis-agents-custom-context>");
@@ -1679,6 +1809,7 @@ describe("SubAgentRunner — unknown mode audit warn", () => {
       .mockImplementation(() => undefined);
     try {
       await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "t",
         instructions: "do",
         profileMode: "supervise", // not a member of AGENT_MODES
@@ -1773,6 +1904,7 @@ describe("SubAgentRunner — subagent session namespace isolation (PR-A)", () =>
 
     try {
       const result = await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "isolated",
         instructions: "do",
         originSessionId: "abc123-DEF-should:be::sanitized",
@@ -1848,6 +1980,7 @@ describe("SubAgentRunner — subagent session namespace isolation (PR-A)", () =>
       });
     try {
       const result = await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "sanitize",
         instructions: "do",
         originSessionId: "a::b//c..d",
@@ -1960,6 +2093,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
 
     try {
       const result = await runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "provider-missing",
         instructions: "do",
         originSessionId: "b0590dc4-c31e-4ff6-8106-2b5f6d6325d9",
@@ -2006,7 +2140,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
         title: "meta",
         instructions: "do",
         originSessionId: "51941cbf-7fc2-45a8-8401-d2193b48d640",
-        sourceTools: ["noop"],
+        toolScope: exactToolScope(["noop"]),
         profileModel: "high",
         profileMode: "execute",
         maxRounds: 3,
@@ -2055,6 +2189,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
         title: "meta-min",
         instructions: "do",
         originSessionId: "dbf92cab-1af6-4614-815f-ee0e85ca76ab",
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         maxRounds: 1,
       },
     );
@@ -2094,6 +2229,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
         title: "hash",
         instructions: "do",
         originSessionId: origin,
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         maxRounds: 1,
       },
     );
@@ -2131,6 +2267,7 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
         title: "trace",
         instructions: "do",
         originSessionId: "5ff63492-6b31-40b0-89d5-e32bffe9063b",
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         maxRounds: 1,
       },
     );
@@ -2477,6 +2614,7 @@ describe("SubAgentRunner workspace lifecycle", () => {
 
     try {
       spawnPromise = runner.spawn({
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "pending metadata child",
         instructions: "run only after metadata persists",
         projectRoot: removedRoot,
@@ -2575,6 +2713,7 @@ describe("spawn cancellation signal", () => {
     try {
       const spawned = runner.spawn(
         {
+          toolScope: PARENT_ALL_TOOL_SCOPE,
           title: "cancel-signal",
           instructions: "work",
           originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
@@ -2629,6 +2768,7 @@ describe("SubAgentRunner terminal completion step", () => {
     // through the completion step without needing a scripted LLM turn.
     const spawned = runner.spawn(
       {
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "completion order",
         instructions: "do",
         originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
@@ -2666,6 +2806,7 @@ describe("SubAgentRunner terminal completion step", () => {
     const onTerminal = vi.fn();
     await runner.spawn(
       {
+        toolScope: PARENT_ALL_TOOL_SCOPE,
         title: "single frame",
         instructions: "do",
         originSessionId: "a1bdc27a-c758-4a74-8955-5e9188412366",
