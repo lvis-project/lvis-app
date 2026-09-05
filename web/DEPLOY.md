@@ -4,9 +4,33 @@
 
 ## 자동 배포 (기본)
 
-`.github/workflows/web-ci.yml`이 **`web/**` 변경이 main에 머지되면 자동으로 배포**합니다
-(repo 시크릿 `CLOUDFLARE_API_TOKEN`, Cloudflare Pages: Edit 권한이 설정돼 있어야 발화 —
-없으면 워크플로가 경고 후 스킵하고 아래 수동 방식이 폴백). 이제 별도 조치 없이 머지만으로 배포됩니다.
+`.github/workflows/web-deploy.yml`이 **`web/**` 변경이 main에 머지되면 자동으로 배포**합니다.
+`repository_dispatch`(type `deploy-web`)로도 같은 워크플로를 돌릴 수 있습니다.
+
+배포하는 워크플로는 `web-ci.yml`이 **아니라** `web-deploy.yml`입니다. `web-ci.yml`은 스크린샷
+출처 검사와 static export 빌드만 하고 배포 단계가 없으므로, 그 런이 `success`여도 사이트는
+바뀌지 않습니다. 배포 여부는 `web-deploy.yml` 런에서 확인하세요:
+
+```bash
+gh run list --workflow="web-deploy.yml" --limit 10 \
+  --json databaseId,status,conclusion,headSha
+```
+
+`deploy` job은 `web-production` 환경에서 실행됩니다. 이 환경에는 **사람 승인 규칙이 없어**
+머지만으로 끝까지 배포됩니다(2026-09-05 제거 — 승인 대기 런이 조용히 15건까지 쌓여 사이트가
+일주일치 구 콘텐츠를 서비스한 뒤). 남아 있는 보호는 **보호 브랜치에서만 배포** 정책 하나이며,
+아티팩트 무결성은 승인과 무관하게 deploy job 안에서 강제됩니다 — artifact digest, 번들
+SHA-256, source SHA 일치, tar 경로 traversal 차단, 파일별 체크섬.
+
+승인 규칙을 되돌리려면:
+
+```bash
+printf '{"reviewers":[{"type":"User","id":42824840}],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}' \
+  | gh api repos/lvis-project/lvis-app/environments/web-production -X PUT --input -
+```
+
+배포에는 repo 시크릿 `CLOUDFLARE_API_TOKEN`(Cloudflare Pages: Edit)이 필요합니다. 없으면
+워크플로는 스킵이 아니라 **실패**하므로, 실패한 런은 아래 수동 방식으로 폴백하세요.
 
 ## 수동 배포 (폴백 / 로컬 검증)
 
