@@ -23,6 +23,7 @@ import {
 import { telegramConversationDigest } from "../telegram-platform-runtime.js";
 import { namespaceAt } from "./telegram-connection-namespace.js";
 import { useTempDirs } from "../../__tests__/test-helpers.js";
+import { forbidAmbientFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const BOT_TOKEN = "8112233445:activation-suite-bot-token";
 /** The store only ever holds digests, so the fingerprint is what it is given. */
@@ -57,24 +58,13 @@ function memorySecretStore() {
   };
 }
 
-/**
- * The ambient stack is nobody's transport: the activation takes the one it
- * runs on as a required option. It stays stubbed as a TRIPWIRE so a path that
- * regresses to the global fetch fails loudly here instead of quietly reaching
- * the machine's network.
- */
-function tripwireAmbientFetch(): void {
-  vi.stubGlobal("fetch", vi.fn(() => {
-    throw new Error("this suite must not issue a request on the ambient fetch");
-  }));
-}
 
 /**
  * Every Bot API call answers 401. `getUpdates` maps that to `unauthorized`,
  * which is the one provider outcome the poller treats as unrecoverable.
  */
 function rejectingProvider(): typeof fetch {
-  tripwireAmbientFetch();
+  forbidAmbientFetch();
   return vi.fn(async () => new Response(
     JSON.stringify({ ok: false, error_code: 401, description: "Unauthorized" }),
     { status: 401, headers: { "content-type": "application/json" } },
@@ -90,7 +80,7 @@ function rejectingProvider(): typeof fetch {
  * starve the timers `vi.waitFor` runs on.
  */
 function emptyProvider(): typeof fetch {
-  tripwireAmbientFetch();
+  forbidAmbientFetch();
   let polls = 0;
   return vi.fn(async (url: string | URL, init?: RequestInit) => {
     if (String(url).endsWith("/getUpdates") && ++polls > 1) {

@@ -33,6 +33,7 @@ import {
   textUpdate,
   type Batch,
 } from "./telegram-bridge-fixtures.js";
+import { forbidAmbientFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const ASSISTANT_TEXT = "응답 텍스트입니다.";
 
@@ -75,12 +76,9 @@ describe("telegram egress integration (real projection, real delivery)", () => {
         json: async () => ({ ok: true }),
       } as unknown as Response;
     });
-    // The ambient stack is nobody's transport here. It stays stubbed as a
-    // TRIPWIRE so a path that regresses to it fails loudly instead of quietly
-    // reaching the machine's network.
-    vi.stubGlobal("fetch", vi.fn(() => {
-      throw new Error("this suite must not issue a request on the ambient fetch");
-    }));
+    // The ambient stack is nobody's transport here: a path that regresses to
+    // it fails loudly instead of quietly reaching the machine's network.
+    forbidAmbientFetch();
 
     // Command port stand-in that does what the real port does for a bridge
     // turn: publish semantic events into the ONE timeline the projection reads.

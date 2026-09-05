@@ -24,6 +24,7 @@ import {
   textUpdate,
   type Batch,
 } from "./telegram-bridge-fixtures.js";
+import { forbidAmbientFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 /** Minimal safe-projection stand-in: only snapshot/subscribe are ever called. */
 function projectionStore(): SharedConversationProjectionStore {
@@ -175,11 +176,8 @@ describe("Telegram bridge lifecycle (owner-driven connection)", () => {
 
   it("admits Telegram's 4,096-UTF-16-unit text bound and no more", async () => {
     // The ambient stack is nobody's transport here — the fixture hands the
-    // bridge its own. It stays stubbed as a TRIPWIRE so a path that regresses
-    // to the global fetch fails loudly instead of reaching the network.
-    vi.stubGlobal("fetch", vi.fn(() => {
-      throw new Error("this suite must not issue a request on the ambient fetch");
-    }));
+    // bridge its own, and a path that regresses to the global fails loudly.
+    forbidAmbientFetch();
     const f = connectionFixture({
       receiptStore: {
         reserve: vi.fn(() => ({ kind: "reserved" })),
