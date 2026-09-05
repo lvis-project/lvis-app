@@ -285,8 +285,18 @@ export function coalesceTelegramDeliveryQueue(
 export interface CreateTelegramOutboundTransportOptions {
   /** Bot API token. It is used only as validated path material and never logged. */
   readonly botToken: string;
-  /** Injectable for tests; defaults to the runtime Fetch implementation. */
-  readonly fetch?: typeof globalThis.fetch;
+  /**
+   * The transport every outbound send runs on. REQUIRED, and deliberately
+   * without a default.
+   *
+   * It used to fall back to the ambient `fetch`, which is Node's — a stack
+   * that reads neither the machine's proxy configuration nor its trust store.
+   * A caller that forgot one therefore went out direct, on a path the user
+   * never chose, and one that cannot complete at all where the direct route
+   * is intercepted. Requiring it makes forgetting the transport a compile
+   * error rather than a silent route change.
+   */
+  readonly fetch: typeof globalThis.fetch;
   /** Optional host-owned re-pair/revocation fence checked before wire delivery. */
   readonly isChannelCurrent?: (
     channel: Readonly<TelegramDeliveryChannel>,
@@ -431,7 +441,7 @@ export function createTelegramOutboundTransport(
   options: CreateTelegramOutboundTransportOptions,
 ): PlatformBridgeDeliveryTransport<TelegramDeliveryChannel> {
   const botToken = readConfiguredBotToken(options);
-  const fetchImplementation = options?.fetch ?? globalThis.fetch;
+  const fetchImplementation = options?.fetch;
   if (typeof fetchImplementation !== "function") {
     throw new TypeError("telegram-outbound-fetch-invalid");
   }

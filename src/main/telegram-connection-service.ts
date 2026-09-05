@@ -109,6 +109,14 @@ export interface CreateTelegramConnectionServiceOptions {
    * is the exact failure this dependency exists to end.
    */
   readonly conversationExists: (conversationId: string) => boolean;
+  /**
+   * The transport this service's own Bot API calls (bot verification) run on.
+   * REQUIRED: Node's ambient `fetch` reads neither the machine's proxy
+   * configuration nor its trust store, so a verification issued on it would go
+   * direct on a machine whose configuration says otherwise. Composition
+   * supplies Chromium's stack.
+   */
+  readonly networkFetch: typeof fetch;
   /** Test-only injection; production builds a real Bot API client. */
   readonly createBotApiClient?: (botToken: string) => TelegramBotApiClient;
 }
@@ -303,7 +311,8 @@ export function createTelegramConnectionService(
   }
   const { store, settingsService, bridgeControl } = options;
   const makeClient = options.createBotApiClient
-    ?? ((botToken: string) => createTelegramBotApiClient({ botToken }));
+    ?? ((botToken: string) =>
+      createTelegramBotApiClient({ botToken, fetchImplementation: options.networkFetch }));
   const listeners = new Set<() => void>();
   /** Serialize multi-step lifecycle work so two connects cannot interleave. */
   const runExclusive = createSerialQueue();

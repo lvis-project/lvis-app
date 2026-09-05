@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTelegramBotApiClient } from "../telegram-bot-api-client.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const BOT_TOKEN = "123456789:abcdefghijklmnopqrstuvwxyz_ABCDEF";
 
@@ -259,7 +260,10 @@ describe("TelegramBotApiClient", () => {
   });
 
   it("rejects an unusable configuration instead of calling Telegram", async () => {
-    expect(() => createTelegramBotApiClient({ botToken: "has/slash" })).toThrow(
+    expect(() => createTelegramBotApiClient({
+      botToken: "has/slash",
+      fetchImplementation: unusedNetworkFetch,
+    })).toThrow(
       "telegram-bot-api-client-bot-token-invalid",
     );
 

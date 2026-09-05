@@ -12,6 +12,7 @@ import {
   type TelegramDeliveryChannel,
   type TelegramDeliveryQueueEntry,
 } from "../telegram-platform-adapter.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const BOT_TOKEN = "123456:BOT_TOKEN-safe_123";
 
@@ -193,7 +194,10 @@ describe("Telegram platform adapter", () => {
 
   it("validates bot-token configuration without accepting URL-changing token material", () => {
     for (const botToken of ["", "bad token", "bad/path", "x".repeat(257)]) {
-      expect(() => createTelegramOutboundTransport({ botToken })).toThrow("telegram-outbound-bot-token-invalid");
+      expect(() => createTelegramOutboundTransport({
+        botToken,
+        fetch: unusedNetworkFetch,
+      })).toThrow("telegram-outbound-bot-token-invalid");
     }
     expect(() => createTelegramOutboundTransport({
       botToken: BOT_TOKEN,

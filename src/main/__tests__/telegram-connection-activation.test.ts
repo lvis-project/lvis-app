@@ -58,14 +58,27 @@ function memorySecretStore() {
 }
 
 /**
+ * The ambient stack is nobody's transport: the activation takes the one it
+ * runs on as a required option. It stays stubbed as a TRIPWIRE so a path that
+ * regresses to the global fetch fails loudly here instead of quietly reaching
+ * the machine's network.
+ */
+function tripwireAmbientFetch(): void {
+  vi.stubGlobal("fetch", vi.fn(() => {
+    throw new Error("this suite must not issue a request on the ambient fetch");
+  }));
+}
+
+/**
  * Every Bot API call answers 401. `getUpdates` maps that to `unauthorized`,
  * which is the one provider outcome the poller treats as unrecoverable.
  */
-function stubRejectingProvider(): void {
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(
+function rejectingProvider(): typeof fetch {
+  tripwireAmbientFetch();
+  return vi.fn(async () => new Response(
     JSON.stringify({ ok: false, error_code: 401, description: "Unauthorized" }),
     { status: 401, headers: { "content-type": "application/json" } },
-  )));
+  )) as unknown as typeof fetch;
 }
 
 /**
@@ -76,9 +89,10 @@ function stubRejectingProvider(): void {
  * answered long poll would otherwise spin the loop on resolved promises and
  * starve the timers `vi.waitFor` runs on.
  */
-function stubEmptyProvider(): void {
+function emptyProvider(): typeof fetch {
+  tripwireAmbientFetch();
   let polls = 0;
-  vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+  return vi.fn(async (url: string | URL, init?: RequestInit) => {
     if (String(url).endsWith("/getUpdates") && ++polls > 1) {
       await new Promise((_resolve, reject) => {
         init?.signal?.addEventListener(
@@ -92,7 +106,7 @@ function stubEmptyProvider(): void {
       JSON.stringify({ ok: true, result: [] }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
-  }));
+  }) as unknown as typeof fetch;
 }
 
 /**
@@ -117,9 +131,14 @@ function storeWithFailingWrites(
   return { ...store, ...broken };
 }
 
-function activationInput(store: TelegramConnectionStore, stopBridge: () => Promise<void>) {
+function activationInput(
+  store: TelegramConnectionStore,
+  stopBridge: () => Promise<void>,
+  networkFetch: typeof fetch,
+) {
   return {
     store,
+    networkFetch,
     settingsService: { getEncryptedSecret: (key: string) => (
       key === TELEGRAM_BOT_TOKEN_SECRET_KEY ? BOT_TOKEN : null
     ) },
@@ -160,14 +179,14 @@ describe("telegram connection activation", () => {
   });
 
   it("tears the activation down when the provider rejects the token", async () => {
-    stubRejectingProvider();
+    const provider = rejectingProvider();
     const store = await connectedStore();
     // The real teardown, exactly as `main.ts` wires it. A stub would pass even
     // if the handler and the teardown were waiting on each other, which is the
     // failure this whole path is about.
     const stopBridge = vi.fn(() => stopTelegramBridgeServer("user"));
 
-    await startTelegramConnectionActivation(activationInput(store, stopBridge));
+    await startTelegramConnectionActivation(activationInput(store, stopBridge, provider));
     await vi.waitFor(() => {
       expect(store.ownerSnapshot().lastErrorCode).toBe("telegram-bot-token-rejected");
     });
@@ -187,13 +206,14 @@ describe("telegram connection activation", () => {
   });
 
   it("tears the activation down when the poll offset cannot be persisted", async () => {
-    stubEmptyProvider();
+    const provider = emptyProvider();
     const real = await connectedStore();
     const stopBridge = vi.fn(() => stopTelegramBridgeServer("user"));
 
     await startTelegramConnectionActivation(activationInput(
       storeWithFailingWrites(real, "recordPollOffset"),
       stopBridge,
+      provider,
     ));
 
     // The write is the only injected callback whose failure used to escape the
@@ -210,7 +230,7 @@ describe("telegram connection activation", () => {
   });
 
   it("tears the activation down even when the fatal outcome cannot be recorded", async () => {
-    stubEmptyProvider();
+    const provider = emptyProvider();
     const real = await connectedStore();
     const stopBridge = vi.fn(() => stopTelegramBridgeServer("user"));
 
@@ -222,6 +242,7 @@ describe("telegram connection activation", () => {
     await startTelegramConnectionActivation(activationInput(
       storeWithFailingWrites(real, "recordPollOffset", "setLastError"),
       stopBridge,
+      provider,
     ));
 
     await vi.waitFor(() => {
@@ -235,11 +256,11 @@ describe("telegram connection activation", () => {
   });
 
   it("keeps receiving when the same poll writes the offset through", async () => {
-    stubEmptyProvider();
+    const provider = emptyProvider();
     const store = await connectedStore();
     const stopBridge = vi.fn(() => stopTelegramBridgeServer("user"));
 
-    await startTelegramConnectionActivation(activationInput(store, stopBridge));
+    await startTelegramConnectionActivation(activationInput(store, stopBridge, provider));
 
     // The control for both cases above: identical wiring, identical provider,
     // and the only difference is a store that accepts the write.

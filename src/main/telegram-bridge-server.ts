@@ -672,6 +672,11 @@ interface StartTelegramBridgeServerOptions {
   readonly conversationSurfaceRuntime: ConversationSurfaceRuntime;
   readonly conversationCommandPort: ConversationCommandPort;
   readonly getCurrentConversationId: () => string;
+  /**
+   * The transport the outbound delivery path runs on. Same option, same
+   * reason as on {@link StartTelegramConnectionBridgeOptions}.
+   */
+  readonly networkFetch: typeof fetch;
   readonly receiptStore?: PlatformBridgeReceiptStore;
   readonly log?: (message: string) => void;
 }
@@ -722,6 +727,14 @@ export interface StartTelegramConnectionBridgeOptions {
   /** Process-held credential from the owner's encrypted store. */
   readonly botToken: string;
   readonly botFingerprint: string;
+  /**
+   * The transport every Bot API request of this activation runs on — polling,
+   * control replies, delivery and approval cards alike. REQUIRED: Node's
+   * ambient `fetch` reads neither the machine's proxy configuration nor its
+   * trust store, so an activation issued on it would go direct on a machine
+   * whose configuration says otherwise. Boot supplies Chromium's stack.
+   */
+  readonly networkFetch: typeof fetch;
   readonly authority: TelegramPairedRouteAuthority;
   readonly pollOffset: () => number | null;
   readonly recordPollOffset: (offset: number) => Promise<void>;
@@ -769,7 +782,9 @@ export async function maybeStartTelegramConnectionBridge(
   if (activeBridge) return Object.freeze({ port: activeBridge.ingress.port });
   if (startPromise) return await startPromise;
 
-  const client = (options.createBotApiClient ?? defaultBotApiClient)(options.botToken);
+  const client = options.createBotApiClient
+    ? options.createBotApiClient(options.botToken)
+    : defaultBotApiClient(options.botToken, options.networkFetch);
   const plan: TelegramActivationPlan = {
     botToken: options.botToken,
     botFingerprint: options.botFingerprint,
@@ -837,6 +852,7 @@ export async function maybeStartTelegramConnectionBridge(
     conversationSurfaceRuntime: options.conversationSurfaceRuntime,
     conversationCommandPort: options.conversationCommandPort,
     getCurrentConversationId: options.getCurrentConversationId,
+    networkFetch: options.networkFetch,
     ...(options.receiptStore ? { receiptStore: options.receiptStore } : {}),
     ...(options.log ? { log: options.log } : {}),
   }, lifecycleGeneration);
@@ -851,8 +867,11 @@ export async function maybeStartTelegramConnectionBridge(
   }
 }
 
-function defaultBotApiClient(botToken: string): TelegramBotApiClient {
-  return createTelegramBotApiClient({ botToken });
+function defaultBotApiClient(
+  botToken: string,
+  fetchImplementation: typeof fetch,
+): TelegramBotApiClient {
+  return createTelegramBotApiClient({ botToken, fetchImplementation });
 }
 
 async function startActivation(
@@ -880,6 +899,7 @@ async function startActivation(
   const delivery = createPlatformBridgeDeliveryAdapter<TelegramDeliveryChannel>({
     transport: createTelegramOutboundTransport({
       botToken: plan.botToken,
+      fetch: options.networkFetch,
       // Egress failures classify themselves into this sink (network / HTTP
       // status / Bot API error code only); without it a failed send is
       // indistinguishable from a delivered one.

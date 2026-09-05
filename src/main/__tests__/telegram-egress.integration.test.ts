@@ -10,9 +10,9 @@
  * comment near `isTailnetOpaqueId` in `conversation-command-port.ts`, where
  * each side passed against a mock of the other while the composed path failed.
  * Here the ONLY stubs are the Bot API wire itself (`getUpdates` via an
- * injected client, `sendMessage` via global fetch) and the command port, which
- * publishes turn events into the real timeline the same way handleChatSend
- * does.
+ * injected client, `sendMessage` via the injected outbound transport) and the
+ * command port, which publishes turn events into the real timeline the same
+ * way handleChatSend does.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemorySecretStore } from "../../audit/hmac-chain.js";
@@ -64,14 +64,22 @@ describe("telegram egress integration (real projection, real delivery)", () => {
       sendMessage: vi.fn(async () => ({ ok: true as const, value: { message_id: 1 } })),
     };
 
-    // Capture outbound wire sends (the safe-projection transport uses fetch).
+    // Capture outbound wire sends. This is the transport the bridge is handed,
+    // not the ambient one: the delivery path takes its `fetch` as a required
+    // option now, so observing it means passing the very stub asserted on.
     const sentBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+    const wireFetch = vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       sentBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
       return {
         ok: true,
         json: async () => ({ ok: true }),
       } as unknown as Response;
+    });
+    // The ambient stack is nobody's transport here. It stays stubbed as a
+    // TRIPWIRE so a path that regresses to it fails loudly instead of quietly
+    // reaching the machine's network.
+    vi.stubGlobal("fetch", vi.fn(() => {
+      throw new Error("this suite must not issue a request on the ambient fetch");
     }));
 
     // Command port stand-in that does what the real port does for a bridge
@@ -100,6 +108,7 @@ describe("telegram egress integration (real projection, real delivery)", () => {
       getCurrentConversationId: () => BOUND_CONVERSATION,
       botToken: BOT_TOKEN,
       botFingerprint: BOT_FINGERPRINT,
+      networkFetch: wireFetch as unknown as typeof fetch,
       authority,
       pollOffset: () => offset,
       recordPollOffset: async (next: number) => {

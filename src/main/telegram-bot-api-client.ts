@@ -154,8 +154,18 @@ export interface TelegramBotApiClient {
 export interface CreateTelegramBotApiClientOptions {
   /** Process-held credential. Never persisted or logged by this module. */
   readonly botToken: string;
-  /** Test-only injection; production uses the global fetch. */
-  readonly fetchImplementation?: typeof fetch;
+  /**
+   * The transport every Bot API request runs on. REQUIRED, and deliberately
+   * without a default.
+   *
+   * It used to fall back to the ambient `fetch`, which is Node's — a stack
+   * that reads neither the machine's proxy configuration nor its trust store.
+   * A caller that forgot one therefore went out direct, on a path the user
+   * never chose, and one that cannot complete at all where the direct route
+   * is intercepted. Requiring it makes forgetting the transport a compile
+   * error rather than a silent route change.
+   */
+  readonly fetchImplementation: typeof fetch;
   readonly requestTimeoutMs?: number;
   readonly pollRequestTimeoutMs?: number;
 }
@@ -170,10 +180,7 @@ export function createTelegramBotApiClient(
   if (typeof botToken !== "string" || !TELEGRAM_BOT_TOKEN_PATH_GRAMMAR.test(botToken)) {
     throw new TypeError("telegram-bot-api-client-bot-token-invalid");
   }
-  const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
-  if (typeof fetchImplementation !== "function") {
-    throw new TypeError("telegram-bot-api-client-fetch-unavailable");
-  }
+  const fetchImplementation = options.fetchImplementation;
   const requestTimeoutMs = boundedTimeout(
     options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
   );
