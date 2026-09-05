@@ -22,7 +22,7 @@ export default function Page() {
       <StepList
         steps={[
           { title: "회의 종료", body: <p><strong>Meeting</strong> 플러그인이 녹음 종료 → 자동 회의록 + 액션 아이템 후보 추출.</p>, badge: "Meeting" },
-          { title: "후속 카드 노출", body: <p><strong>Work Assistant</strong> 가 액션 아이템 후보를 사용자 확인 카드로 띄움. ‘TODO 로 추가 / 메일 답장 / 일정 등록’ 중 선택.</p>, badge: "Work Assistant" },
+          { title: "후속 카드 노출", body: <p><strong>Work Assistant</strong> 가 액션 아이템 후보를 사용자 확인 카드로 띄움. ‘Tasks 로 추가 / 메일 답장 / 일정 등록’ 중 선택.</p>, badge: "Work Assistant" },
           { title: "일정 등록 + 답장 초안", body: <p>사용자가 ‘일정 + 답장’ 선택 → <strong>Microsoft 365</strong> 의 캘린더에 일정 등록, 메일 답장 초안 채팅에 표시. ‘발송’ 누르는 순간에만 실제 전송.</p>, badge: "MS-Graph" },
           { title: "기록 보존", body: <p>모든 단계가 감사 기록에 남고, 추출된 액션 아이템은 업무 보드 카드로도 동기화됩니다.</p> },
         ]}

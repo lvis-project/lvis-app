@@ -28,7 +28,7 @@ export default function Page() {
           { title: "회의 종료 감지", body: <p>meeting plugin이 사용자 stop / floating window 종료에서 <code>meeting.ended</code> emit → 모든 transcript 가 SessionStore 에 저장.</p>, badge: "meeting" },
           { title: "요약 생성", body: <p>meeting plugin이 호스트 LLM (<code>callLlm</code>) 으로 transcript 요약 + <code>actionItems</code> 추출. 결과를 <code>meeting.summary.created</code> 로 emit.</p> },
           { title: "Work Assistant detector 진입", body: <p>플러그인 쪽 <code>src/decision/meeting-summary-detector.ts</code> 가 이벤트 구독. 정책 평가 (allow-list 도메인 등) 후 surface 여부 결정. <em>이 경로는 호스트 저장소가 아니라 해당 플러그인 저장소의 경로입니다.</em></p>, badge: "work-assistant" },
-          { title: "Proactive card", body: <p>surface 결정 시 <code>hostApi.triggerConversation</code> 으로 채팅 본문에 카드 노출. 사용자 선택지 표시 (TODO/메일/요약 저장).</p> },
+          { title: "Proactive card", body: <p>surface 결정 시 <code>hostApi.triggerConversation</code> 으로 채팅 본문에 카드 노출. 사용자 선택지 표시 (Tasks/메일/요약 저장).</p> },
           { title: "후속 액션", body: <p>사용자가 선택하면 work-assistant 가 ms-graph 도구로 실제 작업 수행 (예: 캘린더 등록, 업무 보드 카드 생성).</p>, badge: "최종" },
         ]}
       />

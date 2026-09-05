@@ -11,18 +11,19 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Onboarding"
         title="The First Time You Open LVIS — A Short Tour"
-        description="On first run, the host shows a short tour that walks through LVIS's most common actions all at once. The tour appears only once, and its progress is stored only on the user's PC."
-        tags={["One-time", "Skippable", "Reopenable anytime"]}
+        description="On first run the host shows a six-step guide. While it is up the screen dims, only the element being pointed at keeps its original brightness with a highlight ring drawn around it, and the explanation card opens attached to that element. The ring and the card follow their target even when the card grows or a notice band opens and moves the layout."
+        tags={["Six steps", "One-time", "Skippable"]}
       />
 
-      <h2 id="what">What the tour covers</h2>
-      <ul>
-        <li>The chat screen's three areas (left sidebar, main body, right queue/TODO).</li>
-        <li>Where and how "today's suggestion" cards appear.</li>
-        <li>The location of the plugin panel and command palette.</li>
-        <li>The default response flow when a permission card or dialog appears.</li>
-        <li>The one-time memory-seed input (role / team / frequently used tools).</li>
-      </ul>
+      <h2 id="what">The six places the guide points at</h2>
+      <ol>
+        <li><strong>Step 1 · Start a conversation</strong> — the composer, along with ⌘+Enter to stop an answer in progress.</li>
+        <li><strong>Step 2 · Tools always require your approval</strong> — where the approval card appears. Once you allow or deny an action, that decision is remembered for the session.</li>
+        <li><strong>Step 3 · ⌘+K command palette</strong> — the shared entry point for switching sessions, settings, and running plugins.</li>
+        <li><strong>Step 4 · Recent chats and pinned items</strong> — the panel the search icon (⌘+F) opens.</li>
+        <li><strong>Step 5 · Settings · Routines · Memory</strong> — the hamburger menu.</li>
+        <li><strong>Step 6 · The model in use</strong> — the model name in the status row under the composer. A model you switch to applies from your next message.</li>
+      </ol>
 
       <h2 id="state">Progress and context</h2>
       <p>
@@ -32,15 +33,15 @@ export default function Page() {
 
       <StepList
         steps={[
-          { title: "Skip", body: <p>Even if you press "Skip," the memory-seed input step is still asked once more. It helps to fill that part in the first time.</p> },
-          { title: "Replay", body: <p>Go to Settings → Help → "Replay tour" to bring up the same flow again anytime.</p> },
-          { title: "Reset", body: <p>Pressing Settings → Help → "Reset tour" starts the tour again on the next launch, as if you were a first-time user.</p> },
+          { title: "Steps that advance on their own", body: <p>Step 1 advances once you type a line in the composer, and step 3 once you press ⌘+K. You move through the rest yourself.</p> },
+          { title: "The lit spot is safe to click", body: <p>Clicking the highlighted composer moves focus into it without closing the guide, so you can follow the "try typing here" step without losing your place. The button the guide is describing is not pressed on your behalf.</p> },
+          { title: "Skipping", body: <p>Clicking outside the highlighted area closes the guide.</p> },
         ]}
       />
 
-      <Callout tone="tip" title="The user memory seed during the tour">
-        Entering a short line of information up front — role / frequently used tools / preferred meeting time — noticeably improves the quality of every conversation afterward.
-        See the <a href="/en/docs/host/memory">MEMORY</a> page for details.
+      <Callout tone="tip" title="Plugins carry their own guides">
+        Meeting, document search, and Work Assistant each have a separate guide that points at their own screen elements, shown when that plugin's screen is up.
+        The user information worth filling in ahead of time is covered on the <a href="/en/docs/host/memory">MEMORY</a> page.
       </Callout>
 
       <PageNav />

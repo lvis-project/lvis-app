@@ -8,7 +8,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Getting Started", href: "/en/docs/getting-started/updates", title: "App Updates", snippet: "electron-updater · autoDownload=false · 4h interval · channel=latest" },
 
   // Host · Chat
-  { group: "Chat", href: "/en/docs/chat/layout", title: "Chat Screen Layout", snippet: "App · Sidebar · MainToolbar · main content region · ChatView" },
+  { group: "Chat", href: "/en/docs/chat/layout", title: "Chat Screen Layout", snippet: "App · Sidebar · MainToolbar · PaneFrame tiles · ChatGroupSession · ChatView" },
   { group: "Chat", href: "/en/docs/chat/message-queue", title: "Message Queue & Tasks", snippet: "MessageQueuePanel + SessionTasksPanel · above the composer · hidden when empty" },
   { group: "Chat", href: "/en/docs/chat/tool-thinking", title: "Tool & Thinking Display", snippet: "Tool Registry · three sources · background shell · view image · tool search" },
   { group: "Chat", href: "/en/docs/chat/question-cards", title: "Question Cards", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
@@ -22,7 +22,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Host Features", href: "/en/docs/host/agents", title: "Agents — Small Units of Work", snippet: "An autonomous unit that does one task well. Agents spawn sub-agents and resume them", keywords: ["agent", "agents", "subagent"] },
   { group: "Host Features", href: "/en/docs/host/memory", title: "MEMORY — Remembering What You Told It", snippet: "Role · preferences · constraints. Automatic capture is off by default; project AGENTS.md is read too", keywords: ["memory", "AGENTS.md"] },
   { group: "Host Features", href: "/en/docs/host/mcp", title: "MCP — Bringing In External Tools", snippet: "A server's tools, resources, prompts and instructions. External tools are filtered out of risk-band auto-allow into a confirmation card", keywords: ["mcp", "external tools", "resource", "prompt"] },
-  { group: "Host Features", href: "/en/docs/host/onboarding", title: "Onboarding — First-Run Guide", snippet: "Short tour on first launch + memory seed input + can be revisited anytime", keywords: ["onboarding", "tour", "start"] },
+  { group: "Host Features", href: "/en/docs/host/onboarding", title: "Onboarding — First-Run Guide", snippet: "Six-step guide on first launch + dims the screen and highlights its target + skippable", keywords: ["onboarding", "tour", "start"] },
   { group: "Host Features", href: "/en/docs/host/trust-security", title: "Trust & Security", snippet: "Source verification · version withdrawal · load-failure cards · secrets · audit log · no-fallback", keywords: ["trust", "security", "audit"] },
   { group: "Host Features", href: "/en/docs/host/integration-recipes", title: "Integration Recipes — Combined Scenarios", snippet: "Meeting → action → schedule → reply · research → presentation · meeting room + video call · video call → minutes → team board", keywords: ["recipe", "integration", "scenario"] },
 

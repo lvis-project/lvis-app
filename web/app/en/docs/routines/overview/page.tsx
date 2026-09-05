@@ -57,7 +57,7 @@ export default function Page() {
         steps={[
           { title: "Registration — UI or plugin manifest", body: <p>The user adds one from the RoutinePanel, or a plugin manifest provides the <code>routine-provider</code> capability together with a recommended routine.</p> },
           { title: "Scheduler registration", body: <p><code>src/main/routines-scheduler.ts</code> books the time trigger with an OS timer. The shutdown trigger is registered on the host's lifecycle hook.</p> },
-          { title: "Per-fire fresh ConversationLoop", body: <p>A new ConversationLoop instance is created at fire time. It is isolated from the interactive main loop's memory / permissions / TODOs.</p>, badge: "isolation" },
+          { title: "Per-fire fresh ConversationLoop", body: <p>A new ConversationLoop instance is created at fire time. It is isolated from the interactive main loop's memory / permissions / tasks.</p>, badge: "isolation" },
           { title: "Session recording", body: <p>The message stream and tool calls for a single fire are appended as JSONL to <code>{"~/.lvis/routine/sessions/<routineId>/<firedAt>.jsonl"}</code>.</p> },
           { title: "Result surfaced", body: <p>On completion, a "routine run complete" card appears in the chat body. On failure, it goes to the audit log and the next fire proceeds normally.</p> },
         ]}

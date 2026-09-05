@@ -13,10 +13,10 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="채팅 화면 구성"
-        description="메인 화면은 App.tsx 가 CustomTitleBar + MainToolbar 를 두르고, 접이식 Sidebar 를 띄우고, 그 안의 메인 콘텐츠 영역이 ChatView 를 마운트하는 구조입니다. SessionTasksPanel · MessageQueuePanel 은 컴포저 바로 위에 쌓이고, ChatView 는 useChatContext() 로 세션/큐/TODO state 를 함께 읽습니다."
+        description="메인 화면은 App.tsx 가 CustomTitleBar + MainToolbar 를 두르고, 접이식 Sidebar 를 띄우고, 그 안의 메인 콘텐츠 영역이 PaneFrame 을 마운트하는 구조입니다. PaneFrame 은 대화 영역을 최대 네 개의 타일로 나누고, 타일마다 ChatGroupSession 이 자기 ChatContext 를 제공하며 ChatView 를 그립니다. SessionTasksPanel · MessageQueuePanel 은 그 타일의 컴포저 바로 위에 쌓입니다."
         tags={[
-          "App + Sidebar + 메인 콘텐츠 영역",
-          "ChatView",
+          "App + Sidebar + PaneFrame",
+          "ChatGroupSession → ChatView",
           "MessageQueuePanel + SessionTasksPanel",
         ]}
       />
@@ -25,7 +25,7 @@ export default function Page() {
         columns={3}
         items={[
           { title: "① CustomTitleBar + MainToolbar", body: <>창 컨트롤 + 세션/플러그인/권한 toolbar. <code>src/ui/renderer/App.tsx</code> 가 마운트.</>, tone: "teal" },
-          { title: "② ChatView 본문", body: <>대화 + 도구 카드 + thinking + 질문 카드. <code>src/ui/renderer/ChatView.tsx</code>.</> },
+          { title: "② PaneFrame 타일", body: <>대화 영역을 최대 네 개의 타일로 나눕니다 (<code>src/ui/renderer/components/PaneFrame.tsx</code>). 타일마다 <code>ChatGroupSession.tsx</code> 가 자기 ChatContext 를 제공하고 <code>ChatView.tsx</code> 를 그립니다.</> },
           { title: "③ Queue + Tasks 패널", body: <>외부 신호 큐 + 세션 Tasks. 컴포저 바로 위 (<code>src/ui/renderer/components/ChatComposerDock.tsx</code>) 에 놓이고, 항목이 없으면 그려지지 않습니다.</>, tone: "citron" },
         ]}
       />
@@ -41,6 +41,7 @@ export default function Page() {
         <li><code>PluginGridButton.tsx</code> — 플러그인 진입 버튼 그리드 (host UI plugin manifest의 ui[] 슬롯이 여기에 결합).</li>
         <li><code>RoutinePanel.tsx</code> — RoutineEngine 의 등록 루틴 목록 + on/off.</li>
         <li><code>PermissionReviewStatusCard.tsx</code> — Reviewer 모드/상태 카드.</li>
+        <li><code>ApprovalDock.tsx</code> · <code>QuestionOverlay.tsx</code> — 도구 승인과 질문 카드. 그 대화가 열린 타일 안에서 답하고, 답을 기다리는 동안 <code>PendingAnswerDot.tsx</code> 가 사이드바의 그 대화 줄에 노란 점을 붙입니다.</li>
       </ul>
 
       <Callout tone="info" title="사이드바는 두 개가 따로 있습니다">
