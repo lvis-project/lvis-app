@@ -1,7 +1,7 @@
 import "../../../../../test/renderer/setup.js";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getLocale, setLocale } from "../../../../i18n/runtime.js";
+import { getLocale, setLocale, t } from "../../../../i18n/runtime.js";
 import type { TailnetSharingSnapshot } from "../../../../shared/tailnet-sharing.js";
 import type { LvisApi } from "../../types.js";
 import { TailnetAccessContent } from "../TailnetAccessContent.js";
@@ -65,8 +65,12 @@ function observerSnapshot() {
   };
 }
 
-function makeApi(options: { observerUnavailable?: boolean } = {}) {
-  const snapshot = vi.fn(async () => ({ ok: true as const, snapshot: SAFE_SNAPSHOT }));
+function makeApi(options: { observerUnavailable?: boolean; sharingDisabled?: boolean } = {}) {
+  const snapshot = vi.fn(async () =>
+    options.sharingDisabled === true
+      ? { ok: false as const, error: "tailnet-sharing-disabled" as const }
+      : { ok: true as const, snapshot: SAFE_SNAPSHOT },
+  );
   const createInvitation = vi.fn(async () => ({
     ok: true as const,
     invitation: {
@@ -124,6 +128,25 @@ afterEach(() => {
 });
 
 describe("TailnetAccessContent", () => {
+  // This content is rendered INSIDE a `ConnectionRow` whose label is
+  // `remoteSurfacesTab.tailnetSectionTitle`. A section heading equal to that
+  // label names nothing the reader did not already have, one line above it —
+  // and both the unavailable state and the setup card used to render exactly
+  // that string.
+  it("gives no section inside the row the row's own label as its heading", async () => {
+    expect(t("tailnetSetup.sectionTitle")).not.toBe(t("remoteSurfacesTab.tailnetSectionTitle"));
+    expect(t("tailnetAccessTab.disabledTitle")).not.toBe(t("remoteSurfacesTab.tailnetSectionTitle"));
+
+    const { api } = makeApi({ sharingDisabled: true });
+    render(<TailnetAccessContent api={api} />);
+
+    // The unavailable state names itself, and the setup card names the step it
+    // performs — neither restates the row.
+    await screen.findByText(t("tailnetAccessTab.disabledTitle"));
+    expect(screen.getByText(t("tailnetSetup.sectionTitle"))).toBeTruthy();
+    expect(screen.queryByText(t("remoteSurfacesTab.tailnetSectionTitle"))).toBeNull();
+  });
+
   // The setup flow owns the observer anchor now: the full listener form is
   // reachable only through it, so a deep link to the section has to land on the
   // thing a reader can actually act on.
