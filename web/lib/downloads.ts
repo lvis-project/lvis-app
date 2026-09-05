@@ -19,8 +19,17 @@ export interface DownloadTarget {
 }
 
 /**
- * Download buttons always point at the latest GitHub Release assets.
- * Flip a flag to false to render a "준비 중" state if an asset is
+ * Download buttons open the latest GitHub Release page, and the visitor picks
+ * the asset for their platform there.
+ *
+ * They deliberately do NOT deep-link to an asset file. Assets are published
+ * under their version (`LVIS-0.10.0-mac-arm64.dmg`), so a static href can only
+ * name a file that stops existing at the next release; the `LVIS-latest-*`
+ * aliases that once made a stable filename possible are no longer published.
+ * `releases/latest` is the one URL GitHub keeps pointing at the newest release,
+ * which is why it is the same URL for every platform here.
+ *
+ * Flip a flag to false to render a "준비 중" state if a platform's asset is
  * temporarily missing from the latest release (manual safety valve —
  * we intentionally do no runtime HEAD probing on a static site).
  */
@@ -33,6 +42,13 @@ export const KNOWN_AVAILABLE: Record<OS, boolean> = {
 export const ALL_RELEASES_URL =
   "https://github.com/lvis-project/lvis-app/releases";
 
+/**
+ * The newest release. GitHub resolves this to the current tag on every hit.
+ * Module-local: every caller reaches it through a `DownloadTarget.href`.
+ */
+const LATEST_RELEASE_URL =
+  "https://github.com/lvis-project/lvis-app/releases/latest";
+
 /** Per-OS download targets. `command`, `os`, `osLabel`, `title`, `format`, and
  *  `href` are locale-neutral; only the human-readable notes/step labels vary. */
 export function getDownloads(locale: Locale): DownloadTarget[] {
@@ -43,7 +59,7 @@ export function getDownloads(locale: Locale): DownloadTarget[] {
       osLabel: "macOS",
       title: "Apple Silicon",
       format: "DMG · arm64",
-      href: "/download/mac",
+      href: LATEST_RELEASE_URL,
       setupNote: en
         ? "The app isn't signed with an Apple Developer certificate, so Gatekeeper blocks it. Open the DMG, move LVIS.app to /Applications, then run the command below in Terminal."
         : "Apple 개발자 서명이 없어 Gatekeeper가 실행을 차단합니다. DMG를 열어 LVIS.app을 /Applications로 옮긴 뒤, 터미널에서 아래를 실행하세요.",
@@ -65,7 +81,7 @@ export function getDownloads(locale: Locale): DownloadTarget[] {
       osLabel: "Windows",
       title: "Windows 10+",
       format: "Installer · x64",
-      href: "/download/windows",
+      href: LATEST_RELEASE_URL,
       setupNote: en
         ? "Because the app is unsigned, Microsoft Defender SmartScreen shows a warning on first launch."
         : "서명되지 않은 앱이라 처음 실행 시 Microsoft Defender SmartScreen 경고가 표시됩니다.",
@@ -95,7 +111,7 @@ export function getDownloads(locale: Locale): DownloadTarget[] {
       osLabel: "Linux",
       title: "AppImage",
       format: "x86_64",
-      href: "/download/linux",
+      href: LATEST_RELEASE_URL,
       setupNote: en
         ? "The AppImage needs no installation — just grant it execute permission."
         : "AppImage는 설치가 필요 없습니다. 실행 권한만 부여하면 됩니다.",
