@@ -165,11 +165,6 @@
     {
       "type": "exports",
       "file": "src/api/a2a-remote-transport.ts",
-      "name": "isA2APublicAddress"
-    },
-    {
-      "type": "exports",
-      "file": "src/api/a2a-remote-transport.ts",
       "name": "validateA2ARemoteUrl"
     },
     {

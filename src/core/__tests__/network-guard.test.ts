@@ -28,6 +28,7 @@ vi.mock("node:dns", () => ({
 
 // Module must be imported AFTER the mock.
 import {
+  isGloballyRoutableAddress,
   NetworkGuardError,
   validateHttpUrl,
   ensurePublicHttpUrl,
@@ -305,6 +306,98 @@ describe("ensurePublicHttpUrl — IPv6", () => {
       allowPrivateNetworks: true,
     });
     expect(url.hostname).toBe("[fd00::1]");
+  });
+});
+
+describe("isGloballyRoutableAddress — the IANA special-purpose registry", () => {
+  // These ranges were reachable before the transport's classifier and the
+  // guard's were merged: the guard knew RFC1918 and little else, so a
+  // redirect or a DNS answer landing on multicast, on reserved space, or on
+  // documentation address space passed as "public". None of them can carry an
+  // HTTP conversation with a host on the internet, which is what makes them
+  // useful to an attacker steering a request and useless to a real caller.
+  it.each([
+    ["0.0.0.0", "this network"],
+    ["192.0.0.1", "IETF protocol assignments"],
+    ["192.0.2.1", "documentation (TEST-NET-1)"],
+    ["192.88.99.1", "6to4 relay anycast"],
+    ["198.18.0.1", "benchmarking"],
+    ["198.51.100.1", "documentation (TEST-NET-2)"],
+    ["203.0.113.1", "documentation (TEST-NET-3)"],
+    ["224.0.0.1", "multicast"],
+    ["240.0.0.1", "reserved"],
+    ["255.255.255.255", "broadcast"],
+  ])("refuses %s (%s)", (address) => {
+    expect(isGloballyRoutableAddress(address)).toBe(false);
+  });
+
+  it.each([
+    ["192.0.0.9", "PCP anycast"],
+    ["192.0.0.10", "NAT64/DNS64 discovery"],
+  ])("still allows %s (%s), which IANA marks globally reachable", (address) => {
+    expect(isGloballyRoutableAddress(address)).toBe(true);
+  });
+
+  it.each([
+    ["ff02::1", "link-local all-nodes multicast"],
+    ["2001:db8::1", "documentation"],
+    ["2002::1", "6to4"],
+    ["3fff::1", "documentation"],
+    ["5f00::1", "SRv6 SIDs"],
+    ["100::1", "discard-only, and outside global unicast"],
+  ])("refuses [%s] (%s)", (address) => {
+    expect(isGloballyRoutableAddress(address)).toBe(false);
+  });
+
+  it("still allows 64:ff9b::1 (NAT64), which sits outside global unicast", () => {
+    expect(isGloballyRoutableAddress("64:ff9b::1")).toBe(true);
+  });
+
+  it("allows an ordinary public IPv6 address", () => {
+    expect(isGloballyRoutableAddress("2606:4700:4700::1111")).toBe(true);
+  });
+
+  // The old IPv6 test was textual — `lower === "::1"`, `startsWith("fc")` —
+  // and an address is not obliged to arrive in its compressed form. A DNS
+  // answer is not normalised the way a URL literal is, so the fully expanded
+  // loopback address reached the guard as written and read as public.
+  it("recognises the expanded form of an address, not just the compressed one", () => {
+    expect(isGloballyRoutableAddress("0:0:0:0:0:0:0:1")).toBe(false);
+    expect(isGloballyRoutableAddress("fe80:0:0:0:0:0:0:1")).toBe(false);
+    expect(isGloballyRoutableAddress("fd00:0:0:0:0:0:0:1")).toBe(false);
+  });
+
+  it("refuses an unknown address family", () => {
+    expect(isGloballyRoutableAddress("not-an-address")).toBe(false);
+  });
+});
+
+describe("ensurePublicHttpUrl — reserved space is not reachable by opting in", () => {
+  // `allowPrivateNetworks` names the user's own LAN, which is a destination
+  // with a legitimate yes. It must not double as a key to every block the
+  // registry lists, or one option would quietly widen the guard from "reach
+  // my network" to "reach anything".
+  it.each(["224.0.0.1", "240.0.0.1", "192.0.2.1"])(
+    "keeps %s blocked even with private network access enabled",
+    async (address) => {
+      await expect(
+        ensurePublicHttpUrl(`http://${address}/`, { allowPrivateNetworks: true }),
+      ).rejects.toThrowError(/non-public/);
+    },
+  );
+
+  it("keeps the LAN reachable with that same option", async () => {
+    const url = await ensurePublicHttpUrl("http://10.0.0.5/", {
+      allowPrivateNetworks: true,
+    });
+    expect(url.hostname).toBe("10.0.0.5");
+  });
+
+  it("refuses a DNS answer that resolves to multicast", async () => {
+    lookupMock.mockResolvedValueOnce([{ address: "224.0.0.251", family: 4 }]);
+    await expect(ensurePublicHttpUrl("http://mdns.example/")).rejects.toThrowError(
+      /non-public/,
+    );
   });
 });
 
