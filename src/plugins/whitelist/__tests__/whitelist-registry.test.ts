@@ -13,8 +13,12 @@ import { WHITELIST_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
 import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import {
   signedDocumentFixture,
-  stubSignedDocumentFetch,
+  signedDocumentTransport,
 } from "../../../__tests__/support/sign-envelope-fixture.js";
+import {
+  forbidAmbientFetch,
+  unusedNetworkFetch,
+} from "../../../__tests__/support/network-fetch-stubs.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -111,6 +115,7 @@ describe("WhitelistRegistry — fresh allow", () => {
     });
 
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -142,6 +147,7 @@ describe("WhitelistRegistry — fresh allow", () => {
     });
 
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -171,6 +177,7 @@ describe("WhitelistRegistry — not-whitelisted", () => {
     });
 
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -200,6 +207,7 @@ describe("WhitelistRegistry — not-whitelisted", () => {
     });
 
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -232,6 +240,7 @@ describe("WhitelistRegistry — manifest-sha mismatch", () => {
     });
 
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -271,6 +280,7 @@ describe("WhitelistRegistry — issuedAt guard on the cached document", () => {
 
     const audits: string[] = [];
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -308,6 +318,7 @@ describe("WhitelistRegistry — issuedAt guard on the cached document", () => {
 
     const audits: string[] = [];
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -335,7 +346,7 @@ describe("WhitelistRegistry — issuedAt guard on the cached document", () => {
     });
     await cache.store({ body: signed.body, signature: signed.signature, meta: {} });
 
-    await whitelistRegistry.init({ userDataDir, online: false, now: () => now });
+    await whitelistRegistry.init({ networkFetch: unusedNetworkFetch, userDataDir, online: false, now: () => now });
 
     expect(whitelistRegistry.status().state).toBe("fresh");
     expect(await cache.load()).not.toBeNull();
@@ -356,6 +367,7 @@ describe("WhitelistRegistry — issuedAt guard on the cached document", () => {
     });
 
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -384,6 +396,7 @@ describe("WhitelistRegistry — stale grace windows", () => {
     });
 
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-12T00:00:00.000Z"),
@@ -410,6 +423,7 @@ describe("WhitelistRegistry — stale grace windows", () => {
     });
 
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       // Far past expiresAt + 7 day grace.
@@ -433,6 +447,7 @@ describe("WhitelistRegistry — uninitialized fail-closed", () => {
     // revocation registry's `(fail-open: nothing blocked)`.
     const audits: string[] = [];
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir: freshUserData(),
       online: false,
       audit: (line) => audits.push(line),
@@ -456,11 +471,16 @@ describe("WhitelistRegistry — uninitialized fail-closed", () => {
 
 describe("WhitelistRegistry — issuedAt guard on the fetched document", () => {
   /**
-   * The registry's source URLs are module constants, so the seam for the
-   * online path is the global `fetch` the shared fetcher calls. Only the two
-   * document paths are served; anything else 404s, which is what an
-   * unmatched request should look like.
+   * The seam for the online path is the `networkFetch` the registry is
+   * initialised with. Only the two document paths are served; anything else
+   * 404s, which is what an unmatched request should look like — and the
+   * ambient `fetch` is a tripwire, so a registry that reached for it instead
+   * of its injected transport fails here rather than leaving the suite green.
    */
+  beforeEach(() => {
+    forbidAmbientFetch();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -473,10 +493,15 @@ describe("WhitelistRegistry — issuedAt guard on the fetched document", () => {
       issuedAt: "2027-01-01T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
     });
-    stubSignedDocumentFetch("whitelist.json", future.body, future.signature);
+    const futureTransport = signedDocumentTransport(
+      "whitelist.json",
+      future.body,
+      future.signature,
+    );
 
     const audits: string[] = [];
     await whitelistRegistry.init({
+      networkFetch: futureTransport,
       userDataDir,
       online: true,
       now: () => now,
@@ -497,8 +522,17 @@ describe("WhitelistRegistry — issuedAt guard on the fetched document", () => {
       issuedAt: "2026-05-17T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
     });
-    stubSignedDocumentFetch("whitelist.json", genuine.body, genuine.signature);
-    await whitelistRegistry.init({ userDataDir, online: true, now: () => now });
+    const genuineTransport = signedDocumentTransport(
+      "whitelist.json",
+      genuine.body,
+      genuine.signature,
+    );
+    await whitelistRegistry.init({
+      networkFetch: genuineTransport,
+      userDataDir,
+      online: true,
+      now: () => now,
+    });
 
     expect(whitelistRegistry.status()).toMatchObject({ state: "fresh", source: "remote" });
     expect((await cache.loadMeta()).highestSeenIssuedAt).toBe("2026-05-17T00:00:00.000Z");

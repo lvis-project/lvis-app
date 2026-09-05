@@ -95,9 +95,10 @@ const WHITELIST_SOURCE: SignedDocSource = {
  * telemetry counter.
  */
 async function fetchWhitelist(
+  networkFetch: typeof fetch,
   opts: FetchSignedDocumentOptions = {},
 ): Promise<SignedDocumentFetchOutcome> {
-  return fetchSignedDocument(WHITELIST_SOURCE, opts, "lvis-app/whitelist-registry");
+  return fetchSignedDocument(WHITELIST_SOURCE, networkFetch, opts, "lvis-app/whitelist-registry");
 }
 
 /** Caller-facing decision shape — discriminated union for exhaustive narrowing. */
@@ -130,6 +131,15 @@ export interface WhitelistStatus {
 export interface WhitelistInitOptions {
   /** Electron `app.getPath("userData")`. The cache lives under `marketplace-whitelist/`. */
   userDataDir: string;
+  /**
+   * Transport for the two document GETs. Required, and deliberately not
+   * defaulted to the ambient `fetch`: Node's stack reads neither the
+   * machine's proxy configuration nor its OS trust store, so a default here
+   * would silently send the signed-document fetch out on a route the user
+   * never chose — and one that cannot complete at all where the direct route
+   * is unavailable. Boot passes Chromium's stack.
+   */
+  networkFetch: typeof fetch;
   /** Skip the network fetch for offline tests or user-selected offline mode. */
   online: boolean;
   /** Wall-clock now provider — injected for deterministic tests. Defaults to `Date.now`. */
@@ -217,7 +227,7 @@ class WhitelistRegistry {
       parse: parseWhitelistDocument,
       publicKeys: this.publicKeys,
       primaryKeyId: WHITELIST_PRIMARY_KEY_ID,
-      fetch: fetchWhitelist,
+      fetch: (fetchOpts) => fetchWhitelist(opts.networkFetch, fetchOpts),
       // Fail-closed: with no document `isAllowed` reports
       // `whitelist-unreachable` for every secret.
       failMode: "closed",

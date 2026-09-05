@@ -23,6 +23,8 @@ import type { AuditLogger } from "../../audit/audit-logger.js";
 
 export interface AdmissionBootstrapInput {
   bootAuditLogger: AuditLogger;
+  /** Transport for the document GETs — Chromium's stack, from `ctx.singleHopNetworkFetch`. */
+  networkFetch: typeof fetch;
   /** Online toggle — disabled in tests or user-selected offline mode. */
   online?: boolean;
   /** App-shutdown AbortSignal, aborts an in-flight fetch on quit. */
@@ -49,6 +51,7 @@ export async function wireAdmissionRegistry(input: AdmissionBootstrapInput): Pro
   await admissionRegistry.init({
     userDataDir,
     online,
+    networkFetch: input.networkFetch,
     ...(input.appShutdownSignal ? { signal: input.appShutdownSignal } : {}),
     audit: (line: string) => {
       try {

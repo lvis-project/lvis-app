@@ -1,3 +1,5 @@
+import { vi } from "vitest";
+
 /**
  * The transport a suite passes when it must pass one and no request may happen.
  *
@@ -14,3 +16,17 @@
 export const unusedNetworkFetch: typeof fetch = () => {
   throw new Error("this suite must not issue a network request");
 };
+
+/**
+ * Make the ambient `fetch` a tripwire for the rest of the test.
+ *
+ * A suite that hands its subject an explicit transport is asserting the
+ * subject uses THAT transport. Without this, a regression that reached for
+ * `globalThis.fetch` instead would leave the suite green while sending a real
+ * request from the machine running it. With it, the same regression throws.
+ */
+export function forbidAmbientFetch(): void {
+  vi.stubGlobal("fetch", () => {
+    throw new Error("this code must take its transport as an argument, not the ambient fetch");
+  });
+}

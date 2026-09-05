@@ -10,7 +10,6 @@
  * `check:test-duplicates` flags a second copy of this helper.
  */
 import { createHash, sign, type KeyObject } from "node:crypto";
-import { vi } from "vitest";
 import type { SignatureEnvelope } from "../../plugins/types.js";
 import { canonicalJSON } from "../../plugins/whitelist/canonical-json.js";
 
@@ -69,21 +68,23 @@ export function manifestSha(manifest: unknown): string {
 }
 
 /**
- * Serve one signed policy document, and nothing else, over the global `fetch`
- * both registries reach the network through.
+ * A transport that serves one signed policy document and nothing else.
  *
- * The registries' source URLs are module constants, so the global is the only
- * seam. `documentFileName` is the document each registry asks for
+ * The registries take their transport as a required `networkFetch`, so this
+ * hands back a `fetch` rather than stubbing the global one: a suite that
+ * passes it is exercising the same seam production wires, and a code path that
+ * reached for the ambient `fetch` instead would no longer be served by this
+ * fixture. `documentFileName` is the document each registry asks for
  * (`whitelist.json`, `revocation.json`); its `.sig` sidecar is served
  * alongside and every other path 404s, which is what an unmatched request
  * should look like.
  */
-export function stubSignedDocumentFetch(
+export function signedDocumentTransport(
   documentFileName: string,
   body: string,
   signature: string,
-): void {
-  vi.stubGlobal("fetch", async (input: string | URL) => {
+): typeof fetch {
+  return (async (input: string | URL) => {
     const path = new URL(String(input)).pathname;
     const payload =
       path.endsWith(`/${documentFileName}`)
@@ -105,5 +106,5 @@ export function stubSignedDocumentFetch(
       headers: { get: () => null },
       text: async () => payload,
     };
-  });
+  }) as unknown as typeof fetch;
 }

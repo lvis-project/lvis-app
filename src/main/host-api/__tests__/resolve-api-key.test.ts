@@ -25,6 +25,7 @@ import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import type { SignatureEnvelope } from "../../../plugins/types.js";
 import type { PluginManifest } from "../../../plugins/types.js";
 import { manifestSha } from "../../../__tests__/support/sign-envelope-fixture.js";
+import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 
 // -------- helpers --------
 
@@ -86,6 +87,7 @@ async function seedRegistryWithGrant(opts: SeedOpts): Promise<void> {
     meta: { highestSeenIssuedAt: doc.issuedAt },
   });
   await whitelistRegistry.init({
+    networkFetch: unusedNetworkFetch,
     userDataDir: cacheRoot,
     online: false,
     now: () => Date.parse("2026-05-18T00:00:00.000Z"),

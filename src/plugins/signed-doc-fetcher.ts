@@ -63,6 +63,7 @@ async function fetchBoth(
   source: SignedDocSource,
   opts: FetchSignedDocumentOptions,
   userAgent: string,
+  networkFetch: typeof fetch,
 ): Promise<SignedDocumentFetchOutcome | { error: string; status?: number }> {
   const headers: Record<string, string> = {
     accept: "application/json",
@@ -79,7 +80,7 @@ async function fetchBoth(
     else upstreamSignal.addEventListener("abort", onUpstreamAbort, { once: true });
   }
   try {
-    const docRes = await fetch(`${base}/${source.docFilename}`, {
+    const docRes = await networkFetch(`${base}/${source.docFilename}`, {
       method: "GET",
       headers,
       signal: controller.signal,
@@ -92,7 +93,7 @@ async function fetchBoth(
     }
     const body = await docRes.text();
     const etag = docRes.headers.get("etag") ?? undefined;
-    const sigRes = await fetch(`${base}/${source.sigFilename}`, {
+    const sigRes = await networkFetch(`${base}/${source.sigFilename}`, {
       method: "GET",
       headers: { "user-agent": userAgent, accept: "application/json" },
       signal: controller.signal,
@@ -126,17 +127,22 @@ function shouldFallback(status: number | undefined): boolean {
 }
 
 /**
- * Fetch a signed document + its detached signature. Tries the primary URL
+ * Fetch a signed document + its detached signature over `networkFetch`,
+ * which every caller must supply — see `WhitelistInitOptions.networkFetch`
+ * for why this module refuses to default to the ambient `fetch`.
+ *
+ * Tries the primary URL
  * first; falls back to the secondary URL on 5xx or network failure. Throws
  * when both endpoints fail — the caller (a domain registry) catches and
  * routes the error into its own audit log + telemetry counter.
  */
 export async function fetchSignedDocument(
   source: SignedDocSource,
+  networkFetch: typeof fetch,
   opts: FetchSignedDocumentOptions = {},
   userAgent = "lvis-app/signed-doc-fetcher",
 ): Promise<SignedDocumentFetchOutcome> {
-  const primary = await fetchBoth(source.primaryBase, true, source, opts, userAgent);
+  const primary = await fetchBoth(source.primaryBase, true, source, opts, userAgent, networkFetch);
   if ("notModified" in primary) return primary;
   if ("body" in primary) return primary;
   // primary failed
@@ -146,7 +152,7 @@ export async function fetchSignedDocument(
   log.warn(
     `${source.docFilename} primary fetch failed (${primary.error}); trying fallback`,
   );
-  const fallback = await fetchBoth(source.fallbackBase, false, source, opts, userAgent);
+  const fallback = await fetchBoth(source.fallbackBase, false, source, opts, userAgent, networkFetch);
   if ("notModified" in fallback) return fallback;
   if ("body" in fallback) return fallback;
   throw new Error(
