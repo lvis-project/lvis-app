@@ -864,6 +864,7 @@ export async function bootstrap(
     mainWindow,
     settingsService,
     bootAuditLogger: ctx.bootAuditLogger,
+    networkFetch: ctx.singleHopNetworkFetch,
   });
   wireUpdateCheck({
     mainWindow,

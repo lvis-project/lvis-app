@@ -150,6 +150,8 @@ export class LlmReviewerProviderAdapter implements LlmReviewerProvider {
  */
 export interface WireReviewerDeps {
   permissionManager: PermissionManager;
+  /** The host's outbound transport — both reviewer adapters run on it. */
+  networkFetch: typeof fetch;
   /**
    * Settings reader — defaults to {@link readPermissionSettings} which
    * pulls from `~/.lvis/settings.json`. Override in tests.
@@ -538,6 +540,7 @@ function resolveReviewerAdapter(
     const adapter = createFoundryProvider(
       deps.getSecret,
       deps.getFoundryEndpoint ?? (() => null),
+      deps.networkFetch,
     );
     if (!adapter) {
       throw new ReviewerProviderUnconfiguredError(
@@ -557,7 +560,7 @@ function resolveReviewerAdapter(
         `Boot caller must provide a secret accessor (atomic cutover — no silent fallback).`,
       );
     }
-    const adapter = createGcpPlaygroundProvider(deps.getSecret);
+    const adapter = createGcpPlaygroundProvider(deps.getSecret, deps.networkFetch);
     if (!adapter) {
       throw new ReviewerProviderUnconfiguredError(
         `Permission reviewer wiring: provider='gcp-playground' — API key not configured. ` +

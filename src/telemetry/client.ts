@@ -152,7 +152,13 @@ export interface PluginTelemetryClientDeps {
   /** Batch flush interval in ms (default: 5 min). */
   flushIntervalMs?: number;
   /** Override fetch for tests. */
-  fetchImpl?: typeof fetch;
+  /**
+   * The transport this client's uploads run on. REQUIRED: the ambient
+   * `fetch` is Node's, which reads neither the machine's proxy configuration
+   * nor its trust store, so defaulting to it sent telemetry out on a path the
+   * user never chose — and, on an intercepted network, nowhere at all.
+   */
+  fetchImpl: typeof fetch;
 }
 
 const DEFAULT_FLUSH_MS = 5 * 60 * 1000;
@@ -173,7 +179,7 @@ export class PluginTelemetryClient {
   constructor(private readonly deps: PluginTelemetryClientDeps) {
     this.deviceUuid = loadOrCreateDeviceUuid(deps.deviceUuidPath);
     this.flushIntervalMs = deps.flushIntervalMs ?? DEFAULT_FLUSH_MS;
-    this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+    this.fetchImpl = deps.fetchImpl;
   }
 
   /**

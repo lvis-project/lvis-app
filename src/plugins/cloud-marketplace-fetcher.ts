@@ -54,6 +54,7 @@ import {
 } from "./marketplace-artifact-limits.js";
 import { sha256Hex } from "../lib/hex-digest-equal.js";
 import { SHA256_HEX } from "../lib/hex-digest-equal.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 /**
  * Allowlist for npm package identifiers. Matches scoped (@scope/name) and
  * unscoped (name) package names. Rejects path traversal, CLI flags,
@@ -507,7 +508,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     if (this.config.apiKey) {
       headers["authorization"] = `Bearer ${this.config.apiKey}`;
     }
-    const timeoutMs = this.config.timeoutMs ?? 15_000;
+    const timeoutMs = this.config.timeoutMs ?? TOOL_TIMEOUT_POLICY.marketplaceHttpTimeoutMs;
 
     try {
       const privateNetworkScope = this.privateNetworkScopeFor(base);

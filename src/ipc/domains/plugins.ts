@@ -82,6 +82,7 @@ import {
   MCP_PROMPT_ARG_VALUE_MAX_CHARS,
   MCP_PROMPT_NAME_MAX_CHARS,
 } from "../../shared/mcp-prompt-bounds.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 // The MCP-app `ui/message` staging path reuses the plugin overlay gate's rate limiter
 // (one mechanism for "staged conversation proposals") and the same overlay push channel.
 import {
@@ -118,7 +119,7 @@ import {
 } from "../handlers/plugins.js";
 import { errorMessage } from "../../shared/error-message.js";
 const log = createLogger("lvis");
-const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
+const MARKETPLACE_PING_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.marketplaceHttpTimeoutMs;
 const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
 
 export {

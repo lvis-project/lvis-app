@@ -28,6 +28,7 @@ import {
   setActiveSandboxCapability,
 } from "../sandbox-capability.js";
 import { PermissionTestResources } from "./test-resources.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const resources = new PermissionTestResources();
 
@@ -764,6 +765,9 @@ describe("#664 flood guard — degraded rule reviewer does not over-defer headle
     const pm = new PermissionManager(tmpFile("permissions.json"));
     const wiring = wireReviewerAgent({
       permissionManager: pm,
+      // Degrades to the rule classifier — no adapter is built and nothing is
+      // ever fetched, so the transport is the tripwire.
+      networkFetch: unusedNetworkFetch,
       readSettings: () => ({
         mode: "llm",
         provider: "openai",

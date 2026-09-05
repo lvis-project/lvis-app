@@ -47,6 +47,8 @@ export interface ReleasePrepInput {
   mainWindow: BrowserWindow;
   settingsService: SettingsService;
   bootAuditLogger: AuditLogger;
+  /** The host's outbound transport — both telemetry uploads run on it. */
+  networkFetch: typeof fetch;
 }
 
 /**
@@ -54,7 +56,7 @@ export interface ReleasePrepInput {
  * the auto-updater. All default-off or settings-driven. Non-fatal on error.
  */
 export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
-  const { mainWindow, settingsService, bootAuditLogger } = input;
+  const { mainWindow, settingsService, bootAuditLogger, networkFetch } = input;
   let telemetry: TelemetryService | undefined;
   let pluginTelemetry: PluginTelemetryClient | undefined;
   let autoUpdaterStop: (() => void) | undefined;
@@ -69,6 +71,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       appVersion: app.getVersion(),
       isPackaged: app.isPackaged,
       auditLogger: bootAuditLogger,
+      fetchImpl: networkFetch,
     });
     telemetry.start();
     telemetry.track("app_start");
@@ -98,6 +101,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       marketplaceBaseUrl: () => settingsService.get("marketplace").cloudBaseUrl,
       installToken: () => settingsService.getSecret("marketplace.apiKey"),
       deviceUuidPath,
+      fetchImpl: networkFetch,
     });
     pluginTelemetry = ptClient;
     ptClient.start();
