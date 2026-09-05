@@ -257,8 +257,11 @@ export function TailnetAccessContent({ api, onCompleted }: TailnetAccessContentP
       ) : null}
 
       {disabled ? (
+        // Not the row's own title: this section sits INSIDE the row, and a
+        // heading that repeats its container names nothing the reader did not
+        // already have.
         <SettingsSection
-          title={t("remoteSurfacesTab.tailnetSectionTitle")}
+          title={t("tailnetAccessTab.disabledTitle")}
           actions={<Button size="sm" variant="outline" onClick={() => void refresh()}>{t("tailnetAccessTab.refresh")}</Button>}
         >
           <p className="text-sm text-muted-foreground">{t("tailnetAccessTab.disabled")}</p>

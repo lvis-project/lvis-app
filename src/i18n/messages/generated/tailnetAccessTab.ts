@@ -2,6 +2,7 @@
 export const en = {
   "tailnetAccessTab.pageDescription": "Pair a Tailnet account, then grant a separate, time-limited share for the current conversation.",
   "tailnetAccessTab.disabled": "Tailnet sharing is not enabled on this desktop.",
+  "tailnetAccessTab.disabledTitle": "Sharing unavailable",
   "tailnetAccessTab.loading": "Checking local Tailnet sharing…",
   "tailnetAccessTab.refresh": "Refresh",
   "tailnetAccessTab.pairingIsNotAccess": "Pairing identifies an account only. It does not share transcripts or grant control by itself.",
@@ -101,7 +102,7 @@ export const en = {
   "tailnetObserver.errorKeyboardIntent": "Click the action directly in this window to confirm it.",
   "tailnetObserver.errorUnavailable": "Listener settings are not available on this desktop.",
   "tailnetObserver.errorGeneric": "Listener settings could not be saved.",
-  "tailnetSetup.sectionTitle": "Tailnet access",
+  "tailnetSetup.sectionTitle": "Set up this desktop",
   "tailnetSetup.sectionDescription": "Set this desktop up so you can reach the current conversation from your tailnet.",
   "tailnetSetup.readyState": "Ready to connect",
   "tailnetSetup.connect": "Connect to your tailnet",
@@ -133,6 +134,7 @@ export const en = {
 export const ko: Record<keyof typeof en, string> = {
   "tailnetAccessTab.pageDescription": "Tailnet 계정을 페어링한 뒤, 현재 대화에 대해서만 별도의 시간 제한 공유를 부여합니다.",
   "tailnetAccessTab.disabled": "이 데스크톱에서는 Tailnet 공유가 활성화되어 있지 않습니다.",
+  "tailnetAccessTab.disabledTitle": "공유를 사용할 수 없음",
   "tailnetAccessTab.loading": "로컬 Tailnet 공유 상태를 확인하는 중…",
   "tailnetAccessTab.refresh": "새로고침",
   "tailnetAccessTab.pairingIsNotAccess": "페어링은 계정 식별만 합니다. 그 자체로 대화를 공유하거나 제어 권한을 부여하지 않습니다.",
@@ -232,7 +234,7 @@ export const ko: Record<keyof typeof en, string> = {
   "tailnetObserver.errorKeyboardIntent": "이 창에서 작업을 직접 클릭해 확인하세요.",
   "tailnetObserver.errorUnavailable": "이 데스크톱에서는 리스너 설정을 사용할 수 없습니다.",
   "tailnetObserver.errorGeneric": "리스너 설정을 저장하지 못했습니다.",
-  "tailnetSetup.sectionTitle": "Tailnet 접속",
+  "tailnetSetup.sectionTitle": "이 데스크톱 설정",
   "tailnetSetup.sectionDescription": "테일넷에서 현재 대화에 접근할 수 있도록 이 데스크톱을 설정합니다.",
   "tailnetSetup.readyState": "연결 준비됨",
   "tailnetSetup.connect": "테일넷 연결",
