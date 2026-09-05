@@ -19,6 +19,8 @@ const log = createLogger("whitelist-bootstrap");
 
 export interface WhitelistBootstrapInput {
   bootAuditLogger: AuditLogger;
+  /** Transport for the document GETs — Chromium's stack, from `ctx.singleHopNetworkFetch`. */
+  networkFetch: typeof fetch;
   /** Online toggle — disabled in tests or user-selected offline mode. */
   online?: boolean;
   /**
@@ -58,6 +60,7 @@ export async function wireWhitelistRegistry(input: WhitelistBootstrapInput): Pro
   await whitelistRegistry.init({
     userDataDir,
     online,
+    networkFetch: input.networkFetch,
     ...(input.appShutdownSignal ? { signal: input.appShutdownSignal } : {}),
     audit: (input: string) => {
       try {

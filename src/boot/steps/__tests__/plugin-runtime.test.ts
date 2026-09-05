@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 
 import { createTmpDirTracker } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 
 const tmpDirs = createTmpDirTracker();
 
@@ -1210,7 +1211,7 @@ describe("initPluginRuntime HostApi factory", () => {
       signature: JSON.stringify(envelope),
       meta: {},
     });
-    await whitelistRegistry.init({ userDataDir: cacheRoot, online: false });
+    await whitelistRegistry.init({ networkFetch: unusedNetworkFetch, userDataDir: cacheRoot, online: false });
 
     const getSecretMock = vi.fn((key: string) => {
       if (key === "llm.apiKey.openai") return "sk-openai";

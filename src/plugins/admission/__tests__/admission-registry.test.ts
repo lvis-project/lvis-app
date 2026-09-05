@@ -23,6 +23,7 @@ import type { AdmissionEntry } from "../admission-schema.js";
 import { SignedDocumentCache } from "../../signed-doc-cache.js";
 import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
+import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 
 const ANCHOR_KEY_ID = "admission-v1";
 const SHA_MEETING = "1".repeat(64);
@@ -130,6 +131,9 @@ afterEach(async () => {
 
 async function initAgainstServer(opts: { now?: number; online?: boolean } = {}) {
   await admissionRegistry.init({
+    // This suite's origin is its own loopback server, so Node's `fetch` is the
+    // transport under test here; production passes Chromium's.
+    networkFetch: fetch,
     userDataDir: freshUserData(),
     online: opts.online ?? true,
     now: () => opts.now ?? NOW,
@@ -165,6 +169,7 @@ describe("AdmissionRegistry — admits", () => {
     serveSignedCatalog(body);
     const userDataDir = freshUserData();
     await admissionRegistry.init({
+      networkFetch: fetch,
       userDataDir,
       online: true,
       now: () => NOW,
@@ -178,6 +183,7 @@ describe("AdmissionRegistry — admits", () => {
     admissionRegistry.setPublicKeysForTesting({ [ANCHOR_KEY_ID]: anchorB64 });
     routes.clear();
     await admissionRegistry.init({
+      networkFetch: fetch,
       userDataDir,
       online: true,
       now: () => NOW + HOUR,
@@ -256,13 +262,14 @@ describe("AdmissionRegistry — refuses a stale document", () => {
     const body = buildBody({ issuedAtMs, expiresAtMs: issuedAtMs + 24 * HOUR });
     serveSignedCatalog(body);
     const userDataDir = freshUserData();
-    await admissionRegistry.init({ userDataDir, online: true, now: () => NOW, source: source() });
+    await admissionRegistry.init({ networkFetch: fetch, userDataDir, online: true, now: () => NOW, source: source() });
     expect(admissionRegistry.evaluate("meeting", "1.2.3").kind).toBe("admitted");
 
     admissionRegistry.resetForTesting();
     admissionRegistry.setPublicKeysForTesting({ [ANCHOR_KEY_ID]: anchorB64 });
     routes.clear();
     await admissionRegistry.init({
+      networkFetch: fetch,
       userDataDir,
       online: true,
       now: () => NOW + 48 * HOUR,
@@ -278,12 +285,13 @@ describe("AdmissionRegistry — refuses a stale document", () => {
     const body = buildBody({ issuedAtMs, expiresAtMs: issuedAtMs + 24 * HOUR });
     serveSignedCatalog(body);
     const userDataDir = freshUserData();
-    await admissionRegistry.init({ userDataDir, online: true, now: () => NOW, source: source() });
+    await admissionRegistry.init({ networkFetch: fetch, userDataDir, online: true, now: () => NOW, source: source() });
 
     // Origin keeps answering, but with the same (now expired) document.
     admissionRegistry.resetForTesting();
     admissionRegistry.setPublicKeysForTesting({ [ANCHOR_KEY_ID]: anchorB64 });
     await admissionRegistry.init({
+      networkFetch: fetch,
       userDataDir,
       online: true,
       now: () => NOW + 48 * HOUR,
@@ -321,7 +329,7 @@ describe("AdmissionRegistry — refuses an unparseable document", () => {
   it("keeps the previously held document when a later fetch returns garbage", async () => {
     serveSignedCatalog(buildBody({}));
     const userDataDir = freshUserData();
-    await admissionRegistry.init({ userDataDir, online: true, now: () => NOW, source: source() });
+    await admissionRegistry.init({ networkFetch: fetch, userDataDir, online: true, now: () => NOW, source: source() });
     expect(admissionRegistry.evaluate("meeting", "1.2.3").kind).toBe("admitted");
 
     serve("/v1/admission.json", { status: 200, body: "{{{" });
@@ -396,6 +404,7 @@ describe("AdmissionRegistry — refuses an untrusted signer", () => {
     });
 
     await admissionRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => NOW,
@@ -423,7 +432,7 @@ describe("AdmissionRegistry — rollback and clock guards", () => {
     });
     serveSignedCatalog(newer);
     const userDataDir = freshUserData();
-    await admissionRegistry.init({ userDataDir, online: true, now: () => NOW, source: source() });
+    await admissionRegistry.init({ networkFetch: fetch, userDataDir, online: true, now: () => NOW, source: source() });
     expect(admissionRegistry.evaluate("meeting", "1.2.3").kind).toBe("admitted");
 
     // An older, still validly signed issuance that ALSO admits a version the
@@ -444,7 +453,7 @@ describe("AdmissionRegistry — rollback and clock guards", () => {
   it("discards a document issued implausibly far in the future without poisoning the guard", async () => {
     serveSignedCatalog(buildBody({ issuedAtMs: NOW + 72 * HOUR }));
     const userDataDir = freshUserData();
-    await admissionRegistry.init({ userDataDir, online: true, now: () => NOW, source: source() });
+    await admissionRegistry.init({ networkFetch: fetch, userDataDir, online: true, now: () => NOW, source: source() });
     expect(admissionRegistry.status().hasDocument).toBe(false);
 
     // A genuine document issued now is still accepted — the rejected one did

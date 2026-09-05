@@ -408,7 +408,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           const ctrl = new AbortController();
           const timer = setTimeout(() => ctrl.abort(), MARKETPLACE_PING_TIMEOUT_MS);
           try {
-            res = await fetch(url, { signal: ctrl.signal });
+            res = await deps.singleHopNetworkFetch(url, { signal: ctrl.signal });
           } finally {
             clearTimeout(timer);
           }
