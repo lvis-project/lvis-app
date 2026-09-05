@@ -40,9 +40,9 @@ is `unsigned`.
   draft Release assets. It must still equal `github.sha`.
 - `workflow_dispatch` remains an unsigned candidate and never creates a
   GitHub Release.
-- The draft uses the tracked unsigned disclosure template. Before publication,
-  the operator must replace both `PENDING` entries with the approval and
-  deferred signed Windows-evidence reference. This is a manual publish gate.
+- The draft uses the tracked unsigned disclosure template. Publishing stays a
+  manual step: the operator checks the draft's assets and body, then takes it
+  out of draft.
 
 A future signed/notarized release requires a separate reviewed workflow and
 positive platform signature/notarization evidence. It must not be enabled by

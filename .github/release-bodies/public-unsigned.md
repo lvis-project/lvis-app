@@ -7,8 +7,3 @@ This is an operator-approved unsigned public release. It is not signed with a Wi
 - **Linux:** verify the downloaded asset checksum from this official GitHub Release before installation.
 
 The public tag build contains no embedded internal credentials.
-
-## Required operator record before publish
-
-- Approval: PENDING - replace with the approver and authoritative approval reference.
-- Deferred signed Windows evidence: PENDING - replace with the issue or evidence reference.

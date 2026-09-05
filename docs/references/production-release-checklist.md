@@ -110,12 +110,8 @@ the following:
   calls out Windows SmartScreen/Unknown publisher and macOS Gatekeeper, directs
   users to the official GitHub Release, and gives Linux checksum guidance.
 
-The generated unsigned body starts with two `PENDING` operator records. Before
-manually publishing, replace both with the actual approval and deferred
-signed-candidate evidence reference; the operator must treat an unfilled record
-as a publication blocker. A future signed release must add its own reviewed
-workflow and positive platform signature/notarization evidence before it can
-make signed claims.
+A future signed release must add its own reviewed workflow and positive
+platform signature/notarization evidence before it can make signed claims.
 
 ## Windows Installer Path
 
@@ -217,7 +213,7 @@ Perform on each platform artifact before uploading:
 ## Direct local publishing (not the public release path)
 
 Do not use `npx electron-builder --publish=always` for a public release. It
-bypasses the three-OS workflow, SHA pinning, atomic asset assembly, unsigned
-operator record, and draft verification. Public releases use the tag-triggered
+bypasses the three-OS workflow, SHA pinning, atomic asset assembly, and draft
+verification. Public releases use the tag-triggered
 **Build Installers** workflow and are published only after its draft has passed
 the checks above.
