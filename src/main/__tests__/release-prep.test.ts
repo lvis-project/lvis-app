@@ -20,6 +20,7 @@ import {
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
 import { foreignFrameEvent, useTempDirs } from "../../__tests__/test-helpers.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 function fakeWindow() {
   const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -685,7 +686,10 @@ describe("crash-reporter", () => {
 
 describe("telemetry", () => {
   it("is inactive by default and track() is a no-op", async () => {
-    const svc = new TelemetryService({ settings: () => ({ enabled: false }) });
+    const svc = new TelemetryService({
+      settings: () => ({ enabled: false }),
+      fetchImpl: unusedNetworkFetch,
+    });
     expect(svc.isActive()).toBe(false);
     svc.track("app_start");
     await svc.flush();
@@ -757,6 +761,7 @@ describe("telemetry", () => {
     let enabled = true;
     const svc = new TelemetryService({
       settings: () => ({ enabled, endpoint: "https://t.example/ingest" }),
+      fetchImpl: unusedNetworkFetch,
       allowlistEnv: "t.example"
     });
     expect(svc.isActive()).toBe(true);

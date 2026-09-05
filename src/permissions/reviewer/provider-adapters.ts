@@ -55,6 +55,7 @@ import { REVIEWER_VENDOR_MAP } from "./reviewer-vendor-map.js";
 export { REVIEWER_VENDOR_MAP };
 import { secretKeyFor } from "../../engine/llm/provider-factory.js";
 import { createLogger } from "../../lib/logger.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 const log = createLogger("reviewer-adapters");
 
@@ -66,7 +67,7 @@ const GCP_API_VERSION = "v1beta";
 
 // ─── HTTP timeout ──────────────────────────────────────────────────────
 // Shared by both adapters. Bump here to change timeout for both.
-const REVIEWER_HTTP_TIMEOUT_MS = 15_000;
+const REVIEWER_HTTP_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.reviewerHttpTimeoutMs;
 
 // ─── Secret key constants (chat-provider inheritance) ─────────────────
 
@@ -112,6 +113,13 @@ export class FoundryReviewerProvider implements LlmReviewerProvider {
   constructor(
     private readonly getApiKey: () => string | null,
     private readonly getEndpoint: () => string | null,
+    /**
+     * The transport the reviewer's request runs on. Passed in rather than
+     * taken from the ambient `fetch`, which is Node's: it reads neither the
+     * machine's proxy configuration nor its trust store, so a reviewer call
+     * went direct on a machine configured otherwise.
+     */
+    private readonly networkFetch: typeof fetch,
   ) {}
 
   async complete(params: {
@@ -150,7 +158,7 @@ export class FoundryReviewerProvider implements LlmReviewerProvider {
       ? AbortSignal.any([params.abortSignal, ac.signal])
       : ac.signal;
     try {
-      const response = await fetch(url, {
+      const response = await this.networkFetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -307,7 +315,16 @@ interface FoundryCompletionResponse {
  * @see https://ai.google.dev/api/generate-content
  */
 export class GcpPlaygroundReviewerProvider implements LlmReviewerProvider {
-  constructor(private readonly getApiKey: () => string | null) {}
+  constructor(
+    private readonly getApiKey: () => string | null,
+    /**
+     * The transport the reviewer's request runs on. Passed in rather than
+     * taken from the ambient `fetch`, which is Node's: it reads neither the
+     * machine's proxy configuration nor its trust store, so a reviewer call
+     * went direct on a machine configured otherwise.
+     */
+    private readonly networkFetch: typeof fetch,
+  ) {}
 
   async complete(params: {
     model: string;
@@ -338,7 +355,7 @@ export class GcpPlaygroundReviewerProvider implements LlmReviewerProvider {
       ? AbortSignal.any([params.abortSignal, ac.signal])
       : ac.signal;
     try {
-      const response = await fetch(url, {
+      const response = await this.networkFetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -404,6 +421,7 @@ interface GcpGenerateContentResponse {
 export function createFoundryProvider(
   getSecret: (key: string) => string | null,
   getEndpoint: () => string | null,
+  networkFetch: typeof fetch,
 ): FoundryReviewerProvider | null {
   // Pre-flight: both must exist at creation time so the factory returns null
   // (rather than wiring an adapter that always fails on first use).
@@ -421,6 +439,7 @@ export function createFoundryProvider(
   return new FoundryReviewerProvider(
     () => getSecret(FOUNDRY_API_KEY_SECRET),
     () => getEndpoint(),
+    networkFetch,
   );
 }
 
@@ -435,6 +454,7 @@ export function createFoundryProvider(
  */
 export function createGcpPlaygroundProvider(
   getSecret: (key: string) => string | null,
+  networkFetch: typeof fetch,
 ): GcpPlaygroundReviewerProvider | null {
   // Pre-flight: key must exist at creation time.
   const apiKey = getSecret(GCP_PLAYGROUND_API_KEY_SECRET);
@@ -442,6 +462,7 @@ export function createGcpPlaygroundProvider(
   // Adapter holds accessor — key rotation is transparent.
   return new GcpPlaygroundReviewerProvider(
     () => getSecret(GCP_PLAYGROUND_API_KEY_SECRET),
+    networkFetch,
   );
 }
 

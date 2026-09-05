@@ -47,6 +47,7 @@ import {
   NetworkGuardError,
 } from "../core/network-guard.js";
 import { methodEffect, type Effect } from "../permissions/effect-kind.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
 /** Reason buckets used for egress-denial telemetry + audit detail. */
 export type HostFetchDenyReason =
@@ -380,15 +381,33 @@ export async function runHostFetchHops(options: HostFetchHopOptions): Promise<Re
   };
   await applyInjectedCookie(url);
   for (let hop = 0; ; hop++) {
-    const response = await transport(url.toString(), {
-      ...init,
-      headers,
-      body,
-      method,
-      // The transport ignores this by contract; pinned so a call site reads
-      // true and a future fetch-shaped transport fails toward NOT following.
-      redirect: "manual",
-    });
+    // Every hop gets its own deadline to PRODUCE HEADERS. A plugin may pass a
+    // signal of its own and most do not, which used to mean no deadline at
+    // all — a server that accepts the connection and never answers held the
+    // call open for as long as the app ran. The timer is cleared the moment
+    // the response resolves, so a slow BODY is never cut off: reading it is
+    // the caller's business, and a large download is not a hang.
+    const hopDeadline = new AbortController();
+    const hopTimer = setTimeout(() => hopDeadline.abort(), TOOL_TIMEOUT_POLICY.pluginFetchResponseCeilingMs);
+    let response: Response;
+    try {
+      response = await transport(url.toString(), {
+        ...init,
+        headers,
+        body,
+        method,
+        // The plugin's own signal still cancels; the ceiling only adds an
+        // upper bound it cannot raise.
+        signal: init.signal
+          ? AbortSignal.any([init.signal, hopDeadline.signal])
+          : hopDeadline.signal,
+        // The transport ignores this by contract; pinned so a call site reads
+        // true and a future fetch-shaped transport fails toward NOT following.
+        redirect: "manual",
+      });
+    } finally {
+      clearTimeout(hopTimer);
+    }
     if (!REDIRECT_STATUSES.has(response.status)) return response;
     const location = response.headers.get("location");
     // A 3xx without a location names nowhere; per fetch it is a final response.

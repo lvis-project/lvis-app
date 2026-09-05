@@ -25,6 +25,7 @@ import {
   GCP_PLAYGROUND_API_KEY_SECRET,
   REVIEWER_VENDOR_MAP,
 } from "../reviewer/provider-adapters.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 // ─── fetch mock helpers ───────────────────────────────────────────────
 
@@ -43,6 +44,10 @@ let originalFetch: typeof globalThis.fetch;
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
+  // Every adapter here takes its transport as an argument now, so the ambient
+  // one must never be reached. A tripwire rather than an obliging stub: a
+  // regression back to the ambient stack fails loudly instead of passing.
+  globalThis.fetch = unusedNetworkFetch;
 });
 
 afterEach(() => {
@@ -59,15 +64,16 @@ describe("FoundryReviewerProvider", () => {
       () => new FoundryReviewerProvider(
         () => "sk-test",
         () => "https://my.services.ai.azure.com",
+        unusedNetworkFetch,
       ),
     ).not.toThrow();
   });
 
   it("throws at complete() time when apiKey accessor returns null", async () => {
-    globalThis.fetch = mockFetch({ ok: true, json: async () => ({}) }) as unknown as typeof fetch;
     const provider = new FoundryReviewerProvider(
       () => null,
       () => "https://e.services.ai.azure.com",
+      unusedNetworkFetch,
     );
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
@@ -75,10 +81,10 @@ describe("FoundryReviewerProvider", () => {
   });
 
   it("throws at complete() time when endpoint accessor returns null", async () => {
-    globalThis.fetch = mockFetch({ ok: true, json: async () => ({}) }) as unknown as typeof fetch;
     const provider = new FoundryReviewerProvider(
       () => "key",
       () => null,
+      unusedNetworkFetch,
     );
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
@@ -94,11 +100,10 @@ describe("FoundryReviewerProvider", () => {
         usage: { prompt_tokens: 5, completion_tokens: 2 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
     const provider = new FoundryReviewerProvider(
       () => currentKey,
       () => "https://proj.services.ai.azure.com",
+      fetchSpy as unknown as typeof fetch,
     );
 
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
@@ -116,6 +121,7 @@ describe("FoundryReviewerProvider", () => {
     const provider = new FoundryReviewerProvider(
       () => "sk-test",
       () => "http://proj.services.ai.azure.com",
+      unusedNetworkFetch,
     );
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
@@ -126,6 +132,7 @@ describe("FoundryReviewerProvider", () => {
     const provider = new FoundryReviewerProvider(
       () => "sk-test",
       () => "https://evil.example.com",
+      unusedNetworkFetch,
     );
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
@@ -140,11 +147,10 @@ describe("FoundryReviewerProvider", () => {
         usage: { prompt_tokens: 10, completion_tokens: 5 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
     const provider = new FoundryReviewerProvider(
       () => "sk-test",
       () => "https://proj.services.ai.azure.com",
+      fetchSpy as unknown as typeof fetch,
     );
     await provider.complete({
       model: "gpt-4o-mini",
@@ -167,11 +173,10 @@ describe("FoundryReviewerProvider", () => {
         usage: { prompt_tokens: 8, completion_tokens: 3 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
     const provider = new FoundryReviewerProvider(
       () => "my-foundry-key",
       () => "https://e.services.ai.azure.com",
+      fetchSpy as unknown as typeof fetch,
     );
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
@@ -183,17 +188,18 @@ describe("FoundryReviewerProvider", () => {
 
   it("extracts text, tokensIn, tokensOut from successful response", async () => {
     const responseText = '{"level":"high","reason":"dangerous"}';
-    globalThis.fetch = mockFetch({
+    const fetchStub = mockFetch({
       ok: true,
       json: async () => ({
         choices: [{ message: { content: responseText } }],
         usage: { prompt_tokens: 42, completion_tokens: 7 },
       }),
-    }) as unknown as typeof fetch;
+    });
 
     const provider = new FoundryReviewerProvider(
       () => "key",
       () => "https://e.services.ai.azure.com",
+      fetchStub as unknown as typeof fetch,
     );
     const result = await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
@@ -204,15 +210,16 @@ describe("FoundryReviewerProvider", () => {
   });
 
   it("throws on non-2xx HTTP response (for fallbackOnError chain)", async () => {
-    globalThis.fetch = mockFetch({
+    const fetchStub = mockFetch({
       ok: false,
       status: 401,
       text: async () => "Unauthorized",
-    }) as unknown as typeof fetch;
+    });
 
     const provider = new FoundryReviewerProvider(
       () => "bad-key",
       () => "https://e.services.ai.azure.com",
+      fetchStub as unknown as typeof fetch,
     );
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
@@ -220,14 +227,15 @@ describe("FoundryReviewerProvider", () => {
   });
 
   it("returns empty text when choices array is empty", async () => {
-    globalThis.fetch = mockFetch({
+    const fetchStub = mockFetch({
       ok: true,
       json: async () => ({ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } }),
-    }) as unknown as typeof fetch;
+    });
 
     const provider = new FoundryReviewerProvider(
       () => "key",
       () => "https://e.services.ai.azure.com",
+      fetchStub as unknown as typeof fetch,
     );
     const result = await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
     expect(result.text).toBe("");
@@ -308,11 +316,13 @@ describe("validateFoundryEndpoint", () => {
 
 describe("GcpPlaygroundReviewerProvider", () => {
   it("constructs successfully with valid accessor function", () => {
-    expect(() => new GcpPlaygroundReviewerProvider(() => "gcp-key-123")).not.toThrow();
+    expect(
+      () => new GcpPlaygroundReviewerProvider(() => "gcp-key-123", unusedNetworkFetch),
+    ).not.toThrow();
   });
 
   it("throws at complete() time when apiKey accessor returns null", async () => {
-    const provider = new GcpPlaygroundReviewerProvider(() => null);
+    const provider = new GcpPlaygroundReviewerProvider(() => null, unusedNetworkFetch);
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
     ).rejects.toThrow(/apiKey not configured/);
@@ -327,9 +337,10 @@ describe("GcpPlaygroundReviewerProvider", () => {
         usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    const provider = new GcpPlaygroundReviewerProvider(() => currentKey);
+    const provider = new GcpPlaygroundReviewerProvider(
+      () => currentKey,
+      fetchSpy as unknown as typeof fetch,
+    );
 
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
     expect((fetchSpy.mock.calls[0] as [string, RequestInit])[1]?.headers as Record<string, string>)
@@ -350,9 +361,10 @@ describe("GcpPlaygroundReviewerProvider", () => {
         usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    const provider = new GcpPlaygroundReviewerProvider(() => "AIza-test-key");
+    const provider = new GcpPlaygroundReviewerProvider(
+      () => "AIza-test-key",
+      fetchSpy as unknown as typeof fetch,
+    );
     await provider.complete({
       model: "gemini-1.5-flash",
       systemPrompt: "sys",
@@ -377,9 +389,10 @@ describe("GcpPlaygroundReviewerProvider", () => {
         usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    const provider = new GcpPlaygroundReviewerProvider(() => "AIza-secret-key");
+    const provider = new GcpPlaygroundReviewerProvider(
+      () => "AIza-secret-key",
+      fetchSpy as unknown as typeof fetch,
+    );
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -394,9 +407,10 @@ describe("GcpPlaygroundReviewerProvider", () => {
         usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    const provider = new GcpPlaygroundReviewerProvider(() => "key");
+    const provider = new GcpPlaygroundReviewerProvider(
+      () => "key",
+      fetchSpy as unknown as typeof fetch,
+    );
     await provider.complete({ model: "m", systemPrompt: "system text", userPrompt: "user text" });
 
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -411,15 +425,18 @@ describe("GcpPlaygroundReviewerProvider", () => {
 
   it("extracts text, tokensIn, tokensOut from successful response", async () => {
     const responseText = '{"level":"high","reason":"risky"}';
-    globalThis.fetch = mockFetch({
+    const fetchStub = mockFetch({
       ok: true,
       json: async () => ({
         candidates: [{ content: { parts: [{ text: responseText }] } }],
         usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 8 },
       }),
-    }) as unknown as typeof fetch;
+    });
 
-    const provider = new GcpPlaygroundReviewerProvider(() => "key");
+    const provider = new GcpPlaygroundReviewerProvider(
+      () => "key",
+      fetchStub as unknown as typeof fetch,
+    );
     const result = await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
     expect(result.text).toBe(responseText);
@@ -429,25 +446,31 @@ describe("GcpPlaygroundReviewerProvider", () => {
   });
 
   it("throws on non-2xx HTTP response (for fallbackOnError chain)", async () => {
-    globalThis.fetch = mockFetch({
+    const fetchStub = mockFetch({
       ok: false,
       status: 403,
       text: async () => "Forbidden",
-    }) as unknown as typeof fetch;
+    });
 
-    const provider = new GcpPlaygroundReviewerProvider(() => "bad-key");
+    const provider = new GcpPlaygroundReviewerProvider(
+      () => "bad-key",
+      fetchStub as unknown as typeof fetch,
+    );
     await expect(
       provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" }),
     ).rejects.toThrow(/GCP reviewer HTTP 403/);
   });
 
   it("returns empty text when candidates array is empty", async () => {
-    globalThis.fetch = mockFetch({
+    const fetchStub = mockFetch({
       ok: true,
       json: async () => ({ candidates: [], usageMetadata: {} }),
-    }) as unknown as typeof fetch;
+    });
 
-    const provider = new GcpPlaygroundReviewerProvider(() => "key");
+    const provider = new GcpPlaygroundReviewerProvider(
+      () => "key",
+      fetchStub as unknown as typeof fetch,
+    );
     const result = await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
     expect(result.text).toBe("");
   });
@@ -459,28 +482,28 @@ describe("createFoundryProvider", () => {
   it("returns null when API key is absent", () => {
     const getSecret = (_key: string) => null;
     const getEndpoint = () => "https://e.services.ai.azure.com";
-    expect(createFoundryProvider(getSecret, getEndpoint)).toBeNull();
+    expect(createFoundryProvider(getSecret, getEndpoint, unusedNetworkFetch)).toBeNull();
   });
 
   it("returns null when endpoint is absent (key present)", () => {
     const getSecret = (key: string) =>
       key === FOUNDRY_API_KEY_SECRET ? "api-key" : null;
     const getEndpoint = () => null;
-    expect(createFoundryProvider(getSecret, getEndpoint)).toBeNull();
+    expect(createFoundryProvider(getSecret, getEndpoint, unusedNetworkFetch)).toBeNull();
   });
 
   it("returns null when endpoint is invalid (key present, bad URL)", () => {
     const getSecret = (key: string) =>
       key === FOUNDRY_API_KEY_SECRET ? "api-key" : null;
     const getEndpoint = () => "http://evil.example.com";
-    expect(createFoundryProvider(getSecret, getEndpoint)).toBeNull();
+    expect(createFoundryProvider(getSecret, getEndpoint, unusedNetworkFetch)).toBeNull();
   });
 
   it("returns FoundryReviewerProvider when both key + endpoint are present and valid", () => {
     const getSecret = (key: string) =>
       key === FOUNDRY_API_KEY_SECRET ? "api-key" : null;
     const getEndpoint = () => "https://e.services.ai.azure.com";
-    const provider = createFoundryProvider(getSecret, getEndpoint);
+    const provider = createFoundryProvider(getSecret, getEndpoint, unusedNetworkFetch);
     expect(provider).toBeInstanceOf(FoundryReviewerProvider);
   });
 
@@ -490,7 +513,7 @@ describe("createFoundryProvider", () => {
       key === "llm.apiKey.azure-foundry" ? "az-key" : null,
     );
     const getEndpoint = () => "https://proj.services.ai.azure.com";
-    const provider = createFoundryProvider(getSecret, getEndpoint);
+    const provider = createFoundryProvider(getSecret, getEndpoint, unusedNetworkFetch);
     expect(provider).toBeInstanceOf(FoundryReviewerProvider);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.azure-foundry");
   });
@@ -510,9 +533,11 @@ describe("createFoundryProvider", () => {
         usage: { prompt_tokens: 5, completion_tokens: 2 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    const provider = createFoundryProvider(getSecret, getEndpoint)!;
+    const provider = createFoundryProvider(
+      getSecret,
+      getEndpoint,
+      fetchSpy as unknown as typeof fetch,
+    )!;
     expect(provider).not.toBeNull();
 
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
@@ -537,12 +562,14 @@ describe("createFoundryProvider", () => {
         usage: { prompt_tokens: 5, completion_tokens: 2 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
     let liveEndpoint = "https://proj1.services.ai.azure.com";
     const getEndpoint = vi.fn(() => liveEndpoint);
 
-    const provider = createFoundryProvider(getSecret, getEndpoint)!;
+    const provider = createFoundryProvider(
+      getSecret,
+      getEndpoint,
+      fetchSpy as unknown as typeof fetch,
+    )!;
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
     expect((fetchSpy.mock.calls[0] as [string, RequestInit])[0]).toContain("proj1.services.ai.azure.com");
 
@@ -556,13 +583,13 @@ describe("createFoundryProvider", () => {
 describe("createGcpPlaygroundProvider", () => {
   it("returns null when API key is absent", () => {
     const getSecret = (_key: string) => null;
-    expect(createGcpPlaygroundProvider(getSecret)).toBeNull();
+    expect(createGcpPlaygroundProvider(getSecret, unusedNetworkFetch)).toBeNull();
   });
 
   it("returns GcpPlaygroundReviewerProvider when key is present", () => {
     const getSecret = (key: string) =>
       key === GCP_PLAYGROUND_API_KEY_SECRET ? "AIza-key" : null;
-    const provider = createGcpPlaygroundProvider(getSecret);
+    const provider = createGcpPlaygroundProvider(getSecret, unusedNetworkFetch);
     expect(provider).toBeInstanceOf(GcpPlaygroundReviewerProvider);
   });
 
@@ -571,7 +598,7 @@ describe("createGcpPlaygroundProvider", () => {
     const getSecret = vi.fn((key: string) =>
       key === "llm.apiKey.gemini" ? "gemini-key" : null,
     );
-    const provider = createGcpPlaygroundProvider(getSecret);
+    const provider = createGcpPlaygroundProvider(getSecret, unusedNetworkFetch);
     expect(provider).toBeInstanceOf(GcpPlaygroundReviewerProvider);
     expect(getSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
   });
@@ -589,9 +616,10 @@ describe("createGcpPlaygroundProvider", () => {
         usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 },
       }),
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    const provider = createGcpPlaygroundProvider(getSecret)!;
+    const provider = createGcpPlaygroundProvider(
+      getSecret,
+      fetchSpy as unknown as typeof fetch,
+    )!;
     expect(provider).not.toBeNull();
 
     await provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
@@ -716,16 +744,17 @@ describe("FoundryReviewerProvider timeout (M4)", () => {
   it("aborts with AbortError when fetch hangs beyond 15s", async () => {
     vi.useFakeTimers();
     let rejectFetch!: (err: Error) => void;
-    globalThis.fetch = vi.fn(
+    const hangingFetch = vi.fn(
       () =>
         new Promise<never>((_res, rej) => {
           rejectFetch = rej;
         }),
-    ) as unknown as typeof fetch;
+    );
 
     const provider = new FoundryReviewerProvider(
       () => "key",
       () => "https://e.services.ai.azure.com",
+      hangingFetch as unknown as typeof fetch,
     );
     const completionPromise = provider.complete({ model: "m", systemPrompt: "s", userPrompt: "u" });
 
@@ -746,14 +775,17 @@ describe("GcpPlaygroundReviewerProvider timeout (M4)", () => {
   it("aborts with AbortError when fetch hangs beyond 15s", async () => {
     vi.useFakeTimers();
     let rejectFetch!: (err: Error) => void;
-    globalThis.fetch = vi.fn(
+    const hangingFetch = vi.fn(
       () =>
         new Promise<never>((_res, rej) => {
           rejectFetch = rej;
         }),
-    ) as unknown as typeof fetch;
+    );
 
-    const provider = new GcpPlaygroundReviewerProvider(() => "AIza-key");
+    const provider = new GcpPlaygroundReviewerProvider(
+      () => "AIza-key",
+      hangingFetch as unknown as typeof fetch,
+    );
     const completionPromise = provider.complete({ model: "gemini-1.5-flash", systemPrompt: "s", userPrompt: "u" });
 
     await vi.advanceTimersByTimeAsync(16_000);

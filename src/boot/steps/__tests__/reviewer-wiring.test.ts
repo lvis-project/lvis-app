@@ -77,6 +77,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const setReviewerSpy = vi.spyOn(pm, "setReviewer");
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "rule",
@@ -114,6 +115,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     });
 
     const ruled = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: new PermissionManager(join(tmpDir, "permissions-rule.json")),
       readSettings: settingsFor("rule"),
       resolveParentSessionAdjudicationTarget: () => target,
@@ -126,6 +128,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(ruled.parentAdjudicator).toBeInstanceOf(UnavailableParentAdjudicator);
 
     const disabled = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: new PermissionManager(join(tmpDir, "permissions-disabled.json")),
       readSettings: settingsFor("disabled"),
       resolveParentSessionAdjudicationTarget: () => target,
@@ -140,6 +143,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
   it("settings mode=disabled wires DisabledRiskClassifier", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "disabled",
@@ -170,6 +174,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       vendor === "openai" ? provider : null,
     );
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -215,6 +220,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       vendor === "openai-compatible" ? provider : null,
     );
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -264,6 +270,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     );
 
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -303,6 +310,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     expect(() =>
       wireReviewerAgent({
+        networkFetch: unusedNetworkFetch,
         permissionManager: pm,
         readSettings: () => ({
           mode: "llm",
@@ -321,6 +329,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
   it("mode=llm + factory null → degrades to rule (provider unconfigured)", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -349,6 +358,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     // every mutating tool would modal — this pins the combination.
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -372,6 +382,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       wireReviewerAgent({
+        networkFetch: unusedNetworkFetch,
         permissionManager: pm,
         readSettings: () => ({
           mode: "llm",
@@ -398,6 +409,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     // First wiring: no provider → degraded.
     const degraded = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -419,6 +431,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       { type: "message_complete", stopReason: "end_turn" },
     ]);
     const healed = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -484,6 +497,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     // First wiring: provider unconfigured (factory returns null) → degraded.
     // Capture its cacheScope.
     const degraded = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: llmReviewerSettings,
       streamProviderFor: () => null,
@@ -507,6 +521,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       { type: "message_complete", stopReason: "end_turn" },
     ]);
     const healed = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: llmReviewerSettings,
       streamProviderFor: () => provider,
@@ -537,6 +552,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
 
     // Healthy wiring: provider available → llm. Capture its cacheScope.
     const healthy = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: llmReviewerSettings,
       streamProviderFor: () => provider,
@@ -557,6 +573,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     // Provider key removed (factory now returns null) → degrade. Capture
     // degraded scope.
     const degraded = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: llmReviewerSettings,
       streamProviderFor: () => null,
@@ -596,6 +613,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     );
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "rule",
@@ -615,6 +633,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
   it("pushes interactive.autoApprove onto the live PermissionManager instance (round-3 test-engineer MAJOR-1)", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "rule",
@@ -640,6 +659,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       wireReviewerAgent({
+        networkFetch: unusedNetworkFetch,
         permissionManager: pm,
         readSettings: () => ({
           mode: "rule",
@@ -667,6 +687,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       wireReviewerAgent({
+        networkFetch: unusedNetworkFetch,
         permissionManager: pm,
         readSettings: () => ({
           mode: "rule",
@@ -691,6 +712,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
   it("re-rewiring with a different interactive.autoApprove updates the live state (round-3 test-engineer MAJOR-1)", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "rule",
@@ -705,6 +727,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     });
     expect(pm.getInteractiveAutoApprove()).toBe("low");
     wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "rule",
@@ -1016,6 +1039,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     expect(() =>
       wireReviewerAgent({
+        networkFetch: unusedNetworkFetch,
         permissionManager: pm,
         readSettings: () => ({
           mode: "llm",
@@ -1036,6 +1060,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
   it("mode=llm provider=foundry with getSecret returning null → degrades to rule", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -1058,6 +1083,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
   it("mode=llm provider=foundry with valid secrets → wires LlmRiskClassifier", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -1084,6 +1110,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     expect(() =>
       wireReviewerAgent({
+        networkFetch: unusedNetworkFetch,
         permissionManager: pm,
         readSettings: () => ({
           mode: "llm",
@@ -1103,6 +1130,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
   it("mode=llm provider=gcp-playground with getSecret returning null → degrades to rule", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -1124,6 +1152,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
   it("mode=llm provider=gcp-playground with llm.apiKey.gemini → wires LlmRiskClassifier", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const result = wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -1150,6 +1179,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const setReviewerSpy = vi.spyOn(pm, "setReviewer");
     wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -1173,6 +1203,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const setReviewerSpy = vi.spyOn(pm, "setReviewer");
     wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -1198,6 +1229,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
       streamTurn: async function* () {},
     };
     wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -1220,6 +1252,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
     const setReviewerSpy = vi.spyOn(pm, "setReviewer");
 
     wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",
@@ -1235,6 +1268,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
       deferredQueuePath: join(tmpDir, "queue-m2-change-a.jsonl"),
     });
     wireReviewerAgent({
+      networkFetch: unusedNetworkFetch,
       permissionManager: pm,
       readSettings: () => ({
         mode: "llm",

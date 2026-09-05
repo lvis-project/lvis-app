@@ -135,7 +135,13 @@ export interface TelemetryDeps {
    */
   settings: () => TelemetrySettings;
   appVersion?: string;
-  fetchImpl?: typeof fetch;
+  /**
+   * The transport this client's uploads run on. REQUIRED: the ambient
+   * `fetch` is Node's, which reads neither the machine's proxy configuration
+   * nor its trust store, so defaulting to it sent telemetry out on a path the
+   * user never chose — and, on an intercepted network, nowhere at all.
+   */
+  fetchImpl: typeof fetch;
   flushIntervalMs?: number;
   /** M2: when true, localhost endpoints are rejected. Pass app.isPackaged. */
   isPackaged?: boolean;
@@ -158,7 +164,7 @@ export class TelemetryService {
 
   constructor(private readonly deps: TelemetryDeps) {
     this.sid = sha256Hex(randomUUID()).slice(0, 16);
-    this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+    this.fetchImpl = deps.fetchImpl;
     this.flushIntervalMs = deps.flushIntervalMs ?? DEFAULT_FLUSH_MS;
   }
 
