@@ -14,10 +14,10 @@ import { href, type Locale } from "@/lib/i18n";
 const copy = {
   ko: {
     heading: "사용 중인 OS에 맞게.",
-    leadPre: "macOS·Windows·Linux 빌드를 GitHub Releases에서 직접 받습니다. 버튼은 언제나 최신 빌드를 가리킵니다.",
+    leadPre: "macOS·Windows·Linux 빌드를 GitHub Releases에서 직접 받습니다. 버튼을 누르면 최신 릴리스 페이지가 열리고, 그 자리에서 내 운영체제용 파일을 고릅니다.",
     allReleases: "모든 릴리스 보기 ",
     recommended: "권장",
-    download: "다운로드",
+    download: "릴리스 열기",
     viewReleases: "릴리스 보기",
     ready: "최신 빌드 · 다운로드 가능",
     notReady: "준비 중",
@@ -28,10 +28,10 @@ const copy = {
   },
   en: {
     heading: "Pick the build for your OS.",
-    leadPre: "Grab the macOS, Windows, or Linux build straight from GitHub Releases. The button always points at the latest build.",
+    leadPre: "Grab the macOS, Windows, or Linux build straight from GitHub Releases. The button opens the latest release, where you pick the file for your operating system.",
     allReleases: "See all releases ",
     recommended: "Recommended",
-    download: "Download",
+    download: "Open the release",
     viewReleases: "View releases",
     ready: "Latest build · available",
     notReady: "Coming soon",
@@ -118,7 +118,7 @@ export function Downloads({ locale = "ko" }: { locale?: Locale }) {
                       <p className="mt-1 font-mono text-[12px] text-muted-foreground">{d.format}</p>
                       <div className="mt-5">
                         <Button asChild size="lg" variant="default" className="w-full text-[15px]">
-                          <a href={ready ? d.href : ALL_RELEASES_URL}>
+                          <a href={ready ? d.href : ALL_RELEASES_URL} target="_blank" rel="noreferrer">
                             <Download className="h-4 w-4" />
                             {ready ? t.download : t.viewReleases}
                           </a>

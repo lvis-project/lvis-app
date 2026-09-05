@@ -1204,11 +1204,6 @@
     },
     {
       "type": "files",
-      "file": "web/functions/download/[platform].js",
-      "name": "web/functions/download/[platform].js"
-    },
-    {
-      "type": "files",
       "file": "web/infra/edge-router/worker.js",
       "name": "web/infra/edge-router/worker.js"
     },

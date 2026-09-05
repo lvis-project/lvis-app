@@ -28,12 +28,16 @@ infra/          docs-redirect shim for the legacy docs domain
 
 ## Desktop packages
 
-Download buttons link directly to the latest GitHub Release assets:
+Every download button opens the latest GitHub Release, and the visitor picks
+the asset for their platform there:
 
 ```
-https://github.com/lvis-project/lvis-app/releases/latest/download/LVIS-latest-mac-arm64.dmg
-https://github.com/lvis-project/lvis-app/releases/latest/download/LVIS-latest-windows-x64-setup.exe
-https://github.com/lvis-project/lvis-app/releases/latest/download/LVIS-latest-linux-x86_64.AppImage
+https://github.com/lvis-project/lvis-app/releases/latest
 ```
+
+The buttons do not deep-link to an asset file. Assets are published under their
+version (`LVIS-0.10.0-mac-arm64.dmg`), so a static href can only name a file
+that stops existing at the next release, and the `LVIS-latest-*` aliases that
+once gave those files a stable name are no longer published.
 
 The landing page auto-detects the visitor's OS and highlights the matching card.
