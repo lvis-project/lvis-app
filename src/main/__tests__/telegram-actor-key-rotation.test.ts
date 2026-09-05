@@ -35,6 +35,7 @@ import {
   telegramConversationDigest,
 } from "../telegram-platform-runtime.js";
 import { namespaceAt } from "./telegram-connection-namespace.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 import { useTempDirs } from "../../__tests__/test-helpers.js";
 
 const OWNER_ID = "776655443322";
@@ -160,6 +161,9 @@ function connectionService(store: TelegramConnectionStore, secretStore: SecretSt
     conversationDigestFor: (conversationId: string) =>
       telegramConversationDigest(BOT_FINGERPRINT, conversationId),
     conversationExists: () => true,
+    // This resume gives up at the missing credential, so no Bot API request
+    // may happen; this transport fails loudly if one ever does.
+    networkFetch: unusedNetworkFetch,
   });
 }
 

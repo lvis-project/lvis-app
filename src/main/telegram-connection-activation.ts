@@ -31,6 +31,13 @@ export interface StartTelegramConnectionActivationOptions {
   readonly conversationCommandPort: ConversationCommandPort;
   readonly getCurrentConversationId: () => string;
   /**
+   * The transport this activation's Bot API requests run on. REQUIRED: Node's
+   * ambient `fetch` reads neither the machine's proxy configuration nor its
+   * trust store, so an activation issued on it would go direct on a machine
+   * whose configuration says otherwise. Composition supplies Chromium's stack.
+   */
+  readonly networkFetch: typeof fetch;
+  /**
    * Stops this activation. Wired to the same owner-initiated teardown the
    * settings surface uses, so a fatal poll outcome and a manual disconnect
    * converge on one path.
@@ -128,7 +135,7 @@ export async function startTelegramConnectionActivation(
   if (botToken === null) return;
 
   const controlReplies = createTelegramControlReplySender({
-    client: createTelegramBotApiClient({ botToken }),
+    client: createTelegramBotApiClient({ botToken, fetchImplementation: options.networkFetch }),
     ...(options.log ? { log: options.log } : {}),
   });
 
@@ -138,6 +145,7 @@ export async function startTelegramConnectionActivation(
     getCurrentConversationId: options.getCurrentConversationId,
     botToken,
     botFingerprint,
+    networkFetch: options.networkFetch,
     ...(options.secretStore ? { secretStore: options.secretStore } : {}),
     authority: {
       activePairingActorDigest: () => store.activePairingActorDigest(),

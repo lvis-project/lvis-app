@@ -231,6 +231,10 @@ async function main() {
     telegramConnectionService = createTelegramConnectionService({
       store: telegramStore,
       settingsService: services.settingsService,
+      // Chromium's stack, not Node's: it is the one that resolves the machine's
+      // proxy configuration and reads its trust store, so the Bot API is
+      // reached over the route the machine is configured for.
+      networkFetch: services.singleHopNetworkFetch,
       bridgeControl: {
         start: () => startTelegramConnectionActivation({
           store: telegramStore,
@@ -238,6 +242,7 @@ async function main() {
           conversationSurfaceRuntime,
           conversationCommandPort,
           getCurrentConversationId,
+          networkFetch: services.singleHopNetworkFetch,
           // A fatal poll outcome tears the activation down through the same
           // owner-initiated path a manual disconnect uses.
           stopBridge: () => stopTelegramBridgeServer("user"),

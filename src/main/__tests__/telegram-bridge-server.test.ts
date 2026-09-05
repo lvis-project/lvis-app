@@ -24,6 +24,7 @@ import {
   textUpdate,
   type Batch,
 } from "./telegram-bridge-fixtures.js";
+import { forbidAmbientFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 /** Minimal safe-projection stand-in: only snapshot/subscribe are ever called. */
 function projectionStore(): SharedConversationProjectionStore {
@@ -92,6 +93,13 @@ function connectionFixture(overrides: {
     answerCallbackQuery: vi.fn(async () => ({ ok: true as const, value: true as const })),
   };
   const createBotApiClient = vi.fn(() => client as never);
+  // The outbound delivery transport takes its `fetch` as a required option, so
+  // the fixture hands it one that answers like the Bot API rather than letting
+  // a send reach the machine's network.
+  const networkFetch = vi.fn(async () => new Response(
+    JSON.stringify({ ok: true, result: { message_id: 1 } }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  ));
 
   // The command port's submit contract is SYNCHRONOUS: it returns the
   // submission object (whose `completion` promise settles the receipt), or
@@ -114,6 +122,7 @@ function connectionFixture(overrides: {
     getCurrentConversationId: () => BOUND_CONVERSATION,
     botToken: BOT_TOKEN,
     botFingerprint: BOT_FINGERPRINT,
+    networkFetch: networkFetch as unknown as typeof fetch,
     authority,
     pollOffset: () => offset,
     recordPollOffset: async (next: number) => {
@@ -130,7 +139,7 @@ function connectionFixture(overrides: {
       : { receiptStore: overrides.receiptStore as never }),
   };
 
-  return { input, client, createBotApiClient, submit, onFatal, sendMessage,
+  return { input, client, createBotApiClient, submit, onFatal, sendMessage, networkFetch,
     queue(...next: Batch[]) {
       batches.push(...next);
       // Wake a poll parked on an empty queue so a batch queued after start —
@@ -166,10 +175,9 @@ describe("Telegram bridge lifecycle (owner-driven connection)", () => {
   });
 
   it("admits Telegram's 4,096-UTF-16-unit text bound and no more", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    })));
+    // The ambient stack is nobody's transport here — the fixture hands the
+    // bridge its own, and a path that regresses to the global fails loudly.
+    forbidAmbientFetch();
     const f = connectionFixture({
       receiptStore: {
         reserve: vi.fn(() => ({ kind: "reserved" })),

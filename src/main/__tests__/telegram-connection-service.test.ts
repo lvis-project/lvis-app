@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SecretEncryptionUnavailableError } from "../../data/secret-document-store.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 import {
   isTelegramPairingCode,
   parseTelegramConnectionSnapshot,
@@ -199,6 +200,9 @@ async function harness(
     getCurrentConversationId: () => conversation.id,
     conversationDigestFor: digestOf,
     conversationExists: (conversationId: string) => existingConversations.has(conversationId),
+    // The suite injects its own client factory, so no request may reach a
+    // transport; this one fails loudly if that ever changes.
+    networkFetch: unusedNetworkFetch,
     createBotApiClient: bot.factory,
   });
   return {
