@@ -486,6 +486,13 @@ export interface ConversationLoopDeps {
   rewireReviewerAgent?: () => void;
   /** Main-process fetch implementation for Azure Foundry private-endpoint calls. */
   llmFetch?: typeof fetch;
+  /**
+   * The host's outbound transport for provider calls that run through the
+   * network guard (self-hosted endpoints, marketplace presets). Required
+   * rather than optional: an absent transport used to mean "use Node's", which
+   * ignores the machine's proxy configuration and its trust store.
+   */
+  networkFetch: typeof fetch;
 }
 
 export interface RequestProjectionContext {

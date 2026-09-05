@@ -5,6 +5,7 @@ import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage, StreamEvent } from "../llm/types.js";
 import type { CompactWithBoundaryResult } from "../structured-compact.js";
 import { CompressionStatus } from "../../shared/compact-status.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 export function makeConversationLoopSettings(
   autoCompact = true,
@@ -104,6 +105,7 @@ export function makeConversationLoopDeps(
     } as unknown as ConversationLoopDeps["toolRegistry"],
     memoryManager: makeConversationLoopMemoryManager(),
     memoryReviewer: makeConversationLoopMemoryReviewer(),
+    networkFetch: unusedNetworkFetch,
     ...overrides,
   };
 }

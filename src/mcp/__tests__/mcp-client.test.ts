@@ -26,6 +26,15 @@ import { PassThrough } from "node:stream";
 import { getLvisAppVersion } from "../../shared/app-version.js";
 import { EventEmitter } from "node:events";
 
+/**
+ * The outbound transport `McpClient` hands its HTTP transport. Every HTTP case
+ * here drives the server by replacing the global `fetch` (`vi.stubGlobal`), so
+ * this reads that stub at call time rather than capturing one at construction;
+ * the stdio cases never reach it.
+ */
+const stubbedGlobalNetworkFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+  globalThis.fetch(input, init)) as typeof fetch;
+
 // ─── dns mock — configurable per test ───────────────────────
 type LookupResult = { address: string; family: number };
 const lookupMock = vi.fn<
@@ -280,6 +289,7 @@ describe("HttpTransport — happy path", () => {
       },
       gov,
       registry,
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -371,6 +381,7 @@ describe("HttpTransport — happy path", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -422,6 +433,7 @@ describe("HttpTransport — happy path", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await expect(client.connect()).rejects.toThrow(/\[REDACTED:/i);
@@ -479,6 +491,7 @@ describe("HttpTransport — happy path", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -509,6 +522,7 @@ describe("HttpTransport — NetworkGuard", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await expect(client.connect()).rejects.toThrow(/network guard:/);
@@ -562,6 +576,7 @@ describe("HttpTransport — NetworkGuard", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -593,6 +608,7 @@ describe("HttpTransport — NetworkGuard", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await expect(client.connect()).rejects.toThrow(/allowPrivateNetworks/);
@@ -667,6 +683,7 @@ describe("HttpTransport — NetworkGuard", () => {
       },
       gov,
       registry,
+      stubbedGlobalNetworkFetch,
       permissionManager,
     );
 
@@ -741,6 +758,7 @@ describe("HttpTransport — SSE streaming", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -794,6 +812,7 @@ describe("StdioTransport — regression", () => {
       },
       gov,
       registry,
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -841,6 +860,7 @@ describe("StdioTransport — regression", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -884,6 +904,7 @@ describe("StdioTransport — regression", () => {
       } as McpStdioServerConfig,
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -937,6 +958,7 @@ describe("StdioTransport — regression", () => {
         },
         gov,
         new ToolRegistry(),
+        stubbedGlobalNetworkFetch,
       );
 
       // connect() pends on `initialize` — resolve it asynchronously.
@@ -1005,6 +1027,7 @@ describe("StdioTransport — regression", () => {
         { id: "broken-stdin", transport: "stdio", command: "lvis-mcp-broken-stdin" },
         governanceWithPolicy(buildPolicy([stdioApproval("broken-stdin", "lvis-mcp-broken-stdin")])),
         new ToolRegistry(),
+        stubbedGlobalNetworkFetch,
       );
 
       const connectPromise = client.connect();
@@ -1135,6 +1158,7 @@ describe("HttpTransport — per-request DNS rebinding defense", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     // Connect expects initialize/tools-list to succeed; those also go through
@@ -1217,6 +1241,7 @@ describe("HttpTransport — SSE stream death", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     await client.connect();
@@ -1265,6 +1290,7 @@ describe("HttpTransport — timeout path", () => {
         },
         gov,
         new ToolRegistry(),
+        stubbedGlobalNetworkFetch,
       );
 
       // Fire connect() but do NOT await yet — it will hang on initialize.
@@ -1300,6 +1326,7 @@ describe("McpClient buffered response safety", () => {
       },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
 
     for (let id = 1; id <= 256; id += 1) {
@@ -1336,6 +1363,7 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
       { id, transport: "http", url },
       governanceWithPolicy(buildPolicy([httpApproval(id, url)])),
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
       undefined,
       undefined,
       inputResolver,
@@ -2216,6 +2244,7 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
         allowedCapabilities: ["tools", "resources"] as McpGovernancePolicy["servers"][number]["allowedCapabilities"],
       })])),
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
     await client.connect();
 
@@ -2319,6 +2348,7 @@ describe("MCP prompts discovery", () => {
       { id: "psrv", transport: "http", url: "https://psrv.example.com/mcp" },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
     return { client, promptsCalls };
   }
@@ -2454,6 +2484,7 @@ describe("MCP getPrompt gating", () => {
       { id: "psrv2", transport: "http", url: "https://psrv2.example.com/mcp" },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
     await client.connect();
 
@@ -2484,6 +2515,7 @@ describe("MCP getPrompt gating", () => {
       { id: "psrv3", transport: "http", url: "https://psrv3.example.com/mcp" },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
     await client.connect();
     await expect(client.getPrompt("anything", {})).rejects.toThrow(/did not advertise prompts/);
@@ -2553,6 +2585,7 @@ describe("MCP resources discovery and read", () => {
       { id: "rsrv", transport: "http", url: "https://rsrv.example.com/mcp" },
       gov,
       new ToolRegistry(),
+      stubbedGlobalNetworkFetch,
     );
     return { client, listCalls, readCalls, templateListCalls };
   }

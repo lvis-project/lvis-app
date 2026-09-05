@@ -36,6 +36,7 @@ export async function setupMcp(ctx: BootContext): Promise<void> {
   const mcpManager = new McpManager(
     mcpGovernance,
     toolRegistry,
+    ctx.singleHopNetworkFetch,
     undefined,
     permissionManager,
     bootAuditLogger,

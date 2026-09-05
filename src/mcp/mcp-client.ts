@@ -542,6 +542,8 @@ export class McpClient {
     private readonly config: McpServerConfig,
     private readonly governance: McpGovernance,
     private readonly toolRegistry: ToolRegistry,
+    /** The host's outbound transport, handed to the HTTP transport it builds. */
+    private readonly networkFetch: typeof fetch,
     private readonly permissionManager?: PermissionManager,
     /**
      * Optional pre-built transport. When provided, `connect()` uses it instead
@@ -597,7 +599,7 @@ export class McpClient {
       this.transport = this.transportOverride
         ?? (this.config.transport === "stdio"
           ? new StdioTransport(this.config as McpStdioServerConfig)
-          : new HttpTransport(this.config as McpHttpServerConfig));
+          : new HttpTransport(this.config as McpHttpServerConfig, this.networkFetch));
 
       this.transport.onMessage((msg) => this.handleResponse(msg));
       this.transport.onClose((reason) => this.handleTransportClose(reason));
@@ -2524,7 +2526,17 @@ class HttpTransport implements McpTransport {
   /** Tracks in-flight SSE AbortControllers so `close` can cancel them. */
   private readonly inflight = new Set<AbortController>();
 
-  constructor(private readonly config: McpHttpServerConfig) {}
+  constructor(
+    private readonly config: McpHttpServerConfig,
+    /**
+     * The transport this host makes its requests on — Chromium's stack, which
+     * reads the machine's proxy configuration and its trust store. Passed in
+     * rather than imported because `electron` cannot be imported by a module
+     * a test loads, and rather than read off `config` because the config
+     * describes the SERVER while this describes how this host reaches it.
+     */
+    private readonly networkFetch: typeof fetch,
+  ) {}
 
   onMessage(handler: (msg: JsonRpcResponse) => void): void {
     this.messageHandler = handler;
@@ -2639,13 +2651,14 @@ class HttpTransport implements McpTransport {
         // Governance has already gated `allowPrivateNetworks` behind an
         // admin-policy flag (see McpGovernance.validateServer). Bypass
         // NetworkGuard here for on-prem / loopback deployments.
-        response = await fetch(this.config.url, init);
+        response = await this.networkFetch(this.config.url, init);
       } else {
         // Every request re-validates DNS via fetchPublicHttpResponse, which
         // re-runs ensurePublicHttpUrl on the initial URL and on each redirect
         // hop. This closes the DNS-rebinding window between open() and send().
         response = await fetchPublicHttpResponse(this.config.url, {
           ...init,
+          fetchImpl: this.networkFetch,
           // `fetchPublicHttpResponse` owns its own AbortController but honours
           // an external `signal`. Keep the caller's signal so close() still
           // cancels in-flight requests.

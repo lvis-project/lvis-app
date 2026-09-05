@@ -106,6 +106,8 @@ export class McpManager {
   constructor(
     private readonly governance: McpGovernance,
     private readonly toolRegistry: ToolRegistry,
+    /** The host's outbound transport, handed to every client this builds. */
+    private readonly networkFetch: typeof fetch,
     configPath?: string,
     private readonly permissionManager?: PermissionManager,
     private readonly auditLogger?: AuditLogger,
@@ -261,6 +263,7 @@ export class McpManager {
       connectConfig,
       this.governance,
       this.toolRegistry,
+      this.networkFetch,
       this.permissionManager,
       undefined, // transportOverride — external servers build their own transport
       this.inputResolverFactory?.(config.id), // MRTR resolver, bound to this server
@@ -340,6 +343,7 @@ export class McpManager {
           connectConfig,
           scopedGovernance,
           stagingRegistry,
+          this.networkFetch,
           undefined,
           undefined,
           this.inputResolverFactory?.(projection.serverId),

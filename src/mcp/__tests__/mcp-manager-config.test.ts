@@ -54,6 +54,7 @@ vi.mock("../../tools/registry.js", () => ({
 import { McpManager } from "../mcp-manager.js";
 import type { McpServerConfig } from "../types.js";
 import { observeFileHandleSyncs } from "../../__tests__/support/fsync-observer.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const testDir = join(tmpdir(), `lvis-mcp-test-${process.pid}`);
 const testConfigPath = join(testDir, "mcp-servers.json");
@@ -64,6 +65,7 @@ async function makeManager() {
   return new McpManager(
     new (McpGovernance as new () => InstanceType<typeof McpGovernance>)(),
     new (ToolRegistry as new () => InstanceType<typeof ToolRegistry>)(),
+    unusedNetworkFetch,
     testConfigPath,
     undefined,
     { log: mockAuditLog } as never,

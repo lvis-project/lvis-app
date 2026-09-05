@@ -12,6 +12,7 @@ import { LoopbackTransport } from "../loopback-transport.js";
 import type { McpGovernancePolicy } from "../types.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import { governanceWithPolicy } from "./test-helpers.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -72,10 +73,11 @@ describe("plugin-as-MCP-server loopback round-trip (#1230)", () => {
     const registry = new ToolRegistry();
     const client = new McpClient(
       // The config's transport/command satisfy governance; the actual transport
-      // is the injected loopback (5th ctor arg) — the in-process plugin path.
+      // is the injected loopback (6th ctor arg) — the in-process plugin path.
       { id: "fs", transport: "stdio", command: "lvis-mcp-fs" },
       governanceWithPolicy(approvingPolicy("fs", "lvis-mcp-fs")),
       registry,
+      unusedNetworkFetch,
       undefined,
       transport,
     );
@@ -118,6 +120,7 @@ describe("loopback marshalling — the boundary has to behave like a wire", () =
       { id: "fs", transport: "stdio", command: "lvis-mcp-fs" },
       governanceWithPolicy(approvingPolicy("fs", "lvis-mcp-fs")),
       new ToolRegistry(),
+      unusedNetworkFetch,
       undefined,
       transport,
     );

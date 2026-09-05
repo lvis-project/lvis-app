@@ -31,6 +31,7 @@ import {
 } from "../../../permissions/reviewer/verdict-cache.js";
 import type { LLMProvider, StreamEvent } from "../../../engine/llm/types.js";
 import { marketplaceProviderPresetSecretKey } from "../../../shared/marketplace-package-assets.js";
+import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 import {
   LlmParentAdjudicator,
   UnavailableParentAdjudicator,
@@ -806,6 +807,7 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
       permissionManager,
       settingsService,
       llmFetch: vi.fn(),
+      singleHopNetworkFetch: unusedNetworkFetch,
       getMainWindow: () => null,
       bootAuditLogger: { log: vi.fn() },
     };
@@ -943,6 +945,7 @@ describe("wireReviewerAndPermissions self-hosted direct endpoint binding", () =>
       permissionManager,
       settingsService,
       llmFetch: vi.fn(),
+      singleHopNetworkFetch: unusedNetworkFetch,
       getMainWindow: () => null,
       bootAuditLogger: { log: vi.fn() },
     };

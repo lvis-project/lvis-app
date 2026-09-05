@@ -104,7 +104,7 @@ export interface WorkflowToolDeps {
    * through Chromium's network stack (system proxy/PAC, OS certificate store)
    * rather than Node's global `fetch`.
    */
-  networkFetch?: typeof fetch;
+  networkFetch: typeof fetch;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
   acquirePluginSkillGeneration?: NonNullable<SkillLoadToolDeps["acquirePluginGeneration"]>;
@@ -119,9 +119,9 @@ export interface WorkflowToolDeps {
 export function registerBuiltinTools(
   toolRegistry: ToolRegistry,
   settingsService: SettingsService,
-  workflowDeps?: WorkflowToolDeps,
+  workflowDeps: WorkflowToolDeps,
 ): void {
-  const networkFetch = workflowDeps?.networkFetch ?? fetch;
+  const { networkFetch } = workflowDeps;
   const builtins: Tool[] = [
     createWebSearchTool(settingsService, networkFetch),
     createWebFetchTool(networkFetch),

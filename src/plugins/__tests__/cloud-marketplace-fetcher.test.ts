@@ -25,6 +25,7 @@ import { fetchPublicHttpResponse, NetworkGuardError } from "../../core/network-g
 import { CloudMarketplaceFetcher } from "../cloud-marketplace-fetcher.js";
 import { installFromMarketplace } from "../marketplace-installer.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const mockedFetchPublic = fetchPublicHttpResponse as unknown as ReturnType<typeof vi.fn>;
 
@@ -122,6 +123,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
 
@@ -169,6 +171,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
 
@@ -200,6 +203,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
     expect(plugins).toHaveLength(1);
@@ -252,6 +256,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
 
@@ -303,6 +308,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     });
     const [item] = await fetcher.listPlugins();
 
@@ -338,6 +344,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     });
     const [item] = await fetcher.listPlugins();
 
@@ -364,6 +371,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     });
     const [item] = await fetcher.listPlugins();
 
@@ -408,6 +416,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
 
@@ -460,6 +469,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
 
@@ -510,6 +520,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
 
@@ -531,6 +542,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const detail = await fetcher.getPluginDetail("ghost");
     expect(detail).toBeNull();
@@ -543,6 +555,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const result = await fetcher.downloadVersion("acme-notes", "1.2.3");
 
@@ -560,6 +573,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     mockedFetchPublic.mockResolvedValueOnce(jsonResponse([]));
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       apiKey: "secret-token",
     });
     await fetcher.listPlugins();
@@ -575,6 +589,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/network guard:/);
   });
@@ -597,6 +612,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const announcements = await fetcher.listAnnouncements();
 
@@ -648,6 +664,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.9.1",
     });
     const announcements = await fetcher.listAnnouncements();
@@ -684,6 +701,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     // exist in this build.
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const announcements = await fetcher.listAnnouncements();
 
@@ -701,6 +719,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const announcements = await fetcher.listAnnouncements();
     expect(announcements.map((a) => a.id)).toEqual([6]);
@@ -727,6 +746,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const announcements = await fetcher.listAnnouncements();
     expect(announcements.map((a) => a.id)).toEqual([Number.MAX_SAFE_INTEGER]);
@@ -766,6 +786,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
 
     const announcements = await fetcher.listAnnouncements();
@@ -789,6 +810,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
 
     const announcements = await fetcher.listAnnouncements();
@@ -817,6 +839,7 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const announcements = await fetcher.listAnnouncements();
     expect(announcements.map((a) => a.id)).toEqual([9]);
@@ -844,6 +867,7 @@ describe("CloudMarketplaceFetcher (private-network path)", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8080",
+      networkFetch: unusedNetworkFetch,
       allowPrivateNetwork: true,
     });
     const plugins = await fetcher.listPlugins();
@@ -887,6 +911,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8000",
+      networkFetch: unusedNetworkFetch,
       allowPrivateNetwork: true,
     });
     const plugins = await fetcher.listPlugins();
@@ -917,6 +942,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8000",
+      networkFetch: unusedNetworkFetch,
       allowPrivateNetwork: true,
     });
     const result = await fetcher.downloadVersion("lvis-plugin-meeting", "0.1.0");
@@ -938,6 +964,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       artifactLimits: { maxCompressedBytes: 5 },
     });
 
@@ -957,6 +984,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
       );
       const fetcher = new CloudMarketplaceFetcher({
         baseUrl: "https://marketplace.example.com",
+        networkFetch: unusedNetworkFetch,
         artifactLimits: { maxCompressedBytes: 5 },
       });
 
@@ -975,6 +1003,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       artifactLimits: { maxCompressedBytes: 5 },
     });
 
@@ -992,6 +1021,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       artifactLimits: { maxCompressedBytes: 5 },
     });
 
@@ -1010,6 +1040,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       artifactReadTimeoutMs: 10,
     });
 
@@ -1027,6 +1058,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const controller = new AbortController();
     const download = fetcher.downloadArtifact(
@@ -1054,6 +1086,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.fetchSignatureEnvelope("acme", "1.0.0"))
       .rejects.toMatchObject({ code: "SIGNATURE_ENVELOPE_TOO_LARGE" });
@@ -1066,6 +1099,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     );
     const shortDeadlineFetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       envelopeReadTimeoutMs: 10,
     });
     await expect(shortDeadlineFetcher.fetchSignatureEnvelope("acme", "1.0.0"))
@@ -1078,6 +1112,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     mockedFetchPublic.mockResolvedValueOnce(new Response(null, { status: 200 }));
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const downloadRoot = mkdtempSync(join(process.cwd(), ".marketplace-protocol-integration-"));
     try {
@@ -1102,6 +1137,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       artifactLimits: { maxCompressedBytes: 5 },
     });
     const downloadRoot = mkdtempSync(join(process.cwd(), ".marketplace-limit-integration-"));
@@ -1127,6 +1163,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8000",
+      networkFetch: unusedNetworkFetch,
       allowPrivateNetwork: true,
     });
     const plugins = await fetcher.listPlugins();
@@ -1154,6 +1191,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
@@ -1164,6 +1202,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
@@ -1174,6 +1213,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
@@ -1184,6 +1224,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
@@ -1194,6 +1235,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/missing id\/name/);
   });
@@ -1204,6 +1246,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/missing id\/name/);
   });
@@ -1214,6 +1257,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
@@ -1224,6 +1268,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     // NaN is not finite → id becomes undefined → throws missing id
     await expect(fetcher.listPlugins()).rejects.toThrow(/missing id\/name/);
@@ -1240,6 +1285,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
     expect(plugins[0].packageName).toBe("@acme/notes");
@@ -1256,6 +1302,7 @@ describe("CloudMarketplaceFetcher — input validation (security)", () => {
     );
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const plugins = await fetcher.listPlugins();
     expect(plugins[0].packageName).toBe("simple-plugin");
@@ -1277,6 +1324,7 @@ describe("CloudMarketplaceFetcher.updateAllowPrivateNetwork (live config)", () =
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "http://127.0.0.1:8080",
+      networkFetch: unusedNetworkFetch,
       allowPrivateNetwork: false,
     });
 
@@ -1317,9 +1365,11 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
 
     await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
     }).listPlugins();
     const versionedFetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9+build.7",
     });
     await versionedFetcher.listPlugins();
@@ -1333,6 +1383,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
     expect(versionedFetcher.getCatalogCacheKey()).toBe("0.5.9");
     expect(new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9-preview",
     }).getCatalogCacheKey()).toBeNull();
   });
@@ -1432,6 +1483,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
 
     const plugins = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).listPlugins();
 
@@ -1493,6 +1545,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
   it("fails closed for malformed or inconsistent selected artifacts", async () => {
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     });
     mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
@@ -1540,6 +1593,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
   it("normalises an uppercase resolved artifact digest at the network boundary", async () => {
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     });
     mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
@@ -1583,6 +1637,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
 
     await expect(new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).listPlugins()).rejects.toThrow(/no valid runtime block/);
   });
@@ -1622,6 +1677,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
 
     const plugins = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).listPlugins();
 
@@ -1702,6 +1758,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
 
     const plugins = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).listPlugins();
 
@@ -1760,6 +1817,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
 
     await expect(new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).listPlugins()).resolves.toEqual([]);
   });
@@ -1778,6 +1836,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
 
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     });
     const catalog = await fetcher.listPlugins();
     const detail = await fetcher.getPluginDetail("legacy-plugin");
@@ -1819,6 +1878,7 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
 
     const detail = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).getPluginDetail("detail-plugin");
 
@@ -1832,6 +1892,7 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
     const installableTypes = ["plugin", "mcp", "agent", "skill"] as const;
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     });
 
@@ -1871,6 +1932,7 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
 
     await expect(new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).listPlugins()).rejects.toThrow(/stable SemVer/);
   });
@@ -1890,6 +1952,7 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
 
     const detail = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9+build.7",
     }).getPluginDetail("incompatible-detail");
 
@@ -1925,6 +1988,7 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
 
     const detail = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).getPluginDetail("generic-incompatible-detail");
 
@@ -1960,6 +2024,7 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
 
     await expect(new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).getPluginDetail("incompatible-detail")).resolves.toBeNull();
   });
@@ -1974,6 +2039,7 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
 
     await expect(new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
       appVersion: "0.5.9",
     }).getPluginDetail("incompatible-detail")).resolves.toBeNull();
   });
@@ -2016,6 +2082,7 @@ describe("per-version artifact hashes", () => {
 
     const item = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     }).getPluginDetail("acme-notes");
 
     expect(item?.artifactSha256ByVersion).toEqual({
@@ -2032,6 +2099,7 @@ describe("per-version artifact hashes", () => {
 
     const item = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     }).getPluginDetail("acme-notes");
 
     expect(item?.artifactSha256ByVersion?.["1.0.0"]).toBe(SHA_PRIOR);
@@ -2050,6 +2118,7 @@ describe("per-version artifact hashes", () => {
 
     const item = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     }).getPluginDetail("acme-notes");
 
     expect(item?.artifactSha256ByVersion?.["1.0.0"]).toBeUndefined();
@@ -2062,6 +2131,7 @@ describe("per-version artifact hashes", () => {
 
     const item = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
+      networkFetch: unusedNetworkFetch,
     }).getPluginDetail("acme-notes");
 
     expect(item?.artifactSha256ByVersion).toBeUndefined();

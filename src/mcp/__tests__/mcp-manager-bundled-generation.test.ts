@@ -39,6 +39,7 @@ vi.mock("../mcp-client.js", () => ({
 import { McpManager } from "../mcp-manager.js";
 import { McpGovernance } from "../mcp-governance.js";
 import { PluginMcpTrustStore, preparePluginMcpGeneration } from "../plugin-mcp-projection.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 const root = mkdtempSync(join(tmpdir(), "lvis-mcp-generation-"));
 
@@ -79,6 +80,7 @@ describe("McpManager bundled generation", () => {
     const manager = new McpManager(
       new McpGovernance(join(root, "policy.json")),
       registry,
+      unusedNetworkFetch,
       join(root, "servers.json"),
     );
     const active = { current: "g1" };
@@ -127,6 +129,7 @@ describe("McpManager bundled generation", () => {
     const manager = new McpManager(
       new McpGovernance(join(root, "policy-retry.json")),
       registry,
+      unusedNetworkFetch,
       join(root, "servers-retry.json"),
     );
     const trust = new PluginMcpTrustStore();
