@@ -16,6 +16,7 @@ import {
   invokeRegisteredHandlerWithEvent,
   untrustedEvent,
 } from "./test-helpers.js";
+import { unusedNetworkFetch } from "./support/network-fetch-stubs.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 
@@ -55,6 +56,8 @@ function makeServices(
       cloudBaseUrl?: string;
       cloudAllowPrivateNetwork?: boolean;
     };
+    /** The transport the marketplace ping is expected to reach the network through. */
+    networkFetch?: typeof fetch;
   } = {},
 ) {
   const toolRegistrySize = overrides.toolRegistrySize ?? 5;
@@ -110,6 +113,11 @@ function makeServices(
       getModelVisibleTools: () => Array.from({ length: toolRegistrySize }, () => ({})),
     } as any,
     auditLogger: { log: vi.fn() } as any,
+    // Every handler that reaches the network takes its transport from here.
+    // Defaulting to the throwing stub keeps the rest of the suite honest: a
+    // handler that starts making a request shows up as a failure, not as a
+    // real request from whatever machine runs the tests.
+    singleHopNetworkFetch: overrides.networkFetch ?? unusedNetworkFetch,
     idleScheduler: undefined,
     bashAstValidator: {} as any,
     auditService: {} as any,
@@ -255,12 +263,13 @@ describe("lvis:marketplace:ping", () => {
   });
 
   it("returns { configured: true, online: false } when real-cloud fetch throws", async () => {
-    // Use cloudAllowPrivateNetwork=true so the handler uses the direct
-    // fetch path (no dynamic network-guard import) and we can control the
-    // global fetch stub.
-    const fetchSpy = vi.spyOn(global, "fetch").mockRejectedValueOnce(
-      new Error("ECONNREFUSED"),
-    );
+    // `cloudAllowPrivateNetwork: true` selects the private-network arm, which
+    // skips the SSRF guard because the operator has already vouched for the
+    // endpoint. It does NOT skip the transport: both arms go out on the
+    // machine's configured network stack, so this is the transport to observe.
+    const networkFetch = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    });
 
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
@@ -268,6 +277,7 @@ describe("lvis:marketplace:ping", () => {
         cloudBaseUrl: "http://127.0.0.1:9999/",
         cloudAllowPrivateNetwork: true,
       },
+      networkFetch: networkFetch as unknown as typeof fetch,
     });
 
     const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
@@ -277,14 +287,11 @@ describe("lvis:marketplace:ping", () => {
 
     expect(result.configured).toBe(true);
     expect(result.online).toBe(false);
-
-    fetchSpy.mockRestore();
+    expect(networkFetch).toHaveBeenCalledTimes(1);
   });
 
   it("returns { configured: true, online: true } when real-cloud fetch succeeds (ok=true)", async () => {
-    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
-      ok: true,
-    } as Response);
+    const networkFetch = vi.fn(async () => ({ ok: true }) as Response);
 
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
@@ -292,6 +299,7 @@ describe("lvis:marketplace:ping", () => {
         cloudBaseUrl: "http://127.0.0.1:9999/",
         cloudAllowPrivateNetwork: true,
       },
+      networkFetch: networkFetch as unknown as typeof fetch,
     });
 
     const result = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
@@ -301,16 +309,16 @@ describe("lvis:marketplace:ping", () => {
 
     expect(result.configured).toBe(true);
     expect(result.online).toBe(true);
-
-    fetchSpy.mockRestore();
+    expect(networkFetch).toHaveBeenCalledTimes(1);
   });
 
   it("coalesces concurrent real-cloud pings into one network request", async () => {
     let resolveFetch: (value: Response) => void = () => undefined;
-    const fetchSpy = vi.spyOn(global, "fetch").mockReturnValue(
-      new Promise<Response>((resolve) => {
-        resolveFetch = resolve;
-      }),
+    const networkFetch = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
     );
 
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
@@ -319,23 +327,20 @@ describe("lvis:marketplace:ping", () => {
         cloudBaseUrl: "http://127.0.0.1:9999/",
         cloudAllowPrivateNetwork: true,
       },
+      networkFetch: networkFetch as unknown as typeof fetch,
     });
 
     const first = invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
     const second = invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(networkFetch).toHaveBeenCalledTimes(1);
     resolveFetch({ ok: true } as Response);
     await expect(first).resolves.toEqual({ configured: true, online: true });
     await expect(second).resolves.toEqual({ configured: true, online: true });
-
-    fetchSpy.mockRestore();
   });
 
   it("serves near-repeat pings from the main-process cache", async () => {
-    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
-      ok: true,
-    } as Response);
+    const networkFetch = vi.fn(async () => ({ ok: true }) as Response);
 
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
@@ -343,6 +348,7 @@ describe("lvis:marketplace:ping", () => {
         cloudBaseUrl: "http://127.0.0.1:9999/",
         cloudAllowPrivateNetwork: true,
       },
+      networkFetch: networkFetch as unknown as typeof fetch,
     });
 
     const first = await invokeRegisteredHandler(handlers, "lvis:marketplace:ping") as {
@@ -356,9 +362,7 @@ describe("lvis:marketplace:ping", () => {
 
     expect(first).toEqual({ configured: true, online: true });
     expect(second).toEqual({ configured: true, online: true });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-    fetchSpy.mockRestore();
+    expect(networkFetch).toHaveBeenCalledTimes(1);
   });
 });
 

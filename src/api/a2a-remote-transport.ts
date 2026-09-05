@@ -11,6 +11,11 @@ import {
   type A2ARemoteTransportRequest,
   type A2ARemoteTransportResponse,
 } from "./a2a-remote-contracts.js";
+// One classifier, not two: this transport and the SSRF guard were both
+// answering "can a packet to this address leave the machine and arrive?", and
+// their two copies had drifted apart on multicast, on reserved space, and on
+// every IPv6 address outside global unicast.
+import { isGloballyRoutableAddress } from "../core/network-guard.js";
 
 export interface A2ADnsAnswer {
   address: string;
@@ -25,107 +30,6 @@ export interface CreateA2AStrictTransportOptions {
   maxHeaderBytes?: number;
 }
 
-const IPV4_BLOCKS: ReadonlyArray<readonly [number, number]> = [
-  [0x00000000, 8], [0x0a000000, 8], [0x64400000, 10], [0x7f000000, 8],
-  [0xa9fe0000, 16], [0xac100000, 12], [0xc0000000, 24], [0xc0000200, 24],
-  [0xc0586300, 24], [0xc0a80000, 16], [0xc6120000, 15], [0xc6336400, 24],
-  [0xcb007100, 24], [0xe0000000, 4], [0xf0000000, 4],
-];
-
-const IPV4_GLOBAL_EXCEPTIONS: ReadonlyArray<readonly [number, number]> = [
-  [0xc0000009, 32], [0xc000000a, 32], [0xc01fc400, 24],
-  [0xc034c100, 24], [0xc0af3000, 24],
-];
-
-function ipv4Number(value: string): number | null {
-  const parts = value.split(".");
-  if (parts.length !== 4) return null;
-  const octets = parts.map(Number);
-  if (octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
-  return (((octets[0]! << 24) >>> 0)
-    + (octets[1]! << 16)
-    + (octets[2]! << 8)
-    + octets[3]!) >>> 0;
-}
-
-function ipv4InCidr(value: number, network: number, prefix: number): boolean {
-  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-  return (value & mask) === (network & mask);
-}
-
-function expandIpv6(value: string): number[] | null {
-  let input = value.toLowerCase().split("%")[0]!;
-  const mapped = input.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) {
-    const v4 = ipv4Number(mapped[2]!);
-    if (v4 === null) return null;
-    input = `${mapped[1]}${((v4 >>> 16) & 0xffff).toString(16)}:${(v4 & 0xffff).toString(16)}`;
-  }
-  const halves = input.split("::");
-  if (halves.length > 2) return null;
-  const left = halves[0] ? halves[0].split(":") : [];
-  const right = halves.length === 2 && halves[1] ? halves[1]!.split(":") : [];
-  const missing = 8 - left.length - right.length;
-  if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) return null;
-  const parts = [...left, ...Array(Math.max(0, missing)).fill("0"), ...right];
-  if (parts.length !== 8 || parts.some((part) => !/^[a-f0-9]{1,4}$/.test(part))) return null;
-  return parts.map((part) => Number.parseInt(part, 16));
-}
-
-function ipv6BigInt(parts: readonly number[]): bigint {
-  return parts.reduce((value, part) => (value << 16n) | BigInt(part), 0n);
-}
-
-function ipv6InCidr(value: bigint, network: bigint, prefix: number): boolean {
-  const shift = BigInt(128 - prefix);
-  return (value >> shift) === (network >> shift);
-}
-
-function ipv6Network(value: string): bigint {
-  const parts = expandIpv6(value);
-  if (!parts) throw new Error("invalid fixed IPv6 network");
-  return ipv6BigInt(parts);
-}
-
-const IPV6_BLOCKS: ReadonlyArray<readonly [bigint, number]> = [
-  [ipv6Network("2001::"), 23],
-  [ipv6Network("2001:db8::"), 32],
-  [ipv6Network("2002::"), 16],
-  [ipv6Network("3fff::"), 20],
-  [ipv6Network("5f00::"), 16],
-];
-
-const IPV6_2001_GLOBAL_EXCEPTIONS: ReadonlyArray<readonly [bigint, number]> = [
-  [ipv6Network("2001:1::1"), 128],
-  [ipv6Network("2001:1::2"), 128],
-  [ipv6Network("2001:1::3"), 128],
-  [ipv6Network("2001:3::"), 32],
-  [ipv6Network("2001:4:112::"), 48],
-  [ipv6Network("2001:20::"), 28],
-  [ipv6Network("2001:30::"), 28],
-  [ipv6Network("2620:4f:8000::"), 48],
-  [ipv6Network("64:ff9b::"), 96],
-];
-
-export function isA2APublicAddress(address: string): boolean {
-  const family = isIP(address);
-  if (family === 4) {
-    const value = ipv4Number(address);
-    return value !== null && (
-      IPV4_GLOBAL_EXCEPTIONS.some(([network, prefix]) => ipv4InCidr(value, network, prefix))
-      || !IPV4_BLOCKS.some(([network, prefix]) => ipv4InCidr(value, network, prefix))
-    );
-  }
-  if (family === 6) {
-    const parts = expandIpv6(address);
-    if (!parts) return false;
-    const value = ipv6BigInt(parts);
-    if (IPV6_2001_GLOBAL_EXCEPTIONS.some(([network, prefix]) => ipv6InCidr(value, network, prefix))) return true;
-    if (!ipv6InCidr(value, ipv6Network("2000::"), 3)) return false;
-    return !IPV6_BLOCKS.some(([network, prefix]) => ipv6InCidr(value, network, prefix));
-  }
-  return false;
-}
 
 export function validateA2ARemoteUrl(raw: string): URL {
   let url: URL;
@@ -197,7 +101,7 @@ export function createA2AStrictTransport(
       });
       const unique = new Set(answers.map((answer) => `${answer.family}:${answer.address}`));
       if (answers.length === 0 || answers.length > 8 || unique.size !== answers.length || answers.some((answer) =>
-        !isA2APublicAddress(answer.address) || answer.family !== isIP(answer.address))) {
+        !isGloballyRoutableAddress(answer.address) || answer.family !== isIP(answer.address))) {
         throw new Error("a2a-remote-address-ineligible");
       }
       const plane = input.plane ?? "data";

@@ -497,7 +497,10 @@ export async function bootstrap(
   // synchronously from `getSecret`; if the registry isn't initialized the
   // tier-3 check fails closed with `whitelist-unreachable`. Resolves on every
   // path (fresh, offline, cached) so a network blip never blocks boot.
-  await wireWhitelistRegistry({ bootAuditLogger: ctx.bootAuditLogger });
+  await wireWhitelistRegistry({
+    bootAuditLogger: ctx.bootAuditLogger,
+    networkFetch: ctx.singleHopNetworkFetch,
+  });
 
   // Load the plugin revocation registry BEFORE initPluginRuntime, same
   // ordering requirement as the whitelist above: the LOAD-boundary gate
@@ -505,13 +508,19 @@ export async function bootstrap(
   // (deferStart:true — see `startPlugins()` below) but must see a populated
   // registry the first time it runs. Resolves on every path (fresh, offline,
   // cached) — fail-open on a fetch failure, never blocks boot.
-  await wireRevocationRegistry({ bootAuditLogger: ctx.bootAuditLogger });
+  await wireRevocationRegistry({
+    bootAuditLogger: ctx.bootAuditLogger,
+    networkFetch: ctx.singleHopNetworkFetch,
+  });
 
   // Warm the admission catalog. Unlike the two registries above this is not an
   // ordering requirement — admission is consulted at install, not at load, and
   // the install path re-checks freshness itself. Warming here only saves the
   // first install of a session a cold fetch.
-  await wireAdmissionRegistry({ bootAuditLogger: ctx.bootAuditLogger });
+  await wireAdmissionRegistry({
+    bootAuditLogger: ctx.bootAuditLogger,
+    networkFetch: ctx.singleHopNetworkFetch,
+  });
 
   // PermissionManager is built BEFORE initPluginRuntime
   // so its per-plugin revoke signal can be wired into the resolveApiKey host
@@ -864,6 +873,7 @@ export async function bootstrap(
     mainWindow,
     settingsService,
     bootAuditLogger: ctx.bootAuditLogger,
+    networkFetch: ctx.singleHopNetworkFetch,
   });
   wireUpdateCheck({
     mainWindow,

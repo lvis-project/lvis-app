@@ -17,6 +17,7 @@ import { runSecretGate } from "../secret-gate.js";
 import type { SecretGateInput } from "../secret-gate.js";
 import { WhitelistCache, whitelistRegistry } from "../whitelist-registry.js";
 import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 
 const tempCacheRoots: string[] = [];
 
@@ -188,6 +189,7 @@ describe("runSecretGate — admin-install bypass (#955)", () => {
       meta: { highestSeenIssuedAt: doc.issuedAt },
     });
     await whitelistRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir: cacheRoot,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),

@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { REDIRECT_STATUSES } from "../host-fetch-guard.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 // ─── dns mock — configurable per test via `lookupMock` ──────────────
 const lookupMock = vi.fn<
@@ -454,6 +455,62 @@ function hopOptions(
     hops,
   };
 }
+
+describe("runHostFetchHops — hop deadline", () => {
+  /** A server that accepts the connection and then says nothing, ever. */
+  function silentTransport() {
+    const aborted: string[] = [];
+    const transport = vi.fn((input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const give = () => {
+          aborted.push(String(input));
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        };
+        // A real transport checks the signal before it opens the socket, so a
+        // signal that is ALREADY aborted must reject rather than wait for an
+        // event that has been and gone.
+        if (init?.signal?.aborted) give();
+        else init?.signal?.addEventListener("abort", give);
+      })) as unknown as typeof fetch;
+    return { transport, aborted };
+  }
+
+  it("gives up on a hop that never produces headers", async () => {
+    // The plugin lane's one missing bound. Without it this call is held open
+    // for as long as the app runs, and the plugin looks merely slow.
+    vi.useFakeTimers();
+    try {
+      publicDns();
+      const { transport, aborted } = silentTransport();
+      const { options } = hopOptions(await firstAllow("https://api.example.com/a"), {}, transport);
+      const pending = runHostFetchHops(options);
+      const settled = expect(pending).rejects.toThrow(/abort/i);
+      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.pluginFetchResponseCeilingMs);
+      await settled;
+      expect(aborted).toEqual(["https://api.example.com/a"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the plugin's own signal able to cancel sooner", async () => {
+    // The ceiling is an upper bound, not a replacement: a plugin that cancels
+    // at its own moment still cancels then.
+    publicDns();
+    const { transport, aborted } = silentTransport();
+    const pluginAbort = new AbortController();
+    const { options } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { signal: pluginAbort.signal },
+      transport,
+    );
+    const pending = runHostFetchHops(options);
+    const settled = expect(pending).rejects.toThrow(/abort/i);
+    pluginAbort.abort();
+    await settled;
+    expect(aborted).toEqual(["https://api.example.com/a"]);
+  });
+});
 
 describe("runHostFetchHops — redirect policy", () => {
   it("default (no redirect field) refuses a redirect, after one hop only", async () => {

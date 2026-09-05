@@ -31,7 +31,7 @@ function makeDeps(overrides: {
   promptAnswered?: boolean;
   marketplaceBaseUrl?: string;
   installToken?: string | null;
-  fetchImpl?: typeof fetch;
+  fetchImpl: typeof fetch;
   flushIntervalMs?: number;
 }) {
   const settings: TelemetrySettings = {

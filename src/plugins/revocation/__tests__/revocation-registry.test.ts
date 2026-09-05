@@ -9,6 +9,7 @@
  * as `whitelist-registry.test.ts`.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { unusedNetworkFetch } from "../../../__tests__/support/network-fetch-stubs.js";
 
 // `evaluate()` before `init()` reports itself through the module logger,
 // because the audit sink it would otherwise use arrives via the very call that
@@ -31,12 +32,22 @@ import { WHITELIST_PRIMARY_KEY_ID as REVOCATION_PRIMARY_KEY_ID } from "../../mar
 import { useTempDirs } from "../../../__tests__/test-helpers.js";
 import {
   signedDocumentFixture,
-  stubSignedDocumentFetch,
+  signedDocumentTransport,
 } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------
+
+/**
+ * A transport whose connection is refused — the network-failure arm of
+ * `init()`. Defined once because two tests describe the same failure from
+ * different starting states (no cached document vs. one still enforced), and
+ * two copies of the same body are what `check:test-duplicates` flags.
+ */
+const refusingFetch: typeof fetch = async () => {
+  throw new Error("connect ECONNREFUSED");
+};
 
 interface SignedDoc {
   body: string;
@@ -100,7 +111,7 @@ describe("RevocationRegistry — fail-open", () => {
   it("allows everything when no document was ever obtained (offline, no cache)", async () => {
     const userDataDir = freshUserData();
     const audits: string[] = [];
-    await revocationRegistry.init({ userDataDir, online: false, audit: (line) => audits.push(line) });
+    await revocationRegistry.init({ networkFetch: unusedNetworkFetch, userDataDir, online: false, audit: (line) => audits.push(line) });
 
     expect(revocationRegistry.evaluate("meeting", "1.0.0")).toEqual({ kind: "allow" });
     expect(revocationRegistry.status().hasDocument).toBe(false);
@@ -125,7 +136,7 @@ describe("RevocationRegistry — fail-open", () => {
       meta: { highestSeenIssuedAt: signed.doc.issuedAt },
     });
 
-    await revocationRegistry.init({ userDataDir, online: false });
+    await revocationRegistry.init({ networkFetch: unusedNetworkFetch, userDataDir, online: false });
 
     expect(revocationRegistry.evaluate("meeting", "1.0.0")).toEqual({ kind: "allow" });
   });
@@ -147,6 +158,7 @@ describe("RevocationRegistry — fail-closed on a valid document", () => {
     });
 
     await revocationRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -176,6 +188,7 @@ describe("RevocationRegistry — fail-closed on a valid document", () => {
     });
 
     await revocationRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -205,6 +218,7 @@ describe("RevocationRegistry — fail-closed on a valid document", () => {
 
     // "Now" is years past expiresAt, and we're offline so no refresh happens.
     await revocationRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -290,6 +304,7 @@ describe("RevocationRegistry — issuedAt guard on the cached document", () => {
 
     const audits: string[] = [];
     await revocationRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -323,6 +338,7 @@ describe("RevocationRegistry — issuedAt guard on the cached document", () => {
 
     const audits: string[] = [];
     await revocationRegistry.init({
+      networkFetch: unusedNetworkFetch,
       userDataDir,
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -351,7 +367,7 @@ describe("RevocationRegistry — issuedAt guard on the cached document", () => {
     });
     await cache.store({ body: signed.body, signature: signed.signature, meta: {} });
 
-    await revocationRegistry.init({ userDataDir, online: false, now: () => now });
+    await revocationRegistry.init({ networkFetch: unusedNetworkFetch, userDataDir, online: false, now: () => now });
 
     expect(revocationRegistry.evaluate("meeting", "1.0.0")).toMatchObject({ kind: "block" });
     expect(await cache.load()).not.toBeNull();
@@ -371,7 +387,7 @@ describe("RevocationRegistry — issuedAt guard on the cached document", () => {
       meta: { highestSeenIssuedAt: signed.doc.issuedAt },
     });
 
-    await revocationRegistry.init({ userDataDir, online: false });
+    await revocationRegistry.init({ networkFetch: unusedNetworkFetch, userDataDir, online: false });
 
     // Previously this entry survived on disk and was re-read and re-refused on
     // every boot, with its meta still claiming a mark it could not justify.
@@ -382,8 +398,8 @@ describe("RevocationRegistry — issuedAt guard on the cached document", () => {
 
 describe("RevocationRegistry — issuedAt guard on the fetched document", () => {
   /**
-   * The registry's source URLs are module constants, so the seam for the
-   * online path is the global `fetch` the shared fetcher calls.
+   * The seam for the online path is the `networkFetch` the registry is
+   * initialised with.
    */
   it("discards a fetched doc dated implausibly far ahead without advancing the mark", async () => {
     const now = Date.parse("2026-05-18T00:00:00.000Z");
@@ -393,10 +409,15 @@ describe("RevocationRegistry — issuedAt guard on the fetched document", () => 
       issuedAt: "2027-01-01T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
     });
-    stubSignedDocumentFetch("revocation.json", future.body, future.signature);
+    const futureTransport = signedDocumentTransport(
+      "revocation.json",
+      future.body,
+      future.signature,
+    );
 
     const audits: string[] = [];
     await revocationRegistry.init({
+      networkFetch: futureTransport,
       userDataDir,
       online: true,
       now: () => now,
@@ -418,8 +439,17 @@ describe("RevocationRegistry — issuedAt guard on the fetched document", () => 
       expiresAt: "2030-01-01T00:00:00.000Z",
       blocked: [{ slug: "meeting", version: "1.0.0", reason: "test" }],
     });
-    stubSignedDocumentFetch("revocation.json", genuine.body, genuine.signature);
-    await revocationRegistry.init({ userDataDir, online: true, now: () => now });
+    const genuineTransport = signedDocumentTransport(
+      "revocation.json",
+      genuine.body,
+      genuine.signature,
+    );
+    await revocationRegistry.init({
+      networkFetch: genuineTransport,
+      userDataDir,
+      online: true,
+      now: () => now,
+    });
 
     expect(revocationRegistry.evaluate("meeting", "1.0.0")).toMatchObject({ kind: "block" });
     expect((await cache.loadMeta()).highestSeenIssuedAt).toBe("2026-05-17T00:00:00.000Z");
@@ -431,12 +461,10 @@ describe("RevocationRegistry — issuedAt guard on the fetched document", () => 
     // operator that this device is blocking nothing at all. The
     // cache-miss counter is what separates the two, matching what
     // `whitelist-registry.ts` emits on the same branch.
-    vi.stubGlobal("fetch", async () => {
-      throw new Error("connect ECONNREFUSED");
-    });
     const events: Array<{ event: string; meta?: Record<string, string> }> = [];
     const audits: string[] = [];
     await revocationRegistry.init({
+      networkFetch: refusingFetch,
       userDataDir: freshUserData(),
       online: true,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -470,12 +498,9 @@ describe("RevocationRegistry — issuedAt guard on the fetched document", () => 
       signature: signed.signature,
       meta: { highestSeenIssuedAt: signed.doc.issuedAt },
     });
-    vi.stubGlobal("fetch", async () => {
-      throw new Error("connect ECONNREFUSED");
-    });
-
     const events: string[] = [];
     await revocationRegistry.init({
+      networkFetch: refusingFetch,
       userDataDir,
       online: true,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
@@ -508,7 +533,7 @@ describe("RevocationRegistry — evaluate() before init()", () => {
   });
 
   it("stays silent once init() has run", async () => {
-    await revocationRegistry.init({ userDataDir: freshUserData(), online: false });
+    await revocationRegistry.init({ networkFetch: unusedNetworkFetch, userDataDir: freshUserData(), online: false });
 
     revocationRegistry.evaluate("meeting", "1.0.0");
     expect(loggerMock.error).not.toHaveBeenCalled();

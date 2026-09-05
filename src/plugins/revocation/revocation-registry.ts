@@ -117,9 +117,10 @@ const REVOCATION_SOURCE: SignedDocSource = {
  * has never been one.
  */
 async function fetchRevocationDocument(
+  networkFetch: typeof fetch,
   opts: FetchSignedDocumentOptions = {},
 ): Promise<SignedDocumentFetchOutcome> {
-  return fetchSignedDocument(REVOCATION_SOURCE, opts, "lvis-app/revocation-registry");
+  return fetchSignedDocument(REVOCATION_SOURCE, networkFetch, opts, "lvis-app/revocation-registry");
 }
 
 /** Caller-facing decision shape — discriminated union for exhaustive narrowing. */
@@ -148,6 +149,15 @@ export interface RevocationStatus {
 export interface RevocationInitOptions {
   /** Electron `app.getPath("userData")`. The cache lives under `marketplace-revocation/`. */
   userDataDir: string;
+  /**
+   * Transport for the two document GETs. Required, and deliberately not
+   * defaulted to the ambient `fetch`: Node's stack reads neither the
+   * machine's proxy configuration nor its OS trust store, so a default here
+   * would silently send the signed-document fetch out on a route the user
+   * never chose — and one that cannot complete at all where the direct route
+   * is unavailable. Boot passes Chromium's stack.
+   */
+  networkFetch: typeof fetch;
   /** Skip the network fetch for offline tests or user-selected offline mode. */
   online: boolean;
   /** Wall-clock now provider — injected for deterministic tests. Defaults to `Date.now`. */
@@ -213,7 +223,7 @@ class RevocationRegistry {
       parse: parseRevocationDocument,
       publicKeys: this.publicKeys,
       primaryKeyId: REVOCATION_PRIMARY_KEY_ID,
-      fetch: fetchRevocationDocument,
+      fetch: (fetchOpts) => fetchRevocationDocument(opts.networkFetch, fetchOpts),
       // Fail-open: an absent document means `evaluate()` allows everything.
       // That is the intended behaviour (see module doc), not an error state
       // worth a toast the way the whitelist's equivalent path is.

@@ -16,6 +16,7 @@ import {
   validateTelemetryEndpoint,
 } from "../telemetry.js";
 import type { TelemetrySettings } from "../../data/settings-store.js";
+import { unusedNetworkFetch } from "../../__tests__/support/network-fetch-stubs.js";
 
 describe("validateTelemetryEndpoint — schemes", () => {
   it("accepts https:// when host is allowlisted (env override)", () => {
@@ -156,6 +157,7 @@ describe("TelemetryService — audit log uses warn + sanitized url", () => {
   it("logs type=warn (not error) and strips query string when endpoint rejected", () => {
     const entries: Array<Record<string, unknown>> = [];
     const svc = new TelemetryService({
+      fetchImpl: unusedNetworkFetch,
       settings: () => ({ enabled: true, endpoint: "http://bad.example/x?secret=abc" } as TelemetrySettings),
       isPackaged: true,
       auditLogger: { log: (e) => entries.push(e) },
@@ -184,6 +186,7 @@ describe("TelemetryService — isActive() + audit on invalid endpoint", () => {
   it("isActive() is false when endpoint is http://", () => {
     const { logger, entries } = makeLogger();
     const svc = new TelemetryService({
+      fetchImpl: unusedNetworkFetch,
       settings: makeSettings({ endpoint: "http://telemetry.example.com/x" }),
       isPackaged: true,
       auditLogger: logger,
@@ -196,6 +199,7 @@ describe("TelemetryService — isActive() + audit on invalid endpoint", () => {
   it("isActive() is false when host not in allowlist", () => {
     const { logger } = makeLogger();
     const svc = new TelemetryService({
+      fetchImpl: unusedNetworkFetch,
       settings: makeSettings({ endpoint: "https://evil.example.com/x" }),
       isPackaged: true,
       auditLogger: logger,
@@ -205,6 +209,7 @@ describe("TelemetryService — isActive() + audit on invalid endpoint", () => {
 
   it("isActive() is true when endpoint is https + allowlist host (dev localhost)", () => {
     const svc = new TelemetryService({
+      fetchImpl: unusedNetworkFetch,
       settings: makeSettings({ endpoint: "https://localhost:4000/x" }),
       isPackaged: false,
     });
@@ -213,6 +218,7 @@ describe("TelemetryService — isActive() + audit on invalid endpoint", () => {
 
   it("isActive() rejects localhost in packaged build", () => {
     const svc = new TelemetryService({
+      fetchImpl: unusedNetworkFetch,
       settings: makeSettings({ endpoint: "https://localhost:4000/x" }),
       isPackaged: true,
     });
@@ -222,6 +228,7 @@ describe("TelemetryService — isActive() + audit on invalid endpoint", () => {
   it("session-disables after first invalid endpoint — no retries", () => {
     const { logger, entries } = makeLogger();
     const svc = new TelemetryService({
+      fetchImpl: unusedNetworkFetch,
       settings: makeSettings({ endpoint: "http://bad/x" }),
       isPackaged: true,
       auditLogger: logger,
@@ -250,6 +257,7 @@ describe("TelemetryService — isActive() + audit on invalid endpoint", () => {
 
   it("honors allowlistEnv override in TelemetryService", () => {
     const svc = new TelemetryService({
+      fetchImpl: unusedNetworkFetch,
       settings: makeSettings({ endpoint: "https://custom.corp.example/x" }),
       isPackaged: true,
       allowlistEnv: "custom.corp.example",

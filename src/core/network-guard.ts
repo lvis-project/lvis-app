@@ -97,16 +97,178 @@ const CGNAT_IPV4_RANGE: [bigint, bigint] = [
   ipv4ToBigInt("100.127.255.255"),
 ];
 
-const PRIVATE_IPV4_RANGES: Array<[bigint, bigint]> = [
-  ...RFC1918_IPV4_RANGES,
-  // 127.0.0.0/8 (loopback)
-  [ipv4ToBigInt("127.0.0.0"), ipv4ToBigInt("127.255.255.255")],
-  // 169.254.0.0/16 (link-local, AWS metadata 169.254.169.254)
-  [ipv4ToBigInt("169.254.0.0"), ipv4ToBigInt("169.254.255.255")],
-  CGNAT_IPV4_RANGE,
-  // 0.0.0.0/8 (this network)
-  [ipv4ToBigInt("0.0.0.0"), ipv4ToBigInt("0.255.255.255")],
-];
+
+
+// ─── IANA special-purpose address registry ─────────────────────────────
+/**
+ * The blocks IANA records as special-purpose, with the entries it marks
+ * "globally reachable: True" carved back out.
+ *
+ * The RFC1918 ranges above answer "is this the user's own network?", which is
+ * a question with a legitimate yes: a caller can opt into it. These answer a
+ * different one — "could a packet to this address reach a host on the public
+ * internet at all?" — and for documentation, benchmarking, multicast and
+ * reserved space the answer is no under any option. Keeping the two sets
+ * apart is what lets `allowPrivateNetworks` open a LAN without also opening
+ * 224.0.0.0/4.
+ *
+ * Written as CIDR text rather than packed integers so each line can be read
+ * against the registry it came from.
+ */
+const SPECIAL_PURPOSE_IPV4 = [
+  "0.0.0.0/8", // this network
+  "10.0.0.0/8", // private-use
+  "100.64.0.0/10", // shared address space (CGNAT) — also the tailnet peer range
+  "127.0.0.0/8", // loopback
+  "169.254.0.0/16", // link-local, including the 169.254.169.254 metadata service
+  "172.16.0.0/12", // private-use
+  "192.0.0.0/24", // IETF protocol assignments
+  "192.0.2.0/24", // documentation (TEST-NET-1)
+  "192.88.99.0/24", // 6to4 relay anycast (deprecated)
+  "192.168.0.0/16", // private-use
+  "198.18.0.0/15", // benchmarking
+  "198.51.100.0/24", // documentation (TEST-NET-2)
+  "203.0.113.0/24", // documentation (TEST-NET-3)
+  "224.0.0.0/4", // multicast
+  "240.0.0.0/4", // reserved, including the 255.255.255.255 broadcast address
+] as const;
+
+/** Special-purpose IPv4 entries IANA still marks globally reachable. */
+const GLOBALLY_REACHABLE_IPV4 = [
+  "192.0.0.9/32", // PCP anycast
+  "192.0.0.10/32", // NAT64/DNS64 discovery
+  "192.31.196.0/24", // AS112-v4
+  "192.52.193.0/24", // AMT
+  "192.175.48.0/24", // direct delegation AS112 service
+] as const;
+
+const SPECIAL_PURPOSE_IPV6 = [
+  "2001::/23", // IETF protocol assignments
+  "2001:db8::/32", // documentation
+  "2002::/16", // 6to4 (deprecated)
+  "3fff::/20", // documentation
+  "5f00::/16", // segment routing (SRv6) SIDs
+] as const;
+
+/** Special-purpose IPv6 entries IANA still marks globally reachable. */
+const GLOBALLY_REACHABLE_IPV6 = [
+  "64:ff9b::/96", // NAT64 — outside 2000::/3, so it needs the exception to pass
+  "2001:1::1/128", // PCP anycast
+  "2001:1::2/128", // TURN anycast
+  "2001:1::3/128", // DNS-SD service registration
+  "2001:3::/32", // AMT
+  "2001:4:112::/48", // AS112-v6
+  "2001:20::/28", // ORCHIDv2
+  "2001:30::/28", // drone remote-id
+  "2620:4f:8000::/48", // direct delegation AS112 service
+] as const;
+
+/** Global unicast — everything a public IPv6 destination must be inside. */
+const GLOBAL_UNICAST_IPV6 = "2000::/3";
+
+/**
+ * The three ranges a caller can OPT INTO. They are matched by their own
+ * predicates rather than by "not globally routable", so tightening the
+ * routable answer above can never widen what an opt-in reaches.
+ */
+const LOOPBACK_IPV4 = "127.0.0.0/8";
+const LOOPBACK_IPV6 = "::1/128";
+const UNIQUE_LOCAL_IPV6 = "fc00::/7";
+
+interface AddressBlock {
+  network: bigint;
+  prefix: number;
+  /** 32 for IPv4, 128 for IPv6 — the width the prefix is measured against. */
+  bits: 32 | 128;
+}
+
+function parseIpv4Block(cidr: string): AddressBlock {
+  const [address, prefix] = cidr.split("/");
+  return { network: ipv4ToBigInt(address!), prefix: Number(prefix), bits: 32 };
+}
+
+function parseIpv6Block(cidr: string): AddressBlock {
+  const [address, prefix] = cidr.split("/");
+  const network = ipv6ToBigInt(address!);
+  if (network === null) throw new NetworkGuardError(`invalid IPv6 block: ${cidr}`);
+  return { network, prefix: Number(prefix), bits: 128 };
+}
+
+function inBlock(value: bigint, block: AddressBlock): boolean {
+  const shift = BigInt(block.bits - block.prefix);
+  return value >> shift === block.network >> shift;
+}
+
+const SPECIAL_PURPOSE_IPV4_BLOCKS = SPECIAL_PURPOSE_IPV4.map(parseIpv4Block);
+const GLOBALLY_REACHABLE_IPV4_BLOCKS = GLOBALLY_REACHABLE_IPV4.map(parseIpv4Block);
+const SPECIAL_PURPOSE_IPV6_BLOCKS = SPECIAL_PURPOSE_IPV6.map(parseIpv6Block);
+const GLOBALLY_REACHABLE_IPV6_BLOCKS = GLOBALLY_REACHABLE_IPV6.map(parseIpv6Block);
+const GLOBAL_UNICAST_IPV6_BLOCK = parseIpv6Block(GLOBAL_UNICAST_IPV6);
+const LOOPBACK_IPV4_BLOCK = parseIpv4Block(LOOPBACK_IPV4);
+const LOOPBACK_IPV6_BLOCK = parseIpv6Block(LOOPBACK_IPV6);
+const UNIQUE_LOCAL_IPV6_BLOCK = parseIpv6Block(UNIQUE_LOCAL_IPV6);
+
+/**
+ * Expand an IPv6 literal to its 128 bits, or `null` when it is malformed.
+ *
+ * Textual prefix tests do not survive contact with the address forms a URL can
+ * carry: `::1` and `0:0:0:0:0:0:0:1` name the same host, a zone id can be
+ * appended, and `::ffff:1.2.3.4` embeds a dotted quad. Expanding once and
+ * comparing numbers is the only form that answers the same for all of them.
+ */
+function ipv6ToBigInt(address: string): bigint | null {
+  let input = address.toLowerCase().split("%")[0]!;
+  const embeddedIpv4 = input.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (embeddedIpv4) {
+    if (!isIPv4(embeddedIpv4[2]!)) return null;
+    const packed = ipv4ToBigInt(embeddedIpv4[2]!);
+    const high = (packed >> 16n) & 0xffffn;
+    const low = packed & 0xffffn;
+    input = `${embeddedIpv4[1]}${high.toString(16)}:${low.toString(16)}`;
+  }
+  const halves = input.split("::");
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1]!.split(":") : [];
+  const missing = 8 - left.length - right.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const parts = [...left, ...Array(Math.max(0, missing)).fill("0"), ...right];
+  if (parts.length !== 8 || parts.some((part) => !/^[a-f0-9]{1,4}$/.test(part))) return null;
+  return parts.reduce((value, part) => (value << 16n) | BigInt(Number.parseInt(part, 16)), 0n);
+}
+
+/**
+ * Can a packet to `address` reach a host on the public internet?
+ *
+ * This is the shared answer for every caller that has to refuse a destination
+ * the user did not choose — the SSRF guard below, and the A2A remote transport
+ * in `api/a2a-remote-transport.ts`, which used to carry a second copy. Two
+ * copies of this question is one classifier more than the codebase can keep
+ * consistent: they disagreed on multicast, on reserved space, and on every
+ * IPv6 address outside global unicast, so the two subsystems refused different
+ * sets while both looked like they were asking the same thing.
+ *
+ * IPv4 is a deny-list because the registry is: anything not recorded as
+ * special-purpose is routable. IPv6 is an allow-list — global unicast, minus
+ * the special-purpose blocks inside it — because the address space is mostly
+ * unassigned, and unassigned is not the same as reachable.
+ */
+export function isGloballyRoutableAddress(address: string): boolean {
+  if (isIPv4(address)) {
+    const value = ipv4ToBigInt(address);
+    if (GLOBALLY_REACHABLE_IPV4_BLOCKS.some((block) => inBlock(value, block))) return true;
+    return !SPECIAL_PURPOSE_IPV4_BLOCKS.some((block) => inBlock(value, block));
+  }
+  if (isIPv6(address)) {
+    const value = ipv6ToBigInt(address);
+    if (value === null) return false;
+    if (GLOBALLY_REACHABLE_IPV6_BLOCKS.some((block) => inBlock(value, block))) return true;
+    if (!inBlock(value, GLOBAL_UNICAST_IPV6_BLOCK)) return false;
+    return !SPECIAL_PURPOSE_IPV6_BLOCKS.some((block) => inBlock(value, block));
+  }
+  // Unknown address family → fail closed.
+  return false;
+}
 
 /**
  * Synchronous syntactic validation for an http(s) URL.
@@ -328,48 +490,14 @@ function stripIpv6Brackets(host: string): string {
   return host;
 }
 
+/**
+ * The SSRF layer's default verdict. Every axis a caller can opt into
+ * (`allowPrivateNetworks`, `allowLoopback`, `allowCarrierGradeNat`) is
+ * checked separately in `isAllowedAddress` against its own range, so
+ * narrowing this function narrows only what passes WITHOUT an opt-in.
+ */
 function isPublicAddress(address: string): boolean {
-  if (isIPv4(address)) {
-    const num = ipv4ToBigInt(address);
-    return !PRIVATE_IPV4_RANGES.some(
-      ([start, end]) => num >= start && num <= end,
-    );
-  }
-  if (isIPv6(address)) {
-    const lower = address.toLowerCase();
-
-    // Unspecified (::) + loopback (::1)
-    if (lower === "::" || lower === "::1") return false;
-
-    // IPv4-mapped IPv6 (::ffff:a.b.c.d or its normalized hex form).
-    // Node's URL parser normalizes "::ffff:10.0.0.1" → "::ffff:a00:1",
-    // so we recover the IPv4 bytes from the final 32 bits of the
-    // expanded address instead of relying on dotted-quad detection.
-    if (lower.startsWith("::ffff:")) {
-      const ipv4 = ipv4FromMappedIpv6(lower);
-      if (ipv4 !== null) return isPublicAddress(ipv4);
-      return false;
-    }
-
-    // Link-local fe80::/10 — covers fe80..febf
-    // First byte = 0xfe, top two bits of second byte = 10 →
-    // second nibble is 8, 9, a, or b.
-    if (
-      lower.startsWith("fe8") ||
-      lower.startsWith("fe9") ||
-      lower.startsWith("fea") ||
-      lower.startsWith("feb")
-    ) {
-      return false;
-    }
-
-    // Unique local address fc00::/7 (fc.. or fd..)
-    if (lower.startsWith("fc") || lower.startsWith("fd")) return false;
-
-    return true;
-  }
-  // Unknown address family → fail closed.
-  return false;
+  return isGloballyRoutableAddress(address);
 }
 
 /** Each axis already resolved against the current hop URL. */
@@ -408,17 +536,15 @@ function isCarrierGradeNatAddress(address: string): boolean {
 }
 
 function isLoopbackAddress(address: string): boolean {
-  if (isIPv4(address)) {
-    const num = ipv4ToBigInt(address);
-    return num >= ipv4ToBigInt("127.0.0.0") && num <= ipv4ToBigInt("127.255.255.255");
-  }
+  if (isIPv4(address)) return inBlock(ipv4ToBigInt(address), LOOPBACK_IPV4_BLOCK);
   if (isIPv6(address)) {
     const lower = address.toLowerCase();
-    if (lower === "::1") return true;
     if (lower.startsWith("::ffff:")) {
       const ipv4 = ipv4FromMappedIpv6(lower);
       return ipv4 !== null && isLoopbackAddress(ipv4);
     }
+    const value = ipv6ToBigInt(lower);
+    return value !== null && inBlock(value, LOOPBACK_IPV6_BLOCK);
   }
   return false;
 }
@@ -431,7 +557,8 @@ function isPrivateNetworkAddress(address: string): boolean {
       const ipv4 = ipv4FromMappedIpv6(lower);
       return ipv4 !== null && isRfc1918Ipv4(ipv4);
     }
-    return lower.startsWith("fc") || lower.startsWith("fd");
+    const value = ipv6ToBigInt(lower);
+    return value !== null && inBlock(value, UNIQUE_LOCAL_IPV6_BLOCK);
   }
   return false;
 }

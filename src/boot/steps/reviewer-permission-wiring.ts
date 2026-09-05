@@ -182,6 +182,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
   const rewireReviewerAgent = (): void => {
     const reviewerResult = wireReviewerAgent({
       permissionManager,
+      networkFetch: singleHopNetworkFetch,
       readActiveLlm: readActiveReviewerLlm,
       streamProviderFor: reviewerStreamProviderFor,
       resolveParentSessionAdjudicationTarget,

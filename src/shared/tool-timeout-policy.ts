@@ -109,9 +109,28 @@ export const TOOL_TIMEOUT_POLICY = {
   // the old constant rather than a new number: at the default budget the two
   // agree exactly.
   subAgentPerRoundAllowanceMs: 10_000,
+  // How long ONE hop of a plugin's `hostFetch` may take to produce response
+  // HEADERS. The plugin lane had no deadline at all: a plugin that passes no
+  // `signal` — and most pass none — waited forever on a host that accepted
+  // the connection and never answered. Every other egress path in this app
+  // carries a deadline; this is the one that did not.
+  //
+  // Headers, not the whole body: the body belongs to whoever is reading it,
+  // and a large download is not a hang. Matched to `mcpRequestDefaultMs`
+  // because both bound the same thing — a first-party integration's request
+  // to a server the user configured, not a page fetch.
+  pluginFetchResponseCeilingMs: 60_000,
   mcpRequestDefaultMs: 60_000,
   mcpRequestMaxMs: 120_000,
   networkFetchDefaultMs: 15_000,
+  // How long the host waits on the MARKETPLACE. One fact with two readers —
+  // the settings-page health ping and the catalogue fetcher — which had the
+  // same number written down twice and no way to notice if they drifted.
+  marketplaceHttpTimeoutMs: 15_000,
+  // The reviewer adapters' own HTTP deadline. Its neighbours below bound the
+  // reviewer's LLM WORK; this bounds the request that carries it, which is a
+  // different thing and so has a name of its own rather than borrowing one.
+  reviewerHttpTimeoutMs: 15_000,
   // How long a model provider may stay silent. Two waits share this one
   // number: the provider fetch's transport deadline (the response headers)
   // and the adapter's idle re-arm (each delta once the body is streaming).

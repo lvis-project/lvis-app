@@ -170,6 +170,15 @@ interface AdmissionStatus {
 interface AdmissionInitOptions {
   /** Electron `app.getPath("userData")`. The cache lives under `marketplace-admission/`. */
   userDataDir: string;
+  /**
+   * Transport for the two document GETs. Required, and deliberately not
+   * defaulted to the ambient `fetch`: Node's stack reads neither the
+   * machine's proxy configuration nor its OS trust store, so a default here
+   * would silently send the signed-document fetch out on a route the user
+   * never chose — and one that cannot complete at all where the direct route
+   * is unavailable. Boot passes Chromium's stack.
+   */
+  networkFetch: typeof fetch;
   /** Skip the network fetch for offline tests or user-selected offline mode. */
   online: boolean;
   /** Wall-clock now provider — injected for deterministic tests. Defaults to `Date.now`. */
@@ -192,6 +201,7 @@ interface ResolvedAdmissionSnapshot extends ResolvedSignedSnapshot<AdmissionDocu
 class AdmissionRegistry {
   private snapshot: ResolvedAdmissionSnapshot | null = null;
   private cache: SignedDocumentCache | null = null;
+  private networkFetch: typeof fetch | null = null;
   private highestSeenIssuedAt: string | undefined;
   private cacheLoaded = false;
   private online = true;
@@ -206,6 +216,7 @@ class AdmissionRegistry {
   resetForTesting(): void {
     this.snapshot = null;
     this.cache = null;
+    this.networkFetch = null;
     this.highestSeenIssuedAt = undefined;
     this.cacheLoaded = false;
     this.online = true;
@@ -237,6 +248,7 @@ class AdmissionRegistry {
     this.audit = opts.audit ?? (() => {});
     this.telemetry = opts.telemetry ?? (() => {});
     this.online = opts.online;
+    this.networkFetch = opts.networkFetch;
     this.source = opts.source ?? ADMISSION_SOURCE;
     this.cache = new SignedDocumentCache(
       opts.userDataDir,
@@ -337,7 +349,7 @@ class AdmissionRegistry {
   // ---------------------------------------------------------------------
 
   private async refresh(signal?: AbortSignal): Promise<void> {
-    if (!this.cache) {
+    if (!this.cache || !this.networkFetch) {
       // Unconfigured. Fails closed (`evaluate` has no snapshot to read), but
       // it is a wiring bug rather than an environment condition, so it is
       // reported as one instead of being silently indistinguishable from a
@@ -359,6 +371,7 @@ class AdmissionRegistry {
     try {
       const outcome = await fetchSignedDocument(
         this.source,
+        this.networkFetch,
         {
           ...(meta.etag ? { ifNoneMatch: meta.etag } : {}),
           ...(signal ? { signal } : {}),
