@@ -13,10 +13,10 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="Chat Screen Layout"
-        description="App.tsx wraps the main screen in CustomTitleBar + MainToolbar, floats a collapsible Sidebar, and the main content region inside it mounts ChatView. SessionTasksPanel · MessageQueuePanel stack directly above the composer, and ChatView reads session/queue/TODO state together through useChatContext()."
+        description="App.tsx wraps the main screen in CustomTitleBar + MainToolbar, floats a collapsible Sidebar, and the main content region inside it mounts PaneFrame. PaneFrame splits the conversation area into as many as four tiles, and each tile is a ChatGroupSession that provides its own ChatContext and draws ChatView. SessionTasksPanel · MessageQueuePanel stack directly above that tile's composer."
         tags={[
-          "App + Sidebar + main content region",
-          "ChatView",
+          "App + Sidebar + PaneFrame",
+          "ChatGroupSession → ChatView",
           "MessageQueuePanel + SessionTasksPanel",
         ]}
       />
@@ -25,7 +25,7 @@ export default function Page() {
         columns={3}
         items={[
           { title: "① CustomTitleBar + MainToolbar", body: <>Window controls + session/plugin/permission toolbar. Mounted by <code>src/ui/renderer/App.tsx</code>.</>, tone: "teal" },
-          { title: "② ChatView body", body: <>Conversation + tool cards + thinking + question cards. <code>src/ui/renderer/ChatView.tsx</code>.</> },
+          { title: "② PaneFrame tiles", body: <>Splits the conversation area into as many as four tiles (<code>src/ui/renderer/components/PaneFrame.tsx</code>). Each tile is a <code>ChatGroupSession.tsx</code> that provides its own ChatContext and draws <code>ChatView.tsx</code>.</> },
           { title: "③ Queue + Tasks panels", body: <>External signal queue + session tasks. They sit directly above the composer (<code>src/ui/renderer/components/ChatComposerDock.tsx</code>) and draw nothing when they have no items.</>, tone: "citron" },
         ]}
       />
@@ -41,6 +41,7 @@ export default function Page() {
         <li><code>PluginGridButton.tsx</code> — grid of plugin entry buttons (the host UI plugin manifest's ui[] slots attach here).</li>
         <li><code>RoutinePanel.tsx</code> — RoutineEngine's list of registered routines + on/off toggles.</li>
         <li><code>PermissionReviewStatusCard.tsx</code> — reviewer mode/status card.</li>
+        <li><code>ApprovalDock.tsx</code> · <code>QuestionOverlay.tsx</code> — tool approvals and question cards. They are answered inside the tile that holds their conversation, and while one waits <code>PendingAnswerDot.tsx</code> puts a yellow dot on that conversation&apos;s row in the sidebar.</li>
       </ul>
 
       <Callout tone="info" title="There are two separate sidebars">

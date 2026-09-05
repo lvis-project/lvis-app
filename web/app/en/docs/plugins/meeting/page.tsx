@@ -52,7 +52,7 @@ export default function Page() {
           { title: "Meeting starts", body: <p>Click "start recording" on the widget → microphone permission → live transcription during the meeting.</p>, badge: "recording" },
           { title: "Transcript shown live", body: <p>Speech streams onto the screen in short chunks. Users can mark or bookmark moments while it's still in progress.</p>, badge: "STT" },
           { title: "Meeting ends → summary generated automatically", body: <p>When the user clicks "end" or the host detects the meeting has ended, the whole meeting is summarized into a paragraph and action items are extracted along with it.</p>, badge: "summary" },
-          { title: "Automated follow-up to work board / mail", body: <p>Work Assistant surfaces the action items as a confirmation card, and once approved, registers them simultaneously to the work board and the host TODO list.</p>, badge: "follow-up" },
+          { title: "Automated follow-up to work board / mail", body: <p>Work Assistant surfaces the action items as a confirmation card, and once approved, registers them simultaneously to the work board and the host Tasks list.</p>, badge: "follow-up" },
         ]}
       />
 

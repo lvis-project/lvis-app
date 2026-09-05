@@ -22,7 +22,7 @@ export default function Page() {
       <StepList
         steps={[
           { title: "Meeting ends", body: <p>The <strong>Meeting</strong> plugin ends the recording → automatically extracts meeting notes and candidate action items.</p>, badge: "Meeting" },
-          { title: "Follow-up card appears", body: <p><strong>Work Assistant</strong> surfaces the action item candidates as a user confirmation card. Choose from "add as TODO / reply by mail / add to schedule."</p>, badge: "Work Assistant" },
+          { title: "Follow-up card appears", body: <p><strong>Work Assistant</strong> surfaces the action item candidates as a user confirmation card. Choose from "add as a task / reply by mail / add to schedule."</p>, badge: "Work Assistant" },
           { title: "Schedule entry + reply draft", body: <p>If the user picks "schedule + reply" → the event is added to the <strong>Microsoft 365</strong> calendar, and a reply draft appears in chat. It is only actually sent the moment "Send" is pressed.</p>, badge: "MS-Graph" },
           { title: "Records preserved", body: <p>Every step is logged in the audit trail, and extracted action items are also synced as work-board cards.</p> },
         ]}

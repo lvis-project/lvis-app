@@ -5,7 +5,6 @@ import { href, type Locale } from "@/lib/i18n";
 
 const copy = {
   ko: {
-    deadline: "7월 31일 종료",
     heading: "정적 통합에서, 자율 협업으로.",
     lead: "플러그인은 단순 도구 호출 모듈에서 커넥터와 자율 서브 에이전트로 진화합니다. 여섯 개의 비전 축을 v1부터 v4까지 단계적으로 펼쳐 갑니다. 일정은 아직 확정하지 않았습니다.",
     axesLabel: "여섯 개 비전 축",
@@ -63,7 +62,6 @@ const copy = {
     ],
   },
   en: {
-    deadline: "Ends July 31",
     heading: "From static integrations to autonomous collaboration.",
     lead: "Plugins evolve from simple tool-calling modules into connectors and autonomous sub-agents. We're rolling out six vision axes across v1 through v4. Timing isn't finalized yet.",
     axesLabel: "Six vision axes",
@@ -127,12 +125,7 @@ export function Roadmap({ locale = "ko" }: { locale?: Locale }) {
   return (
     <section id="roadmap" className="mx-auto max-w-[1120px] scroll-mt-20 px-6 py-24">
       <Reveal>
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Roadmap</p>
-          <span className="rounded-full border border-border bg-secondary px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
-            {t.deadline}
-          </span>
-        </div>
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Roadmap</p>
         <h2 className="mt-2 max-w-2xl text-[clamp(1.75rem,3.5vw,2.5rem)] font-semibold tracking-[-0.02em] text-ink">
           {t.heading}
         </h2>

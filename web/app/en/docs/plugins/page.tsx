@@ -6,9 +6,9 @@ import { PageNav } from "@/components/docs/page-nav";
 import { Badge } from "@/components/ui/badge";
 
 const plugins = [
-  { slug: "local-indexer", title: "Local Indexer", id: "local-indexer", ver: "0.6.2", scope: "Local · RAG", desc: "kiwipiepy Korean morphological analysis + pymupdf4llm + FTS5 + LanceDB. Folder watching via chokidar.", color: "from-teal/10 to-transparent" },
+  { slug: "local-indexer", title: "Local Indexer", id: "local-indexer", ver: "0.6.6", scope: "Local · RAG", desc: "kiwipiepy Korean morphological analysis + pymupdf4llm + FTS5 + LanceDB. Folder watching via chokidar.", color: "from-teal/10 to-transparent" },
   { slug: "ms-graph", title: "Microsoft 365 (Outlook)", id: "ms-graph", ver: "0.5.2", scope: "Mail · Calendar", desc: "MSAL OAuth + Electron safeStorage tokens. 31 mail + calendar tools.", color: "from-accent/60 to-transparent" },
-  { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.8.3", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec chunks.", color: "from-coral/10 to-transparent" },
+  { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.8.4", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec chunks.", color: "from-coral/10 to-transparent" },
   { slug: "work-assistant", title: "Work Assistant", id: "work-assistant", ver: "0.11.2", scope: "Proactive", desc: "10+ detectors → triggerConversation. Unifies mail/calendar/meeting signals.", color: "from-citron/30 to-transparent" },
 ];
 

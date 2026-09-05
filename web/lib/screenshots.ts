@@ -225,8 +225,8 @@ export const shots: Record<string, Shot> = {
   "work-assistant-meeting-end-trigger-2": {
     slug: "work-assistant-meeting-end-trigger-2.png",
     topic: "work-assistant",
-    caption: "추출된 액션 아이템을 TODO/메일로 변환",
-    captionEn: "Converting extracted action items into TODOs/emails",
+    caption: "추출된 액션 아이템을 Tasks/메일로 변환",
+    captionEn: "Converting extracted action items into tasks/emails",
   },
 
 

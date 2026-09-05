@@ -24,7 +24,7 @@ export default function Page() {
         <li>When user intent is ambiguous — "Which emails should I organize?"</li>
         <li>When choosing among several candidates — "Which of the three meeting rooms?"</li>
         <li>Right before a risky action — "Should I overwrite this file?"</li>
-        <li>When a plugin suggests a follow-up action — "Add this action item to your TODOs?"</li>
+        <li>When a plugin suggests a follow-up action — "Add this action item to your tasks?"</li>
       </ul>
 
       <h2 id="features">Small conveniences built into the card</h2>

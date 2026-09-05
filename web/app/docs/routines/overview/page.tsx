@@ -57,7 +57,7 @@ export default function Page() {
         steps={[
           { title: "등록 — UI 또는 plugin manifest", body: <p>사용자가 RoutinePanel 에서 추가하거나, plugin manifest 가 capability <code>routine-provider</code> + 추천 routine 을 함께 제공.</p> },
           { title: "Scheduler 등록", body: <p><code>src/main/routines-scheduler.ts</code> 가 시간 트리거를 OS timer 로 예약. shutdown 트리거는 호스트 lifecycle hook 에 등록.</p> },
-          { title: "Per-fire fresh ConversationLoop", body: <p>발사 시점에 새 ConversationLoop 인스턴스 생성. interactive 메인 루프와 메모리 / 권한 / TODO 가 isolation.</p>, badge: "isolation" },
+          { title: "Per-fire fresh ConversationLoop", body: <p>발사 시점에 새 ConversationLoop 인스턴스 생성. interactive 메인 루프와 메모리 / 권한 / Tasks 가 isolation.</p>, badge: "isolation" },
           { title: "세션 기록", body: <p><code>{"~/.lvis/routine/sessions/<routineId>/<firedAt>.jsonl"}</code> 에 한 발사의 message stream + tool calls JSONL 로 append.</p> },
           { title: "결과 노출", body: <p>완료 시 채팅 본문에 “루틴 실행 완료” 카드. 실패 시 audit log + 다음 발사는 정상.</p> },
         ]}

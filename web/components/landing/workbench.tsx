@@ -35,13 +35,13 @@ const copy = {
       },
       {
         icon: ListTree,
-        title: "카드는 자기 타일에 머뭅니다",
-        body: "오버레이 카드 · 질문 카드 · 알림 · MCP 카드는 그것을 띄운 대화의 타일에만 나타납니다. 옆 타일에서 일어난 일이 지금 보는 화면을 가리지 않습니다.",
+        title: "카드는 그 대화가 있는 판에 머뭅니다",
+        body: "도구 승인과 질문 카드는 그 대화가 열린 판 안에서 답합니다 — 그 판이 워크보드나 설정을 보여주는 중이어도 그렇습니다. 앱 업데이트 같은 창 전체 알림은 타일 격자 위에 한 번만 놓이고, 창 하단에 카드를 모아 두던 띠는 없어졌습니다.",
       },
       {
         icon: MessageSquarePlus,
         title: "사이드바가 상태를 알려줍니다",
-        body: "대화마다 응답 중 표시와 읽지 않은 turn 표시가 붙습니다. 목록은 스크롤을 내리는 만큼 이어서 드러나고, 프로젝트별로 묶여 있습니다.",
+        body: "대화마다 응답 중 표시와 읽지 않은 turn 표시가 붙고, 답을 기다리는 대화에는 노란 점이 붙어 카드가 다른 판에 가려져 있어도 어디가 멈췄는지 보입니다. 목록에는 본 대화와 함께 루틴 실행 · 워크보드 실행이 나타나고, 사이드 챗은 그것을 연 대화 아래에 들여쓰기로 붙습니다.",
       },
       {
         icon: CornerUpLeft,
@@ -82,13 +82,13 @@ const copy = {
       },
       {
         icon: ListTree,
-        title: "Cards stay in their own tile",
-        body: "Overlay cards, question cards, toasts, and MCP cards appear only in the tile whose conversation raised them. What happens next door does not cover the screen you are reading.",
+        title: "Cards stay in the pane their conversation is in",
+        body: "Tool approvals and question cards are answered inside their own pane, even while that pane is showing the work board or settings. A window-wide notice such as an app update sits once above the tile grid, and the band that used to collect cards at the bottom of the window is gone.",
       },
       {
         icon: MessageSquarePlus,
         title: "The sidebar tells you where things stand",
-        body: "Each conversation carries a responding dot and a mark for turns you have not read yet. The list reveals more as you scroll, and conversations are grouped by project.",
+        body: "Each conversation carries a responding dot, a mark for turns you have not read, and a yellow dot while it waits on your answer — so you can see what is stalled even when its card sits behind another pane. The list holds routine runs and work board runs alongside your own conversations, and a side chat is indented under the conversation that opened it.",
       },
       {
         icon: CornerUpLeft,
