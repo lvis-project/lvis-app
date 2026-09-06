@@ -66,6 +66,20 @@ describe("main.ts — headless exec branch", () => {
     expect(branch!).toMatch(/process\.exitCode\s*=/);
   });
 
+  it("rejects a malformed command line before a window exists", () => {
+    const usageBranch = mainSource.indexOf('"error" in execRequest');
+    const createWindow = mainSource.indexOf("createWindow();");
+    expect(usageBranch).toBeGreaterThanOrEqual(0);
+    expect(createWindow).toBeGreaterThan(usageBranch);
+  });
+
+  it("reports a held single-instance lock instead of exiting silently", () => {
+    const lockBranch = mainSource.match(/if \(!gotSingleInstanceLock\) \{[\s\S]*?\n\} else \{/);
+    expect(lockBranch, "could not locate the single-instance branch").not.toBeNull();
+    expect(lockBranch![0]).toContain("EXEC_LOCKED_EXIT_CODE");
+    expect(lockBranch![0]).toMatch(/process\.stderr\.write/);
+  });
+
   it("keeps the plugin-smoke flag on its own path", () => {
     expect(mainSource).toContain("parsePluginSmokeFlag(process.argv)");
   });

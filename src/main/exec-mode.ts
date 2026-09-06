@@ -37,6 +37,13 @@ import type { ExecutionMode } from "../shared/permission-mode.js";
 /** Exit code for a malformed command line, matching the `EX_USAGE` convention. */
 export const EXEC_USAGE_EXIT_CODE = 64;
 
+/**
+ * Exit code when another LVIS process already holds the single-instance lock.
+ * `EX_TEMPFAIL`: the request was well-formed and may succeed once that process
+ * exits, so a runner must not read it as an empty successful turn.
+ */
+export const EXEC_LOCKED_EXIT_CODE = 75;
+
 /** Exit code for a turn that ended asking the operator a question. */
 const EXEC_INPUT_REQUIRED_EXIT_CODE = 2;
 
