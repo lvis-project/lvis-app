@@ -72,10 +72,12 @@ import {
   EXEC_FAILURE_EXIT_CODE,
   EXEC_LOCKED_EXIT_CODE,
   EXEC_USAGE_EXIT_CODE,
+  execModeRequested,
   parseExecFlags,
   readAllStdin,
   runExecTurn,
 } from "./main/exec-mode.js";
+import { isAuthorizedWorkspaceProjectRoot } from "./main/project-root-authorization.js";
 import {
   getMainWindow,
   getPendingLvisUri,
@@ -97,7 +99,9 @@ const log = createLogger("lvis");
 // The directory the process was started from. `runEarlyBootEnv()` re-anchors
 // the process to `~/.lvis/workspace` a line later, and a headless `--exec`
 // without `--exec-cwd` must work on the caller's directory, not the anchor.
-const launchCwd = process.cwd();
+// Read only for a headless launch: a desktop launch from an unlinked directory
+// must not fail here, before the anchor gives the process a directory again.
+const launchCwd = execModeRequested(process.argv) ? process.cwd() : null;
 runEarlyBootEnv();
 
 /**
@@ -211,6 +215,7 @@ async function main() {
         stdout: process.stdout,
         stderr: process.stderr,
         readStdin: readAllStdin,
+        isAuthorizedProjectRoot: isAuthorizedWorkspaceProjectRoot,
       },
       execRequest,
     );
@@ -616,8 +621,11 @@ if (!gotSingleInstanceLock) {
     void main().catch((error) => {
       log.error({ err: error }, "bootstrap failed");
       // A headless run that never reached its turn must not exit 0: a runner
-      // would otherwise file an empty stream as a completed turn.
-      if (execRequest !== null) process.exitCode = EXEC_FAILURE_EXIT_CODE;
+      // would otherwise file an empty stream as a completed turn. A code the
+      // run already chose (usage, lock) is more specific and stays.
+      if (execRequest !== null && process.exitCode === undefined) {
+        process.exitCode = EXEC_FAILURE_EXIT_CODE;
+      }
       app.quit();
     });
   });

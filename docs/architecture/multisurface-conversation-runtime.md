@@ -428,7 +428,12 @@ event union, with a sink that serialises instead of projecting to a renderer.
 ```text
 lvis --exec="<prompt>"              prompt inline; `--exec` or `--exec=-` reads stdin
      [--exec-cwd=<dir>]             session project root (default: the directory
-                                    the process was launched from)
+                                    the process was launched from; a relative
+                                    path resolves against it). Must be the
+                                    default workspace or a directory listed in
+                                    permissions.additionalDirectories of
+                                    ~/.lvis/settings.json — the run refuses
+                                    (exit 64) rather than re-rooting elsewhere
      [--exec-approve=default|allow] permission mode for the run (default: default)
      [--exec-output=stream-json|json]  (default: stream-json)
      [--exec-max-rounds=<n>]        round budget for the turn

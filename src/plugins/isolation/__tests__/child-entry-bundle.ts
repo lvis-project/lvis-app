@@ -1,13 +1,16 @@
 /**
- * Build the REAL plugin-child entry, against the real bundle boundary.
+ * Build a main-process module the way the shipped build bundles it — the
+ * plugin-child entry for the suites that spawn a child, `tracing.ts` for the
+ * telemetry suite — against the real bundle boundary.
  *
- * ONE copy, imported by every suite that spawns a child, because two copies are
- * two chances for one suite to prove something about a child that does not
- * ship: the externals, the banner and the target here are the shipped build's,
- * and a suite that drifted from them would read like it exercises this bundle
- * while exercising a different one. This argument was already written against
- * the two cases inside `confined-plugin-child.test.ts`; it holds across files
- * for the same reason, which is why the function it guarded now lives here.
+ * ONE copy, imported by every suite that needs a shipped-shape bundle, because
+ * two copies are two chances for one suite to prove something about a bundle
+ * that does not ship: the externals, the banner and the target here are the
+ * shipped build's, and a suite that drifted from them would read like it
+ * exercises this bundle while exercising a different one. This argument was
+ * already written against the two cases inside `confined-plugin-child.test.ts`;
+ * it holds across files for the same reason, which is why the function it
+ * guarded now lives here.
  *
  * A module rather than an export from one of the suites: importing a `.test.ts`
  * would register that file's cases a second time under the importer.
@@ -25,7 +28,7 @@ export function repositoryRoot(): string {
 }
 
 /**
- * Where a suite's bundled child entry is emitted.
+ * Where a suite's bundle is emitted.
  *
  * INSIDE the repository, not in a fixture's temp dir. The bundle keeps `pino`
  * and ASRT external — for reasons the shipped build documents at length — so it
@@ -38,10 +41,11 @@ export function childBundleDir(cacheName: string): string {
 }
 
 /**
- * Bundle one main-process module the way the shipped build bundles it: the
- * same external boundary, banner, format, platform and target. `splitting`
- * matters for what a suite can prove — the shipped build splits, and a split
- * ESM chunk exposes a CommonJS dependency differently from an inlined one.
+ * Bundle one main-process module with the shipped build's external boundary,
+ * banner, format, platform, target, minification and symlink handling.
+ * `splitting` matters for what a suite can prove — the shipped build splits,
+ * and a split ESM chunk exposes a CommonJS dependency differently from an
+ * inlined one.
  */
 export async function buildMainBoundaryBundle(options: {
   readonly entryPoints: Record<string, string>;
@@ -59,8 +63,11 @@ export async function buildMainBoundaryBundle(options: {
     bundle: true,
     format: "esm",
     splitting: options.splitting,
+    preserveSymlinks: true,
     platform: "node",
     target: ["node22"],
+    minifySyntax: true,
+    minifyWhitespace: true,
     external: [...MAIN_BUNDLE_EXTERNALS],
     logLevel: "silent",
     banner: {

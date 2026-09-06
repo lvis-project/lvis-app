@@ -7,7 +7,7 @@
  * the events a benchmark reads on stdout are the events the host produced.
  */
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -58,6 +58,7 @@ function makeDeps(overrides: {
   permissionManager?: PermissionManager | undefined;
   setSecret?: (key: string, value: string) => Promise<void>;
   stdin?: string;
+  isAuthorizedProjectRoot?: (projectRoot: string) => boolean;
 } = {}) {
   const turnImpl = overrides.runTurn ?? (async () => overrides.turnResult ?? COMPLETED_TURN);
   const runTurn = vi.fn(async (..._args: unknown[]) => turnImpl());
@@ -96,6 +97,7 @@ function makeDeps(overrides: {
     stdout: stdout.stream,
     stderr: stderr.stream,
     readStdin: async () => overrides.stdin ?? "",
+    isAuthorizedProjectRoot: overrides.isAuthorizedProjectRoot ?? (() => true),
   };
   return {
     deps,
@@ -194,6 +196,27 @@ describe("parseExecFlags", () => {
     }
   });
 
+  it("resolves a relative --exec-cwd against the launch directory, not the process cwd", async () => {
+    const launch = mkdtempSync(join(tmpdir(), "exec-launch-"));
+    const sub = join(launch, "project");
+    mkdirSync(sub);
+    try {
+      const request = expectRequest(parseExecFlags(["--exec=hi", "--exec-cwd=project"], launch));
+      expect(request.turn?.cwd).toBe(sub);
+      expect(parseExecFlags(["--exec=hi", "--exec-cwd=project"], process.cwd()))
+        .toEqual({ error: expect.stringContaining("does not exist") });
+    } finally {
+      await cleanupTmpDir(launch);
+    }
+  });
+
+  it("refuses a turn whose launch directory was never captured", () => {
+    expect(parseExecFlags(["--exec=hi"], null))
+      .toEqual({ error: expect.stringContaining("launch directory") });
+    expect(parseExecFlags(["--exec=hi", "--exec-cwd=/tmp"], null))
+      .toEqual({ error: expect.stringContaining("needs --exec") });
+  });
+
   it("reads a secret key without a turn", () => {
     const request = expectRequest(parseExecFlags(["--set-secret=llm.apiKey.claude"], LAUNCH_CWD));
     expect(request).toEqual({ secret: { key: "llm.apiKey.claude" }, turn: null });
@@ -246,6 +269,21 @@ describe("runExecTurn — stream-json output", () => {
     expect(events.map((event) => event.kind)).toContain("turn.started");
     expect(events.at(-1)?.kind).toBe("turn.completed");
     expect(text).toBe(events.map((event) => `${JSON.stringify(event)}\n`).join(""));
+  });
+
+  it("refuses a project root the workspace has not authorized instead of re-rooting it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "exec-project-"));
+    try {
+      const harness = makeDeps({ isAuthorizedProjectRoot: () => false });
+      const code = await runExecTurn(harness.deps, turnRequest({ cwd: dir }));
+      expect(code).toBe(64);
+      expect(harness.newConversation).not.toHaveBeenCalled();
+      expect(harness.runTurn).not.toHaveBeenCalled();
+      expect(harness.stderr.text()).toContain("not an authorized workspace project");
+      expect(harness.stderr.text()).toContain(dir);
+    } finally {
+      await cleanupTmpDir(dir);
+    }
   });
 
   it("opens the session on the requested project root", async () => {

@@ -48,6 +48,28 @@ describe("main.ts — headless exec branch", () => {
     expect(mainSource).toContain("parseExecFlags(process.argv, launchCwd)");
   });
 
+  it("captures the launch directory before the workspace anchor moves the process", () => {
+    const capture = mainSource.indexOf("const launchCwd = execModeRequested(process.argv) ? process.cwd() : null;");
+    const anchor = mainSource.indexOf("runEarlyBootEnv();");
+    expect(capture).toBeGreaterThanOrEqual(0);
+    expect(anchor).toBeGreaterThan(capture);
+  });
+
+  it("hands the runner the workspace project authorization the app uses everywhere", () => {
+    expect(mainSource).toContain("isAuthorizedProjectRoot: isAuthorizedWorkspaceProjectRoot,");
+  });
+
+  it("exits non-zero when bootstrap fails before the turn, keeping a more specific code", () => {
+    expect(mainSource).toContain(
+      "if (execRequest !== null && process.exitCode === undefined) {",
+    );
+    const guard = mainSource.indexOf("if (execRequest !== null && process.exitCode === undefined) {");
+    const bootstrapFailed = mainSource.indexOf('"bootstrap failed"');
+    expect(bootstrapFailed).toBeGreaterThanOrEqual(0);
+    expect(guard).toBeGreaterThan(bootstrapFailed);
+    expect(mainSource.slice(guard, guard + 200)).toContain("process.exitCode = EXEC_FAILURE_EXIT_CODE;");
+  });
+
   it("runs after setServices and before the workspace is opened", () => {
     const setServices = mainSource.indexOf("setServices(services)");
     const execBranch = mainSource.indexOf("if (execRequest !== null)");
