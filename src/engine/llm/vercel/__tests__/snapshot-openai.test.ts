@@ -753,6 +753,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
         baseURL: "https://example.test/v1",
         apiKey: "k",
         name: "lvis-compat",
+        includeUsage: true,
       }),
     );
     expect(compatFactory).toHaveBeenCalledWith("custom-model-1");
@@ -818,6 +819,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
         baseURL: "https://future.example/v1",
         apiKey: "",
         name: "lvis-compat",
+        includeUsage: true,
       }),
     );
     expect(compatFactory).toHaveBeenCalledWith("future/free");
@@ -872,6 +874,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
         baseURL: "https://openrouter.ai/api/v1",
         apiKey: "or-key",
         name: "lvis-compat",
+        includeUsage: true,
       }),
     );
     expect(compatFactory).toHaveBeenCalledWith("anthropic/claude-sonnet-4.6");

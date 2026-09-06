@@ -3,6 +3,7 @@
 
 
 import { app } from "electron";
+import { writeSync } from "node:fs";
 import { t } from "./i18n/index.js";
 import { registerIpcHandlers, unregisterPluginWebview } from "./ipc-bridge.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
@@ -575,10 +576,17 @@ if (!gotSingleInstanceLock) {
   // A headless run must never look like an empty successful turn: say why
   // nothing happened and exit with a code a runner can retry on.
   if (execRequest !== null) {
-    process.stderr.write(
+    // Synchronous: `process.stderr` is asynchronous on a macOS pipe, and the
+    // hard exit below would drop the line a runner needs to explain the code.
+    writeSync(
+      2,
       "exec: another LVIS process holds the single-instance lock; quit it before running --exec\n",
     );
-    process.exitCode = EXEC_LOCKED_EXIT_CODE;
+    // Before `whenReady` there is no `will-quit` to carry the code (see the
+    // handler below), and nothing has been booted that a hard exit could lose.
+    // The process ends here; the `app.quit()` below is the desktop
+    // second-instance path.
+    app.exit(EXEC_LOCKED_EXIT_CODE);
   }
   // We are NOT the primary instance — quit immediately and let the existing
   // primary handle the protocol URL via its `second-instance` listener.
@@ -732,6 +740,19 @@ app.on("window-all-closed", () => {
 // Re-register the plugin event bridge for the new window (Issue 5).
 app.on("activate", () => {
   showOrCreateMainWindow("activate");
+});
+
+// Electron's `quit()` ends the process with 0 whatever `process.exitCode`
+// says (verified on the packaged Linux build and the macOS dev build), so a
+// headless run's code reaches its caller only through `app.exit()`. `will-quit`
+// is the one event every `quit()` path crosses AFTER the `before-quit` cleanup
+// has flushed the transcript, the audit log and the trace, which is why the
+// exec branch keeps `app.quit()` and the code is applied here rather than there.
+app.on("will-quit", (event) => {
+  if (execRequest === null) return;
+  if (typeof process.exitCode !== "number") return;
+  event.preventDefault();
+  app.exit(process.exitCode);
 });
 
 app.on("before-quit", (event) => {

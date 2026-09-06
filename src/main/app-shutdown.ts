@@ -187,7 +187,9 @@ export async function runAppShutdownCleanup(options: {
       closeFileLogSink();
       setAppShutdownCompleted(true);
       if (options.exitOnTimeout) {
-        app.exit(0);
+        // A hard exit here never reaches `will-quit`, so the code a headless
+        // run already chose is applied directly; a desktop run chose none.
+        app.exit(typeof process.exitCode === "number" ? process.exitCode : 0);
       }
       return "timed-out";
     }
