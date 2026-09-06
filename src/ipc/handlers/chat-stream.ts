@@ -74,6 +74,8 @@ export async function runStreamedTurn(
     hostSubmitted?: true;
     /** Host-owned signal for a cancellable public remote turn. */
     abortSignal?: AbortSignal;
+    /** Host-assigned round budget, threaded verbatim into `RunTurnOptions`. */
+    maxRounds?: number;
   },
 ): Promise<TurnResult> {
   // Minted HERE rather than read back after the append, because the input is
@@ -302,6 +304,7 @@ export async function runStreamedTurn(
     },
     options.abortSignal,
     {
+      ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
       ...(originSource ? { originSource } : {}),
       ...(options.attachments && options.attachments.length > 0
         ? { attachments: options.attachments }

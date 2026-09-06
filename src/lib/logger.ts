@@ -31,6 +31,7 @@ import pino from "pino";
 import prettyStream from "pino-pretty";
 import { createLogFileSink, type LogFileSink, type LogFileSinkOptions } from "./log-file-sink.js";
 import { isPackagedElectronProcess } from "../boot/dev-flags.js";
+import { execModeRequested } from "../main/exec-mode.js";
 
 const isTest = process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
 const isProduction = process.env.NODE_ENV === "production";
@@ -67,13 +68,23 @@ let fileSink: LogFileSink | null = null;
 const LOG_LEVEL = process.env.LOG_LEVEL ?? ((isProduction || isPackagedElectron) ? "info" : "debug");
 
 /**
+ * A headless one-shot run (`--exec`) owns stdout: it writes one JSON event per
+ * line there and a reader parses every line. A log line on the same descriptor
+ * is not noise, it is a parse error, so the console destination moves to stderr
+ * for the whole process. Decided from argv here rather than at boot because the
+ * logger is constructed when this module is first imported, which is before any
+ * host service exists to be asked.
+ */
+const execHeadless = execModeRequested(process.argv);
+
+/**
  * The console destination — pino-pretty (colorized text) for dev/unpackaged,
  * or raw pino JSON to stdout for production/packaged/CI. Used both by the
  * legacy single-transport path (kept for the exported `transport`) and as the
  * first multistream stream.
  */
 const consoleStream: NodeJS.WritableStream = useJsonFormat
-  ? process.stdout
+  ? (execHeadless ? process.stderr : process.stdout)
   : // pino-pretty as a STREAM (not a worker transport) so it can coexist with
     // the file stream inside a single pino.multistream. Worker transports are
     // avoided here because they resolve a separate worker entry file, which
@@ -82,6 +93,8 @@ const consoleStream: NodeJS.WritableStream = useJsonFormat
       colorize: true,
       translateTime: "SYS:HH:MM:ss.l",
       ignore: "pid,hostname",
+      // Its default destination is stdout, which a headless run has claimed.
+      ...(execHeadless ? { destination: process.stderr } : {}),
     });
 
 /**

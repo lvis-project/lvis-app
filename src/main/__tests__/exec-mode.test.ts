@@ -1,0 +1,460 @@
+/**
+ * Headless one-shot CLI: flag parsing, the stdout contract, the auto-deny
+ * approval policy, and the exit-code mapping.
+ *
+ * The turn tests drive the REAL `runStreamedTurn` over a stub ConversationLoop
+ * rather than a second event mapping, because the property under test is that
+ * the events a benchmark reads on stdout are the events the host produced.
+ */
+import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+
+import {
+  EXEC_USAGE_EXIT_CODE,
+  execModeRequested,
+  parseExecFlags,
+  runExecTurn,
+  type ExecDeps,
+  type ExecRequest,
+} from "../exec-mode.js";
+import {
+  SecretDocumentValidationError,
+  SecretEncryptionUnavailableError,
+} from "../../data/secret-document-store.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import type { ApprovalGate, PendingApprovalObserver } from "../../permissions/approval-gate.js";
+import type { PermissionManager } from "../../permissions/permission-manager.js";
+import type { SettingsService } from "../../data/settings-store.js";
+import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
+
+const COMPLETED_TURN: TurnResult = {
+  text: "done",
+  toolCalls: [],
+  route: "default",
+  stopReason: "end_turn",
+};
+
+function collectingStream() {
+  const chunks: string[] = [];
+  const stream = {
+    write(chunk: string): boolean {
+      chunks.push(chunk);
+      return true;
+    },
+  } as unknown as NodeJS.WritableStream;
+  return {
+    stream,
+    text: () => chunks.join(""),
+    lines: () => chunks.join("").split("\n").filter((line) => line.length > 0),
+  };
+}
+
+function makeDeps(overrides: {
+  turnResult?: TurnResult;
+  runTurn?: () => Promise<TurnResult>;
+  approvalGate?: ApprovalGate | undefined;
+  permissionManager?: PermissionManager | undefined;
+  setSecret?: (key: string, value: string) => Promise<void>;
+  stdin?: string;
+} = {}) {
+  const turnImpl = overrides.runTurn ?? (async () => overrides.turnResult ?? COMPLETED_TURN);
+  const runTurn = vi.fn(async (..._args: unknown[]) => turnImpl());
+  const newConversation = vi.fn();
+  const conversationLoop = { runTurn, newConversation } as unknown as ConversationLoop;
+
+  const setMode = vi.fn();
+  const permissionManager = "permissionManager" in overrides
+    ? overrides.permissionManager
+    : ({ setMode } as unknown as PermissionManager);
+
+  const observers: PendingApprovalObserver[] = [];
+  const resolve = vi.fn();
+  const approvalGate = "approvalGate" in overrides
+    ? overrides.approvalGate
+    : ({
+      observePendingApprovals: (observer: PendingApprovalObserver) => {
+        observers.push(observer);
+        return () => {
+          observers.splice(observers.indexOf(observer), 1);
+        };
+      },
+      resolve,
+    } as unknown as ApprovalGate);
+
+  const setSecret = vi.fn(overrides.setSecret ?? (async () => undefined));
+  const settingsService = { setSecret } as unknown as SettingsService;
+
+  const stdout = collectingStream();
+  const stderr = collectingStream();
+  const deps: ExecDeps = {
+    conversationLoop,
+    permissionManager,
+    approvalGate,
+    settingsService,
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    readStdin: async () => overrides.stdin ?? "",
+  };
+  return {
+    deps,
+    stdout,
+    stderr,
+    runTurn,
+    newConversation,
+    setMode,
+    setSecret,
+    observers,
+    resolve,
+  };
+}
+
+function turnRequest(overrides: Partial<NonNullable<ExecRequest["turn"]>> = {}): ExecRequest {
+  return {
+    secret: null,
+    turn: {
+      prompt: "hello",
+      cwd: process.cwd(),
+      approveMode: "default",
+      output: "stream-json",
+      ...overrides,
+    },
+  };
+}
+
+function expectRequest(parsed: ReturnType<typeof parseExecFlags>): ExecRequest {
+  expect(parsed).not.toBeNull();
+  expect(parsed).not.toHaveProperty("error");
+  return parsed as ExecRequest;
+}
+
+describe("execModeRequested", () => {
+  it.each([
+    ["--exec"],
+    ["--exec=say hi"],
+    ["--exec=-"],
+    ["--set-secret"],
+    ["--set-secret=llm.apiKey.claude"],
+  ])("is true for %s", (flag) => {
+    expect(execModeRequested(["electron", "main.js", flag])).toBe(true);
+  });
+
+  it.each([
+    ["--exec-cwd=/tmp"],
+    ["--exec-output=json"],
+    ["--plugin-smoke=meeting"],
+    ["--executable"],
+  ])("is false for %s alone", (flag) => {
+    expect(execModeRequested(["electron", "main.js", flag])).toBe(false);
+  });
+});
+
+describe("parseExecFlags", () => {
+  it("returns null for an ordinary launch", () => {
+    expect(parseExecFlags(["electron", "main.js"])).toBeNull();
+  });
+
+  it("reads an inline prompt and defaults the rest", () => {
+    const request = expectRequest(parseExecFlags(["--exec=count to three"]));
+    expect(request.secret).toBeNull();
+    expect(request.turn).toEqual({
+      prompt: "count to three",
+      cwd: process.cwd(),
+      approveMode: "default",
+      output: "stream-json",
+    });
+  });
+
+  it.each([["--exec"], ["--exec=-"]])("defers the prompt to stdin for %s", (flag) => {
+    expect(expectRequest(parseExecFlags([flag])).turn?.prompt).toBeNull();
+  });
+
+  it("accepts every modifier", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "exec-cwd-"));
+    try {
+      const request = expectRequest(parseExecFlags([
+        "--exec=hi",
+        `--exec-cwd=${dir}`,
+        "--exec-approve=allow",
+        "--exec-output=json",
+        "--exec-max-rounds=4",
+      ]));
+      expect(request.turn).toEqual({
+        prompt: "hi",
+        cwd: dir,
+        approveMode: "allow",
+        output: "json",
+        maxRounds: 4,
+      });
+    } finally {
+      await cleanupTmpDir(dir);
+    }
+  });
+
+  it("reads a secret key without a turn", () => {
+    const request = expectRequest(parseExecFlags(["--set-secret=llm.apiKey.claude"]));
+    expect(request).toEqual({ secret: { key: "llm.apiKey.claude" }, turn: null });
+  });
+
+  it("rejects a cwd that is a file rather than a directory", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "exec-cwd-"));
+    const file = join(dir, "not-a-dir");
+    writeFileSync(file, "x");
+    try {
+      expect(parseExecFlags(["--exec=hi", `--exec-cwd=${file}`]))
+        .toEqual({ error: expect.stringContaining("not a directory") });
+    } finally {
+      await cleanupTmpDir(dir);
+    }
+  });
+
+  it.each([
+    [["--exec=hi", "--exec-cwd=/definitely/not/here"], "does not exist"],
+    [["--exec=hi", "--exec-approve=auto"], "--exec-approve"],
+    [["--exec=hi", "--exec-output=yaml"], "--exec-output"],
+    [["--exec=hi", "--exec-max-rounds=0"], "--exec-max-rounds"],
+    [["--exec=hi", "--exec-max-rounds=two"], "--exec-max-rounds"],
+    [["--exec=hi", "--exec-quiet"], "unknown flag"],
+    [["--exec="], "empty prompt"],
+    [["--set-secret"], "needs a key"],
+    [["--set-secret="], "empty key"],
+    [["--exec", "--set-secret=k"], "consumes stdin"],
+  ])("rejects %j", (argv, fragment) => {
+    expect(parseExecFlags(argv)).toEqual({ error: expect.stringContaining(fragment) });
+  });
+
+  it("allows a secret beside an inline prompt", () => {
+    const request = expectRequest(parseExecFlags(["--exec=hi", "--set-secret=k"]));
+    expect(request.secret).toEqual({ key: "k" });
+    expect(request.turn?.prompt).toBe("hi");
+  });
+});
+
+describe("runExecTurn — stream-json output", () => {
+  it("writes one JSON event per line and nothing else on stdout", async () => {
+    const harness = makeDeps();
+    const code = await runExecTurn(harness.deps, turnRequest());
+
+    expect(code).toBe(0);
+    const text = harness.stdout.text();
+    expect(text.endsWith("\n")).toBe(true);
+    const events = harness.stdout.lines().map((line) => JSON.parse(line) as { kind: string });
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.map((event) => event.kind)).toContain("turn.started");
+    expect(events.at(-1)?.kind).toBe("turn.completed");
+    expect(text).toBe(events.map((event) => `${JSON.stringify(event)}\n`).join(""));
+  });
+
+  it("opens the session on the requested project root", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "exec-project-"));
+    try {
+      const harness = makeDeps();
+      await runExecTurn(harness.deps, turnRequest({ cwd: dir }));
+      expect(harness.newConversation).toHaveBeenCalledWith("main", {
+        projectRoot: dir,
+        projectName: basename(dir),
+      });
+    } finally {
+      await cleanupTmpDir(dir);
+    }
+  });
+
+  it("threads the round budget into the turn options", async () => {
+    const harness = makeDeps();
+    await runExecTurn(harness.deps, turnRequest({ maxRounds: 3 }));
+    const options = harness.runTurn.mock.calls[0]![3] as { maxRounds?: number };
+    expect(options.maxRounds).toBe(3);
+  });
+
+  it("reads the prompt from stdin when none was given inline", async () => {
+    const harness = makeDeps({ stdin: "prompt from stdin\n" });
+    await runExecTurn(harness.deps, turnRequest({ prompt: null }));
+    expect(harness.runTurn.mock.calls[0]![0]).toBe("prompt from stdin");
+  });
+
+  it("refuses an empty prompt", async () => {
+    const harness = makeDeps({ stdin: "   \n" });
+    const code = await runExecTurn(harness.deps, turnRequest({ prompt: null }));
+    expect(code).toBe(EXEC_USAGE_EXIT_CODE);
+    expect(harness.runTurn).not.toHaveBeenCalled();
+    expect(harness.stderr.text()).toContain("empty prompt");
+  });
+});
+
+describe("runExecTurn — json output", () => {
+  it("writes exactly one line carrying the turn result", async () => {
+    const harness = makeDeps();
+    const code = await runExecTurn(harness.deps, turnRequest({ output: "json" }));
+
+    expect(code).toBe(0);
+    const lines = harness.stdout.lines();
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!)).toEqual(COMPLETED_TURN);
+  });
+});
+
+describe("runExecTurn — permission mode", () => {
+  it("switches the permission manager to allow only when asked", async () => {
+    const allowed = makeDeps();
+    await runExecTurn(allowed.deps, turnRequest({ approveMode: "allow" }));
+    expect(allowed.setMode).toHaveBeenCalledWith("allow");
+    expect(allowed.setMode).toHaveBeenCalledTimes(1);
+
+    const byDefault = makeDeps();
+    await runExecTurn(byDefault.deps, turnRequest());
+    expect(byDefault.setMode).not.toHaveBeenCalled();
+  });
+
+  it("refuses to run a turn when boot produced no approval gate", async () => {
+    const harness = makeDeps({ approvalGate: undefined });
+    const code = await runExecTurn(harness.deps, turnRequest());
+    expect(code).toBe(1);
+    expect(harness.runTurn).not.toHaveBeenCalled();
+    expect(harness.stderr.text()).toContain("approval gate");
+  });
+});
+
+describe("runExecTurn — headless approvals", () => {
+  it("denies every parked request and notes it on stderr", async () => {
+    const harness = makeDeps({
+      runTurn: async () => {
+        harness.observers[0]!.onPending({
+          requestId: "req-1",
+          toolName: "bash",
+          category: "tool",
+          nonce: "nonce-1",
+          hmac: "hmac-1",
+        });
+        return COMPLETED_TURN;
+      },
+    });
+
+    await runExecTurn(harness.deps, turnRequest());
+
+    expect(harness.resolve).toHaveBeenCalledWith(
+      "req-1",
+      { requestId: "req-1", choice: "deny-once", nonce: "nonce-1", hmac: "hmac-1" },
+      "headless-exec",
+    );
+    expect(harness.stderr.text()).toContain("auto-denied approval req-1 tool=bash");
+    expect(harness.stdout.text()).not.toContain("auto-denied");
+  });
+
+  it("unsubscribes the observer once the turn is over", async () => {
+    const harness = makeDeps();
+    await runExecTurn(harness.deps, turnRequest());
+    expect(harness.observers).toHaveLength(0);
+  });
+});
+
+describe("runExecTurn — exit codes", () => {
+  it("returns 0 for a completed turn", async () => {
+    const harness = makeDeps();
+    expect(await runExecTurn(harness.deps, turnRequest())).toBe(0);
+  });
+
+  it.each([["context-error"], ["stream-error"], ["blocked"]] as const)(
+    "returns 1 for a turn that stopped with %s",
+    async (stopReason) => {
+      const harness = makeDeps({ turnResult: { ...COMPLETED_TURN, stopReason } });
+      expect(await runExecTurn(harness.deps, turnRequest())).toBe(1);
+    },
+  );
+
+  it("returns 1 when the turn throws, and says so on stderr", async () => {
+    const harness = makeDeps({
+      runTurn: async () => {
+        throw new Error("provider unreachable");
+      },
+    });
+    expect(await runExecTurn(harness.deps, turnRequest())).toBe(1);
+    expect(harness.stderr.text()).toContain("provider unreachable");
+  });
+
+  it("returns 2 when the turn ended asking for input", async () => {
+    const harness = makeDeps({
+      turnResult: {
+        ...COMPLETED_TURN,
+        stopReason: "input-required",
+        inputRequired: { reason: "question", prompt: "which file?" },
+      },
+    });
+    expect(await runExecTurn(harness.deps, turnRequest())).toBe(2);
+  });
+});
+
+describe("runExecTurn — --set-secret", () => {
+  const secretRequest: ExecRequest = { secret: { key: "llm.apiKey.claude" }, turn: null };
+
+  it("writes the stdin value through the settings service", async () => {
+    const harness = makeDeps({ stdin: "sk-value\n" });
+    expect(await runExecTurn(harness.deps, secretRequest)).toBe(0);
+    expect(harness.setSecret).toHaveBeenCalledWith("llm.apiKey.claude", "sk-value");
+    expect(harness.stdout.text()).toBe("");
+  });
+
+  it("refuses an empty value", async () => {
+    const harness = makeDeps({ stdin: "\n" });
+    expect(await runExecTurn(harness.deps, secretRequest)).toBe(EXEC_USAGE_EXIT_CODE);
+    expect(harness.setSecret).not.toHaveBeenCalled();
+    expect(harness.stderr.text()).toContain("empty value");
+  });
+
+  it("reports an invalid key as a usage error", async () => {
+    const harness = makeDeps({
+      stdin: "sk-value",
+      setSecret: async () => {
+        throw new SecretDocumentValidationError("Secret document contains an invalid key");
+      },
+    });
+    expect(await runExecTurn(harness.deps, secretRequest)).toBe(EXEC_USAGE_EXIT_CODE);
+    expect(harness.stderr.text()).toContain("rejected the key");
+  });
+
+  it("reports unusable encryption as a run failure naming the keyring", async () => {
+    const harness = makeDeps({
+      stdin: "sk-value",
+      setSecret: async () => {
+        throw new SecretEncryptionUnavailableError();
+      },
+    });
+    expect(await runExecTurn(harness.deps, secretRequest)).toBe(1);
+    expect(harness.stderr.text()).toContain("OS keyring");
+  });
+
+  it("applies the secret before running a combined turn", async () => {
+    const order: string[] = [];
+    const harness = makeDeps({
+      stdin: "sk-value",
+      setSecret: async () => {
+        order.push("secret");
+      },
+      runTurn: async () => {
+        order.push("turn");
+        return COMPLETED_TURN;
+      },
+    });
+    const code = await runExecTurn(harness.deps, {
+      secret: { key: "llm.apiKey.claude" },
+      turn: turnRequest().turn,
+    });
+    expect(code).toBe(0);
+    expect(order).toEqual(["secret", "turn"]);
+  });
+
+  it("does not run the turn when the secret could not be stored", async () => {
+    const harness = makeDeps({
+      stdin: "sk-value",
+      setSecret: async () => {
+        throw new SecretEncryptionUnavailableError();
+      },
+    });
+    const code = await runExecTurn(harness.deps, {
+      secret: { key: "llm.apiKey.claude" },
+      turn: turnRequest().turn,
+    });
+    expect(code).toBe(1);
+    expect(harness.runTurn).not.toHaveBeenCalled();
+  });
+});

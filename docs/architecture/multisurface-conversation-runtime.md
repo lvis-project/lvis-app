@@ -1,7 +1,7 @@
 # Multi-surface conversation runtime
 
-Status: Implemented foundation — canonical protocol, local adapters, default-OFF Tailnet observer/controller, P2 owner pairing/share / same-origin Web, P3 paired turn control/bounded image staging, restricted external-platform inbound core, and an opt-in Telegram v1 private-DM adapter
-Last updated: 2026-08-04
+Status: Implemented foundation — canonical protocol, local adapters, headless one-shot CLI, default-OFF Tailnet observer/controller, P2 owner pairing/share / same-origin Web, P3 paired turn control/bounded image staging, restricted external-platform inbound core, and an opt-in Telegram v1 private-DM adapter
+Last updated: 2026-09-06
 
 This document defines how one active main conversation is shared across many
 display and command surfaces without creating a second model turn or bypassing
@@ -416,6 +416,54 @@ Implementation anchors:
 - `src/engine/conversation-activity-coordinator.ts`
 - `src/ipc/domains/chat.ts`
 - `src/main/local-api-server.ts`
+
+## Headless one-shot CLI
+
+The main process accepts two one-shot flags. Each boots the ordinary host
+service graph, performs exactly one action, and quits. Neither opens a
+workspace, and neither is a second conversation runtime: `--exec` runs the same
+`runStreamedTurn` producer the desktop window runs and reads the same closed
+event union, with a sink that serialises instead of projecting to a renderer.
+
+```text
+lvis --exec="<prompt>"              prompt inline; `--exec` or `--exec=-` reads stdin
+     [--exec-cwd=<dir>]             session project root (default: process cwd)
+     [--exec-approve=default|allow] permission mode for the run (default: default)
+     [--exec-output=stream-json|json]  (default: stream-json)
+     [--exec-max-rounds=<n>]        round budget for the turn
+lvis --set-secret=<key>             secret VALUE is read from stdin, never argv
+```
+
+`stream-json` writes every platform conversation event to **stdout** as one
+`JSON.stringify(event)` per line and nothing else; `json` writes no per-event
+line and one final line carrying the turn result. Because a reader parses every
+stdout line, the process logger moves its console destination to stderr for the
+whole run — decided from argv inside `src/lib/logger.ts`, which is the only
+place that can decide it, since the logger is built when it is first imported.
+
+Exit codes are `0` completed, `1` the turn failed or the secret could not be
+stored, `2` the turn ended asking for input, `64` a malformed command line. The
+branch ends with `app.quit()`, not `app.exit()`, so the `before-quit` shutdown
+cleanup flushes the session transcript and audit rows the run produced.
+
+An unattended run has nobody to ask, so it registers a pending-approval observer
+that answers every parked request with `deny-once` and notes it on stderr. That
+is the whole of its approval behaviour: it never widens a verdict, and
+`--exec-approve=allow` sets the permission manager's allow mode without removing
+any Layer 0 check. `--set-secret` writes through the app's own secret store so a
+container never has to produce the platform's ciphertext itself; the store's key
+validation and its refusal to store a secret it cannot encrypt are surfaced as
+exit codes rather than worked around.
+
+`--set-secret` and `--exec` may be combined in one launch, in which case the
+secret is applied first and the prompt must be inline — both flags read the
+whole of stdin, so only one of them can have it.
+
+Implementation anchors:
+
+- `src/main/exec-mode.ts`
+- `src/main.ts`
+- `src/ipc/handlers/chat-stream.ts`
 
 ## Adapter rule
 
