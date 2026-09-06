@@ -470,15 +470,29 @@ exit codes rather than worked around.
 secret is applied first and the prompt must be inline — both flags read the
 whole of stdin, so only one of them can have it.
 
-A headless boot opens **no service connection of its own**: the only egress a
-one-shot run produces is the model provider the turn talks to and whatever the
-tools it calls reach. `bootstrap()` takes the launch mode as an argument and
-derives all four consequences from that one fact — the marketplace catalog is
-not synced at boot, the whitelist / revocation / admission registries
-initialise from their disk cache, the release check is not started, and neither
-the plugin-update nor the announcement poll is scheduled. Plugin loading is
-untouched: the run still loads whatever the registry snapshot on disk holds.
-An interactive launch keeps every one of them.
+A headless boot opens **no discretionary service connection**. `bootstrap()`
+takes the launch mode as an argument and derives every one of these from that
+single fact: the marketplace catalog is not synced at boot, the admission
+registry is not warmed, the release check is not started, neither the
+plugin-update nor the announcement poll is scheduled, and neither telemetry
+uploader is constructed. What is left is the turn's own egress — the model
+provider it talks to and whatever the tools it calls reach.
+
+Two things a headless run must **not** skip. The signed whitelist and
+revocation documents are the plugin trust chain, and skipping either would
+remove a control rather than save a request: the whitelist fails closed and
+gates plugin secret reads, so a headless-only host would lock itself out of its
+own secrets once the cached document aged out; the revocation list fails open,
+so the same host would silently lose the plugin kill switch. Both are refreshed
+on every launch. Admission is the one signed document that is safe to skip — it
+is consulted at install, and the install path re-checks freshness itself, so
+warming it at boot only ever saved the first install of a session a cold fetch.
+
+Crash reporting splits along the same line: local minidumps are still collected
+into the LVIS-owned dump directory, and only their upload is discretionary.
+Plugin loading is untouched — the run still loads whatever the registry
+snapshot on disk holds, and what is dropped is the network refresh in front of
+it. An interactive launch keeps every one of them.
 
 Implementation anchors:
 

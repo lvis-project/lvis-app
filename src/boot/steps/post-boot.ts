@@ -53,16 +53,26 @@ export interface ReleasePrepInput {
   /** Boot-configured tracing; its batched spans are flushed on quit. */
   tracing: TracingHandle;
   /**
-   * Whether to start the app auto-updater. A headless launch passes `false`:
-   * the release check is a service connection the run never asked for, and
-   * nobody is there to act on what it finds.
+   * Whether this launch may open the connections in here that nothing forces
+   * it to open: the release check, the two telemetry uploaders, and crash
+   * reporting off the machine. A headless one-shot run passes `false` — no
+   * operator can act on an update prompt or a consent prompt, and a run asked
+   * for one turn should not report on itself. Local crash minidumps are still
+   * collected either way; only their upload is discretionary.
+   *
+   * Every one of these is ALSO settings-driven, and this never widens that:
+   * `true` leaves each of them deciding exactly as before.
    */
-  startAutoUpdater: boolean;
+  discretionaryEgress: boolean;
 }
 
 /**
  * Start crash reporter, anonymous telemetry, plugin-lifecycle telemetry, and
  * the auto-updater. All default-off or settings-driven. Non-fatal on error.
+ *
+ * A launch without discretionary egress keeps only the local half: crash
+ * minidumps still land in the LVIS-owned dump directory, and nothing else in
+ * here is constructed at all.
  */
 export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
   const { mainWindow, settingsService, bootAuditLogger, networkFetch, tracing } = input;
@@ -82,10 +92,17 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
   }
 
   try {
+    // Always started: this is the local minidump collector, and `remoteReporting`
+    // is what decides whether a dump may leave the machine.
     startCrashReporter({
       userDataPath: app.getPath("userData"),
       telemetry: settingsService.get("telemetry"),
+      remoteReporting: input.discretionaryEgress,
     });
+    if (!input.discretionaryEgress) {
+      log.info("boot: release prep wired (local crash dumps only)");
+      return { telemetry, pluginTelemetry, autoUpdaterStop };
+    }
     telemetry = new TelemetryService({
       settings: () => settingsService.get("telemetry"),
       appVersion: app.getVersion(),
@@ -165,24 +182,22 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       }
     });
 
-    if (input.startAutoUpdater) {
-      const updater = createAutoUpdater({
-        mainWindow,
-        auditLogger: bootAuditLogger,
-        isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
-        getSkippedVersion: () => settingsService.get("updates")?.skippedVersion,
-        setSkippedVersion: async (version) => {
-          await settingsService.patch({
-            updates: {
-              ...settingsService.get("updates"),
-              skippedVersion: version,
-            },
-          });
-        },
-      });
-      updater.start();
-      autoUpdaterStop = updater.stop;
-    }
+    const updater = createAutoUpdater({
+      mainWindow,
+      auditLogger: bootAuditLogger,
+      isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
+      getSkippedVersion: () => settingsService.get("updates")?.skippedVersion,
+      setSkippedVersion: async (version) => {
+        await settingsService.patch({
+          updates: {
+            ...settingsService.get("updates"),
+            skippedVersion: version,
+          },
+        });
+      },
+    });
+    updater.start();
+    autoUpdaterStop = updater.stop;
     const retainedTelemetry = telemetry;
     app.prependOnceListener("before-quit", () => {
       try { autoUpdaterStop?.(); } catch { /* noop */ }
@@ -193,10 +208,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
         log.warn("shutdown: telemetry final flush failed: %s", (err as Error).message);
       }
     });
-    log.info(
-      "boot: release prep wired (crash/telemetry%s)",
-      input.startAutoUpdater ? "/updater" : ", updater not started",
-    );
+    log.info("boot: release prep wired (updater/crash/telemetry)");
   } catch (err) {
     log.warn("boot: release prep init failed (non-fatal): %s", (err as Error).message);
   }

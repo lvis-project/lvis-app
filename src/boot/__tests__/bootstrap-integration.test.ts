@@ -290,8 +290,8 @@ vi.mock("../steps/ipc-bridge.js", () => ({
 }));
 
 vi.mock("../steps/post-boot.js", () => ({
-  wireReleasePrep: vi.fn((input: { startAutoUpdater: boolean }) => {
-    h.captured["startAutoUpdater"] = input.startAutoUpdater;
+  wireReleasePrep: vi.fn((input: { discretionaryEgress: boolean }) => {
+    h.captured["discretionaryEgress"] = input.discretionaryEgress;
     return {
       telemetry: { stop: vi.fn() },
       pluginTelemetry: { stop: vi.fn() },
@@ -900,40 +900,50 @@ describe("bootstrap() integration lock", () => {
   });
 
   it("opens the host's own service connections (interactive launch is unchanged)", () => {
-    // The three signed registries resolve `online` from their own default, so
-    // boot passes nothing and the step keeps deciding.
+    // Every registry resolves `online` from its own default, so boot passes
+    // nothing and each step keeps deciding.
     expect(h.captured["whitelistOnline"]).toBeUndefined();
     expect(h.captured["revocationOnline"]).toBeUndefined();
     expect(h.captured["admissionOnline"]).toBeUndefined();
     expect(vi.mocked(runManagedBootstrap)).toHaveBeenCalled();
-    expect(h.captured["startAutoUpdater"]).toBe(true);
+    expect(h.captured["discretionaryEgress"]).toBe(true);
     expect(vi.mocked(wireUpdateCheck)).toHaveBeenCalled();
     expect(vi.mocked(wireAnnouncementCheck)).toHaveBeenCalled();
   });
 });
 
 /**
- * A headless `--exec` boot opens no service connections of its own.
+ * A headless `--exec` boot opens no DISCRETIONARY service connection.
  *
  * The rule is one fact — the `launch` argument — and this suite is what proves
- * all four consequences come off it: the marketplace catalog is not read, the
- * three signed registries initialise from disk, the release check is not
- * started, and neither marketplace poller is scheduled. The interactive boot
- * above is the control; both run against the same mocked seams.
+ * each consequence comes off it: the marketplace catalog is not read, the
+ * admission warm-up is skipped, and neither the release check, the telemetry
+ * uploaders nor the two marketplace polls are started. It also proves the two
+ * halves of the boundary that are NOT discretionary: the whitelist and
+ * revocation documents are still refreshed, because one fails closed and the
+ * other fails open, and plugins on disk still load. The interactive boot above
+ * is the control; both run against the same mocked seams.
  */
-describe("bootstrap() headless launch opens no service connections", () => {
+describe("bootstrap() headless launch opens no discretionary service connection", () => {
+  let headlessServices: AppServices;
   let savedSandboxEnv: string | undefined;
 
   beforeAll(async () => {
     savedSandboxEnv = process.env["LVIS_SANDBOX_ENABLED"];
     delete process.env["LVIS_SANDBOX_ENABLED"];
-    // The interactive boot above already called each of these; the assertions
-    // here are about what THIS boot does.
+    // The interactive boot above already called each of these, and recorded its
+    // own ordering; the assertions here are about what THIS boot does.
     vi.mocked(runManagedBootstrap).mockClear();
     vi.mocked(wireUpdateCheck).mockClear();
     vi.mocked(wireAnnouncementCheck).mockClear();
+    h.order.length = 0;
     const win = fakeWindow();
-    await bootstrap("/tmp/lvis-boot-test/project", win, () => win, "headless");
+    headlessServices = await bootstrap(
+      "/tmp/lvis-boot-test/project",
+      win,
+      () => win,
+      "headless",
+    );
   }, 180_000);
 
   afterAll(() => {
@@ -946,18 +956,30 @@ describe("bootstrap() headless launch opens no service connections", () => {
     expect(vi.mocked(runManagedBootstrap)).not.toHaveBeenCalled();
   });
 
-  it("initialises the signed registries offline", () => {
-    expect(h.captured["whitelistOnline"]).toBe(false);
-    expect(h.captured["revocationOnline"]).toBe(false);
+  it("skips the admission warm-up but still refreshes the plugin trust chain", () => {
+    // Admission is consulted at install and re-checked there, so warming it at
+    // boot is only latency. The whitelist fails closed and the revocation list
+    // fails open, so skipping either would take a control with it — both keep
+    // resolving `online` from their own default.
     expect(h.captured["admissionOnline"]).toBe(false);
+    expect(h.captured["whitelistOnline"]).toBeUndefined();
+    expect(h.captured["revocationOnline"]).toBeUndefined();
   });
 
-  it("does not start the auto-updater", () => {
-    expect(h.captured["startAutoUpdater"]).toBe(false);
+  it("starts neither the release check nor the telemetry uploaders", () => {
+    expect(h.captured["discretionaryEgress"]).toBe(false);
   });
 
   it("schedules neither marketplace poll", () => {
     expect(vi.mocked(wireUpdateCheck)).not.toHaveBeenCalled();
     expect(vi.mocked(wireAnnouncementCheck)).not.toHaveBeenCalled();
+  });
+
+  it("still loads the plugins already on disk", () => {
+    // The point of the cut: what is dropped is the network refresh in front of
+    // the registry snapshot, never the snapshot itself.
+    expect(h.order).toContain("initPluginRuntime");
+    expect(h.order).toContain("startPlugins");
+    expect(headlessServices.pluginRuntime.listPluginIds()).toEqual([]);
   });
 });
