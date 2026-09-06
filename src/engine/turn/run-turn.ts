@@ -848,9 +848,15 @@ async function runTurnInSpan(
     // exposes prompt_tokens + completion_tokens via the provider's
     // streamText/onFinish equivalent — see `fullStreamToStreamEvent` in
     // `engine/llm/vercel/adapter.ts` which forwards the values into the
-    // round stream's `usage` field). Suppressed for interrupted
-    // turns and turns without a real assistant response (mirrors the
-    // turn-end notification gate so dropped turns don't render footers).
+    // round stream's `usage` field). Suppressed for interrupted turns and for
+    // the two error stop reasons below — those are dropped turns, not answers.
+    // NOT gated on the final text being non-empty: a turn that ends with the
+    // model reasoning and emitting no visible text still spent every token it
+    // spent, and suppressing the summary there reported the whole turn as zero
+    // usage on both surfaces and left no cost record. Empty text is a shape the
+    // summary consumers already tolerate — `attachTurnSummaryToLastAssistant`
+    // keys on role, and `historyToEntries` emits the turn_summary entry off the
+    // attached meta rather than off the assistant text.
     // Production diagnostic — turn_summary 가 사용자 UI (TokenCostBadge 배지
     // + TokenProgressRing) 의 단일 source 라 *emit 되지 않으면* 두 표면 모두
     // 0 표시. 어느 단계에서 끊겼는지 정확히 가시화.
@@ -862,8 +868,7 @@ async function runTurnInSpan(
       // under a user-facing failure notice with stats that belong to the
       // PARTIAL (failed) round, not a completed turn. Exclude explicitly.
       result.stopReason !== "stream-error" &&
-      typeof result.text === "string" &&
-      result.text.trim().length > 0;
+      typeof result.text === "string";
     // Shape attributes are set for EVERY turn, including the ones whose summary
     // is suppressed (interrupted, context error, stream error) — those are
     // exactly the turns an attribution run needs to be able to see.

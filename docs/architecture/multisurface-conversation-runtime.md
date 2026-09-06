@@ -534,7 +534,8 @@ The AI SDK spans nest under `lvis.turn` because registering the Node provider
 also installs the AsyncLocalStorage context manager.
 
 The decision kinds are `tool_batch`, `tool_schema.drop`, `length.continuation`,
-`tool_search`, `plugin.expansion`, `compact.micro` and `early_exit`. Each names
+`reasoning_only.continuation`, `tool_search`, `plugin.expansion`,
+`compact.micro` and `early_exit`. Each names
 a branch the loop chose on its own — a budget it hit, a recovery it took, an
 exit it made — and never a provider call.
 

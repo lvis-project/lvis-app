@@ -205,27 +205,58 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(summary!.breakdown!["list_directory"].count).toBe(1);
   });
 
-  it("does not emit a summary for an empty/interrupted turn", async () => {
+  it("emits a summary for a completed turn that produced no visible text", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
-        // No text — empty assistant response.
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 0 },
+        // No text — the round still spent input and output tokens.
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 7 },
         },
       ],
     ]);
     const loop = createLoopWithRegistry(provider, toolRegistry);
 
-    let calls = 0;
+    const summaries: { tokensOut: number }[] = [];
     await loop.runTurn("질문", {
-      onTurnSummary: () => {
-        calls += 1;
+      onTurnSummary: (s) => {
+        summaries.push(s);
       },
     }, undefined, { inputOrigin: "user-keyboard" },
     );
 
-    // Turn produced no assistant text → footer suppressed (mirrors the
-    // notification-gate so dropped/aborted turns don't render footers).
+    // Empty final text is not a dropped turn: it consumed tokens, and the
+    // summary is the only record either the badge or cost accounting gets.
+    // Gating on text length reported such a turn as zero usage everywhere.
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.tokensOut).toBe(7);
+  });
+
+  it("does not emit a summary for an interrupted turn", async () => {
+    const toolRegistry = new ToolRegistry();
+    const controller = new AbortController();
+    const provider: LLMProvider = {
+      vendor: "openai",
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        yield { type: "text_delta", text: "partial" };
+        controller.abort();
+        yield {
+          type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 3 },
+        };
+      },
+    };
+    const loop = createLoopWithRegistry(provider, toolRegistry);
+
+    let calls = 0;
+    const result = await loop.runTurn("질문", {
+      onTurnSummary: () => {
+        calls += 1;
+      },
+    }, controller.signal, { inputOrigin: "user-keyboard" },
+    );
+
+    // An aborted turn carries partial-round stats, not a completed turn's, so
+    // the footer stays suppressed for it and for the two error stop reasons.
+    expect(result.stopReason).toBe("interrupted");
     expect(calls).toBe(0);
   });
 

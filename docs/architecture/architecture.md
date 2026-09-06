@@ -142,6 +142,10 @@ Important rules:
   decision path.
 - Long histories are compacted through the structured compact path rather than
   silent truncation.
+- A round that stops at `end_turn` with reasoning but no visible text and no
+  tool call does not end the turn: the loop re-prompts it a bounded number of
+  times before returning, because that reasoning states the action the model
+  meant to take next.
 - Foreground turn-end notices stay out of the composer notification area; system
   notifications are reserved for background or non-focused app state.
 - The main window may show up to four conversations side by side (chat mode

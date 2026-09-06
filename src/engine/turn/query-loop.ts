@@ -77,6 +77,18 @@ const PARENT_UNLIMITED_ROUNDS = Number.MAX_SAFE_INTEGER;
  */
 const MAX_LENGTH_CONTINUATIONS = 3;
 /**
+ * Hard cap on reasoning-only re-prompts per turn. A round that ends `end_turn`
+ * with reasoning but no answer text and no tool call has not finished the turn:
+ * the reasoning names the next action the model meant to take, so returning
+ * there gives up before the model did. Two: the first re-prompt covers a model
+ * that narrated its next action and simply failed to emit it, the second covers
+ * one that answers the re-prompt with more reasoning. Past that the model is
+ * looping, and every attempt spends a round out of the same budget the real
+ * work needs. AND-ed with the caller-assigned round budget — either one
+ * tripping ends the turn exactly the way it ends without this branch.
+ */
+const MAX_REASONING_ONLY_NUDGES = 2;
+/**
  * Defensive cap on provider-as-oracle tool drops per turn. Termination is
  * already guaranteed structurally (each drop strictly shrinks the finite tool
  * set and we only drop a tool the provider named AND that is still present),
@@ -334,6 +346,11 @@ export async function queryLoop(
     let continuationCarryText = "";
     let continuationCarryThought = "";
     let continuationPrefillText: string | undefined = undefined;
+    // Reasoning-only re-prompt state. `reasoningNudgePending` arms exactly one
+    // wire-only instruction for the NEXT round (see MAX_REASONING_ONLY_NUDGES);
+    // `reasoningNudgesRun` is the per-turn spend against that cap.
+    let reasoningNudgesRun = 0;
+    let reasoningNudgePending = false;
     // C3(a): effective round budget. A host-assigned `maxRounds` (the sub-agent
     // runner, carrying the user's configured budget) is HONOURED exactly, above
     // the default too; narrowing it only shows up as an agent stopped mid-task.
@@ -597,8 +614,19 @@ export async function queryLoop(
       // vLLM resumes it verbatim. For mid-<think> truncation the prefill text is
       // `<think>\n…` (open, no closing tag) so the model finishes reasoning
       // before answering; add_generation_prompt:false blocks a 2nd auto <think>.
+      // Reasoning-only re-prompt: also WIRE-ONLY. The reasoning round it answers
+      // is already committed to history, and persisting a host instruction there
+      // would replay on every later turn as if the user had typed it. Dropped
+      // when this round already carries injected guidance — that guidance IS the
+      // re-prompt, and appending after it would put two user rows in a row.
+      const injectReasoningNudge =
+        reasoningNudgePending && pendingGuidanceDelivery === null;
+      reasoningNudgePending = false;
       const messagesForRound: GenericMessage[] = continuationPrefillText !== undefined ? [
         ...baseMessagesForRound, { role: "assistant" as const, content: continuationPrefillText },
+      ] : injectReasoningNudge ? [
+        ...baseMessagesForRound,
+        { role: "user" as const, content: t("be_conversationLoop.reasoningOnlyContinuePrompt") },
       ] : baseMessagesForRound;
       self.lastRoundInputProjection = self.projectProviderRequestInput({
         systemPrompt, messages: messagesForRound, toolSchemas,
@@ -1068,6 +1096,52 @@ export async function queryLoop(
             note: "extending turn — guide queued at end-turn boundary",
           });
           continue;
+        }
+        // A round that ended `end_turn` with reasoning but no answer text and no
+        // tool call is not a completed turn. Measured on an agentic run: the
+        // reasoning of such rounds states the next action in the first person
+        // ("I need to retry the installation") and the loop returned anyway, so
+        // the turn ended because the LOOP gave up, not the model. Re-prompt
+        // instead, bounded by MAX_REASONING_ONLY_NUDGES so a model that only
+        // ever reasons still terminates. A round with no text, no tool call AND
+        // no reasoning is genuinely empty and keeps today's behaviour: it falls
+        // through to the return below (which also warns when the stop reason was
+        // not `end_turn`).
+        const reasoningOnlyEnd =
+          stopReason === "end_turn" &&
+          pendingToolCalls.length === 0 &&
+          mergedText.trim().length === 0 &&
+          mergedThought.trim().length > 0;
+        if (reasoningOnlyEnd) {
+          const willNudge =
+            reasoningNudgesRun < MAX_REASONING_ONLY_NUDGES &&
+            assistantRoundsRun < effectiveMaxRounds;
+          decide({
+            kind: "reasoning_only.continuation",
+            branch: willNudge ? "continue" : "stop",
+            ...(willNudge
+              ? {}
+              : {
+                reason: reasoningNudgesRun >= MAX_REASONING_ONLY_NUDGES
+                  ? "cap"
+                  : "round-budget",
+              }),
+            data: {
+              nudgesRun: reasoningNudgesRun,
+              cap: MAX_REASONING_ONLY_NUDGES,
+              thoughtChars: mergedThought.length,
+            },
+          });
+          if (willNudge) {
+            reasoningNudgesRun += 1;
+            reasoningNudgePending = true;
+            self.tracer.step("REASONING_ONLY_CONTINUATION", {
+              round: roundIndex,
+              nudgesRun: reasoningNudgesRun,
+              thoughtLen: mergedThought.length,
+            });
+            continue;
+          }
         }
         // EARLY-EXIT #4: turn 종료. 정상 케이스는 stopReason === "end_turn"
         // 또는 LLM 이 tool 없이 final 답을 내놓은 케이스. *비정상 silent

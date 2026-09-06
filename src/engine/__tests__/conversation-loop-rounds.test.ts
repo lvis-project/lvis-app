@@ -20,6 +20,8 @@ import { createSkillLoadTool } from "../../tools/skill-load.js";
 import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
 import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import type { TurnDecisionEvent } from "../turn/types.js";
+import { t } from "../../i18n/index.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -1386,5 +1388,148 @@ describe("ConversationLoop queryLoop", () => {
     const [firstMessage] = withoutRuntimeMeta(loop.getHistory().getMessages());
     expect((firstMessage as { meta?: { displayText?: string } }).meta?.displayText)
       .toBeUndefined();
+  });
+});
+
+describe("reasoning-only round is not a finished turn", () => {
+  function createLoop(provider: LLMProvider): ConversationLoop {
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry: new ToolRegistry(),
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    return loop;
+  }
+
+  it("re-prompts a round that ended with reasoning but no text and no tool call", async () => {
+    // The measured shape: stopReason end_turn, empty visible text, no tool
+    // call, and reasoning that names the next action. Ending there is the loop
+    // giving up before the model did.
+    const provider = new RecordingPromptProvider([
+      [
+        { type: "reasoning_delta", text: "I need to retry the installation." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "Reinstalled and verified." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+    const decisions: TurnDecisionEvent[] = [];
+
+    const result = await loop.runTurn(
+      "install it",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(provider.messages).toHaveLength(2);
+    expect(result.text).toBe("Reinstalled and verified.");
+    expect(decisions).toContainEqual({
+      kind: "reasoning_only.continuation",
+      branch: "continue",
+      data: { nudgesRun: 0, cap: 2, thoughtChars: 33 },
+    });
+  });
+
+  it("sends the re-prompt on the wire only, never into persisted history", async () => {
+    const provider = new RecordingPromptProvider([
+      [
+        { type: "reasoning_delta", text: "Let me verify the tokenizer." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "Verified." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoop(provider);
+
+    await loop.runTurn("check it", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    const nudge = t("be_conversationLoop.reasoningOnlyContinuePrompt");
+    // Round 2 carries it as the last wire message …
+    const secondRound = provider.messages[1]!;
+    expect(secondRound[secondRound.length - 1]).toEqual({
+      role: "user",
+      content: nudge,
+    });
+    // … and round 3 would not, because history never took it: a persisted host
+    // instruction would replay on every later turn as if the user typed it.
+    expect(JSON.stringify(loop.getHistory().getMessages())).not.toContain(nudge);
+  });
+
+  it("bounds the re-prompt so a model that only ever reasons still terminates", async () => {
+    let calls = 0;
+    class AlwaysReasoningProvider implements LLMProvider {
+      readonly vendor = "openai" as const;
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        calls += 1;
+        yield { type: "reasoning_delta", text: "still thinking" };
+        yield { type: "message_complete", stopReason: "end_turn" };
+      }
+    }
+    const loop = createLoop(new AlwaysReasoningProvider());
+    const decisions: TurnDecisionEvent[] = [];
+
+    const result = await loop.runTurn(
+      "loop forever",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    // 1 initial round + 2 re-prompts, then the turn ends as it does today.
+    expect(calls).toBe(3);
+    expect(result.stopReason).toBe("end_turn");
+    expect(
+      decisions.filter(
+        (event) => event.kind === "reasoning_only.continuation"
+          && event.branch === "continue",
+      ),
+    ).toHaveLength(2);
+    expect(decisions).toContainEqual({
+      kind: "reasoning_only.continuation",
+      branch: "stop",
+      reason: "cap",
+      data: { nudgesRun: 2, cap: 2, thoughtChars: 14 },
+    });
+  });
+
+  it("ends a genuinely empty round on the first attempt", async () => {
+    let calls = 0;
+    class EmptyProvider implements LLMProvider {
+      readonly vendor = "openai" as const;
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        calls += 1;
+        yield { type: "message_complete", stopReason: "end_turn" };
+      }
+    }
+    const loop = createLoop(new EmptyProvider());
+    const decisions: TurnDecisionEvent[] = [];
+
+    const result = await loop.runTurn(
+      "nothing",
+      { onDecision: (event) => decisions.push(event) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    // No reasoning means nothing states what the model meant to do next, so
+    // there is nothing to re-prompt toward — unchanged behaviour.
+    expect(calls).toBe(1);
+    expect(result.text).toBe("");
+    expect(
+      decisions.filter((event) => event.kind === "reasoning_only.continuation"),
+    ).toEqual([]);
   });
 });
