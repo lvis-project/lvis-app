@@ -9,7 +9,10 @@
  *
  *  - The branch must quit with `app.quit()`. `app.exit()` skips the `before-quit`
  *    handler, and that handler's `runAppShutdownCleanup` is what flushes the
- *    session transcript and the audit log a headless run just produced.
+ *    session transcript and the audit log a headless run just produced. The
+ *    exit code itself is applied by a `will-quit` handler with `app.exit()`,
+ *    because Electron's `quit()` ends the process with 0 regardless of
+ *    `process.exitCode`.
  *  - `logger.ts` must send its console output to stderr in exec mode. The logger
  *    is constructed from `process.argv` at import time and its console stream is
  *    module-private, so there is no runtime seam to observe; what can be
@@ -86,6 +89,21 @@ describe("main.ts — headless exec branch", () => {
     expect(branch!).toMatch(/app\.quit\s*\(\s*\)/);
     expect(branch!, "a hard exit would skip runAppShutdownCleanup").not.toMatch(/app\.exit\s*\(/);
     expect(branch!).toMatch(/process\.exitCode\s*=/);
+  });
+
+  it("carries the chosen exit code through will-quit, after before-quit cleanup", () => {
+    const handler = mainSource.indexOf('app.on("will-quit"');
+    expect(handler).toBeGreaterThanOrEqual(0);
+    const body = mainSource.slice(handler, handler + 400);
+    expect(body).toContain("execRequest === null || process.exitCode === undefined");
+    expect(body).toMatch(/event\.preventDefault\(\);\s*app\.exit\(Number\(process\.exitCode\)\)/);
+  });
+
+  it("exits the lock-held case hard, before whenReady, with the retry code", () => {
+    const lock = mainSource.indexOf("if (!gotSingleInstanceLock) {");
+    const block = mainSource.slice(lock, mainSource.indexOf("} else {", lock));
+    expect(block).toContain("app.exit(EXEC_LOCKED_EXIT_CODE)");
+    expect(block).not.toContain("process.exitCode = EXEC_LOCKED_EXIT_CODE");
   });
 
   it("rejects a malformed command line before a window exists", () => {

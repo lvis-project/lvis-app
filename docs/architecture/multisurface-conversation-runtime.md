@@ -451,7 +451,9 @@ Exit codes are `0` completed, `1` the turn failed or the secret could not be
 stored, `2` the turn ended asking for input, `64` a malformed command line, `75` another
 LVIS process holds the single-instance lock (retry once it has quit). The
 branch ends with `app.quit()`, not `app.exit()`, so the `before-quit` shutdown
-cleanup flushes the session transcript and audit rows the run produced.
+cleanup flushes the session transcript and audit rows the run produced; the
+code itself is applied by a `will-quit` handler through `app.exit()`, because
+Electron's `quit()` exits 0 whatever `process.exitCode` holds.
 
 An unattended run has nobody to ask, so it registers a pending-approval observer
 that answers every parked request with `deny-once` and notes it on stderr. That
